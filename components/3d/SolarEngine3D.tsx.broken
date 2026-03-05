@@ -1,0 +1,1692 @@
+'use client';
+/**
+ * ═══════════════════════════════════════════════════════════════
+ * SOLAR ENGINE 3D — Production-Grade Digital Twin Engine
+ * ═══════════════════════════════════════════════════════════════
+ *
+ * TRUE 3D surface picking + panel placement engine.
+ *
+ * Stack:
+ *   • CesiumJS 1.114        — geospatial 3D engine + Google 3D Tiles
+ *   • Three.js r160         — PBR panel mesh rendering
+ *   • Google Solar API      — roof segments, irradiance, shade data
+ *   • Google Elevation API  — terrain mesh
+ *   • NOAA Solar Calculator — physically accurate sun position
+ *   • WebGL2                — GPU instanced rendering
+ *
+ * Panel Placement:
+ *   • Click on 3D tile surface → exact Cartesian3 hit point
+ *   • Surface normal computed via finite-difference raycasting
+ *   • Panel quaternion aligned to surface normal
+ *   • No floating panels. No flat projection. Real 3D geometry.
+ *
+ * Modes:
+ *   • Click-to-place: single panel on any surface
+ *   • Polygon fill: draw area → auto-fill with panels
+ *   • Fence line: draw line → vertical bifacial array
+ *   • Ground mount: draw area → tilted ground array
+ *   • Auto-roof: Solar API segments → auto-fill roof
+ */
+
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import type { PlacedPanel, SolarPanel, SystemType } from '@/types';
+import { getSunPosition } from '@/lib/solarMath';
+import { buildDigitalTwin, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
+import { pickSurface, buildPanelModelMatrix, samplePolygonSurface, generateFencePanels, type SurfaceHit } from '@/lib/surfacePicker';
+import { DEFAULT_PANEL_SPEC, buildDetailedPanel, buildInstancedPanelMesh, computePanelShadeColor, type PanelSpec } from '@/lib/panelEngine';
+
+// ── Types ──────────────────────────────────────────────────────
+interface Props {
+  panels: PlacedPanel[];
+  onPanelsChange: (panels: PlacedPanel[]) => void;
+  systemType: SystemType;
+  tilt: number;
+  azimuth: number;
+  fenceHeight: number;
+  rowSpacing: number;
+  colSpacing: number;
+  selectedPanel: SolarPanel;
+  mapCenter?: { lat: number; lng: number };
+  solarData?: any;
+  projectAddress?: string;
+  placementMode: PlacementMode;
+  onPlacementModeChange: (mode: PlacementMode) => void;
+  showShade: boolean;
+  onTwinLoaded?: (twin: DigitalTwinData) => void;
+  onError?: (error: string) => void;
+}
+
+export type PlacementMode =
+  | 'select'
+  | 'click_place'
+  | 'polygon_fill'
+  | 'fence_line'
+  | 'ground_fill'
+  | 'auto_roof';
+
+type LoadStage = 'idle' | 'cesium' | 'three' | 'tiles' | 'solar' | 'terrain' | 'done' | 'error';
+type CameraMode = 'orbit' | 'walk' | 'drone' | 'street';
+type ViewMode = '3d' | 'street' | 'shade';
+
+const GOOGLE_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+const MAX_PANELS = 10000;
+
+declare global {
+  interface Window {
+    Cesium: any;
+    THREE: any;
+    google: any;
+  }
+}
+
+// ── Placed panel with 3D hit data ──────────────────────────────
+interface Panel3D extends PlacedPanel {
+  hit: SurfaceHit;
+  modelMatrix: any; // Cesium Matrix4
+}
+
+export default function SolarEngine3D({
+  panels, onPanelsChange, systemType, tilt, azimuth, fenceHeight,
+  rowSpacing, colSpacing, selectedPanel, mapCenter, solarData,
+  projectAddress, placementMode, onPlacementModeChange, showShade, onTwinLoaded, onError,
+}: Props) {
+  // ── Refs ───────────────────────────────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cesiumRef    = useRef<HTMLDivElement>(null);
+  const streetRef    = useRef<HTMLDivElement>(null);
+  const svCanvasRef  = useRef<HTMLCanvasElement>(null);
+  const viewerRef    = useRef<any>(null);
+  const threeRef     = useRef<{
+    renderer: any; scene: any; camera: any; animFrame: number;
+  } | null>(null);
+  const instancedRef = useRef<{
+    mesh: any; frameMesh: any;
+    updateInstance: (i: number, m: any, c?: [number,number,number]) => void;
+    setCount: (n: number) => void;
+  } | null>(null);
+  const panels3DRef  = useRef<Panel3D[]>([]);
+  const primitivesRef = useRef<any[]>([]);
+  const entitiesRef   = useRef<any[]>([]);
+  const svPanoRef     = useRef<any>(null);
+  const initDone      = useRef(false);
+  const drawingPolygon = useRef<Array<{ lat: number; lng: number }>>([]);
+  const drawingFence   = useRef<Array<{ lat: number; lng: number }>>([]);
+  const polyEntities   = useRef<any[]>([]);
+  const hoverEntity    = useRef<any>(null);
+  const highlightPrim  = useRef<any>(null);
+
+  // ── State ──────────────────────────────────────────────────────
+  const [stage, setStage]       = useState<LoadStage>('idle');
+  const [stageMsg, setStageMsg] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [twin, setTwin]         = useState<DigitalTwinData | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('3d');
+  const [cameraMode, setCameraMode] = useState<CameraMode>('orbit');
+  const [simHour, setSimHour]   = useState(12);
+  const [animating, setAnimating] = useState(false);
+  const [svReady, setSvReady]   = useState(false);
+  const [showParcel, setShowParcel]     = useState(true);
+  const [showEasements, setShowEasements] = useState(false);
+  const [showRoofSegs, setShowRoofSegs]   = useState(true);
+  const [panelCount, setPanelCount] = useState(0);
+
+  // Ref for current placement mode (avoids stale closure in event handlers)
+  const placementModeRef = useRef(placementMode);
+  useEffect(() => { placementModeRef.current = placementMode; }, [placementMode]);
+
+  const [hoverInfo, setHoverInfo] = useState<string | null>(null);
+  const [polyPoints, setPolyPoints] = useState(0);
+  const animRef = useRef<any>(null);
+  const placementModeRef = useRef(placementMode);
+
+  const lat = mapCenter?.lat ?? 33.4484;
+  const lng = mapCenter?.lng ?? -112.0740;
+
+  const sunPos = getSunPosition(lat, lng, (() => {
+    const d = new Date();
+    d.setHours(Math.floor(simHour), Math.round((simHour % 1) * 60));
+    return d;
+  })());
+
+
+  // ── Main boot sequence ─────────────────────────────────────────
+  async function boot() {
+    try {
+      step('cesium', 'Loading CesiumJS engine...', 5);
+      await Promise.race([
+        loadCesium(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('CesiumJS timeout after 15s')), 15000))
+      ]);
+
+      step('three', 'Loading Three.js renderer...', 12);
+      await Promise.race([
+        loadThreeJS(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Three.js timeout after 10s')), 10000))
+      ]);
+
+      step('tiles', 'Initializing 3D viewer...', 18);
+      const viewer = await Promise.race([
+        initViewer(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Viewer initialization timeout after 10s')), 10000))
+      ]);
+
+      step('solar', 'Fetching Solar API + elevation data...', 30);
+      const twinData: DigitalTwinData = await Promise.race([
+        buildDigitalTwin(lat, lng, projectAddress ?? ''),
+        new Promise<DigitalTwinData>((_, reject) => setTimeout(() => reject(new Error('Solar API timeout after 20s')), 20000))
+      ]);
+      setTwin(twinData);
+      onTwinLoaded?.(twinData);
+
+      step('terrain', 'Loading Google Photorealistic 3D Tiles...', 50);
+      await Promise.race([
+        loadGoogleTiles(viewer, twinData),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Google 3D Tiles timeout after 15s')), 15000))
+      ]);
+
+      step('terrain', 'Setting up panel engine...', 70);
+      initThreeOverlay(viewer);
+
+      step('done', '', 90);
+      await flyToProperty(viewer);
+      drawAllOverlays(viewer, twinData);
+      renderAllPanels();
+
+      setStage('done');
+      setProgress(100);
+
+      // Setup click handler for panel placement
+      setupClickHandler(viewer);
+      setupHoverHandler(viewer);
+
+      // Load Street View in background
+      initStreetView().catch(e => console.warn('SV:', e));
+
+    } catch (e: any) {
+      console.error('Boot error:', e);
+      setStage('error');
+      setStageMsg(e?.message ?? 'Unknown error');
+      onError?.(e?.message ?? '3D engine failed to load');
+    }
+  }
+
+  function step(s: LoadStage, msg: string, pct: number) {
+    setStage(s); setStageMsg(msg); setProgress(pct);
+  }
+
+  // ── Load CesiumJS from CDN ─────────────────────────────────────
+  function loadCesium(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (window.Cesium) { resolve(); return; }
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css';
+      document.head.appendChild(link);
+      const s = document.createElement('script');
+      s.src = 'https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js';
+      s.onload = () => window.Cesium ? resolve() : reject(new Error('Cesium unavailable'));
+      s.onerror = () => reject(new Error('Cesium CDN failed'));
+      document.head.appendChild(s);
+    });
+  }
+
+  // ── Load Three.js from CDN ─────────────────────────────────────
+  function loadThreeJS(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (window.THREE) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+      s.onload = () => window.THREE ? resolve() : reject(new Error('Three.js unavailable'));
+      s.onerror = () => reject(new Error('Three.js CDN failed'));
+      document.head.appendChild(s);
+    });
+  }
+
+  // ── Init Cesium Viewer ─────────────────────────────────────────
+  async function initViewer(): Promise<any> {
+    if (!cesiumRef.current) throw new Error('Container missing');
+    const C = window.Cesium;
+
+    // Use a public Cesium Ion token (for terrain only)
+    C.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc5YzciLCJpZCI6NTc3MzMsImlhdCI6MTYyNzg0NTE4Mn0.XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
+
+    const viewer = new C.Viewer(cesiumRef.current, {
+      imageryProvider: false,
+      baseLayerPicker: false,
+      geocoder: false,
+      homeButton: false,
+      sceneModePicker: false,
+      navigationHelpButton: false,
+      animation: false,
+      timeline: false,
+      fullscreenButton: false,
+      vrButton: false,
+      infoBox: false,
+      selectionIndicator: false,
+      shadows: true,
+      terrainShadows: C.ShadowMode.ENABLED,
+      requestRenderMode: false,
+      maximumRenderTimeChange: Infinity,
+    });
+
+    // Configure scene
+    viewer.scene.globe.show = false; // Hidden until tiles load
+    viewer.scene.backgroundColor = new C.Color(0.04, 0.06, 0.10, 1);
+    viewer.scene.globe.enableLighting = true;
+    viewer.scene.atmosphere.show = true;
+    viewer.scene.fog.enabled = true;
+    viewer.scene.fog.density = 0.0001;
+
+    // Enable shadows
+    viewer.shadows = true;
+    viewer.shadowMap.enabled = true;
+    viewer.shadowMap.softShadows = true;
+    viewer.shadowMap.size = 2048;
+
+    // Set sun to simulation time
+    const d = new Date();
+    d.setHours(Math.floor(simHour));
+    viewer.clock.currentTime = C.JulianDate.fromDate(d);
+    viewer.clock.shouldAnimate = false;
+
+    // High quality rendering
+    viewer.scene.postProcessStages.fxaa.enabled = true;
+    viewer.resolutionScale = window.devicePixelRatio || 1;
+
+    viewerRef.current = viewer;
+    return viewer;
+  }
+
+  // ── Load Google Photorealistic 3D Tiles ────────────────────────
+  async function loadGoogleTiles(viewer: any, twinData: DigitalTwinData) {
+    const C = window.Cesium;
+    try {
+      const tileset = await C.Cesium3DTileset.fromUrl(
+        `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_API_KEY}`,
+        {
+          showCreditsOnScreen: true,
+          maximumScreenSpaceError: 4,
+          dynamicScreenSpaceError: true,
+          dynamicScreenSpaceErrorDensity: 0.00278,
+          dynamicScreenSpaceErrorFactor: 4.0,
+          skipLevelOfDetail: true,
+          baseScreenSpaceError: 1024,
+          skipScreenSpaceErrorFactor: 16,
+          skipLevels: 1,
+          immediatelyLoadDesiredLevelOfDetail: false,
+          loadSiblings: false,
+          cullWithChildrenBounds: true,
+        }
+      );
+      viewer.scene.primitives.add(tileset);
+      console.log('✅ Google 3D Tiles loaded');
+    } catch (e) {
+      console.warn('3D tiles failed, using satellite imagery:', e);
+      // Fallback: show globe with satellite imagery
+      viewer.scene.globe.show = true;
+      try {
+        viewer.imageryLayers.addImageryProvider(
+          new C.UrlTemplateImageryProvider({
+            url: `/api/tile?z={z}&x={x}&y={y}`,
+            maximumLevel: 20,
+          })
+        );
+      } catch {}
+      // Add terrain
+      try {
+        viewer.terrainProvider = await C.CesiumTerrainProvider.fromIonAssetId(1);
+      } catch {}
+    }
+  }
+
+  // ── Init Three.js overlay ──────────────────────────────────────
+  function initThreeOverlay(viewer: any) {
+    const THREE = window.THREE;
+    if (!THREE || !cesiumRef.current) return;
+
+    // Create Three.js renderer that shares the Cesium canvas WebGL context
+    // We use a separate canvas overlay approach
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:5;';
+    cesiumRef.current.appendChild(canvas);
+
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      alpha: true,
+      antialias: true,
+      logarithmicDepthBuffer: true,
+    });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(cesiumRef.current.clientWidth, cesiumRef.current.clientHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+
+    const scene = new THREE.Scene();
+
+    // Camera matches Cesium camera
+    const camera = new THREE.PerspectiveCamera(
+      60,
+      cesiumRef.current.clientWidth / cesiumRef.current.clientHeight,
+      0.1,
+      1e10
+    );
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambientLight);
+
+    const sunLight = new THREE.DirectionalLight(0xfff5e0, 2.0);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 2048;
+    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.camera.near = 0.1;
+    sunLight.shadow.camera.far = 500;
+    sunLight.shadow.camera.left = -100;
+    sunLight.shadow.camera.right = 100;
+    sunLight.shadow.camera.top = 100;
+    sunLight.shadow.camera.bottom = -100;
+    sunLight.shadow.bias = -0.001;
+    scene.add(sunLight);
+
+    // Sky light (blue fill from above)
+    const skyLight = new THREE.HemisphereLight(0x87ceeb, 0x4a3728, 0.6);
+    scene.add(skyLight);
+
+    // Build instanced panel mesh
+    const panelSpec: PanelSpec = {
+      widthM: selectedPanel?.width ?? DEFAULT_PANEL_SPEC.widthM,
+      heightM: selectedPanel?.height ?? DEFAULT_PANEL_SPEC.heightM,
+      thicknessM: DEFAULT_PANEL_SPEC.thicknessM,
+      frameWidthM: DEFAULT_PANEL_SPEC.frameWidthM,
+      cellRows: DEFAULT_PANEL_SPEC.cellRows,
+      cellCols: DEFAULT_PANEL_SPEC.cellCols,
+      color: 'mono-black',
+      wattage: selectedPanel?.wattage ?? 400,
+    };
+
+    const instanced = buildInstancedPanelMesh(THREE, panelSpec, MAX_PANELS);
+    scene.add(instanced.mesh);
+    instancedRef.current = instanced;
+
+    // Resize handler
+    const onResize = () => {
+      if (!cesiumRef.current) return;
+      const w = cesiumRef.current.clientWidth;
+      const h = cesiumRef.current.clientHeight;
+      renderer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    };
+    window.addEventListener('resize', onResize);
+
+    // Render loop — sync Three.js camera with Cesium camera
+    let frameId = 0;
+    function renderLoop() {
+      frameId = requestAnimationFrame(renderLoop);
+      if (!viewerRef.current || !window.Cesium) return;
+
+      const C = window.Cesium;
+      const cesiumCamera = viewerRef.current.camera;
+
+      // Sync Three.js camera with Cesium camera
+      const pos = cesiumCamera.positionWC;
+      const dir = cesiumCamera.directionWC;
+      const up  = cesiumCamera.upWC;
+
+      camera.position.set(pos.x, pos.y, pos.z);
+      camera.up.set(up.x, up.y, up.z);
+      camera.lookAt(
+        pos.x + dir.x,
+        pos.y + dir.y,
+        pos.z + dir.z
+      );
+
+      // Match FOV
+      const fov = C.Math.toDegrees(cesiumCamera.frustum.fovy ?? 1.0);
+      if (camera.fov !== fov) {
+        camera.fov = fov;
+        camera.updateProjectionMatrix();
+      }
+
+      // Update sun light direction
+      const sunEl = sunPos.elevation * Math.PI / 180;
+      const sunAz = sunPos.azimuth * Math.PI / 180;
+      sunLight.position.set(
+        Math.sin(sunAz) * Math.cos(sunEl) * 1000,
+        Math.cos(sunAz) * Math.cos(sunEl) * 1000,
+        Math.sin(sunEl) * 1000
+      );
+      sunLight.intensity = sunPos.elevation > 0 ? 2.0 : 0.1;
+
+      renderer.render(scene, camera);
+    }
+    renderLoop();
+
+    threeRef.current = { renderer, scene, camera, animFrame: frameId };
+  }
+
+  // ── Fly to property ────────────────────────────────────────────
+  async function flyToProperty(viewer: any) {
+    const C = window.Cesium;
+    return new Promise<void>(res => {
+      viewer.camera.flyTo({
+        destination: C.Cartesian3.fromDegrees(lng, lat, 180),
+        orientation: {
+          heading: C.Math.toRadians(0),
+          pitch: C.Math.toRadians(-45),
+          roll: 0,
+        },
+        duration: 2.0,
+        complete: res,
+      });
+    });
+  }
+
+  // ── Setup click handler for panel placement ────────────────────
+  function setupClickHandler(viewer: any) {
+    const C = window.Cesium;
+    const handler = new C.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+    handler.setInputAction((event: any) => {
+      const mode = placementModeRef.current;
+      if (mode === 'select') return;
+
+      const screenPos = event.position;
+
+      if (mode === 'click_place') {
+        handleClickPlace(viewer, screenPos);
+      } else if (mode === 'polygon_fill' || mode === 'ground_fill') {
+        handlePolygonClick(viewer, screenPos);
+      } else if (mode === 'fence_line') {
+        handleFenceClick(viewer, screenPos);
+      } else if (mode === 'auto_roof') {
+        handleAutoRoof(viewer);
+      }
+    }, C.ScreenSpaceEventType.LEFT_CLICK);
+
+    // Double-click to finish polygon/fence
+    handler.setInputAction((event: any) => {
+      const mode = placementModeRef.current;
+      if (mode === 'polygon_fill' || mode === 'ground_fill') {
+        finishPolygon(viewer);
+      } else if (mode === 'fence_line') {
+        finishFence(viewer);
+      }
+    }, C.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
+    // Right-click to cancel drawing
+    handler.setInputAction(() => {
+      cancelDrawing(viewer);
+    }, C.ScreenSpaceEventType.RIGHT_CLICK);
+  }
+
+  // ── Setup hover handler ────────────────────────────────────────
+  function setupHoverHandler(viewer: any) {
+    const C = window.Cesium;
+    const handler = new C.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+    handler.setInputAction((event: any) => {
+      const mode = placementModeRef.current;
+      if (mode === 'select') return;
+
+      const hit = pickSurface(viewer, event.endPosition);
+      if (hit) {
+        setHoverInfo(
+          `${hit.surfaceType === 'building' ? '🏠 Roof' : '🌍 Ground'} · ` +
+          `${hit.tiltDegrees.toFixed(1)}° tilt · ` +
+          `${hit.height.toFixed(1)}m elevation`
+        );
+        showHoverMarker(viewer, hit);
+      } else {
+        setHoverInfo(null);
+        removeHoverMarker(viewer);
+  }
+
+  // Ref for current placement mode (avoids stale closure in event handlers)
+  const placementModeRef = useRef(placementMode);
+  useEffect(() => { placementModeRef.current = placementMode; }, [placementMode]);
+
+  // ── Click-to-place single panel ────────────────────────────────
+  function handleClickPlace(viewer: any, screenPos: { x: number; y: number }) {
+    const hit = pickSurface(viewer, screenPos);
+    if (!hit) return;
+
+    const panelTilt = systemType === 'fence' ? 90 : tilt;
+    const panelAz = azimuth;
+
+    const newPanel: PlacedPanel = {
+      id: `panel-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      layoutId: 'current',
+      lat: hit.lat,
+      lng: hit.lng,
+      x: 0, y: 0,
+      tilt: panelTilt,
+      azimuth: panelAz,
+      wattage: selectedPanel?.wattage ?? 400,
+      bifacialGain: selectedPanel?.bifacialFactor ?? 1.0,
+      row: 0, col: 0,
+    };
+
+    // Store 3D hit data
+    const modelMatrix = buildPanelModelMatrix(hit, panelTilt, panelAz, systemType);
+    panels3DRef.current.push({ ...newPanel, hit, modelMatrix });
+
+    onPanelsChange([...panels, newPanel]);
+  }
+
+  // ── Polygon drawing ────────────────────────────────────────────
+  function handlePolygonClick(viewer: any, screenPos: { x: number; y: number }) {
+    const hit = pickSurface(viewer, screenPos);
+    if (!hit) return;
+
+    drawingPolygon.current.push({ lat: hit.lat, lng: hit.lng });
+    setPolyPoints(drawingPolygon.current.length);
+    updatePolygonPreview(viewer);
+  }
+
+  async function finishPolygon(viewer: any) {
+    const polygon = drawingPolygon.current;
+    if (polygon.length < 3) return;
+
+    const PW = selectedPanel?.width ?? DEFAULT_PANEL_SPEC.widthM;
+    const PH = selectedPanel?.height ?? DEFAULT_PANEL_SPEC.heightM;
+
+    const hits = await samplePolygonSurface(
+      viewer, polygon, PW, PH,
+      rowSpacing, colSpacing, azimuth
+    );
+
+    const newPanels: PlacedPanel[] = hits.map((hit, i) => ({
+      id: `panel-${Date.now()}-${i}`,
+      layoutId: 'current',
+      lat: hit.lat,
+      lng: hit.lng,
+      x: 0, y: 0,
+      tilt: systemType === 'fence' ? 90 : tilt,
+      azimuth,
+      wattage: selectedPanel?.wattage ?? 400,
+      bifacialGain: selectedPanel?.bifacialFactor ?? 1.0,
+      row: Math.floor(i / 10),
+      col: i % 10,
+    }));
+
+    // Store 3D data
+    hits.forEach((hit, i) => {
+      const modelMatrix = buildPanelModelMatrix(hit, tilt, azimuth, systemType);
+      panels3DRef.current.push({ ...newPanels[i], hit, modelMatrix });
+    });
+
+    onPanelsChange([...panels, ...newPanels]);
+    cancelDrawing(viewer);
+  }
+
+  // ── Fence line drawing ─────────────────────────────────────────
+  function handleFenceClick(viewer: any, screenPos: { x: number; y: number }) {
+    const hit = pickSurface(viewer, screenPos);
+    if (!hit) return;
+
+    drawingFence.current.push({ lat: hit.lat, lng: hit.lng });
+    setPolyPoints(drawingFence.current.length);
+    updateFencePreview(viewer);
+  }
+
+  function finishFence(viewer: any) {
+    const line = drawingFence.current;
+    if (line.length < 2) return;
+
+    const PW = selectedPanel?.width ?? DEFAULT_PANEL_SPEC.widthM;
+    const PH = selectedPanel?.height ?? DEFAULT_PANEL_SPEC.heightM;
+    const elevation = twin?.elevation ?? 0;
+
+    const hits = generateFencePanels(line, PW, PH, fenceHeight, elevation);
+
+    const newPanels: PlacedPanel[] = hits.map((hit, i) => ({
+      id: `fence-${Date.now()}-${i}`,
+      layoutId: 'current',
+      lat: hit.lat,
+      lng: hit.lng,
+      x: 0, y: 0,
+      tilt: 90,
+      azimuth: hit.azimuthDegrees,
+      wattage: selectedPanel?.wattage ?? 400,
+      bifacialGain: selectedPanel?.bifacialFactor ?? 1.0,
+      row: 0, col: i,
+    }));
+
+    hits.forEach((hit, i) => {
+      const modelMatrix = buildPanelModelMatrix(hit, 90, hit.azimuthDegrees, 'fence');
+      panels3DRef.current.push({ ...newPanels[i], hit, modelMatrix });
+    });
+
+    onPanelsChange([...panels, ...newPanels]);
+    cancelDrawing(viewer);
+  }
+
+  // ── Auto-fill roof from Solar API ─────────────────────────────
+  async function handleAutoRoof(viewer: any) {
+    if (!twin?.roofSegments?.length) return;
+
+    const PW = selectedPanel?.width ?? DEFAULT_PANEL_SPEC.widthM;
+    const PH = selectedPanel?.height ?? DEFAULT_PANEL_SPEC.heightM;
+    const allNewPanels: PlacedPanel[] = [];
+
+    for (const seg of twin.roofSegments) {
+      if (seg.pitchDegrees > 60) continue; // Skip near-vertical segments
+      if (seg.areaM2 < PW * PH * 2) continue; // Too small
+
+      const polygon = seg.corners.map(c => ({ lat: c.lat, lng: c.lng }));
+      const hits = await samplePolygonSurface(
+        viewer, polygon, PW, PH,
+        rowSpacing, colSpacing, seg.azimuthDegrees
+      );
+
+      hits.forEach((hit, i) => {
+        // Override hit elevation with roof segment elevation
+        hit.height = seg.elevation + 0.05;
+        hit.tiltDegrees = seg.pitchDegrees;
+        hit.azimuthDegrees = seg.azimuthDegrees;
+
+        const C = window.Cesium;
+        hit.cartesian = C.Cartesian3.fromDegrees(hit.lng, hit.lat, hit.height);
+
+        const panel: PlacedPanel = {
+          id: `roof-${seg.id}-${i}`,
+          layoutId: 'current',
+          lat: hit.lat,
+          lng: hit.lng,
+          x: 0, y: 0,
+          tilt: seg.pitchDegrees,
+          azimuth: seg.azimuthDegrees,
+          wattage: selectedPanel?.wattage ?? 400,
+          bifacialGain: selectedPanel?.bifacialFactor ?? 1.0,
+          row: Math.floor(i / 10),
+          col: i % 10,
+        };
+
+        const modelMatrix = buildPanelModelMatrix(hit, seg.pitchDegrees, seg.azimuthDegrees, 'roof');
+        panels3DRef.current.push({ ...panel, hit, modelMatrix });
+        allNewPanels.push(panel);
+      });
+    }
+
+    onPanelsChange([...panels, ...allNewPanels]);
+    onPlacementModeChange('select');
+  }
+
+  // ── Cancel drawing ─────────────────────────────────────────────
+  function cancelDrawing(viewer: any) {
+    drawingPolygon.current = [];
+    drawingFence.current = [];
+    setPolyPoints(0);
+    clearPolyPreview(viewer);
+  }
+
+  // ── Polygon preview entities ───────────────────────────────────
+  function updatePolygonPreview(viewer: any) {
+    const C = window.Cesium;
+    clearPolyPreview(viewer);
+    const pts = drawingPolygon.current;
+    if (pts.length < 2) return;
+
+    const elevation = twin?.elevation ?? 0;
+    const positions = pts.map(p => C.Cartesian3.fromDegrees(p.lng, p.lat, elevation + 1));
+
+    const e = viewer.entities.add({
+      polyline: {
+        positions: [...positions, positions[0]],
+        width: 2,
+        material: new C.PolylineDashMaterialProperty({
+          color: C.Color.fromCssColorString('#f59e0b'),
+          dashLength: 8,
+        }),
+        clampToGround: false,
+      },
+    });
+    polyEntities.current.push(e);
+
+    if (pts.length >= 3) {
+      const e2 = viewer.entities.add({
+        polygon: {
+          hierarchy: new C.PolygonHierarchy(positions),
+          material: C.Color.fromCssColorString('#f59e0b').withAlpha(0.12),
+          height: elevation + 0.5,
+        },
+      });
+      polyEntities.current.push(e2);
+    }
+  }
+
+  function updateFencePreview(viewer: any) {
+    const C = window.Cesium;
+    clearPolyPreview(viewer);
+    const pts = drawingFence.current;
+    if (pts.length < 2) return;
+
+    const elevation = twin?.elevation ?? 0;
+    const positions = pts.map(p => C.Cartesian3.fromDegrees(p.lng, p.lat, elevation + fenceHeight));
+
+    const e = viewer.entities.add({
+      polyline: {
+        positions,
+        width: 3,
+        material: new C.PolylineDashMaterialProperty({
+          color: C.Color.fromCssColorString('#a78bfa'),
+          dashLength: 8,
+        }),
+        clampToGround: false,
+      },
+    });
+    polyEntities.current.push(e);
+  }
+
+  function clearPolyPreview(viewer: any) {
+    polyEntities.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+    polyEntities.current = [];
+  }
+
+  // ── Hover marker ───────────────────────────────────────────────
+  function showHoverMarker(viewer: any, hit: SurfaceHit) {
+    const C = window.Cesium;
+    removeHoverMarker(viewer);
+    hoverEntity.current = viewer.entities.add({
+      position: hit.cartesian,
+      point: {
+        pixelSize: 10,
+        color: C.Color.fromCssColorString('#f59e0b').withAlpha(0.9),
+        outlineColor: C.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+  }
+
+  function removeHoverMarker(viewer: any) {
+    if (hoverEntity.current) {
+      try { viewer.entities.remove(hoverEntity.current); } catch {}
+      hoverEntity.current = null;
+    }
+  }
+
+  // ── Render all panels ──────────────────────────────────────────
+  const renderAllPanels = useCallback(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !window.Cesium) return;
+
+    // Remove old Cesium primitives
+    primitivesRef.current.forEach(p => { try { viewer.scene.primitives.remove(p); } catch {} });
+    primitivesRef.current = [];
+
+    if (!panels?.length) {
+      setPanelCount(0);
+      return;
+    }
+
+    const C = window.Cesium;
+    const PW = selectedPanel?.width ?? DEFAULT_PANEL_SPEC.widthM;
+    const PH = selectedPanel?.height ?? DEFAULT_PANEL_SPEC.heightM;
+    const PT = DEFAULT_PANEL_SPEC.thicknessM;
+    const baseElev = twin?.elevation ?? 0;
+
+    const instances: any[] = [];
+    const frameInstances: any[] = [];
+
+    panels.forEach((panel, idx) => {
+      const pLat = panel.lat || lat;
+      const pLng = panel.lng || lng;
+      const panelTilt = panel.tilt ?? tilt;
+      const panelAz = panel.azimuth ?? azimuth;
+
+      // Find stored 3D hit data
+      const stored = panels3DRef.current.find(p => p.id === panel.id);
+
+      let panelElev = baseElev + 0.1;
+      let modelMatrix: any;
+
+      if (stored?.modelMatrix) {
+        modelMatrix = stored.modelMatrix;
+      } else {
+        // Reconstruct from lat/lng/elevation
+        if (twin?.roofSegments?.length && systemType === 'roof') {
+          const seg = twin.roofSegments.find(s =>
+            pLat >= s.boundingBox.sw.lat && pLat <= s.boundingBox.ne.lat &&
+            pLng >= s.boundingBox.sw.lng && pLng <= s.boundingBox.ne.lng
+          );
+          if (seg) panelElev = seg.elevation + 0.05;
+        } else if (systemType === 'fence') {
+          panelElev = baseElev + fenceHeight / 2;
+        } else if (systemType === 'ground') {
+          panelElev = baseElev + 0.5;
+        }
+
+        const position = C.Cartesian3.fromDegrees(pLng, pLat, panelElev);
+        const enu = C.Transforms.eastNorthUpToFixedFrame(position);
+
+        const azRad = C.Math.toRadians(panelAz);
+        const tiltRad = C.Math.toRadians(systemType === 'fence' ? 90 : panelTilt);
+        const rotZ = C.Matrix3.fromRotationZ(-azRad);
+        const rotX = C.Matrix3.fromRotationX(-tiltRad);
+        const rot = C.Matrix3.multiply(rotZ, rotX, new C.Matrix3());
+        const rot4 = C.Matrix4.fromRotationTranslation(rot);
+        modelMatrix = C.Matrix4.multiply(enu, rot4, new C.Matrix4());
+      }
+
+      // Shade color
+      let panelColor: any;
+      if (showShade) {
+        const normal = stored?.hit?.normal ?? { x: 0, y: 0, z: 1 };
+        const [r, g, b] = computePanelShadeColor(normal, sunPos.azimuth, sunPos.elevation);
+        panelColor = new C.Color(r, g, b, 0.95);
+      } else {
+        panelColor = systemType === 'roof'
+          ? new C.Color(0.06, 0.14, 0.42, 0.95)
+          : systemType === 'ground'
+          ? new C.Color(0.04, 0.22, 0.10, 0.95)
+          : new C.Color(0.06, 0.12, 0.42, 0.95);
+      }
+
+      instances.push(new C.GeometryInstance({
+        id: `panel-${idx}`,
+        geometry: C.BoxGeometry.fromDimensions({
+          dimensions: new C.Cartesian3(PW, PH, PT),
+          vertexFormat: C.PerInstanceColorAppearance.VERTEX_FORMAT,
+        }),
+        modelMatrix,
+        attributes: {
+          color: C.ColorGeometryInstanceAttribute.fromColor(panelColor),
+        },
+      }));
+
+      // Frame
+      frameInstances.push(new C.GeometryInstance({
+        id: `frame-${idx}`,
+        geometry: C.BoxOutlineGeometry.fromDimensions({
+          dimensions: new C.Cartesian3(PW + 0.02, PH + 0.02, PT + 0.008),
+        }),
+        modelMatrix,
+        attributes: {
+          color: C.ColorGeometryInstanceAttribute.fromColor(
+            new C.Color(0.80, 0.82, 0.86, 1.0)
+          ),
+        },
+      }));
+    });
+
+    if (!instances.length) { setPanelCount(0); return; }
+
+    // Batch into chunks of 1000 for performance
+    const CHUNK = 1000;
+    for (let i = 0; i < instances.length; i += CHUNK) {
+      const chunk = instances.slice(i, i + CHUNK);
+      const frameChunk = frameInstances.slice(i, i + CHUNK);
+
+      const panelPrim = new C.Primitive({
+        geometryInstances: chunk,
+        appearance: new C.PerInstanceColorAppearance({
+          closed: true,
+          translucent: false,
+        }),
+        shadows: C.ShadowMode.ENABLED,
+        releaseGeometryInstances: false,
+        asynchronous: false,
+      });
+
+      const framePrim = new C.Primitive({
+        geometryInstances: frameChunk,
+        appearance: new C.PerInstanceColorAppearance({ flat: true }),
+        shadows: C.ShadowMode.DISABLED,
+        asynchronous: false,
+      });
+
+      viewer.scene.primitives.add(panelPrim);
+      viewer.scene.primitives.add(framePrim);
+      primitivesRef.current.push(panelPrim, framePrim);
+    }
+
+    setPanelCount(panels.length);
+  }, [panels, showShade, simHour, systemType, tilt, azimuth, fenceHeight, selectedPanel, lat, lng, twin, sunPos]);
+
+  // ── Draw all overlays ──────────────────────────────────────────
+  function drawAllOverlays(v?: any, t?: DigitalTwinData) {
+    const viewer = v ?? viewerRef.current;
+    const twinData = t ?? twin;
+    if (!viewer || !window.Cesium) return;
+
+    entitiesRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+    entitiesRef.current = [];
+
+    if (!twinData) return;
+
+    if (showParcel && twinData.parcel) drawParcelBoundary(viewer, twinData);
+    if (showEasements && twinData.parcel?.easements) drawEasements(viewer, twinData);
+    if (showRoofSegs && twinData.roofSegments.length > 0) drawRoofSegments(viewer, twinData);
+  }
+
+  function drawParcelBoundary(viewer: any, twinData: DigitalTwinData) {
+    const C = window.Cesium;
+    const { boundary } = twinData.parcel!;
+    const elev = twinData.elevation;
+
+    const positions = [...boundary, boundary[0]].map(p =>
+      C.Cartesian3.fromDegrees(p.lng, p.lat, elev + 0.5)
+    );
+
+    const e = viewer.entities.add({
+      polyline: {
+        positions,
+        width: 3,
+        material: new C.PolylineGlowMaterialProperty({
+          glowPower: 0.3,
+          color: C.Color.fromCssColorString('#22c55e'),
+        }),
+        clampToGround: false,
+      },
+    });
+    entitiesRef.current.push(e);
+
+    const e2 = viewer.entities.add({
+      polygon: {
+        hierarchy: new C.PolygonHierarchy(
+          boundary.map(p => C.Cartesian3.fromDegrees(p.lng, p.lat, elev + 0.1))
+        ),
+        material: C.Color.fromCssColorString('#22c55e').withAlpha(0.05),
+        height: elev + 0.1,
+      },
+    });
+    entitiesRef.current.push(e2);
+
+    const e3 = viewer.entities.add({
+      position: C.Cartesian3.fromDegrees(lng, lat, elev + 8),
+      label: {
+        text: `📐 ${Math.round(twinData.parcel!.area)} m²`,
+        font: '600 12px Inter, sans-serif',
+        fillColor: C.Color.fromCssColorString('#22c55e'),
+        outlineColor: C.Color.BLACK,
+        outlineWidth: 2,
+        style: C.LabelStyle.FILL_AND_OUTLINE,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        pixelOffset: new C.Cartesian2(0, -10),
+      },
+    });
+    entitiesRef.current.push(e3);
+  }
+
+  function drawEasements(viewer: any, twinData: DigitalTwinData) {
+    const C = window.Cesium;
+    const elev = twinData.elevation;
+
+    twinData.parcel!.easements.forEach(ez => {
+      const color = ez.type === 'utility' ? '#f59e0b'
+        : ez.type === 'setback' ? '#ef4444'
+        : '#a78bfa';
+
+      const e = viewer.entities.add({
+        polygon: {
+          hierarchy: new C.PolygonHierarchy(
+            ez.boundary.map(p => C.Cartesian3.fromDegrees(p.lng, p.lat, elev + 0.3))
+          ),
+          material: C.Color.fromCssColorString(color).withAlpha(0.18),
+          height: elev + 0.3,
+          outline: true,
+          outlineColor: C.Color.fromCssColorString(color).withAlpha(0.7),
+          outlineWidth: 2,
+        },
+      });
+      entitiesRef.current.push(e);
+    });
+  }
+
+  function drawRoofSegments(viewer: any, twinData: DigitalTwinData) {
+    const C = window.Cesium;
+
+    twinData.roofSegments.forEach(seg => {
+      const maxSun = 1900, minSun = 800;
+      const t = Math.max(0, Math.min(1, (seg.sunshineHours - minSun) / (maxSun - minSun)));
+      const r = Math.round(255 * (1 - t));
+      const g = Math.round(200 * t);
+      const color = C.Color.fromBytes(r, g, 30, 80);
+
+      const corners = seg.corners.map(c =>
+        C.Cartesian3.fromDegrees(c.lng, c.lat, c.alt)
+      );
+
+      if (corners.length >= 3) {
+        const e = viewer.entities.add({
+          polygon: {
+            hierarchy: new C.PolygonHierarchy(corners),
+            material: color,
+            height: seg.elevation,
+            outline: true,
+            outlineColor: C.Color.fromCssColorString('#60a5fa').withAlpha(0.5),
+            outlineWidth: 1,
+          },
+        });
+        entitiesRef.current.push(e);
+      }
+
+      const e2 = viewer.entities.add({
+        position: C.Cartesian3.fromDegrees(seg.center.lng, seg.center.lat, seg.elevation + 2),
+        label: {
+          text: `${seg.pitchDegrees.toFixed(0)}° · ${seg.sunshineHours.toFixed(0)}h/yr`,
+          font: '500 10px Inter, sans-serif',
+          fillColor: C.Color.WHITE,
+          outlineColor: C.Color.BLACK,
+          outlineWidth: 2,
+          style: C.LabelStyle.FILL_AND_OUTLINE,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          scale: 0.85,
+        },
+      });
+      entitiesRef.current.push(e2);
+    });
+  }
+
+  // ── Street View ────────────────────────────────────────────────
+  async function initStreetView() {
+    if (!streetRef.current) return;
+    await loadGoogleMapsSDK();
+    const { StreetViewPanorama, StreetViewService, StreetViewStatus } =
+      await window.google.maps.importLibrary('streetView');
+    const svc = new StreetViewService();
+    const result: any = await new Promise((res, rej) =>
+      svc.getPanorama({ location: { lat, lng }, radius: 150, preference: 'nearest' },
+        (d: any, s: any) => s === StreetViewStatus.OK ? res(d) : rej(new Error('No SV')))
+    );
+    let heading = 0;
+    try {
+      const { spherical } = await window.google.maps.importLibrary('geometry');
+      heading = spherical.computeHeading(result.location.latLng, new window.google.maps.LatLng(lat, lng));
+    } catch {}
+    const pano = new StreetViewPanorama(streetRef.current, {
+      pano: result.location.pano,
+      pov: { heading, pitch: 5 },
+      zoom: 0,
+      addressControl: false,
+      fullscreenControl: false,
+      motionTracking: false,
+      motionTrackingControl: false,
+      showRoadLabels: false,
+    });
+    pano.addListener('pov_changed', () => drawSVOverlay());
+    svPanoRef.current = pano;
+    setSvReady(true);
+    setTimeout(() => drawSVOverlay(), 1500);
+  }
+
+  function loadGoogleMapsSDK(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (window.google?.maps?.importLibrary) { resolve(); return; }
+      if (document.getElementById('__gm_sdk')) {
+        const p = setInterval(() => {
+          if (window.google?.maps?.importLibrary) { clearInterval(p); resolve(); }
+        }, 100);
+        setTimeout(() => { clearInterval(p); reject(new Error('GM timeout')); }, 15000);
+        return;
+      }
+      const s = document.createElement('script');
+      s.id = '__gm_sdk';
+      s.textContent = `(g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await(a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src="https://maps."+c+"apis.com/maps/api/js?"+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({key:"${GOOGLE_API_KEY}",v:"alpha"});`;
+      document.head.appendChild(s);
+      const p = setInterval(() => {
+        if (window.google?.maps?.importLibrary) { clearInterval(p); resolve(); }
+      }, 100);
+      setTimeout(() => { clearInterval(p); reject(new Error('GM timeout')); }, 15000);
+    });
+  }
+
+  // ── Street View AR overlay ─────────────────────────────────────
+  const drawSVOverlay = useCallback(() => {
+    const canvas = svCanvasRef.current;
+    const pano = svPanoRef.current;
+    const container = streetRef.current;
+    if (!canvas || !pano || !container || !panels?.length) return;
+
+    const W = container.clientWidth || 800;
+    const H = container.clientHeight || 500;
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, W, H);
+
+    const pov = pano.getPov();
+    const heading = pov.heading || 0;
+    const pitch = pov.pitch || 0;
+    const zoom = pov.zoom || 0;
+    const hFov = 90 / Math.pow(2, zoom);
+    const vFov = hFov * (H / W);
+
+    const panoPos = pano.getPosition();
+    if (!panoPos) return;
+    const pLat = panoPos.lat(), pLng = panoPos.lng();
+    const mLat = 111320, mLng = mLat * Math.cos(pLat * Math.PI / 180);
+
+    function project(wLat: number, wLng: number, wAlt: number) {
+      const dx = (wLng - pLng) * mLng;
+      const dy = (wLat - pLat) * mLat;
+      const dz = wAlt - 1.5;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist < 0.3) return null;
+      const bearDeg = Math.atan2(dx, dy) * 180 / Math.PI;
+      const elevDeg = Math.atan2(dz, Math.sqrt(dx * dx + dy * dy)) * 180 / Math.PI;
+      let relH = bearDeg - heading;
+      while (relH > 180) relH -= 360;
+      while (relH < -180) relH += 360;
+      const relP = elevDeg - pitch;
+      if (Math.abs(relH) > hFov * 1.6 || Math.abs(relP) > vFov * 1.6) return null;
+      return { x: W / 2 + (relH / hFov) * (W / 2), y: H / 2 - (relP / vFov) * (H / 2), dist };
+    }
+
+    const PW = selectedPanel?.width ?? DEFAULT_PANEL_SPEC.widthM;
+    const PH = selectedPanel?.height ?? DEFAULT_PANEL_SPEC.heightM;
+    const baseElev = twin?.elevation ?? 0;
+
+    const sorted = [...panels].sort((a, b) => {
+      const aLat = a.lat || lat, aLng = a.lng || lng;
+      const bLat = b.lat || lat, bLng = b.lng || lng;
+      return Math.hypot((bLat - pLat) * mLat, (bLng - pLng) * mLng) -
+             Math.hypot((aLat - pLat) * mLat, (aLng - pLng) * mLng);
+    });
+
+    let drawn = 0;
+    sorted.forEach(panel => {
+      const panLat = panel.lat || lat;
+      const panLng = panel.lng || lng;
+      const dist = Math.hypot((panLat - pLat) * mLat, (panLng - pLng) * mLng);
+      if (dist > 100) return;
+
+      const panelTilt = panel.tilt ?? tilt;
+      const panelAz = panel.azimuth ?? azimuth;
+      const altOff = systemType === 'fence' ? baseElev + fenceHeight
+        : systemType === 'ground' ? baseElev + 0.5 : baseElev + 3.2;
+
+      const tiltR = panelTilt * Math.PI / 180;
+      const azR = (panelAz - 180) * Math.PI / 180;
+      const hw = PW / 2, hh = PH / 2;
+      const cosAz = Math.cos(azR), sinAz = Math.sin(azR);
+      const cosTilt = Math.cos(tiltR), sinTilt = Math.sin(tiltR);
+      const rx = cosAz, ry = -sinAz;
+      const ux = sinAz * sinTilt, uy = cosAz * sinTilt, uz = cosTilt;
+
+      const corners4 = [
+        { dlat: (-hh * uy - hw * ry) / mLat, dlng: (-hh * ux - hw * rx) / mLng, dalt: -hh * uz },
+        { dlat: (-hh * uy + hw * ry) / mLat, dlng: (-hh * ux + hw * rx) / mLng, dalt: -hh * uz },
+        { dlat: (hh * uy + hw * ry) / mLat, dlng: (hh * ux + hw * rx) / mLng, dalt: hh * uz },
+        { dlat: (hh * uy - hw * ry) / mLat, dlng: (hh * ux - hw * rx) / mLng, dalt: hh * uz },
+      ];
+
+      const pts = corners4.map(c => project(panLat + c.dlat, panLng + c.dlng, altOff + c.dalt));
+      if (pts.every(p => !p)) return;
+      if (pts.filter(Boolean).length < 3) return;
+
+      const opacity = Math.max(0.45, Math.min(0.95, 1 - dist / 90));
+      const [p0, p1, p2, p3] = pts;
+
+      // Panel body
+      const grad = ctx.createLinearGradient(p0?.x ?? 0, p0?.y ?? 0, p2?.x ?? 100, p2?.y ?? 100);
+      grad.addColorStop(0, `rgba(15,40,110,${opacity})`);
+      grad.addColorStop(0.4, `rgba(22,60,150,${opacity * 0.92})`);
+      grad.addColorStop(1, `rgba(10,30,85,${opacity})`);
+
+      ctx.beginPath();
+      ctx.moveTo(p0?.x ?? 0, p0?.y ?? 0);
+      [p1, p2, p3].forEach(p => ctx.lineTo(p?.x ?? 0, p?.y ?? 0));
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+
+      // Frame
+      ctx.strokeStyle = `rgba(180,200,255,${Math.min(1, opacity + 0.1)})`;
+      ctx.lineWidth = Math.max(1, 2.5 - dist / 50);
+      ctx.stroke();
+
+      // Cell grid
+      ctx.strokeStyle = `rgba(147,197,253,${opacity * 0.25})`;
+      ctx.lineWidth = 0.5;
+      for (let r = 1; r < 6; r++) {
+        const t2 = r / 6;
+        ctx.beginPath();
+        ctx.moveTo((p0?.x ?? 0) + t2 * ((p3?.x ?? 0) - (p0?.x ?? 0)), (p0?.y ?? 0) + t2 * ((p3?.y ?? 0) - (p0?.y ?? 0)));
+        ctx.lineTo((p1?.x ?? 0) + t2 * ((p2?.x ?? 0) - (p1?.x ?? 0)), (p1?.y ?? 0) + t2 * ((p2?.y ?? 0) - (p1?.y ?? 0)));
+        ctx.stroke();
+      }
+      for (let c = 1; c < 3; c++) {
+        const t2 = c / 3;
+        ctx.beginPath();
+        ctx.moveTo((p0?.x ?? 0) + t2 * ((p1?.x ?? 0) - (p0?.x ?? 0)), (p0?.y ?? 0) + t2 * ((p1?.y ?? 0) - (p0?.y ?? 0)));
+        ctx.lineTo((p3?.x ?? 0) + t2 * ((p2?.x ?? 0) - (p3?.x ?? 0)), (p3?.y ?? 0) + t2 * ((p2?.y ?? 0) - (p3?.y ?? 0)));
+        ctx.stroke();
+      }
+
+      // Glass highlight
+      const hGrad = ctx.createLinearGradient(p0?.x ?? 0, p0?.y ?? 0, p1?.x ?? 50, p1?.y ?? 0);
+      hGrad.addColorStop(0, 'rgba(255,255,255,0)');
+      hGrad.addColorStop(0.25, `rgba(255,255,255,${opacity * 0.12})`);
+      hGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hGrad;
+      ctx.beginPath();
+      ctx.moveTo(p0?.x ?? 0, p0?.y ?? 0);
+      [p1, p2, p3].forEach(p => ctx.lineTo(p?.x ?? 0, p?.y ?? 0));
+      ctx.closePath();
+      ctx.fill();
+
+      drawn++;
+    });
+
+    if (drawn > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,0.75)';
+      ctx.beginPath();
+      (ctx as any).roundRect?.(10, H - 48, 280, 36, 8);
+      ctx.fill();
+      ctx.fillStyle = '#f1f5f9';
+      ctx.font = '600 12px Inter, system-ui, sans-serif';
+      ctx.fillText(`☀️ ${drawn} panels · ${((drawn * (selectedPanel?.wattage ?? 400)) / 1000).toFixed(1)} kW`, 20, H - 24);
+    }
+  }, [panels, systemType, tilt, azimuth, fenceHeight, selectedPanel, lat, lng, twin, svReady]);
+
+  // ── Sun animation ──────────────────────────────────────────────
+  const toggleAnimation = () => {
+    if (animating) {
+      clearInterval(animRef.current);
+      setAnimating(false);
+    } else {
+      setAnimating(true);
+      animRef.current = setInterval(() => {
+        setSimHour(h => {
+          const next = (h + 0.25) % 24;
+          if (viewerRef.current && window.Cesium) {
+            const d = new Date();
+            d.setHours(Math.floor(next), Math.round((next % 1) * 60));
+            viewerRef.current.clock.currentTime = window.Cesium.JulianDate.fromDate(d);
+          }
+          return next;
+        });
+      }, 150);
+    }
+  };
+
+  useEffect(() => () => clearInterval(animRef.current), []);
+
+  // ── Camera modes ───────────────────────────────────────────────
+  function setCameraOrbit() {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    viewer.scene.screenSpaceCameraController.enableRotate = true;
+    viewer.scene.screenSpaceCameraController.enableTranslate = true;
+    viewer.scene.screenSpaceCameraController.enableZoom = true;
+    viewer.scene.screenSpaceCameraController.enableTilt = true;
+    viewer.scene.screenSpaceCameraController.enableLook = false;
+    setCameraMode('orbit');
+  }
+
+  function setCameraWalk() {
+    const viewer = viewerRef.current;
+    if (!viewer || !window.Cesium) return;
+    const C = window.Cesium;
+    viewer.scene.screenSpaceCameraController.enableRotate = false;
+    viewer.scene.screenSpaceCameraController.enableTranslate = false;
+    viewer.scene.screenSpaceCameraController.enableZoom = false;
+    viewer.scene.screenSpaceCameraController.enableTilt = false;
+    viewer.scene.screenSpaceCameraController.enableLook = true;
+    // Fly to ground level
+    viewer.camera.flyTo({
+      destination: C.Cartesian3.fromDegrees(lng, lat - 0.0003, (twin?.elevation ?? 0) + 1.7),
+      orientation: { heading: 0, pitch: 0, roll: 0 },
+      duration: 1.5,
+    });
+    setCameraMode('walk');
+  }
+
+  function setCameraDrone() {
+    const viewer = viewerRef.current;
+    if (!viewer || !window.Cesium) return;
+    const C = window.Cesium;
+    viewer.camera.flyTo({
+      destination: C.Cartesian3.fromDegrees(lng, lat, (twin?.elevation ?? 0) + 50),
+      orientation: { heading: 0, pitch: C.Math.toRadians(-90), roll: 0 },
+      duration: 1.5,
+    });
+    setCameraMode('drone');
+
+  // ─── Boot ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (initDone.current) return;
+    initDone.current = true;
+    boot();
+    return () => {
+      clearInterval(animRef.current);
+      if (threeRef.current) {
+        cancelAnimationFrame(threeRef.current.animFrame);
+        threeRef.current.renderer.dispose();
+      }
+    };
+  }, []);
+
+  // Re-render panels when props change
+  useEffect(() => {
+    if (stage === 'done') renderAllPanels();
+  }, [panels, showShade, simHour, stage, systemType]);
+
+  // Re-draw overlays when twin or toggles change
+  useEffect(() => {
+    if (stage === 'done') drawAllOverlays();
+  }, [showParcel, showEasements, showRoofSegs, twin, stage]);
+
+  // Fly to new location when mapCenter changes
+  useEffect(() => {
+    if (stage === 'done' && viewerRef.current) flyToProperty(viewerRef.current);
+  }, [lat, lng]);
+
+  }
+
+  // ── Computed stats ─────────────────────────────────────────────
+
+  // ─── Boot ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (initDone.current) return;
+    initDone.current = true;
+    boot();
+    return () => {
+      clearInterval(animRef.current);
+      if (threeRef.current) {
+        cancelAnimationFrame(threeRef.current.animFrame);
+        threeRef.current.renderer.dispose();
+      }
+    };
+  }, []);
+
+  // Re-render panels when props change
+  useEffect(() => {
+    if (stage === 'done') renderAllPanels();
+  }, [panels, showShade, simHour, stage, systemType]);
+
+  // Re-draw overlays when twin or toggles change
+  useEffect(() => {
+    if (stage === 'done') drawAllOverlays();
+  }, [showParcel, showEasements, showRoofSegs, twin, stage]);
+
+  // Fly to new location when mapCenter changes
+  useEffect(() => {
+    if (stage === 'done' && viewerRef.current) flyToProperty(viewerRef.current);
+  }, [lat, lng]);
+
+  const totalKw = ((panelCount * (selectedPanel?.wattage ?? 400)) / 1000).toFixed(1);
+  const isLoading = stage !== 'done' && stage !== 'error';
+
+  // ── Render ─────────────────────────────────────────────────────
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 500, background: '#0d1117', display: 'flex', flexDirection: 'column' }}>
+
+      {/* ── Top Control Bar ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: 'rgba(0,0,0,0.95)', borderBottom: '1px solid rgba(255,255,255,0.07)', flexShrink: 0, zIndex: 20, flexWrap: 'wrap' }}>
+
+        {/* View tabs */}
+        <div style={{ display: 'flex', gap: 0, borderRadius: 7, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {(['3d', 'street', 'shade'] as ViewMode[]).map((m, i) => (
+            <button key={m} onClick={() => setViewMode(m)} style={{
+              padding: '5px 12px', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              background: viewMode === m ? 'linear-gradient(135deg,#1d4ed8,#2563eb)' : 'rgba(255,255,255,0.04)',
+              color: viewMode === m ? '#fff' : '#64748b', transition: 'all 0.15s',
+            }}>
+              {m === '3d' ? '🏙️ 3D Twin' : m === 'street' ? '🚶 Street AR' : '🌡️ Shade'}
+            </button>
+          ))}
+        </div>
+
+        {/* Placement mode */}
+        <div style={{ display: 'flex', gap: 0, borderRadius: 7, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {([
+            { mode: 'select', label: '↖ Select', color: '#94a3b8' },
+            { mode: 'click_place', label: '+ Click', color: '#22c55e' },
+            { mode: 'polygon_fill', label: '⬡ Fill', color: '#f59e0b' },
+            { mode: 'fence_line', label: '| Fence', color: '#a78bfa' },
+            { mode: 'auto_roof', label: '🏠 Auto', color: '#60a5fa' },
+          ] as { mode: PlacementMode; label: string; color: string }[]).map(item => (
+            <button
+              key={item.mode}
+              onClick={() => {
+                onPlacementModeChange(item.mode);
+                if (item.mode === 'auto_roof' && viewerRef.current) {
+                  handleAutoRoof(viewerRef.current);
+                }
+              }}
+              style={{
+                padding: '5px 10px', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 600,
+                background: placementMode === item.mode
+                  ? `${item.color}22`
+                  : 'rgba(255,255,255,0.04)',
+                color: placementMode === item.mode ? item.color : '#475569',
+                borderRight: '1px solid rgba(255,255,255,0.05)',
+                transition: 'all 0.15s',
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Camera modes */}
+        <div style={{ display: 'flex', gap: 0, borderRadius: 7, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.08)' }}>
+          {[
+            { mode: 'orbit' as CameraMode, label: '🌐 Orbit', fn: setCameraOrbit },
+            { mode: 'walk' as CameraMode, label: '🚶 Walk', fn: setCameraWalk },
+            { mode: 'drone' as CameraMode, label: '🚁 Drone', fn: setCameraDrone },
+          ].map(item => (
+            <button key={item.mode} onClick={item.fn} style={{
+              padding: '5px 10px', border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 600,
+              background: cameraMode === item.mode ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.04)',
+              color: cameraMode === item.mode ? '#60a5fa' : '#475569',
+              borderRight: '1px solid rgba(255,255,255,0.05)',
+              transition: 'all 0.15s',
+            }}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Overlay toggles */}
+        {[
+          { key: 'parcel', label: '📐 Parcel', val: showParcel, set: setShowParcel, color: '#22c55e' },
+          { key: 'ease', label: '⚠️ Ease', val: showEasements, set: setShowEasements, color: '#f59e0b' },
+          { key: 'roof', label: '🏠 Roof', val: showRoofSegs, set: setShowRoofSegs, color: '#60a5fa' },
+        ].map(o => (
+          <button key={o.key} onClick={() => o.set(!o.val)} style={{
+            padding: '4px 9px', border: `1px solid ${o.val ? o.color + '55' : 'rgba(255,255,255,0.07)'}`,
+            borderRadius: 6, background: o.val ? o.color + '15' : 'rgba(255,255,255,0.03)',
+            color: o.val ? o.color : '#475569', fontSize: 10, fontWeight: 600, cursor: 'pointer',
+          }}>{o.label}</button>
+        ))}
+
+        {/* Sun slider */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 4 }}>
+          <button onClick={toggleAnimation} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, padding: '0 2px' }}>
+            {animating ? '⏸' : '▶️'}
+          </button>
+          <input type="range" min={5} max={20} step={0.25} value={simHour}
+            onChange={e => {
+              const h = parseFloat(e.target.value);
+              setSimHour(h);
+              if (viewerRef.current && window.Cesium) {
+                const d = new Date();
+                d.setHours(Math.floor(h), Math.round((h % 1) * 60));
+                viewerRef.current.clock.currentTime = window.Cesium.JulianDate.fromDate(d);
+              }
+            }}
+            style={{ width: 80, accentColor: '#f59e0b', cursor: 'pointer' }}
+          />
+          <span style={{ color: '#94a3b8', fontSize: 10, minWidth: 36 }}>
+            {String(Math.floor(simHour)).padStart(2, '0')}:{String(Math.round((simHour % 1) * 60)).padStart(2, '0')}
+          </span>
+          <span style={{ color: '#64748b', fontSize: 10 }}>
+            {sunPos.elevation > 0 ? `☀️ ${sunPos.elevation.toFixed(0)}°` : '🌙'}
+          </span>
+        </div>
+
+        {/* Stats */}
+        {panelCount > 0 && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ color: '#fbbf24', fontSize: 11 }}>⚡ <b style={{ color: '#f1f5f9' }}>{panelCount}</b> <span style={{ color: '#475569' }}>panels</span></span>
+            <span style={{ color: '#60a5fa', fontWeight: 700, fontSize: 12 }}>{totalKw} kW</span>
+            {panelCount > 0 && (
+              <button
+                onClick={() => { panels3DRef.current = []; onPanelsChange([]); }}
+                style={{ padding: '3px 8px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 5, color: '#f87171', fontSize: 10, cursor: 'pointer' }}
+              >
+                🗑 Clear
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── Viewer ── */}
+      <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+
+        {/* Cesium 3D */}
+        <div ref={cesiumRef} style={{ position: 'absolute', inset: 0, display: viewMode !== 'street' ? 'block' : 'none' }} />
+
+        {/* Street View + AR */}
+        <div style={{ position: 'absolute', inset: 0, display: viewMode === 'street' ? 'block' : 'none' }}>
+          <div ref={streetRef} style={{ position: 'absolute', inset: 0 }} />
+          <canvas ref={svCanvasRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 5 }} />
+          {svReady && (
+            <button onClick={drawSVOverlay} style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)', border: '1px solid rgba(59,130,246,0.4)', borderRadius: 8, color: '#93c5fd', fontSize: 11, fontWeight: 600, padding: '5px 12px', cursor: 'pointer' }}>
+              🔄 Refresh AR
+            </button>
+          )}
+        </div>
+
+        {/* Loading overlay */}
+        {isLoading && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(160deg,#0d1117,#0f172a)', gap: 20 }}>
+            <div style={{ position: 'relative', width: 80, height: 80 }}>
+              <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 35% 35%,#1e3a8a,#0f172a)', boxShadow: '0 0 50px rgba(59,130,246,0.2)' }} />
+              <div style={{ position: 'absolute', inset: -7, borderRadius: '50%', border: '3px solid transparent', borderTopColor: '#3b82f6', borderRightColor: 'rgba(59,130,246,0.1)', animation: 'se3d_spin 0.9s linear infinite' }} />
+              <div style={{ position: 'absolute', inset: 10, borderRadius: '50%', border: '2px solid transparent', borderBottomColor: '#60a5fa', animation: 'se3d_spin 0.6s linear infinite reverse' }} />
+              <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', width: 14, height: 14, borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 16px #3b82f6' }} />
+            </div>
+
+            <div style={{ width: 300, background: 'rgba(255,255,255,0.06)', borderRadius: 8, overflow: 'hidden', height: 6 }}>
+              <div style={{ height: '100%', width: `${progress}%`, background: 'linear-gradient(90deg,#1d4ed8,#3b82f6,#60a5fa)', transition: 'width 0.5s ease', borderRadius: 8 }} />
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ color: '#f1f5f9', fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Building Digital Twin</div>
+              <div style={{ color: '#64748b', fontSize: 13 }}>{stageMsg}</div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 340 }}>
+              {[
+                { label: 'CesiumJS', done: progress >= 12 },
+                { label: 'Three.js', done: progress >= 18 },
+                { label: '3D Tiles', done: progress >= 50 },
+                { label: 'Solar API', done: progress >= 30 },
+                { label: 'Elevation', done: progress >= 50 },
+                { label: 'Panels', done: progress >= 90 },
+              ].map(item => (
+                <span key={item.label} style={{
+                  background: item.done ? 'rgba(34,197,94,0.12)' : 'rgba(59,130,246,0.08)',
+                  border: `1px solid ${item.done ? 'rgba(34,197,94,0.3)' : 'rgba(59,130,246,0.2)'}`,
+                  borderRadius: 6, padding: '3px 10px',
+                  color: item.done ? '#22c55e' : '#3b82f6',
+                  fontSize: 10, fontWeight: 600,
+                }}>
+                  {item.done ? '✓' : '○'} {item.label}
+                </span>
+              ))}
+            </div>
+            <style>{`@keyframes se3d_spin{to{transform:rotate(360deg)}}`}</style>
+          </div>
+        )}
+
+        {/* Error */}
+        {stage === 'error' && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0d1117', gap: 16 }}>
+            <div style={{ fontSize: 48 }}>⚠️</div>
+            <div style={{ color: '#f87171', fontSize: 16, fontWeight: 700 }}>Digital Twin Failed</div>
+            <div style={{ color: '#6b7280', fontSize: 13, maxWidth: 360, textAlign: 'center', lineHeight: 1.6 }}>{stageMsg}</div>
+            <button onClick={() => { initDone.current = false; window.location.reload(); }} style={{ padding: '8px 20px', background: 'linear-gradient(135deg,#1d4ed8,#2563eb)', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+              Reload
+            </button>
+          </div>
+        )}
+
+        {/* Ready overlays */}
+        {stage === 'done' && (
+          <>
+            {/* Status badge */}
+            <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(12px)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 10, padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 7, pointerEvents: 'none' }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 8px #22c55e' }} />
+              <span style={{ color: '#f1f5f9', fontSize: 11, fontWeight: 600 }}>
+                {viewMode === '3d' ? 'Digital Twin · CesiumJS · Google 3D Tiles' : viewMode === 'street' ? 'Street View · AR Solar Overlay' : 'Shade Analysis · NOAA Sun Position'}
+              </span>
+            </div>
+
+            {/* Sun position */}
+            {viewMode !== 'street' && sunPos.elevation > 0 && (
+              <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, background: 'rgba(0,0,0,0.78)', backdropFilter: 'blur(8px)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: '5px 12px', pointerEvents: 'none' }}>
+                <div style={{ color: '#fbbf24', fontSize: 11, fontWeight: 600 }}>
+                  ☀️ Az {sunPos.azimuth.toFixed(0)}° · El {sunPos.elevation.toFixed(0)}°
+                </div>
+              </div>
+            )}
+
+            {/* Property data */}
+            {twin && (
+              <div style={{ position: 'absolute', bottom: 36, right: 10, zIndex: 10, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '8px 12px', pointerEvents: 'none', minWidth: 170 }}>
+                <div style={{ color: '#94a3b8', fontSize: 10, marginBottom: 4, fontWeight: 600 }}>PROPERTY DATA</div>
+                <div style={{ color: '#f1f5f9', fontSize: 11, lineHeight: 1.8 }}>
+                  <div>📍 {twin.elevation.toFixed(1)}m elevation</div>
+                  <div>🏠 {twin.roofSegments.length} roof segments</div>
+                  <div>☀️ {twin.solarData?.solarPotential?.maxSunshineHoursPerYear?.toFixed(0) ?? '—'}h/yr</div>
+                  <div>⚡ {twin.solarData?.solarPotential?.maxArrayPanelsCount ?? '—'} max panels</div>
+                </div>
+              </div>
+            )}
+
+            {/* Hover info */}
+            {hoverInfo && placementMode !== 'select' && (
+              <div style={{ position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 8, padding: '5px 14px', color: '#fbbf24', fontSize: 11, fontWeight: 600, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                {hoverInfo}
+              </div>
+            )}
+
+            {/* Drawing instructions */}
+            {(placementMode === 'polygon_fill' || placementMode === 'ground_fill') && (
+              <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 8, padding: '5px 14px', color: '#f1f5f9', fontSize: 11, display: 'flex', gap: 14, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                <span>🖱️ Click to add points ({polyPoints} placed)</span>
+                <span>⬡ Double-click to fill</span>
+                <span>Right-click to cancel</span>
+              </div>
+            )}
+
+            {placementMode === 'fence_line' && (
+              <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', border: '1px solid rgba(167,139,250,0.3)', borderRadius: 8, padding: '5px 14px', color: '#f1f5f9', fontSize: 11, display: 'flex', gap: 14, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                <span>🖱️ Click to draw fence line ({polyPoints} points)</span>
+                <span>Double-click to place panels</span>
+                <span>Right-click to cancel</span>
+              </div>
+            )}
+
+            {placementMode === 'click_place' && (
+              <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.82)', backdropFilter: 'blur(8px)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: 8, padding: '5px 14px', color: '#f1f5f9', fontSize: 11, display: 'flex', gap: 14, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                <span>🖱️ Click any surface to place a panel</span>
+                <span>Panels snap to roof/terrain geometry</span>
+              </div>
+            )}
+
+            {/* Orbit hint */}
+            {viewMode === '3d' && placementMode === 'select' && (
+              <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 10, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', borderRadius: 8, padding: '5px 14px', color: '#94a3b8', fontSize: 11, display: 'flex', gap: 14, pointerEvents: 'none', whiteSpace: 'nowrap' }}>
+                <span>🖱️ Left: orbit</span><span>Right: pan</span><span>⚲ Scroll: zoom</span><span>Middle: tilt</span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+}
+}

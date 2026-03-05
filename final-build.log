@@ -1,0 +1,108 @@
+
+> solar-platform@1.0.0 build
+> next build
+
+  ▲ Next.js 14.2.29
+  - Environments: .env.local
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/44) ...
+   Generating static pages (11/44) 
+   Generating static pages (22/44) 
+[GET /api/stats] B [Error]: Dynamic server usage: Route /api/stats couldn't be rendered statically because it used `request.headers`. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
+    at V (/workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js:6:21778)
+    at Object.get (/workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js:6:29465)
+    at x (/workspace/solarpro-v5/solarpro-v3.1/.next/server/app/api/auth/login/route.js:6:1728)
+    at c (/workspace/solarpro-v5/solarpro-v3.1/.next/server/app/api/stats/route.js:1:706)
+    at /workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js:6:38417
+    at /workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/server/lib/trace/tracer.js:140:36
+    at NoopContextManager.with (/workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:7062)
+    at ContextAPI.with (/workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:518)
+    at NoopTracer.startActiveSpan (/workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:18093)
+    at ProxyTracer.startActiveSpan (/workspace/solarpro-v5/solarpro-v3.1/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:18854) {
+  description: "Route /api/stats couldn't be rendered statically because it used `request.headers`. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
+  digest: 'DYNAMIC_SERVER_USAGE'
+}
+   Generating static pages (33/44) 
+ ✓ Generating static pages (44/44)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                  Size     First Load JS
+┌ ○ /                                        9.53 kB         106 kB
+├ ○ /_not-found                              880 B          88.5 kB
+├ ○ /admin/hardware                          5.39 kB         105 kB
+├ ○ /admin/pricing                           7.77 kB         108 kB
+├ ○ /analytics                               8.44 kB         219 kB
+├ ƒ /api/auth/login                          0 B                0 B
+├ ƒ /api/auth/logout                         0 B                0 B
+├ ƒ /api/auth/me                             0 B                0 B
+├ ƒ /api/auth/register                       0 B                0 B
+├ ƒ /api/clients                             0 B                0 B
+├ ƒ /api/clients/[id]                        0 B                0 B
+├ ƒ /api/dsm                                 0 B                0 B
+├ ƒ /api/elevation                           0 B                0 B
+├ ƒ /api/engineering/assist                  0 B                0 B
+├ ƒ /api/engineering/auto-configure          0 B                0 B
+├ ƒ /api/engineering/bom                     0 B                0 B
+├ ƒ /api/engineering/bom-v2                  0 B                0 B
+├ ƒ /api/engineering/calculate               0 B                0 B
+├ ƒ /api/engineering/enphase                 0 B                0 B
+├ ƒ /api/engineering/equipment               0 B                0 B
+├ ƒ /api/engineering/ironridge               0 B                0 B
+├ ƒ /api/engineering/override                0 B                0 B
+├ ƒ /api/engineering/permit                  0 B                0 B
+├ ƒ /api/engineering/pvwatts                 0 B                0 B
+├ ƒ /api/engineering/rules                   0 B                0 B
+├ ƒ /api/engineering/sld                     0 B                0 B
+├ ƒ /api/engineering/sld/pdf                 0 B                0 B
+├ ƒ /api/engineering/slg/generate            0 B                0 B
+├ ƒ /api/engineering/structural              0 B                0 B
+├ ƒ /api/engineering/topology                0 B                0 B
+├ ƒ /api/equipment                           0 B                0 B
+├ ƒ /api/geocode                             0 B                0 B
+├ ƒ /api/hardware                            0 B                0 B
+├ ƒ /api/maps-session                        0 B                0 B
+├ ƒ /api/migrate                             0 B                0 B
+├ ƒ /api/pricing                             0 B                0 B
+├ ƒ /api/production                          0 B                0 B
+├ ƒ /api/projects                            0 B                0 B
+├ ƒ /api/projects/[id]                       0 B                0 B
+├ ƒ /api/projects/[id]/layout                0 B                0 B
+├ ƒ /api/projects/[id]/site-conditions       0 B                0 B
+├ ƒ /api/projects/[id]/versions              0 B                0 B
+├ ƒ /api/projects/[id]/versions/[versionId]  0 B                0 B
+├ ƒ /api/proposals                           0 B                0 B
+├ ƒ /api/proposals/[id]                      0 B                0 B
+├ ƒ /api/solar                               0 B                0 B
+├ ƒ /api/stats                               0 B                0 B
+├ ƒ /api/tile                                0 B                0 B
+├ ○ /auth/login                              2.65 kB        99.5 kB
+├ ○ /auth/register                           4.03 kB         101 kB
+├ ○ /auth/subscribe                          4.31 kB         101 kB
+├ ○ /clients                                 6.33 kB         109 kB
+├ ƒ /clients/[id]                            3.67 kB         206 kB
+├ ƒ /clients/[id]/edit                       4.18 kB         106 kB
+├ ○ /clients/new                             8.75 kB         111 kB
+├ ○ /dashboard                               4.99 kB         217 kB
+├ ○ /design                                  40.3 kB         145 kB
+├ ○ /engineering                             59.2 kB         162 kB
+├ ○ /engineering/assist                      505 B          88.1 kB
+├ ○ /projects                                5.28 kB         107 kB
+├ ƒ /projects/[id]                           8.21 kB         210 kB
+├ ○ /projects/new                            5.59 kB         108 kB
+└ ○ /proposals                               16.3 kB         116 kB
++ First Load JS shared by all                87.6 kB
+  ├ chunks/2117-c6149993c65c4a4c.js          31.8 kB
+  ├ chunks/fd9d1056-47a2c6308ac7423f.js      53.6 kB
+  └ other shared chunks (total)              2.22 kB
+
+
+ƒ Middleware                                 26.8 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
