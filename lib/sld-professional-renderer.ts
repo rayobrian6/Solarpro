@@ -1,83 +1,81 @@
 // ============================================================
-// Professional SLD Renderer V9 — True IEEE Engineering Drawing
+// Professional SLD Renderer V10 — IEEE Engineering Drawing
 // ANSI C Landscape (24"×18") = 2304×1728px at 96 DPI
-// Style: Pure black/white engineering schematic
-//   - Black lines on white background ONLY
-//   - IEEE symbols as SVG paths (no colored boxes)
-//   - Green ONLY for grounding conductors
-//   - Numbered callout circles for components
-//   - Right-side title block with revision table
-//   - Wire labels inline next to conductors
-//   - Multi-line conductor callouts via SVG <tspan>
-//   - ConductorBundle[] as single source of truth
+//
+// ARCHITECTURE:
+//   - Single horizontal bus line at vertical center
+//   - Components spaced evenly left→right with generous gaps
+//   - Wire callout boxes ABOVE bus line (never overlapping)
+//   - Conduit schedule reads directly from RunSegment[]
+//   - ConductorBundle[] as single source of truth for labels
+//   - All NEC references shown inline
+//   - Clean black/white IEEE schematic style
 // ============================================================
 
-import {
-  buildSLDTopologyGraph,
-  SLDGraphInput,
-  SLDTopologyGraph,
-  TopologyType,
-} from './topology-engine';
-import {
-  calcAllSegments,
-  buildConduitSchedule,
-  SegmentCalcParams,
-  ConduitScheduleRow,
-} from './wire-autosizer';
 import type { RunSegment, MicroBranch } from './computed-system';
 import type { ConductorBundle } from './segment-schedule';
 
 // ─── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
 const H = 1728;
-const M = 48;
+const MARGIN = 40;
 
-// Title block on right
-const TB_W = 300;
-const TB_X = W - TB_W - M;
+// Title block on right side
+const TB_W = 280;
+const TB_X = W - TB_W - MARGIN;
 
 // Drawing area (left of title block)
-const DX = M;
-const DY = M;
-const DW = TB_X - M - 16;
-const DH = H - M * 2;
+const DX = MARGIN;
+const DY = MARGIN;
+const DW = TB_X - MARGIN - 12;
+const DH = H - MARGIN * 2;
 
-// Bottom tables area
-const SCHED_H  = 180;   // expanded to show up to 10 runs
-const NOTES_H  = 130;
-const SCHED_Y  = H - M - SCHED_H;
-const NOTES_Y  = SCHED_Y - NOTES_H - 12;
-
-// Main schematic area
+// Schematic area (upper 52% of drawing area)
 const SCH_X = DX;
-const SCH_Y = DY + 32;
+const SCH_Y = DY + 28;
 const SCH_W = DW;
-const SCH_H = NOTES_Y - SCH_Y - 12;
+const SCH_H = Math.round(DH * 0.52);
+
+// Bus line Y position (center of schematic area)
+const BUS_Y = SCH_Y + Math.round(SCH_H * 0.55);
+
+// Callout zone: wire labels go here (above bus line)
+const CALLOUT_Y = BUS_Y - 90;  // base Y for callout boxes
+
+// Ground zone: below bus line
+const GND_Y = BUS_Y + 80;
+
+// Bottom tables
+const SCHED_Y = SCH_Y + SCH_H + 8;
+const SCHED_H = 200;
+const NOTES_Y = SCHED_Y + SCHED_H + 8;
+const NOTES_H = H - MARGIN - NOTES_Y;
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 const BLK = '#000000';
-const GRN = '#006600';   // grounding ONLY
+const GRN = '#005500';   // grounding conductors ONLY
 const WHT = '#FFFFFF';
-const LGY = '#F4F4F4';   // light gray for table alternating rows
-const DGY = '#CCCCCC';   // dark gray for dividers
+const LGY = '#F5F5F5';   // alternating table rows
+const RED_FAIL = '#CC0000';
+const GRN_PASS = '#006600';
 
 // ─── Stroke widths ───────────────────────────────────────────────────────────
-const SW_HEAVY = 2.5;
-const SW_MED   = 1.5;
-const SW_THIN  = 1.0;
-const SW_HAIR  = 0.5;
+const SW_BORDER = 3.0;
+const SW_HEAVY  = 2.0;
+const SW_MED    = 1.5;
+const SW_THIN   = 1.0;
+const SW_HAIR   = 0.5;
 
-// ─── Fonts ───────────────────────────────────────────────────────────────────
+// ─── Font sizes ──────────────────────────────────────────────────────────────
 const F = {
-  title:  15,
-  hdr:    10,
-  label:   8,
-  sub:     7,
-  tiny:    6.5,
-  note:    6.5,
-  tb:      7.5,
+  title:   14,
+  hdr:      9,
+  label:    8,
+  sub:      7,
+  tiny:     6.5,
+  note:     6.5,
+  tb:       7.5,
   tbTitle: 11,
-  tbBig:   13,
 };
 
 // ─── Public Interface ─────────────────────────────────────────────────────────
@@ -118,7 +116,7 @@ export interface SLDProfessionalInput {
   scale:                   string;
   acWireLength:            number;
 
-  // Auto String Generation (NEC 690.7) -- string/optimizer topology
+  // String generation results
   panelsPerString?:        number;
   lastStringPanels?:       number;
   designTempMin?:          number;
@@ -136,6 +134,7 @@ export interface SLDProfessionalInput {
   ocpdPerString?:          number;
   dcAcRatio?:              number;
   stringConfigWarnings?:   string[];
+
   // Microinverter topology
   deviceCount?:            number;
   microBranches?:          MicroBranch[];
@@ -146,11 +145,12 @@ export interface SLDProfessionalInput {
   // String topology — per-string data
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
 
-  // ComputedSystem runSegments — single source of truth for wire labels
+  // ComputedSystem runSegments — single source of truth
   runs?:                   RunSegment[];
 }
 
-// ─── SVG helpers ─────────────────────────────────────────────────────────────
+// ─── SVG Helpers ─────────────────────────────────────────────────────────────
+
 function esc(s: string): string {
   return String(s ?? '')
     .replace(/&/g, '&amp;')
@@ -174,21 +174,20 @@ function txt(
   return `<text x="${x}" y="${y}" font-family="Arial,Helvetica,sans-serif" font-size="${size}" ${bold} ${anchor} ${fill} ${italic} dominant-baseline="auto">${esc(content)}</text>`;
 }
 
-// Multi-line text using tspan — handles \n in conductor callouts
 function multilineTxt(
-  x: number, y: number, content: string,
+  x: number, y: number, lines: string[],
   opts: {
     size?: number; bold?: boolean; anchor?: 'start'|'middle'|'end';
     fill?: string; lineHeight?: number;
   } = {}
 ): string {
+  if (!lines.length) return '';
   const size       = opts.size       ?? F.tiny;
   const bold       = opts.bold       ? `font-weight="bold"` : '';
   const anchor     = `text-anchor="${opts.anchor ?? 'start'}"`;
   const fill       = `fill="${opts.fill ?? BLK}"`;
-  const lineHeight = opts.lineHeight ?? (size * 1.4);
-  const lines      = String(content ?? '').split('\n');
-  const tspans     = lines.map((line, i) =>
+  const lineHeight = opts.lineHeight ?? Math.round(size * 1.45);
+  const tspans = lines.map((line, i) =>
     `<tspan x="${x}" dy="${i === 0 ? 0 : lineHeight}">${esc(line)}</tspan>`
   ).join('');
   return `<text x="${x}" y="${y}" font-family="Arial,Helvetica,sans-serif" font-size="${size}" ${bold} ${anchor} ${fill} dominant-baseline="auto">${tspans}</text>`;
@@ -223,180 +222,244 @@ function circle(cx: number, cy: number, r: number,
   return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
 }
 
-// Numbered callout circle (IEEE style)
-function callout(cx: number, cy: number, n: number, r = 14): string {
+// IEEE numbered callout circle
+function calloutCircle(cx: number, cy: number, n: number, r = 12): string {
   return circle(cx, cy, r, { fill: WHT, stroke: BLK, sw: SW_MED })
     + txt(cx, cy + 1, String(n), { size: F.hdr, bold: true, anchor: 'middle', fill: BLK });
 }
 
-// Ground symbol (IEEE)
-function gndSym(x: number, y: number): string {
+// Ground symbol (IEEE 315)
+function gndSym(x: number, y: number, color = GRN): string {
   const s: string[] = [];
-  s.push(line(x, y, x, y + 12, { stroke: GRN, sw: SW_MED }));
-  s.push(line(x - 12, y + 12, x + 12, y + 12, { stroke: GRN, sw: SW_MED }));
-  s.push(line(x - 8,  y + 17, x + 8,  y + 17, { stroke: GRN, sw: SW_MED }));
-  s.push(line(x - 4,  y + 22, x + 4,  y + 22, { stroke: GRN, sw: SW_MED }));
+  s.push(line(x, y, x, y + 10, { stroke: color, sw: SW_MED }));
+  s.push(line(x - 10, y + 10, x + 10, y + 10, { stroke: color, sw: SW_MED }));
+  s.push(line(x - 7,  y + 15, x + 7,  y + 15, { stroke: color, sw: SW_MED }));
+  s.push(line(x - 4,  y + 20, x + 4,  y + 20, { stroke: color, sw: SW_MED }));
   return s.join('');
 }
 
 // Knife-blade disconnect symbol (IEEE 315)
-function discoSym(cx: number, cy: number, w = 60, h = 20): string {
+function discoSym(cx: number, cy: number, w = 56, h = 18): string {
   const s: string[] = [];
   const lx = cx - w / 2;
   const rx = cx + w / 2;
-  s.push(line(lx, cy, lx + 14, cy, { sw: SW_MED }));
-  s.push(line(rx - 14, cy, rx, cy, { sw: SW_MED }));
-  s.push(line(lx + 14, cy, rx - 14, cy - h * 0.5, { sw: SW_MED }));
-  s.push(circle(lx + 14, cy, 3, { fill: BLK }));
-  s.push(circle(rx - 14, cy, 3, { fill: WHT }));
+  s.push(line(lx, cy, lx + 12, cy, { sw: SW_MED }));
+  s.push(line(rx - 12, cy, rx, cy, { sw: SW_MED }));
+  s.push(line(lx + 12, cy, rx - 12, cy - h * 0.5, { sw: SW_MED }));
+  s.push(circle(lx + 12, cy, 3, { fill: BLK }));
+  s.push(circle(rx - 12, cy, 3, { fill: WHT }));
   return s.join('');
 }
 
-// Wire label box — clean bordered callout above conductor
-function wireCalloutBox(cx: number, cy: number, lines: string[], isOpenAir = false): string {
+// ─── Wire Callout Box ─────────────────────────────────────────────────────────
+// Draws a bordered box with conductor info, positioned above the bus line
+// cx = center X of the wire segment
+// topY = top of the box (caller controls vertical position)
+function wireCalloutBox(
+  cx: number,
+  topY: number,
+  lines: string[],
+  opts: { isOpenAir?: boolean; leaderToY?: number } = {}
+): string {
   if (!lines.length) return '';
+  const isOpenAir = opts.isOpenAir ?? false;
   const lineH   = 9;
-  const padding = 5;
-  const boxW    = Math.max(...lines.map(l => l.length)) * 4.8 + padding * 2;
-  const boxH    = lines.length * lineH + padding * 2;
+  const padX    = 6;
+  const padY    = 4;
+  const maxLen  = Math.max(...lines.map(l => l.length));
+  const boxW    = Math.max(60, maxLen * 5.2 + padX * 2);
+  const boxH    = lines.length * lineH + padY * 2;
   const bx      = cx - boxW / 2;
-  const by      = cy - boxH - 4;
+  const by      = topY;
+  const borderColor = isOpenAir ? GRN : BLK;
+  const textColor   = isOpenAir ? GRN : BLK;
+
   const s: string[] = [];
+  // Box background + border
   s.push(rect(bx, by, boxW, boxH, {
-    fill: WHT, stroke: isOpenAir ? GRN : BLK, sw: SW_HAIR,
+    fill: WHT, stroke: borderColor, sw: isOpenAir ? SW_MED : SW_THIN,
+    dash: isOpenAir ? '4,2' : undefined,
   }));
-  lines.forEach((l, i) => {
-    s.push(txt(cx, by + padding + (i + 1) * lineH - 1, l, {
-      size: F.tiny, anchor: 'middle',
-      fill: isOpenAir ? GRN : BLK,
-      bold: i === 0,
+  // Text lines using tspan
+  const textX = cx;
+  const textY = by + padY + lineH - 1;
+  s.push(multilineTxt(textX, textY, lines, {
+    size: F.tiny, anchor: 'middle', fill: textColor,
+  }));
+  // Leader line from bottom of box to bus line
+  if (opts.leaderToY !== undefined) {
+    s.push(line(cx, by + boxH, cx, opts.leaderToY, {
+      stroke: borderColor, sw: SW_HAIR, dash: '3,2',
     }));
-  });
-  // Leader line from box to conductor
-  s.push(line(cx, by + boxH, cx, cy, { stroke: isOpenAir ? GRN : BLK, sw: SW_HAIR, dash: '2,2' }));
+  }
   return s.join('');
 }
 
-// Format ConductorBundle[] into display lines for wire callout box
-function bundleToLines(bundle: ConductorBundle[] | undefined, conduitSize: string, conduitType: string, isOpenAir: boolean): string[] {
+// ─── Format conductor bundle into display lines ───────────────────────────────
+function bundleToLines(
+  bundle: ConductorBundle[] | undefined,
+  conduitSize: string,
+  conduitType: string,
+  isOpenAir: boolean,
+  fillPct?: number
+): string[] {
   if (!bundle || bundle.length === 0) return [];
-  const lines = bundle.map(c => `${c.qty}#${c.gauge.replace('#', '').replace(' AWG', '')} ${c.color}`);
+  const lines = bundle.map(c => {
+    const gaugeNum = c.gauge.replace('#', '').replace(' AWG', '');
+    return `${c.qty}#${gaugeNum} ${c.insulation} ${c.color}`;
+  });
   if (isOpenAir) {
-    lines.push('(OPEN AIR)');
+    lines.push('(OPEN AIR — NEC 690.31)');
   } else {
     const abbrev = conduitType === 'EMT' ? 'EMT'
       : conduitType === 'PVC Sch 40' ? 'PVC SCH 40'
       : conduitType === 'PVC Sch 80' ? 'PVC SCH 80'
       : conduitType || 'EMT';
-    lines.push(`IN ${conduitSize} ${abbrev}`);
+    const fillStr = fillPct != null && fillPct > 0 ? ` (${fillPct.toFixed(0)}% fill)` : '';
+    lines.push(`IN ${conduitSize} ${abbrev}${fillStr}`);
   }
   return lines;
 }
 
-// Format conductorCallout string (may contain \n) into lines array
+// Format conductorCallout string into lines array
 function calloutToLines(callout: string): string[] {
   if (!callout) return [];
   return callout.split('\n').filter(l => l.trim().length > 0);
 }
 
-// ─── Main render function ─────────────────────────────────────────────────────
+// Build wire label lines from a RunSegment (best available data)
+function runToCalloutLines(run: RunSegment | undefined, fallback: string[]): string[] {
+  if (!run) return fallback;
+  if (run.conductorBundle && run.conductorBundle.length > 0) {
+    return bundleToLines(
+      run.conductorBundle,
+      run.conduitSize,
+      run.conduitType,
+      run.isOpenAir ?? false,
+      run.conduitFillPct
+    );
+  }
+  if (run.conductorCallout) {
+    return calloutToLines(run.conductorCallout);
+  }
+  // Build from scalar fields
+  const gaugeNum = run.wireGauge.replace('#', '').replace(' AWG', '');
+  const egcNum   = run.egcGauge.replace('#', '').replace(' AWG', '');
+  const lines: string[] = [
+    `${run.conductorCount}#${gaugeNum} ${run.insulation}`,
+    `1#${egcNum} GND`,
+  ];
+  if (run.isOpenAir) {
+    lines.push('(OPEN AIR — NEC 690.31)');
+  } else {
+    const abbrev = run.conduitType === 'EMT' ? 'EMT'
+      : run.conduitType === 'PVC Sch 40' ? 'PVC SCH 40'
+      : run.conduitType || 'EMT';
+    const fillStr = run.conduitFillPct > 0 ? ` (${run.conduitFillPct.toFixed(0)}% fill)` : '';
+    lines.push(`IN ${run.conduitSize} ${abbrev}${fillStr}`);
+  }
+  return lines;
+}
+
+// ─── Main Render Function ─────────────────────────────────────────────────────
 export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const parts: string[] = [];
+  const isMicro = input.topologyType === 'MICROINVERTER';
 
-  // ── Derive wire gauges / OCPD from ComputedSystem.runs (single source of truth)
-  const isMicroTopo = input.topologyType === 'MICROINVERTER';
-  let resolvedAcWireGauge   = input.acWireGauge   || '#8 AWG';
-  let resolvedDcWireGauge   = input.dcWireGauge   || '#10 AWG';
-  let resolvedAcOCPD        = input.acOCPD        || 30;
-  let resolvedAcConduitSize = '';
-  let resolvedAcConduitType = input.acConduitType || 'EMT';
-  let resolvedDcConduitSize = '';
+  // ── Helper: find run by ID ──────────────────────────────────────────────────
+  const findRun = (id: string): RunSegment | undefined =>
+    input.runs?.find(r => r.id === id);
 
-  // Run segment lookup helpers
-  const findRun = (id: string) => input.runs?.find(r => r.id === id);
-  const findRunByColor = (color: string) => input.runs?.find(r => r.color === color);
+  // ── Resolve wire data from runs ─────────────────────────────────────────────
+  const acRunId = isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN';
+  const acRun   = findRun(acRunId);
+  const dcRun   = findRun(isMicro ? 'ROOF_RUN' : 'DC_STRING_RUN');
 
-  if (input.runs && input.runs.length > 0) {
-    const acRunId = isMicroTopo ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN';
-    const acRun   = findRun(acRunId) ?? findRunByColor('ac');
-    if (acRun) {
-      resolvedAcWireGauge   = acRun.wireGauge   || resolvedAcWireGauge;
-      resolvedAcOCPD        = acRun.ocpdAmps    || resolvedAcOCPD;
-      resolvedAcConduitSize = acRun.conduitSize || '';
-      resolvedAcConduitType = acRun.conduitType || resolvedAcConduitType;
-    }
-    const dcRunId = isMicroTopo ? 'ROOF_RUN' : 'DC_STRING_RUN';
-    const dcRun   = findRun(dcRunId) ?? findRunByColor('dc');
-    if (dcRun) {
-      resolvedDcWireGauge   = dcRun.wireGauge   || resolvedDcWireGauge;
-      resolvedDcConduitSize = dcRun.conduitSize || '';
-    }
-  }
+  const resolvedAcWireGauge   = acRun?.wireGauge   ?? input.acWireGauge   ?? '#8 AWG';
+  const resolvedAcOCPD        = acRun?.ocpdAmps     ?? input.acOCPD        ?? 30;
+  const resolvedAcConduitSize = acRun?.conduitSize  ?? '3/4"';
+  const resolvedAcConduitType = acRun?.conduitType  ?? input.acConduitType ?? 'EMT';
+  const resolvedDcWireGauge   = dcRun?.wireGauge    ?? input.dcWireGauge   ?? '#10 AWG';
 
-  // ── SVG root ──────────────────────────────────────────────────────────────
+  // ── SVG root ────────────────────────────────────────────────────────────────
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="background:${WHT};font-family:Arial,Helvetica,sans-serif;">`);
   parts.push(rect(0, 0, W, H, { fill: WHT, stroke: WHT, sw: 0 }));
-  parts.push(rect(M / 2, M / 2, W - M, H - M, { fill: WHT, stroke: BLK, sw: SW_HEAVY }));
+  // Outer border
+  parts.push(rect(MARGIN / 2, MARGIN / 2, W - MARGIN, H - MARGIN, { fill: WHT, stroke: BLK, sw: SW_BORDER }));
 
-  // ── Drawing title (top center) ────────────────────────────────────────────
+  // ── Drawing title ────────────────────────────────────────────────────────────
   const titleCX = (DX + TB_X) / 2;
-  parts.push(txt(titleCX, DY + 18, 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM', {
+  parts.push(txt(titleCX, DY + 16, 'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM', {
     size: F.title, bold: true, anchor: 'middle',
   }));
-  parts.push(txt(titleCX, DY + 30,
+  parts.push(txt(titleCX, DY + 26,
     `${esc(input.address)}  |  ${esc(input.topologyType.replace(/_/g,' '))}  |  ${input.totalModules} MODULES  |  ${input.acOutputKw} kW AC`,
     { size: F.sub, anchor: 'middle', fill: '#444444' }
   ));
 
-  // ── Schematic border ──────────────────────────────────────────────────────
+  // ── Schematic border ─────────────────────────────────────────────────────────
   parts.push(rect(SCH_X, SCH_Y, SCH_W, SCH_H, { fill: WHT, stroke: BLK, sw: SW_THIN }));
 
-  // ── Layout positions ──────────────────────────────────────────────────────
-  const isMicro = input.topologyType === 'MICROINVERTER';
-  const busY    = SCH_Y + Math.round(SCH_H * 0.44);
-  const xPad    = 80;
+  // ── Component X positions ────────────────────────────────────────────────────
+  // Layout: PV Array → [DC Disco] → Inverter → AC Disco → Meter → MSP → Utility
+  // Microinverter: PV Array → Microinverter → AC Disco → Meter → MSP → Utility
+  const xPad    = 70;
   const usableW = SCH_W - xPad * 2;
 
-  // Component X positions — topology-aware spacing
-  // MICROINVERTER:  PV → Microinverter → AC Disco → Meter → MSP → Utility  (5 gaps)
-  // STRING/OPT:     PV → DC Disco → Inverter → AC Disco → Meter → MSP → Utility (6 gaps)
-  const xPV    = SCH_X + xPad;
-  const xDCDis = isMicro ? -9999 : SCH_X + xPad + usableW * (1/6);
-  const xInv   = isMicro ? SCH_X + xPad + usableW * (1/5) : SCH_X + xPad + usableW * (2/6);
-  const xACDis = isMicro ? SCH_X + xPad + usableW * (2/5) : SCH_X + xPad + usableW * (3/6);
-  const xMeter = isMicro ? SCH_X + xPad + usableW * (3/5) : SCH_X + xPad + usableW * (4/6);
-  const xMSP   = isMicro ? SCH_X + xPad + usableW * (4/5) : SCH_X + xPad + usableW * (5/6);
-  const xUtil  = SCH_X + xPad + usableW;
+  let xPV: number, xDCDis: number, xInv: number, xACDis: number, xMeter: number, xMSP: number, xUtil: number;
 
-  // ─── PV ARRAY ─────────────────────────────────────────────────────────────
-  const pvW = 100, pvH = 90;
-  const pvCX = xPV, pvCY = busY - 40;
+  if (isMicro) {
+    // 5 components, 4 gaps
+    xPV    = SCH_X + xPad;
+    xInv   = SCH_X + xPad + usableW * 0.22;
+    xACDis = SCH_X + xPad + usableW * 0.44;
+    xMeter = SCH_X + xPad + usableW * 0.66;
+    xMSP   = SCH_X + xPad + usableW * 0.83;
+    xUtil  = SCH_X + xPad + usableW;
+    xDCDis = -9999; // not used
+  } else {
+    // 6 components, 5 gaps
+    xPV    = SCH_X + xPad;
+    xDCDis = SCH_X + xPad + usableW * 0.17;
+    xInv   = SCH_X + xPad + usableW * 0.35;
+    xACDis = SCH_X + xPad + usableW * 0.53;
+    xMeter = SCH_X + xPad + usableW * 0.70;
+    xMSP   = SCH_X + xPad + usableW * 0.84;
+    xUtil  = SCH_X + xPad + usableW;
+  }
 
+  // ── PV ARRAY ─────────────────────────────────────────────────────────────────
+  const pvW = 90, pvH = 80;
+  const pvCX = xPV, pvCY = BUS_Y;
+
+  // PV module symbol (grid of cells)
   parts.push(rect(pvCX - pvW/2, pvCY - pvH/2, pvW, pvH, { fill: WHT, sw: SW_MED }));
-  // Grid lines inside PV symbol
-  parts.push(line(pvCX - pvW/2, pvCY, pvCX + pvW/2, pvCY, { sw: SW_HAIR }));
-  parts.push(line(pvCX, pvCY - pvH/2, pvCX, pvCY + pvH/2, { sw: SW_HAIR }));
-  parts.push(line(pvCX - pvW/4, pvCY - pvH/2, pvCX - pvW/4, pvCY + pvH/2, { sw: SW_HAIR }));
-  parts.push(line(pvCX + pvW/4, pvCY - pvH/2, pvCX + pvW/4, pvCY + pvH/2, { sw: SW_HAIR }));
-  parts.push(line(pvCX - pvW/2, pvCY - pvH/4, pvCX + pvW/2, pvCY - pvH/4, { sw: SW_HAIR }));
-  parts.push(line(pvCX - pvW/2, pvCY + pvH/4, pvCX + pvW/2, pvCY + pvH/4, { sw: SW_HAIR }));
+  // Internal grid lines
+  for (let gx = 1; gx < 3; gx++) {
+    parts.push(line(pvCX - pvW/2 + gx * pvW/3, pvCY - pvH/2, pvCX - pvW/2 + gx * pvW/3, pvCY + pvH/2, { sw: SW_HAIR }));
+  }
+  for (let gy = 1; gy < 3; gy++) {
+    parts.push(line(pvCX - pvW/2, pvCY - pvH/2 + gy * pvH/3, pvCX + pvW/2, pvCY - pvH/2 + gy * pvH/3, { sw: SW_HAIR }));
+  }
+  // Plus/minus symbols
+  parts.push(txt(pvCX - pvW/2 + 8, pvCY - pvH/2 + 12, '+', { size: 10, bold: true }));
+  parts.push(txt(pvCX + pvW/2 - 14, pvCY - pvH/2 + 12, '−', { size: 10, bold: true }));
 
-  const pvPanelsPerStr = input.panelsPerString ?? Math.round(input.totalModules / Math.max(input.totalStrings, 1));
-  const pvStringLabel  = isMicro
+  const pvStringLabel = isMicro
     ? `${input.deviceCount ?? input.totalModules} microinverters`
     : (input.totalStrings > 1
-        ? `${input.totalStrings} strings × ${pvPanelsPerStr} panels`
+        ? `${input.totalStrings} strings × ${input.panelsPerString ?? Math.round(input.totalModules / Math.max(input.totalStrings, 1))} panels`
         : `${input.totalModules} modules`);
 
-  parts.push(txt(pvCX, pvCY - pvH/2 - 22, 'PV ARRAY', { size: F.hdr, bold: true, anchor: 'middle' }));
-  parts.push(txt(pvCX, pvCY - pvH/2 - 11, `${input.totalModules} × ${input.panelWatts}W`, { size: F.sub, anchor: 'middle' }));
-  parts.push(txt(pvCX, pvCY + pvH/2 + 11, pvStringLabel, { size: F.tiny, anchor: 'middle' }));
-  parts.push(txt(pvCX, pvCY + pvH/2 + 21, input.panelModel, { size: F.tiny, anchor: 'middle', italic: true }));
-  parts.push(callout(pvCX + pvW/2 + 18, pvCY - pvH/2 - 8, 1));
+  parts.push(txt(pvCX, pvCY - pvH/2 - 20, 'PV ARRAY', { size: F.hdr, bold: true, anchor: 'middle' }));
+  parts.push(txt(pvCX, pvCY - pvH/2 - 10, `${input.totalModules} × ${input.panelWatts}W`, { size: F.sub, anchor: 'middle' }));
+  parts.push(txt(pvCX, pvCY + pvH/2 + 10, pvStringLabel, { size: F.tiny, anchor: 'middle' }));
+  parts.push(txt(pvCX, pvCY + pvH/2 + 20, esc(input.panelModel), { size: F.tiny, anchor: 'middle', italic: true }));
+  parts.push(calloutCircle(pvCX + pvW/2 + 16, pvCY - pvH/2 - 6, 1));
 
   const pvOutX = pvCX + pvW/2;
 
-  // ─── MICROINVERTER BRANCH CIRCUITS ────────────────────────────────────────
+  // ── MICROINVERTER TOPOLOGY ───────────────────────────────────────────────────
   if (isMicro) {
     const microDevCount = input.deviceCount ?? input.totalModules;
     const branchLimit   = 16;
@@ -404,647 +467,601 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ? input.microBranches.length
       : Math.ceil(microDevCount / branchLimit);
 
-    // Branch wire data from runs
     const branchRun     = findRun('BRANCH_RUN');
     const branchGauge   = input.branchWireGauge ?? branchRun?.wireGauge ?? '#10 AWG';
     const branchConduit = input.branchConduitSize ?? branchRun?.conduitSize ?? '3/4"';
     const branchOcpd    = input.branchOcpdAmps ?? branchRun?.ocpdAmps ?? 20;
-    const branchBundle  = branchRun?.conductorBundle;
 
-    // AC Combiner box position
-    const combBoxX = xInv - 70;
-    const combBoxW = 52;
-    const combBoxH = Math.max(44, numBranches * 16 + 16);
-    const combBoxY = busY - combBoxH / 2;
+    // AC Combiner box — positioned between PV and Inverter
+    const combCX = (pvCX + pvW/2 + xInv - 55) / 2;
+    const combW  = 50;
+    const combH  = Math.max(40, numBranches * 14 + 16);
+    const combY  = BUS_Y - combH / 2;
 
-    parts.push(rect(combBoxX - combBoxW/2, combBoxY, combBoxW, combBoxH, { fill: WHT, sw: SW_MED }));
-    parts.push(txt(combBoxX, combBoxY - 12, 'AC COMBINER', { size: F.tiny, bold: true, anchor: 'middle' }));
-    parts.push(txt(combBoxX, combBoxY - 3, 'J-BOX / WIREWAY', { size: 5.5, anchor: 'middle' }));
-    parts.push(callout(combBoxX + combBoxW/2 + 14, combBoxY - 10, 2));
+    parts.push(rect(combCX - combW/2, combY, combW, combH, { fill: WHT, sw: SW_MED }));
+    parts.push(txt(combCX, combY - 14, 'AC COMBINER', { size: F.tiny, bold: true, anchor: 'middle' }));
+    parts.push(txt(combCX, combY - 5, 'J-BOX / WIREWAY', { size: 5.5, anchor: 'middle' }));
+    parts.push(calloutCircle(combCX + combW/2 + 12, combY - 10, 2));
 
-    // Branch circuits
-    const branchSpacing = Math.min(55, (SCH_H * 0.50) / Math.max(numBranches, 1));
-    const totalBranchSpan = (numBranches - 1) * branchSpacing;
-    const firstBranchY = busY - totalBranchSpan / 2;
+    // Branch circuits — stacked vertically
+    const branchSpacing = Math.min(50, (SCH_H * 0.45) / Math.max(numBranches, 1));
+    const totalSpan     = (numBranches - 1) * branchSpacing;
+    const firstBranchY  = BUS_Y - totalSpan / 2;
 
     for (let b = 0; b < numBranches; b++) {
-      const mbData = input.microBranches?.[b];
-      const basePerBranch = Math.floor(microDevCount / numBranches);
-      const remainder     = microDevCount % numBranches;
-      const devOnBranch   = mbData?.deviceCount ?? (b < remainder ? basePerBranch + 1 : basePerBranch);
-      const branchY       = firstBranchY + b * branchSpacing;
-      const bOcpd         = mbData?.ocpdAmps ?? branchOcpd;
-      const bAmps         = mbData ? mbData.branchCurrentA.toFixed(1) : '—';
+      const mbData      = input.microBranches?.[b];
+      const basePerBr   = Math.floor(microDevCount / numBranches);
+      const remainder   = microDevCount % numBranches;
+      const devOnBranch = mbData?.deviceCount ?? (b < remainder ? basePerBr + 1 : basePerBr);
+      const branchY     = firstBranchY + b * branchSpacing;
+      const bOcpd       = mbData?.ocpdAmps ?? branchOcpd;
 
       // Small PV sub-array box
-      const pvSubW = 40, pvSubH = 28;
-      const pvSubX = xPV + pvW/2 + 28;
+      const pvSubW = 36, pvSubH = 24;
+      const pvSubX = pvCX + pvW/2 + 24;
       const pvSubCX = pvSubX + pvSubW/2;
       parts.push(rect(pvSubX, branchY - pvSubH/2, pvSubW, pvSubH, { fill: WHT, sw: SW_THIN }));
       parts.push(line(pvSubX, branchY, pvSubX + pvSubW, branchY, { sw: SW_HAIR }));
       parts.push(line(pvSubCX, branchY - pvSubH/2, pvSubCX, branchY + pvSubH/2, { sw: SW_HAIR }));
-      parts.push(txt(pvSubCX, branchY - pvSubH/2 - 9, `BR ${b + 1}`, { size: F.tiny, bold: true, anchor: 'middle' }));
-      parts.push(txt(pvSubCX, branchY + pvSubH/2 + 8, `${devOnBranch} × ${bAmps}A`, { size: 5.5, anchor: 'middle' }));
+      parts.push(txt(pvSubCX, branchY - pvSubH/2 - 8, `BR ${b + 1}`, { size: F.tiny, bold: true, anchor: 'middle' }));
+      parts.push(txt(pvSubCX, branchY + pvSubH/2 + 8, `${devOnBranch} micros`, { size: 5.5, anchor: 'middle' }));
 
-      // Dashed DC stub from main PV array to branch
+      // Dashed DC stub from main PV to branch
       parts.push(line(pvOutX, pvCY, pvSubX, branchY, { sw: SW_HAIR, dash: '4,2' }));
 
       // AC branch wire to combiner
       const branchOutX = pvSubX + pvSubW;
-      const combInX    = combBoxX - combBoxW/2;
+      const combInX    = combCX - combW/2;
       parts.push(line(branchOutX, branchY, combInX, branchY, { sw: SW_MED }));
-      parts.push(line(combInX, branchY, combInX, busY + (b - (numBranches-1)/2) * 5, { sw: SW_HAIR }));
 
-      // Wire callout on branch run (only on first branch to avoid clutter)
-      if (b === 0 && branchBundle) {
-        const calloutLines = bundleToLines(branchBundle, branchConduit, resolvedAcConduitType, false);
-        calloutLines.push(`${bOcpd}A OCPD`);
+      // Wire callout on first branch only
+      if (b === 0) {
+        const branchLines = runToCalloutLines(branchRun, [
+          `${branchGauge} THWN-2`,
+          `${branchConduit} ${resolvedAcConduitType}`,
+          `${bOcpd}A OCPD`,
+        ]);
         const midX = (branchOutX + combInX) / 2;
-        parts.push(wireCalloutBox(midX, branchY, calloutLines));
-      } else if (b === 0) {
-        parts.push(wireCalloutBox(
-          (branchOutX + combInX) / 2, branchY,
-          [`${branchGauge}`, `${branchConduit} ${resolvedAcConduitType}`, `${bOcpd}A OCPD`]
-        ));
+        const calloutTopY = branchY - 50;
+        parts.push(wireCalloutBox(midX, calloutTopY, branchLines, {
+          leaderToY: branchY,
+        }));
       }
     }
 
-    // Home run from combiner to inverter bus
-    const combOutX = combBoxX + combBoxW/2;
-    parts.push(line(combOutX, busY, xInv - 55, busY, { sw: SW_HEAVY }));
+    // Combiner internal bus
+    parts.push(line(combCX, combY + combH, combCX, BUS_Y, { sw: SW_MED }));
+    parts.push(line(combCX, BUS_Y, combCX + combW/2, BUS_Y, { sw: SW_MED }));
+
+    // Home run: combiner → inverter
+    const combOutX = combCX + combW/2;
+    parts.push(line(combOutX, BUS_Y, xInv - 55, BUS_Y, { sw: SW_HEAVY }));
 
     // Home run wire callout
-    const homeRunRun = findRun('COMBINER_TO_DISCO_RUN');
-    const homeRunBundle = homeRunRun?.conductorBundle;
-    const homeRunCallout = homeRunRun?.conductorCallout;
-    const homeRunLines = homeRunBundle
-      ? bundleToLines(homeRunBundle, resolvedAcConduitSize || branchConduit, resolvedAcConduitType, false)
-      : homeRunCallout
-        ? calloutToLines(homeRunCallout)
-        : [`${resolvedAcWireGauge}`, `${resolvedAcConduitSize || '3/4"'} ${resolvedAcConduitType}`, `${resolvedAcOCPD}A OCPD`];
-    parts.push(wireCalloutBox((combOutX + xInv - 55) / 2, busY, homeRunLines));
-
-    parts.push(line(combBoxX, combBoxY + combBoxH, combBoxX, busY, { sw: SW_MED }));
-    parts.push(line(combBoxX, busY, combOutX, busY, { sw: SW_MED }));
+    const homeRun = findRun('COMBINER_TO_DISCO_RUN');
+    const homeLines = runToCalloutLines(homeRun, [
+      `${resolvedAcWireGauge} THWN-2`,
+      `${resolvedAcConduitSize} ${resolvedAcConduitType}`,
+      `${resolvedAcOCPD}A OCPD`,
+    ]);
+    const homeMidX = (combOutX + xInv - 55) / 2;
+    parts.push(wireCalloutBox(homeMidX, CALLOUT_Y, homeLines, { leaderToY: BUS_Y }));
 
   } else {
-    // ─── STRING/OPTIMIZER: DC wire from PV to DC Disco ──────────────────────
-    const dcRun    = findRun('DC_STRING_RUN');
-    const dcBundle = dcRun?.conductorBundle;
-    const dcCallout = dcRun?.conductorCallout;
-    const dcLines  = dcBundle
-      ? bundleToLines(dcBundle, resolvedDcConduitSize || '3/4"', input.dcConduitType || 'EMT', true)
-      : dcCallout
-        ? calloutToLines(dcCallout)
-        : [`${resolvedDcWireGauge}`, `PV WIRE (OPEN AIR)`, `NEC 690.31`];
-
-    parts.push(line(pvOutX, pvCY, xDCDis - 44, pvCY, { sw: SW_MED }));
-    parts.push(line(xDCDis - 44, pvCY, xDCDis - 44, busY, { sw: SW_MED }));
-    parts.push(wireCalloutBox((pvOutX + xDCDis - 44) / 2, pvCY, dcLines, true));
+    // ── STRING/OPTIMIZER: DC wire from PV to DC Disco ─────────────────────────
+    const dcStringRun = findRun('DC_STRING_RUN');
+    const dcLines = runToCalloutLines(dcStringRun, [
+      `${resolvedDcWireGauge} PV Wire`,
+      '(OPEN AIR — NEC 690.31)',
+    ]);
+    // DC wire goes from PV output down to bus level, then right to DC Disco
+    parts.push(line(pvOutX, pvCY, pvOutX + 20, pvCY, { sw: SW_MED }));
+    parts.push(line(pvOutX + 20, pvCY, pvOutX + 20, BUS_Y, { sw: SW_MED }));
+    parts.push(line(pvOutX + 20, BUS_Y, xDCDis - 44, BUS_Y, { sw: SW_MED }));
+    // DC wire callout (open air — green border)
+    const dcMidX = (pvOutX + 20 + xDCDis - 44) / 2;
+    parts.push(wireCalloutBox(dcMidX, CALLOUT_Y, dcLines, {
+      isOpenAir: true, leaderToY: BUS_Y,
+    }));
   }
 
-  // ─── DC DISCONNECT (string/optimizer only) ────────────────────────────────
+  // ── DC DISCONNECT (string/optimizer only) ────────────────────────────────────
   if (!isMicro) {
-    const dcDisCX = xDCDis, dcDisCY = busY;
+    const dcDisCX = xDCDis, dcDisCY = BUS_Y;
     parts.push(rect(dcDisCX - 44, dcDisCY - 28, 88, 56, { fill: WHT, sw: SW_MED }));
-    parts.push(discoSym(dcDisCX, dcDisCY, 60, 20));
-    parts.push(txt(dcDisCX, dcDisCY - 38, '(N) DC DISCONNECT', { size: F.sub, bold: true, anchor: 'middle' }));
-    parts.push(txt(dcDisCX, dcDisCY + 40, `${input.dcOCPD}A FUSED`, { size: F.tiny, anchor: 'middle' }));
+    parts.push(discoSym(dcDisCX, dcDisCY, 56, 18));
+    parts.push(txt(dcDisCX, dcDisCY - 36, '(N) DC DISCONNECT', { size: F.sub, bold: true, anchor: 'middle' }));
+    parts.push(txt(dcDisCX, dcDisCY + 38, `${input.dcOCPD}A FUSED`, { size: F.tiny, anchor: 'middle' }));
     if (input.rapidShutdownIntegrated) {
-      parts.push(txt(dcDisCX, dcDisCY + 51, 'RAPID SHUTDOWN — NEC 690.12', { size: F.tiny, anchor: 'middle', italic: true }));
+      parts.push(txt(dcDisCX, dcDisCY + 48, 'RAPID SHUTDOWN — NEC 690.12', { size: F.tiny, anchor: 'middle', italic: true }));
     }
-    parts.push(callout(dcDisCX + 52, dcDisCY - 34, 2));
+    parts.push(calloutCircle(dcDisCX + 50, dcDisCY - 34, 2));
+
+    // DC wire from DC Disco to Inverter
+    const dcDisToInvRun = findRun('DC_DISCO_TO_INV_RUN') ?? findRun('DC_STRING_RUN');
+    const dcDisLines = runToCalloutLines(dcDisToInvRun, [
+      `${resolvedDcWireGauge} PV Wire`,
+      `${input.dcConduitType || 'EMT'}`,
+    ]);
+    parts.push(line(xDCDis + 44, BUS_Y, xInv - 55, BUS_Y, { sw: SW_MED }));
+    const dcDisMidX = (xDCDis + 44 + xInv - 55) / 2;
+    parts.push(wireCalloutBox(dcDisMidX, CALLOUT_Y, dcDisLines, { leaderToY: BUS_Y }));
   }
 
-  // ─── INVERTER ─────────────────────────────────────────────────────────────
-  const invCX = xInv, invCY = busY;
-  const invW = 110, invH = 70;
+  // ── INVERTER ─────────────────────────────────────────────────────────────────
+  const invCX = xInv, invCY = BUS_Y;
+  const invW = 100, invH = 64;
   parts.push(rect(invCX - invW/2, invCY - invH/2, invW, invH, { fill: WHT, sw: SW_MED }));
-  parts.push(txt(invCX - invW/2 + 8, invCY - 8, 'DC', { size: F.sub, bold: true }));
-  parts.push(txt(invCX + invW/2 - 20, invCY - 8, 'AC', { size: F.sub, bold: true }));
-  // DC→AC arrow symbol
-  parts.push(line(invCX - 12, invCY + 6, invCX + 8, invCY + 6, { sw: SW_THIN }));
-  parts.push(`<polygon points="${invCX+8},${invCY+3} ${invCX+14},${invCY+6} ${invCX+8},${invCY+9}" fill="${BLK}"/>`);
-  parts.push(`<path d="M${invCX-8},${invCY-6} Q${invCX-4},${invCY-14} ${invCX},${invCY-6} Q${invCX+4},${invCY+2} ${invCX+8},${invCY-6}" fill="none" stroke="${BLK}" stroke-width="${SW_THIN}"/>`);
+  // DC/AC labels
+  parts.push(txt(invCX - invW/2 + 6, invCY - 6, 'DC', { size: F.sub, bold: true }));
+  parts.push(txt(invCX + invW/2 - 18, invCY - 6, 'AC', { size: F.sub, bold: true }));
+  // DC→AC arrow
+  parts.push(line(invCX - 10, invCY + 6, invCX + 6, invCY + 6, { sw: SW_THIN }));
+  parts.push(`<polygon points="${invCX+6},${invCY+3} ${invCX+12},${invCY+6} ${invCX+6},${invCY+9}" fill="${BLK}"/>`);
+  // Sine wave symbol
+  parts.push(`<path d="M${invCX-8},${invCY-4} Q${invCX-4},${invCY-12} ${invCX},${invCY-4} Q${invCX+4},${invCY+4} ${invCX+8},${invCY-4}" fill="none" stroke="${BLK}" stroke-width="${SW_THIN}"/>`);
+  // Center divider
   parts.push(line(invCX, invCY - invH/2, invCX, invCY + invH/2, { sw: SW_HAIR, dash: '3,2' }));
-  parts.push(line(invCX - invW/2 - 16, invCY, invCX - invW/2, invCY, { sw: SW_MED }));
-  parts.push(line(invCX + invW/2, invCY, invCX + invW/2 + 16, invCY, { sw: SW_MED }));
+  // Connection stubs
+  parts.push(line(invCX - invW/2 - 14, invCY, invCX - invW/2, invCY, { sw: SW_MED }));
+  parts.push(line(invCX + invW/2, invCY, invCX + invW/2 + 14, invCY, { sw: SW_MED }));
 
   if (isMicro) {
     const microDevCount2 = input.deviceCount ?? input.totalModules;
     const numBranches2   = Math.ceil(microDevCount2 / 16);
-    parts.push(txt(invCX, invCY - invH/2 - 22, 'MICROINVERTER', { size: F.hdr, bold: true, anchor: 'middle' }));
-    parts.push(txt(invCX, invCY - invH/2 - 11, `${input.inverterManufacturer} ${input.inverterModel}`, { size: F.sub, anchor: 'middle' }));
-    parts.push(txt(invCX, invCY + invH/2 + 11, `${input.acOutputKw} kW / ${input.acOutputAmps}A`, { size: F.tiny, anchor: 'middle' }));
-    parts.push(txt(invCX, invCY + invH/2 + 21, `${microDevCount2} units · ${numBranches2} branch circuit${numBranches2 > 1 ? 's' : ''}`, { size: F.tiny, anchor: 'middle' }));
-    parts.push(txt(invCX, invCY + invH/2 + 31, 'NEC 690.8(B) — MAX 16/BRANCH', { size: F.tiny, anchor: 'middle', italic: true }));
+    parts.push(txt(invCX, invCY - invH/2 - 20, 'MICROINVERTER', { size: F.hdr, bold: true, anchor: 'middle' }));
+    parts.push(txt(invCX, invCY - invH/2 - 10, `${esc(input.inverterManufacturer)} ${esc(input.inverterModel)}`, { size: F.sub, anchor: 'middle' }));
+    parts.push(txt(invCX, invCY + invH/2 + 10, `${input.acOutputKw} kW / ${input.acOutputAmps}A`, { size: F.tiny, anchor: 'middle' }));
+    parts.push(txt(invCX, invCY + invH/2 + 20, `${microDevCount2} units · ${numBranches2} branch circuit${numBranches2 > 1 ? 's' : ''}`, { size: F.tiny, anchor: 'middle' }));
+    parts.push(txt(invCX, invCY + invH/2 + 30, 'NEC 690.8(B) — MAX 16/BRANCH', { size: F.tiny, anchor: 'middle', italic: true }));
   } else {
-    const topoLabel = input.topologyType === 'STRING_WITH_OPTIMIZER' ? 'STRING INVERTER + OPTIMIZER' : 'STRING INVERTER';
-    const mpptLabel = input.mpptAllocation ? `MPPT: ${input.mpptAllocation}` : input.mpptChannels ? `${input.mpptChannels} MPPT CH` : '';
-    parts.push(txt(invCX, invCY - invH/2 - 22, topoLabel, { size: F.hdr, bold: true, anchor: 'middle' }));
-    parts.push(txt(invCX, invCY - invH/2 - 11, `${input.inverterManufacturer} ${input.inverterModel}`, { size: F.sub, anchor: 'middle' }));
-    parts.push(txt(invCX, invCY + invH/2 + 11, `${input.acOutputKw} kW / ${input.acOutputAmps}A`, { size: F.tiny, anchor: 'middle' }));
-    if (mpptLabel) parts.push(txt(invCX, invCY + invH/2 + 21, mpptLabel, { size: F.tiny, anchor: 'middle' }));
+    const topoLabel = input.topologyType === 'STRING_WITH_OPTIMIZER' ? 'STRING + OPTIMIZER' : 'STRING INVERTER';
+    const mpptLabel = input.mpptAllocation ? `MPPT: ${input.mpptAllocation}` : '';
+    parts.push(txt(invCX, invCY - invH/2 - 20, topoLabel, { size: F.hdr, bold: true, anchor: 'middle' }));
+    parts.push(txt(invCX, invCY - invH/2 - 10, `${esc(input.inverterManufacturer)} ${esc(input.inverterModel)}`, { size: F.sub, anchor: 'middle' }));
+    parts.push(txt(invCX, invCY + invH/2 + 10, `${input.acOutputKw} kW / ${input.acOutputAmps}A`, { size: F.tiny, anchor: 'middle' }));
+    if (mpptLabel) parts.push(txt(invCX, invCY + invH/2 + 20, mpptLabel, { size: F.tiny, anchor: 'middle' }));
     if (input.totalStrings > 1) {
       const ppStr = input.panelsPerString ?? Math.round(input.totalModules / input.totalStrings);
-      parts.push(txt(invCX, invCY + invH/2 + 31, `${input.totalStrings} strings × ${ppStr} panels`, { size: F.tiny, anchor: 'middle', italic: true }));
+      parts.push(txt(invCX, invCY + invH/2 + 30, `${input.totalStrings} strings × ${ppStr} panels`, { size: F.tiny, anchor: 'middle', italic: true }));
     }
   }
-  parts.push(callout(invCX + invW/2 + 18, invCY - invH/2 - 8, isMicro ? 3 : 3));
+  parts.push(calloutCircle(invCX + invW/2 + 16, invCY - invH/2 - 6, isMicro ? 3 : 3));
 
-  // DC wire label between DC Disco and Inverter (string/optimizer only)
-  if (!isMicro) {
-    const dcDisToInvRun    = findRun('DC_DISCO_TO_INV_RUN') ?? findRun('DC_STRING_RUN');
-    const dcDisToInvBundle = dcDisToInvRun?.conductorBundle;
-    const dcDisToInvCallout = dcDisToInvRun?.conductorCallout;
-    const dcMidX = (xDCDis + 44 + invCX - invW/2 - 16) / 2;
-    const dcDisLines = dcDisToInvBundle
-      ? bundleToLines(dcDisToInvBundle, resolvedDcConduitSize || '3/4"', input.dcConduitType || 'EMT', false)
-      : dcDisToInvCallout
-        ? calloutToLines(dcDisToInvCallout)
-        : [`${resolvedDcWireGauge}`, `${input.dcConduitType || 'EMT'}`];
-    parts.push(wireCalloutBox(dcMidX, busY, dcDisLines));
-  }
+  // ── AC wire: Inverter → AC Disconnect ────────────────────────────────────────
+  const invToDiscoRun = findRun(isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
+  const invToDiscoLines = runToCalloutLines(invToDiscoRun, [
+    `${resolvedAcWireGauge} THWN-2`,
+    `${resolvedAcConduitSize} ${resolvedAcConduitType}`,
+    `${resolvedAcOCPD}A OCPD`,
+  ]);
+  parts.push(line(invCX + invW/2 + 14, BUS_Y, xACDis - 44, BUS_Y, { sw: SW_HEAVY }));
+  const acMid1X = (invCX + invW/2 + 14 + xACDis - 44) / 2;
+  parts.push(wireCalloutBox(acMid1X, CALLOUT_Y, invToDiscoLines, { leaderToY: BUS_Y }));
 
-  // ─── AC DISCONNECT ────────────────────────────────────────────────────────
-  const acDisCX = xACDis, acDisCY = busY;
+  // ── AC DISCONNECT ─────────────────────────────────────────────────────────────
+  const acDisCX = xACDis, acDisCY = BUS_Y;
   parts.push(rect(acDisCX - 44, acDisCY - 28, 88, 56, { fill: WHT, sw: SW_MED }));
-  parts.push(discoSym(acDisCX, acDisCY, 60, 20));
-  parts.push(txt(acDisCX, acDisCY - 38, '(N) AC DISCONNECT', { size: F.sub, bold: true, anchor: 'middle' }));
-  parts.push(txt(acDisCX, acDisCY + 40, `${resolvedAcOCPD}A NON-FUSED`, { size: F.tiny, anchor: 'middle' }));
-  parts.push(callout(acDisCX + 52, acDisCY - 34, 4));
+  parts.push(discoSym(acDisCX, acDisCY, 56, 18));
+  parts.push(txt(acDisCX, acDisCY - 36, '(N) AC DISCONNECT', { size: F.sub, bold: true, anchor: 'middle' }));
+  parts.push(txt(acDisCX, acDisCY + 38, `${resolvedAcOCPD}A NON-FUSED`, { size: F.tiny, anchor: 'middle' }));
+  parts.push(calloutCircle(acDisCX + 50, acDisCY - 34, 4));
 
-  // AC wire label between Inverter/Combiner and AC Disco
-  const invToDiscoRun    = findRun(isMicro ? 'COMBINER_TO_DISCO_RUN' : 'INV_TO_DISCO_RUN');
-  const invToDiscoBundle = invToDiscoRun?.conductorBundle;
-  const invToDiscoCallout = invToDiscoRun?.conductorCallout;
-  const acMid1X = (invCX + invW/2 + 16 + acDisCX - 44) / 2;
-  const invToDiscoLines = invToDiscoBundle
-    ? bundleToLines(invToDiscoBundle, resolvedAcConduitSize || '3/4"', resolvedAcConduitType, false)
-    : invToDiscoCallout
-      ? calloutToLines(invToDiscoCallout)
-      : [`${resolvedAcWireGauge}`, `${resolvedAcConduitSize || '3/4"'} ${resolvedAcConduitType}`, `${resolvedAcOCPD}A OCPD`];
-  parts.push(wireCalloutBox(acMid1X, busY, invToDiscoLines));
+  // ── AC wire: AC Disconnect → Production Meter ────────────────────────────────
+  const discoToMeterRun = findRun('DISCO_TO_METER_RUN');
+  const discoToMeterLines = runToCalloutLines(discoToMeterRun, [
+    `${resolvedAcWireGauge} THWN-2`,
+    `${resolvedAcConduitType}`,
+  ]);
+  parts.push(line(acDisCX + 44, BUS_Y, xMeter - 28, BUS_Y, { sw: SW_HEAVY }));
+  const acMid2X = (acDisCX + 44 + xMeter - 28) / 2;
+  parts.push(wireCalloutBox(acMid2X, CALLOUT_Y, discoToMeterLines, { leaderToY: BUS_Y }));
 
-  // ─── PRODUCTION METER ─────────────────────────────────────────────────────
-  const meterCX = xMeter, meterCY = busY;
-  const meterR  = 28;
+  // ── PRODUCTION METER ──────────────────────────────────────────────────────────
+  const meterCX = xMeter, meterCY = BUS_Y;
+  const meterR  = 26;
   parts.push(circle(meterCX, meterCY, meterR, { fill: WHT, sw: SW_MED }));
-  parts.push(txt(meterCX, meterCY - 4, 'kWh', { size: F.sub, bold: true, anchor: 'middle' }));
-  parts.push(txt(meterCX, meterCY + 7, 'METER', { size: 6, anchor: 'middle' }));
-  parts.push(line(meterCX - meterR - 16, meterCY, meterCX - meterR, meterCY, { sw: SW_MED }));
-  parts.push(line(meterCX + meterR, meterCY, meterCX + meterR + 16, meterCY, { sw: SW_MED }));
-  parts.push(txt(meterCX, meterCY - meterR - 20, 'PRODUCTION METER', { size: F.sub, bold: true, anchor: 'middle' }));
-  parts.push(txt(meterCX, meterCY - meterR - 9, 'BI-DIRECTIONAL', { size: F.tiny, anchor: 'middle' }));
-  parts.push(callout(meterCX + meterR + 20, meterCY - meterR - 8, 5));
+  parts.push(txt(meterCX, meterCY - 3, 'kWh', { size: F.sub, bold: true, anchor: 'middle' }));
+  parts.push(txt(meterCX, meterCY + 8, 'METER', { size: 5.5, anchor: 'middle' }));
+  parts.push(line(meterCX - meterR - 14, meterCY, meterCX - meterR, meterCY, { sw: SW_MED }));
+  parts.push(line(meterCX + meterR, meterCY, meterCX + meterR + 14, meterCY, { sw: SW_MED }));
+  parts.push(txt(meterCX, meterCY - meterR - 18, 'PRODUCTION METER', { size: F.sub, bold: true, anchor: 'middle' }));
+  parts.push(txt(meterCX, meterCY - meterR - 8, 'BI-DIRECTIONAL', { size: F.tiny, anchor: 'middle' }));
+  parts.push(calloutCircle(meterCX + meterR + 18, meterCY - meterR - 6, 5));
 
-  // AC wire label between AC Disco and Meter
-  const discoToMeterRun    = findRun('DISCO_TO_METER_RUN');
-  const discoToMeterBundle = discoToMeterRun?.conductorBundle;
-  const discoToMeterCallout = discoToMeterRun?.conductorCallout;
-  const acMid2X = (acDisCX + 44 + meterCX - meterR - 16) / 2;
-  const discoToMeterLines = discoToMeterBundle
-    ? bundleToLines(discoToMeterBundle, resolvedAcConduitSize || '3/4"', resolvedAcConduitType, false)
-    : discoToMeterCallout
-      ? calloutToLines(discoToMeterCallout)
-      : [`${resolvedAcWireGauge}`, `${resolvedAcConduitType}`];
-  parts.push(wireCalloutBox(acMid2X, busY, discoToMeterLines));
+  // ── AC wire: Meter → MSP ─────────────────────────────────────────────────────
+  const meterToMspRun = findRun('METER_TO_MSP_RUN');
+  const meterToMspLines = runToCalloutLines(meterToMspRun, [
+    `${resolvedAcWireGauge} THWN-2`,
+    `${resolvedAcConduitType}`,
+  ]);
+  parts.push(line(meterCX + meterR + 14, BUS_Y, xMSP - 40, BUS_Y, { sw: SW_HEAVY }));
+  const acMid3X = (meterCX + meterR + 14 + xMSP - 40) / 2;
+  parts.push(wireCalloutBox(acMid3X, CALLOUT_Y, meterToMspLines, { leaderToY: BUS_Y }));
 
-  // ─── MAIN SERVICE PANEL ───────────────────────────────────────────────────
-  const mspCX = xMSP, mspCY = busY;
-  const mspW = 80, mspH = 110;
+  // ── MAIN SERVICE PANEL ────────────────────────────────────────────────────────
+  const mspCX = xMSP, mspCY = BUS_Y;
+  const mspW = 72, mspH = 100;
   parts.push(rect(mspCX - mspW/2, mspCY - mspH/2, mspW, mspH, { fill: WHT, sw: SW_MED }));
-  parts.push(line(mspCX, mspCY - mspH/2 + 12, mspCX, mspCY + mspH/2 - 12, { sw: SW_MED }));
+  // Internal bus bar
+  parts.push(line(mspCX, mspCY - mspH/2 + 10, mspCX, mspCY + mspH/2 - 10, { sw: SW_MED }));
+  // Breaker symbols
   for (let i = 0; i < 3; i++) {
-    const sy = mspCY - mspH/2 + 20 + i * 26;
-    parts.push(line(mspCX - mspW/2 + 8, sy, mspCX - 4, sy, { sw: SW_THIN }));
-    parts.push(rect(mspCX - 8, sy - 5, 16, 10, { fill: WHT, sw: SW_HAIR }));
-    parts.push(line(mspCX + 4, sy, mspCX + mspW/2 - 8, sy, { sw: SW_THIN }));
+    const sy = mspCY - mspH/2 + 18 + i * 24;
+    parts.push(line(mspCX - mspW/2 + 6, sy, mspCX - 4, sy, { sw: SW_THIN }));
+    parts.push(rect(mspCX - 6, sy - 5, 12, 10, { fill: WHT, sw: SW_HAIR }));
+    parts.push(line(mspCX + 4, sy, mspCX + mspW/2 - 6, sy, { sw: SW_THIN }));
   }
-  parts.push(line(mspCX - mspW/2 - 16, mspCY, mspCX - mspW/2, mspCY, { sw: SW_MED }));
-  parts.push(line(mspCX + mspW/2, mspCY, mspCX + mspW/2 + 16, mspCY, { sw: SW_MED }));
-  parts.push(txt(mspCX, mspCY - mspH/2 - 22, 'MAIN SERVICE PANEL', { size: F.hdr, bold: true, anchor: 'middle' }));
-  parts.push(txt(mspCX, mspCY - mspH/2 - 11, `${input.mainPanelAmps}A RATED`, { size: F.sub, anchor: 'middle' }));
-  parts.push(txt(mspCX, mspCY + mspH/2 + 11, `${input.backfeedAmps}A PV BREAKER`, { size: F.tiny, anchor: 'middle' }));
-  parts.push(callout(mspCX + mspW/2 + 20, mspCY - mspH/2 - 8, 6));
+  parts.push(line(mspCX - mspW/2 - 14, mspCY, mspCX - mspW/2, mspCY, { sw: SW_MED }));
+  parts.push(line(mspCX + mspW/2, mspCY, mspCX + mspW/2 + 14, mspCY, { sw: SW_MED }));
+  parts.push(txt(mspCX, mspCY - mspH/2 - 20, 'MAIN SERVICE PANEL', { size: F.hdr, bold: true, anchor: 'middle' }));
+  parts.push(txt(mspCX, mspCY - mspH/2 - 10, `${input.mainPanelAmps}A RATED`, { size: F.sub, anchor: 'middle' }));
+  parts.push(txt(mspCX, mspCY + mspH/2 + 10, `${input.backfeedAmps}A PV BREAKER`, { size: F.tiny, anchor: 'middle' }));
+  parts.push(txt(mspCX, mspCY + mspH/2 + 20, `NEC 705.12(B)(2)`, { size: F.tiny, anchor: 'middle', italic: true }));
+  parts.push(calloutCircle(mspCX + mspW/2 + 18, mspCY - mspH/2 - 6, 6));
 
-  // AC wire label between Meter and MSP
-  const meterToMspRun    = findRun('METER_TO_MSP_RUN');
-  const meterToMspBundle = meterToMspRun?.conductorBundle;
-  const meterToMspCallout = meterToMspRun?.conductorCallout;
-  const acMid3X = (meterCX + meterR + 16 + mspCX - mspW/2 - 16) / 2;
-  const meterToMspLines = meterToMspBundle
-    ? bundleToLines(meterToMspBundle, resolvedAcConduitSize || '3/4"', resolvedAcConduitType, false)
-    : meterToMspCallout
-      ? calloutToLines(meterToMspCallout)
-      : [`${resolvedAcWireGauge}`, `${resolvedAcConduitType}`];
-  parts.push(wireCalloutBox(acMid3X, busY, meterToMspLines));
+  // ── AC wire: MSP → Utility ───────────────────────────────────────────────────
+  const mspToUtilRun = findRun('MSP_TO_UTILITY_RUN');
+  const mspToUtilLines = runToCalloutLines(mspToUtilRun, [
+    `${resolvedAcWireGauge} THWN-2`,
+    `${resolvedAcConduitType}`,
+  ]);
+  parts.push(line(mspCX + mspW/2 + 14, BUS_Y, xUtil - 30, BUS_Y, { sw: SW_HEAVY }));
+  const acMid4X = (mspCX + mspW/2 + 14 + xUtil - 30) / 2;
+  parts.push(wireCalloutBox(acMid4X, CALLOUT_Y, mspToUtilLines, { leaderToY: BUS_Y }));
 
-  // ─── UTILITY ──────────────────────────────────────────────────────────────
-  const utilCX = xUtil, utilCY = busY;
-  const utilR  = 30;
+  // ── UTILITY GRID ──────────────────────────────────────────────────────────────
+  const utilCX = xUtil, utilCY = BUS_Y;
+  const utilR  = 28;
   parts.push(circle(utilCX, utilCY, utilR, { fill: WHT, sw: SW_MED }));
-  parts.push(txt(utilCX, utilCY - 4, 'UTILITY', { size: F.sub, bold: true, anchor: 'middle' }));
-  parts.push(txt(utilCX, utilCY + 7, 'METER', { size: 6, anchor: 'middle' }));
-  parts.push(line(utilCX - utilR - 16, utilCY, utilCX - utilR, utilCY, { sw: SW_MED }));
-  parts.push(txt(utilCX, utilCY - utilR - 22, 'UTILITY GRID', { size: F.hdr, bold: true, anchor: 'middle' }));
-  parts.push(txt(utilCX, utilCY - utilR - 11, esc(input.utilityName), { size: F.sub, anchor: 'middle' }));
-  parts.push(txt(utilCX, utilCY + utilR + 11, '120/240V, 1Ø, 3W', { size: F.tiny, anchor: 'middle' }));
-  parts.push(callout(utilCX + utilR + 20, utilCY - utilR - 8, 7));
+  parts.push(txt(utilCX, utilCY - 3, 'UTILITY', { size: F.sub, bold: true, anchor: 'middle' }));
+  parts.push(txt(utilCX, utilCY + 8, 'GRID', { size: 5.5, anchor: 'middle' }));
+  parts.push(line(utilCX - utilR - 14, utilCY, utilCX - utilR, utilCY, { sw: SW_MED }));
+  parts.push(txt(utilCX, utilCY - utilR - 18, 'UTILITY GRID', { size: F.hdr, bold: true, anchor: 'middle' }));
+  parts.push(txt(utilCX, utilCY - utilR - 8, esc(input.utilityName), { size: F.sub, anchor: 'middle' }));
+  parts.push(txt(utilCX, utilCY + utilR + 10, '120/240V, 1Ø, 3W', { size: F.tiny, anchor: 'middle' }));
+  parts.push(calloutCircle(utilCX + utilR + 18, utilCY - utilR - 6, 7));
 
-  // AC wire label between MSP and Utility
-  const mspToUtilRun    = findRun('MSP_TO_UTILITY_RUN');
-  const mspToUtilBundle = mspToUtilRun?.conductorBundle;
-  const mspToUtilCallout = mspToUtilRun?.conductorCallout;
-  const acMid4X = (mspCX + mspW/2 + 16 + utilCX - utilR - 16) / 2;
-  const mspToUtilLines = mspToUtilBundle
-    ? bundleToLines(mspToUtilBundle, resolvedAcConduitSize || '3/4"', resolvedAcConduitType, false)
-    : mspToUtilCallout
-      ? calloutToLines(mspToUtilCallout)
-      : [`${resolvedAcWireGauge}`, `${resolvedAcConduitType}`];
-  parts.push(wireCalloutBox(acMid4X, busY, mspToUtilLines));
-
-  // ─── Horizontal bus line ──────────────────────────────────────────────────
-  parts.push(line(pvCX + pvW/2 + 10, busY, utilCX - utilR, busY, { sw: SW_MED }));
-
-  // ─── Grounding conductors (GREEN) ─────────────────────────────────────────
-  const gndLineY = busY + 100;
+  // ── Grounding conductors (GREEN) ─────────────────────────────────────────────
   const gndPoints = isMicro
     ? [xInv, xACDis, xMeter, xMSP]
     : [xDCDis, xInv, xACDis, xMeter, xMSP];
+  const gndLineY  = GND_Y + 20;
   const gndStartX = gndPoints[0];
   const gndEndX   = gndPoints[gndPoints.length - 1];
+
   parts.push(line(gndStartX, gndLineY, gndEndX, gndLineY, { stroke: GRN, sw: SW_MED }));
   for (const gx of gndPoints) {
-    parts.push(line(gx, busY + 30, gx, gndLineY, { stroke: GRN, sw: SW_MED }));
+    parts.push(line(gx, BUS_Y + 28, gx, gndLineY, { stroke: GRN, sw: SW_MED }));
     parts.push(gndSym(gx, gndLineY));
   }
-  parts.push(txt((gndStartX + gndEndX) / 2, gndLineY - 8,
-    'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122',
+  parts.push(txt((gndStartX + gndEndX) / 2, gndLineY - 6,
+    'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43',
     { size: F.tiny, anchor: 'middle', fill: GRN }
   ));
 
-  // ─── Rapid Shutdown note ──────────────────────────────────────────────────
+  // ── Rapid Shutdown note ──────────────────────────────────────────────────────
   if (input.rapidShutdownIntegrated) {
-    const rsdY = SCH_Y + SCH_H - 28;
-    parts.push(rect(SCH_X + 8, rsdY - 14, 280, 22, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-    parts.push(txt(SCH_X + 16, rsdY, 'RAPID SHUTDOWN SYSTEM — NEC 690.12 COMPLIANT', { size: F.tiny, bold: true }));
+    const rsdY = SCH_Y + SCH_H - 26;
+    parts.push(rect(SCH_X + 6, rsdY - 12, 260, 20, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+    parts.push(txt(SCH_X + 12, rsdY, 'RAPID SHUTDOWN SYSTEM — NEC 690.12 COMPLIANT', { size: F.tiny, bold: true }));
   }
 
-  // ─── LEGEND ───────────────────────────────────────────────────────────────
-  const legX = SCH_X + SCH_W - 220;
-  const legY = SCH_Y + SCH_H - 82;
-  const legW = 210, legH = 74;
+  // ── LEGEND ───────────────────────────────────────────────────────────────────
+  const legX = SCH_X + SCH_W - 200;
+  const legY = SCH_Y + SCH_H - 76;
+  const legW = 192, legH = 68;
   parts.push(rect(legX, legY, legW, legH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-  parts.push(txt(legX + 8, legY + 12, 'LEGEND', { size: F.sub, bold: true }));
-  parts.push(line(legX, legY + 15, legX + legW, legY + 15, { sw: SW_THIN }));
+  parts.push(txt(legX + 6, legY + 11, 'LEGEND', { size: F.sub, bold: true }));
+  parts.push(line(legX, legY + 14, legX + legW, legY + 14, { sw: SW_THIN }));
   const legItems = [
     { dash: '',    stroke: BLK, label: 'AC Conductor (THWN-2)' },
     { dash: '6,3', stroke: BLK, label: 'DC Conductor (PV Wire / Open Air)' },
     { dash: '',    stroke: GRN, label: 'Grounding Conductor (EGC)' },
-    { dash: '2,2', stroke: BLK, label: 'Communication / Signal Wire' },
+    { dash: '4,2', stroke: GRN, label: 'Open Air Run (NEC 690.31)' },
   ];
   legItems.forEach((item, i) => {
-    const ly = legY + 22 + i * 13;
-    parts.push(line(legX + 8, ly, legX + 48, ly, { stroke: item.stroke, sw: SW_MED, dash: item.dash }));
-    parts.push(txt(legX + 54, ly + 3, item.label, { size: F.tiny }));
+    const ly = legY + 20 + i * 12;
+    parts.push(line(legX + 6, ly, legX + 44, ly, { stroke: item.stroke, sw: SW_MED, dash: item.dash }));
+    parts.push(txt(legX + 50, ly + 3, item.label, { size: F.tiny }));
   });
 
-  // ─── CALC PANELS ──────────────────────────────────────────────────────────
-  const calcY = SCH_Y + SCH_H + 8;
-  const calcH = NOTES_Y - calcY - 4;
-  const calcW = DW / 3 - 4;
+  // ── CALCULATION PANELS (below schematic) ─────────────────────────────────────
+  const calcY = SCHED_Y;
+  const calcH = SCHED_H;
+  const calcW = Math.floor(DW / 3) - 4;
+  const totalDcKw = input.totalModules * input.panelWatts / 1000;
 
-  if (calcH > 30) {
-    const totalDcKw = (input.totalModules * input.panelWatts / 1000);
+  // Panel 1: DC / Micro AC Branch Calcs
+  const dcCalcX = DX;
+  parts.push(rect(dcCalcX, calcY, calcW, calcH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+  parts.push(rect(dcCalcX, calcY, calcW, 16, { fill: BLK, stroke: BLK, sw: 0 }));
 
-    // DC / Micro AC Branch Calcs
-    const dcCalcX = DX;
-    parts.push(rect(dcCalcX, calcY, calcW, calcH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-    parts.push(rect(dcCalcX, calcY, calcW, 16, { fill: BLK, stroke: BLK, sw: SW_THIN }));
-
-    if (isMicro) {
-      const microDevCount = input.deviceCount ?? input.totalModules;
-      const acBranchCircuits = Math.ceil(microDevCount / 16);
-      const acBranchAmps = Math.ceil((input.acOutputKw * 1000 / 240) * 1.25 / 5) * 5;
-      parts.push(txt(dcCalcX + calcW/2, calcY + 11, 'AC BRANCH CIRCUIT INFO', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
-      const microRows: [string, string][] = [
-        ['Topology',               'MICROINVERTER'],
-        ['Microinverters',         `${microDevCount} units`],
-        ['Panels per Micro',       `${input.panelsPerString ?? 1}`],
-        ['Total DC Power',         `${totalDcKw.toFixed(2)} kW`],
-        ['AC Output per Micro',    `${((input.acOutputKw * 1000) / microDevCount).toFixed(0)} W`],
-        ['AC Branch Circuits',     `${acBranchCircuits}`],
-        ['Max Micros / Branch',    '16 (NEC 690.8)'],
-        ['AC Branch OCPD',         `${acBranchAmps} A`],
-        ['AC Wire (branch)',       `${resolvedAcWireGauge}`],
-        ['AC Conduit',             resolvedAcConduitType],
-        ['Module Voc (STC)',       `${input.panelVoc} V`],
-        ['Module Isc (STC)',       `${input.panelIsc} A`],
-        ['DC/AC Ratio',            'N/A (micro)'],
-      ];
-      const microRowH = Math.min(14, (calcH - 20) / microRows.length);
-      microRows.forEach(([label, val], i) => {
-        const ry = calcY + 22 + i * microRowH;
-        if (i % 2 === 1) parts.push(rect(dcCalcX, ry - microRowH + 2, calcW, microRowH, { fill: LGY, stroke: 'none', sw: 0 }));
-        parts.push(txt(dcCalcX + 6, ry, label, { size: F.tiny }));
-        parts.push(txt(dcCalcX + calcW - 6, ry, val, { size: F.tiny, anchor: 'end', bold: true }));
-      });
-    } else {
-      parts.push(txt(dcCalcX + calcW/2, calcY + 11, 'DC SYSTEM CALCULATIONS', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
-      const panelsPerStr  = input.panelsPerString ?? Math.round(input.totalModules / Math.max(input.totalStrings, 1));
-      const lastStrPanels = input.lastStringPanels ?? panelsPerStr;
-      const vocCorr       = input.vocCorrected ?? input.panelVoc;
-      const stringVocVal  = input.stringVoc ?? (vocCorr * panelsPerStr);
-      const stringIscVal  = input.stringIsc ?? input.panelIsc;
-      const ocpdStr       = input.ocpdPerString ?? input.dcOCPD;
-      const designTemp    = input.designTempMin ?? -10;
-      const dcAcRatio     = input.dcAcRatio ?? (input.acOutputKw > 0 ? totalDcKw / input.acOutputKw : 0);
-
-      const dcRows: [string, string][] = [
-        ['Module Voc (STC)',          `${input.panelVoc} V`],
-        ['Module Isc (STC)',          `${input.panelIsc} A`],
-        ['Design Temp (NEC 690.7)',   `${designTemp}°C`],
-        ['Voc Corrected',             `${vocCorr.toFixed(2)} V`],
-        ['Panels per String',         panelsPerStr === lastStrPanels ? `${panelsPerStr}` : `${panelsPerStr} (last: ${lastStrPanels})`],
-        ['Number of Strings',         `${input.totalStrings}`],
-        ['String Voc (corrected)',     `${stringVocVal.toFixed(1)} V`],
-        ['String Voc × 1.25 (NEC)',   `${(stringVocVal * 1.25).toFixed(1)} V`],
-        ['String Isc × 1.25 (NEC)',   `${(stringIscVal * 1.25).toFixed(2)} A`],
-        ['DC OCPD / String',          `${ocpdStr} A`],
-        ['DC Wire Gauge',             `${resolvedDcWireGauge}`],
-        ['Total DC Power',            `${totalDcKw.toFixed(2)} kW`],
-        ['DC/AC Ratio',               `${dcAcRatio.toFixed(2)}`],
-      ];
-      const dcRowH = Math.min(14, (calcH - 20) / dcRows.length);
-      dcRows.forEach(([label, val], i) => {
-        const ry = calcY + 22 + i * dcRowH;
-        if (i % 2 === 1) parts.push(rect(dcCalcX, ry - dcRowH + 2, calcW, dcRowH, { fill: LGY, stroke: 'none', sw: 0 }));
-        parts.push(txt(dcCalcX + 6, ry, label, { size: F.tiny }));
-        parts.push(txt(dcCalcX + calcW - 6, ry, val, { size: F.tiny, anchor: 'end', bold: true }));
-      });
-    }
-
-    // AC Calcs
-    const acCalcX = DX + calcW + 4;
-    parts.push(rect(acCalcX, calcY, calcW, calcH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-    parts.push(rect(acCalcX, calcY, calcW, 16, { fill: BLK, stroke: BLK, sw: SW_THIN }));
-    parts.push(txt(acCalcX + calcW/2, calcY + 11, 'AC SYSTEM CALCULATIONS', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
-
-    const acRows: [string, string][] = [
-      ['AC Output (kW)',    `${input.acOutputKw} kW`],
-      ['AC Output Amps',   `${input.acOutputAmps} A`],
-      ['AC OCPD (125%)',   `${resolvedAcOCPD} A`],
-      ['AC Wire Gauge',    `${resolvedAcWireGauge}`],
-      ['AC Conduit Type',  resolvedAcConduitType],
-      ['Conduit Size',     resolvedAcConduitSize || '—'],
-      ['Service Voltage',  '120/240V, 1Ø'],
-      ['Main Panel Rating',`${input.mainPanelAmps} A`],
-      ['Backfeed Breaker', `${input.backfeedAmps} A`],
-      ['Busbar Loading',   `${((input.backfeedAmps / input.mainPanelAmps) * 100).toFixed(1)}%`],
-      ['120% Rule Check',  `${input.mainPanelAmps * 1.2 >= input.mainPanelAmps + input.backfeedAmps ? 'PASS ✓' : 'FAIL ✗'}`],
-      ['Interconnection',  esc(input.interconnection)],
+  if (isMicro) {
+    const microDevCount = input.deviceCount ?? input.totalModules;
+    const acBranchCircuits = Math.ceil(microDevCount / 16);
+    const acBranchAmps = Math.ceil((input.acOutputKw * 1000 / 240) * 1.25 / 5) * 5;
+    parts.push(txt(dcCalcX + calcW/2, calcY + 11, 'AC BRANCH CIRCUIT INFO', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
+    const microRows: [string, string][] = [
+      ['Topology',            'MICROINVERTER'],
+      ['Microinverters',      `${microDevCount} units`],
+      ['Total DC Power',      `${totalDcKw.toFixed(2)} kW`],
+      ['AC Output per Micro', `${((input.acOutputKw * 1000) / microDevCount).toFixed(0)} W`],
+      ['AC Branch Circuits',  `${acBranchCircuits}`],
+      ['Max Micros / Branch', '16 (NEC 690.8)'],
+      ['AC Branch OCPD',      `${acBranchAmps} A`],
+      ['AC Wire (branch)',    `${resolvedAcWireGauge}`],
+      ['AC Conduit',          resolvedAcConduitType],
+      ['Module Voc (STC)',    `${input.panelVoc} V`],
+      ['Module Isc (STC)',    `${input.panelIsc} A`],
+      ['DC/AC Ratio',         'N/A (micro)'],
     ];
-    const acRowH = Math.min(14, (calcH - 20) / acRows.length);
-    acRows.forEach(([label, val], i) => {
-      const ry = acCalcX + 22 + i * acRowH - acCalcX + calcY + 22;
-      const ryFixed = calcY + 22 + i * acRowH;
-      if (i % 2 === 1) parts.push(rect(acCalcX, ryFixed - acRowH + 2, calcW, acRowH, { fill: LGY, stroke: 'none', sw: 0 }));
-      parts.push(txt(acCalcX + 6, ryFixed, label, { size: F.tiny }));
-      parts.push(txt(acCalcX + calcW - 6, ryFixed, val, { size: F.tiny, anchor: 'end', bold: true }));
+    const rowH = Math.min(14, (calcH - 20) / microRows.length);
+    microRows.forEach(([label, val], i) => {
+      const ry = calcY + 22 + i * rowH;
+      if (i % 2 === 1) parts.push(rect(dcCalcX, ry - rowH + 2, calcW, rowH, { fill: LGY, stroke: 'none', sw: 0 }));
+      parts.push(txt(dcCalcX + 5, ry, label, { size: F.tiny }));
+      parts.push(txt(dcCalcX + calcW - 5, ry, val, { size: F.tiny, anchor: 'end', bold: true }));
     });
+  } else {
+    parts.push(txt(dcCalcX + calcW/2, calcY + 11, 'DC SYSTEM CALCULATIONS', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
+    const panelsPerStr  = input.panelsPerString ?? Math.round(input.totalModules / Math.max(input.totalStrings, 1));
+    const lastStrPanels = input.lastStringPanels ?? panelsPerStr;
+    const vocCorr       = input.vocCorrected ?? input.panelVoc;
+    const stringVocVal  = input.stringVoc ?? (vocCorr * panelsPerStr);
+    const stringIscVal  = input.stringIsc ?? input.panelIsc;
+    const ocpdStr       = input.ocpdPerString ?? input.dcOCPD;
+    const designTemp    = input.designTempMin ?? -10;
+    const dcAcRatio     = input.dcAcRatio ?? (input.acOutputKw > 0 ? totalDcKw / input.acOutputKw : 0);
 
-    // Equipment Schedule
-    const eqCalcX = DX + (calcW + 4) * 2;
-    parts.push(rect(eqCalcX, calcY, calcW, calcH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-    parts.push(rect(eqCalcX, calcY, calcW, 16, { fill: BLK, stroke: BLK, sw: SW_THIN }));
-    parts.push(txt(eqCalcX + calcW/2, calcY + 11, 'EQUIPMENT SCHEDULE', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
-
-    const microDevCountEq  = input.deviceCount ?? input.totalModules;
-    const panelsPerStrEq   = input.panelsPerString ?? Math.round(input.totalModules / Math.max(input.totalStrings, 1));
-
-    const eqRows: [string, string][] = isMicro ? [
-      ['PV Module',             esc(input.panelModel)],
-      ['Module Wattage',        `${input.panelWatts} W`],
-      ['Total Modules',         `${input.totalModules}`],
-      ['Microinverters',        `${microDevCountEq} units`],
-      ['Panels per Micro',      `${panelsPerStrEq}`],
-      ['AC Branch Circuits',    `${Math.ceil(microDevCountEq / 16)}`],
-      ['Inverter Mfr.',         esc(input.inverterManufacturer)],
-      ['Inverter Model',        esc(input.inverterModel)],
-      ['Inverter Output',       `${input.acOutputKw} kW AC`],
-      ['Main Panel',            `${input.mainPanelAmps} A`],
-      ['Utility',               esc(input.utilityName)],
-      ['Interconnection',       esc(input.interconnection)],
-      ['Rapid Shutdown',        input.rapidShutdownIntegrated ? 'INTEGRATED' : 'EXTERNAL'],
-      ['Battery Storage',       input.hasBattery ? esc(input.batteryModel) : 'NONE'],
-    ] : [
-      ['PV Module',             esc(input.panelModel)],
-      ['Module Wattage',        `${input.panelWatts} W`],
-      ['Total Modules',         `${input.totalModules}`],
-      ['Strings',               `${input.totalStrings} × ${panelsPerStrEq} panels`],
-      ['MPPT Channels',         input.mpptAllocation ?? `${input.mpptChannels ?? 1} ch`],
-      ['Combiner',              esc(input.combinerLabel ?? (input.combinerType ?? 'Direct'))],
-      ['Inverter Mfr.',         esc(input.inverterManufacturer)],
-      ['Inverter Model',        esc(input.inverterModel)],
-      ['Inverter Output',       `${input.acOutputKw} kW AC`],
-      ['Main Panel',            `${input.mainPanelAmps} A`],
-      ['Utility',               esc(input.utilityName)],
-      ['Interconnection',       esc(input.interconnection)],
-      ['Rapid Shutdown',        input.rapidShutdownIntegrated ? 'INTEGRATED' : 'EXTERNAL'],
-      ['Battery Storage',       input.hasBattery ? esc(input.batteryModel) : 'NONE'],
+    const dcRows: [string, string][] = [
+      ['Module Voc (STC)',        `${input.panelVoc} V`],
+      ['Module Isc (STC)',        `${input.panelIsc} A`],
+      ['Design Temp (NEC 690.7)', `${designTemp}°C`],
+      ['Voc Corrected',           `${vocCorr.toFixed(2)} V`],
+      ['Panels per String',       panelsPerStr === lastStrPanels ? `${panelsPerStr}` : `${panelsPerStr} (last: ${lastStrPanels})`],
+      ['Number of Strings',       `${input.totalStrings}`],
+      ['String Voc (corrected)',  `${stringVocVal.toFixed(1)} V`],
+      ['String Voc × 1.25 (NEC)', `${(stringVocVal * 1.25).toFixed(1)} V`],
+      ['String Isc × 1.25 (NEC)', `${(stringIscVal * 1.25).toFixed(2)} A`],
+      ['DC OCPD / String',        `${ocpdStr} A`],
+      ['DC Wire Gauge',           `${resolvedDcWireGauge}`],
+      ['Total DC Power',          `${totalDcKw.toFixed(2)} kW`],
+      ['DC/AC Ratio',             `${dcAcRatio.toFixed(2)}`],
     ];
-    const eqRowH = Math.min(14, (calcH - 20) / eqRows.length);
-    eqRows.forEach(([label, val], i) => {
-      const ry = calcY + 22 + i * eqRowH;
-      if (i % 2 === 1) parts.push(rect(eqCalcX, ry - eqRowH + 2, calcW, eqRowH, { fill: LGY, stroke: 'none', sw: 0 }));
-      parts.push(txt(eqCalcX + 6, ry, label, { size: F.tiny }));
-      parts.push(txt(eqCalcX + calcW - 6, ry, val, { size: F.tiny, anchor: 'end', bold: true }));
+    const rowH = Math.min(14, (calcH - 20) / dcRows.length);
+    dcRows.forEach(([label, val], i) => {
+      const ry = calcY + 22 + i * rowH;
+      if (i % 2 === 1) parts.push(rect(dcCalcX, ry - rowH + 2, calcW, rowH, { fill: LGY, stroke: 'none', sw: 0 }));
+      parts.push(txt(dcCalcX + 5, ry, label, { size: F.tiny }));
+      parts.push(txt(dcCalcX + calcW - 5, ry, val, { size: F.tiny, anchor: 'end', bold: true }));
     });
   }
 
-  // ─── NOTES SECTION ────────────────────────────────────────────────────────
-  parts.push(rect(DX, NOTES_Y, DW, NOTES_H, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-  parts.push(txt(DX + 8, NOTES_Y + 12, 'GENERAL NOTES & NEC CODE COMPLIANCE', { size: F.hdr, bold: true }));
-  parts.push(line(DX, NOTES_Y + 16, DX + DW, NOTES_Y + 16, { sw: SW_THIN }));
+  // Panel 2: AC Calcs
+  const acCalcX = DX + calcW + 4;
+  parts.push(rect(acCalcX, calcY, calcW, calcH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+  parts.push(rect(acCalcX, calcY, calcW, 16, { fill: BLK, stroke: BLK, sw: 0 }));
+  parts.push(txt(acCalcX + calcW/2, calcY + 11, 'AC SYSTEM CALCULATIONS', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
 
-  const panelsPerStrNote  = input.panelsPerString ?? Math.round(input.totalModules / Math.max(input.totalStrings, 1));
-  const vocCorrNote       = input.vocCorrected ?? input.panelVoc;
-  const microDevCountNote = input.deviceCount ?? input.totalModules;
-
-  const notes = isMicro ? [
-    'ALL WORK SHALL COMPLY WITH NEC 2020, NEC 690, NEC 705.',
-    `PV MODULES: ${esc(input.panelModel)} — ${input.panelWatts}W, Voc=${input.panelVoc}V, Isc=${input.panelIsc}A`,
-    `MICROINVERTERS: ${microDevCountNote} UNITS — DC→AC AT EACH MODULE`,
-    `AC BRANCH CIRCUITS: ${Math.ceil(microDevCountNote / 16)} CIRCUITS (MAX 16 MICROS/BRANCH — NEC 690.8)`,
-    `INVERTER: ${esc(input.inverterManufacturer)} ${esc(input.inverterModel)} — ${input.acOutputKw} kW`,
-    `AC CONDUCTORS: ${resolvedAcWireGauge} THWN-2 — NEC 310`,
-    `CONDUIT: ${resolvedAcConduitType} — NEC 358/352`,
-    `AC OCPD: ${resolvedAcOCPD}A — NEC 705.12`,
-    `BACKFEED BREAKER: ${input.backfeedAmps}A — NEC 705.12(B)(2)`,
-    `MAIN PANEL: ${input.mainPanelAmps}A — BUSBAR LOADING ≤ 120%`,
-    'GROUNDING: NEC 250.122, NEC 690.43',
-    'BONDING: NEC 690.43, NEC 250.97',
-    input.rapidShutdownIntegrated ? 'RAPID SHUTDOWN: NEC 690.12 INTEGRATED (MICRO)' : 'RAPID SHUTDOWN: NEC 690.12 — EXTERNAL DEVICE',
-    `INTERCONNECTION: ${esc(input.interconnection)} — NEC 705`,
-    `UTILITY: ${esc(input.utilityName)} — NOTIFY PRIOR TO ENERGIZING`,
-    'INSTALLER SHALL VERIFY ALL DIMENSIONS IN FIELD',
-  ] : [
-    'ALL WORK SHALL COMPLY WITH NEC 2020, NEC 690, NEC 705.',
-    `PV MODULES: ${esc(input.panelModel)} — ${input.panelWatts}W, Voc=${input.panelVoc}V, Isc=${input.panelIsc}A`,
-    `STRING CONFIG: ${input.totalStrings} STRINGS × ${panelsPerStrNote} PANELS — NEC 690.7`,
-    `VOC CORRECTED @ ${input.designTempMin ?? -10}°C: ${vocCorrNote.toFixed(2)}V/MODULE — NEC 690.7`,
-    `INVERTER: ${esc(input.inverterManufacturer)} ${esc(input.inverterModel)} — ${input.acOutputKw} kW`,
-    `DC CONDUCTORS: ${resolvedDcWireGauge} PV WIRE — NEC 690.31`,
-    `AC CONDUCTORS: ${resolvedAcWireGauge} THWN-2 — NEC 310`,
-    `CONDUIT: ${input.dcConduitType}/${resolvedAcConduitType} — NEC 358/352`,
-    `DC OCPD/STRING: ${input.ocpdPerString ?? input.dcOCPD}A — NEC 690.9`,
-    `AC OCPD: ${resolvedAcOCPD}A — NEC 705.12`,
-    `BACKFEED BREAKER: ${input.backfeedAmps}A — NEC 705.12(B)(2)`,
-    `MAIN PANEL: ${input.mainPanelAmps}A — BUSBAR LOADING ≤ 120%`,
-    'GROUNDING: NEC 250.122, NEC 690.43',
-    'BONDING: NEC 690.43, NEC 250.97',
-    input.rapidShutdownIntegrated ? 'RAPID SHUTDOWN: NEC 690.12 INTEGRATED' : 'RAPID SHUTDOWN: NEC 690.12 — EXTERNAL DEVICE',
-    `INTERCONNECTION: ${esc(input.interconnection)} — NEC 705`,
-    `UTILITY: ${esc(input.utilityName)} — NOTIFY PRIOR TO ENERGIZING`,
-    'INSTALLER SHALL VERIFY ALL DIMENSIONS IN FIELD',
-    ...(input.stringConfigWarnings?.map(w => `⚠ ${w}`) ?? []),
+  const acRows: [string, string][] = [
+    ['AC Output (kW)',    `${input.acOutputKw} kW`],
+    ['AC Output Amps',   `${input.acOutputAmps} A`],
+    ['AC OCPD (125%)',   `${resolvedAcOCPD} A`],
+    ['AC Wire Gauge',    `${resolvedAcWireGauge}`],
+    ['AC Conduit Type',  resolvedAcConduitType],
+    ['Conduit Size',     resolvedAcConduitSize || '—'],
+    ['Service Voltage',  '120/240V, 1Ø'],
+    ['Main Panel Rating',`${input.mainPanelAmps} A`],
+    ['Backfeed Breaker', `${input.backfeedAmps} A`],
+    ['Busbar Loading',   `${((input.backfeedAmps / input.mainPanelAmps) * 100).toFixed(1)}%`],
+    ['120% Rule Check',  `${input.mainPanelAmps * 1.2 >= input.mainPanelAmps + input.backfeedAmps ? 'PASS ✓' : 'FAIL ✗'}`],
+    ['Interconnection',  esc(input.interconnection)],
   ];
-
-  const colW        = DW / 3;
-  const noteLineH   = 11;
-  const notesPerCol = Math.ceil(notes.length / 3);
-  notes.forEach((note, i) => {
-    const col = Math.floor(i / notesPerCol);
-    const row = i % notesPerCol;
-    const nx  = DX + 8 + col * colW;
-    const ny  = NOTES_Y + 24 + row * noteLineH;
-    parts.push(txt(nx, ny, `${i + 1}. ${note}`, { size: F.note }));
+  const acRowH = Math.min(14, (calcH - 20) / acRows.length);
+  acRows.forEach(([label, val], i) => {
+    const ry = calcY + 22 + i * acRowH;
+    if (i % 2 === 1) parts.push(rect(acCalcX, ry - acRowH + 2, calcW, acRowH, { fill: LGY, stroke: 'none', sw: 0 }));
+    parts.push(txt(acCalcX + 5, ry, label, { size: F.tiny }));
+    parts.push(txt(acCalcX + calcW - 5, ry, val, { size: F.tiny, anchor: 'end', bold: true }));
   });
-  parts.push(line(DX + colW,     NOTES_Y + 16, DX + colW,     NOTES_Y + NOTES_H, { sw: SW_THIN }));
-  parts.push(line(DX + colW * 2, NOTES_Y + 16, DX + colW * 2, NOTES_Y + NOTES_H, { sw: SW_THIN }));
 
-  // ─── CONDUIT SCHEDULE ─────────────────────────────────────────────────────
-  parts.push(rect(DX, SCHED_Y, DW, SCHED_H, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-  parts.push(txt(DX + 8, SCHED_Y + 12, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9', { size: F.hdr, bold: true }));
-  parts.push(line(DX, SCHED_Y + 16, DX + DW, SCHED_Y + 16, { sw: SW_THIN }));
+  // Panel 3: Equipment Schedule
+  const eqCalcX = DX + (calcW + 4) * 2;
+  parts.push(rect(eqCalcX, calcY, calcW, calcH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+  parts.push(rect(eqCalcX, calcY, calcW, 16, { fill: BLK, stroke: BLK, sw: 0 }));
+  parts.push(txt(eqCalcX + calcW/2, calcY + 11, 'EQUIPMENT SCHEDULE', { size: F.hdr, bold: true, anchor: 'middle', fill: WHT }));
 
+  const microDevCountEq = input.deviceCount ?? input.totalModules;
+  const panelsPerStrEq  = input.panelsPerString ?? Math.round(input.totalModules / Math.max(input.totalStrings, 1));
+
+  const eqRows: [string, string][] = isMicro ? [
+    ['PV Module',          esc(input.panelModel)],
+    ['Module Wattage',     `${input.panelWatts} W`],
+    ['Total Modules',      `${input.totalModules}`],
+    ['Microinverters',     `${microDevCountEq} units`],
+    ['AC Branch Circuits', `${Math.ceil(microDevCountEq / 16)}`],
+    ['Inverter Mfr.',      esc(input.inverterManufacturer)],
+    ['Inverter Model',     esc(input.inverterModel)],
+    ['Inverter Output',    `${input.acOutputKw} kW AC`],
+    ['Main Panel',         `${input.mainPanelAmps} A`],
+    ['Utility',            esc(input.utilityName)],
+    ['Interconnection',    esc(input.interconnection)],
+    ['Rapid Shutdown',     input.rapidShutdownIntegrated ? 'INTEGRATED' : 'EXTERNAL'],
+    ['Battery Storage',    input.hasBattery ? esc(input.batteryModel) : 'NONE'],
+  ] : [
+    ['PV Module',          esc(input.panelModel)],
+    ['Module Wattage',     `${input.panelWatts} W`],
+    ['Total Modules',      `${input.totalModules}`],
+    ['Strings',            `${input.totalStrings} × ${panelsPerStrEq} panels`],
+    ['MPPT Channels',      input.mpptAllocation ?? `${input.mpptChannels ?? 1} ch`],
+    ['Combiner',           esc(input.combinerLabel ?? (input.combinerType ?? 'Direct'))],
+    ['Inverter Mfr.',      esc(input.inverterManufacturer)],
+    ['Inverter Model',     esc(input.inverterModel)],
+    ['Inverter Output',    `${input.acOutputKw} kW AC`],
+    ['Main Panel',         `${input.mainPanelAmps} A`],
+    ['Utility',            esc(input.utilityName)],
+    ['Interconnection',    esc(input.interconnection)],
+    ['Rapid Shutdown',     input.rapidShutdownIntegrated ? 'INTEGRATED' : 'EXTERNAL'],
+    ['Battery Storage',    input.hasBattery ? esc(input.batteryModel) : 'NONE'],
+  ];
+  const eqRowH = Math.min(14, (calcH - 20) / eqRows.length);
+  eqRows.forEach(([label, val], i) => {
+    const ry = calcY + 22 + i * eqRowH;
+    if (i % 2 === 1) parts.push(rect(eqCalcX, ry - eqRowH + 2, calcW, eqRowH, { fill: LGY, stroke: 'none', sw: 0 }));
+    parts.push(txt(eqCalcX + 5, ry, label, { size: F.tiny }));
+    parts.push(txt(eqCalcX + calcW - 5, ry, val, { size: F.tiny, anchor: 'end', bold: true }));
+  });
+
+  // ── CONDUIT & CONDUCTOR SCHEDULE ─────────────────────────────────────────────
+  const schedY2 = NOTES_Y;
+  const schedH2 = NOTES_H;
+  parts.push(rect(DX, schedY2, DW, schedH2, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+  parts.push(rect(DX, schedY2, DW, 16, { fill: BLK, stroke: BLK, sw: 0 }));
+  parts.push(txt(DX + 8, schedY2 + 11, 'CONDUIT & CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9', {
+    size: F.hdr, bold: true, fill: WHT,
+  }));
+
+  // Column definitions
   const schedCols = [
-    { label: 'RUN',        w: 0.05 },
-    { label: 'FROM',       w: 0.10 },
-    { label: 'TO',         w: 0.10 },
-    { label: 'CONDUCTORS', w: 0.22 },
-    { label: 'CONDUIT',    w: 0.09 },
-    { label: 'FILL%',      w: 0.06 },
-    { label: 'AMPACITY',   w: 0.07 },
-    { label: 'OCPD',       w: 0.07 },
-    { label: 'V-DROP%',    w: 0.07 },
-    { label: 'LENGTH',     w: 0.07 },
-    { label: 'PASS',       w: 0.06 },
+    { label: 'RUN ID',      w: 0.07 },
+    { label: 'FROM',        w: 0.11 },
+    { label: 'TO',          w: 0.11 },
+    { label: 'CONDUCTORS',  w: 0.24 },
+    { label: 'CONDUIT',     w: 0.10 },
+    { label: 'FILL %',      w: 0.06 },
+    { label: 'AMPACITY',    w: 0.07 },
+    { label: 'OCPD',        w: 0.06 },
+    { label: 'V-DROP %',    w: 0.07 },
+    { label: 'LENGTH',      w: 0.06 },
+    { label: 'PASS',        w: 0.05 },
   ];
 
+  const hdrRowY = schedY2 + 26;
+  const rowH    = 14;
   let colX = DX;
-  const hdrY = SCHED_Y + 26;
-  const rowH = 15;
   schedCols.forEach(col => {
     const cw = col.w * DW;
-    parts.push(txt(colX + 4, hdrY, col.label, { size: F.tiny, bold: true }));
-    parts.push(line(colX, SCHED_Y + 16, colX, SCHED_Y + SCHED_H, { sw: SW_HAIR }));
+    parts.push(txt(colX + 3, hdrRowY, col.label, { size: F.tiny, bold: true }));
+    parts.push(line(colX, schedY2 + 16, colX, schedY2 + schedH2, { sw: SW_HAIR }));
     colX += cw;
   });
-  parts.push(line(DX, hdrY + 2, DX + DW, hdrY + 2, { sw: SW_THIN }));
+  parts.push(line(DX, hdrRowY + 2, DX + DW, hdrRowY + 2, { sw: SW_THIN }));
 
-  // Build schedule rows — Priority: ComputedSystem.runs > fallback defaults
-  let schedRows: any[] = [];
+  // Build schedule rows from RunSegment[] — single source of truth
+  let schedRows: {
+    id: string; from: string; to: string;
+    conductors: string; conduitType: string;
+    fillPercent: number; ampacity: number;
+    ocpd: number; voltageDrop: number;
+    lengthFt: number; pass: boolean;
+  }[] = [];
 
   if (input.runs && input.runs.length > 0) {
     schedRows = input.runs.map(run => {
-      // Use conductorBundle for display if available, else fall back to conductorCallout
+      // Build conductor display string from best available data
       let conductorsDisplay = '';
       if (run.conductorBundle && run.conductorBundle.length > 0) {
         conductorsDisplay = run.conductorBundle
-          .map((c: ConductorBundle) => `${c.qty}#${c.gauge.replace('#','').replace(' AWG','')} ${c.color}`)
+          .map((c: ConductorBundle) => {
+            const g = c.gauge.replace('#', '').replace(' AWG', '');
+            return `${c.qty}#${g} ${c.insulation} ${c.color}`;
+          })
           .join(' + ');
       } else if (run.conductorCallout) {
-        // Replace \n with ' + ' for single-line table display
-        conductorsDisplay = run.conductorCallout.replace(/\n/g, ' + ').replace(/IN \S+ \S+$/, '').trim();
+        conductorsDisplay = run.conductorCallout
+          .replace(/\n/g, ' + ')
+          .replace(/IN \S+ \S+$/, '')
+          .replace(/\(OPEN AIR[^)]*\)/, '(OPEN AIR)')
+          .trim();
       } else {
-        conductorsDisplay = `${run.conductorCount}#${run.wireGauge.replace('#','').replace(' AWG','')} ${run.insulation}`;
+        const g = run.wireGauge.replace('#', '').replace(' AWG', '');
+        const eg = run.egcGauge.replace('#', '').replace(' AWG', '');
+        conductorsDisplay = `${run.conductorCount}#${g} ${run.insulation} + 1#${eg} GND`;
       }
+
+      const conduitDisplay = run.isOpenAir
+        ? 'OPEN AIR'
+        : `${run.conduitType} ${run.conduitSize}`;
+
       return {
-        raceway:     run.id,
+        id:          run.id,
         from:        run.from,
         to:          run.to,
         conductors:  conductorsDisplay,
-        conduitType: run.isOpenAir ? 'OPEN AIR' : `${run.conduitType} ${run.conduitSize}`,
-        fillPercent: run.conduitFillPct,
-        ampacity:    run.continuousCurrent,
-        ocpd:        run.ocpdAmps,
-        voltageDrop: run.voltageDropPct,
-        lengthFt:    run.onewayLengthFt,
-        pass:        run.overallPass,
+        conduitType: conduitDisplay,
+        fillPercent: run.conduitFillPct ?? 0,
+        ampacity:    run.continuousCurrent ?? 0,
+        ocpd:        run.ocpdAmps ?? 0,
+        voltageDrop: run.voltageDropPct ?? 0,
+        lengthFt:    run.onewayLengthFt ?? 0,
+        pass:        run.overallPass ?? true,
       };
     });
   } else {
-    // Fallback defaults
-    const microDevCnt = input.deviceCount ?? input.totalModules;
+    // Fallback when no runs provided
     schedRows = isMicro ? [
-      { raceway: 'BR-1', from: 'MICROINVERTERS', to: 'AC COMBINER', conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize || '3/4"'}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.2, pass: true },
-      { raceway: 'A-1',  from: 'AC COMBINER',   to: 'AC DISCO',    conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize || '3/4"'}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.4, pass: true },
-      { raceway: 'A-2',  from: 'AC DISCO',       to: 'METER',       conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize || '3/4"'}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.4, pass: true },
-      { raceway: 'A-3',  from: 'METER',          to: 'MSP',         conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize || '3/4"'}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, pass: true },
+      { id: 'BR-1', from: 'MICROINVERTERS', to: 'AC COMBINER', conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.2, lengthFt: 50, pass: true },
+      { id: 'A-1',  from: 'AC COMBINER',   to: 'AC DISCO',    conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.4, lengthFt: 20, pass: true },
+      { id: 'A-2',  from: 'AC DISCO',       to: 'METER',       conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.4, lengthFt: 15, pass: true },
+      { id: 'A-3',  from: 'METER',          to: 'MSP',         conductors: `${resolvedAcWireGauge} THWN-2`, conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, lengthFt: 10, pass: true },
     ] : [
-      { raceway: 'D-1', from: 'PV ARRAY',  to: 'DC DISCO',  conductors: `${resolvedDcWireGauge} PV WIRE`,  conduitType: `${input.dcConduitType} OPEN AIR`, fillPercent: 0,  ampacity: 30,                  ocpd: input.dcOCPD,   voltageDrop: 1.2, pass: true },
-      { raceway: 'D-2', from: 'DC DISCO',  to: 'INVERTER',  conductors: `${resolvedDcWireGauge} PV WIRE`,  conduitType: `${input.dcConduitType} 3/4"`,    fillPercent: 28, ampacity: 30,                  ocpd: input.dcOCPD,   voltageDrop: 1.2, pass: true },
-      { raceway: 'A-1', from: 'INVERTER',  to: 'AC DISCO',  conductors: `${resolvedAcWireGauge} THWN-2`,   conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize || '3/4"'}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, pass: true },
-      { raceway: 'A-2', from: 'AC DISCO',  to: 'METER',     conductors: `${resolvedAcWireGauge} THWN-2`,   conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize || '3/4"'}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, pass: true },
-      { raceway: 'A-3', from: 'METER',     to: 'MSP',       conductors: `${resolvedAcWireGauge} THWN-2`,   conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize || '3/4"'}`, fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, pass: true },
+      { id: 'D-1', from: 'PV ARRAY',  to: 'DC DISCO',  conductors: `${resolvedDcWireGauge} PV Wire`,  conduitType: 'OPEN AIR',                                                                   fillPercent: 0,  ampacity: 30,                  ocpd: input.dcOCPD,   voltageDrop: 1.2, lengthFt: 50, pass: true },
+      { id: 'D-2', from: 'DC DISCO',  to: 'INVERTER',  conductors: `${resolvedDcWireGauge} PV Wire`,  conduitType: `${input.dcConduitType} 3/4"`,                                                fillPercent: 28, ampacity: 30,                  ocpd: input.dcOCPD,   voltageDrop: 1.2, lengthFt: 20, pass: true },
+      { id: 'A-1', from: 'INVERTER',  to: 'AC DISCO',  conductors: `${resolvedAcWireGauge} THWN-2`,   conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize}`,                          fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, lengthFt: 20, pass: true },
+      { id: 'A-2', from: 'AC DISCO',  to: 'METER',     conductors: `${resolvedAcWireGauge} THWN-2`,   conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize}`,                          fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, lengthFt: 15, pass: true },
+      { id: 'A-3', from: 'METER',     to: 'MSP',       conductors: `${resolvedAcWireGauge} THWN-2`,   conduitType: `${resolvedAcConduitType} ${resolvedAcConduitSize}`,                          fillPercent: 32, ampacity: input.acOutputAmps, ocpd: resolvedAcOCPD, voltageDrop: 1.8, lengthFt: 10, pass: true },
     ];
   }
 
-  schedRows.slice(0, 10).forEach((row: any, ri) => {
-    const ry = hdrY + 4 + (ri + 1) * rowH;
+  const maxRows = Math.floor((schedH2 - 32) / rowH);
+  schedRows.slice(0, maxRows).forEach((row, ri) => {
+    const ry = hdrRowY + 4 + (ri + 1) * rowH;
     if (ri % 2 === 1) parts.push(rect(DX, ry - rowH + 2, DW, rowH, { fill: LGY, stroke: 'none', sw: 0 }));
-    let cx2 = DX;
-    const passVal = row.pass != null ? (row.pass ? '✓' : '✗') : '';
-    const passColor = row.pass ? '#006600' : '#CC0000';
+
+    const passColor = row.pass ? GRN_PASS : RED_FAIL;
+    const passVal   = row.pass ? '✓ PASS' : '✗ FAIL';
+
     const vals = [
-      row.raceway ?? '',
-      row.from ?? '',
-      row.to ?? '',
-      row.conductors ?? '',
-      row.conduitType ?? '',
-      row.fillPercent != null ? `${Number(row.fillPercent).toFixed(1)}%` : '',
-      row.ampacity != null ? `${row.ampacity}A` : '',
-      row.ocpd != null ? `${row.ocpd}A` : '',
-      row.voltageDrop != null ? `${Number(row.voltageDrop).toFixed(2)}%` : '',
-      (row as any).lengthFt != null ? `${(row as any).lengthFt} FT` : '',
+      row.id,
+      row.from,
+      row.to,
+      row.conductors,
+      row.conduitType,
+      row.fillPercent > 0 ? `${Number(row.fillPercent).toFixed(1)}%` : (row.conduitType === 'OPEN AIR' ? 'N/A' : '—'),
+      row.ampacity > 0 ? `${row.ampacity}A` : '—',
+      row.ocpd > 0 ? `${row.ocpd}A` : '—',
+      row.voltageDrop > 0 ? `${Number(row.voltageDrop).toFixed(2)}%` : '—',
+      row.lengthFt > 0 ? `${row.lengthFt} FT` : '—',
       passVal,
     ];
+
+    let cx2 = DX;
     schedCols.forEach((col, ci) => {
       const cw = col.w * DW;
       const fillColor = ci === 10 ? passColor : BLK;
-      parts.push(txt(cx2 + 4, ry, String(vals[ci] ?? ''), { size: F.tiny, fill: fillColor, bold: ci === 10 }));
+      const isBold    = ci === 10;
+      parts.push(txt(cx2 + 3, ry, String(vals[ci] ?? ''), { size: F.tiny, fill: fillColor, bold: isBold }));
       cx2 += cw;
     });
   });
 
-  // ─── TITLE BLOCK (right side) ─────────────────────────────────────────────
+  // ── TITLE BLOCK (right side) ─────────────────────────────────────────────────
   const tbX = TB_X;
   const tbY = DY;
   const tbH = DH;
 
   parts.push(rect(tbX, tbY, TB_W, tbH, { fill: WHT, stroke: BLK, sw: SW_HEAVY }));
 
-  // Company header — black bar
-  parts.push(rect(tbX, tbY, TB_W, 44, { fill: BLK, stroke: BLK, sw: SW_THIN }));
-  parts.push(txt(tbX + TB_W/2, tbY + 18, 'SOLARPRO', { size: 16, bold: true, anchor: 'middle', fill: WHT }));
-  parts.push(txt(tbX + TB_W/2, tbY + 32, 'ENGINEERING', { size: F.tb, anchor: 'middle', fill: '#AAAAAA' }));
+  // Company header
+  parts.push(rect(tbX, tbY, TB_W, 42, { fill: BLK, stroke: BLK, sw: 0 }));
+  parts.push(txt(tbX + TB_W/2, tbY + 17, 'SOLARPRO', { size: 15, bold: true, anchor: 'middle', fill: WHT }));
+  parts.push(txt(tbX + TB_W/2, tbY + 30, 'ENGINEERING', { size: F.tb, anchor: 'middle', fill: '#AAAAAA' }));
 
-  // Drawing title section
-  parts.push(rect(tbX, tbY + 44, TB_W, 36, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-  parts.push(txt(tbX + TB_W/2, tbY + 60, 'SINGLE LINE DIAGRAM', { size: F.tbTitle, bold: true, anchor: 'middle' }));
-  parts.push(txt(tbX + TB_W/2, tbY + 74, 'PHOTOVOLTAIC SYSTEM', { size: F.tb, anchor: 'middle' }));
+  // Drawing title
+  parts.push(rect(tbX, tbY + 42, TB_W, 34, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+  parts.push(txt(tbX + TB_W/2, tbY + 57, 'SINGLE LINE DIAGRAM', { size: F.tbTitle, bold: true, anchor: 'middle' }));
+  parts.push(txt(tbX + TB_W/2, tbY + 70, 'PHOTOVOLTAIC SYSTEM', { size: F.tb, anchor: 'middle' }));
 
   // Project info rows
   const tbInfoRows: [string, string][] = [
@@ -1057,18 +1074,18 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['REVISION', input.revision],
     ['SCALE',    input.scale || 'NOT TO SCALE'],
   ];
-  let tbRowY = tbY + 80;
+  let tbRowY = tbY + 76;
   const tbRowH = 22;
   tbInfoRows.forEach(([label, val]) => {
     parts.push(rect(tbX, tbRowY, TB_W, tbRowH, { fill: WHT, stroke: BLK, sw: SW_HAIR }));
-    parts.push(txt(tbX + 6, tbRowY + 14, label, { size: F.tiny, bold: true, fill: '#555555' }));
-    parts.push(txt(tbX + 72, tbRowY + 14, esc(String(val ?? '')), { size: F.tb }));
+    parts.push(txt(tbX + 5, tbRowY + 14, label, { size: F.tiny, bold: true, fill: '#555555' }));
+    parts.push(txt(tbX + 68, tbRowY + 14, esc(String(val ?? '')), { size: F.tb }));
     tbRowY += tbRowH;
   });
 
   // System Summary
   const sysY = tbRowY + 4;
-  parts.push(rect(tbX, sysY, TB_W, 14, { fill: BLK, stroke: BLK, sw: SW_THIN }));
+  parts.push(rect(tbX, sysY, TB_W, 14, { fill: BLK, stroke: BLK, sw: 0 }));
   parts.push(txt(tbX + TB_W/2, sysY + 10, 'SYSTEM SUMMARY', { size: F.sub, bold: true, anchor: 'middle', fill: WHT }));
 
   const sysRows: [string, string][] = [
@@ -1076,24 +1093,24 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['DC SIZE',    `${(input.totalModules * input.panelWatts / 1000).toFixed(2)} kW`],
     ['AC OUTPUT',  `${input.acOutputKw} kW`],
     ['MODULES',    `${input.totalModules} × ${input.panelWatts}W`],
-    ['INVERTER',   `${input.inverterManufacturer}`],
-    ['MODEL',      `${input.inverterModel}`],
+    ['INVERTER',   `${esc(input.inverterManufacturer)}`],
+    ['MODEL',      `${esc(input.inverterModel)}`],
     ['SERVICE',    `${input.mainPanelAmps}A`],
-    ['UTILITY',    input.utilityName],
-    ['INTERCONN.', input.interconnection],
+    ['UTILITY',    esc(input.utilityName)],
+    ['INTERCONN.', esc(input.interconnection)],
   ];
   let sysRowY = sysY + 14;
   const sysRowH = 18;
   sysRows.forEach(([label, val]) => {
     parts.push(rect(tbX, sysRowY, TB_W, sysRowH, { fill: WHT, stroke: BLK, sw: SW_HAIR }));
-    parts.push(txt(tbX + 6, sysRowY + 12, label, { size: F.tiny, bold: true, fill: '#555555' }));
-    parts.push(txt(tbX + 80, sysRowY + 12, esc(String(val ?? '')), { size: F.tb }));
+    parts.push(txt(tbX + 5, sysRowY + 12, label, { size: F.tiny, bold: true, fill: '#555555' }));
+    parts.push(txt(tbX + 76, sysRowY + 12, esc(String(val ?? '')), { size: F.tb }));
     sysRowY += sysRowH;
   });
 
   // Code References
   const codeY = sysRowY + 4;
-  parts.push(rect(tbX, codeY, TB_W, 14, { fill: BLK, stroke: BLK, sw: SW_THIN }));
+  parts.push(rect(tbX, codeY, TB_W, 14, { fill: BLK, stroke: BLK, sw: 0 }));
   parts.push(txt(tbX + TB_W/2, codeY + 10, 'CODE REFERENCES', { size: F.sub, bold: true, anchor: 'middle', fill: WHT }));
   const codes = [
     '• NEC 690 — PV SYSTEMS',
@@ -1107,36 +1124,36 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   ];
   let codeRowY = codeY + 14;
   codes.forEach(code => {
-    parts.push(txt(tbX + 6, codeRowY + 10, code, { size: F.tiny }));
+    parts.push(txt(tbX + 5, codeRowY + 10, code, { size: F.tiny }));
     codeRowY += 13;
   });
 
-  // Revisions
+  // Revisions table
   const revY = codeRowY + 4;
-  const revH = Math.min(100, tbY + tbH - revY - 60);
-  if (revH > 30) {
-    parts.push(rect(tbX, revY, TB_W, 14, { fill: BLK, stroke: BLK, sw: SW_THIN }));
+  const revH = Math.min(90, tbY + tbH - revY - 58);
+  if (revH > 28) {
+    parts.push(rect(tbX, revY, TB_W, 14, { fill: BLK, stroke: BLK, sw: 0 }));
     parts.push(txt(tbX + TB_W/2, revY + 10, 'REVISIONS', { size: F.sub, bold: true, anchor: 'middle', fill: WHT }));
     parts.push(rect(tbX, revY + 14, TB_W, revH, { fill: WHT, stroke: BLK, sw: SW_THIN }));
     const revColW = TB_W / 3;
-    parts.push(txt(tbX + 6, revY + 24, 'REV', { size: F.tiny, bold: true }));
-    parts.push(txt(tbX + revColW + 4, revY + 24, 'DESCRIPTION', { size: F.tiny, bold: true }));
-    parts.push(txt(tbX + revColW * 2 + 4, revY + 24, 'DATE', { size: F.tiny, bold: true }));
+    parts.push(txt(tbX + 4, revY + 24, 'REV', { size: F.tiny, bold: true }));
+    parts.push(txt(tbX + revColW + 3, revY + 24, 'DESCRIPTION', { size: F.tiny, bold: true }));
+    parts.push(txt(tbX + revColW * 2 + 3, revY + 24, 'DATE', { size: F.tiny, bold: true }));
     parts.push(line(tbX, revY + 26, tbX + TB_W, revY + 26, { sw: SW_HAIR }));
     parts.push(line(tbX + revColW, revY + 14, tbX + revColW, revY + revH, { sw: SW_HAIR }));
     parts.push(line(tbX + revColW * 2, revY + 14, tbX + revColW * 2, revY + revH, { sw: SW_HAIR }));
-    parts.push(txt(tbX + 6, revY + 38, input.revision, { size: F.tiny }));
-    parts.push(txt(tbX + revColW + 4, revY + 38, 'INITIAL ISSUE', { size: F.tiny }));
-    parts.push(txt(tbX + revColW * 2 + 4, revY + 38, input.drawingDate, { size: F.tiny }));
+    parts.push(txt(tbX + 4, revY + 38, input.revision, { size: F.tiny }));
+    parts.push(txt(tbX + revColW + 3, revY + 38, 'INITIAL ISSUE', { size: F.tiny }));
+    parts.push(txt(tbX + revColW * 2 + 3, revY + 38, input.drawingDate, { size: F.tiny }));
   }
 
-  // Seal area
-  const sealY = tbY + tbH - 55;
-  parts.push(rect(tbX, sealY, TB_W, 55, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-  parts.push(circle(tbX + TB_W/2, sealY + 28, 22, { fill: WHT, stroke: BLK, sw: SW_THIN }));
-  parts.push(txt(tbX + TB_W/2, sealY + 24, 'ENGINEER', { size: F.tiny, anchor: 'middle', fill: '#888888' }));
-  parts.push(txt(tbX + TB_W/2, sealY + 35, 'SEAL', { size: F.tiny, anchor: 'middle', fill: '#888888' }));
-  parts.push(txt(tbX + TB_W/2, sealY + 50, `${esc(input.designer)} — ${esc(input.drawingDate)}`, { size: F.tiny, anchor: 'middle', fill: '#555555' }));
+  // Engineer seal area
+  const sealY = tbY + tbH - 54;
+  parts.push(rect(tbX, sealY, TB_W, 54, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+  parts.push(circle(tbX + TB_W/2, sealY + 26, 20, { fill: WHT, stroke: BLK, sw: SW_THIN }));
+  parts.push(txt(tbX + TB_W/2, sealY + 22, 'ENGINEER', { size: F.tiny, anchor: 'middle', fill: '#888888' }));
+  parts.push(txt(tbX + TB_W/2, sealY + 33, 'SEAL', { size: F.tiny, anchor: 'middle', fill: '#888888' }));
+  parts.push(txt(tbX + TB_W/2, sealY + 48, `${esc(input.designer)} — ${esc(input.drawingDate)}`, { size: F.tiny, anchor: 'middle', fill: '#555555' }));
 
   parts.push('</svg>');
   return parts.join('\n');
