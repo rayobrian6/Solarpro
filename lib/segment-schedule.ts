@@ -463,8 +463,9 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
     // SEGMENT 3: AC Combiner → AC Disconnect (CONDUIT)
     // Feeder: all branches combined into single feeder
-    // Conductors: 1 BLK + 1 RED + 1 WHT (neutral) + 1 GRN EGC
-    const feederSizing = autoSizeGauge(totalCurrentA, ambientC, 3, false, '#10 AWG');
+    // 240V split-phase PV output: L1 (BLK) + L2 (RED) + EGC (GRN) — NO neutral
+    // NEC 690.8: PV AC output circuits are ungrounded 2-wire 240V; neutral NOT required
+    const feederSizing = autoSizeGauge(totalCurrentA, ambientC, 2, false, '#10 AWG');
     const feederGauge = feederSizing.gauge;
     const feederOcpd = nextStandardOCPD(totalCurrentA * 1.25);
     const feederEgcGauge = getEGCGauge(feederOcpd);
@@ -472,7 +473,6 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     const seg3Bundle: ConductorBundle[] = [
       { qty: 1, gauge: feederGauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: totalCurrentA },
       { qty: 1, gauge: feederGauge, color: 'RED', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: totalCurrentA },
-      { qty: 1, gauge: feederGauge, color: 'WHT', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: totalCurrentA },
       { qty: 1, gauge: feederEgcGauge, color: 'GRN', insulation: 'THWN-2', isCurrentCarrying: false, currentPerConductor: 0 },
     ];
 
@@ -546,8 +546,10 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
     // SEGMENT 3: Inverter → AC Disconnect (CONDUIT)
     // AC feeder after DC→AC conversion
+    // 240V split-phase PV output: L1 (BLK) + L2 (RED) + EGC (GRN) — NO neutral
+    // NEC 690.8: PV AC output circuits are ungrounded 2-wire 240V; neutral NOT required
     const acCurrentA = input.acOutputCurrentA;
-    const feederSizing = autoSizeGauge(acCurrentA, ambientC, 3, false, '#10 AWG');
+    const feederSizing = autoSizeGauge(acCurrentA, ambientC, 2, false, '#10 AWG');
     const feederGauge = feederSizing.gauge;
     const feederOcpd = nextStandardOCPD(acCurrentA * 1.25);
     const feederEgcGauge = getEGCGauge(feederOcpd);
@@ -555,7 +557,6 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     const seg3Bundle: ConductorBundle[] = [
       { qty: 1, gauge: feederGauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
       { qty: 1, gauge: feederGauge, color: 'RED', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
-      { qty: 1, gauge: feederGauge, color: 'WHT', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
       { qty: 1, gauge: feederEgcGauge, color: 'GRN', insulation: 'THWN-2', isCurrentCarrying: false, currentPerConductor: 0 },
     ];
 
@@ -572,9 +573,11 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
   // ── COMMON DOWNSTREAM SEGMENTS ────────────────────────────────────────────
   // These are the same for both micro and string topologies
+  // 240V split-phase PV output: L1 (BLK) + L2 (RED) + EGC (GRN) — NO neutral
+  // NEC 690.8: PV AC output is ungrounded 2-wire 240V; neutral NOT required downstream
 
   const acCurrentA = input.acOutputCurrentA;
-  const feederSizing = autoSizeGauge(acCurrentA, ambientC, 3, false, '#10 AWG');
+  const feederSizing = autoSizeGauge(acCurrentA, ambientC, 2, false, '#10 AWG');
   const feederGauge = feederSizing.gauge;
   const feederOcpd = nextStandardOCPD(acCurrentA * 1.25);
   const feederEgcGauge = getEGCGauge(feederOcpd);
@@ -582,7 +585,6 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
   const feederBundle: ConductorBundle[] = [
     { qty: 1, gauge: feederGauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
     { qty: 1, gauge: feederGauge, color: 'RED', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
-    { qty: 1, gauge: feederGauge, color: 'WHT', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
     { qty: 1, gauge: feederEgcGauge, color: 'GRN', insulation: 'THWN-2', isCurrentCarrying: false, currentPerConductor: 0 },
   ];
 

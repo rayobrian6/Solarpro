@@ -1425,27 +1425,70 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   };
   const segmentSchedule = buildSegmentSchedule(segmentScheduleInput);
 
-  // Back-populate conductorBundle and update conductorCallout on each RunSegment
-  // Map segment types to RunSegmentIds for cross-reference
-  const segTypeToRunId: Record<string, string> = {
-    'ARRAY_TO_JBOX':     isMicro ? 'BRANCH_RUN' : 'DC_STRING_RUN',
+  // Back-populate conductorBundle, conduitSize, conduitFillPct, conduitType, ocpdAmps,
+  // continuousCurrent, voltageDropPct, overallPass from segmentSchedule onto each RunSegment.
+  // This is the single source of truth — all downstream outputs (SLD, BOM) read from RunSegment.
+  //
+  // Mapping: segmentType → RunSegmentId
+  // For micro: ARRAY_TO_JBOX = open-air roof run (ROOF_RUN)
+  //            JBOX_TO_COMBINER = branch trunk run (BRANCH_RUN)
+  //            COMBINER_TO_DISCO = feeder from combiner to AC disco (COMBINER_TO_DISCO_RUN)
+  // For string: ARRAY_TO_JBOX = DC string open-air (DC_STRING_RUN)
+  //             JBOX_TO_INVERTER = DC conduit run to inverter (DC_DISCO_TO_INV_RUN)
+  //             INVERTER_TO_DISCO = AC feeder from inverter (INV_TO_DISCO_RUN)
+  const segTypeToRunId: Record<string, string> = isMicro ? {
+    'ARRAY_TO_JBOX':     'ROOF_RUN',
     'JBOX_TO_COMBINER':  'BRANCH_RUN',
-    'JBOX_TO_INVERTER':  'DC_DISCO_TO_INV_RUN',
     'COMBINER_TO_DISCO': 'COMBINER_TO_DISCO_RUN',
+    'DISCO_TO_METER':    'DISCO_TO_METER_RUN',
+    'METER_TO_MSP':      'METER_TO_MSP_RUN',
+    'MSP_TO_UTILITY':    'MSP_TO_UTILITY_RUN',
+  } : {
+    'ARRAY_TO_JBOX':     'DC_STRING_RUN',
+    'JBOX_TO_INVERTER':  'DC_DISCO_TO_INV_RUN',
     'INVERTER_TO_DISCO': 'INV_TO_DISCO_RUN',
     'DISCO_TO_METER':    'DISCO_TO_METER_RUN',
     'METER_TO_MSP':      'METER_TO_MSP_RUN',
     'MSP_TO_UTILITY':    'MSP_TO_UTILITY_RUN',
   };
+
   for (const seg of segmentSchedule) {
     const runId = segTypeToRunId[seg.segmentType];
     if (runId && runMap[runId as RunSegmentId]) {
       const run = runMap[runId as RunSegmentId];
-      run.conductorBundle = seg.conductorBundle;
-      // Update conductorCallout to use the new bundle format
+      // Back-populate ALL computed fields from segment schedule
+      run.conductorBundle  = seg.conductorBundle;
       run.conductorCallout = seg.conductorCallout;
+      run.conduitSize      = seg.conduitSize;
+      run.conduitFillPct   = seg.fillPercent;
+      run.conduitType      = seg.raceway === 'OPEN_AIR' ? run.conduitType : (
+        seg.raceway === 'EMT' ? 'EMT' :
+        seg.raceway === 'PVC_SCH40' ? 'PVC Sch 40' :
+        seg.raceway === 'PVC_SCH80' ? 'PVC Sch 80' : run.conduitType
+      );
+      run.isOpenAir        = seg.raceway === 'OPEN_AIR';
+      run.ocpdAmps         = seg.ocpdAmps;
+      run.continuousCurrent = seg.continuousCurrent;
+      run.effectiveAmpacity = seg.effectiveAmpacity;
+      run.voltageDropPct   = seg.voltageDropPct;
+      run.overallPass      = seg.overallPass;
+      // Update wire gauge from primary hot conductor
+      const hotConductor = seg.conductorBundle.find(c => c.isCurrentCarrying && c.color !== 'GRN');
+      if (hotConductor) {
+        run.wireGauge  = hotConductor.gauge;
+        run.insulation = hotConductor.insulation;
+      }
+      // Update EGC gauge from GRN conductor
+      const egcConductor = seg.conductorBundle.find(c => c.color === 'GRN');
+      if (egcConductor) {
+        run.egcGauge = egcConductor.gauge;
+      }
+      // Update conductor count (current-carrying only)
+      run.conductorCount = seg.totalCurrentCarryingConductors;
     }
   }
+
+  console.log(`[DATA_PROPAGATION] Validated: ${runs.length} runSegments -> ${segmentSchedule.length} conduit rows -> ${runs.length} equipment items`);
 
   // ── Conduit Schedule ──────────────────────────────────────────────────────
   const conduitSchedule: ConduitScheduleRow[] = runs.map((run, idx) => ({

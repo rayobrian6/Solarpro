@@ -1545,7 +1545,7 @@ export default function EngineeringPage() {
             <h1 className="text-xl font-black text-white flex items-center gap-2">
               <Zap size={20} className="text-amber-400" /> Engineering Schematics
               <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full ml-1">V3 · Permit-Grade</span>
-              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD 20260305-v13 · SLD-V11✓ InlineLabels✓ Conduit✓ BOM✓ Bundles✓</span>
+              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD 20260305-v14 · SLD-V12✓ CorrectTopo✓ NoNeutral✓ Segments✓ BOM✓</span>
             </h1>
             <p className="text-slate-400 text-xs mt-0.5">
               {config.projectName} · {totalPanels} panels · {totalKw} kW DC · {totalInverterKw} kW AC
@@ -3701,6 +3701,15 @@ export default function EngineeringPage() {
                           a.download = `SLD-${config.projectName || 'project'}.pdf`;
                           a.click();
                           URL.revokeObjectURL(url);
+                        } else {
+                          let errMsg = `PDF export failed (HTTP ${res.status})`;
+                          try {
+                            const errData = await res.json();
+                            errMsg = errData.error || errData.message || errMsg;
+                          } catch {
+                            try { errMsg = await res.text() || errMsg; } catch { /* ignore */ }
+                          }
+                          setSldError(`Export PDF: ${errMsg}`);
                         }
                       }}
                       className="btn-secondary btn-sm cursor-pointer"

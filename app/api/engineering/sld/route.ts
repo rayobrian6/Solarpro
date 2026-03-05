@@ -1,13 +1,13 @@
 // ============================================================
 // POST /api/engineering/sld
-// Professional SLD generation — V8 + Auto String Generation
+// Professional SLD generation — V11 + Segment-based conductor data
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
-import type { RunSegment } from '@/lib/computed-system';
+import { computeSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import {
   generateStringConfig,
   moduleSpecsFromRegistry,
@@ -109,6 +109,54 @@ export async function POST(req: NextRequest) {
       lastStringPanels = stringResult.strings[stringResult.strings.length - 1]?.panelsInString ?? panelsPerString;
     }
 
+        // ── Compute RunSegments via computeSystem() ─────────────────────────────
+    // This is the single source of truth for conductor bundles, conduit sizing,
+    // fill percentages, and all electrical data shown on the SLD.
+    let computedRuns: ReturnType<typeof computeSystem>['runs'] | undefined;
+    try {
+      const csInput: ComputedSystemInput = {
+        topology:                      isMicro ? 'micro' : 'string',
+        totalPanels:                   totalModules,
+        panelWatts:                    panelWatts,
+        panelVoc:                      panelVoc,
+        panelIsc:                      panelIsc,
+        panelVmp:                      panelVmp,
+        panelImp:                      panelImp,
+        panelTempCoeffVoc:             Number(body.panelTempCoeffVoc ?? body.tempCoeffVoc ?? -0.27),
+        panelTempCoeffIsc:             Number(body.panelTempCoeffIsc ?? 0.05),
+        panelMaxSeriesFuse:            Number(body.panelMaxSeriesFuse ?? body.maxSeriesFuse ?? 20),
+        panelModel:                    String(body.panelModel ?? 'Q.PEAK DUO BLK ML-G10+ 400W'),
+        panelManufacturer:             String(body.panelManufacturer ?? 'Q CELLS'),
+        inverterManufacturer:          inverterManufacturer,
+        inverterModel:                 inverterModel,
+        inverterAcKw:                  acOutputKw,
+        inverterMaxDcV:                Number(body.inverterMaxDcV ?? body.maxDcVoltage ?? 600),
+        inverterMpptVmin:              Number(body.mpptVoltageMin ?? 100),
+        inverterMpptVmax:              Number(body.mpptVoltageMax ?? 600),
+        inverterMaxInputCurrentPerMppt: Number(body.maxInputCurrentPerMppt ?? 15),
+        inverterMpptChannels:          Number(body.mpptChannels ?? 2),
+        inverterAcCurrentMax:          acOutputAmps,
+        inverterModulesPerDevice:      Number(body.inverterModulesPerDevice ?? 1),
+        inverterBranchLimit:           Number(body.inverterBranchLimit ?? 16),
+        designTempMin:                 designTempMin,
+        ambientTempC:                  Number(body.ambientTempC ?? 30),
+        rooftopTempAdderC:             Number(body.rooftopTempAdderC ?? 30),
+        runLengths:                    body.runLengths ?? {},
+        conduitType:                   String(body.conduitType ?? body.acConduitType ?? 'EMT'),
+        mainPanelAmps:                 Number(body.mainPanelAmps ?? 200),
+        mainPanelBrand:                String(body.mainPanelBrand ?? 'Square D'),
+        panelBusRating:                Number(body.panelBusRating ?? body.mainPanelAmps ?? 200),
+        maxACVoltageDropPct:           Number(body.maxACVoltageDropPct ?? 2),
+        maxDCVoltageDropPct:           Number(body.maxDCVoltageDropPct ?? 3),
+      };
+      const cs = computeSystem(csInput);
+      computedRuns = cs.runs;
+    } catch (csErr) {
+      // Non-fatal: fall back to body.runs or undefined
+      console.warn('[SLD] computeSystem failed, falling back to body.runs:', csErr);
+      computedRuns = body.runs ?? undefined;
+    }
+
         const input: SLDProfessionalInput = {
       projectName:             String(body.projectName             ?? 'Solar PV System'),
       clientName:              String(body.clientName              ?? 'Homeowner'),
@@ -157,7 +205,8 @@ export async function POST(req: NextRequest) {
       stringDetails:           !isMicro ? (body.stringDetails ?? undefined) : undefined,
 
       // ComputedSystem.runs — single source of truth for conduit schedule
-      runs:                   (body.runs as RunSegment[]) ?? undefined,
+      // computedRuns is populated by computeSystem() above with full conductorBundle[] data
+      runs:                   computedRuns,
 
       // Auto string generation results (null for micro topology)
       panelsPerString:         isMicro ? 1 : panelsPerString,
