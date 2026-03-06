@@ -683,7 +683,7 @@ function autoSizeWire(
         : conduitType === 'PVC Sch 80' ? 'PVC SCH 80'
         : conduitType;
       const insulation = isDC ? 'USE-2/PV Wire' : 'THWN-2';
-      const conductorCallout = `${conductorCount}#${gaugeNum} AWG ${insulation} + 1#${egcNum} AWG GND in ${conduitSize} ${conduitAbbrev}`;
+      const conductorCallout = `${conductorCount}×#${gaugeNum} ${insulation}\n1×#${egcNum} GRN EGC\nIN ${conduitSize} ${conduitAbbrev} (${fillPct.toFixed(0)}% fill)`;
 
       return {
         gauge: finalGauge,
@@ -734,7 +734,7 @@ function autoSizeWire(
     ampacityPass: effectiveAmpacity >= requiredAmpacity,
     voltageDropPass: vdropPct <= maxVDropPct,
     conduitFillPass: fillPct <= 40,
-    conductorCallout: `${conductorCount}#${gaugeNum} AWG ${insulation} + 1#${egcNum} AWG GND in ${conduitSize} ${conduitAbbrev}`,
+    conductorCallout: `${conductorCount}×#${gaugeNum} ${insulation}\n1×#${egcNum} GRN EGC\nIN ${conduitSize} ${conduitAbbrev} (${fillPct.toFixed(0)}% fill)`,
   };
 }
 // ─── Open-Air Wire Auto-Sizer (BUG 1 FIX) ───────────────────────────────────────────────────────────────────────────────────
@@ -782,7 +782,7 @@ function autoSizeOpenAirWire(
       const egcNum = egcGauge.replace('#', '').replace(' AWG', '');
       const insulation = isDC ? 'USE-2/PV Wire' : 'THWN-2';
       // Open-air callout with (OPEN AIR) indicator
-      const conductorCallout = `${conductorCount}#${gaugeNum} AWG ${insulation} + 1#${egcNum} AWG GND (OPEN AIR)`;
+      const conductorCallout = `${conductorCount}×#${gaugeNum} ${insulation}\n1×#${egcNum} GRN EGC\nOPEN AIR — NEC 690.31`;
 
       return {
         gauge,
@@ -829,7 +829,7 @@ function autoSizeOpenAirWire(
     ampacityPass: effectiveAmpacity >= requiredAmpacity,
     voltageDropPass: vdropPct <= maxVDropPct,
     conduitFillPass: true, // N/A for open-air
-    conductorCallout: `${conductorCount}#${gaugeNum} AWG ${insulation} + 1#${egcNum} AWG GND (OPEN AIR)`,
+    conductorCallout: `${conductorCount}×#${gaugeNum} ${insulation}\n1×#${egcNum} GRN EGC\nOPEN AIR — NEC 690.31`,
   };
 }
 
@@ -1058,7 +1058,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
         deviceCount: devicesOnBranch,
         branchCurrentA: +branchCurrent.toFixed(2),
         ocpdAmps: ocpd,
-        conductorCallout: `3#${gaugeNum} AWG THWN-2 + 1#${gaugeNum} AWG GND`,
+        conductorCallout: `3×#${gaugeNum} THWN-2\n1×#${gaugeNum} GRN EGC`,
         necReference: 'NEC 690.8(B)',
       });
     }
@@ -1557,7 +1557,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const batHotArea = (CONDUCTOR_AREA_IN2[batWire.gauge] ?? 0.0133) * 2;
     const batEgcArea = CONDUCTOR_AREA_IN2[batEgc] ?? 0.0133;
     const batConduit = getSmallestConduit(input.conduitType, batHotArea + batEgcArea);
-    const batCallout = `2#${batGaugeNum} AWG THWN-2 + 1#${batEgcNum} AWG GND IN ${batConduit.size} ${batConduitAbbrev} (${batConduit.fillPct.toFixed(0)}% FILL)`;
+    const batCallout = `2×#${batGaugeNum} THWN-2\n1×#${batEgcNum} GRN EGC\nIN ${batConduit.size} ${batConduitAbbrev} (${batConduit.fillPct.toFixed(0)}% fill)`;
     runs.push(makeRunSegment('BATTERY_TO_BUI_RUN', 'BATTERY TO BUI/CONTROLLER', 'BATTERY STORAGE', 'BACKUP INTERFACE UNIT', {
       sourceTerminal: 'BAT_AC_OUT',   // Battery AC output lug
       destTerminal:   'BATTERY',       // BUI BATTERY port (bottom center)
@@ -1626,7 +1626,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const buiHotArea = (CONDUCTOR_AREA_IN2[buiWire.gauge] ?? 0.0507) * 3;
     const buiEgcArea = CONDUCTOR_AREA_IN2[buiEgc] ?? 0.0507;
     const buiConduit = getSmallestConduit(input.conduitType, buiHotArea + buiEgcArea);
-    const buiCallout = `3#${buiGaugeNum} AWG THWN-2 + 1#${buiEgcNum} AWG GND IN ${buiConduit.size} ${buiConduitAbbrev} (${buiConduit.fillPct.toFixed(0)}% FILL)`;
+    const buiCallout = `3×#${buiGaugeNum} THWN-2\n1×#${buiEgcNum} GRN EGC\nIN ${buiConduit.size} ${buiConduitAbbrev} (${buiConduit.fillPct.toFixed(0)}% fill)`;
     runs.push(makeRunSegment('BUI_TO_MSP_RUN', 'BUI/CONTROLLER TO MSP', 'BACKUP INTERFACE UNIT', 'MAIN SERVICE PANEL', {
       sourceTerminal: 'GRID',       // BUI GRID port (left side, upper) — connects to MSP backfeed breaker
       destTerminal:   'MSP_BKFD',   // MSP backfeed breaker lug
@@ -1699,7 +1699,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     // IQ SC3 mode: generator connects to BUI GEN port; standalone ATS mode: generator connects to ATS GEN terminals
     const genDest      = input.hasEnphaseIQSC3 ? 'IQ SC3 GEN PORT' : 'ATS GEN TERMINALS';
     const genDestTerm  = input.hasEnphaseIQSC3 ? 'GEN' : 'ATS_GEN';  // terminal name on destination equipment
-    const genCallout = `3#${genGaugeNum} AWG THWN-2 + 1#${genEgcNum} AWG GND IN ${genConduit.size} ${genConduitAbbrev} (${genConduit.fillPct.toFixed(0)}% FILL)`;
+    const genCallout = `3×#${genGaugeNum} THWN-2\n1×#${genEgcNum} GRN EGC\nIN ${genConduit.size} ${genConduitAbbrev} (${genConduit.fillPct.toFixed(0)}% fill)`;
     runs.push(makeRunSegment('GENERATOR_TO_ATS_RUN', 'GENERATOR TO ATS/BUI', 'STANDBY GENERATOR', genDest, {
       sourceTerminal: 'GEN_OUT',      // Generator output lug (right side of generator symbol)
       destTerminal:   genDestTerm,    // BUI GEN port (left side, lower) or ATS GEN input
@@ -1768,7 +1768,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const atsHotArea = (CONDUCTOR_AREA_IN2[atsWire.gauge] ?? 0.0824) * 3;
     const atsEgcArea = CONDUCTOR_AREA_IN2[atsEgc] ?? 0.0507;
     const atsConduit = getSmallestConduit(input.conduitType, atsHotArea + atsEgcArea);
-    const atsCallout = `3#${atsGaugeNum} AWG THWN-2 + 1#${atsEgcNum} AWG GND IN ${atsConduit.size} ${atsConduitAbbrev} (${atsConduit.fillPct.toFixed(0)}% FILL)`;
+    const atsCallout = `3×#${atsGaugeNum} THWN-2\n1×#${atsEgcNum} GRN EGC\nIN ${atsConduit.size} ${atsConduitAbbrev} (${atsConduit.fillPct.toFixed(0)}% fill)`;
     runs.push(makeRunSegment('ATS_TO_MSP_RUN', 'ATS LOAD TO MSP', 'ATS LOAD TERMINALS', 'MAIN SERVICE PANEL', {
       sourceTerminal: 'ATS_LOAD',    // ATS LOAD output (right side of ATS symbol)
       destTerminal:   'MSP_BUS',     // MSP main bus (service entrance connection)
