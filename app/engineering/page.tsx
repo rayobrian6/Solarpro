@@ -1625,7 +1625,7 @@ export default function EngineeringPage() {
             <h1 className="text-xl font-black text-white flex items-center gap-2">
               <Zap size={20} className="text-amber-400" /> Engineering Schematics
               <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full ml-1">V3 · Permit-Grade</span>
-              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v21 · EQUIP-AUDIT✓ ECOSYSTEM-COMPLETE✓ SLD-GEN-ATS✓ NEW-BADGES✓ NEC2023✓</span>
+              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v24 · NEC-CONDUCTOR-SIZING✓ 120%-RULE-BAT-BF✓ IQ-SC3-DUAL-MODE✓ ATS-GEN-WIRE✓</span>
             </h1>
             <p className="text-slate-400 text-xs mt-0.5">
               {config.projectName} · {totalPanels} panels · {totalKw} kW DC · {totalInverterKw} kW AC
