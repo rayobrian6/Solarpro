@@ -147,6 +147,14 @@ export async function POST(req: NextRequest) {
       batteryModel:            String(buildInput.batteryModel            ?? ''),
       batteryKwh:              Number(buildInput.batteryKwh)             || 0,
       scale:                   String(buildInput.scale                   ?? 'NOT TO SCALE'),
+      // Pass through runs, micro data, and string details if provided
+      runs:                    buildInput.runs ?? undefined,
+      deviceCount:             buildInput.deviceCount ?? undefined,
+      microBranches:           buildInput.microBranches ?? undefined,
+      branchWireGauge:         buildInput.branchWireGauge ?? undefined,
+      branchConduitSize:       buildInput.branchConduitSize ?? undefined,
+      branchOcpdAmps:          buildInput.branchOcpdAmps ? Number(buildInput.branchOcpdAmps) : undefined,
+      stringDetails:           buildInput.stringDetails ?? undefined,
     };
 
     // Render SVG

@@ -414,6 +414,8 @@ export default function EngineeringPage() {
       mainPanelAmps: config.mainPanelAmps ?? 200,
       mainPanelBrand: config.mainPanelBrand ?? 'Square D',
       panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+      interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+      branchCount: topology === 'micro' ? Math.ceil(totalPanels / (modulesPerDevice * branchLimit)) : undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
     };
@@ -3675,17 +3677,52 @@ export default function EngineeringPage() {
                               address: config.address,
                               designer: config.designer,
                               date: config.date,
-                              necVersion: `NEC ${compliance.jurisdiction?.necVersion || '2020'}`,
+                              necVersion: `NEC ${compliance.jurisdiction?.necVersion || '2023'}`,
                               systemVoltage: 240,
                               mainPanelAmps: config.mainPanelAmps,
                               mainPanelBrand: config.mainPanelBrand,
                               utilityMeter: config.utilityMeter,
+                              utilityName: config.utilityId || 'Local Utility',
                               acDisconnect: config.acDisconnect,
                               dcDisconnect: config.dcDisconnect,
                               productionMeter: config.productionMeter,
                               rapidShutdown: config.rapidShutdown,
                               conduitType: config.conduitType,
                               notes: config.notes,
+                              // Interconnection — critical for correct SLD rendering
+                              interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
+                              interconnectionType: config.interconnectionMethod ?? 'LOAD_SIDE',
+                              panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+                              // Topology & module data
+                              topologyType: computedSystem.isMicro ? 'MICROINVERTER' : 'STRING_INVERTER',
+                              totalModules: totalPanels,
+                              totalStrings: computedSystem.isMicro ? 0 : (computedSystem.strings?.length ?? 1),
+                              // Inverter data
+                              inverterManufacturer: (() => { const inv = config.inverters[0]; const d = getInvById(inv?.inverterId, inv?.type) as any; return d?.manufacturer || (computedSystem.isMicro ? 'Enphase' : 'SolarEdge'); })(),
+                              inverterModel: (() => { const inv = config.inverters[0]; const d = getInvById(inv?.inverterId, inv?.type) as any; return d?.model || (computedSystem.isMicro ? 'IQ8+' : 'SE7600H'); })(),
+                              acOutputKw: Number(totalInverterKw),
+                              acOutputAmps: Math.round(Number(totalInverterKw) * 1000 / 240),
+                              acOCPD: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
+                              backfeedAmps: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.ocpdAmps ?? Math.ceil(Math.round(Number(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5,
+                              // Panel data
+                              panelModel: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.model || 'Solar Panel'; })(),
+                              panelWatts: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.watts || 400; })(),
+                              panelVoc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.voc || 41.6; })(),
+                              panelIsc: (() => { const inv = config.inverters[0]; const str = inv?.strings[0]; const p = getPanelById(str?.panelId) as any; return p?.isc || 12.26; })(),
+                              // Wire data from computedSystem
+                              dcWireGauge: computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
+                              acWireGauge: computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
+                              acConduitType: config.conduitType ?? 'EMT',
+                              dcConduitType: config.conduitType ?? 'EMT',
+                              acWireLength: config.wireLength ?? 60,
+                              // Micro-specific
+                              deviceCount: computedSystem.isMicro ? totalPanels : undefined,
+                              microBranches: computedSystem.isMicro ? computedSystem.microBranches : undefined,
+                              branchWireGauge: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.wireGauge : undefined,
+                              branchConduitSize: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.conduitSize : undefined,
+                              branchOcpdAmps: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.ocpdAmps : undefined,
+                              // ComputedSystem runs — single source of truth
+                              runs: computedSystem.runs,
                               calcResult: compliance.electrical || null,
                               inverterSpecs: config.inverters.map(inv => {
                                 const invData = getInvById(inv.inverterId, inv.type) as any;

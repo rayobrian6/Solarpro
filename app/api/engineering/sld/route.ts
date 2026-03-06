@@ -146,6 +146,8 @@ export async function POST(req: NextRequest) {
         mainPanelAmps:                 Number(body.mainPanelAmps ?? 200),
         mainPanelBrand:                String(body.mainPanelBrand ?? 'Square D'),
         panelBusRating:                Number(body.panelBusRating ?? body.mainPanelAmps ?? 200),
+        interconnectionMethod:         String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'LOAD_SIDE'),
+        branchCount:                   isMicro ? (Number(body.microBranches) || Number(body.branchCount) || undefined) : undefined,
         maxACVoltageDropPct:           Number(body.maxACVoltageDropPct ?? 2),
         maxDCVoltageDropPct:           Number(body.maxDCVoltageDropPct ?? 3),
       };
