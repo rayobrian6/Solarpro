@@ -129,13 +129,20 @@ export async function POST(req: NextRequest) {
         panelManufacturer:             String(body.panelManufacturer ?? 'Q CELLS'),
         inverterManufacturer:          inverterManufacturer,
         inverterModel:                 inverterModel,
-        inverterAcKw:                  acOutputKw,
+        // For micro: inverterAcKw must be PER-DEVICE kW, not total system kW
+        // For string: inverterAcKw is the single inverter rated kW (= total system kW)
+        inverterAcKw:                  isMicro
+          ? (Number(body.inverterAcKwPerDevice ?? body.perMicroKw) || (acOutputKw / Math.max(deviceCount, 1)))
+          : acOutputKw,
+        // For micro: inverterAcCurrentMax is PER-DEVICE amps, not total system amps
+        inverterAcCurrentMax:          isMicro
+          ? (Number(body.inverterAcCurrentMax ?? body.perMicroAmps) || (acOutputAmps / Math.max(deviceCount, 1)))
+          : acOutputAmps,
         inverterMaxDcV:                Number(body.inverterMaxDcV ?? body.maxDcVoltage ?? 600),
         inverterMpptVmin:              Number(body.mpptVoltageMin ?? 100),
         inverterMpptVmax:              Number(body.mpptVoltageMax ?? 600),
         inverterMaxInputCurrentPerMppt: Number(body.maxInputCurrentPerMppt ?? 15),
         inverterMpptChannels:          Number(body.mpptChannels ?? 2),
-        inverterAcCurrentMax:          acOutputAmps,
         inverterModulesPerDevice:      Number(body.inverterModulesPerDevice ?? 1),
         inverterBranchLimit:           Number(body.inverterBranchLimit ?? 16),
         designTempMin:                 designTempMin,

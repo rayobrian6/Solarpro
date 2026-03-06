@@ -282,8 +282,13 @@ function autoSizeGauge(
 
   for (let i = startIdx; i < AWG_ORDER.length; i++) {
     const gauge = AWG_ORDER[i];
-    const tableAmp = isDC ? (AMPACITY_90C[gauge] ?? 0) : (AMPACITY_75C[gauge] ?? 0);
-    const effectiveAmpacity = tableAmp * tempDerating * conduitDerating;
+    // NEC 310.15(B)(2): For THWN-2 (90°C rated), derate from 90°C column,
+    // then cap at 75°C termination limit per NEC 110.14(C).
+    // For DC (USE-2/PV Wire), use 90°C directly.
+    const amp90 = AMPACITY_90C[gauge] ?? 0;
+    const amp75 = AMPACITY_75C[gauge] ?? 0;
+    const derated = amp90 * tempDerating * conduitDerating;
+    const effectiveAmpacity = isDC ? derated : Math.min(derated, amp75);
     if (effectiveAmpacity >= requiredAmpacity) {
       return { gauge, effectiveAmpacity, tempDerating, conduitDerating };
     }
@@ -418,7 +423,10 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     //   e.g. 3 branches → 3 BLK + 3 RED + 1 GRN
 
     const branches = Math.ceil(input.moduleCount / input.maxDevicesPerBranch);
-    const branchCurrentA = input.microAcCurrentA * input.maxDevicesPerBranch; // max per branch
+    // Use actual devices per branch (balanced distribution), not worst-case max
+    // e.g. 34 micros / 3 branches = ~11.3 → ceil = 12 micros on largest branch
+    const devicesPerBranch = Math.ceil(input.moduleCount / branches);
+    const branchCurrentA = input.microAcCurrentA * devicesPerBranch; // actual max branch current
     const totalCurrentA = input.microAcCurrentA * input.moduleCount;
 
     // Auto-size branch conductor gauge (open air, no conduit derating)

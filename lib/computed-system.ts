@@ -604,10 +604,15 @@ function autoSizeWire(
 
   for (let i = startIdx; i < AWG_ORDER.length; i++) {
     const gauge = AWG_ORDER[i];
-    const tableAmpacity = isDC
-      ? (AMPACITY_TABLE_90C[gauge] ?? 0)
-      : (AMPACITY_TABLE_75C[gauge] ?? 0);
-    const effectiveAmpacity = tableAmpacity * tempDerating * conduitDerating;
+    // NEC 310.15(B)(2): For THWN-2 (90°C rated), derate from 90°C column,
+    // then cap at 75°C termination limit. For DC (USE-2/PV Wire), use 90°C directly.
+    const tableAmpacity90 = AMPACITY_TABLE_90C[gauge] ?? 0;
+    const tableAmpacity75 = AMPACITY_TABLE_75C[gauge] ?? 0;
+    const derated90 = tableAmpacity90 * tempDerating * conduitDerating;
+    // Effective ampacity = min(derated 90°C value, 75°C table value) per NEC 110.14(C)
+    const effectiveAmpacity = isDC
+      ? derated90
+      : Math.min(derated90, tableAmpacity75);
     const ampacityPass = effectiveAmpacity >= requiredAmpacity;
 
     const vdropPct = calcVoltageDrop(continuousCurrent, onewayFt, gauge, systemVoltage, conductorCount <= 2 ? 2 : 2);
@@ -721,10 +726,14 @@ function autoSizeOpenAirWire(
 
   for (let i = startIdx; i < AWG_ORDER.length; i++) {
     const gauge = AWG_ORDER[i];
-    const tableAmpacity = isDC
-      ? (AMPACITY_TABLE_90C[gauge] ?? 0)
-      : (AMPACITY_TABLE_75C[gauge] ?? 0);
-    const effectiveAmpacity = tableAmpacity * tempDerating * conduitDerating;
+    // NEC 310.15(B)(2): For THWN-2 (90°C rated), derate from 90°C column,
+    // then cap at 75°C termination limit. For DC (USE-2/PV Wire), use 90°C directly.
+    const tableAmpacity90 = AMPACITY_TABLE_90C[gauge] ?? 0;
+    const tableAmpacity75 = AMPACITY_TABLE_75C[gauge] ?? 0;
+    const derated90 = tableAmpacity90 * tempDerating * conduitDerating;
+    const effectiveAmpacity = isDC
+      ? derated90
+      : Math.min(derated90, tableAmpacity75);
     const ampacityPass = effectiveAmpacity >= requiredAmpacity;
 
     const vdropPct = calcVoltageDrop(continuousCurrent, onewayFt, gauge, systemVoltage, conductorCount <= 2 ? 2 : 2);
