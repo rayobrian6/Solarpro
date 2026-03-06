@@ -109,6 +109,11 @@ export interface BOMGenerationInputV4 {
 
   // Labels (NEC 690.31, 690.54, 690.56)
   requiresWarningLabels?: boolean;
+
+  // Interconnection method — controls whether backfed breaker appears in BOM
+  // 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE' | 'BACKFED_BREAKER'
+  interconnectionMethod?: string;
+  panelBusRating?: number;  // For NEC 705.12(B) 120% rule calculation
 }
 
 // ─── BOM Generation Result ────────────────────────────────────────────────────
@@ -463,15 +468,39 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     complianceNotes.push(`NEC 690.14: AC disconnect ${acDiscAmps}A — sized for ${input.acOCPD}A backfeed`);
   }
 
-  // Backfeed Breaker
-  const backfeedAmps = nextStandardBreaker(input.backfeedAmps);
-  items.push(addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
-    `QO${backfeedAmps}`,
-    `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12 120% rule`,
-    1, 'ea', 'NEC 705.12', 'perSystem', '1', true));
-  log.push({ stageId: 'ac', category: 'breaker', item: `${backfeedAmps}A Backfeed Breaker`,
-    quantity: 1, derivedFrom: 'backfeedAmps', formula: 'nextStandardBreaker(backfeedAmps)', necReference: 'NEC 705.12' });
-  complianceNotes.push(`NEC 705.12: Backfeed breaker ${backfeedAmps}A — verify 120% rule: (${input.mainPanelAmps}A × 120%) ≥ (${input.mainPanelAmps}A + ${backfeedAmps}A)`);
+  // Backfeed Breaker — only include when interconnection method is backfed breaker
+  // For load-side tap, supply-side tap, main breaker derate, or panel upgrade: NO backfed breaker in MSP
+  const interconMethod = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+  const isBackfedBreaker = interconMethod === 'BACKFED_BREAKER' ||
+    interconMethod.includes('BACKFED') ||
+    interconMethod.includes('BREAKER');
+  const isLoadSideTap = interconMethod === 'LOAD_SIDE' ||
+    interconMethod.includes('LOAD') ||
+    interconMethod === 'MAIN_BREAKER_DERATE' ||
+    interconMethod === 'PANEL_UPGRADE';
+  const isSupplySideTap = interconMethod === 'SUPPLY_SIDE_TAP' ||
+    interconMethod.includes('SUPPLY') ||
+    interconMethod.includes('LINE');
+
+  if (isBackfedBreaker) {
+    // Backfed breaker — enforce NEC 705.12(B) 120% rule
+    const busRating = input.panelBusRating ?? input.mainPanelAmps ?? 200;
+    const maxPVBreaker = Math.floor(busRating * 1.2 - input.mainPanelAmps);
+    const backfeedAmps = Math.min(nextStandardBreaker(input.backfeedAmps), maxPVBreaker);
+    items.push(addItem('ac', 'breaker', 'Square D', `${backfeedAmps}A Backfeed Breaker`,
+      `QO${backfeedAmps}`,
+      `${backfeedAmps}A 2-pole backfeed breaker — NEC 705.12(B) 120% rule (max ${maxPVBreaker}A)`,
+      1, 'ea', 'NEC 705.12(B)', 'perSystem', '1', true));
+    log.push({ stageId: 'ac', category: 'breaker', item: `${backfeedAmps}A Backfeed Breaker`,
+      quantity: 1, derivedFrom: 'backfeedAmps', formula: 'min(nextStandardBreaker(backfeedAmps), maxPVBreaker)', necReference: 'NEC 705.12(B)' });
+    complianceNotes.push(`NEC 705.12(B): Backfeed breaker ${backfeedAmps}A — 120% rule: (${busRating}A × 1.2) - ${input.mainPanelAmps}A = ${maxPVBreaker}A max`);
+  } else if (isLoadSideTap) {
+    // Load-side tap — no breaker in MSP, just a tap connection
+    complianceNotes.push(`NEC 705.12(B): Load-side tap — no backfed breaker required. AC disconnect provides OCPD.`);
+  } else if (isSupplySideTap) {
+    // Supply-side tap — no breaker in MSP
+    complianceNotes.push(`NEC 705.11: Supply-side tap — no backfed breaker required. Utility-side connection.`);
+  }
 
   // Production Meter
   if (input.requiresProductionMeter) {

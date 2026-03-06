@@ -46,6 +46,10 @@ export async function POST(req: NextRequest) {
       requiresDCDisconnect:    body.requiresDCDisconnect    ?? true,
       requiresRapidShutdown:   body.requiresRapidShutdown   ?? true,
       requiresWarningLabels:   body.requiresWarningLabels   ?? true,
+      // Interconnection method — controls whether backfed breaker appears in BOM
+      interconnectionMethod:   body.interconnectionMethod ?? body.interconnection ?? 'LOAD_SIDE',
+      panelBusRating:          Number(body.panelBusRating) || Number(body.mainPanelAmps) || 200,
+      runs:                    body.runs,
     };
 
     const result = generateBOMV4(input);

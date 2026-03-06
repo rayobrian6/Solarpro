@@ -873,6 +873,9 @@ export default function EngineeringPage() {
           jurisdiction:   compliance.jurisdiction?.state || '',
           notes:          config.notes,
           format:         'svg',
+          // Interconnection method — drives SLD rendering (load-side tap vs backfed breaker)
+          interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
+          panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for conduit schedule
           runs:           cs.runs,
           // Microinverter branch data — for per-branch SLD drawing
@@ -1012,6 +1015,9 @@ export default function EngineeringPage() {
           rowCount:         config.rowCount,
           columnCount:      config.columnCount,
           layoutOrientation: config.layoutOrientation,
+          // Interconnection method — controls whether backfed breaker appears in BOM
+          interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+          panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
           runs:             cs.runs,
           format:           'json',

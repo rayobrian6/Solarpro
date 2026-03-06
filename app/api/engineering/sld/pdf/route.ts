@@ -131,7 +131,16 @@ export async function POST(req: NextRequest) {
       backfeedAmps,
       mainPanelAmps:           Number(buildInput.mainPanelAmps)          || 200,
       utilityName:             String(buildInput.utilityName ?? buildInput.utilityCompany ?? buildInput.utility ?? 'Local Utility'),
-      interconnection:         String(buildInput.interconnection ?? buildInput.interconnectionType ?? 'Backfeed Breaker'),
+      // Map interconnection method to renderer-friendly string
+      interconnection:         (() => {
+        const raw = String(buildInput.interconnection ?? buildInput.interconnectionType ?? 'LOAD_SIDE');
+        if (raw === 'LOAD_SIDE' || raw.toLowerCase().includes('load')) return 'Load Side Tap';
+        if (raw === 'SUPPLY_SIDE_TAP' || raw.toLowerCase().includes('supply')) return 'Supply Side Tap';
+        if (raw === 'MAIN_BREAKER_DERATE' || raw.toLowerCase().includes('derate')) return 'Load Side Tap';
+        if (raw === 'PANEL_UPGRADE' || raw.toLowerCase().includes('upgrade')) return 'Load Side Tap';
+        if (raw.toLowerCase().includes('line')) return 'Line Side Tap';
+        return raw;
+      })(),
       rapidShutdownIntegrated: !!(buildInput.rapidShutdownIntegrated || buildInput.rapidShutdown),
       hasProductionMeter:      buildInput.hasProductionMeter !== false,
       hasBattery:              !!(buildInput.hasBattery || buildInput.batteryModel || buildInput.batteryKwh),

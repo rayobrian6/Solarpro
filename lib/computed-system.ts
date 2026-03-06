@@ -25,6 +25,9 @@ import {
   RacewayType,
 } from './segment-schedule';
 
+import { buildSegments } from './segment-builder';
+import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
+
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
 export type TopologyType =
@@ -235,6 +238,12 @@ export interface ComputedSystem {
   designTempMin: number;      // °C — from jurisdiction
   ambientTempC: number;       // °C — design max ambient
   rooftopTempAdderC: number;  // °C — for DC runs
+
+  // ── Segment Builder Output (BUILD v16) ──────────────────────────────────────────────────────────────
+  // Canonical segment model — single source of truth for SLD, BOM, conductor schedule
+  segments?: import('./segment-model').Segment[];
+  segmentIssues?: import('./segment-model').EngineeringIssue[];
+  segmentInterconnectionPass?: boolean;
 }
 
 export interface ConduitScheduleRow {
@@ -348,6 +357,11 @@ export interface ComputedSystemInput {
   // Compliance thresholds
   maxACVoltageDropPct: number;  // typically 2%
   maxDCVoltageDropPct: number;  // typically 3%
+
+  // Interconnection method (optional — for segment builder integration)
+  // 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE' | 'BACKFED_BREAKER'
+  interconnectionMethod?: string;
+  branchCount?: number;     // Number of AC branches (microinverter topology)
 }
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
@@ -1653,7 +1667,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  return {
+  const baseResult = {
     topology,
     isMicro,
     isString,
@@ -1695,6 +1709,73 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     designTempMin: input.designTempMin,
     ambientTempC: input.ambientTempC,
     rooftopTempAdderC: input.rooftopTempAdderC,
+  };
+
+  // ── BUILD v16: Segment Builder Integration ──────────────────────────────────────────────────────────────
+  // Run segment builder to generate canonical segments for SLD/BOM/conductor schedule
+  let sbSegments: import('./segment-model').Segment[] | undefined;
+  let sbIssues: import('./segment-model').EngineeringIssue[] | undefined;
+  let sbInterconnectionPass: boolean | undefined;
+  try {
+    const interconRaw = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+    let interconType: InterconnectionType;
+    if (interconRaw === 'SUPPLY_SIDE_TAP' || interconRaw.includes('SUPPLY') || interconRaw.includes('LINE')) {
+      interconType = InterconnectionType.SUPPLY_SIDE_TAP;
+    } else if (interconRaw === 'BACKFED_BREAKER' || interconRaw.includes('BACKFED') || interconRaw.includes('BREAKER')) {
+      interconType = InterconnectionType.BACKFED_BREAKER;
+    } else {
+      interconType = InterconnectionType.LOAD_SIDE_TAP;
+    }
+
+    const sbInput: SegmentBuilderInput = {
+      topology: isMicro ? 'micro' : 'string',
+      totalModules: input.totalPanels,
+      panelVoc: input.panelVoc,
+      panelVmp: input.panelVmp,
+      panelIsc: input.panelIsc,
+      panelImp: input.panelImp,
+      panelWatts: input.panelWatts,
+      inverterAcOutputA: isMicro
+        ? (input.inverterAcCurrentMax || acOutputCurrentA / Math.max(acBranchCount, 1))
+        : acOutputCurrentA,
+      inverterAcOutputW: input.inverterAcKw * 1000,
+      inverterCount: input.totalPanels,
+      branchCount: isMicro ? acBranchCount : 1,
+      maxMicrosPerBranch: input.inverterBranchLimit || 16,
+      ambientTempC: input.ambientTempC,
+      rooftopTempAdderC: input.rooftopTempAdderC,
+      conduitType: input.conduitType,
+      runLengths: {
+        arrayToJbox: defaultRunLengths.ROOF_RUN ?? 30,
+        jboxToCombiner: defaultRunLengths.BRANCH_RUN ?? 40,
+        jboxToInverter: 0,
+        combinerToDisco: defaultRunLengths.COMBINER_TO_DISCO_RUN ?? 40,
+        inverterToDisco: defaultRunLengths.INV_TO_DISCO_RUN ?? 20,
+        discoToMsp: defaultRunLengths.DISCO_TO_METER_RUN ?? 25,
+        mspToUtility: defaultRunLengths.MSP_TO_UTILITY_RUN ?? 5,
+      },
+      maxACVoltageDropPct: input.maxACVoltageDropPct,
+      maxDCVoltageDropPct: input.maxDCVoltageDropPct,
+      interconnectionType: interconType,
+      mainPanelAmps: input.mainPanelAmps,
+      mainBusRating: input.panelBusRating ?? input.mainPanelAmps,
+      mainBreakerAmps: input.mainPanelAmps,
+    };
+
+    const sbResult = buildSegments(sbInput);
+    sbSegments = sbResult.segments;
+    sbIssues = sbResult.issues;
+    sbInterconnectionPass = sbResult.interconnectionPass;
+  } catch (sbErr) {
+    // Non-fatal: segment builder failure does not break existing functionality
+    console.warn('[computeSystem] Segment builder failed (non-fatal):', sbErr);
+  }
+
+  return {
+    ...baseResult,
+    segments: sbSegments,
+    segmentIssues: sbIssues,
+    segmentInterconnectionPass: sbInterconnectionPass,
   };
 }
 

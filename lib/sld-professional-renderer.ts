@@ -644,12 +644,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // Supply-side connection → NEC 705.11 (was 705.12(A) in NEC 2017/2020 — renumbered in 2023)
   // Line-side tap          → NEC 705.11 (supply-side, same renumbering)
   // Backfed breaker        → NEC 705.12(B)(2) (load-side, subsection retained in NEC 2023)
-  const interconLabel = isLoadSide   ? 'LOAD SIDE TAP — NEC 705.12(B)'
-                      : isSupplySide ? 'SUPPLY SIDE TAP — NEC 705.11'
-                      : isLineSide   ? 'LINE SIDE TAP — NEC 705.11'
-                      : `BACKFED BREAKER — NEC 705.12(B)(2)`;
-  parts.push(txt(mspCX, mspCY + mspH/2 + 9,  `${input.backfeedAmps}A PV BREAKER`, { size: F.tiny, anchor: 'middle' }));
-  parts.push(txt(mspCX, mspCY + mspH/2 + 18, interconLabel, { size: F.tiny, anchor: 'middle', italic: true, fill: '#333' }));
+  
+  // BUILD v16 FIX: Only show backfed breaker for non-tap interconnections
+  if (isLoadSide) {
+    parts.push(txt(mspCX, mspCY + mspH/2 + 14, 'LOAD SIDE TAP — NEC 705.12(B)', { size: F.tiny, anchor: 'middle', bold: true, fill: '#228B22' }));
+  } else if (isSupplySide || isLineSide) {
+    parts.push(txt(mspCX, mspCY + mspH/2 + 14, 'SUPPLY SIDE TAP — NEC 705.11', { size: F.tiny, anchor: 'middle', bold: true, fill: '#1E90FF' }));
+  } else {
+    // Backfed breaker - show rating and NEC reference
+    parts.push(txt(mspCX, mspCY + mspH/2 + 9,  `${input.backfeedAmps}A PV BREAKER`, { size: F.tiny, anchor: 'middle' }));
+    parts.push(txt(mspCX, mspCY + mspH/2 + 18, `BACKFED BREAKER — NEC 705.12(B)(2)`, { size: F.tiny, anchor: 'middle', italic: true, fill: '#333' }));
+  }
   parts.push(calloutNum(mspCX + mspW/2 + 16, mspCY - mspH/2 - 5, isMicro ? 5 : 6));
 
   // SEGMENT: AC Disconnect → MSP (CONDUIT)
