@@ -273,6 +273,310 @@ const UTILITY_REGISTRY: Record<string, UtilityRuleEntry> = {
     notes: 'FPL serves most of South and East Florida. Florida Building Code 7th Edition structural requirements apply.',
   },
 
+  // ── Illinois Electric Cooperatives ──────────────────────────────────────────
+  // All IL co-ops: ICC Docket 19-0368 interconnection rules, IL Net Metering Act (220 ILCS 5/16-107.5)
+  // Net metering at retail rate ≤ 40 kW, $50 application fee, 30-day approval, anti-islanding required
+
+  'swec-il': {
+    id: 'swec-il', name: 'Southwestern Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (avoided cost rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.swec.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required; excess credited at avoided cost rate' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required per ICC interconnection standards.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op. $50 application fee ≤10 kW. Net metering at avoided cost rate. Illinois Shines (ABP) available for RECs.',
+  },
+
+  'tri-county-il': {
+    id: 'tri-county-il', name: 'Tri-County Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.tricountyelectric.org',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required per ICC interconnection standards.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Marshall/Putnam/Stark/Bureau/Peoria counties. $50 application fee. Illinois Shines (ABP) available.',
+  },
+
+  'corn-belt-il': {
+    id: 'corn-belt-il', name: 'Corn Belt Energy Corporation', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.cornbeltenergy.com',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required; annual true-up in April' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving McLean/DeWitt/Livingston/Woodford/Tazewell counties. USDA REAP grants available for agricultural members.',
+  },
+
+  'eastern-illini-il': {
+    id: 'eastern-illini-il', name: 'Eastern Illini Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.eiec.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Ford/Iroquois/Kankakee counties. Illinois Shines (ABP) available.',
+  },
+
+  'coles-moultrie-il': {
+    id: 'coles-moultrie-il', name: 'Coles-Moultrie Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.cmec.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Coles/Moultrie/Douglas/Shelby counties. Illinois Shines (ABP) available.',
+  },
+
+  'egyptian-il': {
+    id: 'egyptian-il', name: 'Egyptian Electric Cooperative Association', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.egyptianelectric.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Saline/Gallatin/White/Hamilton/Hardin counties (southern IL). USDA REAP grants available.',
+  },
+
+  'menard-il': {
+    id: 'menard-il', name: 'Menard Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.menardelectric.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Menard/Mason/Cass/Sangamon counties (central IL). Illinois Shines (ABP) available.',
+  },
+
+  'monroe-county-il': {
+    id: 'monroe-county-il', name: 'Monroe County Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.monroecountyelectric.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Monroe/Randolph counties (SW IL near St. Louis metro). Illinois Shines (ABP) available.',
+  },
+
+  'norris-il': {
+    id: 'norris-il', name: 'Norris Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.norriselectric.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Wayne/Edwards/Wabash/White/Lawrence counties (SE IL). USDA REAP grants available.',
+  },
+
+  'shelby-il': {
+    id: 'shelby-il', name: 'Shelby Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.shelbyelectric.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Shelby/Effingham/Fayette/Christian counties (central IL). Illinois Shines (ABP) available.',
+  },
+
+  'spoon-river-il': {
+    id: 'spoon-river-il', name: 'Spoon River Electric Cooperative', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.srec.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Fulton/Knox/Warren/McDonough counties (west-central IL). USDA REAP grants available.',
+  },
+
+  'western-illinois-il': {
+    id: 'western-illinois-il', name: 'Western Illinois Electrical Coop', states: ['IL'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 40, maxSystemSizeKw: 40,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 40, netMeteringProgram: 'IL Net Metering (retail rate)',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.wiec.coop',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'ICC Docket 19-0368', description: 'Illinois Commerce Commission interconnection rules', requirement: 'All systems must comply with ICC interconnection standards' },
+      { rule: '220 ILCS 5/16-107.5', description: 'Illinois Net Metering Act', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Visible, lockable AC disconnect required.',
+    },
+    labelingRequirements: ['NEC 705.10 — Identification of power sources', 'NEC 690.54 — Equipment identification'],
+    notes: 'IL co-op serving Adams/Brown/Pike/Schuyler counties (western IL near Missouri border). Illinois Shines (ABP) available.',
+  },
+
   'pseg': {
     id: 'pseg', name: 'PSE&G', states: ['NJ'],
     preferredInterconnection: 'LOAD_SIDE',
@@ -346,15 +650,41 @@ export function getUtilityRules(utilityName: string): UtilityRuleEntry {
     .replace('floridapowerandlight', 'fpl')
     .replace('dukeenergy', 'duke')
     .replace('pseg', 'pseg')
-    .replace('publicserviceenterprisegroup', 'pseg');
+    .replace('publicserviceenterprisegroup', 'pseg')
+    // IL Co-op aliases
+    .replace('southwesternelectriccooperative', 'swecil')
+    .replace('southwesternelectric', 'swecil')
+    .replace('tricountyelectriccooperative', 'tricountyil')
+    .replace('tricountyelectric', 'tricountyil')
+    .replace('cornbeltenergycorporation', 'cornbeltil')
+    .replace('cornbeltenergy', 'cornbeltil')
+    .replace('easternillinielectriccooperative', 'easternilliniil')
+    .replace('easternillini', 'easternilliniil')
+    .replace('colesmoultrie', 'colesmoultriecooperativeil')
+    .replace('egyptianelectric', 'egyptianil')
+    .replace('menardelectric', 'menardil')
+    .replace('monroecountyelectric', 'monroecountyil')
+    .replace('norriselectric', 'norrisil')
+    .replace('shelbyelectric', 'shelbyil')
+    .replace('spoonriverelectric', 'spoonriveril')
+    .replace('westernillinoiselectrical', 'westernillinoisil');
 
   // Direct match
   if (UTILITY_REGISTRY[key]) return UTILITY_REGISTRY[key];
 
-  // Partial match
+  // Direct match on hyphenated id (e.g. 'swec-il' -> 'swecil')
+  const keyNorm = key.replace(/-/g, '');
   for (const [id, entry] of Object.entries(UTILITY_REGISTRY)) {
-    if (key.includes(id) || id.includes(key)) return entry;
-    if (entry.name.toLowerCase().replace(/[^a-z0-9]/g, '').includes(key)) return entry;
+    const idNorm = id.replace(/-/g, '');
+    if (keyNorm === idNorm) return entry;
+  }
+
+  // Partial match on name
+  for (const [id, entry] of Object.entries(UTILITY_REGISTRY)) {
+    const idNorm = id.replace(/-/g, '');
+    if (keyNorm.includes(idNorm) || idNorm.includes(keyNorm)) return entry;
+    const nameNorm = entry.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (nameNorm.includes(keyNorm) || keyNorm.includes(nameNorm.substring(0, 8))) return entry;
   }
 
   return DEFAULT_UTILITY;

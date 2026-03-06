@@ -27,6 +27,7 @@ import {
 
 import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
+import { computeBatteryBusImpact, getBatteryById } from './equipment-db';
 
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
@@ -364,6 +365,9 @@ export interface ComputedSystemInput {
   // 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE' | 'BACKFED_BREAKER'
   interconnectionMethod?: string;
   branchCount?: number;     // Number of AC branches (microinverter topology)
+
+  // Battery storage — NEC 705.12(B): AC-coupled battery backfeed breakers add to bus loading
+  batteryIds?: string[];    // equipment-db battery IDs (e.g. ['tesla-powerwall-3'])
 }
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
@@ -1045,20 +1049,29 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
   // NEC 705.12(B) — 120% rule applies ONLY to load-side connections
   // NEC 705.11 — Supply-side tap: 120% rule does NOT apply (connection before main breaker)
+  // NEC 706 / 705.12(B) — AC-coupled battery backfeed breakers ALSO add to bus loading
   const _interconMethodRaw = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
   const _isSupplySideTap = _interconMethodRaw.includes('SUPPLY') || _interconMethodRaw.includes('LINE_SIDE');
+
+  // Sum battery backfeed breaker contributions (AC-coupled only; DC-coupled returns 0)
+  const batteryBusImpactA = (input.batteryIds ?? []).reduce(
+    (sum, id) => sum + computeBatteryBusImpact(id), 0
+  );
+  const totalBackfeedA = backfeedBreakerAmps + batteryBusImpactA;
+
   const interconnectionPass = _isSupplySideTap
     ? true  // NEC 705.11: supply-side tap — no busbar loading concern
-    : (backfeedBreakerAmps + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
+    : (totalBackfeedA + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
   if (!interconnectionPass) {
     // Use correct terminology based on interconnection method
     const _interconLabel = (_interconMethodRaw.includes('BACKFED') || _interconMethodRaw.includes('BREAKER'))
       ? 'backfed breaker'
       : 'load-side breaker';
+    const _batteryNote = batteryBusImpactA > 0 ? ` + ${batteryBusImpactA}A battery` : '';
     issues.push({
       severity: 'error',
       code: 'NEC_705_12B_120PCT',
-      message: `Interconnection: ${backfeedBreakerAmps}A ${_interconLabel} + ${input.mainPanelAmps}A main = ${backfeedBreakerAmps + input.mainPanelAmps}A > 120% of ${input.panelBusRating}A bus (${Math.round(input.panelBusRating * 1.2)}A max)`,
+      message: `Interconnection: ${backfeedBreakerAmps}A ${_interconLabel}${_batteryNote} + ${input.mainPanelAmps}A main = ${totalBackfeedA + input.mainPanelAmps}A > 120% of ${input.panelBusRating}A bus (${Math.round(input.panelBusRating * 1.2)}A max)`,
       necReference: 'NEC 705.12(B)',
       autoFixed: false,
       suggestion: 'Consider supply-side tap (NEC 705.11) or panel upgrade',
@@ -1608,6 +1621,38 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     );
   }
 
+  // Battery / Generator / ATS — add to equipment schedule if configured
+  if (input.batteryIds && input.batteryIds.length > 0) {
+    input.batteryIds.forEach((batId, idx) => {
+      const bat = getBatteryById(batId);
+      if (bat) {
+        const busNote = bat.backfeedBreakerA
+          ? ` · ${bat.backfeedBreakerA}A backfeed breaker (NEC 705.12B bus loading)`
+          : ' · DC-coupled (no separate backfeed breaker)';
+        equipmentSchedule.push({
+          tag: `BATT-${idx + 1}`,
+          description: `Battery Storage (${bat.subcategory === 'ac_coupled' ? 'AC-Coupled' : 'DC-Coupled'})`,
+          manufacturer: bat.manufacturer,
+          model: bat.model,
+          qty: 1,
+          rating: `${bat.usableCapacityKwh} kWh / ${bat.continuousPowerKw} kW${busNote}`,
+          necReference: 'NEC 706 / NEC 705.12(B)',
+        });
+        if (bat.requiresGateway && bat.gatewayModel) {
+          equipmentSchedule.push({
+            tag: `GW-${idx + 1}`,
+            description: 'Backup Gateway / System Controller',
+            manufacturer: bat.manufacturer,
+            model: bat.gatewayModel,
+            qty: 1,
+            rating: `${bat.backfeedBreakerA ?? 0}A / 240V`,
+            necReference: 'NEC 706.15 / NEC 230.82',
+          });
+        }
+      }
+    });
+  }
+
   // ── BoM Quantities ────────────────────────────────────────────────────────
   // Wire quantities: runLength × conductorCount × 1.15 (15% waste factor)
   const WASTE_FACTOR = 1.15;
@@ -1764,7 +1809,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     acOutputCurrentA,
     acContinuousCurrentA,
     acOcpdAmps,
-    backfeedBreakerAmps,
+    backfeedBreakerAmps: totalBackfeedA,  // NEC 705.12(B): solar + battery combined
     interconnectionPass,
     runs,
     runMap,

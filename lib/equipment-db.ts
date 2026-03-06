@@ -751,3 +751,431 @@ export function getConductorByGauge(gauge: string): Conductor | undefined {
 export function getConduitByTypeAndSize(type: string, size: string): Conduit | undefined {
   return CONDUITS.find(c => c.type === type && c.tradeSize === size);
 }
+// ============================================================
+// Battery Storage Systems
+// ============================================================
+
+export interface BatterySystem {
+  id: string;
+  manufacturer: string;
+  model: string;
+  category: 'battery';
+  subcategory: 'ac_coupled' | 'dc_coupled';
+  usableCapacityKwh: number;
+  peakPowerKw: number;
+  continuousPowerKw: number;
+  roundTripEfficiencyPct: number;
+  chemistry: 'LFP' | 'NMC' | 'NCA';
+  voltageNominalV: number;
+  // AC interconnection (ac_coupled)
+  acOutputVoltageV?: number;
+  maxContinuousOutputA?: number;
+  backfeedBreakerA?: number;       // ← NEC 705.12(B): adds to bus loading
+  minDedicatedBreakerA?: number;
+  // Physical
+  weightLbs: number;
+  outdoorRated: boolean;
+  ipRating: string;
+  // Capabilities
+  gridFormingCapable: boolean;
+  backupCapable: boolean;
+  wholeHomeBackup: boolean;
+  requiresGateway: boolean;
+  gatewayModel?: string;
+  // Warranty
+  warrantyYears: number;
+  cycleGuarantee: string;
+  capacityRetentionPct: number;
+  // Pricing
+  msrpUsd: number;
+  // NEC references
+  necRefs: string[];
+  ulListing: string;
+  certifications: string[];
+}
+
+export const BATTERIES: BatterySystem[] = [
+  {
+    id: 'tesla-powerwall-3',
+    manufacturer: 'Tesla', model: 'Powerwall 3',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 13.5, peakPowerKw: 11.5, continuousPowerKw: 11.5,
+    roundTripEfficiencyPct: 97.5, chemistry: 'LFP', voltageNominalV: 50,
+    acOutputVoltageV: 240, maxContinuousOutputA: 48,
+    backfeedBreakerA: 50,        // NEC 705.12(B): 50A breaker adds to bus loading
+    minDedicatedBreakerA: 60,
+    weightLbs: 287, outdoorRated: true, ipRating: 'IP67',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: true, gatewayModel: 'Tesla Backup Gateway 2',
+    warrantyYears: 10, cycleGuarantee: 'Unlimited cycles', capacityRetentionPct: 70,
+    msrpUsd: 9300,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems', 'NEC 705.11 — supply-side connection option'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+  },
+  {
+    id: 'enphase-iq-battery-5p',
+    manufacturer: 'Enphase', model: 'IQ Battery 5P',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 5.0, peakPowerKw: 3.84, continuousPowerKw: 3.84,
+    roundTripEfficiencyPct: 96.0, chemistry: 'LFP', voltageNominalV: 48,
+    acOutputVoltageV: 240, maxContinuousOutputA: 16,
+    backfeedBreakerA: 20,        // NEC 705.12(B): 20A breaker adds to bus loading
+    minDedicatedBreakerA: 20,
+    weightLbs: 114, outdoorRated: true, ipRating: 'IP55',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: false,
+    requiresGateway: true, gatewayModel: 'Enphase IQ System Controller 3',
+    warrantyYears: 15, cycleGuarantee: '4000 cycles', capacityRetentionPct: 70,
+    msrpUsd: 4000,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+  },
+  {
+    id: 'enphase-iq-battery-10t',
+    manufacturer: 'Enphase', model: 'IQ Battery 10T',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 10.08, peakPowerKw: 7.68, continuousPowerKw: 7.68,
+    roundTripEfficiencyPct: 96.0, chemistry: 'LFP', voltageNominalV: 48,
+    acOutputVoltageV: 240, maxContinuousOutputA: 32,
+    backfeedBreakerA: 40,        // NEC 705.12(B): 40A breaker adds to bus loading
+    minDedicatedBreakerA: 40,
+    weightLbs: 225, outdoorRated: true, ipRating: 'IP55',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: true, gatewayModel: 'Enphase IQ System Controller 3',
+    warrantyYears: 15, cycleGuarantee: '4000 cycles', capacityRetentionPct: 70,
+    msrpUsd: 7500,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+  },
+  {
+    id: 'generac-pwrcell-9',
+    manufacturer: 'Generac', model: 'PWRcell 9 kWh',
+    category: 'battery', subcategory: 'dc_coupled',
+    usableCapacityKwh: 9.0, peakPowerKw: 4.5, continuousPowerKw: 4.5,
+    roundTripEfficiencyPct: 96.5, chemistry: 'NMC', voltageNominalV: 48,
+    // DC coupled — no direct AC backfeed breaker; inverter handles AC output
+    backfeedBreakerA: undefined, minDedicatedBreakerA: undefined,
+    weightLbs: 195, outdoorRated: true, ipRating: 'IP65',
+    gridFormingCapable: false, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: true, gatewayModel: 'Generac PWRmanager',
+    warrantyYears: 10, cycleGuarantee: '3650 cycles', capacityRetentionPct: 70,
+    msrpUsd: 8000,
+    necRefs: ['NEC 706 — Energy Storage Systems', 'NEC 705.12(B) — inverter backfeed breaker covers combined solar+battery output'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547'],
+  },
+  {
+    id: 'franklin-apower-15',
+    manufacturer: 'Franklin Electric', model: 'aPower 15.0',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 15.0, peakPowerKw: 10.0, continuousPowerKw: 10.0,
+    roundTripEfficiencyPct: 97.0, chemistry: 'LFP', voltageNominalV: 51.2,
+    acOutputVoltageV: 240, maxContinuousOutputA: 42,
+    backfeedBreakerA: 50,        // NEC 705.12(B): 50A breaker adds to bus loading
+    minDedicatedBreakerA: 60,
+    weightLbs: 330, outdoorRated: true, ipRating: 'IP65',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: false,
+    warrantyYears: 12, cycleGuarantee: '6000 cycles', capacityRetentionPct: 70,
+    msrpUsd: 10500,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+  },
+  {
+    id: 'solaredge-home-battery-10',
+    manufacturer: 'SolarEdge', model: 'Home Battery 10 kWh',
+    category: 'battery', subcategory: 'dc_coupled',
+    usableCapacityKwh: 9.7, peakPowerKw: 5.0, continuousPowerKw: 5.0,
+    roundTripEfficiencyPct: 94.5, chemistry: 'LFP', voltageNominalV: 48,
+    backfeedBreakerA: undefined, minDedicatedBreakerA: undefined,
+    weightLbs: 264, outdoorRated: true, ipRating: 'IP55',
+    gridFormingCapable: false, backupCapable: true, wholeHomeBackup: false,
+    requiresGateway: false, gatewayModel: 'SolarEdge Home Hub Inverter',
+    warrantyYears: 10, cycleGuarantee: '6000 cycles', capacityRetentionPct: 70,
+    msrpUsd: 7000,
+    necRefs: ['NEC 706 — Energy Storage Systems', 'NEC 705.12(B) — inverter backfeed breaker covers combined solar+battery output'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+  },
+];
+
+// ============================================================
+// Generator Systems
+// ============================================================
+
+export interface GeneratorSystem {
+  id: string;
+  manufacturer: string;
+  model: string;
+  category: 'generator';
+  subcategory: 'standby_natural_gas' | 'standby_propane' | 'portable';
+  ratedOutputKw: number;
+  voltageOutputV: number;
+  phaseType: 'split_phase' | 'three_phase';
+  fuelType: 'natural_gas' | 'propane' | 'gasoline' | 'diesel';
+  outputBreakerA: number;
+  outputWireGaugeMin: string;
+  neutralBonded: boolean;           // NEC 250.30 — floating neutral required when ATS switches neutral
+  autoStart: boolean;
+  remoteMonitoring: boolean;
+  weightLbs: number;
+  warrantyYears: number;
+  msrpUsd: number;
+  necRefs: string[];
+  ulListing: string;
+}
+
+export const GENERATORS: GeneratorSystem[] = [
+  {
+    id: 'generac-guardian-22kw',
+    manufacturer: 'Generac', model: 'Guardian 22kW',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 22, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 100, outputWireGaugeMin: '4 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 497, warrantyYears: 5, msrpUsd: 5499,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+  },
+  {
+    id: 'generac-guardian-24kw',
+    manufacturer: 'Generac', model: 'Guardian 24kW',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 24, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 100, outputWireGaugeMin: '4 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 530, warrantyYears: 5, msrpUsd: 6499,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+  },
+  {
+    id: 'kohler-20rcal',
+    manufacturer: 'Kohler', model: '20RCAL',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 20, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 100, outputWireGaugeMin: '4 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 410, warrantyYears: 5, msrpUsd: 5200,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+  },
+  {
+    id: 'briggs-stratton-20kw',
+    manufacturer: 'Briggs & Stratton', model: '20kW Home Standby',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 20, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 100, outputWireGaugeMin: '4 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 450, warrantyYears: 3, msrpUsd: 4800,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+  },
+];
+
+// ============================================================
+// Automatic Transfer Switches (ATS)
+// ============================================================
+
+export interface ATSUnit {
+  id: string;
+  manufacturer: string;
+  model: string;
+  category: 'ats';
+  subcategory: 'whole_home_ats' | 'manual_transfer_switch' | 'critical_load_panel';
+  ampRating: number;
+  voltageV: number;
+  serviceEntranceRated: boolean;
+  mainBreakerA?: number;
+  transferType: 'automatic' | 'manual';
+  neutralSwitched: boolean;         // NEC 250.30 — must switch neutral when generator has bonded neutral
+  outdoorRated: boolean;
+  enclosureType: string;
+  weightLbs: number;
+  warrantyYears: number;
+  msrpUsd: number;
+  necRefs: string[];
+  ulListing: string;
+}
+
+export const ATS_UNITS: ATSUnit[] = [
+  {
+    id: 'generac-rxsw200a3',
+    manufacturer: 'Generac', model: 'RXSW200A3',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 200, voltageV: 240,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    transferType: 'automatic', neutralSwitched: true,
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 45, warrantyYears: 5, msrpUsd: 1200,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required (generator has bonded neutral)', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1008',
+  },
+  {
+    id: 'generac-rtsw200a3',
+    manufacturer: 'Generac', model: 'RTSW200A3',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 200, voltageV: 240,
+    serviceEntranceRated: false,
+    transferType: 'automatic', neutralSwitched: true,
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 38, warrantyYears: 5, msrpUsd: 950,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required'],
+    ulListing: 'UL 1008',
+  },
+  {
+    id: 'kohler-rdt-200',
+    manufacturer: 'Kohler', model: 'RDT-CFNC-0200B',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 200, voltageV: 240,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    transferType: 'automatic', neutralSwitched: true,
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 50, warrantyYears: 5, msrpUsd: 1350,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1008',
+  },
+  {
+    id: 'siemens-tf222r',
+    manufacturer: 'Siemens', model: 'TF222R',
+    category: 'ats', subcategory: 'manual_transfer_switch',
+    ampRating: 200, voltageV: 240,
+    serviceEntranceRated: false,
+    transferType: 'manual', neutralSwitched: true,
+    outdoorRated: false, enclosureType: 'NEMA 1',
+    weightLbs: 22, warrantyYears: 1, msrpUsd: 350,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required'],
+    ulListing: 'UL 1008',
+  },
+];
+
+// ============================================================
+// Backup Interface / Gateway Controllers
+// ============================================================
+
+export interface BackupInterface {
+  id: string;
+  manufacturer: string;
+  model: string;
+  category: 'backup_interface';
+  subcategory: 'gateway_controller' | 'hybrid_inverter_gateway' | 'hybrid_inverter_charger' | 'energy_management_controller';
+  maxBackupOutputKw: number;
+  maxContinuousOutputA: number;
+  serviceEntranceRated: boolean;
+  mainBreakerA?: number;
+  gridFormingCapable: boolean;
+  islandingCapable: boolean;
+  loadSheddingCapable: boolean;
+  loadSheddingCircuits?: number;
+  generatorCompatible: boolean;
+  outdoorRated: boolean;
+  weightLbs: number;
+  warrantyYears: number;
+  msrpUsd: number;
+  necRefs: string[];
+  ulListing: string;
+  compatibleBatteries: string[];   // battery IDs
+}
+
+export const BACKUP_INTERFACES: BackupInterface[] = [
+  {
+    id: 'enphase-iq-system-controller-3',
+    manufacturer: 'Enphase', model: 'IQ System Controller 3',
+    category: 'backup_interface', subcategory: 'gateway_controller',
+    maxBackupOutputKw: 15.36, maxContinuousOutputA: 64,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    gridFormingCapable: true, islandingCapable: true,
+    loadSheddingCapable: true, loadSheddingCircuits: 2,
+    generatorCompatible: true,
+    outdoorRated: true, weightLbs: 22, warrantyYears: 5, msrpUsd: 1800,
+    necRefs: ['NEC 705.12(B) — load-side interconnection', 'NEC 706 — Energy Storage Systems', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1741 / UL 1741-SA',
+    compatibleBatteries: ['enphase-iq-battery-5p', 'enphase-iq-battery-10t'],
+  },
+  {
+    id: 'tesla-backup-gateway-2',
+    manufacturer: 'Tesla', model: 'Backup Gateway 2',
+    category: 'backup_interface', subcategory: 'gateway_controller',
+    maxBackupOutputKw: 46, maxContinuousOutputA: 200,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    gridFormingCapable: true, islandingCapable: true,
+    loadSheddingCapable: false,
+    generatorCompatible: false,
+    outdoorRated: true, weightLbs: 11, warrantyYears: 10, msrpUsd: 1000,
+    necRefs: ['NEC 705.12(B) — load-side interconnection', 'NEC 706 — Energy Storage Systems', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1741 / UL 1741-SA',
+    compatibleBatteries: ['tesla-powerwall-3'],
+  },
+  {
+    id: 'generac-pwrmanager',
+    manufacturer: 'Generac', model: 'PWRmanager',
+    category: 'backup_interface', subcategory: 'energy_management_controller',
+    maxBackupOutputKw: 0, maxContinuousOutputA: 0,
+    serviceEntranceRated: false,
+    gridFormingCapable: false, islandingCapable: false,
+    loadSheddingCapable: true, loadSheddingCircuits: 8,
+    generatorCompatible: true,
+    outdoorRated: false, weightLbs: 5, warrantyYears: 5, msrpUsd: 800,
+    necRefs: ['NEC 706 — Energy Storage Systems', 'NEC 702 — Optional Standby Systems'],
+    ulListing: 'UL 916',
+    compatibleBatteries: ['generac-pwrcell-9'],
+  },
+  {
+    id: 'solaredge-home-hub-7600',
+    manufacturer: 'SolarEdge', model: 'Home Hub SE7600H-US',
+    category: 'backup_interface', subcategory: 'hybrid_inverter_gateway',
+    maxBackupOutputKw: 7.6, maxContinuousOutputA: 32,
+    serviceEntranceRated: false,
+    gridFormingCapable: true, islandingCapable: true,
+    loadSheddingCapable: true, loadSheddingCircuits: 2,
+    generatorCompatible: false,
+    outdoorRated: true, weightLbs: 25.4, warrantyYears: 12, msrpUsd: 2200,
+    necRefs: ['NEC 705.12(B) — load-side backfed breaker (40A)', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 1741 / UL 1741-SA',
+    compatibleBatteries: ['solaredge-home-battery-10'],
+  },
+];
+
+// ── Lookup helpers ────────────────────────────────────────────────────────────
+
+export function getBatteryById(id: string): BatterySystem | undefined {
+  return BATTERIES.find(b => b.id === id);
+}
+
+export function getGeneratorById(id: string): GeneratorSystem | undefined {
+  return GENERATORS.find(g => g.id === id);
+}
+
+export function getATSById(id: string): ATSUnit | undefined {
+  return ATS_UNITS.find(a => a.id === id);
+}
+
+export function getBackupInterfaceById(id: string): BackupInterface | undefined {
+  return BACKUP_INTERFACES.find(b => b.id === id);
+}
+
+/**
+ * computeBatteryBusImpact — NEC 705.12(B) 120% rule
+ * Returns the additional bus loading from an AC-coupled battery's backfeed breaker.
+ * DC-coupled batteries don't add a separate breaker — the inverter backfeed covers both.
+ */
+export function computeBatteryBusImpact(batteryId: string): number {
+  const battery = getBatteryById(batteryId);
+  if (!battery) return 0;
+  if (battery.subcategory === 'dc_coupled') return 0; // inverter backfeed already counted
+  return battery.backfeedBreakerA ?? 0;
+}
+
+/**
+ * computeTotalBusLoading — NEC 705.12(B)
+ * Total bus loading = solar backfeed breaker + battery backfeed breaker(s)
+ * Must be ≤ 120% of bus rating
+ */
+export function computeTotalBusLoading(
+  solarBackfeedBreakerA: number,
+  batteryIds: string[],
+  mainBreakerA: number,
+  busRatingA: number,
+): { totalBackfeedA: number; maxAllowedA: number; passes: boolean; batteryImpactA: number } {
+  const batteryImpactA = batteryIds.reduce((sum, id) => sum + computeBatteryBusImpact(id), 0);
+  const totalBackfeedA = solarBackfeedBreakerA + batteryImpactA;
+  const maxAllowedA = busRatingA * 1.2;
+  const passes = (totalBackfeedA + mainBreakerA) <= maxAllowedA;
+  return { totalBackfeedA, maxAllowedA, passes, batteryImpactA };
+}

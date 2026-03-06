@@ -11,7 +11,7 @@ import {
   Wind, Snowflake, Weight, Ruler, ClipboardCheck,
   ChevronUp, Eye, EyeOff, Lock, Stamp, Package, Cpu as CpuIcon
 } from 'lucide-react';
-import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS } from '@/lib/equipment-db';
+import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById } from '@/lib/equipment-db';
 import { getUtilitiesByState } from '@/lib/utility-rules';
 import { getAhjsByState } from '@/lib/computed-plan';
 
@@ -60,6 +60,9 @@ interface ProjectConfig {
   batteryModel: string;
   batteryCount: number;
   batteryKwh: number;
+  batteryId: string;        // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
+  generatorId: string;      // equipment-db generator ID
+  atsId: string;            // equipment-db ATS ID
   mainPanelAmps: number;
   mainPanelBrand: string;
   utilityMeter: string;
@@ -159,6 +162,7 @@ const defaultProject: ProjectConfig = {
   date: new Date().toISOString().split('T')[0], systemType: 'roof',
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
+  batteryId: '', generatorId: '', atsId: '',
   mainPanelAmps: 200, mainPanelBrand: 'Square D', utilityMeter: 'Bidirectional Net Meter',
   acDisconnect: true, dcDisconnect: true, productionMeter: true, rapidShutdown: true,
   roofType: 'shingle', mountingId: 'ironridge-xr100',
@@ -420,6 +424,8 @@ export default function EngineeringPage() {
       branchCount: topology === 'micro' ? Math.ceil(totalPanels / (modulesPerDevice * branchLimit)) : undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
+      // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading
+      batteryIds: config.batteryId ? [config.batteryId] : [],
     };
 
     try {
@@ -982,7 +988,7 @@ export default function EngineeringPage() {
             : (firstInv?.inverterId || 'fronius-primo-8.2'),
           optimizerId:      firstInv?.type === 'optimizer' ? firstInv.inverterId : undefined,
           rackingId,
-          batteryId:        config.batteryBrand ? 'enphase-iq-battery-5p' : undefined,
+          batteryId:        config.batteryId || undefined,
           panelId:          firstStr?.panelId || 'qcells-peak-duo-400',
           moduleCount:      totalPanels,
           deviceCount:      bomDeviceCount,   // micro qty = deviceCount not moduleCount
@@ -1560,7 +1566,7 @@ export default function EngineeringPage() {
             <h1 className="text-xl font-black text-white flex items-center gap-2">
               <Zap size={20} className="text-amber-400" /> Engineering Schematics
               <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full ml-1">V3 · Permit-Grade</span>
-              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v20 · AP-SYSTEMS✓ WIRE-SIZING✓ LOAD-SIDE-TAP✓ UTIL-DB✓ EQUIP-DB✓ NEC2023✓</span>
+              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v20.1 · UTIL-DB-WIRED✓ EQUIP-DB-WIRED✓ BATTERY-NEC✓ GEN-ATS✓ IL-COOPS✓ NEC2023✓</span>
             </h1>
             <p className="text-slate-400 text-xs mt-0.5">
               {config.projectName} · {totalPanels} panels · {totalKw} kW DC · {totalInverterKw} kW AC
@@ -1814,11 +1820,20 @@ export default function EngineeringPage() {
                 <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Shield size={14} className="text-amber-400" /> Battery Storage (Optional)</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Battery Brand</label>
-                    <select value={config.batteryBrand} onChange={e => updateConfig({ batteryBrand: e.target.value })}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
+                    <label className="text-xs text-slate-400 mb-1 block">Battery Model</label>
+                    <select value={config.batteryId} onChange={e => {
+                      const bat = getBatteryById(e.target.value);
+                      updateConfig({
+                        batteryId: e.target.value,
+                        batteryBrand: bat?.manufacturer ?? '',
+                        batteryModel: bat?.model ?? '',
+                        batteryKwh: bat?.usableCapacityKwh ?? 0,
+                      });
+                    }} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
                       <option value="">None</option>
-                      {['Tesla Powerwall 3', 'Enphase IQ Battery 5P', 'Franklin Electric aPower', 'SolarEdge Home Battery', 'LG RESU Prime 16H', 'Generac PWRcell', 'Panasonic EverVolt H'].map(b => <option key={b}>{b}</option>)}
+                      {BATTERIES.map(b => (
+                        <option key={b.id} value={b.id}>{b.manufacturer} {b.model} ({b.usableCapacityKwh} kWh)</option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -1831,10 +1846,53 @@ export default function EngineeringPage() {
                     <input type="number" min={0} step={0.1} value={config.batteryKwh} onChange={e => updateConfig({ batteryKwh: +e.target.value })}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60" />
                   </div>
-                  <div className="flex items-end">
+                  <div className="flex items-end flex-col gap-1">
                     <div className="bg-slate-700/50 rounded-lg px-3 py-2 text-sm text-amber-400 font-bold w-full text-center">
                       Total: {(config.batteryCount * config.batteryKwh).toFixed(1)} kWh
                     </div>
+                    {config.batteryId && (() => {
+                      const bat = getBatteryById(config.batteryId);
+                      return bat?.backfeedBreakerA ? (
+                        <div className="text-xs text-orange-400 text-center w-full">
+                          +{bat.backfeedBreakerA}A bus load (NEC 705.12B)
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
+                {/* Generator & ATS */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Generator</label>
+                    <select value={config.generatorId} onChange={e => updateConfig({ generatorId: e.target.value })}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
+                      <option value="">None</option>
+                      {GENERATORS.map(g => (
+                        <option key={g.id} value={g.id}>{g.manufacturer} {g.model} ({g.ratedOutputKw} kW)</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Transfer Switch (ATS)</label>
+                    <select value={config.atsId} onChange={e => updateConfig({ atsId: e.target.value })}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
+                      <option value="">None</option>
+                      {ATS_UNITS.map(a => (
+                        <option key={a.id} value={a.id}>{a.manufacturer} {a.model} ({a.ampRating}A {a.transferType})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    {config.generatorId && config.atsId && (() => {
+                      const gen = getGeneratorById(config.generatorId);
+                      const ats = getATSById(config.atsId);
+                      return (
+                        <div className="bg-emerald-900/30 border border-emerald-500/30 rounded-lg px-3 py-2 text-xs text-emerald-400 w-full">
+                          ✓ {gen?.ratedOutputKw}kW gen + {ats?.ampRating}A ATS
+                          {ats?.neutralSwitched ? ' · Neutral switched ✓' : ' · ⚠ Check neutral bonding'}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -3953,7 +4011,7 @@ export default function EngineeringPage() {
                     { label: 'DC System Size', value: `${totalKw} kW` },
                     { label: 'AC Inverter Capacity', value: `${totalInverterKw} kW` },
                     { label: 'Total Panels', value: `${totalPanels}` },
-                    { label: 'Battery Storage', value: config.batteryCount > 0 ? `${(config.batteryCount * config.batteryKwh).toFixed(1)} kWh` : 'None' },
+                    { label: 'Battery Storage', value: config.batteryId ? (() => { const b = getBatteryById(config.batteryId); return b ? `${config.batteryCount}× ${b.manufacturer} ${b.model} (${(config.batteryCount * b.usableCapacityKwh).toFixed(1)} kWh)` : `${(config.batteryCount * config.batteryKwh).toFixed(1)} kWh`; })() : 'None' },
                   ].map(item => (
                     <div key={item.label} className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
                       <div className="text-lg font-black text-amber-700">{item.value}</div>
