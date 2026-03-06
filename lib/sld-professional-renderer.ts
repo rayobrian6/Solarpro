@@ -128,6 +128,10 @@ export interface SLDProfessionalInput {
   hasBackupPanel?:         boolean;
   backupPanelAmps?:        number;
   backupPanelBrand?:       string;
+  backupInterfaceId?:      string;
+  backupInterfaceBrand?:   string;
+  backupInterfaceModel?:   string;
+  backupInterfaceIsATS?:   boolean;
   scale:                   string;
   acWireLength:            number;
   panelsPerString?:        number;
@@ -454,6 +458,160 @@ function renderBackupPanel(
   p.push(callout(bx + W2 + 14, by2 - 5, calloutN));
 
   return {svg: p.join(''), lx: bx - 10, rx: bx + W2, ty: by2, by: by2 + H2};
+}
+
+// Backup Interface Unit (BUI) Symbol
+// Handles: Enphase IQ SC3, Tesla Backup Gateway, generic BUI
+// Placed between MSP and utility meter on the right side of the bus
+function renderBUI(
+  cx: number, cy: number,
+  brand: string, model: string, ampRating: number,
+  isEnphase: boolean, isTesla: boolean,
+  hasGenerator: boolean, calloutN: number
+): {svg: string; lx: number; rx: number; ty: number; by: number; batPortX: number; batPortY: number; loadPortX: number; loadPortY: number} {
+  const W2 = 100, H2 = 90;
+  const bx = cx - W2/2, by2 = cy - H2/2;
+  const BUI_CLR = isEnphase ? '#0D47A1' : isTesla ? '#CC0000' : '#1565C0';
+  const p: string[] = [];
+
+  // Enclosure
+  p.push(rect(bx, by2, W2, H2, {fill: WHT, stroke: BUI_CLR, sw: SW_MED}));
+  p.push(ln(bx, by2+14, bx+W2, by2+14, {stroke: BUI_CLR, sw: SW_THIN}));
+
+  // Header text
+  const headerText = isEnphase ? 'IQ SYSTEM CONTROLLER 3'
+    : isTesla ? 'BACKUP GATEWAY 2'
+    : 'BACKUP INTERFACE UNIT';
+  p.push(txt(cx, by2+10, headerText, {sz: 5.5, bold: true, anc: 'middle', fill: BUI_CLR}));
+
+  // GRID input lug (left side, upper)
+  const gridY = cy - 14;
+  p.push(lug(bx+8, gridY));
+  p.push(txt(bx+8, gridY-8, 'GRID', {sz: 4.5, anc: 'middle', fill: '#444'}));
+  p.push(ln(bx, gridY, bx+8, gridY, {stroke: BUI_CLR, sw: SW_MED}));
+
+  // GEN input lug (left side, lower) — only if generator configured
+  const genInputY = cy + 14;
+  if (hasGenerator) {
+    p.push(lug(bx+8, genInputY));
+    p.push(txt(bx+8, genInputY+9, 'GEN', {sz: 4.5, anc: 'middle', fill: '#2E7D32'}));
+    p.push(ln(bx, genInputY, bx+8, genInputY, {stroke: '#2E7D32', sw: SW_MED}));
+  }
+
+  // Transfer switch blades inside
+  // GRID blade — closed (utility is normal source)
+  p.push(ln(bx+11, gridY, bx+42, gridY, {stroke: BUI_CLR, sw: SW_MED}));
+  p.push(circ(bx+11, gridY, 2.5, {fill: BUI_CLR, stroke: BUI_CLR, sw: 0}));
+  p.push(circ(bx+42, gridY, 2.5, {fill: WHT, stroke: BUI_CLR, sw: SW_THIN}));
+
+  if (hasGenerator) {
+    // GEN blade — open (angled)
+    p.push(ln(bx+11, genInputY, bx+32, genInputY-12, {stroke: '#2E7D32', sw: SW_MED}));
+    p.push(circ(bx+11, genInputY, 2.5, {fill: '#2E7D32', stroke: '#2E7D32', sw: 0}));
+    p.push(circ(bx+42, genInputY, 2.5, {fill: WHT, stroke: '#2E7D32', sw: SW_THIN}));
+  }
+
+  // Internal bus (vertical center)
+  const busX2 = bx + 55;
+  p.push(ln(busX2, gridY, busX2, hasGenerator ? genInputY : gridY+20, {stroke: BUI_CLR, sw: 2.5}));
+  p.push(ln(bx+42, gridY, busX2, gridY, {stroke: BUI_CLR, sw: SW_THIN}));
+  if (hasGenerator) {
+    p.push(ln(bx+42, genInputY, busX2, genInputY, {stroke: BUI_CLR, sw: SW_THIN}));
+  }
+
+  // LOAD output lug (right side, center)
+  const loadY = cy;
+  p.push(lug(bx+W2-8, loadY));
+  p.push(txt(bx+W2-8, loadY-8, 'LOAD', {sz: 4.5, anc: 'middle', fill: '#444'}));
+  p.push(ln(busX2, loadY, bx+W2-8, loadY, {stroke: BUI_CLR, sw: SW_MED}));
+  p.push(ln(bx+W2-8, loadY, bx+W2, loadY, {stroke: BUI_CLR, sw: SW_MED}));
+
+  // BATTERY port (bottom center)
+  const batPortX2 = cx;
+  const batPortY2 = by2 + H2;
+  p.push(lug(batPortX2, batPortY2-4));
+  p.push(txt(batPortX2, batPortY2+8, 'BATTERY', {sz: 4.5, anc: 'middle', fill: BUI_CLR}));
+  p.push(ln(batPortX2, batPortY2-4, batPortX2, batPortY2, {stroke: BUI_CLR, sw: SW_MED}));
+
+  // Labels below
+  const labelBrand = brand || (isEnphase ? 'Enphase' : isTesla ? 'Tesla' : 'BUI');
+  const labelModel = model || (isEnphase ? 'IQ SC3' : isTesla ? 'Gateway 2' : 'BUI');
+  p.push(txt(cx, by2+H2+18, `${labelBrand} ${labelModel}`, {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
+  p.push(txt(cx, by2+H2+27, ampRating > 0 ? `${ampRating}A` : '200A', {sz: F.tiny, anc: 'middle', bold: true, fill: BUI_CLR}));
+  if (isEnphase) {
+    p.push(txt(cx, by2+H2+36, 'NEC 706 / NEC 230.82 / UL 1741-SA', {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
+  } else {
+    p.push(txt(cx, by2+H2+36, 'NEC 706 / UL 1741', {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
+  }
+
+  // Callout
+  p.push(callout(bx+W2+14, by2-5, calloutN));
+
+  return {
+    svg: p.join(''),
+    lx: bx-10, rx: bx+W2+10,
+    ty: by2, by: by2+H2,
+    batPortX: batPortX2, batPortY: batPortY2,
+    loadPortX: bx+W2, loadPortY: loadY,
+  };
+}
+
+// Professional Inverter Box (replaces generic circle symbol)
+function renderInverterBox(
+  cx: number, cy: number,
+  manufacturer: string, model: string,
+  acKw: number, acAmps: number,
+  topologyLabel: string, mpptAllocation: string,
+  calloutN: number
+): {svg: string; lx: number; rx: number} {
+  const W2 = 96, H2 = 80;
+  const bx = cx - W2/2, by2 = cy - H2/2;
+  const p: string[] = [];
+
+  // Enclosure
+  p.push(rect(bx, by2, W2, H2, {fill: WHT, stroke: BLK, sw: SW_MED}));
+  p.push(ln(bx, by2+14, bx+W2, by2+14, {sw: SW_THIN}));
+  p.push(txt(cx, by2+10, topologyLabel, {sz: 5.5, bold: true, anc: 'middle'}));
+
+  // DC/AC conversion symbol in center
+  const symY = cy - 4;
+  // DC label left
+  p.push(txt(bx+10, symY+4, 'DC', {sz: 7, bold: true, anc: 'middle', fill: '#555'}));
+  // Arrow
+  p.push(ln(bx+20, symY, bx+W2-20, symY, {sw: SW_MED}));
+  p.push(`<path d="M${bx+W2-22},${symY-5} L${bx+W2-18},${symY} L${bx+W2-22},${symY+5}" fill="${BLK}" stroke="${BLK}" stroke-width="1"/>`);
+  // Sine wave on AC side
+  const swX = bx + W2 - 18;
+  const swPath = `M${swX-8},${symY} Q${swX-4},${symY-7} ${swX},${symY} Q${swX+4},${symY+7} ${swX+8},${symY}`;
+  p.push(`<path d="${swPath}" fill="none" stroke="${BLK}" stroke-width="${SW_MED}"/>`);
+  // AC label right
+  p.push(txt(bx+W2-10, symY+4, 'AC', {sz: 7, bold: true, anc: 'middle', fill: '#555'}));
+
+  // Manufacturer + model
+  const mfgLabel = manufacturer ? `${manufacturer}` : '';
+  const mdlLabel = model ? model.substring(0, 18) : '';
+  p.push(txt(cx, by2+H2-28, mfgLabel, {sz: F.sub, anc: 'middle', italic: true}));
+  p.push(txt(cx, by2+H2-18, mdlLabel, {sz: F.label, anc: 'middle', bold: true}));
+
+  // Output specs
+  p.push(txt(cx, by2+H2-8, acKw > 0 ? `${acKw} kW / ${acAmps}A` : '', {sz: F.tiny, anc: 'middle'}));
+
+  // MPPT allocation
+  if (mpptAllocation) {
+    p.push(txt(cx, by2+H2+9, `MPPT: ${mpptAllocation}`, {sz: F.tiny, anc: 'middle', fill: '#555'}));
+  }
+
+  // DC input lug (left)
+  p.push(lug(bx, cy));
+  p.push(ln(bx-10, cy, bx, cy, {sw: SW_MED}));
+  // AC output lug (right)
+  p.push(lug(bx+W2, cy));
+  p.push(ln(bx+W2, cy, bx+W2+10, cy, {sw: SW_MED}));
+
+  // Callout
+  p.push(callout(bx+W2+14, by2-5, calloutN));
+
+  return {svg: p.join(''), lx: bx-10, rx: bx+W2+10};
 }
 
 // ── Wire Segment with Inline Label ───────────────────────────────────────────
@@ -986,30 +1144,23 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   if (!isMicro) {
     const invCX = xInv, invCY = BUS_Y;
-    const invR = 28;
-    parts.push(inverterSymbol(invCX, invCY, invR));
-    // DC input lug
-    parts.push(lug(invCX-invR, invCY));
-    parts.push(ln(invCX-invR-10, invCY, invCX-invR, invCY, {sw:SW_MED}));
-    // AC output lug
-    parts.push(lug(invCX+invR, invCY));
-    parts.push(ln(invCX+invR, invCY, invCX+invR+10, invCY, {sw:SW_MED}));
     const tl = input.topologyType==='STRING_WITH_OPTIMIZER' ? 'STRING + OPTIMIZER' : 'STRING INVERTER';
-    parts.push(txt(invCX, invCY-invR-18, tl, {sz:F.hdr, bold:true, anc:'middle'}));
-    parts.push(txt(invCX, invCY-invR-8, `${esc(input.inverterManufacturer)} ${esc(input.inverterModel)}`, {sz:F.sub, anc:'middle'}));
-    parts.push(txt(invCX, invCY+invR+9, `${input.acOutputKw} kW / ${input.acOutputAmps}A`, {sz:F.tiny, anc:'middle'}));
-    if (input.mpptAllocation) {
-      parts.push(txt(invCX, invCY+invR+18, `MPPT: ${input.mpptAllocation}`, {sz:F.tiny, anc:'middle'}));
-    }
-    parts.push(callout(invCX+invR+14, invCY-invR-5, 4));
-    invRX = invCX+invR+10;
+    const invBox = renderInverterBox(
+      invCX, invCY,
+      input.inverterManufacturer, input.inverterModel,
+      input.acOutputKw, input.acOutputAmps,
+      tl, input.mpptAllocation ?? '',
+      4
+    );
+    parts.push(invBox.svg);
+    invRX = invBox.rx;
 
     // SEGMENT 3: DC Disco → Inverter
     {
       const run = dcDiscoInvRun ?? dcStringRun;
       const fb = [`${resolvedDcWire} USE-2/PV Wire`, '1×#10 GRN EGC', `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
-      parts.push(wireSeg(node3RX, invCX-invR-10, BUS_Y, lines, {bundleCount:cnt}));
+      parts.push(wireSeg(node3RX, invBox.lx - 10, BUS_Y, lines, {bundleCount:cnt}));
     }
   }
 
@@ -1034,7 +1185,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── NODE 6: MSP ───────────────────────────────────────────────────────────
   let mspRX: number;
-  let mspBusY = BUS_Y; // Y of MSP output wire (main bus level)
+  let mspBusY = BUS_Y;
+  let buiRX: number; // right edge of BUI (or MSP if no battery) // Y of MSP output wire (main bus level)
 
   if (isLoadSide) {
     const r = renderMSPLoad(xMSP, BUS_Y, input.mainPanelAmps, pvBreakerAmps, isMicro?5:6);
@@ -1051,6 +1203,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   }
 
   // SEGMENT: AC Disco → MSP
+  buiRX = mspRX; // default: no BUI, wire goes directly to meter
   {
     const run = discoMspRun;
     const fb = [
@@ -1063,86 +1216,130 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   }
 
 
-  // NODE 8: BATTERY STORAGE (if configured)
-  // Battery placed ABOVE the main bus, to the right of the MSP
+  // ─── NODE 8: BUI + BATTERY (if battery configured) ───────────────────────
+  // BUI (Enphase IQ SC3 / Tesla Gateway / generic) placed RIGHT of MSP
+  // Battery connects to BUI battery port — NOT directly to MSP bus
+  // Backfeed breaker at MSP connects MSP bus to BUI grid port
+  buiRX = mspRX;
   if (input.hasBattery && input.batteryModel) {
-    const batCX = xMSP + 140;
-    const batCY = BUS_Y - 110;
+    const isEnphase = !!(input.backupInterfaceBrand?.toLowerCase().includes('enphase') ||
+      input.inverterManufacturer?.toLowerCase().includes('enphase') ||
+      input.batteryModel?.toLowerCase().includes('enphase') ||
+      input.batteryModel?.toLowerCase().includes('iq battery'));
+    const isTesla = !!(input.backupInterfaceBrand?.toLowerCase().includes('tesla') ||
+      input.batteryModel?.toLowerCase().includes('powerwall'));
+
+    // BUI positioned right of MSP, on the main bus line
+    const buiCX = xMSP + 130;
+    const buiCY = BUS_Y;
+    const buiAmpRating = input.atsAmpRating ?? 200;
+    const buiResult = renderBUI(
+      buiCX, buiCY,
+      input.backupInterfaceBrand ?? (isEnphase ? 'Enphase' : isTesla ? 'Tesla' : ''),
+      input.backupInterfaceModel ?? (isEnphase ? 'IQ System Controller 3' : isTesla ? 'Backup Gateway 2' : 'BUI'),
+      buiAmpRating,
+      isEnphase, isTesla,
+      (input.generatorKw ?? 0) > 0,
+      isMicro ? 7 : 8
+    );
+    parts.push(buiResult.svg);
+    buiRX = buiResult.rx;
+
+    // Wire: MSP output → BUI grid input (horizontal on bus line)
+    parts.push(ln(mspRX, BUS_Y, buiResult.lx, BUS_Y, {stroke: BLK, sw: SW_MED}));
+
+    // Backfeed breaker at MSP for battery (NEC 705.12(B))
+    const bfA = input.batteryBackfeedA ?? 20;
+    const bfX = xMSP + 30;
+    parts.push(breakerSymbol(bfX, BUS_Y + 30, 20, 12, bfA));
+    parts.push(ln(bfX, BUS_Y, bfX, BUS_Y + 24, {sw: SW_THIN, stroke: '#1565C0'}));
+    parts.push(txt(bfX, BUS_Y + 48, `${bfA}A BATT`, {sz: 5, anc: 'middle', bold: true, fill: '#1565C0'}));
+    parts.push(txt(bfX, BUS_Y + 56, 'NEC 705.12(B)', {sz: 4.5, anc: 'middle', italic: true, fill: '#1565C0'}));
+
+    // Battery symbol — above BUI, connected to BUI battery port
+    const batCX = buiCX;
+    const batCY = BUS_Y - 120;
     const batResult = renderBattery(
       batCX, batCY,
       input.batteryModel,
       input.batteryKwh ?? 0,
       input.batteryBackfeedA ?? 0,
-      isMicro ? 7 : 8
+      isMicro ? 8 : 9
     );
     parts.push(batResult.svg);
 
-    // AC connection: dashed line from battery bottom to MSP bus
-    parts.push(ln(batCX, batResult.by, batCX, BUS_Y, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
-    parts.push(ln(batCX, BUS_Y, xMSP + 20, BUS_Y, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
-    parts.push(circ(xMSP + 20, BUS_Y, 3, {fill: '#1565C0', stroke: '#1565C0', sw: 0}));
+    // Wire: battery bottom → BUI battery port (vertical dashed blue line)
+    parts.push(ln(batCX, batResult.by, batCX, buiResult.batPortY, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
+    // Wire callout
+    const batWireGauge = bfA <= 20 ? '#12 AWG THWN-2' : bfA <= 30 ? '#10 AWG THWN-2' : '#8 AWG THWN-2';
+    parts.push(tspan(batCX + 8, batCY + (buiResult.batPortY - batResult.by)/2,
+      [batWireGauge, `${bfA}A CIRCUIT`],
+      {sz: F.tiny, anc: 'start', fill: '#1565C0'}));
 
-    const batWireLabel = (input.batteryBackfeedA ?? 0) > 0
-      ? [`#6 AWG THWN-2`, `${input.batteryBackfeedA}A — NEC 705.12(B)`]
-      : ['#6 AWG THWN-2', 'AC-COUPLED BATTERY'];
-    parts.push(tspan(batCX + 30, BUS_Y - 20, batWireLabel, {sz: F.tiny, anc: 'start', fill: '#1565C0'}));
+    // Backup sub-panel — connected to BUI load port (right side)
+    if (input.hasBackupPanel) {
+      const bpCX = buiResult.loadPortX + 80;
+      const bpCY = BUS_Y + 100;
+      const bpResult = renderBackupPanel(
+        bpCX, bpCY,
+        input.backupPanelBrand ?? (isEnphase ? 'Enphase' : ''),
+        input.backupPanelAmps ?? 100,
+        isMicro ? 9 : 10
+      );
+      parts.push(bpResult.svg);
+      // Wire: BUI load port → backup panel (L-shaped route)
+      parts.push(ln(buiResult.loadPortX, buiResult.loadPortY, bpCX - 40, buiResult.loadPortY, {stroke: '#6A1B9A', sw: SW_MED}));
+      parts.push(ln(bpCX - 40, buiResult.loadPortY, bpCX - 40, bpCY, {stroke: '#6A1B9A', sw: SW_MED}));
+      parts.push(ln(bpCX - 40, bpCY, bpResult.lx, bpCY, {stroke: '#6A1B9A', sw: SW_MED}));
+      parts.push(tspan(bpCX - 40 + 6, bpCY - 10, ['#6 AWG THWN-2', 'CRITICAL LOADS'], {sz: F.tiny, anc: 'start', fill: '#6A1B9A'}));
+    }
   }
 
-  // NODE 9: GENERATOR + ATS (if configured)
-  // Generator placed BELOW the schematic area, left of MSP
+  // ─── NODE 9: GENERATOR + GENERATOR ATS (if configured) ───────────────────
+  // Generator ATS positioned between utility meter and MSP (service entrance)
+  // Generator positioned below and left of the ATS
   if ((input.generatorKw ?? 0) > 0) {
-    const genCX = xMSP - 200;
-    const genCY = BUS_Y + 160;
+    // Generator ATS — between utility meter and MSP, below the bus
+    const genAtsCX = (xMSP + xUtil) / 2;
+    const genAtsCY = BUS_Y + 140;
+    const genAtsResult = renderATS(
+      genAtsCX, genAtsCY,
+      input.atsBrand ?? '',
+      input.atsModel ?? '',
+      input.atsAmpRating ?? 200,
+      isMicro ? 10 : 11
+    );
+    parts.push(genAtsResult.svg);
+
+    // Generator — below and left of ATS
+    const genCX = genAtsCX - 160;
+    const genCY = BUS_Y + 140;
     const genResult = renderGenerator(
       genCX, genCY,
       input.generatorBrand ?? '',
       input.generatorModel ?? '',
       input.generatorKw!,
-      isMicro ? 8 : 9
+      isMicro ? 11 : 12
     );
     parts.push(genResult.svg);
 
-    const atsCX = xMSP - 80;
-    const atsCY = BUS_Y + 160;
-    const atsResult = renderATS(
-      atsCX, atsCY,
-      input.atsBrand ?? '',
-      input.atsModel ?? '',
-      input.atsAmpRating ?? 200,
-      isMicro ? 9 : 10
-    );
-    parts.push(atsResult.svg);
+    // Generator → ATS GEN input (horizontal wire)
+    parts.push(ln(genResult.rx, genCY, genAtsResult.lx, genAtsCY, {stroke: '#2E7D32', sw: SW_MED}));
+    const genAtsLabelX = (genResult.rx + genAtsResult.lx) / 2;
+    parts.push(tspan(genAtsLabelX, genCY - 10, ['#6 AWG THWN-2', 'GEN OUTPUT'], {sz: F.tiny, anc: 'middle', fill: '#2E7D32'}));
 
-    // Generator -> ATS
-    parts.push(ln(genResult.rx, genCY, atsResult.lx, atsCY, {stroke: '#2E7D32', sw: SW_MED}));
-    const genAtsX = (genResult.rx + atsResult.lx) / 2;
-    parts.push(tspan(genAtsX, genCY - 10, ['#6 AWG THWN-2', 'GEN OUTPUT'], {sz: F.tiny, anc: 'middle', fill: '#2E7D32'}));
+    // Utility → ATS NORM input (vertical drop from bus)
+    const utilDropX = genAtsCX - 44;
+    parts.push(ln(utilDropX, BUS_Y + 36, utilDropX, genAtsCY, {stroke: BLK, sw: SW_MED}));
+    parts.push(txt(utilDropX - 4, (BUS_Y + 36 + genAtsCY) / 2, 'UTILITY', {sz: F.tiny, anc: 'end', fill: '#444'}));
 
-    // Utility feed to ATS (vertical drop from BUS_Y)
-    const utilFeedX = atsCX - 44;
-    parts.push(ln(utilFeedX, BUS_Y + 36, utilFeedX, atsCY, {stroke: BLK, sw: SW_MED}));
-    parts.push(txt(utilFeedX - 4, (BUS_Y + 36 + atsCY) / 2, 'UTILITY', {sz: F.tiny, anc: 'end', fill: '#444'}));
+    // ATS LOAD output → MSP (vertical rise back to bus)
+    const atsLoadX = genAtsCX + 55;
+    parts.push(ln(atsLoadX, genAtsCY, atsLoadX, BUS_Y + 36, {stroke: '#E65100', sw: SW_MED}));
+    parts.push(tspan(atsLoadX + 6, genAtsCY - 20, ['#4 AWG THWN-2', 'ATS → MSP'], {sz: F.tiny, anc: 'start', fill: '#E65100'}));
 
-    // ATS -> MSP (vertical rise)
-    const atsMspX = atsCX + 55;
-    parts.push(ln(atsMspX, atsCY, atsMspX, BUS_Y + 36, {stroke: '#E65100', sw: SW_MED}));
-    parts.push(tspan(atsMspX + 6, atsCY - 20, ['#4 AWG THWN-2', 'ATS → MSP'], {sz: F.tiny, anc: 'start', fill: '#E65100'}));
-
-    parts.push(txt(atsCX, atsCY + 55, 'NEC 702.5 — TRANSFER EQUIPMENT REQUIRED', {sz: F.tiny, anc: 'middle', italic: true, fill: '#E65100'}));
-
-    if (input.hasBackupPanel) {
-      const bpCX = atsCX + 160;
-      const bpCY = BUS_Y + 160;
-      const bpResult = renderBackupPanel(
-        bpCX, bpCY,
-        input.backupPanelBrand ?? '',
-        input.backupPanelAmps ?? 100,
-        isMicro ? 10 : 11
-      );
-      parts.push(bpResult.svg);
-      parts.push(ln(atsResult.rx, atsCY, bpResult.lx, bpCY, {stroke: '#6A1B9A', sw: SW_MED}));
-      parts.push(tspan((atsResult.rx + bpResult.lx) / 2, bpCY - 10, ['#6 AWG THWN-2', 'CRITICAL LOADS'], {sz: F.tiny, anc: 'middle', fill: '#6A1B9A'}));
-    }
+    // NEC 702.5 note
+    parts.push(txt(genAtsCX, genAtsCY + 55, 'NEC 702.5 — TRANSFER EQUIPMENT REQUIRED', {sz: F.tiny, anc: 'middle', italic: true, fill: '#E65100'}));
   }
 
   // ── NODE 7: UTILITY METER ─────────────────────────────────────────────────
@@ -1158,7 +1355,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
     const {lines, cnt} = runLines(run, fb);
-    parts.push(wireSeg(mspRX, utilCX-mR-10, BUS_Y, lines, {bundleCount:cnt}));
+    parts.push(wireSeg(buiRX, utilCX-mR-10, BUS_Y, lines, {bundleCount:cnt}));
   }
 
   // Meter symbol

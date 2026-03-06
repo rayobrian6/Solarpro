@@ -11,7 +11,7 @@ import {
   Wind, Snowflake, Weight, Ruler, ClipboardCheck,
   ChevronUp, Eye, EyeOff, Lock, Stamp, Package, Cpu as CpuIcon
 } from 'lucide-react';
-import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById } from '@/lib/equipment-db';
+import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from '@/lib/equipment-db';
 import { getUtilitiesByState } from '@/lib/utility-rules';
 import { getAhjsByState } from '@/lib/computed-plan';
 
@@ -63,6 +63,7 @@ interface ProjectConfig {
   batteryId: string;        // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
   generatorId: string;      // equipment-db generator ID
   atsId: string;            // equipment-db ATS ID
+  backupInterfaceId: string; // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, etc.)
   mainPanelAmps: number;
   mainPanelBrand: string;
   utilityMeter: string;
@@ -162,7 +163,7 @@ const defaultProject: ProjectConfig = {
   date: new Date().toISOString().split('T')[0], systemType: 'roof',
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
-  batteryId: '', generatorId: '', atsId: '',
+  batteryId: '', generatorId: '', atsId: '', backupInterfaceId: '',
   mainPanelAmps: 200, mainPanelBrand: 'Square D', utilityMeter: 'Bidirectional Net Meter',
   acDisconnect: true, dcDisconnect: true, productionMeter: true, rapidShutdown: true,
   roofType: 'shingle', mountingId: 'ironridge-xr100',
@@ -886,6 +887,47 @@ export default function EngineeringPage() {
           rapidShutdown:  config.rapidShutdown,
           batteryModel:   config.batteryBrand ? `${config.batteryBrand} ${config.batteryModel}` : undefined,
           batteryKwh:     config.batteryKwh * config.batteryCount || undefined,
+          // Battery backfeed breaker (NEC 705.12(B)) — from equipment-db
+          batteryBackfeedA: config.batteryId
+            ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
+            : undefined,
+          // Generator fields
+          generatorBrand: config.generatorId
+            ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })()
+            : undefined,
+          generatorModel: config.generatorId
+            ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? undefined; })()
+            : undefined,
+          generatorKw: config.generatorId
+            ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })()
+            : undefined,
+          // ATS fields
+          atsBrand: config.atsId
+            ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? undefined; })()
+            : undefined,
+          atsModel: config.atsId
+            ? (() => { const a = getATSById(config.atsId); return a?.model ?? undefined; })()
+            : undefined,
+          atsAmpRating: config.atsId
+            ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
+            : undefined,
+          // Backup interface (Enphase IQ SC3, Tesla Gateway, etc.)
+          backupInterfaceId:    config.backupInterfaceId || undefined,
+          backupInterfaceBrand: config.backupInterfaceId
+            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.manufacturer ?? undefined; })()
+            : undefined,
+          backupInterfaceModel: config.backupInterfaceId
+            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.model ?? undefined; })()
+            : undefined,
+          backupInterfaceIsATS: config.backupInterfaceId
+            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.islandingCapable ?? false; })()
+            : false,
+          // Backup panel
+          hasBackupPanel:    !!(config.backupInterfaceId),
+          backupPanelAmps:   100,
+          backupPanelBrand:  config.backupInterfaceId
+            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.manufacturer ?? undefined; })()
+            : undefined,
           necVersion:     `NEC ${compliance.jurisdiction?.necVersion || '2023'}`,
           jurisdiction:   compliance.jurisdiction?.state || '',
           notes:          config.notes,

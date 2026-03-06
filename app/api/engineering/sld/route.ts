@@ -224,6 +224,10 @@ export async function POST(req: NextRequest) {
       hasBackupPanel:          !!(body.hasBackupPanel || body.backupPanelBrand),
       backupPanelAmps:         body.backupPanelAmps  ? Number(body.backupPanelAmps)  : undefined,
       backupPanelBrand:        body.backupPanelBrand ? String(body.backupPanelBrand) : undefined,
+      backupInterfaceId:       body.backupInterfaceId   ? String(body.backupInterfaceId)   : undefined,
+      backupInterfaceBrand:    body.backupInterfaceBrand ? String(body.backupInterfaceBrand) : undefined,
+      backupInterfaceModel:    body.backupInterfaceModel ? String(body.backupInterfaceModel) : undefined,
+      backupInterfaceIsATS:    body.backupInterfaceIsATS ? !!(body.backupInterfaceIsATS)    : undefined,
       scale:                   String(body.scale                   ?? 'NOT TO SCALE'),
       // Micro-specific
       deviceCount:             isMicro ? deviceCount : undefined,
