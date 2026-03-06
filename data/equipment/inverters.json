@@ -1,0 +1,338 @@
+{
+  "schemaVersion": "1.0",
+  "category": "inverter",
+  "lastUpdated": "2025-01-01",
+  "items": [
+    {
+      "id": "apsystems-ds3-s",
+      "manufacturer": "APsystems",
+      "model": "DS3-S",
+      "sku": "DS3-S",
+      "category": "inverter",
+      "subcategory": "microinverter",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "maxDcInputW": 880,
+        "maxDcInputPerMpptW": 440,
+        "mpptCount": 2,
+        "panelsPerUnit": 2,
+        "maxDcVoltageV": 60,
+        "startupVoltageV": 22,
+        "maxDcCurrentPerInputA": 13.5,
+        "ratedAcOutputW": 760,
+        "maxAcOutputW": 800,
+        "acOutputVoltageV": 240,
+        "acOutputCurrentA": 3.33,
+        "maxAcCurrentA": 3.5,
+        "powerFactorMin": 0.99,
+        "frequencyHz": 60,
+        "phaseType": "split_phase",
+        "cec_efficiency_pct": 97.0,
+        "weightLbs": 4.2,
+        "dimensionsInches": "8.7 x 7.1 x 1.4",
+        "ipRating": "IP67",
+        "operatingTempMinC": -40,
+        "operatingTempMaxC": 65,
+        "gridFormingCapable": false,
+        "rapidShutdownCompliant": true,
+        "rapidShutdownStandard": "NEC 2017/2020 690.12"
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "branchCircuitMaxUnits": 16,
+        "branchCircuitMaxCurrentA": 20,
+        "branchCircuitBreakerA": 20,
+        "wireGaugeMin": "12 AWG",
+        "connectorType": "MC4"
+      },
+      "warranty": {
+        "years": 25,
+        "notes": "25-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 185,
+        "notes": "Per unit (covers 2 panels)"
+      }
+    },
+    {
+      "id": "apsystems-ds3",
+      "manufacturer": "APsystems",
+      "model": "DS3",
+      "sku": "DS3",
+      "category": "inverter",
+      "subcategory": "microinverter",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "maxDcInputW": 960,
+        "maxDcInputPerMpptW": 480,
+        "mpptCount": 2,
+        "panelsPerUnit": 2,
+        "maxDcVoltageV": 60,
+        "startupVoltageV": 22,
+        "maxDcCurrentPerInputA": 14.0,
+        "ratedAcOutputW": 880,
+        "maxAcOutputW": 920,
+        "acOutputVoltageV": 240,
+        "acOutputCurrentA": 3.83,
+        "maxAcCurrentA": 4.0,
+        "powerFactorMin": 0.99,
+        "frequencyHz": 60,
+        "phaseType": "split_phase",
+        "cec_efficiency_pct": 97.0,
+        "weightLbs": 4.4,
+        "dimensionsInches": "8.7 x 7.1 x 1.4",
+        "ipRating": "IP67",
+        "operatingTempMinC": -40,
+        "operatingTempMaxC": 65,
+        "gridFormingCapable": false,
+        "rapidShutdownCompliant": true,
+        "rapidShutdownStandard": "NEC 2017/2020 690.12"
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "branchCircuitMaxUnits": 16,
+        "branchCircuitMaxCurrentA": 20,
+        "branchCircuitBreakerA": 20,
+        "wireGaugeMin": "12 AWG",
+        "connectorType": "MC4"
+      },
+      "warranty": {
+        "years": 25,
+        "notes": "25-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 195,
+        "notes": "Per unit (covers 2 panels)"
+      }
+    },
+    {
+      "id": "apsystems-ds3-l",
+      "manufacturer": "APsystems",
+      "model": "DS3-L",
+      "sku": "DS3-L",
+      "category": "inverter",
+      "subcategory": "microinverter",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "maxDcInputW": 1040,
+        "maxDcInputPerMpptW": 520,
+        "mpptCount": 2,
+        "panelsPerUnit": 2,
+        "maxDcVoltageV": 60,
+        "startupVoltageV": 22,
+        "maxDcCurrentPerInputA": 15.0,
+        "ratedAcOutputW": 960,
+        "maxAcOutputW": 1000,
+        "acOutputVoltageV": 240,
+        "acOutputCurrentA": 4.17,
+        "maxAcCurrentA": 4.35,
+        "powerFactorMin": 0.99,
+        "frequencyHz": 60,
+        "phaseType": "split_phase",
+        "cec_efficiency_pct": 97.0,
+        "weightLbs": 4.6,
+        "dimensionsInches": "8.7 x 7.1 x 1.4",
+        "ipRating": "IP67",
+        "operatingTempMinC": -40,
+        "operatingTempMaxC": 65,
+        "gridFormingCapable": false,
+        "rapidShutdownCompliant": true,
+        "rapidShutdownStandard": "NEC 2017/2020 690.12"
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "branchCircuitMaxUnits": 14,
+        "branchCircuitMaxCurrentA": 20,
+        "branchCircuitBreakerA": 20,
+        "wireGaugeMin": "12 AWG",
+        "connectorType": "MC4"
+      },
+      "warranty": {
+        "years": 25,
+        "notes": "25-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 205,
+        "notes": "Per unit (covers 2 panels)"
+      }
+    },
+    {
+      "id": "enphase-iq8plus",
+      "manufacturer": "Enphase",
+      "model": "IQ8+",
+      "sku": "IQ8PLUS-72-2-US",
+      "category": "inverter",
+      "subcategory": "microinverter",
+      "certifications": ["UL 1741", "UL 1741-SA", "UL 1741-SB", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "maxDcInputW": 440,
+        "mpptCount": 1,
+        "panelsPerUnit": 1,
+        "maxDcVoltageV": 60,
+        "startupVoltageV": 22,
+        "maxDcCurrentPerInputA": 14.0,
+        "ratedAcOutputW": 295,
+        "maxAcOutputW": 349,
+        "acOutputVoltageV": 240,
+        "acOutputCurrentA": 1.21,
+        "maxAcCurrentA": 1.46,
+        "powerFactorMin": 0.99,
+        "frequencyHz": 60,
+        "phaseType": "split_phase",
+        "cec_efficiency_pct": 97.0,
+        "weightLbs": 2.6,
+        "dimensionsInches": "8.5 x 6.5 x 1.3",
+        "ipRating": "IP67",
+        "operatingTempMinC": -40,
+        "operatingTempMaxC": 65,
+        "gridFormingCapable": true,
+        "rapidShutdownCompliant": true,
+        "rapidShutdownStandard": "NEC 2017/2020 690.12"
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "branchCircuitMaxUnits": 16,
+        "branchCircuitMaxCurrentA": 20,
+        "branchCircuitBreakerA": 20,
+        "wireGaugeMin": "12 AWG",
+        "connectorType": "Q-connector"
+      },
+      "warranty": {
+        "years": 25,
+        "notes": "25-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 165,
+        "notes": "Per unit (1 panel)"
+      }
+    },
+    {
+      "id": "solaredge-hd-wave-7600",
+      "manufacturer": "SolarEdge",
+      "model": "HD-Wave SE7600H-US",
+      "sku": "SE7600H-US000BNU4",
+      "category": "inverter",
+      "subcategory": "string_inverter",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "maxDcInputW": 11400,
+        "mpptCount": 2,
+        "panelsPerUnit": null,
+        "maxDcVoltageV": 480,
+        "startupVoltageV": 200,
+        "maxDcCurrentPerMpptA": 13.5,
+        "ratedAcOutputW": 7600,
+        "maxAcOutputW": 7600,
+        "acOutputVoltageV": 240,
+        "acOutputCurrentA": 32,
+        "powerFactorMin": 0.99,
+        "frequencyHz": 60,
+        "phaseType": "split_phase",
+        "cec_efficiency_pct": 99.0,
+        "weightLbs": 25.4,
+        "dimensionsInches": "17.7 x 14.6 x 7.2",
+        "ipRating": "IP65",
+        "operatingTempMinC": -40,
+        "operatingTempMaxC": 60,
+        "gridFormingCapable": false,
+        "rapidShutdownCompliant": true,
+        "rapidShutdownStandard": "NEC 2017/2020 690.12",
+        "requiresOptimizers": true
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "backfeedBreakerA": 40,
+        "minMainPanelBreakerA": 40,
+        "wireGaugeMin": "8 AWG"
+      },
+      "warranty": {
+        "years": 12,
+        "extendedWarrantyAvailable": true,
+        "extendedWarrantyYears": 25
+      },
+      "pricing": {
+        "msrpUsd": 1800,
+        "notes": "Inverter only; optimizers sold separately"
+      }
+    },
+    {
+      "id": "solaredge-p370-optimizer",
+      "manufacturer": "SolarEdge",
+      "model": "P370 Power Optimizer",
+      "sku": "P370-5R M4M RM",
+      "category": "inverter",
+      "subcategory": "power_optimizer",
+      "certifications": ["UL 1741", "IEC 62109-1"],
+      "specs": {
+        "maxDcInputW": 370,
+        "maxDcVoltageV": 60,
+        "maxDcCurrentA": 11.25,
+        "outputVoltageV": 1,
+        "maxOutputCurrentA": 15,
+        "weightLbs": 0.75,
+        "dimensionsInches": "5.1 x 3.9 x 0.9",
+        "ipRating": "IP68",
+        "operatingTempMinC": -40,
+        "operatingTempMaxC": 85,
+        "panelsPerUnit": 1,
+        "safetyVoltageV": 1,
+        "rapidShutdownCompliant": true
+      },
+      "warranty": {
+        "years": 25
+      },
+      "pricing": {
+        "msrpUsd": 65,
+        "notes": "Per unit"
+      }
+    },
+    {
+      "id": "sma-sunny-boy-7700",
+      "manufacturer": "SMA",
+      "model": "Sunny Boy 7.7-US",
+      "sku": "SB7.7-1SP-US-40",
+      "category": "inverter",
+      "subcategory": "string_inverter",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "maxDcInputW": 11550,
+        "mpptCount": 2,
+        "panelsPerUnit": null,
+        "maxDcVoltageV": 600,
+        "startupVoltageV": 188,
+        "maxDcCurrentPerMpptA": 15,
+        "ratedAcOutputW": 7700,
+        "maxAcOutputW": 7700,
+        "acOutputVoltageV": 240,
+        "acOutputCurrentA": 32.1,
+        "powerFactorMin": 0.99,
+        "frequencyHz": 60,
+        "phaseType": "split_phase",
+        "cec_efficiency_pct": 97.0,
+        "weightLbs": 55.1,
+        "dimensionsInches": "22.8 x 18.3 x 6.7",
+        "ipRating": "NEMA 4X",
+        "operatingTempMinC": -25,
+        "operatingTempMaxC": 60,
+        "gridFormingCapable": false,
+        "rapidShutdownCompliant": false,
+        "requiresOptimizers": false
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "backfeedBreakerA": 40,
+        "minMainPanelBreakerA": 40,
+        "wireGaugeMin": "8 AWG"
+      },
+      "warranty": {
+        "years": 10,
+        "extendedWarrantyAvailable": true,
+        "extendedWarrantyYears": 20
+      },
+      "pricing": {
+        "msrpUsd": 1650,
+        "notes": "Inverter only"
+      }
+    }
+  ]
+}

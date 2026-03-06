@@ -1043,13 +1043,22 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const acOcpdAmps = nextStandardOCPD(acContinuousCurrentA);
   const backfeedBreakerAmps = acOcpdAmps;
 
-  // NEC 705.12(B) — 120% rule: backfeed + main ≤ 1.2 × busRating
-  const interconnectionPass = (backfeedBreakerAmps + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
+  // NEC 705.12(B) — 120% rule applies ONLY to load-side connections
+  // NEC 705.11 — Supply-side tap: 120% rule does NOT apply (connection before main breaker)
+  const _interconMethodRaw = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+  const _isSupplySideTap = _interconMethodRaw.includes('SUPPLY') || _interconMethodRaw.includes('LINE_SIDE');
+  const interconnectionPass = _isSupplySideTap
+    ? true  // NEC 705.11: supply-side tap — no busbar loading concern
+    : (backfeedBreakerAmps + input.mainPanelAmps) <= (input.panelBusRating * 1.2);
   if (!interconnectionPass) {
+    // Use correct terminology based on interconnection method
+    const _interconLabel = (_interconMethodRaw.includes('BACKFED') || _interconMethodRaw.includes('BREAKER'))
+      ? 'backfed breaker'
+      : 'load-side breaker';
     issues.push({
       severity: 'error',
       code: 'NEC_705_12B_120PCT',
-      message: `Interconnection: ${backfeedBreakerAmps}A backfeed + ${input.mainPanelAmps}A main = ${backfeedBreakerAmps + input.mainPanelAmps}A > 120% of ${input.panelBusRating}A bus (${Math.round(input.panelBusRating * 1.2)}A max)`,
+      message: `Interconnection: ${backfeedBreakerAmps}A ${_interconLabel} + ${input.mainPanelAmps}A main = ${backfeedBreakerAmps + input.mainPanelAmps}A > 120% of ${input.panelBusRating}A bus (${Math.round(input.panelBusRating * 1.2)}A max)`,
       necReference: 'NEC 705.12(B)',
       autoFixed: false,
       suggestion: 'Consider supply-side tap (NEC 705.11) or panel upgrade',

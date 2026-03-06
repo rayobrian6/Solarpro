@@ -1,0 +1,230 @@
+{
+  "schemaVersion": "1.0",
+  "category": "generator",
+  "lastUpdated": "2025-01-01",
+  "items": [
+    {
+      "id": "generac-guardian-22kw",
+      "manufacturer": "Generac",
+      "model": "Guardian Series 22kW",
+      "sku": "7043",
+      "category": "generator",
+      "subcategory": "standby_natural_gas",
+      "certifications": ["UL 2200", "CSA", "CARB compliant"],
+      "specs": {
+        "ratedOutputKw": 22,
+        "ratedOutputKva": 27.5,
+        "standbyOutputKw": 22,
+        "voltageOutputV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "powerFactorMin": 0.8,
+        "fuelType": "natural_gas",
+        "fuelConsumptionCfhAtFullLoad": 204,
+        "engineDisplacementCc": 999,
+        "engineType": "V-twin OHV",
+        "startType": "automatic",
+        "transferSwitchIncluded": false,
+        "transferSwitchCompatible": ["Generac RXSW200A3", "Generac RTSW200A3"],
+        "weightLbs": 497,
+        "dimensionsInches": "48 x 25 x 29",
+        "noiseDbAt23Ft": 67,
+        "operatingTempMinF": -22,
+        "operatingTempMaxF": 104,
+        "outdoorRated": true,
+        "enclosureType": "aluminum",
+        "autoStartOnOutage": true,
+        "exerciseCycleCapable": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Generac Mobile Link"
+      },
+      "electrical": {
+        "outputBreakerA": 100,
+        "outputWireGaugeMin": "4 AWG",
+        "groundingRequired": true,
+        "neutralBonded": true
+      },
+      "warranty": {
+        "years": 5,
+        "notes": "5-year limited warranty on parts and labor"
+      },
+      "pricing": {
+        "msrpUsd": 5499,
+        "installationEstimateUsd": 3000,
+        "notes": "Does not include ATS or installation"
+      },
+      "compatibility": {
+        "atsRequired": true,
+        "recommendedAts": ["generac-rxsw200a3", "generac-rtsw200a3"],
+        "solarCompatible": true,
+        "batteryCompatible": true,
+        "notes": "Compatible with Generac PWRcell for solar+storage+generator integration"
+      }
+    },
+    {
+      "id": "generac-guardian-24kw",
+      "manufacturer": "Generac",
+      "model": "Guardian Series 24kW",
+      "sku": "7210",
+      "category": "generator",
+      "subcategory": "standby_natural_gas",
+      "certifications": ["UL 2200", "CSA", "CARB compliant"],
+      "specs": {
+        "ratedOutputKw": 24,
+        "ratedOutputKva": 30,
+        "standbyOutputKw": 24,
+        "voltageOutputV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "powerFactorMin": 0.8,
+        "fuelType": "natural_gas",
+        "fuelConsumptionCfhAtFullLoad": 222,
+        "engineDisplacementCc": 999,
+        "engineType": "V-twin OHV",
+        "startType": "automatic",
+        "transferSwitchIncluded": false,
+        "weightLbs": 530,
+        "dimensionsInches": "48 x 25 x 29",
+        "noiseDbAt23Ft": 68,
+        "operatingTempMinF": -22,
+        "operatingTempMaxF": 104,
+        "outdoorRated": true,
+        "enclosureType": "aluminum",
+        "autoStartOnOutage": true,
+        "exerciseCycleCapable": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Generac Mobile Link"
+      },
+      "electrical": {
+        "outputBreakerA": 100,
+        "outputWireGaugeMin": "4 AWG",
+        "groundingRequired": true,
+        "neutralBonded": true
+      },
+      "warranty": {
+        "years": 5,
+        "notes": "5-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 6499,
+        "installationEstimateUsd": 3000,
+        "notes": "Does not include ATS or installation"
+      },
+      "compatibility": {
+        "atsRequired": true,
+        "solarCompatible": true,
+        "batteryCompatible": true
+      }
+    },
+    {
+      "id": "kohler-20rcal",
+      "manufacturer": "Kohler",
+      "model": "20RCAL",
+      "sku": "20RCAL-100SELS",
+      "category": "generator",
+      "subcategory": "standby_natural_gas",
+      "certifications": ["UL 2200", "CSA"],
+      "specs": {
+        "ratedOutputKw": 20,
+        "ratedOutputKva": 25,
+        "standbyOutputKw": 20,
+        "voltageOutputV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "powerFactorMin": 0.8,
+        "fuelType": "natural_gas",
+        "fuelConsumptionCfhAtFullLoad": 190,
+        "engineDisplacementCc": 725,
+        "engineType": "Single cylinder OHV",
+        "startType": "automatic",
+        "transferSwitchIncluded": false,
+        "weightLbs": 410,
+        "dimensionsInches": "47.8 x 26.6 x 28.9",
+        "noiseDbAt23Ft": 65,
+        "operatingTempMinF": -22,
+        "operatingTempMaxF": 104,
+        "outdoorRated": true,
+        "enclosureType": "composite",
+        "autoStartOnOutage": true,
+        "exerciseCycleCapable": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Kohler OnCue Plus"
+      },
+      "electrical": {
+        "outputBreakerA": 100,
+        "outputWireGaugeMin": "4 AWG",
+        "groundingRequired": true,
+        "neutralBonded": true
+      },
+      "warranty": {
+        "years": 5,
+        "notes": "5-year/2000-hour limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 5200,
+        "installationEstimateUsd": 3000,
+        "notes": "Does not include ATS or installation"
+      },
+      "compatibility": {
+        "atsRequired": true,
+        "solarCompatible": true,
+        "batteryCompatible": true
+      }
+    },
+    {
+      "id": "briggs-stratton-20kw",
+      "manufacturer": "Briggs & Stratton",
+      "model": "20kW Home Standby Generator",
+      "sku": "040676",
+      "category": "generator",
+      "subcategory": "standby_natural_gas",
+      "certifications": ["UL 2200", "CSA"],
+      "specs": {
+        "ratedOutputKw": 20,
+        "ratedOutputKva": 25,
+        "standbyOutputKw": 20,
+        "voltageOutputV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "powerFactorMin": 0.8,
+        "fuelType": "natural_gas",
+        "fuelConsumptionCfhAtFullLoad": 185,
+        "engineDisplacementCc": 992,
+        "engineType": "V-twin OHV",
+        "startType": "automatic",
+        "transferSwitchIncluded": false,
+        "weightLbs": 450,
+        "dimensionsInches": "48 x 25 x 29",
+        "noiseDbAt23Ft": 66,
+        "operatingTempMinF": -22,
+        "operatingTempMaxF": 104,
+        "outdoorRated": true,
+        "enclosureType": "steel",
+        "autoStartOnOutage": true,
+        "exerciseCycleCapable": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Briggs & Stratton Symphony II"
+      },
+      "electrical": {
+        "outputBreakerA": 100,
+        "outputWireGaugeMin": "4 AWG",
+        "groundingRequired": true,
+        "neutralBonded": true
+      },
+      "warranty": {
+        "years": 3,
+        "notes": "3-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 4800,
+        "installationEstimateUsd": 2800,
+        "notes": "Does not include ATS or installation"
+      },
+      "compatibility": {
+        "atsRequired": true,
+        "solarCompatible": true,
+        "batteryCompatible": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "id": "swec-il",
+  "name": "Southwestern Electric Cooperative",
+  "type": "cooperative",
+  "states": ["IL"],
+  "eiaId": "17609",
+  "preferredInterconnection": "LOAD_SIDE",
+  "maxLoadSideBreaker": 40,
+  "maxSystemSizeKw": 10,
+  "applicationFeeBase": 50,
+  "applicationFeePerKw": 1,
+  "applicationFeeThresholdKw": 10,
+  "allowsMainBreakerDerate": false,
+  "allowsLineSideTap": false,
+  "requiresVisibleDisconnect": true,
+  "requiresProductionMeter": true,
+  "requiresAntiIslanding": true,
+  "netMeteringAvailable": true,
+  "netMeteringMaxKw": 10,
+  "netMeteringProgram": "Net Metering at Avoided Cost Rate",
+  "interconnectionApplicationRequired": true,
+  "interconnectionApplicationUrl": "https://www.nm-prc.org/wp-content/uploads/2021/06/NMInterconnectionManual2008.pdf",
+  "preApplicationRequired": false,
+  "preApplicationThresholdKw": 10,
+  "studyRequiredAboveKw": 10,
+  "ieee1547Compliant": true,
+  "ul1741Compliant": true,
+  "ruleReferences": [
+    { "rule": "NMPRC Rule 17.9.568", "description": "Net metering interconnection rules", "requirement": "Must comply with NM PRC interconnection standards" },
+    { "rule": "NMPRC Rule 17.9.569", "description": "Net metering billing rules", "requirement": "Excess energy credited at avoided cost rate" },
+    { "rule": "NMPRC Rule 17.9.570", "description": "Net metering technical requirements", "requirement": "Anti-islanding protection required" },
+    { "rule": "NEC Article 445.18", "description": "Generator/battery interconnection", "requirement": "Battery and generator systems must comply with NEC 445.18" }
+  ],
+  "disconnectRequirements": {
+    "acDisconnect": true,
+    "acDisconnectVisible": true,
+    "acDisconnectLockable": true,
+    "utilityAccessible": true,
+    "notes": "SWEC requires utility-accessible, lockable AC disconnect at or near the meter"
+  },
+  "labelingRequirements": [
+    "NEC 705.10 — Identification of power sources",
+    "NEC 690.54 — Equipment identification",
+    "SWEC requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at main panel"
+  ],
+  "notes": "Southwestern Electric Cooperative serves SW Illinois. Application fee: $50 for systems ≤10kW; $50 + $1/kW for systems >10kW. Members responsible for 100% of upgrade costs if distribution circuit upgrades required. Excess energy credited at SWEC Avoided Cost Rate (filed annually with NMPRC). RECs no longer purchased by SWEC."
+}

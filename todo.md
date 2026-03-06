@@ -1,25 +1,40 @@
-# BUILD v19 — NEC Calc Step Fix + AP Systems Microinverter Support
+# Solar Platform BUILD v20 — Remaining Tasks
 
-## Task 1: Investigate NEC Calculation Step data flow issue
-- [ ] Find where NEC calc steps are rendered in engineering page
-- [ ] Trace data flow from SLD/computeSystem to NEC calc step display
-- [ ] Identify what data is missing or wrong
-- [ ] Fix the data flow
+## Status: Resuming from context summary
 
-## Task 2: Research AP Systems microinverter specs
-- [ ] Research DS3, DS3-S, DS3-L specs (wattage, AC output current, voltage)
-- [ ] Determine panels per micro (2 per device)
-- [ ] Document AC output amps per model
+## Phase 1: Bug Fix - Load Side Tap ✅ DONE
+- [x] Analyze interconnection method logic in codebase
+- [x] Find root cause of "backfed breaker" error when "load side tap" selected
+- [x] Apply fix to computed-system.ts
+- [x] Document fix (BUG_FIX_LOAD_SIDE_TAP.md)
 
-## Task 3: Implement AP Systems inverter logic
-- [ ] Add AP Systems models to inverter registry/constants
-- [ ] Add inverterModulesPerDevice = 2 for AP Systems
-- [ ] Add per-model AC output current values
-- [ ] Ensure branch sizing uses correct per-device current
-- [ ] Verify 20A breaker / #10 AWG sizing works for all AP models
+## Phase 2: Utility DB Expansion
+- [x] Create swec-il.json (Southwestern Electric Cooperative IL)
+- [ ] Create remaining IL Co-Op utility JSON files (10 more)
+- [ ] Create tri-county-il.json
+- [ ] Create corn-belt-il.json
+- [ ] Create eastern-illini-il.json
+- [ ] Create coles-moultrie-il.json
+- [ ] Create egyptian-il.json
+- [ ] Create menard-il.json
+- [ ] Create monroe-county-il.json
+- [ ] Create norris-il.json
+- [ ] Create shelby-il.json
+- [ ] Create spoon-river-il.json
+- [ ] Create western-illinois-il.json
 
-## Task 4: Verify & test
-- [ ] Run tsc --noEmit
-- [ ] Run 27/27 test suite
-- [ ] Verify branch sizing for each AP model
-- [ ] Commit, push, create zip
+## Phase 3: Equipment Registry
+- [ ] Create data/equipment/ directory structure
+- [ ] Create batteries.json (Tesla Powerwall 3, Enphase IQ, Generac PWRcell, Franklin aPower, SolarEdge)
+- [ ] Create inverters.json (microinverters, string inverters, optimizers)
+- [ ] Create generators.json (Generac, Kohler, Briggs & Stratton)
+- [ ] Create ats.json (Automatic Transfer Switches)
+- [ ] Create backup-interfaces.json (Enphase, SolarEdge, Tesla Gateway)
+
+## Phase 4: Version Badge Update
+- [ ] Update BUILD badge to v20 in UI
+
+## Phase 5: Package ZIP Deliverable
+- [ ] Commit all changes as BUILD v20
+- [ ] Push to GitHub
+- [ ] Create solar-platform-build-v20.zip

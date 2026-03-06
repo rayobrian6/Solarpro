@@ -1,0 +1,277 @@
+{
+  "schemaVersion": "1.0",
+  "category": "backup_interface",
+  "lastUpdated": "2025-01-01",
+  "items": [
+    {
+      "id": "enphase-iq-system-controller-3",
+      "manufacturer": "Enphase",
+      "model": "IQ System Controller 3",
+      "sku": "ENV-IQ-AM3-240",
+      "category": "backup_interface",
+      "subcategory": "gateway_controller",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "maxBackupOutputKw": 15.36,
+        "maxContinuousOutputA": 64,
+        "gridFormingCapable": true,
+        "islandingCapable": true,
+        "loadSheddingCapable": true,
+        "loadSheddingCircuits": 2,
+        "weightLbs": 22,
+        "dimensionsInches": "17.3 x 13.4 x 5.5",
+        "ipRating": "IP54",
+        "outdoorRated": true,
+        "wifiEnabled": true,
+        "ethernetEnabled": true,
+        "cellularEnabled": false,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Enphase Enlighten",
+        "displayIncluded": false,
+        "appControl": true,
+        "appPlatform": "Enphase App"
+      },
+      "electrical": {
+        "mainBreakerA": 200,
+        "backupBreakerA": 200,
+        "inputWireGaugeMin": "2/0 AWG",
+        "outputWireGaugeMin": "2/0 AWG",
+        "serviceEntranceRated": true,
+        "neutralSwitched": true
+      },
+      "warranty": {
+        "years": 5,
+        "notes": "5-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 1800,
+        "installationEstimateUsd": 1200,
+        "notes": "Required for whole-home backup with IQ Battery; replaces main panel service entrance"
+      },
+      "compatibility": {
+        "batteries": ["enphase-iq-battery-5p", "enphase-iq-battery-10t"],
+        "inverters": ["Enphase IQ8 series"],
+        "generatorCompatible": true,
+        "generatorNotes": "Compatible with generators via dry contact; load shedding when generator runs"
+      }
+    },
+    {
+      "id": "tesla-backup-gateway-2",
+      "manufacturer": "Tesla",
+      "model": "Backup Gateway 2",
+      "sku": "1099752-00-E",
+      "category": "backup_interface",
+      "subcategory": "gateway_controller",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "maxBackupOutputKw": 46,
+        "maxContinuousOutputA": 200,
+        "gridFormingCapable": true,
+        "islandingCapable": true,
+        "loadSheddingCapable": false,
+        "weightLbs": 11,
+        "dimensionsInches": "13.5 x 10.5 x 3.5",
+        "ipRating": "IP56",
+        "outdoorRated": true,
+        "wifiEnabled": true,
+        "ethernetEnabled": true,
+        "cellularEnabled": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Tesla App",
+        "displayIncluded": false,
+        "appControl": true,
+        "appPlatform": "Tesla App"
+      },
+      "electrical": {
+        "mainBreakerA": 200,
+        "backupBreakerA": 200,
+        "inputWireGaugeMin": "2/0 AWG",
+        "outputWireGaugeMin": "2/0 AWG",
+        "serviceEntranceRated": true,
+        "neutralSwitched": true
+      },
+      "warranty": {
+        "years": 10,
+        "notes": "Covered under Powerwall warranty"
+      },
+      "pricing": {
+        "msrpUsd": 1000,
+        "installationEstimateUsd": 800,
+        "notes": "Required for Powerwall backup; typically bundled with Powerwall 3 purchase"
+      },
+      "compatibility": {
+        "batteries": ["tesla-powerwall-3"],
+        "inverters": ["Tesla Solar Inverter", "Any grid-tied inverter"],
+        "generatorCompatible": false,
+        "generatorNotes": "Tesla does not officially support generator integration with Powerwall 3"
+      }
+    },
+    {
+      "id": "generac-pwrmanager",
+      "manufacturer": "Generac",
+      "model": "PWRmanager",
+      "sku": "APKE00011",
+      "category": "backup_interface",
+      "subcategory": "energy_management_controller",
+      "certifications": ["UL 916", "FCC Part 15 Class B"],
+      "specs": {
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "maxBackupOutputKw": null,
+        "gridFormingCapable": false,
+        "islandingCapable": false,
+        "loadSheddingCapable": true,
+        "loadSheddingCircuits": 8,
+        "weightLbs": 5,
+        "dimensionsInches": "12 x 8 x 3",
+        "ipRating": "IP20",
+        "outdoorRated": false,
+        "wifiEnabled": true,
+        "ethernetEnabled": true,
+        "cellularEnabled": false,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Generac PWRview",
+        "displayIncluded": false,
+        "appControl": true,
+        "appPlatform": "Generac PWRview App"
+      },
+      "electrical": {
+        "inputWireGaugeMin": "N/A",
+        "outputWireGaugeMin": "N/A",
+        "serviceEntranceRated": false,
+        "notes": "Energy management controller; does not replace service entrance"
+      },
+      "warranty": {
+        "years": 5
+      },
+      "pricing": {
+        "msrpUsd": 800,
+        "installationEstimateUsd": 500,
+        "notes": "Required for PWRcell system monitoring and load management"
+      },
+      "compatibility": {
+        "batteries": ["generac-pwrcell-9"],
+        "inverters": ["Generac PWRcell Inverter"],
+        "generatorCompatible": true,
+        "generatorNotes": "Integrates with Generac Guardian generators for whole-home solar+storage+generator solution"
+      }
+    },
+    {
+      "id": "solaredge-home-hub-7600",
+      "manufacturer": "SolarEdge",
+      "model": "Home Hub SE7600H-US",
+      "sku": "SE7600H-US000BNU4",
+      "category": "backup_interface",
+      "subcategory": "hybrid_inverter_gateway",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "FCC Part 15 Class B"],
+      "specs": {
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "maxAcOutputW": 7600,
+        "maxBackupOutputKw": 7.6,
+        "maxContinuousOutputA": 32,
+        "gridFormingCapable": true,
+        "islandingCapable": true,
+        "loadSheddingCapable": true,
+        "loadSheddingCircuits": 2,
+        "weightLbs": 25.4,
+        "dimensionsInches": "17.7 x 14.6 x 7.2",
+        "ipRating": "IP65",
+        "outdoorRated": true,
+        "wifiEnabled": true,
+        "ethernetEnabled": true,
+        "cellularEnabled": false,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "SolarEdge mySolarEdge",
+        "displayIncluded": false,
+        "appControl": true,
+        "appPlatform": "mySolarEdge App"
+      },
+      "electrical": {
+        "backfeedBreakerA": 40,
+        "inputWireGaugeMin": "8 AWG",
+        "outputWireGaugeMin": "8 AWG",
+        "serviceEntranceRated": false,
+        "notes": "Hybrid inverter; connects to main panel via backfed breaker"
+      },
+      "warranty": {
+        "years": 12,
+        "extendedWarrantyAvailable": true,
+        "extendedWarrantyYears": 25
+      },
+      "pricing": {
+        "msrpUsd": 2200,
+        "installationEstimateUsd": 1500,
+        "notes": "Hybrid inverter/gateway combo; replaces standard string inverter"
+      },
+      "compatibility": {
+        "batteries": ["solaredge-home-battery-10"],
+        "inverters": ["SolarEdge P-series optimizers"],
+        "generatorCompatible": false,
+        "generatorNotes": "Generator integration not officially supported"
+      }
+    },
+    {
+      "id": "schneider-xw-pro-6848",
+      "manufacturer": "Schneider Electric",
+      "model": "XW Pro 6848",
+      "sku": "865-6848-01",
+      "category": "backup_interface",
+      "subcategory": "hybrid_inverter_charger",
+      "certifications": ["UL 1741", "UL 1741-SA", "IEEE 1547", "CSA"],
+      "specs": {
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "maxAcOutputW": 6800,
+        "maxBackupOutputKw": 6.8,
+        "maxContinuousOutputA": 28,
+        "gridFormingCapable": true,
+        "islandingCapable": true,
+        "loadSheddingCapable": true,
+        "batteryVoltageNominalV": 48,
+        "maxBatteryChargeA": 100,
+        "weightLbs": 75,
+        "dimensionsInches": "22.5 x 14.5 x 9",
+        "ipRating": "IP20",
+        "outdoorRated": false,
+        "wifiEnabled": false,
+        "ethernetEnabled": true,
+        "cellularEnabled": false,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Schneider InsightHome",
+        "displayIncluded": true,
+        "appControl": true,
+        "appPlatform": "InsightHome App"
+      },
+      "electrical": {
+        "backfeedBreakerA": 40,
+        "inputWireGaugeMin": "6 AWG",
+        "outputWireGaugeMin": "6 AWG",
+        "serviceEntranceRated": false
+      },
+      "warranty": {
+        "years": 5
+      },
+      "pricing": {
+        "msrpUsd": 3500,
+        "installationEstimateUsd": 2000,
+        "notes": "Professional-grade hybrid inverter/charger; suitable for off-grid and grid-tied with backup"
+      },
+      "compatibility": {
+        "batteries": ["Any 48V battery bank"],
+        "inverters": ["Any grid-tied inverter via AC coupling"],
+        "generatorCompatible": true,
+        "generatorNotes": "Excellent generator integration; supports generator auto-start via dry contact"
+      }
+    }
+  ]
+}
