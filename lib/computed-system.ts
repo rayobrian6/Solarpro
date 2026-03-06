@@ -1171,10 +1171,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     }));
 
     // COMBINER_TO_DISCO_RUN: AC combiner to AC disconnect
+    // Microinverters produce 120/240V split-phase, requiring neutral for imbalance current per NEC 200.3
+    const microConductorCount = (input.topology === 'micro') ? 3 : 2; // L1 + L2 + N for micro, L1 + L2 for string
     const combToDiscoWire = autoSizeWire(
       acOutputCurrentA,
       defaultRunLengths.COMBINER_TO_DISCO_RUN,
-      2, // L1 + L2 only — no neutral per NEC 690.8 / Enphase IQ8 spec §2.2
+      microConductorCount,
       input.conduitType,
       input.ambientTempC,
       systemVoltageAC,
@@ -1183,11 +1185,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('COMBINER_TO_DISCO_RUN', 'COMBINER TO AC DISCO', 'AC COMBINER', 'AC DISCONNECT', {
-      conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8 / Enphase IQ8 spec §2.2
+      conductorCount: microConductorCount,
       wireGauge: combToDiscoWire.gauge,
       insulation: 'THWN-2',
       egcGauge: combToDiscoWire.egcGauge,
-      neutralRequired: false, // PV AC output circuit — 2-wire ungrounded 240V per NEC 690.8
+      neutralRequired: input.topology === 'micro', // Microinverters require neutral for split-phase output
       conduitType: input.conduitType,
       conduitSize: combToDiscoWire.conduitSize,
       conduitFillPct: combToDiscoWire.conduitFillPct,
@@ -1203,7 +1205,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       ampacityPass: combToDiscoWire.ampacityPass,
       voltageDropPass: combToDiscoWire.voltageDropPass,
       conduitFillPass: combToDiscoWire.conduitFillPct <= 40,
-      necReferences: ['NEC 690.8', 'NEC 310.15'],
+      necReferences: ['NEC 690.8', 'NEC 310.15', 'NEC 200.3'],
       conductorCallout: combToDiscoWire.conductorCallout,
       color: 'ac',
     }));
@@ -1334,10 +1336,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // DISCO_TO_METER_RUN: AC Disconnect to MSP interconnection point
   // NOTE: No separate production meter — utility swaps bidirectional meter for net metering;
   // Enphase IQ Gateway provides production monitoring per manufacturer spec.
+  // Microinverters produce 120/240V split-phase, requiring neutral for imbalance current per NEC 200.3
+  const discoToMeterConductorCount = (input.topology === 'micro') ? 3 : 2;
   const discoToMeterWire = autoSizeWire(
     acOutputCurrentA,
     defaultRunLengths.DISCO_TO_METER_RUN,
-    2, // L1 + L2 only — no neutral per NEC 690.8 (PV AC output circuit)
+    discoToMeterConductorCount, // L1 + L2 (+ N for micro)
     input.conduitType,
     input.ambientTempC,
     systemVoltageAC,
@@ -1346,11 +1350,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     '#10 AWG'
   );
   runs.push(makeRunSegment('DISCO_TO_METER_RUN', 'AC DISCO TO MSP', 'AC DISCONNECT', 'MAIN SERVICE PANEL', {
-    conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8
+    conductorCount: discoToMeterConductorCount,
     wireGauge: discoToMeterWire.gauge,
     insulation: 'THWN-2',
     egcGauge: discoToMeterWire.egcGauge,
-    neutralRequired: false, // PV AC output circuit — 2-wire ungrounded 240V per NEC 690.8
+    neutralRequired: input.topology === 'micro', // Microinverters require neutral for split-phase output
     conduitType: input.conduitType,
     conduitSize: discoToMeterWire.conduitSize,
     conduitFillPct: discoToMeterWire.conduitFillPct,
@@ -1366,7 +1370,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     ampacityPass: discoToMeterWire.ampacityPass,
     voltageDropPass: discoToMeterWire.voltageDropPass,
     conduitFillPass: discoToMeterWire.conduitFillPct <= 40,
-    necReferences: ['NEC 310.15'],
+    necReferences: ['NEC 310.15', 'NEC 200.3'],
     conductorCallout: discoToMeterWire.conductorCallout,
     color: 'ac',
   }));
