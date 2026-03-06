@@ -434,6 +434,29 @@ export default function EngineeringPage() {
       maxDCVoltageDropPct: 3,
       // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading
       batteryIds: config.batteryId ? [config.batteryId] : [],
+      // BUILD v24: Battery/Generator/ATS NEC-sized segment inputs
+      batteryBackfeedA: config.batteryId
+        ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
+        : undefined,
+      batteryContinuousOutputA: config.batteryId
+        ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
+        : undefined,
+      generatorOutputBreakerA: config.generatorId
+        ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
+        : undefined,
+      generatorKw: config.generatorId
+        ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })()
+        : undefined,
+      atsAmpRating: config.atsId
+        ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
+        : undefined,
+      backupInterfaceMaxA: config.backupInterfaceId
+        ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.maxContinuousOutputA ?? undefined; })()
+        : undefined,
+      hasEnphaseIQSC3: (() => {
+        const buiId = config.backupInterfaceId?.toLowerCase() ?? '';
+        return buiId.includes('iq-system-controller-3') || buiId.includes('iq-sc3') || buiId.includes('iqsc3');
+      })(),
     };
 
     try {
