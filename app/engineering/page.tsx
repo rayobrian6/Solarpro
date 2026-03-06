@@ -392,6 +392,8 @@ export default function EngineeringPage() {
       inverterAcCurrentMax: invData?.acOutputCurrentMax ?? (topology === 'micro' ? 1.21 : 32),
       inverterModulesPerDevice: modulesPerDevice,
       inverterBranchLimit: branchLimit,
+      manufacturerMaxPerBranch20A: (invData as any)?.maxPerBranch20A ?? undefined,
+      manufacturerMaxPerBranch30A: (invData as any)?.maxPerBranch30A ?? undefined,
       designTempMin: (compliance.autoDetected as any)?.designTempMin ?? -10,
       // Cap ambientTempC at 40°C — NEC 310.15 standard design ambient.
       // compliance.autoDetected.designTempMax is the CONDUCTOR temp (air + rooftop adder),
@@ -885,6 +887,11 @@ export default function EngineeringPage() {
           branchWireGauge:   cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.wireGauge : undefined,
           branchConduitSize: cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.conduitSize : undefined,
           branchOcpdAmps:    cs.isMicro ? cs.runs.find(r => r.id === 'BRANCH_RUN')?.ocpdAmps : undefined,
+          // AP Systems / manufacturer branch limits
+          inverterModulesPerDevice: invData?.modulesPerDevice ?? 1,
+          inverterBranchLimit:      invData?.branchLimit ?? 16,
+          manufacturerMaxPerBranch20A: (invData as any)?.maxPerBranch20A ?? undefined,
+          manufacturerMaxPerBranch30A: (invData as any)?.maxPerBranch30A ?? undefined,
           // String details for string topology
           stringDetails: cs.isString ? cs.strings?.map((s: any, i: number) => ({
             stringIndex: i,
@@ -1553,7 +1560,7 @@ export default function EngineeringPage() {
             <h1 className="text-xl font-black text-white flex items-center gap-2">
               <Zap size={20} className="text-amber-400" /> Engineering Schematics
               <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full ml-1">V3 · Permit-Grade</span>
-              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v18 · SLD-V14✓ NEUTRAL-CARRIED✓ DISCO-SIDES✓ 200A-SERVICE✓ NEC2023✓</span>
+              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v19 · AP-SYSTEMS✓ 20-30A-BALANCE✓ NEC-STEPS-FIXED✓ NEUTRAL✓ NEC2023✓</span>
             </h1>
             <p className="text-slate-400 text-xs mt-0.5">
               {config.projectName} · {totalPanels} panels · {totalKw} kW DC · {totalInverterKw} kW AC
@@ -2822,8 +2829,25 @@ export default function EngineeringPage() {
               {(() => {
                 const elec = compliance.electrical as any;
                 const ac = elec?.acSizing;
-                const totalAcKw = elec?.summary?.totalAcKw ?? 0;
+                // Use computedSystem as primary source of truth for AC sizing values
+                // It uses the same NEC 310.15(B)(2) logic and 240V 2-pole breaker sizing
+                const cs = computedSystem;
+                const csFeederRun = cs?.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN');
+                const csBranchRun = cs?.runs?.find((r: any) => r.id === 'BRANCH_RUN');
+                // Prefer computedSystem values; fall back to electrical-calc acSizing
+                const totalAcKw = cs?.totalAcKw ?? elec?.summary?.totalAcKw ?? 0;
                 const sysV = 240;
+                // Feeder OCPD from computedSystem (correct 240V 2-pole sizing)
+                const feederOcpdAmps = cs?.acOcpdAmps ?? ac?.ocpdAmps ?? 60;
+                // Feeder conductor from computedSystem segment schedule
+                const feederGauge = csFeederRun?.wireGauge ?? ac?.conductorGauge ?? '#6 AWG';
+                const feederConduit = csFeederRun ? `${csFeederRun.conduitSize} ${csFeederRun.conduitType} (${csFeederRun.conduitFillPct?.toFixed(1)}% fill)` : ac?.conduitLabel ?? '';
+                const feederAmpacity = csFeederRun?.effectiveAmpacity ?? ac?.conductorAmpacity ?? 65;
+                // Branch OCPD from computedSystem (correct 240V 2-pole sizing)
+                const branchOcpdAmps = csBranchRun?.ocpdAmps ?? cs?.microBranches?.[0]?.ocpdAmps ?? feederOcpdAmps;
+                // AC output current from computedSystem
+                const acCurrentAmps = cs?.acOutputCurrentA ?? ac?.acCurrentAmps ?? 0;
+                const continuousCurrentAmps = +(acCurrentAmps * 1.25).toFixed(2);
 
                 if (!elec || !ac) {
                   return (
@@ -2846,7 +2870,7 @@ export default function EngineeringPage() {
                     title: 'Inverter Output Current',
                     nec: 'NEC 705.60',
                     formula: `(${totalAcKw.toFixed(2)} kW × 1000) ÷ ${sysV}V`,
-                    result: `${ac.acCurrentAmps}A`,
+                    result: `${acCurrentAmps.toFixed(2)}A`,
                     detail: 'AC output current at system voltage',
                     color: 'blue',
                   },
@@ -2854,57 +2878,57 @@ export default function EngineeringPage() {
                     num: 2,
                     title: 'Continuous Load Rule',
                     nec: 'NEC 705.60',
-                    formula: `${ac.acCurrentAmps}A × 1.25`,
-                    result: `${ac.continuousCurrentAmps}A`,
+                    formula: `${acCurrentAmps.toFixed(2)}A × 1.25`,
+                    result: `${continuousCurrentAmps}A`,
                     detail: 'PV output is continuous — 125% multiplier required',
                     color: 'purple',
                   },
                   {
                     num: 3,
-                    title: 'OCPD Size',
+                    title: 'Feeder OCPD Size',
                     nec: 'NEC 240.6',
-                    formula: `Next standard breaker ≥ ${ac.continuousCurrentAmps}A`,
-                    result: ac.ocpdLabel,
-                    detail: 'Standard breaker sizes: 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80...',
+                    formula: `Next 240V 2-pole breaker ≥ ${continuousCurrentAmps}A`,
+                    result: `${feederOcpdAmps}A Circuit Breaker`,
+                    detail: 'Real 240V double-pole breaker sizes: 20, 40, 60, 100, 125, 150, 200A',
                     color: 'amber',
                   },
                   {
                     num: 4,
                     title: 'AC Disconnect Rating',
                     nec: 'NEC 690.14',
-                    formula: `Disconnect ≥ OCPD (${ac.ocpdAmps}A)`,
-                    result: ac.disconnectLabel,
+                    formula: `Disconnect ≥ OCPD (${feederOcpdAmps}A)`,
+                    result: `${feederOcpdAmps}A Non-Fused AC Disconnect`,
                     detail: 'Utility-accessible disconnect required at point of interconnection',
                     color: 'amber',
                   },
                   {
                     num: 5,
-                    title: 'Fuse Size',
-                    nec: ac.disconnectType === 'fused' ? 'NEC 690.9' : 'NEC 690.14',
-                    formula: ac.disconnectType === 'fused'
-                      ? `2/3 × ${ac.disconnectAmps}A disconnect = ${(ac.disconnectAmps * 2/3).toFixed(0)}A → standard fuse`
-                      : `Non-fused disconnect — no fuses required`,
-                    result: ac.fuseLabel,
-                    detail: ac.disconnectType === 'fused'
-                      ? 'Fused disconnect: fuses protect conductors, 2 required for 240V'
-                      : 'Non-fused disconnect with separate OCPD breaker at panel — no fuses in disconnect',
-                    color: ac.disconnectType === 'fused' ? 'orange' : 'slate',
+                    title: 'Branch Circuit OCPD',
+                    nec: 'NEC 690.8(B)',
+                    formula: cs?.isMicro
+                      ? `${cs?.microBranches?.[0]?.deviceCount ?? '?'} micros × ${(acCurrentAmps / Math.max(cs?.microDeviceCount ?? 1, 1)).toFixed(2)}A × 1.25 → 240V 2-pole breaker`
+                      : 'N/A — string inverter topology',
+                    result: cs?.isMicro ? `${branchOcpdAmps}A Branch Breaker` : 'N/A',
+                    detail: cs?.isMicro
+                      ? `${cs?.microBranches?.length ?? 0} branches × ${branchOcpdAmps}A 240V 2-pole breakers — real panel hardware sizes only`
+                      : 'Branch OCPD applies to microinverter AC trunk circuits only',
+                    color: 'orange',
                   },
                   {
                     num: 6,
-                    title: 'Conductor Size',
-                    nec: 'NEC 310.16',
-                    formula: `75°C ampacity ≥ ${ac.ocpdAmps}A OCPD rating (NEC 310.16)`,
-                    result: ac.conductorLabel,
-                    detail: 'THWN-2 copper, 75°C column per NEC 310.16 Table',
+                    title: 'Feeder Conductor Size',
+                    nec: 'NEC 310.15(B)(2)',
+                    formula: `90°C derated, capped at 75°C termination ≥ ${feederOcpdAmps}A OCPD`,
+                    result: `${feederGauge} THWN-2 (${feederAmpacity}A)`,
+                    detail: 'NEC 310.15(B)(2): derate from 90°C column, cap at 75°C for terminations per NEC 110.14(C)',
                     color: 'emerald',
                   },
                   {
                     num: 7,
                     title: 'Conduit Size',
                     nec: 'NEC Ch. 9',
-                    formula: `3 CC + 1 EGC × ${ac.conductorGauge} THWN-2 → ≤40% fill (NEC Ch.9 Note 1)`,
-                    result: ac.conduitLabel,
+                    formula: `L1 + L2 + N + EGC × ${feederGauge} THWN-2 → ≤40% fill`,
+                    result: feederConduit || ac.conduitLabel,
                     detail: 'NEC Chapter 9 Table 4 (conduit area) & Table 5 (conductor area)',
                     color: 'teal',
                   },

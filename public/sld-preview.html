@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>SLD V13 Preview — BUILD v17</title>
+  <style>
+    body { margin: 0; background: #1a1a1a; display: flex; flex-direction: column; align-items: center; padding: 20px; font-family: Arial, sans-serif; }
+    h1 { color: #4ade80; font-size: 16px; margin-bottom: 10px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .tab { padding: 6px 14px; background: #333; color: #ccc; border: 1px solid #555; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    .tab.active { background: #4ade80; color: #000; border-color: #4ade80; font-weight: bold; }
+    .svg-container { width: 100%; max-width: 1400px; background: white; border-radius: 8px; overflow: auto; box-shadow: 0 4px 24px rgba(0,0,0,0.5); }
+    img { width: 100%; height: auto; display: block; }
+  </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+  <h1>SLD V13 — BUILD v17 — Professional Conductor Landing & Internal Panel Structure</h1>
+  <div class="tabs">
+    <button class="tab active" onclick="show('load')">Load-Side Tap</button>
+    <button class="tab" onclick="show('supply')">Supply-Side Tap</button>
+    <button class="tab" onclick="show('backfed')">Backfed Breaker</button>
+    <button class="tab" onclick="show('string')">String Inverter</button>
+  </div>
+  <div class="svg-container">
+    <img id="sld-img" src="/sld-v13-load-side.svg" alt="SLD Preview"/>
+  </div>
+  <script>
+    function show(type) {
+      document.getElementById('sld-img').src = '/sld-v13-' + type + (type === 'supply' ? '-side' : type === 'load' ? '-side' : '') + '.svg?' + Date.now();
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>

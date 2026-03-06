@@ -79,8 +79,10 @@ export interface SegmentScheduleInput {
   // Array
   moduleCount: number;
   // Microinverter
-  maxDevicesPerBranch: number;   // e.g. 16 for Enphase IQ8
-  microAcCurrentA: number;       // A per microinverter AC output
+  maxDevicesPerBranch: number;   // NEC 690.8(B) hard limit (e.g. 16 for Enphase IQ8)
+  microAcCurrentA: number;       // A per microinverter AC output (nominal, from datasheet)
+  manufacturerMaxPerBranch20A?: number; // Manufacturer-specified max per 20A branch (overrides NEC calc)
+  manufacturerMaxPerBranch30A?: number; // Manufacturer-specified max per 30A branch
   // String inverter
   stringCount: number;
   stringCurrentA: number;        // A — Isc × 1.25
@@ -441,40 +443,88 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     //   N branches × 2 hots + 1 EGC
     //   e.g. 3 branches → 3 BLK + 3 RED + 1 GRN
 
-    // ── Branch sizing: snap to real 240V double-pole breaker sizes ──────────
-    // Rule: branch OCPD must be a real 240V 2-pole breaker size (20, 40, 60, 100...).
-    // Start with 20A (smallest common 240V 2-pole breaker).
-    // Calculate max devices that fit in a 20A breaker: floor(20 / (1.25 × perDeviceA)).
-    // If that gives 0 devices (very high current micro), step up to 40A, etc.
-    // Then compute branches = ceil(moduleCount / maxDevicesPerBreaker).
-    // This ensures branch count is driven by real panel hardware, not arbitrary math.
+    // ── Branch sizing: ONLY 20A or 30A for branch circuits (#10 AWG) ────────
+    // Branch circuits use #10 AWG trunk cable — max 30A per NEC 240.4(D).
+    // 40A+ are feeder sizes, NOT valid branch breaker sizes for #10 AWG trunk.
+    //
+    // Strategy: try 20A first, then 30A. Pick whichever gives most balanced
+    // branch distribution. If tie, prefer fewer branches (30A = fewer branches).
+    //
+    // Priority for max devices per breaker size:
+    //   1. Manufacturer-specified limit (AP Systems DS3 series — from datasheet)
+    //   2. NEC 125% calculation: floor(breakerAmps / (1.25 x perDeviceA))
+    //   3. Hard NEC 690.8(B) limit
     const totalCurrentA = input.microAcCurrentA * input.moduleCount;
+    const deviceCount = input.moduleCount; // total microinverter devices
 
-    // Find the smallest 240V 2-pole breaker that fits at least 1 device
-    let branchOcpd = 20; // start with 20A
+    // Helper: get max devices per branch for a given breaker size
+    const maxDevForBreaker = (breakerAmps: number): number => {
+      if (breakerAmps === 20 && input.manufacturerMaxPerBranch20A && input.manufacturerMaxPerBranch20A > 0) {
+        return Math.min(input.manufacturerMaxPerBranch20A, input.maxDevicesPerBranch);
+      }
+      if (breakerAmps === 30 && input.manufacturerMaxPerBranch30A && input.manufacturerMaxPerBranch30A > 0) {
+        return Math.min(input.manufacturerMaxPerBranch30A, input.maxDevicesPerBranch);
+      }
+      return input.microAcCurrentA > 0
+        ? Math.min(Math.floor(breakerAmps / (input.microAcCurrentA * 1.25)), input.maxDevicesPerBranch)
+        : input.maxDevicesPerBranch;
+    };
+
+    // Helper: compute branch imbalance for a given max-per-branch
+    const branchImbalance = (maxPerBranch: number): number => {
+      if (maxPerBranch < 1) return Infinity;
+      const numBranches = Math.ceil(deviceCount / maxPerBranch);
+      const remainder = deviceCount % numBranches;
+      return remainder === 0 ? 0 : 1;
+    };
+
+    // ONLY 20A and 30A are valid branch breaker sizes for #10 AWG trunk cable
+    const CANDIDATE_BREAKERS = [20, 30];
+    let branchOcpd = 20;
     let maxDevPerBranch = 0;
-    for (const breakerSize of STANDARD_OCPD_240V_2POLE) {
-      maxDevPerBranch = maxDevicesForBreaker(breakerSize, input.microAcCurrentA, input.maxDevicesPerBranch);
-      if (maxDevPerBranch >= 1) {
-        branchOcpd = breakerSize;
-        break;
+
+    const validCandidates: Array<{amps: number; maxDev: number; imbalance: number; numBranches: number}> = [];
+    for (const sz of CANDIDATE_BREAKERS) {
+      const maxDev = maxDevForBreaker(sz);
+      if (maxDev >= 1) {
+        const numBranches = Math.ceil(deviceCount / maxDev);
+        validCandidates.push({ amps: sz, maxDev, imbalance: branchImbalance(maxDev), numBranches });
+        if (validCandidates.length >= 2) break;
       }
     }
-    // Fallback: if no standard size works, use hard limit with 200A breaker
-    if (maxDevPerBranch < 1) {
-      maxDevPerBranch = 1;
-      branchOcpd = 200;
+
+    if (validCandidates.length === 0) {
+      // Fallback: if even 30A can't fit 1 device, use 30A with 1 device per branch
+      // This should never happen with real microinverters (max ~3.7A per device)
+      branchOcpd = 30; maxDevPerBranch = 1;
+    } else if (validCandidates.length === 1) {
+      branchOcpd = validCandidates[0].amps;
+      maxDevPerBranch = validCandidates[0].maxDev;
+    } else {
+      const [a, b] = validCandidates;
+      // Pick: lower imbalance wins; tie -> fewer branches; tie -> smaller breaker (a)
+      const pick = (a.imbalance < b.imbalance) ? a
+        : (b.imbalance < a.imbalance) ? b
+        : (a.numBranches <= b.numBranches) ? a
+        : a;
+      branchOcpd = pick.amps;
+      maxDevPerBranch = pick.maxDev;
     }
 
     // Branches = ceil(total devices / max devices per branch)
-    const branches = Math.ceil(input.moduleCount / maxDevPerBranch);
+    const branches = Math.ceil(deviceCount / maxDevPerBranch);
     // Actual devices on largest branch (balanced distribution)
-    // e.g. 40 micros / 4 branches = 10 each; 34 micros / 4 branches = 9+9+8+8
-    const devicesPerBranch = Math.ceil(input.moduleCount / branches);
+    const devicesPerBranch = Math.ceil(deviceCount / branches);
     const branchCurrentA = input.microAcCurrentA * devicesPerBranch;
 
-    // Verify branchOcpd still covers actual branch current (re-snap if needed)
-    branchOcpd = next240VBreakerSize(branchCurrentA * 1.25);
+    // Final OCPD verification — ensure chosen breaker covers actual branch current.
+    // IMPORTANT: Branch circuits MUST stay on 20A or 30A (#10 AWG, NEC 240.4(D)).
+    // The balance algorithm already chose branchOcpd (20 or 30). Only bump up to 30A
+    // if the actual branch current × 1.25 exceeds the chosen breaker — never above 30A.
+    const requiredOcpd = next240VBreakerSize(branchCurrentA * 1.25);
+    if (requiredOcpd > branchOcpd) {
+      branchOcpd = Math.min(requiredOcpd, 30); // cap at 30A for branch circuits
+    }
 
     // Auto-size branch conductor gauge (open air, no conduit derating)
     const branchSizing = autoSizeGauge(branchCurrentA, roofAmbC, 2, false, '#10 AWG');

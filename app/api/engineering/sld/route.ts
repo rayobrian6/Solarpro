@@ -145,6 +145,8 @@ export async function POST(req: NextRequest) {
         inverterMpptChannels:          Number(body.mpptChannels ?? 2),
         inverterModulesPerDevice:      Number(body.inverterModulesPerDevice ?? 1),
         inverterBranchLimit:           Number(body.inverterBranchLimit ?? 16),
+        manufacturerMaxPerBranch20A:   body.manufacturerMaxPerBranch20A ? Number(body.manufacturerMaxPerBranch20A) : undefined,
+        manufacturerMaxPerBranch30A:   body.manufacturerMaxPerBranch30A ? Number(body.manufacturerMaxPerBranch30A) : undefined,
         designTempMin:                 designTempMin,
         ambientTempC:                  Number(body.ambientTempC ?? 30),
         rooftopTempAdderC:             Number(body.rooftopTempAdderC ?? 30),

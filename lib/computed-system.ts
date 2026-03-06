@@ -335,8 +335,10 @@ export interface ComputedSystemInput {
   inverterMaxInputCurrentPerMppt: number;
   inverterMpptChannels: number;
   inverterAcCurrentMax: number;  // A — from datasheet
-  inverterModulesPerDevice: number; // 1 for IQ8+, 2 for IQ8D
-  inverterBranchLimit: number;   // 16 for Enphase
+  inverterModulesPerDevice: number; // 1 for IQ8+, 2 for DS3/DS3-S/DS3-L
+  inverterBranchLimit: number;   // NEC 690.8(B) hard limit (16 for Enphase, varies for AP Systems)
+  manufacturerMaxPerBranch20A?: number; // Manufacturer-specified max per 20A branch (AP Systems DS3 series)
+  manufacturerMaxPerBranch30A?: number; // Manufacturer-specified max per 30A branch (AP Systems DS3 series)
 
   // Environmental
   designTempMin: number;      // °C — coldest design temp (for Voc correction)
@@ -936,26 +938,54 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // Per-micro AC current: inverterAcKw × 1000 / 240V
   const perMicroCurrentA = isMicro ? (input.inverterAcKw * 1000) / 240 : 0;
 
-  // ── 240V double-pole breaker sizing for branches ──────────────────────
-  // Branch OCPD must be a real 240V 2-pole breaker size: 20, 40, 60, 100, 125, 150, 200A.
-  // 25A, 30A, 35A etc. are single-pole sizes — NOT available as 240V 2-pole breakers.
-  // Find smallest 240V 2-pole breaker that fits at least 1 device per branch.
-  const OCPD_240V_2POLE = [20, 40, 60, 100, 125, 150, 200];
-  let branchBreakerAmps = 20;
-  let maxDevPerBranch240V = 0;
-  for (const sz of OCPD_240V_2POLE) {
-    const maxFit = perMicroCurrentA > 0
+  // ── Branch breaker sizing: ONLY 20A or 30A for branch circuits ──────────
+  // Branch circuits use #10 AWG trunk cable — max 30A per NEC 240.4(D).
+  // 40A+ are feeder sizes, NOT branch breaker sizes for #10 AWG.
+  // Strategy: try 20A first, then 30A. Pick whichever gives most balanced distribution.
+  // Manufacturer-specified limits (AP Systems DS3) take priority over NEC 125% calc.
+  const CANDIDATE_BREAKERS_CS = [20, 30]; // ONLY valid branch breaker sizes for #10 AWG
+
+  const maxDevForBreakerCS = (sz: number): number => {
+    if (sz === 20 && input.manufacturerMaxPerBranch20A && input.manufacturerMaxPerBranch20A > 0)
+      return Math.min(input.manufacturerMaxPerBranch20A, branchLimit);
+    if (sz === 30 && input.manufacturerMaxPerBranch30A && input.manufacturerMaxPerBranch30A > 0)
+      return Math.min(input.manufacturerMaxPerBranch30A, branchLimit);
+    return perMicroCurrentA > 0
       ? Math.min(Math.floor(sz / (perMicroCurrentA * 1.25)), branchLimit)
       : branchLimit;
-    if (maxFit >= 1) {
-      branchBreakerAmps = sz;
-      maxDevPerBranch240V = maxFit;
-      break;
+  };
+
+  const branchImbalanceCS = (maxDev: number): number => {
+    if (maxDev < 1 || microDeviceCount === 0) return Infinity;
+    const nb = Math.ceil(microDeviceCount / maxDev);
+    return microDeviceCount % nb === 0 ? 0 : 1;
+  };
+
+  const validCS: Array<{amps: number; maxDev: number; imbalance: number; numBranches: number}> = [];
+  for (const sz of CANDIDATE_BREAKERS_CS) {
+    const maxDev = maxDevForBreakerCS(sz);
+    if (maxDev >= 1) {
+      validCS.push({ amps: sz, maxDev, imbalance: branchImbalanceCS(maxDev), numBranches: Math.ceil(microDeviceCount / maxDev) });
+      if (validCS.length >= 2) break;
     }
   }
-  if (maxDevPerBranch240V < 1) { maxDevPerBranch240V = 1; branchBreakerAmps = 200; }
 
-  // Branch count driven by 240V breaker constraint (not just NEC 690.8(B) hard limit)
+  let branchBreakerAmps = 20;
+  let maxDevPerBranch240V = 1;
+  if (validCS.length === 0) {
+    // Fallback: 30A with 1 device per branch (should never happen with real micros)
+    branchBreakerAmps = 30; maxDevPerBranch240V = 1;
+  } else if (validCS.length === 1) {
+    branchBreakerAmps = validCS[0].amps; maxDevPerBranch240V = validCS[0].maxDev;
+  } else {
+    const [a, b] = validCS;
+    const pick = (a.imbalance < b.imbalance) ? a
+      : (b.imbalance < a.imbalance) ? b
+      : (a.numBranches <= b.numBranches) ? a : a;
+    branchBreakerAmps = pick.amps; maxDevPerBranch240V = pick.maxDev;
+  }
+
+  // Branch count driven by breaker constraint
   const acBranchCount = isMicro ? Math.ceil(microDeviceCount / maxDevPerBranch240V) : 0;
 
   const microBranches: MicroBranch[] = [];
@@ -974,7 +1004,10 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       const devicesOnBranch = b < remainder ? basePerBranch + 1 : basePerBranch;
       const branchCurrent = devicesOnBranch * perMicroCurrentA;
       // Snap to real 240V 2-pole breaker size
-      const ocpd = OCPD_240V_2POLE.find(s => s >= branchCurrent * 1.25) ?? 200;
+      // Snap to real 240V 2-pole branch breaker — ONLY 20A or 30A for branch circuits
+      // (40A+ are feeder sizes, not branch breaker sizes for #10 AWG trunk cable)
+      const BRANCH_BREAKER_SIZES = [20, 30];
+      const ocpd = BRANCH_BREAKER_SIZES.find(s => s >= branchCurrent * 1.25) ?? 30;
 
       // Validate: max devices per branch (NEC 690.8(B))
       if (devicesOnBranch > branchLimit) {
@@ -1414,6 +1447,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     moduleCount: input.totalPanels,
     maxDevicesPerBranch: input.inverterBranchLimit || 16,
     microAcCurrentA: isMicro ? perMicroCurrentA : 0,
+    manufacturerMaxPerBranch20A: input.manufacturerMaxPerBranch20A,
+    manufacturerMaxPerBranch30A: input.manufacturerMaxPerBranch30A,
     stringCount: isString ? stringCount : 0,
     stringCurrentA: isString ? (strings[0]?.stringIsc ?? input.panelIsc * 1.25) : 0,
     systemVoltageAC,

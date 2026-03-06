@@ -73,7 +73,7 @@ export interface Microinverter {
   mpptVoltageMax: number; // V
   maxInputCurrent: number; // A
   acOutputVoltage: number; // V
-  acOutputCurrentMax: number; // A
+  acOutputCurrentMax: number; // A — nominal AC output current per device
   efficiency: number; // %
   cec_efficiency: number; // %
   weight: number; // lbs
@@ -81,10 +81,14 @@ export interface Microinverter {
   ulListing: string;
   rapidShutdownCompliant: boolean;
   datasheetUrl: string;
-  // FIX: modulesPerDevice — how many PV modules this device serves
-  // 1 = standard 1:1 (IQ8+, IQ8M, IQ8H), 2 = dual-module (DS3, HM-800)
+  // modulesPerDevice — how many PV modules this device serves
+  // 1 = standard 1:1 (IQ8+, IQ8M, IQ8H), 2 = dual-module (DS3, DS3-S, DS3-L, HM-800)
   // deviceCount = ceil(panelCount / modulesPerDevice)
   modulesPerDevice: number;
+  // Manufacturer-specified max devices per branch circuit (from datasheet)
+  // Used instead of NEC 125% calculation when manufacturer specifies it explicitly
+  maxPerBranch20A?: number; // max devices on a 20A branch per manufacturer datasheet
+  maxPerBranch30A?: number; // max devices on a 30A branch per manufacturer datasheet
 }
 
 export interface Optimizer {
@@ -453,21 +457,66 @@ export const MICROINVERTERS: Microinverter[] = [
     datasheetUrl: 'https://enphase.com/store/microinverters/iq8-series',
     modulesPerDevice: 1,
   },
+  // ── APsystems DS3 Series ─────────────────────────────────────────────────
+  // Dual-module microinverter: 1 device connects to 2 PV modules (modulesPerDevice: 2)
+  // Source: APsystems DS3 Series North America Datasheet Rev1.1 (usa.APsystems.com)
+  // All three models: 240V nominal, 60Hz, UL 1741-SA, NEC 2020 690.12 RSD compliant
+  {
+    id: 'apsystems-ds3s',
+    manufacturer: 'APsystems',
+    model: 'DS3-S',
+    category: 'microinverter',
+    // AC Output: 640VA nominal, 2.7A nominal output current at 240V
+    acOutputW: 640, dcInputWMax: 960,
+    maxDcVoltage: 60, mpptVoltageMin: 22, mpptVoltageMax: 48,
+    maxInputCurrent: 16.0,  // 16A × 2 MPPT channels
+    acOutputVoltage: 240, acOutputCurrentMax: 2.7,
+    efficiency: 97.0, cec_efficiency: 96.5,
+    weight: 5.7,
+    warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547 / CA Rule 21',
+    rapidShutdownCompliant: true,
+    datasheetUrl: 'https://usa.apsystems.com/products/ds3/',
+    modulesPerDevice: 2,
+    maxPerBranch20A: 6,  // per datasheet: max 6 units on 20A branch
+    maxPerBranch30A: 8,  // per datasheet: max 8 units on 30A branch
+  },
+  {
+    id: 'apsystems-ds3l',
+    manufacturer: 'APsystems',
+    model: 'DS3-L',
+    category: 'microinverter',
+    // AC Output: 768VA nominal, 3.20A nominal output current at 240V
+    acOutputW: 768, dcInputWMax: 1140,
+    maxDcVoltage: 60, mpptVoltageMin: 25, mpptVoltageMax: 55,
+    maxInputCurrent: 18.0,  // 18A × 2 MPPT channels
+    acOutputVoltage: 240, acOutputCurrentMax: 3.20,
+    efficiency: 96.5, cec_efficiency: 96.0,
+    weight: 5.7,
+    warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547 / CA Rule 21',
+    rapidShutdownCompliant: true,
+    datasheetUrl: 'https://usa.apsystems.com/products/ds3/',
+    modulesPerDevice: 2,
+    maxPerBranch20A: 5,  // per datasheet: max 5 units on 20A branch
+    maxPerBranch30A: 7,  // per datasheet: max 7 units on 30A branch
+  },
   {
     id: 'apsystems-ds3',
     manufacturer: 'APsystems',
     model: 'DS3',
     category: 'microinverter',
-    acOutputW: 730, dcInputWMax: 960,
-    maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
-    maxInputCurrent: 16.0,
-    acOutputVoltage: 240, acOutputCurrentMax: 3.04,
-    efficiency: 96.5, cec_efficiency: 96.0,
-    weight: 4.4,
-    warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547',
+    // AC Output: 880VA nominal, 3.7A nominal output current at 240V
+    acOutputW: 880, dcInputWMax: 1320,
+    maxDcVoltage: 60, mpptVoltageMin: 32, mpptVoltageMax: 55,
+    maxInputCurrent: 20.0,  // 20A × 2 MPPT channels
+    acOutputVoltage: 240, acOutputCurrentMax: 3.7,
+    efficiency: 97.0, cec_efficiency: 96.5,
+    weight: 5.7,
+    warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547 / CA Rule 21',
     rapidShutdownCompliant: true,
-    datasheetUrl: 'https://apsystems.com/products/ds3/',
+    datasheetUrl: 'https://usa.apsystems.com/products/ds3/',
     modulesPerDevice: 2,
+    maxPerBranch20A: 4,  // per datasheet: max 4 units on 20A branch
+    maxPerBranch30A: 6,  // per datasheet: max 6 units on 30A branch
   },
   {
     id: 'hoymiles-hm800',
