@@ -777,7 +777,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ['AC per Micro',       `${((input.acOutputKw*1000)/md).toFixed(0)} W`],
       ['Branch Circuits',    `${ab}`],
       ['Max Micros/Branch',  '16 (NEC 690.8)'],
-      ['Branch OCPD',        `${ba} A`],
+      ['Branch OCPD',        `${branchRun?.ocpdAmps ?? ba} A`],
       ['AC Wire',            `${resolvedAcWireGauge}`],
       ['AC Conduit',         resolvedAcConduitType],
       ['Conduit Size',       resolvedAcConduitSize || '—'],
@@ -839,9 +839,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Conduit Size',     resolvedAcConduitSize || '—'],
     ['Service Voltage',  '120/240V, 1Ø'],
     ['Main Panel Rating',`${input.mainPanelAmps} A`],
-    ['Backfeed Breaker', `${input.backfeedAmps} A`],
-    ['Busbar Loading',   `${((input.backfeedAmps / input.mainPanelAmps) * 100).toFixed(1)}%`],
-    ['120% Rule Check',  `${input.mainPanelAmps * 1.2 >= input.mainPanelAmps + input.backfeedAmps ? 'PASS ✓' : 'FAIL ✗'}`],
+    // Only show backfeed breaker for actual backfed breaker interconnection
+    ...((!isLoadSide && !isSupplySide && !isLineSide) ? [
+      ['Backfeed Breaker', `${input.backfeedAmps} A`] as [string,string],
+      ['Busbar Loading',   `${((input.backfeedAmps / input.mainPanelAmps) * 100).toFixed(1)}%`] as [string,string],
+      ['120% Rule Check',  `${input.mainPanelAmps * 1.2 >= input.mainPanelAmps + input.backfeedAmps ? 'PASS ✓' : 'FAIL ✗'}`] as [string,string],
+    ] : [
+      ['Interconnection Method', isLoadSide ? 'Load Side Tap' : isSupplySide ? 'Supply Side Tap' : 'Line Side Tap'] as [string,string],
+      ['NEC Reference',   isLoadSide ? 'NEC 705.12(B)' : 'NEC 705.11'] as [string,string],
+      ['Backfed Breaker', 'N/A — Tap Connection'] as [string,string],
+    ]),
     ['Interconnection',  esc(input.interconnection)],
   ];
   const acRh = Math.min(13, (CALC_H - 18) / acRows.length);
@@ -942,7 +949,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   let schedRows: SchedRow[] = [];
 
   if (input.runs && input.runs.length > 0) {
-    schedRows = input.runs.map(run => {
+    schedRows = input.runs.filter(run => run.id !== 'MSP_TO_UTILITY_RUN').map(run => {
       let conductorsDisplay = '';
       if (run.conductorBundle && run.conductorBundle.length > 0) {
         conductorsDisplay = run.conductorBundle
@@ -964,9 +971,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
         conductors:  conductorsDisplay,
         conduitType: run.isOpenAir ? 'OPEN AIR' : `${run.conduitType} ${run.conduitSize}`,
         fillPercent: run.conduitFillPct ?? 0,
-        ampacity:    run.continuousCurrent ?? 0,
+        ampacity:    Math.round((run.continuousCurrent ?? 0) * 100) / 100,
         ocpd:        run.ocpdAmps ?? 0,
-        voltageDrop: run.voltageDropPct ?? 0,
+        voltageDrop: Math.round((run.voltageDropPct ?? 0) * 100) / 100,
         lengthFt:    run.onewayLengthFt ?? 0,
         pass:        run.overallPass ?? true,
       };

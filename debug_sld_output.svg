@@ -1,0 +1,370 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2304" height="1728" viewBox="0 0 2304 1728" style="background:#FFFFFF;font-family:Arial,Helvetica,sans-serif;">
+<rect x="0" y="0" width="2304" height="1728" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="0"  />
+<rect x="20" y="20" width="2264" height="1688" fill="#FFFFFF" stroke="#000000" stroke-width="3"  />
+<text x="1016" y="56" font-family="Arial,Helvetica,sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM</text>
+<text x="1016" y="66" font-family="Arial,Helvetica,sans-serif" font-size="7"  text-anchor="middle" fill="#444"  dominant-baseline="auto">123 Main St  |  MICROINVERTER  |  34 MODULES  |  10.03 kW AC</text>
+<rect x="40" y="68" width="1942" height="857" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<rect x="53" y="461" width="84" height="72" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"  />
+<line x1="81" y1="461" x2="81" y2="533" stroke="#000000" stroke-width="0.6" />
+<line x1="109" y1="461" x2="109" y2="533" stroke="#000000" stroke-width="0.6" />
+<line x1="53" y1="485" x2="137" y2="485" stroke="#000000" stroke-width="0.6" />
+<line x1="53" y1="509" x2="137" y2="509" stroke="#000000" stroke-width="0.6" />
+<text x="58" y="472" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">+</text>
+<text x="125" y="472" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">−</text>
+<text x="95" y="443" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">PV ARRAY</text>
+<text x="95" y="453" font-family="Arial,Helvetica,sans-serif" font-size="7"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">34 × 400W</text>
+<text x="95" y="542" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" font-style="italic" dominant-baseline="auto">Test Panel 400W</text>
+<text x="95" y="551" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">34 microinverters</text>
+<circle cx="151" cy="456" r="11" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/><text x="151" y="457" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">1</text>
+<rect x="402.76" y="475" width="44" height="44" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"  />
+<line x1="408.76" y1="481" x2="440.76" y2="513" stroke="#000000" stroke-width="0.6" />
+<line x1="440.76" y1="481" x2="408.76" y2="513" stroke="#000000" stroke-width="0.6" />
+<text x="424.76" y="459" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">ROOF J-BOX</text>
+<text x="424.76" y="468" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">AC TRUNK JUNCTION</text>
+<text x="424.76" y="528" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">3 branch circuits</text>
+<text x="424.76" y="537" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">25A OCPD ea.</text>
+<text x="424.76" y="546" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" font-style="italic" dominant-baseline="auto">NEC 690.8(B) MAX 16/BR</text>
+<circle cx="458.76" cy="470" r="11" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/><text x="458.76" y="471" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">2</text>
+<line x1="137" y1="489.5" x2="402.76" y2="489.5" stroke="#006600" stroke-width="1.2" stroke-dasharray="8,4"/><line x1="137" y1="492.5" x2="402.76" y2="492.5" stroke="#006600" stroke-width="1.2" stroke-dasharray="8,4"/><line x1="137" y1="495.5" x2="402.76" y2="495.5" stroke="#006600" stroke-width="1.2" stroke-dasharray="8,4"/><line x1="137" y1="498.5" x2="402.76" y2="498.5" stroke="#006600" stroke-width="1.2" stroke-dasharray="8,4"/><line x1="137" y1="501.5" x2="402.76" y2="501.5" stroke="#006600" stroke-width="1.2" stroke-dasharray="8,4"/><line x1="137" y1="504.5" x2="402.76" y2="504.5" stroke="#006600" stroke-width="1.2" stroke-dasharray="8,4"/><line x1="137" y1="489.5" x2="137" y2="504.5" stroke="#006600" stroke-width="0.6" /><line x1="402.76" y1="489.5" x2="402.76" y2="504.5" stroke="#006600" stroke-width="0.6" /><text x="269.88" y="473" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#006600" dominant-baseline="auto"><tspan x="269.88" dy="0">3×#10 THWN-2 BLK + 3×#10 THWN-2 RED</tspan><tspan x="269.88" dy="9">1×#10 GRN EGC</tspan><tspan x="269.88" dy="9">OPEN AIR — NEC 690.31</tspan></text>
+<rect x="728.52" y="471" width="52" height="52" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"  />
+<line x1="728.52" y1="484" x2="754.52" y2="497" stroke="#000000" stroke-width="0.6" />
+<line x1="728.52" y1="497" x2="754.52" y2="497" stroke="#000000" stroke-width="0.6" />
+<line x1="728.52" y1="510" x2="754.52" y2="497" stroke="#000000" stroke-width="0.6" />
+<line x1="754.52" y1="497" x2="780.52" y2="497" stroke="#000000" stroke-width="1.8" />
+<text x="754.52" y="455" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">AC COMBINER</text>
+<text x="754.52" y="464" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">Enphase IQ Combiner</text>
+<text x="754.52" y="532" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">3 inputs → 1 output</text>
+<text x="754.52" y="541" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" font-style="italic" dominant-baseline="auto">NEC 690.9</text>
+<circle cx="792.52" cy="466" r="11" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/><text x="792.52" y="467" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">3</text>
+<line x1="446.76" y1="489.5" x2="728.52" y2="489.5" stroke="#000000" stroke-width="1.2" /><line x1="446.76" y1="492.5" x2="728.52" y2="492.5" stroke="#000000" stroke-width="1.2" /><line x1="446.76" y1="495.5" x2="728.52" y2="495.5" stroke="#000000" stroke-width="1.2" /><line x1="446.76" y1="498.5" x2="728.52" y2="498.5" stroke="#000000" stroke-width="1.2" /><line x1="446.76" y1="501.5" x2="728.52" y2="501.5" stroke="#000000" stroke-width="1.2" /><line x1="446.76" y1="504.5" x2="728.52" y2="504.5" stroke="#000000" stroke-width="1.2" /><line x1="446.76" y1="489.5" x2="446.76" y2="504.5" stroke="#000000" stroke-width="0.6" /><line x1="728.52" y1="489.5" x2="728.52" y2="504.5" stroke="#000000" stroke-width="0.6" /><text x="587.64" y="473" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" dominant-baseline="auto"><tspan x="587.64" dy="0">3×#10 THWN-2 BLK + 3×#10 THWN-2 RED</tspan><tspan x="587.64" dy="9">1×#10 GRN EGC</tspan><tspan x="587.64" dy="9">IN 1-1/4&quot; EMT — 25% FILL</tspan></text>
+<rect x="1044.2800000000002" y="471" width="80" height="52" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"  />
+<line x1="1058.2800000000002" y1="497" x2="1069.2800000000002" y2="497" stroke="#000000" stroke-width="1.8" /><line x1="1099.2800000000002" y1="497" x2="1110.2800000000002" y2="497" stroke="#000000" stroke-width="1.8" /><line x1="1069.2800000000002" y1="497" x2="1099.2800000000002" y2="489" stroke="#000000" stroke-width="1.8" /><circle cx="1069.2800000000002" cy="497" r="3" fill="#000000" stroke="#000000" stroke-width="1.2"/><circle cx="1099.2800000000002" cy="497" r="3" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"/>
+<text x="1084.2800000000002" y="455" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">(N) AC DISCONNECT</text>
+<text x="1084.2800000000002" y="532" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">60A NON-FUSED</text>
+<text x="1084.2800000000002" y="541" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" font-style="italic" dominant-baseline="auto">NEC 690.14</text>
+<circle cx="1120.2800000000002" cy="466" r="11" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/><text x="1120.2800000000002" y="467" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">4</text>
+<line x1="780.52" y1="494" x2="1044.2800000000002" y2="494" stroke="#000000" stroke-width="1.2" /><line x1="780.52" y1="497" x2="1044.2800000000002" y2="497" stroke="#000000" stroke-width="1.2" /><line x1="780.52" y1="500" x2="1044.2800000000002" y2="500" stroke="#000000" stroke-width="1.2" /><line x1="780.52" y1="494" x2="780.52" y2="500" stroke="#000000" stroke-width="0.6" /><line x1="1044.2800000000002" y1="494" x2="1044.2800000000002" y2="500" stroke="#000000" stroke-width="0.6" /><text x="912.4000000000001" y="473" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" dominant-baseline="auto"><tspan x="912.4000000000001" dy="0">1×#6 THWN-2 BLK + 1×#6 THWN-2 RED</tspan><tspan x="912.4000000000001" dy="9">1×#10 GRN EGC</tspan><tspan x="912.4000000000001" dy="9">IN 1&quot; EMT — 35% FILL</tspan></text>
+<rect x="1380.04" y="449" width="68" height="96" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"  />
+<line x1="1414.04" y1="458" x2="1414.04" y2="536" stroke="#000000" stroke-width="1.8" />
+<line x1="1385.04" y1="465" x2="1410.04" y2="465" stroke="#000000" stroke-width="1.2" />
+<rect x="1409.04" y="461" width="10" height="8" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<line x1="1418.04" y1="465" x2="1443.04" y2="465" stroke="#000000" stroke-width="1.2" />
+<line x1="1385.04" y1="487" x2="1410.04" y2="487" stroke="#000000" stroke-width="1.2" />
+<rect x="1409.04" y="483" width="10" height="8" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<line x1="1418.04" y1="487" x2="1443.04" y2="487" stroke="#000000" stroke-width="1.2" />
+<line x1="1385.04" y1="509" x2="1410.04" y2="509" stroke="#000000" stroke-width="1.2" />
+<rect x="1409.04" y="505" width="10" height="8" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<line x1="1418.04" y1="509" x2="1443.04" y2="509" stroke="#000000" stroke-width="1.2" />
+<line x1="1368.04" y1="497" x2="1380.04" y2="497" stroke="#000000" stroke-width="1.8" />
+<line x1="1448.04" y1="497" x2="1460.04" y2="497" stroke="#000000" stroke-width="1.8" />
+<text x="1414.04" y="431" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">MAIN SERVICE PANEL</text>
+<text x="1414.04" y="441" font-family="Arial,Helvetica,sans-serif" font-size="7"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">200A RATED</text>
+<text x="1414.04" y="559" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="middle" fill="#228B22"  dominant-baseline="auto">LOAD SIDE TAP — NEC 705.12(B)</text>
+<circle cx="1464.04" cy="444" r="11" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/><text x="1464.04" y="445" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">5</text>
+<line x1="1124.2800000000002" y1="494" x2="1368.04" y2="494" stroke="#000000" stroke-width="1.2" /><line x1="1124.2800000000002" y1="497" x2="1368.04" y2="497" stroke="#000000" stroke-width="1.2" /><line x1="1124.2800000000002" y1="500" x2="1368.04" y2="500" stroke="#000000" stroke-width="1.2" /><line x1="1124.2800000000002" y1="494" x2="1124.2800000000002" y2="500" stroke="#000000" stroke-width="0.6" /><line x1="1368.04" y1="494" x2="1368.04" y2="500" stroke="#000000" stroke-width="0.6" /><text x="1246.16" y="473" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" dominant-baseline="auto"><tspan x="1246.16" dy="0">1×#6 THWN-2 BLK + 1×#6 THWN-2 RED</tspan><tspan x="1246.16" dy="9">1×#10 GRN EGC</tspan><tspan x="1246.16" dy="9">IN 1&quot; EMT — 35% FILL</tspan></text>
+<line x1="1460.04" y1="494" x2="1889" y2="494" stroke="#000000" stroke-width="1.2" /><line x1="1460.04" y1="497" x2="1889" y2="497" stroke="#000000" stroke-width="1.2" /><line x1="1460.04" y1="500" x2="1889" y2="500" stroke="#000000" stroke-width="1.2" /><line x1="1460.04" y1="494" x2="1460.04" y2="500" stroke="#000000" stroke-width="0.6" /><line x1="1889" y1="494" x2="1889" y2="500" stroke="#000000" stroke-width="0.6" /><text x="1674.52" y="473" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000" dominant-baseline="auto"><tspan x="1674.52" dy="0">1×#6 THWN-2 BLK + 1×#6 THWN-2 RED</tspan><tspan x="1674.52" dy="9">1×#10 GRN EGC</tspan><tspan x="1674.52" dy="9">IN 1&quot; EMT — 35% FILL</tspan></text>
+<circle cx="1927" cy="497" r="26" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/>
+<text x="1927" y="493" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">kWh</text>
+<text x="1927" y="503" font-family="Arial,Helvetica,sans-serif" font-size="5.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">METER</text>
+<line x1="1889" y1="497" x2="1901" y2="497" stroke="#000000" stroke-width="1.8" />
+<text x="1927" y="455" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">UTILITY METER</text>
+<text x="1927" y="464" font-family="Arial,Helvetica,sans-serif" font-size="7"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">Test Utility</text>
+<text x="1927" y="532" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">120/240V, 1Ø, 3W</text>
+<circle cx="1969" cy="466" r="11" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/><text x="1969" y="467" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">6</text>
+<line x1="1927" y1="523" x2="1927" y2="555" stroke="#000000" stroke-width="1.8" />
+<circle cx="1927" cy="573" r="18" fill="#FFFFFF" stroke="#000000" stroke-width="1.8"/>
+<text x="1927" y="571" font-family="Arial,Helvetica,sans-serif" font-size="5.5" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">UTIL</text>
+<text x="1927" y="580" font-family="Arial,Helvetica,sans-serif" font-size="5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">GRID</text>
+<text x="1927" y="599" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">UTILITY GRID</text>
+<text x="1927" y="608" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">Test Utility</text>
+<line x1="1927" y1="591" x2="1927" y2="601" stroke="#000000" stroke-width="1.8" />
+<line x1="1927" y1="601" x2="1927" y2="611" stroke="#004400" stroke-width="1.8" /><line x1="1917" y1="611" x2="1937" y2="611" stroke="#004400" stroke-width="1.8" /><line x1="1920" y1="616" x2="1934" y2="616" stroke="#004400" stroke-width="1.8" /><line x1="1923" y1="621" x2="1931" y2="621" stroke="#004400" stroke-width="1.8" />
+<line x1="424.76" y1="607" x2="1414.04" y2="607" stroke="#004400" stroke-width="1.8" />
+<line x1="424.76" y1="527" x2="424.76" y2="607" stroke="#004400" stroke-width="1.8" />
+<line x1="424.76" y1="607" x2="424.76" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="414.76" y1="617" x2="434.76" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="417.76" y1="622" x2="431.76" y2="622" stroke="#004400" stroke-width="1.8" /><line x1="420.76" y1="627" x2="428.76" y2="627" stroke="#004400" stroke-width="1.8" />
+<line x1="754.52" y1="527" x2="754.52" y2="607" stroke="#004400" stroke-width="1.8" />
+<line x1="754.52" y1="607" x2="754.52" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="744.52" y1="617" x2="764.52" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="747.52" y1="622" x2="761.52" y2="622" stroke="#004400" stroke-width="1.8" /><line x1="750.52" y1="627" x2="758.52" y2="627" stroke="#004400" stroke-width="1.8" />
+<line x1="1084.2800000000002" y1="527" x2="1084.2800000000002" y2="607" stroke="#004400" stroke-width="1.8" />
+<line x1="1084.2800000000002" y1="607" x2="1084.2800000000002" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="1074.2800000000002" y1="617" x2="1094.2800000000002" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="1077.2800000000002" y1="622" x2="1091.2800000000002" y2="622" stroke="#004400" stroke-width="1.8" /><line x1="1080.2800000000002" y1="627" x2="1088.2800000000002" y2="627" stroke="#004400" stroke-width="1.8" />
+<line x1="1414.04" y1="527" x2="1414.04" y2="607" stroke="#004400" stroke-width="1.8" />
+<line x1="1414.04" y1="607" x2="1414.04" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="1404.04" y1="617" x2="1424.04" y2="617" stroke="#004400" stroke-width="1.8" /><line x1="1407.04" y1="622" x2="1421.04" y2="622" stroke="#004400" stroke-width="1.8" /><line x1="1410.04" y1="627" x2="1418.04" y2="627" stroke="#004400" stroke-width="1.8" />
+<text x="919.4" y="602" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#004400"  dominant-baseline="auto">EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43</text>
+<rect x="45" y="890" width="248" height="18" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<text x="50" y="901" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">RAPID SHUTDOWN SYSTEM — NEC 690.12 COMPLIANT</text>
+<rect x="1782" y="853" width="192" height="64" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<text x="1787" y="863" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">LEGEND</text>
+<line x1="1782" y1="866" x2="1974" y2="866" stroke="#000000" stroke-width="1.2" />
+<line x1="1787" y1="872" x2="1822" y2="872" stroke="#000000" stroke-width="1.8" />
+<text x="1828" y="875" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Conductor in Conduit (THWN-2)</text>
+<line x1="1787" y1="883" x2="1822" y2="883" stroke="#006600" stroke-width="1.8" stroke-dasharray="8,4"/>
+<text x="1828" y="886" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Open Air — PV Wire/THWN-2 (NEC 690.31)</text>
+<line x1="1787" y1="894" x2="1822" y2="894" stroke="#004400" stroke-width="1.8" />
+<text x="1828" y="897" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Equipment Grounding Conductor (EGC)</text>
+<line x1="1787" y1="905" x2="1822" y2="905" stroke="#000000" stroke-width="1.8" stroke-dasharray="4,2"/>
+<text x="1828" y="908" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">DC Conductor in Conduit (USE-2/PV Wire)</text>
+<rect x="40" y="931" width="643" height="185" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<rect x="40" y="931" width="643" height="15" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="361.5" y="941" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#FFFFFF"  dominant-baseline="auto">AC BRANCH CIRCUIT INFO</text>
+<text x="44" y="951" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Topology</text>
+<text x="679" y="951" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">MICROINVERTER</text>
+<rect x="40" y="953" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="44" y="964" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Microinverters</text>
+<text x="679" y="964" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">34 units</text>
+<text x="44" y="977" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Total DC Power</text>
+<text x="679" y="977" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">13.60 kW</text>
+<rect x="40" y="979" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="44" y="990" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC per Micro</text>
+<text x="679" y="990" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">295 W</text>
+<text x="44" y="1003" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Branch Circuits</text>
+<text x="679" y="1003" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">3</text>
+<rect x="40" y="1005" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="44" y="1016" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Max Micros/Branch</text>
+<text x="679" y="1016" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">16 (NEC 690.8)</text>
+<text x="44" y="1029" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Branch OCPD</text>
+<text x="679" y="1029" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">25 A</text>
+<rect x="40" y="1031" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="44" y="1042" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Wire</text>
+<text x="679" y="1042" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">#6 AWG</text>
+<text x="44" y="1055" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Conduit</text>
+<text x="679" y="1055" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">EMT</text>
+<rect x="40" y="1057" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="44" y="1068" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Conduit Size</text>
+<text x="679" y="1068" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">1&quot;</text>
+<text x="44" y="1081" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Module Voc</text>
+<text x="679" y="1081" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">41.6 V</text>
+<rect x="40" y="1083" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="44" y="1094" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Module Isc</text>
+<text x="679" y="1094" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">12.26 A</text>
+<rect x="687" y="931" width="643" height="185" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<rect x="687" y="931" width="643" height="15" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="1008.5" y="941" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#FFFFFF"  dominant-baseline="auto">AC SYSTEM CALCULATIONS</text>
+<text x="691" y="951" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Output (kW)</text>
+<text x="1326" y="951" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">10.03 kW</text>
+<rect x="687" y="953" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="691" y="964" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Output Amps</text>
+<text x="1326" y="964" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">42 A</text>
+<text x="691" y="977" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC OCPD (125%)</text>
+<text x="1326" y="977" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">60 A</text>
+<rect x="687" y="979" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="691" y="990" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Wire Gauge</text>
+<text x="1326" y="990" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">#6 AWG</text>
+<text x="691" y="1003" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Conduit Type</text>
+<text x="1326" y="1003" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">EMT</text>
+<rect x="687" y="1005" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="691" y="1016" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Conduit Size</text>
+<text x="1326" y="1016" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">1&quot;</text>
+<text x="691" y="1029" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Service Voltage</text>
+<text x="1326" y="1029" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">120/240V, 1Ø</text>
+<rect x="687" y="1031" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="691" y="1042" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Main Panel Rating</text>
+<text x="1326" y="1042" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">200 A</text>
+<text x="691" y="1055" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Interconnection Method</text>
+<text x="1326" y="1055" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">Load Side Tap</text>
+<rect x="687" y="1057" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="691" y="1068" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">NEC Reference</text>
+<text x="1326" y="1068" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">NEC 705.12(B)</text>
+<text x="691" y="1081" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Backfed Breaker</text>
+<text x="1326" y="1081" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">N/A — Tap Connection</text>
+<rect x="687" y="1083" width="643" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="691" y="1094" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Interconnection</text>
+<text x="1326" y="1094" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">Load Side Tap</text>
+<rect x="1334" y="931" width="643" height="185" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<rect x="1334" y="931" width="643" height="15" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="1655.5" y="941" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="middle" fill="#FFFFFF"  dominant-baseline="auto">EQUIPMENT SCHEDULE</text>
+<text x="1338" y="951" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">PV Module</text>
+<text x="1973" y="951" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">Test Panel 400W</text>
+<rect x="1334" y="953" width="643" height="11.133333333333333" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="1338" y="962.1333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Module Wattage</text>
+<text x="1973" y="962.1333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">400 W</text>
+<text x="1338" y="973.2666666666667" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Total Modules</text>
+<text x="1973" y="973.2666666666667" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">34</text>
+<rect x="1334" y="975.2666666666667" width="643" height="11.133333333333333" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="1338" y="984.4" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Microinverters</text>
+<text x="1973" y="984.4" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">34 units</text>
+<text x="1338" y="995.5333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Branch Circuits</text>
+<text x="1973" y="995.5333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">3</text>
+<rect x="1334" y="997.5333333333333" width="643" height="11.133333333333333" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="1338" y="1006.6666666666666" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Inverter Mfr.</text>
+<text x="1973" y="1006.6666666666666" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">Enphase</text>
+<text x="1338" y="1017.8" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Inverter Model</text>
+<text x="1973" y="1017.8" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">IQ8+</text>
+<rect x="1334" y="1019.8000000000001" width="643" height="11.133333333333333" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="1338" y="1028.9333333333334" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Inverter Output</text>
+<text x="1973" y="1028.9333333333334" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">10.03 kW AC</text>
+<text x="1338" y="1040.0666666666666" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Combiner</text>
+<text x="1973" y="1040.0666666666666" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">IQ Combiner</text>
+<rect x="1334" y="1042.0666666666666" width="643" height="11.133333333333333" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="1338" y="1051.2" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC Disconnect</text>
+<text x="1973" y="1051.2" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">60A Non-Fused</text>
+<text x="1338" y="1062.3333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Main Panel</text>
+<text x="1973" y="1062.3333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">200 A</text>
+<rect x="1334" y="1064.3333333333333" width="643" height="11.133333333333333" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="1338" y="1073.4666666666667" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Utility</text>
+<text x="1973" y="1073.4666666666667" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">Test Utility</text>
+<text x="1338" y="1084.6" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Interconnection</text>
+<text x="1973" y="1084.6" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">Load Side Tap</text>
+<rect x="1334" y="1086.6" width="643" height="11.133333333333333" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="1338" y="1095.7333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Rapid Shutdown</text>
+<text x="1973" y="1095.7333333333333" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">INTEGRATED</text>
+<text x="1338" y="1106.8666666666668" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Battery Storage</text>
+<text x="1973" y="1106.8666666666668" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="end" fill="#000000"  dominant-baseline="auto">NONE</text>
+<rect x="40" y="1122" width="1942" height="566" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<rect x="40" y="1122" width="1942" height="15" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="47" y="1132" font-family="Arial,Helvetica,sans-serif" font-size="9" font-weight="bold" text-anchor="start" fill="#FFFFFF"  dominant-baseline="auto">CONDUIT &amp; CONDUCTOR SCHEDULE — NEC 310 / NEC CHAPTER 9 TABLE 1</text>
+<text x="43" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">RUN ID</text>
+<line x1="40" y1="1137" x2="40" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="178.94000000000003" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">FROM</text>
+<line x1="175.94000000000003" y1="1137" x2="175.94000000000003" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="392.56000000000006" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">TO</text>
+<line x1="389.56000000000006" y1="1137" x2="389.56000000000006" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="606.1800000000001" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">CONDUCTORS</text>
+<line x1="603.1800000000001" y1="1137" x2="603.1800000000001" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="1149.94" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">CONDUIT</text>
+<line x1="1146.94" y1="1137" x2="1146.94" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="1344.14" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">FILL %</text>
+<line x1="1341.14" y1="1137" x2="1341.14" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="1460.66" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">AMPACITY</text>
+<line x1="1457.66" y1="1137" x2="1457.66" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="1596.6000000000001" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">OCPD</text>
+<line x1="1593.6000000000001" y1="1137" x2="1593.6000000000001" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="1713.1200000000001" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">V-DROP %</text>
+<line x1="1710.1200000000001" y1="1137" x2="1710.1200000000001" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="1849.0600000000002" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">LENGTH</text>
+<line x1="1846.0600000000002" y1="1137" x2="1846.0600000000002" y2="1688" stroke="#000000" stroke-width="0.6" />
+<text x="1965.5800000000002" y="1147" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">PASS</text>
+<line x1="1962.5800000000002" y1="1137" x2="1962.5800000000002" y2="1688" stroke="#000000" stroke-width="0.6" />
+<line x1="40" y1="1149" x2="1982" y2="1149" stroke="#000000" stroke-width="1.2" />
+<text x="43" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">ROOF_RUN</text>
+<text x="178.94000000000003" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">PV ARRAY</text>
+<text x="392.56000000000006" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">MICROINVERTERS</text>
+<text x="606.1800000000001" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">3×#10 THWN-2 BLK + 3×#10 THWN-2 RED + 1×#10 THWN-2 GRN</text>
+<text x="1149.94" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">OPEN AIR</text>
+<text x="1344.14" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">N/A</text>
+<text x="1460.66" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">19.67A</text>
+<text x="1596.6000000000001" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">25A</text>
+<text x="1713.1200000000001" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">0.61%</text>
+<text x="1849.0600000000002" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">30 FT</text>
+<text x="1965.5800000000002" y="1164" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#005500"  dominant-baseline="auto">✓ PASS</text>
+<rect x="40" y="1166" width="1942" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="43" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">BRANCH_RUN</text>
+<text x="178.94000000000003" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">MICROINVERTERS</text>
+<text x="392.56000000000006" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC COMBINER</text>
+<text x="606.1800000000001" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">3×#10 THWN-2 BLK + 3×#10 THWN-2 RED + 1×#10 THWN-2 GRN</text>
+<text x="1149.94" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">EMT 1-1/4&quot;</text>
+<text x="1344.14" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">24.7%</text>
+<text x="1460.66" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">19.67A</text>
+<text x="1596.6000000000001" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">25A</text>
+<text x="1713.1200000000001" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">0.41%</text>
+<text x="1849.0600000000002" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">50 FT</text>
+<text x="1965.5800000000002" y="1177" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#005500"  dominant-baseline="auto">✓ PASS</text>
+<text x="43" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">COMBINER_TO_DISCO_RUN</text>
+<text x="178.94000000000003" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC COMBINER</text>
+<text x="392.56000000000006" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC DISCONNECT</text>
+<text x="606.1800000000001" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">1×#6 THWN-2 BLK + 1×#6 THWN-2 RED + 1×#10 THWN-2 GRN</text>
+<text x="1149.94" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">EMT 1&quot;</text>
+<text x="1344.14" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">35.4%</text>
+<text x="1460.66" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">41.79A</text>
+<text x="1596.6000000000001" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">60A</text>
+<text x="1713.1200000000001" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">0.34%</text>
+<text x="1849.0600000000002" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">20 FT</text>
+<text x="1965.5800000000002" y="1190" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#005500"  dominant-baseline="auto">✓ PASS</text>
+<rect x="40" y="1192" width="1942" height="13" fill="#F4F4F4" stroke="none" stroke-width="0"  />
+<text x="43" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">DISCO_TO_METER_RUN</text>
+<text x="178.94000000000003" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">AC DISCONNECT</text>
+<text x="392.56000000000006" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">MAIN SERVICE PANEL</text>
+<text x="606.1800000000001" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">1×#6 THWN-2 BLK + 1×#6 THWN-2 RED + 1×#10 THWN-2 GRN</text>
+<text x="1149.94" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">EMT 1&quot;</text>
+<text x="1344.14" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">35.4%</text>
+<text x="1460.66" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">41.79A</text>
+<text x="1596.6000000000001" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">60A</text>
+<text x="1713.1200000000001" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">0.26%</text>
+<text x="1849.0600000000002" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">15 FT</text>
+<text x="1965.5800000000002" y="1203" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#005500"  dominant-baseline="auto">✓ PASS</text>
+<rect x="1992" y="40" width="272" height="1648" fill="#FFFFFF" stroke="#000000" stroke-width="2.5"  />
+<rect x="1992" y="40" width="272" height="40" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="2128" y="56" font-family="Arial,Helvetica,sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#FFFFFF"  dominant-baseline="auto">SOLARPRO</text>
+<text x="2128" y="69" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="middle" fill="#AAAAAA"  dominant-baseline="auto">ENGINEERING</text>
+<rect x="1992" y="80" width="272" height="32" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<text x="2128" y="94" font-family="Arial,Helvetica,sans-serif" font-size="11" font-weight="bold" text-anchor="middle" fill="#000000"  dominant-baseline="auto">SINGLE LINE DIAGRAM</text>
+<text x="2128" y="106" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="middle" fill="#000000"  dominant-baseline="auto">PHOTOVOLTAIC SYSTEM</text>
+<rect x="1992" y="112" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="125" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">PROJECT</text>
+<text x="2058" y="125" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Test System</text>
+<rect x="1992" y="133" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="146" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">CLIENT</text>
+<text x="2058" y="146" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Test Client</text>
+<rect x="1992" y="154" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="167" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">ADDRESS</text>
+<text x="2058" y="167" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">123 Main St</text>
+<rect x="1992" y="175" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="188" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">DESIGNER</text>
+<text x="2058" y="188" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">SolarPro Engineering</text>
+<rect x="1992" y="196" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="209" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">DATE</text>
+<text x="2058" y="209" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">2026-03-06</text>
+<rect x="1992" y="217" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="230" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">DWG NO.</text>
+<text x="2058" y="230" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">SLD-001</text>
+<rect x="1992" y="238" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="251" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">REVISION</text>
+<text x="2058" y="251" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">A</text>
+<rect x="1992" y="259" width="272" height="21" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="272" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">SCALE</text>
+<text x="2058" y="272" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">NOT TO SCALE</text>
+<rect x="1992" y="283" width="272" height="13" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="2128" y="292" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="middle" fill="#FFFFFF"  dominant-baseline="auto">SYSTEM SUMMARY</text>
+<rect x="1992" y="296" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="307" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">TOPOLOGY</text>
+<text x="2066" y="307" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">MICROINVERTER</text>
+<rect x="1992" y="313" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="324" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">DC SIZE</text>
+<text x="2066" y="324" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">13.60 kW</text>
+<rect x="1992" y="330" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="341" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">AC OUTPUT</text>
+<text x="2066" y="341" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">10.03 kW</text>
+<rect x="1992" y="347" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="358" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">MODULES</text>
+<text x="2066" y="358" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">34 × 400W</text>
+<rect x="1992" y="364" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="375" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">INVERTER</text>
+<text x="2066" y="375" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Enphase</text>
+<rect x="1992" y="381" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="392" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">MODEL</text>
+<text x="2066" y="392" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">IQ8+</text>
+<rect x="1992" y="398" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="409" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">SERVICE</text>
+<text x="2066" y="409" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">200A</text>
+<rect x="1992" y="415" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="426" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">UTILITY</text>
+<text x="2066" y="426" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Test Utility</text>
+<rect x="1992" y="432" width="272" height="17" fill="#FFFFFF" stroke="#000000" stroke-width="0.6"  />
+<text x="1996" y="443" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#555"  dominant-baseline="auto">INTERCONN.</text>
+<text x="2066" y="443" font-family="Arial,Helvetica,sans-serif" font-size="7.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">Load Side Tap</text>
+<rect x="1992" y="452" width="272" height="13" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="2128" y="461" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="middle" fill="#FFFFFF"  dominant-baseline="auto">CODE REFERENCES</text>
+<text x="1996" y="474" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• NEC 690 — PV SYSTEMS</text>
+<text x="1996" y="486" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• NEC 705 — INTERCONNECTED ELEC.</text>
+<text x="1996" y="498" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• NEC 310 — CONDUCTORS</text>
+<text x="1996" y="510" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• NEC 250 — GROUNDING/BONDING</text>
+<text x="1996" y="522" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• NEC 358/352 — CONDUIT</text>
+<text x="1996" y="534" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• NEC 230 — SERVICES</text>
+<text x="1996" y="546" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• IBC / ASCE 7 — STRUCTURAL</text>
+<text x="1996" y="558" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">• IEEE 1547 — INTERCONNECTION</text>
+<rect x="1992" y="564" width="272" height="13" fill="#000000" stroke="#000000" stroke-width="0"  />
+<text x="2128" y="573" font-family="Arial,Helvetica,sans-serif" font-size="7" font-weight="bold" text-anchor="middle" fill="#FFFFFF"  dominant-baseline="auto">REVISIONS</text>
+<rect x="1992" y="577" width="272" height="88" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<text x="1995" y="587" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">REV</text>
+<text x="2085.6666666666665" y="587" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">DESCRIPTION</text>
+<text x="2176.3333333333335" y="587" font-family="Arial,Helvetica,sans-serif" font-size="6.5" font-weight="bold" text-anchor="start" fill="#000000"  dominant-baseline="auto">DATE</text>
+<line x1="1992" y1="589" x2="2264" y2="589" stroke="#000000" stroke-width="0.6" />
+<line x1="2082.6666666666665" y1="577" x2="2082.6666666666665" y2="652" stroke="#000000" stroke-width="0.6" />
+<line x1="2173.3333333333335" y1="577" x2="2173.3333333333335" y2="652" stroke="#000000" stroke-width="0.6" />
+<text x="1995" y="600" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">A</text>
+<text x="2085.6666666666665" y="600" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">INITIAL ISSUE</text>
+<text x="2176.3333333333335" y="600" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="start" fill="#000000"  dominant-baseline="auto">2026-03-06</text>
+<rect x="1992" y="1636" width="272" height="52" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"  />
+<circle cx="2128" cy="1660" r="19" fill="#FFFFFF" stroke="#000000" stroke-width="1.2"/>
+<text x="2128" y="1656" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#888"  dominant-baseline="auto">ENGINEER</text>
+<text x="2128" y="1666" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#888"  dominant-baseline="auto">SEAL</text>
+<text x="2128" y="1682" font-family="Arial,Helvetica,sans-serif" font-size="6.5"  text-anchor="middle" fill="#555"  dominant-baseline="auto">SolarPro Engineering — 2026-03-06</text>
+</svg>
