@@ -1,12 +1,31 @@
-# BUILD v23 — SLD Implementation: Enphase BUI, Generator ATS Fix, Data Flow, Inverter Icon
+# BUILD v24: Full SLD Engineering Rebuild
 
-## Tasks
+## Audit Findings (Critical Errors)
 
-- [ ] Phase 1: Fix data flow — add missing fields to SLD POST body in page.tsx
-- [ ] Phase 2: Add renderBUI() function + Enphase IQ SC3 symbol to sld-professional-renderer.ts
-- [ ] Phase 3: Move battery connection from MSP bus → BUI battery port
-- [ ] Phase 4: Fix generator ATS placement (between utility meter and MSP)
-- [ ] Phase 5: Upgrade inverter icon to professional rectangular box
-- [ ] Phase 6: Update 120% rule to include battery backfeed amps
-- [ ] Phase 7: Run tsc --noEmit — 0 errors
-- [ ] Phase 8: Commit as BUILD v23, push, package ZIP
+### A. computed-system.ts — Missing battery/generator/ATS segments
+- [ ] A1: No BATTERY_TO_BUI_RUN segment — battery AC circuit not sized
+- [ ] A2: No BUI_TO_MSP_RUN segment — BUI→MSP feeder not sized  
+- [ ] A3: No GENERATOR_TO_ATS_RUN segment — generator output not sized
+- [ ] A4: No ATS_TO_MSP_RUN segment — ATS→MSP feeder not sized
+- [ ] A5: ComputedSystemInput missing batteryId, generatorKw, generatorOutputA, atsAmpRating
+- [ ] A6: 120% rule only checks PV backfeed — must include battery backfeed breaker
+- [ ] A7: Generator conductor hardcoded nowhere — must derive from outputBreakerA
+- [ ] A8: Battery conductor hardcoded nowhere — must derive from backfeedBreakerA
+
+### B. route.ts — Missing fields passed to computeSystem
+- [ ] B1: batteryId not passed to csInput
+- [ ] B2: generatorKw/outputBreakerA not passed to csInput
+- [ ] B3: atsAmpRating not passed to csInput
+
+### C. sld-professional-renderer.ts — Rendering errors
+- [ ] C1: Battery wire label hardcoded — must use computed run data
+- [ ] C2: Generator wire label hardcoded (#6 AWG) — must use computed run data
+- [ ] C3: ATS→MSP wire label hardcoded (#4 AWG) — must use computed run data
+- [ ] C4: Duplicate ATS: IQ SC3 IS the ATS — no separate renderATS() for Enphase
+- [ ] C5: 120% rule calc panel missing battery backfeed contribution
+
+## Steps
+- [ ] Step 1: Extend computed-system.ts (new RunSegmentIds + battery/gen/ATS sizing)
+- [ ] Step 2: Update route.ts (pass new fields to computeSystem)
+- [ ] Step 3: Update renderer (use computed run data, fix ATS duplication)
+- [ ] Step 4: TypeScript check + commit + push + zip

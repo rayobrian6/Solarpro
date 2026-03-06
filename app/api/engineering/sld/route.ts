@@ -13,6 +13,11 @@ import {
   moduleSpecsFromRegistry,
   inverterSpecsFromRegistry,
 } from '@/lib/string-generator';
+import {
+  getBackupInterfaceById,
+  getBatteryById,
+  getGeneratorById,
+} from '@/lib/equipment-db';
 
 export async function POST(req: NextRequest) {
   try {
@@ -113,6 +118,51 @@ export async function POST(req: NextRequest) {
     // This is the single source of truth for conductor bundles, conduit sizing,
     // fill percentages, and all electrical data shown on the SLD.
     let computedRuns: ReturnType<typeof computeSystem>['runs'] | undefined;
+
+    // BUILD v24: Look up equipment specs for battery/gen/ATS conductor sizing
+    // These are used to populate the new csInput fields for NEC-based segment sizing.
+    const _buiId = body.backupInterfaceId ? String(body.backupInterfaceId) : undefined;
+    const _buiSpec = _buiId ? getBackupInterfaceById(_buiId) : undefined;
+    const _batId = body.batteryId ? String(body.batteryId) : undefined;
+    const _batSpec = _batId ? getBatteryById(_batId) : undefined;
+    const _genId = body.generatorId ? String(body.generatorId) : undefined;
+    const _genSpec = _genId ? getGeneratorById(_genId) : undefined;
+
+    // Derive hasEnphaseIQSC3: true if BUI/ATS is the Enphase IQ System Controller 3
+    // Equipment-db IDs: 'enphase-iq-system-controller-3' (BUI) or 'enphase-iq-sc3-ats' (ATS)
+    // The IQ SC3 IS the ATS — no separate standalone ATS needed when this device is present.
+    const _buiModel = String(body.backupInterfaceModel ?? _buiSpec?.model ?? '');
+    const _buiIdStr = String(body.backupInterfaceId ?? '').toLowerCase();
+    const _atsIdStr = String(body.atsId ?? body.atsModel ?? '').toLowerCase();
+    const _hasEnphaseIQSC3 =
+      _buiIdStr === 'enphase-iq-system-controller-3' ||
+      _buiIdStr === 'enphase-iq-sc3-ats' ||
+      _atsIdStr.includes('enphase-iq-sc3') ||
+      _atsIdStr.includes('enphase-iq-system-controller') ||
+      _buiModel.toUpperCase().includes('IQ SYSTEM CONTROLLER 3') ||
+      _buiModel.toUpperCase().includes('IQ SC3');
+
+    // Derive backupInterfaceMaxA: from spec or body override
+    const _buiMaxA = _buiSpec?.maxContinuousOutputA ??
+      (body.backupInterfaceMaxA ? Number(body.backupInterfaceMaxA) : undefined);
+
+    // Derive batteryBackfeedA and batteryContinuousOutputA: from spec or body
+    const _batBackfeedA = _batSpec?.backfeedBreakerA ??
+      (body.batteryBackfeedA ? Number(body.batteryBackfeedA) : undefined);
+    const _batContinuousA = _batSpec?.maxContinuousOutputA ??
+      (body.batteryContinuousOutputA ? Number(body.batteryContinuousOutputA) : undefined);
+
+    // Derive generatorOutputBreakerA: from spec or body override
+    // Fallback: estimate from kW (kW / 0.24 for 240V single-phase, rounded up to std OCPD)
+    const _genKw = body.generatorKw ? Number(body.generatorKw) : (_genSpec?.ratedOutputKw ?? 0);
+    const _genOutputBreakerA = _genSpec?.outputBreakerA ??
+      (body.generatorOutputBreakerA ? Number(body.generatorOutputBreakerA) :
+        (_genKw > 0 ? Math.ceil((_genKw * 1000 / 240) * 1.25 / 5) * 5 : undefined));
+
+    // Derive atsAmpRating: from body or default to mainPanelAmps
+    const _atsAmpRating = body.atsAmpRating ? Number(body.atsAmpRating) :
+      (body.mainPanelAmps ? Number(body.mainPanelAmps) : undefined);
+
     try {
       const csInput: ComputedSystemInput = {
         topology:                      isMicro ? 'micro' : 'string',
@@ -159,6 +209,17 @@ export async function POST(req: NextRequest) {
         branchCount:                   isMicro ? (Number(body.microBranches) || Number(body.branchCount) || undefined) : undefined,
         maxACVoltageDropPct:           Number(body.maxACVoltageDropPct ?? 2),
         maxDCVoltageDropPct:           Number(body.maxDCVoltageDropPct ?? 3),
+
+        // BUILD v24: Battery/BUI/Generator/ATS segment sizing inputs
+        batteryBackfeedA:              _batBackfeedA,
+        batteryContinuousOutputA:      _batContinuousA,
+        batteryIds:                    _batId ? [_batId] : (body.batteryIds ?? undefined),
+        generatorOutputBreakerA:       _genOutputBreakerA,
+        generatorKw:                   _genKw > 0 ? _genKw : undefined,
+        atsAmpRating:                  _atsAmpRating,
+        backupInterfaceMaxA:           _buiMaxA,
+        hasEnphaseIQSC3:               _hasEnphaseIQSC3 || undefined,
+        runLengthsBatteryGen:          body.runLengthsBatteryGen ?? undefined,
       };
       const cs = computeSystem(csInput);
       computedRuns = cs.runs;
@@ -228,6 +289,8 @@ export async function POST(req: NextRequest) {
       backupInterfaceBrand:    body.backupInterfaceBrand ? String(body.backupInterfaceBrand) : undefined,
       backupInterfaceModel:    body.backupInterfaceModel ? String(body.backupInterfaceModel) : undefined,
       backupInterfaceIsATS:    body.backupInterfaceIsATS ? !!(body.backupInterfaceIsATS)    : undefined,
+      // BUILD v24: Pass IQ SC3 flag to renderer for correct generator routing
+      hasEnphaseIQSC3:         _hasEnphaseIQSC3 || undefined,
       scale:                   String(body.scale                   ?? 'NOT TO SCALE'),
       // Micro-specific
       deviceCount:             isMicro ? deviceCount : undefined,

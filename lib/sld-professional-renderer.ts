@@ -132,6 +132,8 @@ export interface SLDProfessionalInput {
   backupInterfaceBrand?:   string;
   backupInterfaceModel?:   string;
   backupInterfaceIsATS?:   boolean;
+  // BUILD v24: IQ SC3 IS the ATS — suppress standalone renderATS() when true
+  hasEnphaseIQSC3?:        boolean;
   scale:                   string;
   acWireLength:            number;
   panelsPerString?:        number;
@@ -960,6 +962,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   const roofRun       = findRun('ROOF_RUN');
   const branchRun     = findRun('BRANCH_RUN');
+  // BUILD v24: Battery/BUI/Generator/ATS computed segments
+  const batToBuiRun   = findRun('BATTERY_TO_BUI_RUN');
+  const buiToMspRun   = findRun('BUI_TO_MSP_RUN');
+  const genToAtsRun   = findRun('GENERATOR_TO_ATS_RUN');
+  const atsToMspRun   = findRun('ATS_TO_MSP_RUN');
   const combDiscoRun  = findRun('COMBINER_TO_DISCO_RUN');
   const dcStringRun   = findRun('DC_STRING_RUN');
   const dcDiscoInvRun = findRun('DC_DISCO_TO_INV_RUN');
@@ -1271,9 +1278,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // Wire: battery bottom → BUI battery port (vertical dashed blue line)
     parts.push(ln(batCX, batResult.by, batCX, buiResult.batPortY, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
     // Wire callout
-    const batWireGauge = bfA <= 20 ? '#12 AWG THWN-2' : bfA <= 30 ? '#10 AWG THWN-2' : '#8 AWG THWN-2';
+    // BUILD v24: Use computed conductorCallout from BATTERY_TO_BUI_RUN (NEC-sized)
+    // Fallback to legacy hardcoded gauge only if segment not computed
+    const batWireGauge = batToBuiRun?.wireGauge
+      ? `${batToBuiRun.wireGauge} THWN-2`
+      : (bfA <= 20 ? '#12 AWG THWN-2' : bfA <= 30 ? '#10 AWG THWN-2' : '#8 AWG THWN-2');
+    const batCalloutLines = batToBuiRun?.conductorCallout
+      ? batToBuiRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
+      : [batWireGauge, `${bfA}A CIRCUIT`];
     parts.push(tspan(batCX + 8, batCY + (buiResult.batPortY - batResult.by)/2,
-      [batWireGauge, `${bfA}A CIRCUIT`],
+      batCalloutLines,
       {sz: F.tiny, anc: 'start', fill: '#1565C0'}));
 
     // Backup sub-panel — connected to BUI load port (right side)
@@ -1291,55 +1305,115 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       parts.push(ln(buiResult.loadPortX, buiResult.loadPortY, bpCX - 40, buiResult.loadPortY, {stroke: '#6A1B9A', sw: SW_MED}));
       parts.push(ln(bpCX - 40, buiResult.loadPortY, bpCX - 40, bpCY, {stroke: '#6A1B9A', sw: SW_MED}));
       parts.push(ln(bpCX - 40, bpCY, bpResult.lx, bpCY, {stroke: '#6A1B9A', sw: SW_MED}));
-      parts.push(tspan(bpCX - 40 + 6, bpCY - 10, ['#6 AWG THWN-2', 'CRITICAL LOADS'], {sz: F.tiny, anc: 'start', fill: '#6A1B9A'}));
+      // BUILD v24: Use computed BUI_TO_MSP_RUN conductorCallout for backup panel feeder
+      const bpCalloutLines = buiToMspRun?.conductorCallout
+        ? buiToMspRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
+        : ['#6 AWG THWN-2', 'CRITICAL LOADS'];
+      parts.push(tspan(bpCX - 40 + 6, bpCY - 10, bpCalloutLines, {sz: F.tiny, anc: 'start', fill: '#6A1B9A'}));
     }
   }
 
-  // ─── NODE 9: GENERATOR + GENERATOR ATS (if configured) ───────────────────
-  // Generator ATS positioned between utility meter and MSP (service entrance)
-  // Generator positioned below and left of the ATS
+  // ─── NODE 9: GENERATOR + ATS/BUI GEN PORT (if configured) ──────────────────
+  // BUILD v24: Two routing modes:
+  //   A) hasEnphaseIQSC3 = true  → Generator connects to BUI GEN port (IQ SC3 IS the ATS)
+  //      No standalone ATS rendered. NEC 702.5 transfer function is inside IQ SC3.
+  //   B) hasEnphaseIQSC3 = false → Standalone ATS between utility and MSP (legacy topology)
+  //      Generator → ATS GEN terminals → ATS LOAD → MSP
+  // All wire labels from computed segments (NEC-sized) — no hardcoded gauges.
   if ((input.generatorKw ?? 0) > 0) {
-    // Generator ATS — between utility meter and MSP, below the bus
-    const genAtsCX = (xMSP + xUtil) / 2;
-    const genAtsCY = BUS_Y + 140;
-    const genAtsResult = renderATS(
-      genAtsCX, genAtsCY,
-      input.atsBrand ?? '',
-      input.atsModel ?? '',
-      input.atsAmpRating ?? 200,
-      isMicro ? 10 : 11
-    );
-    parts.push(genAtsResult.svg);
+    // Determine if IQ SC3 is the ATS (no separate ATS box needed)
+    const _isIQSC3 = !!(input.hasEnphaseIQSC3 || input.backupInterfaceIsATS ||
+      String(input.backupInterfaceId ?? '').toLowerCase().includes('iq-sc3') ||
+      String(input.backupInterfaceId ?? '').toLowerCase().includes('iq-system-controller'));
 
-    // Generator — below and left of ATS
-    const genCX = genAtsCX - 160;
-    const genCY = BUS_Y + 140;
-    const genResult = renderGenerator(
-      genCX, genCY,
-      input.generatorBrand ?? '',
-      input.generatorModel ?? '',
-      input.generatorKw!,
-      isMicro ? 11 : 12
-    );
-    parts.push(genResult.svg);
+    if (_isIQSC3) {
+      // ── Mode A: Enphase IQ SC3 — generator connects to BUI GEN port ──────────
+      // Generator positioned below and left of BUI (which is already rendered in NODE 8)
+      const genCX = (buiRX ?? (xMSP + 130)) - 160;
+      const genCY = BUS_Y + 160;
+      const genResult = renderGenerator(
+        genCX, genCY,
+        input.generatorBrand ?? '',
+        input.generatorModel ?? '',
+        input.generatorKw!,
+        isMicro ? 10 : 11
+      );
+      parts.push(genResult.svg);
 
-    // Generator → ATS GEN input (horizontal wire)
-    parts.push(ln(genResult.rx, genCY, genAtsResult.lx, genAtsCY, {stroke: '#2E7D32', sw: SW_MED}));
-    const genAtsLabelX = (genResult.rx + genAtsResult.lx) / 2;
-    parts.push(tspan(genAtsLabelX, genCY - 10, ['#6 AWG THWN-2', 'GEN OUTPUT'], {sz: F.tiny, anc: 'middle', fill: '#2E7D32'}));
+      // Wire: Generator output → BUI GEN port (L-shaped route)
+      const genWireX = genResult.rx + 20;
+      const buiGenY  = BUS_Y + 60;
+      parts.push(ln(genResult.rx, genCY, genWireX, genCY, {stroke: '#2E7D32', sw: SW_MED}));
+      parts.push(ln(genWireX, genCY, genWireX, buiGenY, {stroke: '#2E7D32', sw: SW_MED}));
 
-    // Utility → ATS NORM input (vertical drop from bus)
-    const utilDropX = genAtsCX - 44;
-    parts.push(ln(utilDropX, BUS_Y + 36, utilDropX, genAtsCY, {stroke: BLK, sw: SW_MED}));
-    parts.push(txt(utilDropX - 4, (BUS_Y + 36 + genAtsCY) / 2, 'UTILITY', {sz: F.tiny, anc: 'end', fill: '#444'}));
+      // Wire callout — use computed GENERATOR_TO_ATS_RUN conductorCallout
+      const genCalloutLines = genToAtsRun?.conductorCallout
+        ? genToAtsRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
+        : (genToAtsRun?.wireGauge
+            ? [`${genToAtsRun.wireGauge} THWN-2`, `${genToAtsRun.ocpdAmps ?? ''}A OCPD`]
+            : ['SEE COMPUTED SCHEDULE', 'GEN → IQ SC3 GEN PORT']);
+      parts.push(tspan(genWireX + 4, genCY - 10, genCalloutLines, {sz: F.tiny, anc: 'start', fill: '#2E7D32'}));
 
-    // ATS LOAD output → MSP (vertical rise back to bus)
-    const atsLoadX = genAtsCX + 55;
-    parts.push(ln(atsLoadX, genAtsCY, atsLoadX, BUS_Y + 36, {stroke: '#E65100', sw: SW_MED}));
-    parts.push(tspan(atsLoadX + 6, genAtsCY - 20, ['#4 AWG THWN-2', 'ATS → MSP'], {sz: F.tiny, anc: 'start', fill: '#E65100'}));
+      // NEC notes
+      parts.push(txt(genCX, genCY + 55, 'NEC 702.5 — TRANSFER FUNCTION IN IQ SC3', {sz: F.tiny, anc: 'middle', italic: true, fill: '#2E7D32'}));
+      parts.push(txt(genCX, genCY + 63, 'NEC 250.30 — FLOATING NEUTRAL AT IQ SC3', {sz: F.tiny, anc: 'middle', italic: true, fill: '#2E7D32'}));
 
-    // NEC 702.5 note
-    parts.push(txt(genAtsCX, genAtsCY + 55, 'NEC 702.5 — TRANSFER EQUIPMENT REQUIRED', {sz: F.tiny, anc: 'middle', italic: true, fill: '#E65100'}));
+    } else {
+      // ── Mode B: Standalone ATS — between utility meter and MSP ───────────────
+      const genAtsCX = (xMSP + xUtil) / 2;
+      const genAtsCY = BUS_Y + 140;
+      const genAtsResult = renderATS(
+        genAtsCX, genAtsCY,
+        input.atsBrand ?? '',
+        input.atsModel ?? '',
+        input.atsAmpRating ?? 200,
+        isMicro ? 10 : 11
+      );
+      parts.push(genAtsResult.svg);
+
+      // Generator — below and left of ATS
+      const genCX = genAtsCX - 160;
+      const genCY = BUS_Y + 140;
+      const genResult = renderGenerator(
+        genCX, genCY,
+        input.generatorBrand ?? '',
+        input.generatorModel ?? '',
+        input.generatorKw!,
+        isMicro ? 11 : 12
+      );
+      parts.push(genResult.svg);
+
+      // Generator → ATS GEN input (horizontal wire)
+      parts.push(ln(genResult.rx, genCY, genAtsResult.lx, genAtsCY, {stroke: '#2E7D32', sw: SW_MED}));
+      const genAtsLabelX = (genResult.rx + genAtsResult.lx) / 2;
+      // BUILD v24: Use computed GENERATOR_TO_ATS_RUN conductorCallout
+      const genCalloutLines = genToAtsRun?.conductorCallout
+        ? genToAtsRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
+        : (genToAtsRun?.wireGauge
+            ? [`${genToAtsRun.wireGauge} THWN-2`, 'GEN OUTPUT']
+            : ['SEE COMPUTED SCHEDULE', 'GEN OUTPUT']);
+      parts.push(tspan(genAtsLabelX, genCY - 10, genCalloutLines, {sz: F.tiny, anc: 'middle', fill: '#2E7D32'}));
+
+      // Utility → ATS NORM input (vertical drop from bus)
+      const utilDropX = genAtsCX - 44;
+      parts.push(ln(utilDropX, BUS_Y + 36, utilDropX, genAtsCY, {stroke: BLK, sw: SW_MED}));
+      parts.push(txt(utilDropX - 4, (BUS_Y + 36 + genAtsCY) / 2, 'UTILITY', {sz: F.tiny, anc: 'end', fill: '#444'}));
+
+      // ATS LOAD output → MSP (vertical rise back to bus)
+      const atsLoadX = genAtsCX + 55;
+      parts.push(ln(atsLoadX, genAtsCY, atsLoadX, BUS_Y + 36, {stroke: '#E65100', sw: SW_MED}));
+      // BUILD v24: Use computed ATS_TO_MSP_RUN conductorCallout
+      const atsCalloutLines = atsToMspRun?.conductorCallout
+        ? atsToMspRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
+        : (atsToMspRun?.wireGauge
+            ? [`${atsToMspRun.wireGauge} THWN-2`, 'ATS → MSP']
+            : ['SEE COMPUTED SCHEDULE', 'ATS → MSP']);
+      parts.push(tspan(atsLoadX + 6, genAtsCY - 20, atsCalloutLines, {sz: F.tiny, anc: 'start', fill: '#E65100'}));
+
+      // NEC notes
+      parts.push(txt(genAtsCX, genAtsCY + 55, 'NEC 702.5 — TRANSFER EQUIPMENT REQUIRED', {sz: F.tiny, anc: 'middle', italic: true, fill: '#E65100'}));
+      parts.push(txt(genAtsCX, genAtsCY + 63, 'NEC 250.30 — FLOATING NEUTRAL AT ATS', {sz: F.tiny, anc: 'middle', italic: true, fill: '#E65100'}));
+    }
   }
 
   // ── NODE 7: UTILITY METER ─────────────────────────────────────────────────
@@ -1503,12 +1577,24 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['Conduit Size',resolvedAcConduit||'—'],
     ['Service Voltage','120/240V, 1Ø'],
     ['Main Panel Rating',`${input.mainPanelAmps} A`],
-    ...(isLoadSide ? [
-      ['Interconnection','Load Side Tap'] as [string,string],
-      ['NEC Reference','NEC 705.12(B)'] as [string,string],
-      ['PV Breaker',`${pvBreakerAmps} A`] as [string,string],
-      ['120% Rule',`${input.mainPanelAmps*1.2 >= input.mainPanelAmps+pvBreakerAmps ? 'PASS ✓':'FAIL ✗'}`] as [string,string],
-    ] : isSupplySide ? [
+    ...(isLoadSide ? (() => {
+      // BUILD v24: NEC 705.12(B) — ALL backfeed breakers must sum ≤ 120% of bus rating
+      // Total backfeed = PV backfeed breaker + battery backfeed breaker(s)
+      const _batBfA = input.batteryBackfeedA ?? 0;
+      const _totalBfA = pvBreakerAmps + _batBfA;
+      const _busLimit = input.mainPanelAmps * 1.2;
+      const _120pass = _busLimit >= input.mainPanelAmps + _totalBfA;
+      const _rows: [string,string][] = [
+        ['Interconnection','Load Side Tap'],
+        ['NEC Reference','NEC 705.12(B)'],
+        ['PV Breaker',`${pvBreakerAmps} A`],
+        ...(_batBfA > 0 ? [['Batt. Backfeed Bkr',`${_batBfA} A`] as [string,string]] : []),
+        ['Total Backfeed',`${_totalBfA} A`],
+        ['Bus 120% Limit',`${_busLimit.toFixed(0)} A`],
+        ['120% Rule',`${_120pass ? 'PASS ✓':'FAIL ✗'}`],
+      ];
+      return _rows;
+    })() : isSupplySide ? [
       ['Interconnection','Supply Side Tap'] as [string,string],
       ['NEC Reference','NEC 705.11'] as [string,string],
       ['Backfed Breaker','N/A — Tap Connection'] as [string,string],
