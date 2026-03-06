@@ -935,6 +935,16 @@ export default function EngineeringPage() {
           // Interconnection method — drives SLD rendering (load-side tap vs backfed breaker)
           interconnection: config.interconnectionMethod ?? 'LOAD_SIDE',
           panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+          // BUILD v24: Pass equipment IDs so route.ts can look up specs for NEC-sized segments
+          // batteryId → getBatteryById → backfeedBreakerA, maxContinuousOutputA
+          // generatorId → getGeneratorById → outputBreakerA (was hardcoded #6 AWG — wrong for 100A)
+          // backupInterfaceId already sent above
+          batteryId:      config.batteryId || undefined,
+          generatorId:    config.generatorId || undefined,
+          // Also send generatorOutputBreakerA directly as fallback
+          generatorOutputBreakerA: config.generatorId
+            ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
+            : undefined,
           // Pass ComputedSystem.runs as single source of truth for conduit schedule
           runs:           cs.runs,
           // Microinverter branch data — for per-branch SLD drawing
