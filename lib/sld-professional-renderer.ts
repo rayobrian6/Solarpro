@@ -1773,6 +1773,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(rect(tbX, tbY+38, TB_W, 30, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(tbX+TB_W/2, tbY+51, 'SINGLE LINE DIAGRAM', {sz:F.tbTitle, bold:true, anc:'middle'}));
   parts.push(txt(tbX+TB_W/2, tbY+63, 'PHOTOVOLTAIC SYSTEM', {sz:F.tb, anc:'middle'}));
+  // BUILD v24 version badge — visible on every render for deployment verification
+  parts.push(rect(tbX, tbY+68, TB_W, 10, {fill: '#1B5E20', stroke: 'none', sw: 0}));
+  parts.push(txt(tbX+TB_W/2, tbY+76, 'BUILD v24 — NEC CONDUCTOR SIZING ENGINE', {sz: 4.5, bold: true, anc: 'middle', fill: '#FFFFFF'}));
 
   // Project info rows
   const tbRows: [string,string][] = [
@@ -1781,7 +1784,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     ['DATE',input.drawingDate],['DWG NO.',input.drawingNumber],
     ['REVISION',input.revision],['SCALE',input.scale||'NOT TO SCALE'],
   ];
-  let tbY2 = tbY+68;
+  let tbY2 = tbY+78; // BUILD v24: +10 for version badge
   const tbRH = 20;
   tbRows.forEach(([l,v]) => {
     parts.push(rect(tbX, tbY2, TB_W, tbRH, {fill:WHT, stroke:BLK, sw:SW_HAIR}));
