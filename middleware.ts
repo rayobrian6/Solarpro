@@ -13,6 +13,7 @@ const PUBLIC_PATHS = [
   '/api/auth/logout',
   '/api/auth/me',
   '/api/pricing',
+  '/api/version',
   '/api/engineering/sld',
   '/api/engineering/sld/test',
 ];
