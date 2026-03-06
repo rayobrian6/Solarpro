@@ -87,6 +87,7 @@ export interface SegmentScheduleInput {
   // Common AC
   systemVoltageAC: number;       // 240
   acOutputCurrentA: number;      // A — total system AC output
+  mainPanelAmps: number;         // A — service panel rating (e.g. 200A) for MSP_TO_UTILITY sizing
   // Feeder sizing
   feederGauge: string;           // '#6 AWG', '#4 AWG', etc.
   egcGauge: string;              // '#10 AWG', '#8 AWG', etc.
@@ -478,8 +479,10 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
 
     // SEGMENT 3: AC Combiner → AC Disconnect (CONDUIT)
     // Feeder: all branches combined into single feeder
-    // 240V split-phase PV output: L1 (BLK) + L2 (RED) + EGC (GRN) — NO neutral
-    // NEC 690.8: PV AC output circuits are ungrounded 2-wire 240V; neutral NOT required
+    // 240V split-phase microinverter output: L1 (BLK) + L2 (RED) + N (WHT) + EGC (GRN)
+    // Neutral IS required: microinverters produce 120/240V split-phase; neutral carries
+    // imbalance current and is required by NEC 200.3 and utility interconnection rules.
+    // Lands on LOAD side of AC disconnect (combiner feeds load terminals).
     const feederSizing = autoSizeGauge(totalCurrentA, ambientC, 2, false, '#10 AWG');
     const feederGauge = feederSizing.gauge;
     const feederOcpd = nextStandardOCPD(totalCurrentA * 1.25);
@@ -488,16 +491,17 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     const seg3Bundle: ConductorBundle[] = [
       { qty: 1, gauge: feederGauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: totalCurrentA },
       { qty: 1, gauge: feederGauge, color: 'RED', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: totalCurrentA },
+      { qty: 1, gauge: feederGauge, color: 'WHT', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: 0 },  // neutral
       { qty: 1, gauge: feederEgcGauge, color: 'GRN', insulation: 'THWN-2', isCurrentCarrying: false, currentPerConductor: 0 },
     ];
 
     segments.push(buildSegment(
-      'COMBINER_TO_DISCO', 'AC COMBINER', 'AC DISCONNECT',
+      'COMBINER_TO_DISCO', 'AC COMBINER', 'AC DISCONNECT (LOAD SIDE)',
       conduitType === 'EMT' ? 'EMT' : conduitType === 'PVC Sch 40' ? 'PVC_SCH40' : 'PVC_SCH80' as RacewayType,
       seg3Bundle, rl.combinerToDisco,
       totalCurrentA, feederOcpd, conduitType,
       ambientC, sysV, input.maxACVoltageDropPct,
-      ['NEC 690.8', 'NEC 310.15', 'NEC 250.122'],
+      ['NEC 690.8', 'NEC 310.15', 'NEC 250.122', 'NEC 200.3'],
       feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
       nextSegId()
     ));
@@ -591,9 +595,11 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
   }
 
   // ── COMMON DOWNSTREAM SEGMENTS ────────────────────────────────────────────
-  // These are the same for both micro and string topologies
-  // 240V split-phase PV output: L1 (BLK) + L2 (RED) + EGC (GRN) — NO neutral
-  // NEC 690.8: PV AC output is ungrounded 2-wire 240V; neutral NOT required downstream
+  // These are the same for both micro and string topologies.
+  // 240V split-phase: L1 (BLK) + L2 (RED) + N (WHT) + EGC (GRN)
+  // Neutral IS required: interconnection to MSP is 120/240V split-phase service.
+  // DISCO LINE SIDE: conductor from MSP/interconnection lands on LINE (top) terminals of AC disco.
+  // DISCO LOAD SIDE: conductor from combiner lands on LOAD (bottom) terminals of AC disco.
 
   const acCurrentA = input.acOutputCurrentA;
   const feederSizing = autoSizeGauge(acCurrentA, ambientC, 2, false, '#10 AWG');
@@ -601,9 +607,11 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
   const feederOcpd = nextStandardOCPD(acCurrentA * 1.25);
   const feederEgcGauge = getEGCGauge(feederOcpd);
 
+  // Feeder bundle: L1 + L2 + N + EGC
   const feederBundle: ConductorBundle[] = [
     { qty: 1, gauge: feederGauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
     { qty: 1, gauge: feederGauge, color: 'RED', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: acCurrentA },
+    { qty: 1, gauge: feederGauge, color: 'WHT', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: 0 },  // neutral
     { qty: 1, gauge: feederEgcGauge, color: 'GRN', insulation: 'THWN-2', isCurrentCarrying: false, currentPerConductor: 0 },
   ];
 
@@ -611,31 +619,52 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     : conduitType === 'PVC Sch 40' ? 'PVC_SCH40'
     : 'PVC_SCH80';
 
-  // SEGMENT: AC Disconnect → MSP (direct — no separate production meter)
+  // SEGMENT: AC Disconnect LINE SIDE → MSP
+  // This conductor makes the actual grid interconnection.
+  // Lands on LINE (top/arc-shield) side of AC disconnect — utility side.
   // Per industry standard: utility installs bidirectional meter for net metering;
   // Enphase IQ Gateway provides production monitoring. No secondary production meter on plan sets.
   segments.push(buildSegment(
-    'DISCO_TO_METER', 'AC DISCONNECT', 'MAIN SERVICE PANEL',
+    'DISCO_TO_METER', 'AC DISCONNECT (LINE SIDE)', 'MAIN SERVICE PANEL',
     condRaceway, feederBundle, rl.discoToMeter,
     acCurrentA, feederOcpd, conduitType,
     ambientC, sysV, input.maxACVoltageDropPct,
-    ['NEC 690.14', 'NEC 705.12', 'NEC 310.15'],
+    ['NEC 690.14', 'NEC 705.12', 'NEC 310.15', 'NEC 200.3'],
     feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
     nextSegId()
   ));
 
-  // METER_TO_MSP segment removed — no separate production meter per industry standard.
-  // DISCO_TO_METER above now represents the full AC Disco → MSP run.
-
   // SEGMENT: MSP → Utility Meter (utility-owned service entrance — shown for reference only)
-  // NEC 230.42 / NEC 230.54 — service entrance conductors (utility-owned, not in PV BOM)
+  // NEC 230.42 / NEC 230.54 — service entrance conductors sized for full service rating.
+  // Sized for mainPanelAmps (e.g. 200A service), NOT PV feeder current.
+  // NEC 230.42(A): service conductors sized for calculated load, no 125% multiplier.
+  // For 200A service: #2/0 AWG THWN-2 (200A at 75°C) is the standard utility conductor.
+  // These are utility-owned conductors; shown on SLD for completeness only.
+  const serviceAmps = input.mainPanelAmps || 200;
+  // Size service conductors directly to service rating (no 125% — NEC 230.42, not 690.8)
+  const serviceGauge = serviceAmps <= 100 ? '#3 AWG'
+    : serviceAmps <= 125 ? '#1 AWG'
+    : serviceAmps <= 150 ? '#1/0 AWG'
+    : serviceAmps <= 200 ? '#2/0 AWG'   // #2/0 AWG = 200A at 75°C per NEC 310.16
+    : serviceAmps <= 250 ? '#3/0 AWG'
+    : '#4/0 AWG';
+  const serviceSizing = { gauge: serviceGauge, effectiveAmpacity: serviceAmps, tempDerating: 1.0, conduitDerating: 1.0 };
+  const serviceEgcGauge = getEGCGauge(serviceAmps);
+
+  const serviceBundle: ConductorBundle[] = [
+    { qty: 1, gauge: serviceGauge, color: 'BLK', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: serviceAmps },
+    { qty: 1, gauge: serviceGauge, color: 'RED', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: serviceAmps },
+    { qty: 1, gauge: serviceGauge, color: 'WHT', insulation: 'THWN-2', isCurrentCarrying: true, currentPerConductor: 0 },  // neutral
+    { qty: 1, gauge: serviceEgcGauge, color: 'GRN', insulation: 'THWN-2', isCurrentCarrying: false, currentPerConductor: 0 },
+  ];
+
   segments.push(buildSegment(
     'MSP_TO_UTILITY', 'MAIN SERVICE PANEL', 'UTILITY METER',
-    condRaceway, feederBundle, rl.mspToUtility,
-    acCurrentA, feederOcpd, conduitType,
+    condRaceway, serviceBundle, rl.mspToUtility,
+    serviceAmps, serviceAmps, conduitType,
     ambientC, sysV, input.maxACVoltageDropPct,
     ['NEC 230.42', 'NEC 230.54'],
-    feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
+    serviceSizing.effectiveAmpacity, serviceSizing.tempDerating, serviceSizing.conduitDerating,
     nextSegId()
   ));
 

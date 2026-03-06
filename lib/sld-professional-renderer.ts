@@ -431,7 +431,7 @@ function renderDisco(
   cx: number, cy: number,
   ocpd: number, calloutN: number
 ): {svg:string; lx:number; rx:number} {
-  const W2 = 80, H2 = 56;
+  const W2 = 90, H2 = 70;
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
 
@@ -441,40 +441,50 @@ function renderDisco(
   p.push(txt(cx, by2+10, 'AC DISCONNECT', {sz:6, bold:true, anc:'middle'}));
 
   // Two poles: L1 and L2
-  const poleY1 = cy - 6;
-  const poleY2 = cy + 6;
+  const poleY1 = cy - 8;
+  const poleY2 = cy + 8;
 
-  // Line terminals (left)
-  p.push(lug(bx+8, poleY1));
-  p.push(lug(bx+8, poleY2));
-  p.push(txt(bx+8, poleY2+12, 'LINE', {sz:5, anc:'middle', bold:true}));
+  // ── LOAD terminals on LEFT (combiner feeds load side) ──────────────────
+  // Arc shield is on LINE side (right/utility side) per NEC 690.14.
+  // Combiner output → LOAD terminals (left side of disconnect).
+  p.push(lug(bx+10, poleY1));
+  p.push(lug(bx+10, poleY2));
+  p.push(txt(bx+10, poleY2+13, 'LOAD', {sz:5, anc:'middle', bold:true, fill:'#333'}));
+  p.push(txt(bx+10, poleY2+20, '(FROM COMBINER)', {sz:4.5, anc:'middle', fill:'#555'}));
 
-  // Wire line terminal → switch
-  p.push(ln(bx+11, poleY1, bx+28, poleY1, {sw:SW_THIN}));
-  p.push(ln(bx+11, poleY2, bx+28, poleY2, {sw:SW_THIN}));
+  // Wire load terminal → switch
+  p.push(ln(bx+13, poleY1, bx+30, poleY1, {sw:SW_THIN}));
+  p.push(ln(bx+13, poleY2, bx+30, poleY2, {sw:SW_THIN}));
 
-  // Knife switches (2-pole)
-  p.push(knifeSwitch(cx, poleY1, 28));
-  p.push(knifeSwitch(cx, poleY2, 28));
+  // Knife switches (2-pole) — blade opens toward LINE side
+  p.push(knifeSwitch(cx, poleY1, 30));
+  p.push(knifeSwitch(cx, poleY2, 30));
 
-  // Wire switch → load terminal
-  p.push(ln(bx+W2-28, poleY1, bx+W2-11, poleY1, {sw:SW_THIN}));
-  p.push(ln(bx+W2-28, poleY2, bx+W2-11, poleY2, {sw:SW_THIN}));
+  // Wire switch → line terminal
+  p.push(ln(bx+W2-30, poleY1, bx+W2-13, poleY1, {sw:SW_THIN}));
+  p.push(ln(bx+W2-30, poleY2, bx+W2-13, poleY2, {sw:SW_THIN}));
 
-  // Load terminals (right)
-  p.push(lug(bx+W2-8, poleY1));
-  p.push(lug(bx+W2-8, poleY2));
-  p.push(txt(bx+W2-8, poleY2+12, 'LOAD', {sz:5, anc:'middle', bold:true}));
+  // ── LINE terminals on RIGHT (utility/MSP side — arc shield here) ───────
+  p.push(lug(bx+W2-10, poleY1));
+  p.push(lug(bx+W2-10, poleY2));
+  p.push(txt(bx+W2-10, poleY2+13, 'LINE', {sz:5, anc:'middle', bold:true, fill:'#333'}));
+  p.push(txt(bx+W2-10, poleY2+20, '(TO MSP)', {sz:4.5, anc:'middle', fill:'#555'}));
 
-  // Input/output wire stubs (converge to single wire at box edge)
+  // Arc shield indicator on LINE side (top of enclosure, right side)
+  p.push(ln(bx+W2*0.55, by2+14, bx+W2-2, by2+14, {sw:2, stroke:'#888'}));
+  p.push(txt(bx+W2-2, by2+12, '⚡', {sz:5, anc:'end', fill:'#888'}));
+
+  // Input wire stubs: combiner → LOAD side (left)
   p.push(ln(bx-10, cy, bx, poleY1, {sw:SW_MED}));
   p.push(ln(bx-10, cy, bx, poleY2, {sw:SW_MED}));
+
+  // Output wire stubs: LINE side (right) → MSP
   p.push(ln(bx+W2, poleY1, bx+W2+10, cy, {sw:SW_MED}));
   p.push(ln(bx+W2, poleY2, bx+W2+10, cy, {sw:SW_MED}));
 
   // Labels below
   p.push(txt(cx, by2+H2+10, `${ocpd}A NON-FUSED`, {sz:F.tiny, anc:'middle'}));
-  p.push(txt(cx, by2+H2+19, 'NEC 690.14', {sz:F.tiny, anc:'middle', italic:true}));
+  p.push(txt(cx, by2+H2+19, 'NEC 690.14 — UTILITY ACCESSIBLE', {sz:F.tiny, anc:'middle', italic:true}));
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));

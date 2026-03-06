@@ -1407,6 +1407,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     stringCurrentA: isString ? (strings[0]?.stringIsc ?? input.panelIsc * 1.25) : 0,
     systemVoltageAC,
     acOutputCurrentA,
+    mainPanelAmps: input.mainPanelAmps || 200,
     feederGauge: '#10 AWG',   // will be auto-sized inside buildSegmentSchedule
     egcGauge: '#10 AWG',      // will be auto-sized inside buildSegmentSchedule
     conduitType: input.conduitType,
