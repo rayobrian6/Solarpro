@@ -176,10 +176,28 @@ function getConduitDerating(currentCarryingCount: number): number {
   return 0.35;
 }
 
-// NEC 240.6 — Standard OCPD sizes
+// NEC 240.6 — Standard OCPD sizes (all standard sizes, used for feeder/service sizing)
 const STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
 function nextStandardOCPD(amps: number): number {
   return STANDARD_OCPD.find(s => s >= amps) ?? 400;
+}
+
+// 240V double-pole breaker sizes available in residential/commercial panels.
+// These are the ONLY sizes stocked for 2-pole branch circuits.
+// 25A, 30A, 35A etc. are single-pole sizes — NOT available as 240V 2-pole breakers.
+const STANDARD_OCPD_240V_2POLE = [20, 40, 60, 100, 125, 150, 200];
+function next240VBreakerSize(amps: number): number {
+  return STANDARD_OCPD_240V_2POLE.find(s => s >= amps) ?? 200;
+}
+
+// Calculate max devices per branch that fits within a target 240V breaker size.
+// NEC 690.8: branch OCPD >= 125% of branch continuous current.
+// So: maxDevices = floor(breakerAmps / (1.25 × perDeviceCurrentA))
+// Also capped at NEC 690.8(B) hard limit (default 16 for Enphase IQ8).
+function maxDevicesForBreaker(breakerAmps: number, perDeviceCurrentA: number, hardLimit: number): number {
+  if (perDeviceCurrentA <= 0) return hardLimit;
+  const maxByOCPD = Math.floor(breakerAmps / (perDeviceCurrentA * 1.25));
+  return Math.min(maxByOCPD, hardLimit);
 }
 
 // NEC 250.122 — EGC sizing
@@ -423,17 +441,44 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     //   N branches × 2 hots + 1 EGC
     //   e.g. 3 branches → 3 BLK + 3 RED + 1 GRN
 
-    const branches = Math.ceil(input.moduleCount / input.maxDevicesPerBranch);
-    // Use actual devices per branch (balanced distribution), not worst-case max
-    // e.g. 34 micros / 3 branches = ~11.3 → ceil = 12 micros on largest branch
-    const devicesPerBranch = Math.ceil(input.moduleCount / branches);
-    const branchCurrentA = input.microAcCurrentA * devicesPerBranch; // actual max branch current
+    // ── Branch sizing: snap to real 240V double-pole breaker sizes ──────────
+    // Rule: branch OCPD must be a real 240V 2-pole breaker size (20, 40, 60, 100...).
+    // Start with 20A (smallest common 240V 2-pole breaker).
+    // Calculate max devices that fit in a 20A breaker: floor(20 / (1.25 × perDeviceA)).
+    // If that gives 0 devices (very high current micro), step up to 40A, etc.
+    // Then compute branches = ceil(moduleCount / maxDevicesPerBreaker).
+    // This ensures branch count is driven by real panel hardware, not arbitrary math.
     const totalCurrentA = input.microAcCurrentA * input.moduleCount;
+
+    // Find the smallest 240V 2-pole breaker that fits at least 1 device
+    let branchOcpd = 20; // start with 20A
+    let maxDevPerBranch = 0;
+    for (const breakerSize of STANDARD_OCPD_240V_2POLE) {
+      maxDevPerBranch = maxDevicesForBreaker(breakerSize, input.microAcCurrentA, input.maxDevicesPerBranch);
+      if (maxDevPerBranch >= 1) {
+        branchOcpd = breakerSize;
+        break;
+      }
+    }
+    // Fallback: if no standard size works, use hard limit with 200A breaker
+    if (maxDevPerBranch < 1) {
+      maxDevPerBranch = 1;
+      branchOcpd = 200;
+    }
+
+    // Branches = ceil(total devices / max devices per branch)
+    const branches = Math.ceil(input.moduleCount / maxDevPerBranch);
+    // Actual devices on largest branch (balanced distribution)
+    // e.g. 40 micros / 4 branches = 10 each; 34 micros / 4 branches = 9+9+8+8
+    const devicesPerBranch = Math.ceil(input.moduleCount / branches);
+    const branchCurrentA = input.microAcCurrentA * devicesPerBranch;
+
+    // Verify branchOcpd still covers actual branch current (re-snap if needed)
+    branchOcpd = next240VBreakerSize(branchCurrentA * 1.25);
 
     // Auto-size branch conductor gauge (open air, no conduit derating)
     const branchSizing = autoSizeGauge(branchCurrentA, roofAmbC, 2, false, '#10 AWG');
     const branchGauge = branchSizing.gauge;
-    const branchOcpd = nextStandardOCPD(branchCurrentA * 1.25);
     const branchEgcGauge = getEGCGauge(branchOcpd);
 
     // SEGMENT 1: Array → Junction Box (OPEN AIR)

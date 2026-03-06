@@ -931,11 +931,33 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const microDeviceCount = isMicro
     ? Math.ceil(input.totalPanels / input.inverterModulesPerDevice)
     : 0;
-  const branchLimit = input.inverterBranchLimit || 16; // NEC 690.8(B) default
-  const acBranchCount = isMicro ? Math.ceil(microDeviceCount / branchLimit) : 0;
+  const branchLimit = input.inverterBranchLimit || 16; // NEC 690.8(B) hard limit
 
   // Per-micro AC current: inverterAcKw × 1000 / 240V
   const perMicroCurrentA = isMicro ? (input.inverterAcKw * 1000) / 240 : 0;
+
+  // ── 240V double-pole breaker sizing for branches ──────────────────────
+  // Branch OCPD must be a real 240V 2-pole breaker size: 20, 40, 60, 100, 125, 150, 200A.
+  // 25A, 30A, 35A etc. are single-pole sizes — NOT available as 240V 2-pole breakers.
+  // Find smallest 240V 2-pole breaker that fits at least 1 device per branch.
+  const OCPD_240V_2POLE = [20, 40, 60, 100, 125, 150, 200];
+  let branchBreakerAmps = 20;
+  let maxDevPerBranch240V = 0;
+  for (const sz of OCPD_240V_2POLE) {
+    const maxFit = perMicroCurrentA > 0
+      ? Math.min(Math.floor(sz / (perMicroCurrentA * 1.25)), branchLimit)
+      : branchLimit;
+    if (maxFit >= 1) {
+      branchBreakerAmps = sz;
+      maxDevPerBranch240V = maxFit;
+      break;
+    }
+  }
+  if (maxDevPerBranch240V < 1) { maxDevPerBranch240V = 1; branchBreakerAmps = 200; }
+
+  // Branch count driven by 240V breaker constraint (not just NEC 690.8(B) hard limit)
+  const acBranchCount = isMicro ? Math.ceil(microDeviceCount / maxDevPerBranch240V) : 0;
+
   const microBranches: MicroBranch[] = [];
   let acBranchCurrentA = 0;
   let acBranchOcpdAmps = 0;
@@ -943,34 +965,23 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   if (isMicro) {
     // ── Balanced branch distribution ──────────────────────────────────────
     // Distribute microinverters as evenly as possible across branches.
-    // e.g. 34 micros / 3 branches → 12 + 11 + 11  (NOT 16 + 16 + 2)
-    // Base count = floor(total / branches), remainder branches get +1
+    // e.g. 40 micros / 4 branches → 10 + 10 + 10 + 10
+    // e.g. 34 micros / 4 branches → 9 + 9 + 8 + 8
     const basePerBranch = Math.floor(microDeviceCount / acBranchCount);
     const remainder     = microDeviceCount % acBranchCount;
-    // First `remainder` branches get basePerBranch+1, rest get basePerBranch
 
     for (let b = 0; b < acBranchCount; b++) {
       const devicesOnBranch = b < remainder ? basePerBranch + 1 : basePerBranch;
       const branchCurrent = devicesOnBranch * perMicroCurrentA;
-      const ocpd = nextStandardOCPD(branchCurrent * 1.25); // NEC 690.8
+      // Snap to real 240V 2-pole breaker size
+      const ocpd = OCPD_240V_2POLE.find(s => s >= branchCurrent * 1.25) ?? 200;
 
-      // Validate: max 16 micros per branch (NEC 690.8(B))
+      // Validate: max devices per branch (NEC 690.8(B))
       if (devicesOnBranch > branchLimit) {
         issues.push({
           severity: 'error',
           code: 'NEC_690_8B_BRANCH_LIMIT',
           message: `Branch ${b + 1}: ${devicesOnBranch} microinverters exceeds NEC 690.8(B) limit of ${branchLimit}`,
-          necReference: 'NEC 690.8(B)',
-          autoFixed: false,
-        });
-      }
-
-      // Warn if branch is very small (< 4 micros) — may indicate poor design
-      if (devicesOnBranch < 4 && acBranchCount > 1) {
-        issues.push({
-          severity: 'warning',
-          code: 'MICRO_BRANCH_UNDERSIZED',
-          message: `Branch ${b + 1}: only ${devicesOnBranch} microinverter${devicesOnBranch > 1 ? 's' : ''} — consider consolidating branches`,
           necReference: 'NEC 690.8(B)',
           autoFixed: false,
         });
