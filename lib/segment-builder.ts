@@ -330,6 +330,8 @@ export function buildSegments(input: SegmentBuilderInput): SegmentBuilderOutput 
       conduitFillPass: true,
       overallPass: branchOpenAirSizing.effectiveAmpacity >= branchRequiredAmpacity && branchVdrop.percent <= input.maxACVoltageDropPct,
       conductorCallout: buildConductorCallout(branchBundle, 'NONE', 'NONE', 0),
+      phase: '1Ø',
+      conductorMaterial: 'CU',
     });
     
     // Branch homerun — conduit from roof j-box to AC combiner
@@ -364,6 +366,8 @@ export function buildSegments(input: SegmentBuilderInput): SegmentBuilderOutput 
       conduitFillPass: branchConduitSizing.fillPercent <= 0.40,
       overallPass: branchHomerunSizing.effectiveAmpacity >= branchRequiredAmpacity && branchHomerunVdrop.percent <= input.maxACVoltageDropPct && branchConduitSizing.fillPercent <= 0.40,
       conductorCallout: buildConductorCallout(branchBundle, branchConduitSizing.size, input.conduitType, branchConduitSizing.fillPercent),
+      phase: '1Ø',
+      conductorMaterial: 'CU',
     });
     
     // Feeder current — total AC output from all branches
@@ -412,6 +416,8 @@ export function buildSegments(input: SegmentBuilderInput): SegmentBuilderOutput 
       conduitFillPass: feederConduitSizing.fillPercent <= 0.40,
       overallPass: feederSizing.effectiveAmpacity >= feederRequiredAmpacity && feederVdrop.percent <= input.maxACVoltageDropPct && feederConduitSizing.fillPercent <= 0.40,
       conductorCallout: buildConductorCallout(feederBundle, feederConduitSizing.size, input.conduitType, feederConduitSizing.fillPercent),
+      phase: '1Ø',
+      conductorMaterial: 'CU',
     });
     
     // ============================================================
@@ -469,6 +475,8 @@ export function buildSegments(input: SegmentBuilderInput): SegmentBuilderOutput 
         overallPass: feederSizing.effectiveAmpacity >= feederRequiredAmpacity && discoMspVdrop.percent <= input.maxACVoltageDropPct && discoMspConduitSizing.fillPercent <= 0.40,
         interconnectionType: input.interconnectionType,
         conductorCallout: buildConductorCallout(feederBundle, discoMspConduitSizing.size, input.conduitType, discoMspConduitSizing.fillPercent),
+        phase: '1Ø',
+        conductorMaterial: 'CU',
       });
     } else if (input.interconnectionType === InterconnectionType.BACKFED_BREAKER) {
       // Backfed breaker — PV breaker in MSP
@@ -499,6 +507,8 @@ export function buildSegments(input: SegmentBuilderInput): SegmentBuilderOutput 
         overallPass: feederSizing.effectiveAmpacity >= feederRequiredAmpacity && discoMspVdrop.percent <= input.maxACVoltageDropPct && discoMspConduitSizing.fillPercent <= 0.40,
         interconnectionType: input.interconnectionType,
         conductorCallout: buildConductorCallout(feederBundle, discoMspConduitSizing.size, input.conduitType, discoMspConduitSizing.fillPercent),
+        phase: '1Ø',
+        conductorMaterial: 'CU',
       });
     } else if (input.interconnectionType === InterconnectionType.SUPPLY_SIDE_TAP || input.interconnectionType === InterconnectionType.LINE_SIDE_TAP) {
       segments.push({
@@ -528,6 +538,8 @@ export function buildSegments(input: SegmentBuilderInput): SegmentBuilderOutput 
         overallPass: feederSizing.effectiveAmpacity >= feederRequiredAmpacity && discoMspVdrop.percent <= input.maxACVoltageDropPct && discoMspConduitSizing.fillPercent <= 0.40,
         interconnectionType: input.interconnectionType,
         conductorCallout: buildConductorCallout(feederBundle, discoMspConduitSizing.size, input.conduitType, discoMspConduitSizing.fillPercent),
+        phase: '1Ø',
+        conductorMaterial: 'CU',
       });
     }
     
@@ -568,6 +580,8 @@ export function buildSegments(input: SegmentBuilderInput): SegmentBuilderOutput 
       overallPass: true,
       isUtilityOwned: true,
       conductorCallout: 'UTILITY-OWNED SERVICE CONDUCTORS — NOT IN PV BOM',
+      phase: '1Ø',
+      conductorMaterial: 'CU',
     });
   }
   

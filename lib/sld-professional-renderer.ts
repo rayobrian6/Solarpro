@@ -308,10 +308,12 @@ function busbar(x1: number, x2: number, y: number, label?: string): string {
 
 // Battery Storage Symbol (IEEE/ANSI)
 // Drawn as a stack of cells (IEC 60617 battery symbol) with AC connection
+// Terminal BAT_AC_OUT: bottom center — AC output lug connecting to BUI BATTERY port
 function renderBattery(
   cx: number, cy: number,
   model: string, kwh: number, backfeedA: number, calloutN: number
-): {svg: string; lx: number; rx: number; ty: number; by: number} {
+): {svg: string; lx: number; rx: number; ty: number; by: number;
+    acOutX: number; acOutY: number} {
   const W2 = 88, H2 = 72;
   const bx = cx - W2/2, by2 = cy - H2/2;
   const p: string[] = [];
@@ -334,23 +336,29 @@ function renderBattery(
   p.push(txt(cellX - 8, cellY + 4, '\u2212', {sz: 9, bold: true, anc: 'middle', fill: BAT_CLR}));
   p.push(txt(cellX + 22, cellY + 4, '+', {sz: 9, bold: true, anc: 'middle', fill: BAT_CLR}));
 
-  p.push(lug(cx, by2 + H2 - 6));
-  p.push(ln(cx, by2 + H2 - 6, cx, by2 + H2, {stroke: BAT_CLR, sw: SW_MED}));
+  // BAT_AC_OUT terminal — bottom center lug (AC output to BUI BATTERY port)
+  const acOutX = cx;
+  const acOutY = by2 + H2;  // bottom edge — wire exits downward
+  p.push(lug(acOutX, acOutY - 6));
+  p.push(ln(acOutX, acOutY - 6, acOutX, acOutY, {stroke: BAT_CLR, sw: SW_MED}));
+  p.push(txt(acOutX, acOutY + 6, 'AC OUT', {sz: 4, anc: 'middle', fill: BAT_CLR}));
 
-  p.push(txt(cx, by2 + H2 + 10, model ? model.substring(0, 22) : 'BATTERY STORAGE', {sz: F.tiny, anc: 'middle', italic: true}));
-  p.push(txt(cx, by2 + H2 + 19, kwh > 0 ? `${kwh} kWh` : '', {sz: F.tiny, anc: 'middle', bold: true, fill: BAT_CLR}));
+  p.push(txt(cx, by2 + H2 + 16, model ? model.substring(0, 22) : 'BATTERY STORAGE', {sz: F.tiny, anc: 'middle', italic: true}));
+  p.push(txt(cx, by2 + H2 + 25, kwh > 0 ? `${kwh} kWh` : '', {sz: F.tiny, anc: 'middle', bold: true, fill: BAT_CLR}));
   if (backfeedA > 0) {
-    p.push(txt(cx, by2 + H2 + 28, `${backfeedA}A BACKFEED \u2014 NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_CLR}));
+    p.push(txt(cx, by2 + H2 + 34, `${backfeedA}A BACKFEED \u2014 NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_CLR}));
   }
   p.push(callout(bx + W2 + 14, by2 - 5, calloutN));
-  return {svg: p.join(''), lx: bx, rx: bx + W2, ty: by2, by: by2 + H2};
+  return {svg: p.join(''), lx: bx, rx: bx + W2, ty: by2, by: by2 + H2,
+          acOutX, acOutY};
 }
 
 // Generator Symbol (IEEE 315 / ANSI) - circle with G inside
 function renderGenerator(
   cx: number, cy: number,
   brand: string, model: string, kw: number, calloutN: number
-): {svg: string; lx: number; rx: number; ty: number; by: number} {
+): {svg: string; lx: number; rx: number; ty: number; by: number;
+    genOutX: number; genOutY: number} {
   const GEN_CLR = '#2E7D32';
   const r = 30;
   const p: string[] = [];
@@ -369,14 +377,22 @@ function renderGenerator(
   p.push(txt(cx, cy + r + 18, 'NEC 702.5 \u2014 TRANSFER EQUIP. REQ.', {sz: F.tiny, anc: 'middle', italic: true, fill: GEN_CLR}));
   p.push(callout(cx + r + 14, cy - r - 5, calloutN));
 
-  return {svg: p.join(''), lx: cx - r, rx: cx + r + 10, ty: cy - r, by: cy + r};
+  // GEN_OUT terminal — right side lug (wire exits rightward to ATS GEN or BUI GEN port)
+  const genOutX = cx + r + 10;
+  const genOutY = cy;
+  p.push(txt(cx + r + 2, cy - 7, 'GEN OUT', {sz: 4, anc: 'start', fill: GEN_CLR}));
+
+  return {svg: p.join(''), lx: cx - r, rx: genOutX, ty: cy - r, by: cy + r,
+          genOutX, genOutY};
 }
 
 // ATS Symbol (Automatic Transfer Switch)
 function renderATS(
   cx: number, cy: number,
   brand: string, model: string, ampRating: number, calloutN: number
-): {svg: string; lx: number; rx: number; ty: number; by: number} {
+): {svg: string; lx: number; rx: number; ty: number; by: number;
+    utilInX: number; utilInY: number; genInX: number; genInY: number;
+    loadOutX: number; loadOutY: number} {
   const W2 = 90, H2 = 68;
   const bx = cx - W2/2, by2 = cy - H2/2;
   const ATS_CLR = '#E65100';
@@ -422,7 +438,15 @@ function renderATS(
   p.push(txt(cx, by2 + H2 + 28, 'NEC 702.5 \u2014 AUTO TRANSFER', {sz: F.tiny, anc: 'middle', italic: true, fill: ATS_CLR}));
   p.push(callout(bx + W2 + 14, by2 - 5, calloutN));
 
-  return {svg: p.join(''), lx: bx - 10, rx: bx + W2 + 10, ty: by2, by: by2 + H2};
+  // Terminal coordinates for segment routing
+  const utilInX = bx;          // UTIL input — left edge, upper
+  const utilInY = cy - 12;
+  const genInX  = bx;          // GEN input — left edge, lower
+  const genInY  = cy + 12;
+  const loadOutX = bx + W2;    // LOAD output — right edge, center
+  const loadOutY = cy;
+  return {svg: p.join(''), lx: bx - 10, rx: bx + W2 + 10, ty: by2, by: by2 + H2,
+          utilInX, utilInY, genInX, genInY, loadOutX, loadOutY};
 }
 
 // Backup Sub-Panel Symbol
@@ -471,7 +495,11 @@ function renderBUI(
   brand: string, model: string, ampRating: number,
   isEnphase: boolean, isTesla: boolean,
   hasGenerator: boolean, calloutN: number
-): {svg: string; lx: number; rx: number; ty: number; by: number; batPortX: number; batPortY: number; loadPortX: number; loadPortY: number} {
+): {svg: string; lx: number; rx: number; ty: number; by: number;
+    batPortX: number; batPortY: number;
+    loadPortX: number; loadPortY: number;
+    gridPortX: number; gridPortY: number;
+    genPortX: number; genPortY: number} {
   const W2 = 100, H2 = 90;
   const bx = cx - W2/2, by2 = cy - H2/2;
   const BUI_CLR = isEnphase ? '#0D47A1' : isTesla ? '#CC0000' : '#1565C0';
@@ -556,6 +584,8 @@ function renderBUI(
     ty: by2, by: by2+H2,
     batPortX: batPortX2, batPortY: batPortY2,
     loadPortX: bx+W2, loadPortY: loadY,
+    gridPortX: bx,     gridPortY: cy - 14,   // GRID lug -- left edge, upper
+    genPortX:  bx,     genPortY:  cy + 14,   // GEN lug  -- left edge, lower
   };
 }
 
@@ -566,7 +596,8 @@ function renderInverterBox(
   acKw: number, acAmps: number,
   topologyLabel: string, mpptAllocation: string,
   calloutN: number
-): {svg: string; lx: number; rx: number} {
+): {svg: string; lx: number; rx: number;
+    dcInX: number; dcInY: number; acOutX: number; acOutY: number} {
   const W2 = 96, H2 = 80;
   const bx = cx - W2/2, by2 = cy - H2/2;
   const p: string[] = [];
@@ -614,10 +645,41 @@ function renderInverterBox(
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  return {svg: p.join(''), lx: bx-10, rx: bx+W2+10};
+  // Terminal coordinates for segment routing
+  const dcInX  = bx - 10;      // DC input lug — left edge
+  const dcInY  = cy;
+  const acOutX2 = bx + W2 + 10; // AC output lug — right edge
+  const acOutY2 = cy;
+  return {svg: p.join(''), lx: bx-10, rx: bx+W2+10,
+          dcInX, dcInY, acOutX: acOutX2, acOutY: acOutY2};
 }
 
 // ── Wire Segment with Inline Label ───────────────────────────────────────────
+// ── Segment Overlap Guard ───────────────────────────────────────────────────
+// Tracks horizontal wire Y-coordinates to detect and offset parallel overlapping wires.
+// Call resolveSegY() before drawing each horizontal segment to get a non-overlapping Y.
+const OVERLAP_GUARD_OFFSET = 4; // px offset for parallel wires
+function makeOverlapGuard() {
+  const usedRanges: Array<{x1:number; x2:number; y:number}> = [];
+  return function resolveSegY(x1: number, x2: number, y: number): number {
+    const xMin = Math.min(x1, x2);
+    const xMax = Math.max(x1, x2);
+    let candidate = y;
+    let attempts = 0;
+    while (attempts < 10) {
+      const conflict = usedRanges.find(r =>
+        Math.abs(r.y - candidate) < OVERLAP_GUARD_OFFSET &&
+        r.x1 < xMax && r.x2 > xMin
+      );
+      if (!conflict) break;
+      candidate += OVERLAP_GUARD_OFFSET;
+      attempts++;
+    }
+    usedRanges.push({x1: xMin, x2: xMax, y: candidate});
+    return candidate;
+  };
+}
+
 function wireSeg(
   x1: number, x2: number, y: number,
   lines: string[],
@@ -700,7 +762,8 @@ function renderCombiner(
   cx: number, cy: number,
   nBranches: number, branchOcpd: number,
   label: string, calloutN: number
-): {svg:string; lx:number; rx:number; ty:number; by:number} {
+): {svg:string; lx:number; rx:number; ty:number; by:number;
+    feederOutX:number; feederOutY:number} {
   const W2 = 80, H2 = 90;
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
@@ -751,14 +814,19 @@ function renderCombiner(
   // Input wire stub (left side at bus Y)
   p.push(ln(bx-10, busY, bx, busY, {sw:SW_MED}));
 
-  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10, ty:by2, by:by2+H2};
+  // Terminal coordinates for segment routing
+  const feederOutX = bx + W2 + 10;  // Feeder lug output — right edge
+  const feederOutY = cy + 8;         // busY inside combiner
+  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10, ty:by2, by:by2+H2,
+          feederOutX, feederOutY};
 }
 
 // ── AC Disconnect (internal structure) ───────────────────────────────────────
 function renderDisco(
   cx: number, cy: number,
   ocpd: number, calloutN: number
-): {svg:string; lx:number; rx:number} {
+): {svg:string; lx:number; rx:number;
+    loadInX:number; loadInY:number; lineOutX:number; lineOutY:number} {
   const W2 = 90, H2 = 70;
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
@@ -817,14 +885,21 @@ function renderDisco(
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10};
+  // Terminal coordinates for segment routing
+  const loadInX  = bx;          // LOAD terminals — left edge (PV/combiner side)
+  const loadInY  = cy;           // midpoint between poleY1 and poleY2
+  const lineOutX = bx + W2;     // LINE terminals — right edge (utility/MSP side)
+  const lineOutY = cy;
+  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
+          loadInX, loadInY, lineOutX, lineOutY};
 }
 
 // ── MSP Load-Side Tap (internal structure) ───────────────────────────────────
 function renderMSPLoad(
   cx: number, cy: number,
   mainAmps: number, pvAmps: number, calloutN: number
-): {svg:string; lx:number; rx:number} {
+): {svg:string; lx:number; rx:number;
+    bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number} {
   const W2 = 96, H2 = 120;
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
@@ -883,7 +958,13 @@ function renderMSPLoad(
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10};
+  // Terminal coordinates for segment routing
+  const bkfdInX = bx;           // Backfed breaker input — left edge (from AC disco)
+  const bkfdInY = cy;
+  const busOutX = bx + W2;      // Main bus output — right edge (to utility meter)
+  const busOutY = mbY + 20;     // busY inside MSP
+  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
+          bkfdInX, bkfdInY, busOutX, busOutY};
 }
 
 // ── MSP Supply-Side / Backfed (internal structure) ───────────────────────────
@@ -891,7 +972,8 @@ function renderMSPSupply(
   cx: number, cy: number,
   mainAmps: number, backfeedAmps: number,
   isSupply: boolean, calloutN: number
-): {svg:string; lx:number; rx:number} {
+): {svg:string; lx:number; rx:number;
+    bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number} {
   const W2 = 96, H2 = 110;
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
@@ -951,13 +1033,21 @@ function renderMSPSupply(
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10};
+  // Terminal coordinates for segment routing
+  const bkfdInX = bx;           // Input — left edge (from AC disco or ATS)
+  const bkfdInY = cy;
+  const busOutX = bx + W2;      // Main bus output — right edge (to utility meter)
+  const busOutY = by2 + 38;     // busY inside MSP supply
+  return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
+          bkfdInX, bkfdInY, busOutX, busOutY};
 }
 
 // ── Main Render ──────────────────────────────────────────────────────────────
 export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const parts: string[] = [];
   const isMicro = input.topologyType === 'MICROINVERTER';
+  // Instantiate overlap guard for this diagram — prevents parallel wires from overlapping
+  const resolveSegY = makeOverlapGuard();
 
   const findRun = (id: string): RunSegment|undefined => input.runs?.find(r=>r.id===id);
 
@@ -1086,7 +1176,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ? [`${input.branchWireGauge??'#10 AWG'} THWN-2`, '1×#10 GRN EGC', 'OPEN AIR — NEC 690.31']
       : [`${resolvedDcWire} USE-2/PV Wire`, '1×#10 GRN EGC', 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
-    parts.push(wireSeg(pvOutX, jbCX-jbW/2, BUS_Y, lines, {openAir:true, bundleCount:cnt}));
+    parts.push(wireSeg(pvOutX, jbCX-jbW/2, resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y), lines, {openAir:true, bundleCount:cnt}));
   }
 
   // ── NODE 3: AC COMBINER (micro) or DC DISCONNECT (string) ─────────────────
@@ -1099,7 +1189,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const clabel = input.combinerLabel ?? `${input.inverterManufacturer} IQ Combiner`;
     const cr = renderCombiner(xComb, BUS_Y, nb, bocpd, clabel, 3);
     parts.push(cr.svg);
-    node3RX = cr.rx;
+    node3RX = cr.feederOutX;  // Use feeder output terminal X as the right-side connection point
     parts.push(txt(xComb, cr.ty-8, 'AC COMBINER', {sz:F.hdr, bold:true, anc:'middle'}));
 
     // SEGMENT 2: J-Box → Combiner
@@ -1107,7 +1197,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const run = branchRun;
       const fb = [`${input.branchWireGauge??'#10 AWG'} THWN-2`, '1×#10 GRN EGC', `IN ${input.branchConduitSize??'3/4"'} EMT`];
       const {lines, cnt} = runLines(run, fb);
-      parts.push(wireSeg(jbCX+jbW/2, cr.lx, BUS_Y, lines, {bundleCount:cnt}));
+      parts.push(wireSeg(jbCX+jbW/2, cr.lx, resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y), lines, {bundleCount:cnt}));
     }
   } else {
     // DC DISCONNECT with fuse symbols
@@ -1143,7 +1233,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const run = dcStringRun;
       const fb = [`${resolvedDcWire} USE-2/PV Wire`, '1×#10 GRN EGC', `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
-      parts.push(wireSeg(jbCX+jbW/2, dcX-dW/2, BUS_Y, lines, {bundleCount:cnt}));
+      parts.push(wireSeg(jbCX+jbW/2, dcX-dW/2, resolveSegY(jbCX+jbW/2, dcX-dW/2, BUS_Y), lines, {bundleCount:cnt}));
     }
   }
 
@@ -1161,14 +1251,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       4
     );
     parts.push(invBox.svg);
-    invRX = invBox.rx;
+    invRX = invBox.acOutX;  // Use AC output terminal X as the right-side connection point
 
-    // SEGMENT 3: DC Disco → Inverter
+    // SEGMENT 3: DC Disco LOAD terminal → Inverter DC_IN terminal
     {
       const run = dcDiscoInvRun ?? dcStringRun;
       const fb = [`${resolvedDcWire} USE-2/PV Wire`, '1×#10 GRN EGC', `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
-      parts.push(wireSeg(node3RX, invBox.lx - 10, BUS_Y, lines, {bundleCount:cnt}));
+      // Use inverter dcInX/Y terminal for precise routing
+      const segY = invBox.dcInY;
+      parts.push(wireSeg(node3RX, invBox.dcInX, resolveSegY(node3RX, invBox.dcInX, segY), lines, {bundleCount:cnt}));
     }
   }
 
@@ -1177,10 +1269,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(discoResult.svg);
   parts.push(txt(xDisco, BUS_Y-40, '(N) AC DISCONNECT', {sz:F.hdr, bold:true, anc:'middle'}));
 
-  // SEGMENT: Combiner/Inverter → AC Disco
+  // SEGMENT: Combiner/Inverter → AC Disco (terminal-to-terminal routing)
+  // Source: combiner feederOutX/Y (micro) or inverter acOutX/Y (string)
+  // Dest:   discoResult.loadInX/Y
   {
-    const x1 = invRX;
-    const x2 = discoResult.lx;
     const run = isMicro ? combDiscoRun : invDiscoRun;
     const fb = [
       `${resolvedAcWire} THWN-2`,
@@ -1188,18 +1280,25 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
     const {lines, cnt} = runLines(run, fb);
-    parts.push(wireSeg(x1, x2, BUS_Y, lines, {bundleCount:cnt}));
+    // Route from source right edge to disco LOAD terminal using terminal Y coordinate
+    const segY = discoResult.loadInY;  // disco loadIn is at BUS_Y center
+    parts.push(wireSeg(invRX, discoResult.loadInX, resolveSegY(invRX, discoResult.loadInX, segY), lines, {bundleCount:cnt}));
   }
 
   // ── NODE 6: MSP ───────────────────────────────────────────────────────────
   let mspRX: number;
   let mspBusY = BUS_Y;
   let buiRX: number; // right edge of BUI (or MSP if no battery) // Y of MSP output wire (main bus level)
+  // buiResult is hoisted so the generator section (outside battery block) can access BUI terminal coords
+  let buiResult: ReturnType<typeof renderBUI> | undefined;
+  // mspResult holds terminal coordinates for both MSPLoad and MSPSupply (same interface)
+  let mspResult: {svg:string; lx:number; rx:number; bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number};
 
   if (isLoadSide) {
     const r = renderMSPLoad(xMSP, BUS_Y, input.mainPanelAmps, pvBreakerAmps, isMicro?5:6);
     parts.push(r.svg);
     mspRX = r.rx;
+    mspResult = r;
     // MSP output is at main bus Y (offset from BUS_Y)
     const mbY = (BUS_Y - 60/2) + 28 + 20; // busY inside MSP
     mspBusY = mbY;
@@ -1207,10 +1306,12 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const r = renderMSPSupply(xMSP, BUS_Y, input.mainPanelAmps, input.backfeedAmps, isSupplySide, isMicro?5:6);
     parts.push(r.svg);
     mspRX = r.rx;
+    mspResult = r;
     mspBusY = (BUS_Y - 55/2) + 38; // busY inside MSP
   }
 
-  // SEGMENT: AC Disco → MSP
+  // SEGMENT: AC Disco LINE terminal → MSP backfed breaker terminal (terminal-to-terminal routing)
+  // Source: discoResult.lineOutX/Y  Dest: mspResult.bkfdInX/Y
   buiRX = mspRX; // default: no BUI, wire goes directly to meter
   {
     const run = discoMspRun;
@@ -1220,7 +1321,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
     const {lines, cnt} = runLines(run, fb);
-    parts.push(wireSeg(discoResult.rx, xMSP-48, BUS_Y, lines, {bundleCount:cnt}));
+    // Use disco lineOut terminal Y and MSP bkfdIn terminal Y (both at BUS_Y center)
+    const segY = discoResult.lineOutY;
+    parts.push(wireSeg(discoResult.lineOutX, mspResult.bkfdInX, resolveSegY(discoResult.lineOutX, mspResult.bkfdInX, segY), lines, {bundleCount:cnt}));
   }
 
 
@@ -1241,7 +1344,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const buiCX = xMSP + 130;
     const buiCY = BUS_Y;
     const buiAmpRating = input.atsAmpRating ?? 200;
-    const buiResult = renderBUI(
+    buiResult = renderBUI(
       buiCX, buiCY,
       input.backupInterfaceBrand ?? (isEnphase ? 'Enphase' : isTesla ? 'Tesla' : ''),
       input.backupInterfaceModel ?? (isEnphase ? 'IQ System Controller 3' : isTesla ? 'Backup Gateway 2' : 'BUI'),
@@ -1253,8 +1356,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push(buiResult.svg);
     buiRX = buiResult.rx;
 
-    // Wire: MSP output → BUI grid input (horizontal on bus line)
-    parts.push(ln(mspRX, BUS_Y, buiResult.lx, BUS_Y, {stroke: BLK, sw: SW_MED}));
+    // Wire: MSP output → BUI GRID terminal (route to exact terminal coordinate)
+    // gridPortX is the left edge lug; gridPortY is cy-14 (upper-left terminal)
+    parts.push(ln(mspRX, buiResult.gridPortY, buiResult.gridPortX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
+    // Vertical stub from bus line down to GRID terminal if needed
+    if (Math.abs(buiResult.gridPortY - BUS_Y) > 2) {
+      parts.push(ln(mspRX, BUS_Y, mspRX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
+    }
 
     // Backfeed breaker at MSP for battery (NEC 705.12(B))
     const bfA = input.batteryBackfeedA ?? 20;
@@ -1276,8 +1384,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     );
     parts.push(batResult.svg);
 
-    // Wire: battery bottom → BUI battery port (vertical dashed blue line)
-    parts.push(ln(batCX, batResult.by, batCX, buiResult.batPortY, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
+    // Wire: battery AC OUT terminal → BUI BATTERY port (vertical dashed blue line)
+    // Use explicit terminal coordinates: batResult.acOutX/Y → buiResult.batPortX/Y
+    parts.push(ln(batResult.acOutX, batResult.acOutY, buiResult.batPortX, buiResult.batPortY, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
     // Wire callout
     // BUILD v24: Use computed conductorCallout from BATTERY_TO_BUI_RUN (NEC-sized)
     // Fallback to legacy hardcoded gauge only if segment not computed
@@ -1287,7 +1396,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const batCalloutLines = batToBuiRun?.conductorCallout
       ? batToBuiRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
       : [batWireGauge, `${bfA}A CIRCUIT`];
-    parts.push(tspan(batCX + 8, batCY + (buiResult.batPortY - batResult.by)/2,
+    parts.push(tspan(batResult.acOutX + 8, batResult.acOutY + (buiResult.batPortY - batResult.acOutY)/2,
       batCalloutLines,
       {sz: F.tiny, anc: 'start', fill: '#1565C0'}));
 
@@ -1341,11 +1450,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       );
       parts.push(genResult.svg);
 
-      // Wire: Generator output → BUI GEN port (L-shaped route)
-      const genWireX = genResult.rx + 20;
-      const buiGenY  = BUS_Y + 60;
-      parts.push(ln(genResult.rx, genCY, genWireX, genCY, {stroke: '#2E7D32', sw: SW_MED}));
-      parts.push(ln(genWireX, genCY, genWireX, buiGenY, {stroke: '#2E7D32', sw: SW_MED}));
+      // Wire: Generator GEN_OUT terminal → BUI GEN port (L-shaped route)
+      // Use genResult.genOutX/Y → buiResult.genPortX/Y for precise terminal-to-terminal routing
+      const genWireX = genResult.genOutX + 20;
+      // buiResult is hoisted from NODE 8; fall back to BUS_Y+14 if not rendered (shouldn't happen for IQ SC3)
+      const buiGenY  = buiResult?.genPortY ?? (BUS_Y + 14);
+      const buiGenX  = buiResult?.genPortX ?? (xMSP + 130 - 50);
+      parts.push(ln(genResult.genOutX, genResult.genOutY, genWireX, genResult.genOutY, {stroke: '#2E7D32', sw: SW_MED}));
+      parts.push(ln(genWireX, genResult.genOutY, genWireX, buiGenY, {stroke: '#2E7D32', sw: SW_MED}));
+      parts.push(ln(genWireX, buiGenY, buiGenX, buiGenY, {stroke: '#2E7D32', sw: SW_MED}));
 
       // Wire callout — use computed GENERATOR_TO_ATS_RUN conductorCallout
       const genCalloutLines = genToAtsRun?.conductorCallout
@@ -1353,11 +1466,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
         : (genToAtsRun?.wireGauge
             ? [`${genToAtsRun.wireGauge} THWN-2`, `${genToAtsRun.ocpdAmps ?? ''}A OCPD`]
             : ['SEE COMPUTED SCHEDULE', 'GEN → IQ SC3 GEN PORT']);
-      parts.push(tspan(genWireX + 4, genCY - 10, genCalloutLines, {sz: F.tiny, anc: 'start', fill: '#2E7D32'}));
+      parts.push(tspan(genWireX + 4, genResult.genOutY - 10, genCalloutLines, {sz: F.tiny, anc: 'start', fill: '#2E7D32'}));
 
       // NEC notes
-      parts.push(txt(genCX, genCY + 55, 'NEC 702.5 — TRANSFER FUNCTION IN IQ SC3', {sz: F.tiny, anc: 'middle', italic: true, fill: '#2E7D32'}));
-      parts.push(txt(genCX, genCY + 63, 'NEC 250.30 — FLOATING NEUTRAL AT IQ SC3', {sz: F.tiny, anc: 'middle', italic: true, fill: '#2E7D32'}));
+      parts.push(txt(genCX, genResult.by + 55, 'NEC 702.5 — TRANSFER FUNCTION IN IQ SC3', {sz: F.tiny, anc: 'middle', italic: true, fill: '#2E7D32'}));
+      parts.push(txt(genCX, genResult.by + 63, 'NEC 250.30 — FLOATING NEUTRAL AT IQ SC3', {sz: F.tiny, anc: 'middle', italic: true, fill: '#2E7D32'}));
 
     } else {
       // ── Mode B: Standalone ATS — between utility meter and MSP ───────────────
@@ -1384,32 +1497,33 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       );
       parts.push(genResult.svg);
 
-      // Generator → ATS GEN input (horizontal wire)
-      parts.push(ln(genResult.rx, genCY, genAtsResult.lx, genAtsCY, {stroke: '#2E7D32', sw: SW_MED}));
-      const genAtsLabelX = (genResult.rx + genAtsResult.lx) / 2;
+      // Generator GEN_OUT terminal → ATS GEN input terminal (horizontal wire)
+      // Use genResult.genOutX/Y → genAtsResult.genInX/Y for precise terminal routing
+      parts.push(ln(genResult.genOutX, genResult.genOutY, genAtsResult.genInX, genAtsResult.genInY, {stroke: '#2E7D32', sw: SW_MED}));
+      const genAtsLabelX = (genResult.genOutX + genAtsResult.genInX) / 2;
       // BUILD v24: Use computed GENERATOR_TO_ATS_RUN conductorCallout
       const genCalloutLines = genToAtsRun?.conductorCallout
         ? genToAtsRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
         : (genToAtsRun?.wireGauge
             ? [`${genToAtsRun.wireGauge} THWN-2`, 'GEN OUTPUT']
             : ['SEE COMPUTED SCHEDULE', 'GEN OUTPUT']);
-      parts.push(tspan(genAtsLabelX, genCY - 10, genCalloutLines, {sz: F.tiny, anc: 'middle', fill: '#2E7D32'}));
+      parts.push(tspan(genAtsLabelX, genResult.genOutY - 10, genCalloutLines, {sz: F.tiny, anc: 'middle', fill: '#2E7D32'}));
 
-      // Utility → ATS NORM input (vertical drop from bus)
-      const utilDropX = genAtsCX - 44;
-      parts.push(ln(utilDropX, BUS_Y + 36, utilDropX, genAtsCY, {stroke: BLK, sw: SW_MED}));
-      parts.push(txt(utilDropX - 4, (BUS_Y + 36 + genAtsCY) / 2, 'UTILITY', {sz: F.tiny, anc: 'end', fill: '#444'}));
+      // Utility → ATS UTIL input terminal (vertical drop from bus)
+      // Use genAtsResult.utilInX/Y for precise terminal routing
+      parts.push(ln(genAtsResult.utilInX, BUS_Y + 36, genAtsResult.utilInX, genAtsResult.utilInY, {stroke: BLK, sw: SW_MED}));
+      parts.push(txt(genAtsResult.utilInX - 4, (BUS_Y + 36 + genAtsResult.utilInY) / 2, 'UTILITY', {sz: F.tiny, anc: 'end', fill: '#444'}));
 
-      // ATS LOAD output → MSP (vertical rise back to bus)
-      const atsLoadX = genAtsCX + 55;
-      parts.push(ln(atsLoadX, genAtsCY, atsLoadX, BUS_Y + 36, {stroke: '#E65100', sw: SW_MED}));
+      // ATS LOAD output terminal → MSP (vertical rise back to bus)
+      // Use genAtsResult.loadOutX/Y for precise terminal routing
+      parts.push(ln(genAtsResult.loadOutX, genAtsResult.loadOutY, genAtsResult.loadOutX, BUS_Y + 36, {stroke: '#E65100', sw: SW_MED}));
       // BUILD v24: Use computed ATS_TO_MSP_RUN conductorCallout
       const atsCalloutLines = atsToMspRun?.conductorCallout
         ? atsToMspRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
         : (atsToMspRun?.wireGauge
             ? [`${atsToMspRun.wireGauge} THWN-2`, 'ATS → MSP']
             : ['SEE COMPUTED SCHEDULE', 'ATS → MSP']);
-      parts.push(tspan(atsLoadX + 6, genAtsCY - 20, atsCalloutLines, {sz: F.tiny, anc: 'start', fill: '#E65100'}));
+      parts.push(tspan(genAtsResult.loadOutX + 6, genAtsResult.loadOutY - 20, atsCalloutLines, {sz: F.tiny, anc: 'start', fill: '#E65100'}));
 
       // NEC notes
       parts.push(txt(genAtsCX, genAtsCY + 55, 'NEC 702.5 — TRANSFER EQUIPMENT REQUIRED', {sz: F.tiny, anc: 'middle', italic: true, fill: '#E65100'}));
@@ -1421,7 +1535,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const utilCX = xUtil, utilCY = BUS_Y;
   const mR = 24;
 
-  // SEGMENT: MSP → Meter
+  // SEGMENT: MSP busOut terminal → Utility Meter (terminal-to-terminal routing)
+  // Source: mspResult.busOutX/Y  Dest: utility meter left edge
   {
     const run = mspUtilRun;
     const fb = [
@@ -1430,7 +1545,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
     const {lines, cnt} = runLines(run, fb);
-    parts.push(wireSeg(buiRX, utilCX-mR-10, BUS_Y, lines, {bundleCount:cnt}));
+    // Use MSP busOut terminal Y for precise routing; buiRX is the rightmost equipment edge
+    const segY = mspResult.busOutY;
+    parts.push(wireSeg(buiRX, utilCX-mR-10, resolveSegY(buiRX, utilCX-mR-10, segY), lines, {bundleCount:cnt}));
   }
 
   // Meter symbol

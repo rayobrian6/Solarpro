@@ -99,18 +99,24 @@ export interface RunSegment {
   label: string;
   from: string;               // device label
   to: string;                 // device label
+  // Terminal routing — segments must connect at named terminals, not box edges
+  sourceTerminal?: string;    // e.g. 'AC_OUT', 'BAT_AC_OUT', 'GEN_OUT'
+  destTerminal?: string;      // e.g. 'BATTERY', 'GEN', 'GRID', 'MSP_BKFD'
   // Electrical
   conductorCount: number;     // current-carrying conductors
-  wireGauge: string;          // e.g. '#10 AWG'
+  wireGauge: string;          // e.g. '#10 AWG' — always standard AWG
   conductorMaterial: 'CU' | 'AL';
   insulation: string;         // 'THWN-2' | 'USE-2' | 'PV Wire'
-  egcGauge: string;           // Equipment Grounding Conductor
+  egcGauge: string;           // Equipment Grounding Conductor — NEC 250.122
   neutralRequired: boolean;
   isOpenAir?: boolean;         // true for open-air runs (no conduit)
   isUtilityOwned?: boolean;    // true for utility service conductors — exclude from BOM and conduit schedule
+  // Voltage and phase
+  systemVoltage: number;      // V — 240 for AC split-phase, Vmp for DC
+  phase: '1Ø' | '3Ø';        // Single or three phase
   // Conduit
   conduitType: string;        // 'EMT' | 'PVC Sch 40' | 'PVC Sch 80' | 'NONE'
-  conduitSize: string;        // '3/4"' | '1"' etc.
+  conduitSize: string;        // '3/4"' | '1"' etc. — standard trade size only
   conduitFillPct: number;     // NEC Ch.9 Table 1 — max 40%
   onewayLengthFt: number;
   // Ampacity
@@ -130,7 +136,7 @@ export interface RunSegment {
   overallPass: boolean;
   necReferences: string[];
   // Display
-  conductorCallout: string;   // permit-grade: '2#10 AWG THWN-2 + 1#10 AWG GND in 3/4" EMT'
+  conductorCallout: string;   // permit-grade: '2#10 AWG THWN-2 + 1#10 AWG GND in 3/4" EMT (32% FILL)'
   conductorBundle?: ConductorBundle[]; // structured bundle — from buildSegmentSchedule()
   color: 'dc' | 'ac' | 'gnd';
 }
@@ -1159,12 +1165,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('ROOF_RUN', 'ROOF RUN (DC to Micro)', 'PV ARRAY', 'MICROINVERTERS', {
+      sourceTerminal: 'OUT',          // PV module output
+      destTerminal:   'DC_IN',        // Microinverter DC input
       conductorCount: 2,
       wireGauge: roofWire.gauge,
       insulation: 'USE-2/PV Wire',
       egcGauge: roofWire.egcGauge,
       neutralRequired: false,
       isOpenAir: true,
+      systemVoltage: input.panelVoc * input.inverterModulesPerDevice,
+      phase: '1Ø',
       conduitType: 'NONE',
       conduitSize: roofWire.conduitSize,
       conduitFillPct: roofWire.conduitFillPct,
@@ -1199,12 +1209,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('BRANCH_RUN', 'BRANCH RUN (AC Trunk)', 'MICROINVERTERS', 'AC COMBINER', {
+      sourceTerminal: 'AC_OUT',       // Microinverter AC output
+      destTerminal:   'IN',           // AC Combiner branch breaker input lug
       conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8 / Enphase IQ8 spec §2.2
       wireGauge: branchWire.gauge,
       insulation: 'THWN-2',
       egcGauge: branchWire.egcGauge,
       neutralRequired: false, // Enphase IQ Cable: L1-Black + L2-Red, no neutral conductor
       isOpenAir: true,
+      systemVoltage: systemVoltageAC,
+      phase: '1Ø',
       conduitType: 'NONE',
       conduitSize: branchWire.conduitSize,
       conduitFillPct: branchWire.conduitFillPct,
@@ -1240,11 +1254,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('COMBINER_TO_DISCO_RUN', 'COMBINER TO AC DISCO', 'AC COMBINER', 'AC DISCONNECT', {
+      sourceTerminal: 'OUT',          // AC Combiner feeder lug (right side)
+      destTerminal:   'DISCO_LOAD',   // AC Disconnect LOAD terminals (PV/combiner side)
       conductorCount: microConductorCount,
       wireGauge: combToDiscoWire.gauge,
       insulation: 'THWN-2',
       egcGauge: combToDiscoWire.egcGauge,
       neutralRequired: input.topology === 'micro', // Microinverters require neutral for split-phase output
+      systemVoltage: systemVoltageAC,
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: combToDiscoWire.conduitSize,
       conduitFillPct: combToDiscoWire.conduitFillPct,
@@ -1283,11 +1301,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('DC_STRING_RUN', 'DC STRING RUN (PV Wire)', 'PV ARRAY', 'DC DISCONNECT', {
+      sourceTerminal: 'OUT',          // PV string output
+      destTerminal:   'LINE',         // DC Disconnect LINE (PV array) side
       conductorCount: 2,
       wireGauge: dcWire.gauge,
       insulation: 'USE-2/PV Wire',
       egcGauge: dcWire.egcGauge,
       neutralRequired: false,
+      systemVoltage: strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: dcWire.conduitSize,
       conduitFillPct: dcWire.conduitFillPct,
@@ -1321,11 +1343,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
+      sourceTerminal: 'DISCO_LOAD',   // DC Disconnect LOAD (inverter) side
+      destTerminal:   'DC_IN',        // String inverter DC input
       conductorCount: 2,
       wireGauge: dcDiscoWire.gauge,
       insulation: 'USE-2/PV Wire',
       egcGauge: dcDiscoWire.egcGauge,
       neutralRequired: false,
+      systemVoltage: strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: dcDiscoWire.conduitSize,
       conduitFillPct: dcDiscoWire.conduitFillPct,
@@ -1359,11 +1385,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('INV_TO_DISCO_RUN', 'INVERTER TO AC DISCO', 'STRING INVERTER', 'AC DISCONNECT', {
+      sourceTerminal: 'AC_OUT',       // String inverter AC output lug (right side)
+      destTerminal:   'DISCO_LOAD',   // AC Disconnect LOAD terminals (PV/inverter side)
       conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8 (string inverter AC output circuit)
       wireGauge: invToDiscoWire.gauge,
       insulation: 'THWN-2',
       egcGauge: invToDiscoWire.egcGauge,
       neutralRequired: false, // PV AC output circuit — 2-wire ungrounded 240V per NEC 690.8
+      systemVoltage: systemVoltageAC,
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: invToDiscoWire.conduitSize,
       conduitFillPct: invToDiscoWire.conduitFillPct,
@@ -1405,11 +1435,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     '#10 AWG'
   );
   runs.push(makeRunSegment('DISCO_TO_METER_RUN', 'AC DISCO TO MSP', 'AC DISCONNECT', 'MAIN SERVICE PANEL', {
+    sourceTerminal: 'LINE',         // AC Disconnect LINE terminals (utility/MSP side)
+    destTerminal:   'MSP_BKFD',     // MSP backfed breaker lug (load-side tap) or MSP_BUS (supply-side)
     conductorCount: discoToMeterConductorCount,
     wireGauge: discoToMeterWire.gauge,
     insulation: 'THWN-2',
     egcGauge: discoToMeterWire.egcGauge,
     neutralRequired: input.topology === 'micro', // Microinverters require neutral for split-phase output
+    systemVoltage: systemVoltageAC,
+    phase: '1Ø',
     conduitType: input.conduitType,
     conduitSize: discoToMeterWire.conduitSize,
     conduitFillPct: discoToMeterWire.conduitFillPct,
@@ -1452,12 +1486,16 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     '#10 AWG'
   );
   runs.push(makeRunSegment('MSP_TO_UTILITY_RUN', 'MSP TO UTILITY (BY UTILITY)', 'MAIN SERVICE PANEL', 'UTILITY METER', {
+    sourceTerminal: 'MSP_OUT',      // MSP output to meter (right side of MSP main bus)
+    destTerminal:   'IN',           // Utility meter input
     conductorCount: 3, // L1 + L2 + N — utility 3-wire 240V service
     wireGauge: mspToUtilWire.gauge,
     insulation: 'THWN-2',
     egcGauge: mspToUtilWire.egcGauge,
     neutralRequired: true, // Utility service entrance — 3-wire 240V/120V split-phase
     isUtilityOwned: true,  // Utility-owned conductors — exclude from BOM and conduit schedule
+    systemVoltage: systemVoltageAC,
+    phase: '1Ø',
     conduitType: input.conduitType,
     conduitSize: mspToUtilWire.conduitSize,
     conduitFillPct: mspToUtilWire.conduitFillPct,
@@ -1521,11 +1559,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const batConduit = getSmallestConduit(input.conduitType, batHotArea + batEgcArea);
     const batCallout = `2#${batGaugeNum} AWG THWN-2 + 1#${batEgcNum} AWG GND IN ${batConduit.size} ${batConduitAbbrev} (${batConduit.fillPct.toFixed(0)}% FILL)`;
     runs.push(makeRunSegment('BATTERY_TO_BUI_RUN', 'BATTERY TO BUI/CONTROLLER', 'BATTERY STORAGE', 'BACKUP INTERFACE UNIT', {
+      sourceTerminal: 'BAT_AC_OUT',   // Battery AC output lug
+      destTerminal:   'BATTERY',       // BUI BATTERY port (bottom center)
       conductorCount: 2,
       wireGauge: batWire.gauge,
       insulation: 'THWN-2',
       egcGauge: batEgc,
       neutralRequired: false,
+      systemVoltage: systemVoltageAC,  // 240V AC-coupled
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: batConduit.size,
       conduitFillPct: batConduit.fillPct,
@@ -1586,11 +1628,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const buiConduit = getSmallestConduit(input.conduitType, buiHotArea + buiEgcArea);
     const buiCallout = `3#${buiGaugeNum} AWG THWN-2 + 1#${buiEgcNum} AWG GND IN ${buiConduit.size} ${buiConduitAbbrev} (${buiConduit.fillPct.toFixed(0)}% FILL)`;
     runs.push(makeRunSegment('BUI_TO_MSP_RUN', 'BUI/CONTROLLER TO MSP', 'BACKUP INTERFACE UNIT', 'MAIN SERVICE PANEL', {
+      sourceTerminal: 'GRID',       // BUI GRID port (left side, upper) — connects to MSP backfeed breaker
+      destTerminal:   'MSP_BKFD',   // MSP backfeed breaker lug
       conductorCount: 3,
       wireGauge: buiWire.gauge,
       insulation: 'THWN-2',
       egcGauge: buiEgc,
       neutralRequired: true,
+      systemVoltage: systemVoltageAC,  // 120/240V split-phase
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: buiConduit.size,
       conduitFillPct: buiConduit.fillPct,
@@ -1650,14 +1696,20 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const genHotArea = (CONDUCTOR_AREA_IN2[genWire.gauge] ?? 0.0824) * 3;
     const genEgcArea = CONDUCTOR_AREA_IN2[genEgc] ?? 0.0507;
     const genConduit = getSmallestConduit(input.conduitType, genHotArea + genEgcArea);
-    const genDest = input.hasEnphaseIQSC3 ? 'IQ SC3 GEN PORT' : 'ATS GEN TERMINALS';
+    // IQ SC3 mode: generator connects to BUI GEN port; standalone ATS mode: generator connects to ATS GEN terminals
+    const genDest      = input.hasEnphaseIQSC3 ? 'IQ SC3 GEN PORT' : 'ATS GEN TERMINALS';
+    const genDestTerm  = input.hasEnphaseIQSC3 ? 'GEN' : 'ATS_GEN';  // terminal name on destination equipment
     const genCallout = `3#${genGaugeNum} AWG THWN-2 + 1#${genEgcNum} AWG GND IN ${genConduit.size} ${genConduitAbbrev} (${genConduit.fillPct.toFixed(0)}% FILL)`;
     runs.push(makeRunSegment('GENERATOR_TO_ATS_RUN', 'GENERATOR TO ATS/BUI', 'STANDBY GENERATOR', genDest, {
+      sourceTerminal: 'GEN_OUT',      // Generator output lug (right side of generator symbol)
+      destTerminal:   genDestTerm,    // BUI GEN port (left side, lower) or ATS GEN input
       conductorCount: 3,
       wireGauge: genWire.gauge,
       insulation: 'THWN-2',
       egcGauge: genEgc,
       neutralRequired: true,
+      systemVoltage: systemVoltageAC,  // 120/240V split-phase generator output
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: genConduit.size,
       conduitFillPct: genConduit.fillPct,
@@ -1718,11 +1770,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const atsConduit = getSmallestConduit(input.conduitType, atsHotArea + atsEgcArea);
     const atsCallout = `3#${atsGaugeNum} AWG THWN-2 + 1#${atsEgcNum} AWG GND IN ${atsConduit.size} ${atsConduitAbbrev} (${atsConduit.fillPct.toFixed(0)}% FILL)`;
     runs.push(makeRunSegment('ATS_TO_MSP_RUN', 'ATS LOAD TO MSP', 'ATS LOAD TERMINALS', 'MAIN SERVICE PANEL', {
+      sourceTerminal: 'ATS_LOAD',    // ATS LOAD output (right side of ATS symbol)
+      destTerminal:   'MSP_BUS',     // MSP main bus (service entrance connection)
       conductorCount: 3,
       wireGauge: atsWire.gauge,
       insulation: 'THWN-2',
       egcGauge: atsEgc,
       neutralRequired: true,
+      systemVoltage: systemVoltageAC,  // 120/240V split-phase service entrance
+      phase: '1Ø',
       conduitType: input.conduitType,
       conduitSize: atsConduit.size,
       conduitFillPct: atsConduit.fillPct,
@@ -2209,18 +2265,20 @@ function makeRunSegment(
   label: string,
   from: string,
   to: string,
-  fields: Omit<RunSegment, 'id' | 'label' | 'from' | 'to' | 'conductorMaterial' | 'overallPass'>
+  fields: Omit<RunSegment, 'id' | 'label' | 'from' | 'to' | 'conductorMaterial' | 'overallPass' | 'systemVoltage' | 'phase'>
+    & Partial<Pick<RunSegment, 'systemVoltage' | 'phase' | 'sourceTerminal' | 'destTerminal'>>
 ): RunSegment {
   const ampacityPass = fields.ampacityPass ?? true;
   const voltageDropPass = fields.voltageDropPass ?? true;
   const conduitFillPass = fields.conduitFillPass ?? true;
-  const isOpenAir = fields.isOpenAir ?? false;
   return {
     id,
     label,
     from,
     to,
     conductorMaterial: 'CU',
+    systemVoltage: fields.systemVoltage ?? SYSTEM_VOLTAGE_AC,
+    phase: fields.phase ?? '1Ø',
     overallPass: ampacityPass && voltageDropPass && conduitFillPass,
     ...fields,
   };
