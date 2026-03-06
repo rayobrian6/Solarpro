@@ -18,6 +18,7 @@
 // ============================================================
 
 import type { RunSegment, MicroBranch } from './computed-system';
+import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
@@ -1773,9 +1774,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(rect(tbX, tbY+38, TB_W, 30, {fill:WHT, stroke:BLK, sw:SW_THIN}));
   parts.push(txt(tbX+TB_W/2, tbY+51, 'SINGLE LINE DIAGRAM', {sz:F.tbTitle, bold:true, anc:'middle'}));
   parts.push(txt(tbX+TB_W/2, tbY+63, 'PHOTOVOLTAIC SYSTEM', {sz:F.tb, anc:'middle'}));
-  // BUILD v24 version badge — visible on every render for deployment verification
+  // BUILD version badge — visible on every render for deployment verification
   parts.push(rect(tbX, tbY+68, TB_W, 10, {fill: '#1B5E20', stroke: 'none', sw: 0}));
-  parts.push(txt(tbX+TB_W/2, tbY+76, 'BUILD v24 — NEC CONDUCTOR SIZING ENGINE', {sz: 4.5, bold: true, anc: 'middle', fill: '#FFFFFF'}));
+  parts.push(txt(tbX+TB_W/2, tbY+76, getBuildBadge(), {sz: 4.5, bold: true, anc: 'middle', fill: '#FFFFFF'}));
 
   // Project info rows
   const tbRows: [string,string][] = [
