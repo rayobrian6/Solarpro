@@ -1,6 +1,7 @@
 // ============================================================
 // POST /api/engineering/sld
-// Professional SLD generation — V11 + Segment-based conductor data
+// Professional SLD generation — BUILD v24 — NEC Conductor Sizing Engine
+// Last updated: 2026-03-06 — battery/gen/ATS segments, IQ SC3 routing fix
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';

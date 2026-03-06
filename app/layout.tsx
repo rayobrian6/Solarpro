@@ -1,3 +1,4 @@
+// BUILD v24 — 2026-03-06
 import type { Metadata } from 'next';
 import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
