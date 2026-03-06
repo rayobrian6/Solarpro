@@ -859,4 +859,4 @@ export function calcBOMFromSegments(
   }
 
   return { wireByGauge, conduitByType, junctionBoxes };
-}
+}// cache bust Fri Mar  6 19:32:21 UTC 2026
