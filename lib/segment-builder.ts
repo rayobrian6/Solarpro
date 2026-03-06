@@ -231,26 +231,25 @@ function calcConduitSize(bundle: ConductorBundle, conduitType: string): { size: 
 }
 
 function buildConductorCallout(bundle: ConductorBundle, conduitSize: string, conduitType: string, fillPercent: number): string {
-  // Build permit-grade callout: "3×#10 BLK + 3×#10 RED + 1×#10 GRN IN 1" EMT — 31% fill"
+  // Build concise conductor description: e.g., "2×#6 THWN-2 · 1" EMT"
   
-  // Group conductors by gauge and color
-  const groups = new Map<string, number>();
-  for (const c of bundle.conductors) {
-    const key = `${c.gauge} ${c.color}`;
-    groups.set(key, (groups.get(key) || 0) + c.qty);
+  // Count hot conductors and get primary gauge/insulation
+  const hotConductors = bundle.conductors.filter(c => c.isCurrentCarrying && c.color !== 'GRN');
+  const hotCount = hotConductors.reduce((s, c) => s + c.qty, 0);
+  const primary = hotConductors[0];
+  const gaugeNum = primary?.gauge.replace('#', '').replace(' AWG', '') ?? '10';
+  const insulation = primary?.insulation ?? 'THWN-2';
+  
+  const conductorDesc = `${hotCount}×#${gaugeNum} ${insulation}`;
+  
+  if (conduitType === 'NONE') {
+    return `${conductorDesc} (OPEN AIR)`;
   }
-  
-  // Build callout parts
-  const parts: string[] = [];
-  for (const [key, qty] of groups.entries()) {
-    parts.push(`${qty}×${key}`);
-  }
-  
-  const conductorPart = parts.join(' + ');
-  const conduitPart = conduitType !== 'NONE' ? `IN ${conduitSize} ${conduitType}` : 'OPEN AIR';
-  const fillPart = conduitType !== 'NONE' ? ` — ${Math.round(fillPercent * 100)}% fill` : '';
-  
-  return `${conductorPart} ${conduitPart}${fillPart}`;
+  const conduitAbbrev = conduitType === 'EMT' ? 'EMT'
+    : conduitType === 'PVC Sch 40' ? 'PVC'
+    : conduitType === 'PVC Sch 80' ? 'PVC'
+    : conduitType;
+  return `${conductorDesc} · ${conduitSize} ${conduitAbbrev}`;
 }
 
 // ============================================================

@@ -325,15 +325,21 @@ export function buildConductorCallout(
   conduitType: string,
   isOpenAir: boolean
 ): string {
-  const lines = bundle.map(c => `${c.qty}#${c.gauge.replace('#', '').replace(' AWG', '')} ${c.color}`);
+  // Build concise conductor description: e.g., "2×#6 THWN-2"
+  const hotCount = bundle.filter(c => c.isCurrentCarrying && c.color !== 'GRN').reduce((s, c) => s + c.qty, 0);
+  const primaryGauge = bundle.find(c => c.isCurrentCarrying && c.color !== 'GRN')?.gauge ?? '#10 AWG';
+  const gaugeNum = primaryGauge.replace('#', '').replace(' AWG', '');
+  const insulation = bundle[0]?.insulation ?? 'THWN-2';
+  const conductorDesc = `${hotCount}×#${gaugeNum} ${insulation}`;
+  
   if (isOpenAir) {
-    return lines.join('\n') + '\n(OPEN AIR)';
+    return `${conductorDesc} (OPEN AIR)`;
   }
   const conduitAbbrev = conduitType === 'EMT' ? 'EMT'
-    : conduitType === 'PVC Sch 40' ? 'PVC SCH 40'
-    : conduitType === 'PVC Sch 80' ? 'PVC SCH 80'
+    : conduitType === 'PVC Sch 40' ? 'PVC'
+    : conduitType === 'PVC Sch 80' ? 'PVC'
     : conduitType;
-  return lines.join('\n') + `\nIN ${conduitSize} ${conduitAbbrev}`;
+  return `${conductorDesc} · ${conduitSize} ${conduitAbbrev}`;
 }
 
 // ─── Build Segment ────────────────────────────────────────────────────────────
