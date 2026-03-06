@@ -408,11 +408,12 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   if (input.runs && input.runs.length > 0) {
     // Get AC feeder run for gauge/conduit size
     const acRuns = input.runs.filter(r =>
-      r.color === 'ac' ||
+      !r.isUtilityOwned && // Exclude utility-owned service conductors from BOM
+      (r.color === 'ac' ||
       r.id === 'COMBINER_TO_DISCO_RUN' ||
       r.id === 'INV_TO_DISCO_RUN' ||
-      r.id === 'DISCO_TO_METER_RUN' ||
-      r.id === 'METER_TO_MSP_RUN'
+      r.id === 'DISCO_TO_METER_RUN')
+      // METER_TO_MSP_RUN removed — no separate production meter per industry standard
     );
     const primaryAcRun = input.runs.find(r =>
       r.id === 'COMBINER_TO_DISCO_RUN' || r.id === 'INV_TO_DISCO_RUN'

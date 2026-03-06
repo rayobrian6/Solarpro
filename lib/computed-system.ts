@@ -98,6 +98,7 @@ export interface RunSegment {
   egcGauge: string;           // Equipment Grounding Conductor
   neutralRequired: boolean;
   isOpenAir?: boolean;         // true for open-air runs (no conduit)
+  isUtilityOwned?: boolean;    // true for utility service conductors — exclude from BOM and conduit schedule
   // Conduit
   conduitType: string;        // 'EMT' | 'PVC Sch 40' | 'PVC Sch 80' | 'NONE'
   conduitSize: string;        // '3/4"' | '1"' etc.
@@ -352,10 +353,12 @@ export interface ComputedSystemInput {
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
 
 // NEC 310.16 — Conductor ampacity at 75°C (copper, THWN-2)
+// Table 310.16, 75°C column — corrected per NEC 2023
+// NOTE: Previous values were from the 60°C column (incorrect for THWN-2)
 const AMPACITY_TABLE_75C: Record<string, number> = {
-  '#14 AWG': 15,
-  '#12 AWG': 20,
-  '#10 AWG': 30,
+  '#14 AWG': 20,  // NEC 310.16 Table, 75°C col — THWN-2 rated 75°C (or 90°C dry)
+  '#12 AWG': 25,
+  '#10 AWG': 35,
   '#8 AWG':  50,
   '#6 AWG':  65,
   '#4 AWG':  85,
@@ -392,7 +395,8 @@ const AWG_ORDER = [
   '#1/0 AWG', '#2/0 AWG', '#3/0 AWG', '#4/0 AWG',
 ];
 
-// NEC 310.15(B)(2)(a) — Temperature derating factors (75°C conductors)
+// NEC 310.15(B)(2) Table — Ambient Temperature Correction Factors (NEC 2023)
+// (was 310.15(B)(2)(a) in NEC 2020)
 function getTempDerating(ambientC: number): number {
   if (ambientC <= 10) return 1.15;
   if (ambientC <= 15) return 1.12;
@@ -1065,7 +1069,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const branchWire = autoSizeOpenAirWire(
       acBranchCurrentA,
       defaultRunLengths.BRANCH_RUN,
-      3, // L1, L2, N
+      2, // L1, L2 only — no neutral per NEC 690.8 / Enphase IQ8 spec (section 2.2)
       input.ambientTempC,
       systemVoltageAC,
       input.maxACVoltageDropPct,
@@ -1073,11 +1077,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('BRANCH_RUN', 'BRANCH RUN (AC Trunk)', 'MICROINVERTERS', 'AC COMBINER', {
-      conductorCount: 3,
+      conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8 / Enphase IQ8 spec §2.2
       wireGauge: branchWire.gauge,
       insulation: 'THWN-2',
       egcGauge: branchWire.egcGauge,
-      neutralRequired: true,
+      neutralRequired: false, // Enphase IQ Cable: L1-Black + L2-Red, no neutral conductor
       isOpenAir: true,
       conduitType: 'NONE',
       conduitSize: branchWire.conduitSize,
@@ -1103,7 +1107,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const combToDiscoWire = autoSizeWire(
       acOutputCurrentA,
       defaultRunLengths.COMBINER_TO_DISCO_RUN,
-      3,
+      2, // L1 + L2 only — no neutral per NEC 690.8 / Enphase IQ8 spec §2.2
       input.conduitType,
       input.ambientTempC,
       systemVoltageAC,
@@ -1112,11 +1116,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('COMBINER_TO_DISCO_RUN', 'COMBINER TO AC DISCO', 'AC COMBINER', 'AC DISCONNECT', {
-      conductorCount: 3,
+      conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8 / Enphase IQ8 spec §2.2
       wireGauge: combToDiscoWire.gauge,
       insulation: 'THWN-2',
       egcGauge: combToDiscoWire.egcGauge,
-      neutralRequired: true,
+      neutralRequired: false, // PV AC output circuit — 2-wire ungrounded 240V per NEC 690.8
       conduitType: input.conduitType,
       conduitSize: combToDiscoWire.conduitSize,
       conduitFillPct: combToDiscoWire.conduitFillPct,
@@ -1222,7 +1226,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const invToDiscoWire = autoSizeWire(
       acOutputCurrentA,
       defaultRunLengths.INV_TO_DISCO_RUN,
-      3,
+      2, // L1 + L2 only — no neutral per NEC 690.8 (string inverter AC output circuit)
       input.conduitType,
       input.ambientTempC,
       systemVoltageAC,
@@ -1231,11 +1235,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       '#10 AWG'
     );
     runs.push(makeRunSegment('INV_TO_DISCO_RUN', 'INVERTER TO AC DISCO', 'STRING INVERTER', 'AC DISCONNECT', {
-      conductorCount: 3,
+      conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8 (string inverter AC output circuit)
       wireGauge: invToDiscoWire.gauge,
       insulation: 'THWN-2',
       egcGauge: invToDiscoWire.egcGauge,
-      neutralRequired: true,
+      neutralRequired: false, // PV AC output circuit — 2-wire ungrounded 240V per NEC 690.8
       conduitType: input.conduitType,
       conduitSize: invToDiscoWire.conduitSize,
       conduitFillPct: invToDiscoWire.conduitFillPct,
@@ -1260,10 +1264,13 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // ── Common AC Runs (both topologies) ──────────────────────────────────────
 
   // DISCO_TO_METER_RUN
+  // DISCO_TO_METER_RUN: AC Disconnect to MSP interconnection point
+  // NOTE: No separate production meter — utility swaps bidirectional meter for net metering;
+  // Enphase IQ Gateway provides production monitoring per manufacturer spec.
   const discoToMeterWire = autoSizeWire(
     acOutputCurrentA,
     defaultRunLengths.DISCO_TO_METER_RUN,
-    3,
+    2, // L1 + L2 only — no neutral per NEC 690.8 (PV AC output circuit)
     input.conduitType,
     input.ambientTempC,
     systemVoltageAC,
@@ -1271,12 +1278,12 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     false,
     '#10 AWG'
   );
-  runs.push(makeRunSegment('DISCO_TO_METER_RUN', 'AC DISCO TO METER', 'AC DISCONNECT', 'PRODUCTION METER', {
-    conductorCount: 3,
+  runs.push(makeRunSegment('DISCO_TO_METER_RUN', 'AC DISCO TO MSP', 'AC DISCONNECT', 'MAIN SERVICE PANEL', {
+    conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8
     wireGauge: discoToMeterWire.gauge,
     insulation: 'THWN-2',
     egcGauge: discoToMeterWire.egcGauge,
-    neutralRequired: true,
+    neutralRequired: false, // PV AC output circuit — 2-wire ungrounded 240V per NEC 690.8
     conduitType: input.conduitType,
     conduitSize: discoToMeterWire.conduitSize,
     conduitFillPct: discoToMeterWire.conduitFillPct,
@@ -1297,49 +1304,20 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     color: 'ac',
   }));
 
-  // METER_TO_MSP_RUN
-  const meterToMspWire = autoSizeWire(
-    acOutputCurrentA,
-    defaultRunLengths.METER_TO_MSP_RUN,
-    3,
-    input.conduitType,
-    input.ambientTempC,
-    systemVoltageAC,
-    input.maxACVoltageDropPct,
-    false,
-    '#10 AWG'
-  );
-  runs.push(makeRunSegment('METER_TO_MSP_RUN', 'METER TO MSP', 'PRODUCTION METER', 'MAIN SERVICE PANEL', {
-    conductorCount: 3,
-    wireGauge: meterToMspWire.gauge,
-    insulation: 'THWN-2',
-    egcGauge: meterToMspWire.egcGauge,
-    neutralRequired: true,
-    conduitType: input.conduitType,
-    conduitSize: meterToMspWire.conduitSize,
-    conduitFillPct: meterToMspWire.conduitFillPct,
-    onewayLengthFt: defaultRunLengths.METER_TO_MSP_RUN,
-    continuousCurrent: acOutputCurrentA,
-    requiredAmpacity: acContinuousCurrentA,
-    effectiveAmpacity: meterToMspWire.effectiveAmpacity,
-    tempDeratingFactor: meterToMspWire.tempDerating,
-    conduitDeratingFactor: meterToMspWire.conduitDerating,
-    ocpdAmps: acOcpdAmps,
-    voltageDropPct: meterToMspWire.voltageDropPct,
-    voltageDropVolts: meterToMspWire.voltageDropVolts,
-    ampacityPass: meterToMspWire.ampacityPass,
-    voltageDropPass: meterToMspWire.voltageDropPass,
-    conduitFillPass: meterToMspWire.conduitFillPct <= 40,
-    necReferences: ['NEC 310.15', 'NEC 705.12'],
-    conductorCallout: meterToMspWire.conductorCallout,
-    color: 'ac',
-  }));
+  // METER_TO_MSP_RUN — REMOVED
+  // No separate production meter on plan sets per industry standard.
+  // Utility swaps bidirectional meter for net metering; Enphase IQ Gateway handles production monitoring.
+  // DISCO_TO_METER_RUN above now represents the full AC Disco → MSP run.
 
-  // MSP_TO_UTILITY_RUN
+  // MSP_TO_UTILITY_RUN — UTILITY-OWNED SERVICE ENTRANCE
+  // This represents the existing utility service conductors (L1, L2, N) from MSP to utility meter.
+  // These are utility-owned and NOT part of the PV system BOM or conduit schedule.
+  // Shown on SLD for reference only — labeled "UTILITY SERVICE (BY UTILITY)"
+  // Utility installs bidirectional (net metering) meter; no separate production meter required.
   const mspToUtilWire = autoSizeWire(
     acOutputCurrentA,
     defaultRunLengths.MSP_TO_UTILITY_RUN,
-    3,
+    3, // L1 + L2 + N — utility 3-wire 240V service (utility-owned)
     input.conduitType,
     input.ambientTempC,
     systemVoltageAC,
@@ -1347,12 +1325,13 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     false,
     '#10 AWG'
   );
-  runs.push(makeRunSegment('MSP_TO_UTILITY_RUN', 'MSP TO UTILITY', 'MAIN SERVICE PANEL', 'UTILITY GRID', {
-    conductorCount: 3,
+  runs.push(makeRunSegment('MSP_TO_UTILITY_RUN', 'MSP TO UTILITY (BY UTILITY)', 'MAIN SERVICE PANEL', 'UTILITY METER', {
+    conductorCount: 3, // L1 + L2 + N — utility 3-wire 240V service
     wireGauge: mspToUtilWire.gauge,
     insulation: 'THWN-2',
     egcGauge: mspToUtilWire.egcGauge,
-    neutralRequired: true,
+    neutralRequired: true, // Utility service entrance — 3-wire 240V/120V split-phase
+    isUtilityOwned: true,  // Utility-owned conductors — exclude from BOM and conduit schedule
     conduitType: input.conduitType,
     conduitSize: mspToUtilWire.conduitSize,
     conduitFillPct: mspToUtilWire.conduitFillPct,
@@ -1368,7 +1347,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     ampacityPass: mspToUtilWire.ampacityPass,
     voltageDropPass: mspToUtilWire.voltageDropPass,
     conduitFillPass: mspToUtilWire.conduitFillPct <= 40,
-    necReferences: ['NEC 310.15'],
+    necReferences: ['NEC 230.42', 'NEC 230.54'], // Service entrance conductors
     conductorCallout: mspToUtilWire.conductorCallout,
     color: 'ac',
   }));
@@ -1414,8 +1393,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       jboxToInverter:   defaultRunLengths.DC_STRING_RUN,
       combinerToDisco:  defaultRunLengths.COMBINER_TO_DISCO_RUN,
       inverterToDisco:  defaultRunLengths.INV_TO_DISCO_RUN,
-      discoToMeter:     defaultRunLengths.DISCO_TO_METER_RUN,
-      meterToMsp:       defaultRunLengths.METER_TO_MSP_RUN,
+      discoToMeter:     defaultRunLengths.DISCO_TO_METER_RUN, // AC Disco → MSP (direct, no production meter)
+      meterToMsp:       defaultRunLengths.METER_TO_MSP_RUN,   // deprecated — kept for interface compat; no segment generated
       mspToUtility:     defaultRunLengths.MSP_TO_UTILITY_RUN,
     },
     ambientTempC: input.ambientTempC,
@@ -1436,19 +1415,19 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // For string: ARRAY_TO_JBOX = DC string open-air (DC_STRING_RUN)
   //             JBOX_TO_INVERTER = DC conduit run to inverter (DC_DISCO_TO_INV_RUN)
   //             INVERTER_TO_DISCO = AC feeder from inverter (INV_TO_DISCO_RUN)
+  // METER_TO_MSP removed — no separate production meter per industry standard.
+  // DISCO_TO_METER now maps directly to DISCO_TO_METER_RUN (AC Disco → MSP).
   const segTypeToRunId: Record<string, string> = isMicro ? {
     'ARRAY_TO_JBOX':     'ROOF_RUN',
     'JBOX_TO_COMBINER':  'BRANCH_RUN',
     'COMBINER_TO_DISCO': 'COMBINER_TO_DISCO_RUN',
     'DISCO_TO_METER':    'DISCO_TO_METER_RUN',
-    'METER_TO_MSP':      'METER_TO_MSP_RUN',
     'MSP_TO_UTILITY':    'MSP_TO_UTILITY_RUN',
   } : {
     'ARRAY_TO_JBOX':     'DC_STRING_RUN',
     'JBOX_TO_INVERTER':  'DC_DISCO_TO_INV_RUN',
     'INVERTER_TO_DISCO': 'INV_TO_DISCO_RUN',
     'DISCO_TO_METER':    'DISCO_TO_METER_RUN',
-    'METER_TO_MSP':      'METER_TO_MSP_RUN',
     'MSP_TO_UTILITY':    'MSP_TO_UTILITY_RUN',
   };
 
@@ -1483,8 +1462,20 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       if (egcConductor) {
         run.egcGauge = egcConductor.gauge;
       }
-      // Update conductor count (current-carrying only)
-      run.conductorCount = seg.totalCurrentCarryingConductors;
+      // Update conductor count — preserve explicit values for utility-owned runs
+      // For utility service (MSP_TO_UTILITY_RUN): keep conductorCount=3 (L1+L2+N utility service)
+      // For PV AC output circuits: use 2 (L1+L2 only, no neutral per NEC 690.8)
+      // For multi-branch runs (BRANCH_RUN): totalCurrentCarryingConductors reflects all branches
+      //   in the conduit bundle, but conductorCount on RunSegment = conductors per circuit = 2
+      if (!run.isUtilityOwned) {
+        // For AC PV output circuits, cap at 2 (L1+L2); for DC runs use actual count
+        if (run.color === 'ac' && !run.neutralRequired) {
+          run.conductorCount = 2; // L1 + L2 only — no neutral per NEC 690.8
+        } else {
+          run.conductorCount = seg.totalCurrentCarryingConductors;
+        }
+      }
+      // isUtilityOwned runs keep their original conductorCount (3 for L1+L2+N service)
     }
   }
 

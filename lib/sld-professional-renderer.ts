@@ -639,9 +639,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(txt(mspCX, mspCY - mspH/2 - 8,  `${input.mainPanelAmps}A RATED`, { size: F.sub, anchor: 'middle' }));
 
   // Interconnection annotation below MSP
-  const interconLabel = isLoadSide   ? 'LOAD SIDE TAP — NEC 705.12(B)(1)'
-                      : isSupplySide ? 'SUPPLY SIDE TAP — NEC 705.12(A)'
-                      : isLineSide   ? 'LINE SIDE TAP — NEC 705.12(A)'
+  // NEC 2023 interconnection citations:
+  // Load-side connection  → NEC 705.12 (was 705.12(B)(1) in NEC 2017/2020 — subsection removed in 2023)
+  // Supply-side connection → NEC 705.11 (was 705.12(A) in NEC 2017/2020 — renumbered in 2023)
+  // Line-side tap          → NEC 705.11 (supply-side, same renumbering)
+  // Backfed breaker        → NEC 705.12(B)(2) (load-side, subsection retained in NEC 2023)
+  const interconLabel = isLoadSide   ? 'LOAD SIDE TAP — NEC 705.12(B)'
+                      : isSupplySide ? 'SUPPLY SIDE TAP — NEC 705.11'
+                      : isLineSide   ? 'LINE SIDE TAP — NEC 705.11'
                       : `BACKFED BREAKER — NEC 705.12(B)(2)`;
   parts.push(txt(mspCX, mspCY + mspH/2 + 9,  `${input.backfeedAmps}A PV BREAKER`, { size: F.tiny, anchor: 'middle' }));
   parts.push(txt(mspCX, mspCY + mspH/2 + 18, interconLabel, { size: F.tiny, anchor: 'middle', italic: true, fill: '#333' }));

@@ -147,7 +147,8 @@ const CONDUIT_FULL_AREA: Record<string, Record<string, number>> = {
 
 const CONDUIT_SIZES = ['1/2"', '3/4"', '1"', '1-1/4"', '1-1/2"', '2"', '2-1/2"', '3"'];
 
-// NEC 310.15(B)(2)(a) — Temperature derating
+// NEC 310.15(B)(2) Table — Ambient Temperature Correction Factors (NEC 2023)
+// (was 310.15(B)(2)(a) in NEC 2020)
 function getTempDerating(ambientC: number): number {
   if (ambientC <= 10) return 1.15;
   if (ambientC <= 15) return 1.12;
@@ -311,7 +312,8 @@ export function buildConductorCallout(
 
 // ─── Build Segment ────────────────────────────────────────────────────────────
 
-let segIdCounter = 0;
+// segIdCounter moved inside buildSegmentSchedule() to eliminate module-level mutable state
+// and prevent race conditions in concurrent requests. See buildSegmentSchedule() below.
 
 function buildSegment(
   segmentType: SegmentType,
@@ -329,10 +331,10 @@ function buildSegment(
   necReferences: string[],
   effectiveAmpacity: number,
   tempDerating: number,
-  conduitDerating: number
+  conduitDerating: number,
+  segId: number  // passed in from buildSegmentSchedule() local counter
 ): SegmentScheduleRow {
-  segIdCounter++;
-  const id = `SEG-${String(segIdCounter).padStart(2, '0')}`;
+  const id = `SEG-${String(segId).padStart(2, '0')}`;
 
   const isOpenAir = raceway === 'OPEN_AIR';
   const totalCurrentCarrying = conductorBundle.filter(c => c.isCurrentCarrying).reduce((s, c) => s + c.qty, 0);
@@ -393,7 +395,10 @@ function buildSegment(
 // ─── Main: buildSegmentSchedule ───────────────────────────────────────────────
 
 export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentScheduleRow[] {
-  segIdCounter = 0;
+  // Local counter — eliminates module-level mutable state race condition
+  // Each call to buildSegmentSchedule() gets its own isolated counter.
+  let segIdCounter = 0;
+  const nextSegId = () => ++segIdCounter;
   const segments: SegmentScheduleRow[] = [];
   const rl = input.runLengths;
   const conduitType = input.conduitType;
@@ -435,7 +440,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       branchCurrentA, branchOcpd, conduitType,
       roofAmbC, sysV, input.maxACVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8(B)'],
-      branchSizing.effectiveAmpacity, branchSizing.tempDerating, 1.0
+      branchSizing.effectiveAmpacity, branchSizing.tempDerating, 1.0,
+      nextSegId()
     ));
 
     // SEGMENT 2: Junction Box → AC Combiner (CONDUIT)
@@ -458,7 +464,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       branchCurrentA, branchOcpd, conduitType,
       ambientC, sysV, input.maxACVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8(B)', 'NEC 310.15'],
-      jboxCombinerSizing.effectiveAmpacity, jboxCombinerSizing.tempDerating, jboxCombinerDerating
+      jboxCombinerSizing.effectiveAmpacity, jboxCombinerSizing.tempDerating, jboxCombinerDerating,
+      nextSegId()
     ));
 
     // SEGMENT 3: AC Combiner → AC Disconnect (CONDUIT)
@@ -483,7 +490,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       totalCurrentA, feederOcpd, conduitType,
       ambientC, sysV, input.maxACVoltageDropPct,
       ['NEC 690.8', 'NEC 310.15', 'NEC 250.122'],
-      feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating
+      feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
+      nextSegId()
     ));
 
   } else {
@@ -519,7 +527,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       stringCurrentA, stringOcpd, conduitType,
       roofAmbC, sysV, input.maxDCVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8'],
-      stringSizing.effectiveAmpacity, stringSizing.tempDerating, 1.0
+      stringSizing.effectiveAmpacity, stringSizing.tempDerating, 1.0,
+      nextSegId()
     ));
 
     // SEGMENT 2: Junction Box → Inverter (CONDUIT)
@@ -541,7 +550,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       stringCurrentA, stringOcpd, conduitType,
       ambientC, sysV, input.maxDCVoltageDropPct,
       ['NEC 690.31', 'NEC 690.8', 'NEC 310.15'],
-      jboxInvSizing.effectiveAmpacity, jboxInvSizing.tempDerating, jboxInvDerating
+      jboxInvSizing.effectiveAmpacity, jboxInvSizing.tempDerating, jboxInvDerating,
+      nextSegId()
     ));
 
     // SEGMENT 3: Inverter → AC Disconnect (CONDUIT)
@@ -567,7 +577,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
       acCurrentA, feederOcpd, conduitType,
       ambientC, sysV, input.maxACVoltageDropPct,
       ['NEC 690.8', 'NEC 310.15', 'NEC 250.122'],
-      feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating
+      feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
+      nextSegId()
     ));
   }
 
@@ -592,34 +603,32 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     : conduitType === 'PVC Sch 40' ? 'PVC_SCH40'
     : 'PVC_SCH80';
 
-  // SEGMENT: AC Disconnect → Production Meter
+  // SEGMENT: AC Disconnect → MSP (direct — no separate production meter)
+  // Per industry standard: utility installs bidirectional meter for net metering;
+  // Enphase IQ Gateway provides production monitoring. No secondary production meter on plan sets.
   segments.push(buildSegment(
-    'DISCO_TO_METER', 'AC DISCONNECT', 'PRODUCTION METER',
+    'DISCO_TO_METER', 'AC DISCONNECT', 'MAIN SERVICE PANEL',
     condRaceway, feederBundle, rl.discoToMeter,
     acCurrentA, feederOcpd, conduitType,
     ambientC, sysV, input.maxACVoltageDropPct,
-    ['NEC 690.14', 'NEC 310.15'],
-    feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating
+    ['NEC 690.14', 'NEC 705.12', 'NEC 310.15'],
+    feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
+    nextSegId()
   ));
 
-  // SEGMENT: Production Meter → MSP
-  segments.push(buildSegment(
-    'METER_TO_MSP', 'PRODUCTION METER', 'MAIN SERVICE PANEL',
-    condRaceway, feederBundle, rl.meterToMsp,
-    acCurrentA, feederOcpd, conduitType,
-    ambientC, sysV, input.maxACVoltageDropPct,
-    ['NEC 705.12', 'NEC 310.15'],
-    feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating
-  ));
+  // METER_TO_MSP segment removed — no separate production meter per industry standard.
+  // DISCO_TO_METER above now represents the full AC Disco → MSP run.
 
-  // SEGMENT: MSP → Utility Grid
+  // SEGMENT: MSP → Utility Meter (utility-owned service entrance — shown for reference only)
+  // NEC 230.42 / NEC 230.54 — service entrance conductors (utility-owned, not in PV BOM)
   segments.push(buildSegment(
-    'MSP_TO_UTILITY', 'MAIN SERVICE PANEL', 'UTILITY GRID',
+    'MSP_TO_UTILITY', 'MAIN SERVICE PANEL', 'UTILITY METER',
     condRaceway, feederBundle, rl.mspToUtility,
     acCurrentA, feederOcpd, conduitType,
     ambientC, sysV, input.maxACVoltageDropPct,
-    ['NEC 705.12(B)', 'NEC 230'],
-    feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating
+    ['NEC 230.42', 'NEC 230.54'],
+    feederSizing.effectiveAmpacity, feederSizing.tempDerating, feederSizing.conduitDerating,
+    nextSegId()
   ));
 
   console.log(`[SEGMENT_SCHEDULE] Built ${segments.length} segments for ${input.topology} topology`);
