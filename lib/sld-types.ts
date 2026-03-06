@@ -256,6 +256,18 @@ export interface SLDBuildInput {
   batteryBrand?: string;
   batteryCount?: number;
   batteryKwh?: number;
+  batteryBackfeedA?: number;       // NEC 705.12(B) — battery backfeed breaker amps (AC-coupled)
+
+  // Generator + ATS (optional)
+  generatorBrand?: string;
+  generatorModel?: string;
+  generatorKw?: number;
+  atsBrand?: string;
+  atsModel?: string;
+  atsAmpRating?: number;
+  hasBackupInterface?: boolean;
+  backupInterfaceBrand?: string;
+  backupInterfaceModel?: string;
 
   // Engineering calc results (from runElectricalCalc)
   calcResult: {

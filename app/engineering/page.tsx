@@ -288,6 +288,13 @@ export default function EngineeringPage() {
       batteryModel: config.batteryModel,
       batteryCount: config.batteryCount,
       batteryKwh: config.batteryKwh,
+      batteryBackfeedA: config.batteryId ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })() : 0,
+      generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
+      generatorModel: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? ''; })() : undefined,
+      generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
+      atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
+      atsModel: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? ''; })() : undefined,
+      atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
       conductorSizing: {
         acWireGauge: config.wireGauge,
         acConductorCallout: '',
@@ -1566,7 +1573,7 @@ export default function EngineeringPage() {
             <h1 className="text-xl font-black text-white flex items-center gap-2">
               <Zap size={20} className="text-amber-400" /> Engineering Schematics
               <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full ml-1">V3 · Permit-Grade</span>
-              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v20.1 · UTIL-DB-WIRED✓ EQUIP-DB-WIRED✓ BATTERY-NEC✓ GEN-ATS✓ IL-COOPS✓ NEC2023✓</span>
+              <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1">BUILD v21 · EQUIP-AUDIT✓ ECOSYSTEM-COMPLETE✓ SLD-GEN-ATS✓ NEW-BADGES✓ NEC2023✓</span>
             </h1>
             <p className="text-slate-400 text-xs mt-0.5">
               {config.projectName} · {totalPanels} panels · {totalKw} kW DC · {totalInverterKw} kW AC
@@ -1817,7 +1824,10 @@ export default function EngineeringPage() {
 
               {/* Battery Storage */}
               <div className="card p-5">
-                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Shield size={14} className="text-amber-400" /> Battery Storage (Optional)</h3>
+                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                  <Shield size={14} className="text-amber-400" /> Battery Storage (Optional)
+                  <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+5 New Models</span>
+                </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">Battery Model</label>
@@ -1832,7 +1842,7 @@ export default function EngineeringPage() {
                     }} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
                       <option value="">None</option>
                       {BATTERIES.map(b => (
-                        <option key={b.id} value={b.id}>{b.manufacturer} {b.model} ({b.usableCapacityKwh} kWh)</option>
+                        <option key={b.id} value={b.id}>{b.isNew ? '🆕 ' : ''}{b.manufacturer} {b.model} ({b.usableCapacityKwh} kWh){b.subcategory === 'ac_coupled' ? ` · AC-coupled` : ` · DC-coupled`}</option>
                       ))}
                     </select>
                   </div>
@@ -1861,14 +1871,18 @@ export default function EngineeringPage() {
                   </div>
                 </div>
                 {/* Generator & ATS */}
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-4">
+                <div className="mt-4 mb-2 flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">Generator &amp; Transfer Switch</span>
+                  <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+4 New Models</span>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">Generator</label>
                     <select value={config.generatorId} onChange={e => updateConfig({ generatorId: e.target.value })}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
                       <option value="">None</option>
                       {GENERATORS.map(g => (
-                        <option key={g.id} value={g.id}>{g.manufacturer} {g.model} ({g.ratedOutputKw} kW)</option>
+                        <option key={g.id} value={g.id}>{g.isNew ? '🆕 ' : ''}{g.manufacturer} {g.model} ({g.ratedOutputKw} kW · {g.fuelType.replace('_', ' ')})</option>
                       ))}
                     </select>
                   </div>
@@ -1878,7 +1892,7 @@ export default function EngineeringPage() {
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
                       <option value="">None</option>
                       {ATS_UNITS.map(a => (
-                        <option key={a.id} value={a.id}>{a.manufacturer} {a.model} ({a.ampRating}A {a.transferType})</option>
+                        <option key={a.id} value={a.id}>{a.isNew ? '🆕 ' : ''}{a.manufacturer} {a.model} ({a.ampRating}A · {a.transferType}{a.serviceEntranceRated ? ' · SE-rated' : ''})</option>
                       ))}
                     </select>
                   </div>
@@ -1900,7 +1914,10 @@ export default function EngineeringPage() {
               {/* Inverters & Strings */}
               <div className="card p-5">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2"><Zap size={14} className="text-amber-400" /> Inverters & Strings</h3>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Zap size={14} className="text-amber-400" /> Inverters &amp; Strings
+                    <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+14 New Models</span>
+                  </h3>
                   <div className="flex gap-2">
                     {(['string', 'micro', 'optimizer'] as InverterType[]).map(t => {
                       // ISSUE 3 FIX: hide "Add Microinverter" when a micro inverter already exists
@@ -1988,7 +2005,7 @@ export default function EngineeringPage() {
                                 <label className="text-xs text-slate-400 mb-1 block">Inverter Model</label>
                                 <select value={inv.inverterId} onChange={e => updateInverter(inv.id, { inverterId: e.target.value })}
                                   className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500/60">
-                                  {invList.map(i => <option key={i.id} value={i.id}>{i.manufacturer} {i.model}</option>)}
+                                  {invList.map(i => <option key={i.id} value={i.id}>{(i as any).isNew ? '🆕 ' : ''}{i.manufacturer} {i.model}{inv.type === 'string' ? ` (${(i as any).acOutputKw}kW)` : ` (${(i as any).acOutputW}W)`}</option>)}
                                 </select>
                               </div>
                               {invData && (
@@ -4449,6 +4466,11 @@ export default function EngineeringPage() {
                         wireGauge: config.wireGauge, wireLength: config.wireLength,
                         batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
                         batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
+                        batteryBackfeedA: config.batteryId ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })() : 0,
+                        generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
+                        generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
+                        atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
+                        atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
                       },
                       system: {
                         totalDcKw: parseFloat(totalKw), totalAcKw: parseFloat(totalInverterKw),

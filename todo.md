@@ -1,44 +1,28 @@
-# BUILD v20.1 — Data Integration & Logic Audit Fixes
+# BUILD v21 — Equipment Ecosystem Audit & Expansion
 
-## AUDIT FINDINGS SUMMARY
-1. **data/equipment/ files NOT wired into app** — batteries, generators, ATS, backup-interfaces are JSON files sitting on disk with no imports
-2. **data/utilities/ co-op files NOT in utility-rules.ts** — 12 IL co-ops exist as JSON but getUtilityRules() never finds them → falls back to DEFAULT_UTILITY
-3. **DS3-S spec discrepancy** — data/equipment/inverters.json has 760W/3.33A but equipment-db.ts (the active NEC engine) has 640W/2.7A — need to verify correct value and reconcile
-4. **IL co-op utility rules missing from UTILITY_REGISTRY** — need to add all 12 co-ops to lib/utility-rules.ts so NEC engine uses correct net metering caps, interconnection rules, etc.
-5. **equipment-db.ts missing batteries/generators/ATS/backup** — UI has no battery/generator selector wired to NEC logic
-6. **UI utility dropdown only shows utilities from getUtilitiesByState()** — co-ops won't appear until added to UTILITY_REGISTRY
-7. **swec-il.json has different schema** than other co-op files — needs reconciliation
+## Phase 1: Audit & Gap Analysis
+- [x] Read current equipment-db.ts state (all sections)
+- [x] Identify brand ecosystem gaps
 
-## Phase 1: Fix DS3-S Spec Discrepancy
-- [ ] Verify correct DS3-S rated AC output (640W vs 760W) from datasheet
-- [ ] Reconcile data/equipment/inverters.json DS3-S spec with equipment-db.ts
+## Phase 2: Equipment-db.ts Additions
+- [ ] Add Enphase ATS entry (IQ System Controller 3 acts as ATS — missing from ATS_UNITS)
+- [ ] Add new STRING_INVERTERS: SolarEdge SE3800H, SE6000H, SE11400H; SMA SB5.0, SB10.0; Fronius Primo 5.0, 10.0; Sungrow SG5RS, SG7.6RS, SG15RS; GoodWe GW5000-NS, GW10K-MS
+- [ ] Add new MICROINVERTERS: Enphase IQ8A, IQ8AC; APsystems EZ1-M; Hoymiles HMS-800W-2T
+- [ ] Add new OPTIMIZERS: SolarEdge P320, P730, P850; Tigo TS4-A-2O (dual-module)
+- [ ] Add new BATTERIES: Enphase IQ Battery 3T; Tesla Powerwall 2; Generac PWRcell 17; Panasonic EverVolt 11.4; Sonnen Eco 10
+- [ ] Add new GENERATORS: Generac Guardian 26kW, 18kW; Kohler 14RESAL; Cummins RS20A
+- [ ] Add new ATS_UNITS: Enphase IQ System Controller 3 ATS mode; Generac RXSW100A3; Kohler RXT-100; Briggs & Stratton 200A ATS; Eaton CHT200
+- [ ] Add new BACKUP_INTERFACES: SolarEdge Home Hub SE10000H; Generac PWRcell Inverter 7.6kW; Enphase IQ Combiner 5
 
-## Phase 2: Wire IL Co-ops into utility-rules.ts UTILITY_REGISTRY
-- [ ] Add all 12 IL co-ops to UTILITY_REGISTRY in lib/utility-rules.ts
-- [ ] Add name aliases for fuzzy matching (e.g. "southwestern electric" -> swec-il)
-- [ ] Verify getUtilitiesByState('IL') returns all co-ops
+## Phase 3: SLD Integration
+- [ ] Audit current SLD rendering for battery/generator/ATS nodes
+- [ ] Add battery node rendering to SLD engine
+- [ ] Add generator + ATS node rendering to SLD engine
 
-## Phase 3: Wire equipment-db.ts with batteries/generators/ATS/backup
-- [ ] Add BatterySystem interface to lib/equipment-db.ts
-- [ ] Add BATTERIES array with Tesla Powerwall 3, Enphase IQ 5P/10T, Generac PWRcell, Franklin aPower, SolarEdge
-- [ ] Add GeneratorSystem interface + GENERATORS array
-- [ ] Add ATSUnit interface + ATS_UNITS array
-- [ ] Add BackupInterface interface + BACKUP_INTERFACES array
+## Phase 4: UI "New" Badge
+- [ ] Add isNew flag to new equipment entries
+- [ ] Render "NEW" badge in equipment selectors in engineering UI
 
-## Phase 4: Wire battery/generator into NEC compliance engine
-- [ ] Battery backfeed breaker → NEC 705.12(B) 120% rule check (battery adds to bus loading)
-- [ ] Battery interconnection method → load-side vs supply-side
-- [ ] Generator ATS → verify neutral switching, bonding rules NEC 250.30
-- [ ] Add battery/generator to BOM derivation in computed-plan.ts
-
-## Phase 5: Wire battery/generator selector into engineering UI
-- [ ] Add battery selector dropdown to engineering page config
-- [ ] Add generator/ATS selector to engineering page config
-- [ ] Show battery backfeed breaker in compliance panel
-- [ ] Show generator/ATS in equipment schedule
-
-## Phase 6: Commit and package
-- [ ] Run tests to verify no regressions
-- [ ] Commit as BUILD v20.1
-- [ ] Push to GitHub
-- [ ] Create solar-platform-build-v20.1.zip
+## Phase 5: TypeScript Validation & Build
+- [ ] Run tsc --noEmit, fix all errors
+- [ ] Commit as BUILD v21, push, package ZIP

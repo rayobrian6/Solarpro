@@ -259,11 +259,11 @@ function symProductionMeter(cx: number, cy: number): string {
 }
 
 // Battery storage symbol
-function symBattery(cx: number, cy: number, brand: string, kwh: number): string {
+function symBattery(cx: number, cy: number, brand: string, kwh: number, backfeedA?: number): string {
   const parts: string[] = [];
-  const bw = 80; const bh = 52;
+  const bw = 90; const bh = 56;
   parts.push(rect(cx - bw / 2, cy - bh / 2, bw, bh, { fill: '#F3E5F5', stroke: '#6A1B9A', strokeW: 2, rx: 4 }));
-  // Battery cell symbol
+  // Battery cell symbol (NEC 706 ESS icon)
   parts.push(line(cx - 16, cy - 10, cx - 16, cy + 10, { stroke: '#6A1B9A', strokeW: 3 }));
   parts.push(line(cx - 8, cy - 6, cx - 8, cy + 6, { stroke: '#6A1B9A', strokeW: 1.5 }));
   parts.push(line(cx, cy - 10, cx, cy + 10, { stroke: '#6A1B9A', strokeW: 3 }));
@@ -271,6 +271,42 @@ function symBattery(cx: number, cy: number, brand: string, kwh: number): string 
   parts.push(line(cx + 16, cy - 10, cx + 16, cy + 10, { stroke: '#6A1B9A', strokeW: 3 }));
   parts.push(text(cx, cy + bh / 2 + 16, brand, { size: F.small, weight: 'bold', fill: '#6A1B9A' }));
   parts.push(text(cx, cy + bh / 2 + 30, `${kwh.toFixed(1)} kWh`, { size: F.small, fill: C.textLight }));
+  if (backfeedA && backfeedA > 0) {
+    parts.push(text(cx, cy + bh / 2 + 44, `${backfeedA}A backfeed (NEC 705.12B)`, { size: F.tiny, fill: '#6A1B9A' }));
+  }
+  return parts.join('\n');
+}
+
+function symGenerator(cx: number, cy: number, brand: string, kw: number): string {
+  const parts: string[] = [];
+  const gw = 90; const gh = 56;
+  // Generator box — green tones (NEC 702 standby)
+  parts.push(rect(cx - gw / 2, cy - gh / 2, gw, gh, { fill: '#E8F5E9', stroke: '#2E7D32', strokeW: 2, rx: 4 }));
+  // Generator symbol: circle with G
+  parts.push(`<circle cx="${cx}" cy="${cy - 4}" r="14" fill="none" stroke="#2E7D32" stroke-width="2"/>`);
+  parts.push(text(cx, cy - 1, 'G', { size: F.label, weight: 'bold', fill: '#2E7D32' }));
+  // Sine wave inside circle (simplified)
+  parts.push(`<path d="M ${cx - 8} ${cy - 4} Q ${cx - 4} ${cy - 10} ${cx} ${cy - 4} Q ${cx + 4} ${cy + 2} ${cx + 8} ${cy - 4}" fill="none" stroke="#2E7D32" stroke-width="1.5"/>`);
+  parts.push(text(cx, cy + gh / 2 - 6, `${kw}kW GENERATOR`, { size: F.tiny, weight: 'bold', fill: '#2E7D32' }));
+  parts.push(text(cx, cy + gh / 2 + 14, brand, { size: F.small, weight: 'bold', fill: '#2E7D32' }));
+  parts.push(text(cx, cy + gh / 2 + 28, 'NEC 702 · UL 2200', { size: F.tiny, fill: C.textLight }));
+  return parts.join('\n');
+}
+
+function symATS(cx: number, cy: number, brand: string, amps: number, neutralSwitched: boolean): string {
+  const parts: string[] = [];
+  const aw = 100; const ah = 52;
+  // ATS box — orange tones (transfer switch)
+  parts.push(rect(cx - aw / 2, cy - ah / 2, aw, ah, { fill: '#FFF3E0', stroke: '#E65100', strokeW: 2, rx: 4 }));
+  // ATS symbol: two arrows pointing toward center (transfer)
+  parts.push(line(cx - 28, cy - 6, cx - 10, cy - 6, { stroke: '#E65100', strokeW: 2 }));
+  parts.push(line(cx - 10, cy - 6, cx - 16, cy - 12, { stroke: '#E65100', strokeW: 2 }));
+  parts.push(line(cx - 10, cy - 6, cx - 16, cy, { stroke: '#E65100', strokeW: 2 }));
+  parts.push(line(cx + 28, cy + 6, cx + 10, cy + 6, { stroke: '#E65100', strokeW: 2 }));
+  parts.push(line(cx + 10, cy + 6, cx + 16, cy, { stroke: '#E65100', strokeW: 2 }));
+  parts.push(line(cx + 10, cy + 6, cx + 16, cy + 12, { stroke: '#E65100', strokeW: 2 }));
+  parts.push(text(cx, cy + ah / 2 + 14, `${brand} ATS · ${amps}A`, { size: F.small, weight: 'bold', fill: '#E65100' }));
+  parts.push(text(cx, cy + ah / 2 + 28, neutralSwitched ? 'Switched Neutral · NEC 250.30' : 'NEC 702.5', { size: F.tiny, fill: C.textLight }));
   return parts.join('\n');
 }
 
@@ -584,10 +620,40 @@ export function renderSLD(input: SLDBuildInput): string {
 
   // ── Battery Storage (if present) ─────────────────────────────────────────────
   if (input.batteryBrand && (input.batteryCount ?? 0) > 0) {
-    const batX = cx + 200;
+    const batX = cx + 220;
     const totalKwh = (input.batteryCount ?? 0) * (input.batteryKwh ?? 0);
-    parts.push(symBattery(batX, yMSP - 80, input.batteryBrand, totalKwh));
-    parts.push(line(batX - 40, yMSP - 80, cx + 40, yMSP - 80, { stroke: C.ac, strokeW: 2, dash: '8,4' }));
+    parts.push(symBattery(batX, yMSP - 80, input.batteryBrand, totalKwh, input.batteryBackfeedA));
+    // Dashed AC line from battery to MSP bus
+    parts.push(line(batX - 45, yMSP - 80, cx + 80, yMSP - 80, { stroke: C.ac, strokeW: 2, dash: '8,4' }));
+    parts.push(line(cx + 80, yMSP - 80, cx + 80, yMSP, { stroke: C.ac, strokeW: 2, dash: '8,4' }));
+    // Battery backfeed breaker label
+    if (input.batteryBackfeedA && input.batteryBackfeedA > 0) {
+      parts.push(symBreaker(batX - 80, yMSP - 80, input.batteryBackfeedA, 'BATT\\nBREAKER', '#6A1B9A'));
+    }
+  }
+
+  // ── Generator + ATS (if present) ──────────────────────────────────────────────────────────────
+  if (input.generatorBrand && input.generatorKw) {
+    const genX = cx - 240;
+    const genY = yMSP + 60;
+    const atsY = yMSP + 20;
+
+    // Generator symbol
+    parts.push(symGenerator(genX, genY, input.generatorBrand, input.generatorKw));
+
+    // ATS symbol (between generator and MSP)
+    if (input.atsBrand && input.atsAmpRating) {
+      parts.push(symATS(genX, atsY - 60, input.atsBrand, input.atsAmpRating, true));
+      // Wire: generator → ATS
+      parts.push(line(genX, genY - 28, genX, atsY - 60 + 26, { stroke: '#2E7D32', strokeW: 2 }));
+      // Wire: ATS → MSP
+      parts.push(line(genX + 50, atsY - 60, cx - 80, yMSP, { stroke: '#E65100', strokeW: 2, dash: '6,3' }));
+      parts.push(text(genX + 10, atsY - 90, 'STANDBY POWER', { size: F.tiny, weight: 'bold', fill: '#E65100' }));
+      parts.push(text(genX + 10, atsY - 76, 'NEC 702.5 · Transfer Switch', { size: F.tiny, fill: C.textLight }));
+    } else {
+      // No ATS — direct generator connection note
+      parts.push(line(genX, genY - 28, cx - 80, yMSP, { stroke: '#2E7D32', strokeW: 2, dash: '6,3' }));
+    }
   }
 
   // ── Main Service Panel ────────────────────────────────────────────────────────
@@ -641,15 +707,20 @@ export function renderSLD(input: SLDBuildInput): string {
   // ── Legend ────────────────────────────────────────────────────────────────────
   const legX = DRAW_X + DRAW_W - 200;
   const legY = DRAW_Y + 80;
-  parts.push(rect(legX, legY, 180, 130, { fill: '#FAFAFA', stroke: C.border, strokeW: 1, rx: 3 }));
+  const legendItems = [
+    { color: C.dc,      dash: '',    label: 'DC Conductor' },
+    { color: C.ac,      dash: '',    label: 'AC Conductor' },
+    { color: C.gnd,     dash: '6,3', label: 'Grounding Conductor' },
+    { color: C.bond,    dash: '4,4', label: 'Bonding Conductor' },
+    { color: '#6A1B9A', dash: '8,4', label: 'Battery AC Connection' },
+    { color: '#2E7D32', dash: '',    label: 'Generator Output' },
+    { color: '#E65100', dash: '6,3', label: 'ATS Transfer Path' },
+  ];
+  // Expand legend box height to fit all items
+  const legH = 38 + legendItems.length * 22 + 10;
+  parts.push(rect(legX, legY, 180, legH, { fill: '#FAFAFA', stroke: C.border, strokeW: 1, rx: 3 }));
   parts.push(text(legX + 90, legY + 16, 'LEGEND', { size: F.label, weight: 'bold' }));
   parts.push(line(legX, legY + 22, legX + 180, legY + 22, { stroke: '#CCC', strokeW: 1 }));
-  const legendItems = [
-    { color: C.dc,   dash: '',    label: 'DC Conductor' },
-    { color: C.ac,   dash: '',    label: 'AC Conductor' },
-    { color: C.gnd,  dash: '6,3', label: 'Grounding Conductor' },
-    { color: C.bond, dash: '4,4', label: 'Bonding Conductor' },
-  ];
   legendItems.forEach((item, i) => {
     const ly = legY + 38 + i * 22;
     parts.push(line(legX + 12, ly, legX + 44, ly, { stroke: item.color, strokeW: 2, dash: item.dash }));

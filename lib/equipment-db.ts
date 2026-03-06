@@ -59,6 +59,7 @@ export interface StringInverter {
   arcFaultProtection: boolean;
   groundFaultProtection: boolean;
   datasheetUrl: string;
+  isNew?: boolean; // UI badge flag — true for recently added models
 }
 
 export interface Microinverter {
@@ -89,6 +90,7 @@ export interface Microinverter {
   // Used instead of NEC 125% calculation when manufacturer specifies it explicitly
   maxPerBranch20A?: number; // max devices on a 20A branch per manufacturer datasheet
   maxPerBranch30A?: number; // max devices on a 30A branch per manufacturer datasheet
+  isNew?: boolean; // UI badge flag
 }
 
 export interface Optimizer {
@@ -108,6 +110,7 @@ export interface Optimizer {
   ulListing: string;
   compatibleInverters: string[];
   datasheetUrl: string;
+  isNew?: boolean; // UI badge flag
 }
 
 export interface RackingSystem {
@@ -406,6 +409,215 @@ export const STRING_INVERTERS: StringInverter[] = [
     rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
     datasheetUrl: 'https://www.sungrowpower.com/products/inverter/sg10rs',
   },
+  // ── SolarEdge HD-Wave expanded lineup ─────────────────────────────────────
+  {
+    id: 'se-3800h',
+    manufacturer: 'SolarEdge',
+    model: 'SE3800H-US',
+    category: 'string_inverter',
+    acOutputKw: 3.8, dcInputKwMax: 5.7,
+    maxDcVoltage: 480, mpptVoltageMin: 200, mpptVoltageMax: 480,
+    maxInputCurrentPerMppt: 13.5, maxShortCircuitCurrent: 16.0, mpptChannels: 1, numberOfMPPT: 1,
+    recommendedStringRange: { min: 6, max: 10 },
+    acOutputVoltage: 240, acOutputCurrentMax: 16,
+    efficiency: 99.2, cec_efficiency: 99.0,
+    weight: 25.4, dimensions: '17.7 x 14.6 x 7.2',
+    warranty: '12yr (extendable to 25yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.solaredge.com/sites/default/files/se-hd-wave-single-phase-inverter-datasheet-na.pdf',
+    isNew: true,
+  },
+  {
+    id: 'se-6000h',
+    manufacturer: 'SolarEdge',
+    model: 'SE6000H-US',
+    category: 'string_inverter',
+    acOutputKw: 6.0, dcInputKwMax: 9.0,
+    maxDcVoltage: 480, mpptVoltageMin: 200, mpptVoltageMax: 480,
+    maxInputCurrentPerMppt: 13.5, maxShortCircuitCurrent: 16.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 6, max: 12 },
+    acOutputVoltage: 240, acOutputCurrentMax: 25,
+    efficiency: 99.2, cec_efficiency: 99.0,
+    weight: 25.4, dimensions: '17.7 x 14.6 x 7.2',
+    warranty: '12yr (extendable to 25yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.solaredge.com/sites/default/files/se-hd-wave-single-phase-inverter-datasheet-na.pdf',
+    isNew: true,
+  },
+  {
+    id: 'se-11400h',
+    manufacturer: 'SolarEdge',
+    model: 'SE11400H-US',
+    category: 'string_inverter',
+    acOutputKw: 11.4, dcInputKwMax: 17.1,
+    maxDcVoltage: 480, mpptVoltageMin: 200, mpptVoltageMax: 480,
+    maxInputCurrentPerMppt: 13.5, maxShortCircuitCurrent: 16.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 10, max: 18 },
+    acOutputVoltage: 240, acOutputCurrentMax: 47.5,
+    efficiency: 99.2, cec_efficiency: 99.0,
+    weight: 25.4, dimensions: '17.7 x 14.6 x 7.2',
+    warranty: '12yr (extendable to 25yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.solaredge.com/sites/default/files/se-hd-wave-single-phase-inverter-datasheet-na.pdf',
+    isNew: true,
+  },
+  // ── SMA Sunny Boy expanded lineup ─────────────────────────────────────────
+  {
+    id: 'sma-sb-5.0',
+    manufacturer: 'SMA',
+    model: 'Sunny Boy 5.0-US',
+    category: 'string_inverter',
+    acOutputKw: 5.0, dcInputKwMax: 7.5,
+    maxDcVoltage: 600, mpptVoltageMin: 100, mpptVoltageMax: 600,
+    maxInputCurrentPerMppt: 15.0, maxShortCircuitCurrent: 18.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 5, max: 11 },
+    acOutputVoltage: 240, acOutputCurrentMax: 21,
+    efficiency: 97.0, cec_efficiency: 96.5,
+    weight: 48.5, dimensions: '24.0 x 18.0 x 8.7',
+    warranty: '10yr (extendable to 20yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: false, groundFaultProtection: true,
+    datasheetUrl: 'https://www.sma-america.com/products/solarinverters/sunny-boy-us.html',
+    isNew: true,
+  },
+  {
+    id: 'sma-sb-10.0',
+    manufacturer: 'SMA',
+    model: 'Sunny Boy 10.0-US',
+    category: 'string_inverter',
+    acOutputKw: 10.0, dcInputKwMax: 15.0,
+    maxDcVoltage: 600, mpptVoltageMin: 100, mpptVoltageMax: 600,
+    maxInputCurrentPerMppt: 15.0, maxShortCircuitCurrent: 18.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 8, max: 16 },
+    acOutputVoltage: 240, acOutputCurrentMax: 42,
+    efficiency: 97.0, cec_efficiency: 96.5,
+    weight: 48.5, dimensions: '24.0 x 18.0 x 8.7',
+    warranty: '10yr (extendable to 20yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: false, groundFaultProtection: true,
+    datasheetUrl: 'https://www.sma-america.com/products/solarinverters/sunny-boy-us.html',
+    isNew: true,
+  },
+  // ── Fronius Primo expanded lineup ──────────────────────────────────────────
+  {
+    id: 'fronius-primo-5.0',
+    manufacturer: 'Fronius',
+    model: 'Primo 5.0-1',
+    category: 'string_inverter',
+    acOutputKw: 5.0, dcInputKwMax: 7.5,
+    maxDcVoltage: 600, mpptVoltageMin: 200, mpptVoltageMax: 600,
+    maxInputCurrentPerMppt: 18.0, maxShortCircuitCurrent: 22.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 5, max: 11 },
+    acOutputVoltage: 240, acOutputCurrentMax: 21,
+    efficiency: 97.7, cec_efficiency: 97.5,
+    weight: 34.2, dimensions: '22.2 x 17.7 x 6.7',
+    warranty: '10yr (extendable to 20yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: false, groundFaultProtection: true,
+    datasheetUrl: 'https://www.fronius.com/en-us/usa/photovoltaics/products/all-products/inverters/fronius-primo',
+    isNew: true,
+  },
+  {
+    id: 'fronius-primo-10.0',
+    manufacturer: 'Fronius',
+    model: 'Primo 10.0-1',
+    category: 'string_inverter',
+    acOutputKw: 10.0, dcInputKwMax: 15.0,
+    maxDcVoltage: 600, mpptVoltageMin: 200, mpptVoltageMax: 600,
+    maxInputCurrentPerMppt: 18.0, maxShortCircuitCurrent: 22.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 8, max: 16 },
+    acOutputVoltage: 240, acOutputCurrentMax: 42,
+    efficiency: 97.7, cec_efficiency: 97.5,
+    weight: 34.2, dimensions: '22.2 x 17.7 x 6.7',
+    warranty: '10yr (extendable to 20yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: false, groundFaultProtection: true,
+    datasheetUrl: 'https://www.fronius.com/en-us/usa/photovoltaics/products/all-products/inverters/fronius-primo',
+    isNew: true,
+  },
+  // ── Sungrow expanded lineup ────────────────────────────────────────────────
+  {
+    id: 'sungrow-sg5rs',
+    manufacturer: 'Sungrow',
+    model: 'SG5RS',
+    category: 'string_inverter',
+    acOutputKw: 5.0, dcInputKwMax: 7.5,
+    maxDcVoltage: 600, mpptVoltageMin: 40, mpptVoltageMax: 600,
+    maxInputCurrentPerMppt: 14.0, maxShortCircuitCurrent: 17.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 5, max: 11 },
+    acOutputVoltage: 240, acOutputCurrentMax: 21,
+    efficiency: 97.7, cec_efficiency: 97.5,
+    weight: 24.0, dimensions: '16.5 x 13.8 x 6.5',
+    warranty: '10yr (extendable to 25yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.sungrowpower.com/products/inverter/sg5rs',
+    isNew: true,
+  },
+  {
+    id: 'sungrow-sg7.6rs',
+    manufacturer: 'Sungrow',
+    model: 'SG7.6RS',
+    category: 'string_inverter',
+    acOutputKw: 7.6, dcInputKwMax: 11.4,
+    maxDcVoltage: 600, mpptVoltageMin: 40, mpptVoltageMax: 600,
+    maxInputCurrentPerMppt: 14.0, maxShortCircuitCurrent: 17.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 6, max: 13 },
+    acOutputVoltage: 240, acOutputCurrentMax: 32,
+    efficiency: 97.7, cec_efficiency: 97.5,
+    weight: 24.0, dimensions: '16.5 x 13.8 x 6.5',
+    warranty: '10yr (extendable to 25yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.sungrowpower.com/products/inverter/sg7.6rs',
+    isNew: true,
+  },
+  {
+    id: 'sungrow-sg15rs',
+    manufacturer: 'Sungrow',
+    model: 'SG15RS',
+    category: 'string_inverter',
+    acOutputKw: 15.0, dcInputKwMax: 22.5,
+    maxDcVoltage: 600, mpptVoltageMin: 40, mpptVoltageMax: 600,
+    maxInputCurrentPerMppt: 14.0, maxShortCircuitCurrent: 17.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 10, max: 20 },
+    acOutputVoltage: 240, acOutputCurrentMax: 62.5,
+    efficiency: 97.7, cec_efficiency: 97.5,
+    weight: 28.0, dimensions: '17.3 x 14.2 x 6.9',
+    warranty: '10yr (extendable to 25yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.sungrowpower.com/products/inverter/sg15rs',
+    isNew: true,
+  },
+  // ── GoodWe lineup ─────────────────────────────────────────────────────────
+  {
+    id: 'goodwe-gw5000-ns',
+    manufacturer: 'GoodWe',
+    model: 'GW5000-NS',
+    category: 'string_inverter',
+    acOutputKw: 5.0, dcInputKwMax: 7.5,
+    maxDcVoltage: 600, mpptVoltageMin: 90, mpptVoltageMax: 550,
+    maxInputCurrentPerMppt: 12.5, maxShortCircuitCurrent: 15.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 5, max: 11 },
+    acOutputVoltage: 240, acOutputCurrentMax: 21,
+    efficiency: 97.8, cec_efficiency: 97.5,
+    weight: 22.0, dimensions: '15.7 x 13.4 x 6.3',
+    warranty: '10yr (extendable to 20yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.goodwe.com/products/inverter/gw5000-ns',
+    isNew: true,
+  },
+  {
+    id: 'goodwe-gw10k-ms',
+    manufacturer: 'GoodWe',
+    model: 'GW10K-MS',
+    category: 'string_inverter',
+    acOutputKw: 10.0, dcInputKwMax: 15.0,
+    maxDcVoltage: 600, mpptVoltageMin: 90, mpptVoltageMax: 550,
+    maxInputCurrentPerMppt: 12.5, maxShortCircuitCurrent: 15.0, mpptChannels: 2, numberOfMPPT: 2,
+    recommendedStringRange: { min: 8, max: 16 },
+    acOutputVoltage: 240, acOutputCurrentMax: 42,
+    efficiency: 97.8, cec_efficiency: 97.5,
+    weight: 26.0, dimensions: '16.5 x 14.0 x 6.5',
+    warranty: '10yr (extendable to 20yr)', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    datasheetUrl: 'https://www.goodwe.com/products/inverter/gw10k-ms',
+    isNew: true,
+  },
 ];
 
 export const MICROINVERTERS: Microinverter[] = [
@@ -534,6 +746,81 @@ export const MICROINVERTERS: Microinverter[] = [
     datasheetUrl: 'https://www.hoymiles.com/products/microinverter/hm-series/',
     modulesPerDevice: 2,
   },
+  // ── Enphase IQ8 expanded lineup ────────────────────────────────────────────
+  {
+    id: 'enphase-iq8a',
+    manufacturer: 'Enphase',
+    model: 'IQ8A',
+    category: 'microinverter',
+    // IQ8A: 349W AC output, 1.46A nominal — designed for high-power modules up to 460W DC
+    acOutputW: 349, dcInputWMax: 460,
+    maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
+    maxInputCurrent: 15.0,
+    acOutputVoltage: 240, acOutputCurrentMax: 1.46,
+    efficiency: 97.0, cec_efficiency: 96.5,
+    weight: 2.2,
+    warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547',
+    rapidShutdownCompliant: true,
+    datasheetUrl: 'https://enphase.com/store/microinverters/iq8-series',
+    modulesPerDevice: 1,
+    isNew: true,
+  },
+  {
+    id: 'enphase-iq8ac',
+    manufacturer: 'Enphase',
+    model: 'IQ8AC',
+    category: 'microinverter',
+    // IQ8AC: 384W AC output, 1.60A nominal — highest output single-module IQ8 for 500W+ modules
+    acOutputW: 384, dcInputWMax: 530,
+    maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
+    maxInputCurrent: 15.0,
+    acOutputVoltage: 240, acOutputCurrentMax: 1.60,
+    efficiency: 97.0, cec_efficiency: 96.5,
+    weight: 2.2,
+    warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547',
+    rapidShutdownCompliant: true,
+    datasheetUrl: 'https://enphase.com/store/microinverters/iq8-series',
+    modulesPerDevice: 1,
+    isNew: true,
+  },
+  // ── APsystems EZ1-M ────────────────────────────────────────────────────────
+  {
+    id: 'apsystems-ez1-m',
+    manufacturer: 'APsystems',
+    model: 'EZ1-M',
+    category: 'microinverter',
+    // EZ1-M: 800W AC output, single-phase, plug-and-play balcony/small system microinverter
+    acOutputW: 800, dcInputWMax: 960,
+    maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
+    maxInputCurrent: 14.0,
+    acOutputVoltage: 240, acOutputCurrentMax: 3.33,
+    efficiency: 96.7, cec_efficiency: 96.2,
+    weight: 3.5,
+    warranty: '10yr', ulListing: 'UL 1741 / IEEE 1547',
+    rapidShutdownCompliant: true,
+    datasheetUrl: 'https://usa.apsystems.com/products/ez1/',
+    modulesPerDevice: 2,
+    isNew: true,
+  },
+  // ── Hoymiles HMS-800W-2T ───────────────────────────────────────────────────
+  {
+    id: 'hoymiles-hms-800w-2t',
+    manufacturer: 'Hoymiles',
+    model: 'HMS-800W-2T',
+    category: 'microinverter',
+    // HMS-800W-2T: 800W AC, dual-module, MLPE with integrated rapid shutdown
+    acOutputW: 800, dcInputWMax: 960,
+    maxDcVoltage: 60, mpptVoltageMin: 16, mpptVoltageMax: 60,
+    maxInputCurrent: 14.0,
+    acOutputVoltage: 240, acOutputCurrentMax: 3.33,
+    efficiency: 96.7, cec_efficiency: 96.2,
+    weight: 3.3,
+    warranty: '25yr', ulListing: 'UL 1741-SA / IEEE 1547',
+    rapidShutdownCompliant: true,
+    datasheetUrl: 'https://www.hoymiles.com/products/microinverter/hms-series/',
+    modulesPerDevice: 2,
+    isNew: true,
+  },
 ];
 
 export const OPTIMIZERS: Optimizer[] = [
@@ -575,6 +862,68 @@ export const OPTIMIZERS: Optimizer[] = [
     warranty: '25yr', ulListing: 'UL 1741',
     compatibleInverters: ['SMA', 'Fronius', 'SolarEdge', 'Sungrow'],
     datasheetUrl: 'https://www.tigoenergy.com/ts4',
+  },
+  // ── SolarEdge P-Series expanded ────────────────────────────────────────────
+  {
+    id: 'se-p320',
+    manufacturer: 'SolarEdge',
+    model: 'P320',
+    category: 'optimizer',
+    // P320: for modules up to 320W — standard residential optimizer
+    dcInputWMax: 320, maxDcVoltage: 80,
+    mpptVoltageMin: 8, mpptVoltageMax: 80,
+    maxInputCurrent: 15.0, maxOutputCurrent: 15.0,
+    efficiency: 99.5, weight: 0.77,
+    warranty: '25yr', ulListing: 'UL 1741',
+    compatibleInverters: ['SolarEdge SE series'],
+    datasheetUrl: 'https://www.solaredge.com/sites/default/files/se-p-series-add-on-power-optimizer-datasheet.pdf',
+    isNew: true,
+  },
+  {
+    id: 'se-p730',
+    manufacturer: 'SolarEdge',
+    model: 'P730',
+    category: 'optimizer',
+    // P730: for modules up to 730W — high-power module optimizer
+    dcInputWMax: 730, maxDcVoltage: 80,
+    mpptVoltageMin: 8, mpptVoltageMax: 80,
+    maxInputCurrent: 15.0, maxOutputCurrent: 15.0,
+    efficiency: 99.5, weight: 0.77,
+    warranty: '25yr', ulListing: 'UL 1741',
+    compatibleInverters: ['SolarEdge SE series'],
+    datasheetUrl: 'https://www.solaredge.com/sites/default/files/se-p-series-add-on-power-optimizer-datasheet.pdf',
+    isNew: true,
+  },
+  {
+    id: 'se-p850',
+    manufacturer: 'SolarEdge',
+    model: 'P850',
+    category: 'optimizer',
+    // P850: for modules up to 850W — commercial/high-power residential optimizer
+    dcInputWMax: 850, maxDcVoltage: 80,
+    mpptVoltageMin: 8, mpptVoltageMax: 80,
+    maxInputCurrent: 15.0, maxOutputCurrent: 15.0,
+    efficiency: 99.5, weight: 0.77,
+    warranty: '25yr', ulListing: 'UL 1741',
+    compatibleInverters: ['SolarEdge SE series'],
+    datasheetUrl: 'https://www.solaredge.com/sites/default/files/se-p-series-add-on-power-optimizer-datasheet.pdf',
+    isNew: true,
+  },
+  // ── Tigo TS4-A-2O (dual-module optimizer) ─────────────────────────────────
+  {
+    id: 'tigo-ts4-a-2o',
+    manufacturer: 'Tigo',
+    model: 'TS4-A-2O',
+    category: 'optimizer',
+    // TS4-A-2O: dual-module optimizer — one unit handles 2 modules (up to 700W each)
+    dcInputWMax: 1400, maxDcVoltage: 80,
+    mpptVoltageMin: 16, mpptVoltageMax: 80,
+    maxInputCurrent: 30.0, maxOutputCurrent: 30.0,
+    efficiency: 99.6, weight: 0.77,
+    warranty: '25yr', ulListing: 'UL 1741',
+    compatibleInverters: ['SMA', 'Fronius', 'SolarEdge', 'Sungrow', 'GoodWe'],
+    datasheetUrl: 'https://www.tigoenergy.com/ts4',
+    isNew: true,
   },
 ];
 
@@ -792,6 +1141,7 @@ export interface BatterySystem {
   necRefs: string[];
   ulListing: string;
   certifications: string[];
+  isNew?: boolean; // UI badge flag
 }
 
 export const BATTERIES: BatterySystem[] = [
@@ -894,6 +1244,99 @@ export const BATTERIES: BatterySystem[] = [
     necRefs: ['NEC 706 — Energy Storage Systems', 'NEC 705.12(B) — inverter backfeed breaker covers combined solar+battery output'],
     ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
   },
+  // ── Enphase IQ Battery 3T ──────────────────────────────────────────────────
+  {
+    id: 'enphase-iq-battery-3t',
+    manufacturer: 'Enphase', model: 'IQ Battery 3T',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 3.36, peakPowerKw: 1.28, continuousPowerKw: 1.28,
+    roundTripEfficiencyPct: 96.0, chemistry: 'LFP', voltageNominalV: 48,
+    acOutputVoltageV: 240, maxContinuousOutputA: 5.3,
+    backfeedBreakerA: 15,        // NEC 705.12(B): 15A breaker adds to bus loading
+    minDedicatedBreakerA: 15,
+    weightLbs: 75, outdoorRated: true, ipRating: 'IP55',
+    gridFormingCapable: false, backupCapable: true, wholeHomeBackup: false,
+    requiresGateway: true, gatewayModel: 'Enphase IQ System Controller 3',
+    warrantyYears: 15, cycleGuarantee: '4000 cycles', capacityRetentionPct: 70,
+    msrpUsd: 2800,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+    isNew: true,
+  },
+  // ── Tesla Powerwall 2 ──────────────────────────────────────────────────────
+  {
+    id: 'tesla-powerwall-2',
+    manufacturer: 'Tesla', model: 'Powerwall 2',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 13.5, peakPowerKw: 7.0, continuousPowerKw: 5.0,
+    roundTripEfficiencyPct: 90.0, chemistry: 'NMC', voltageNominalV: 50,
+    acOutputVoltageV: 240, maxContinuousOutputA: 21,
+    backfeedBreakerA: 30,        // NEC 705.12(B): 30A breaker adds to bus loading
+    minDedicatedBreakerA: 30,
+    weightLbs: 251, outdoorRated: true, ipRating: 'IP67',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: true, gatewayModel: 'Tesla Backup Gateway 2',
+    warrantyYears: 10, cycleGuarantee: 'Unlimited cycles', capacityRetentionPct: 70,
+    msrpUsd: 8500,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+    isNew: true,
+  },
+  // ── Generac PWRcell 17 kWh ─────────────────────────────────────────────────
+  {
+    id: 'generac-pwrcell-17',
+    manufacturer: 'Generac', model: 'PWRcell 17 kWh',
+    category: 'battery', subcategory: 'dc_coupled',
+    usableCapacityKwh: 17.1, peakPowerKw: 9.0, continuousPowerKw: 9.0,
+    roundTripEfficiencyPct: 96.5, chemistry: 'NMC', voltageNominalV: 48,
+    backfeedBreakerA: undefined, minDedicatedBreakerA: undefined,
+    weightLbs: 360, outdoorRated: true, ipRating: 'IP65',
+    gridFormingCapable: false, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: true, gatewayModel: 'Generac PWRmanager',
+    warrantyYears: 10, cycleGuarantee: '3650 cycles', capacityRetentionPct: 70,
+    msrpUsd: 14000,
+    necRefs: ['NEC 706 — Energy Storage Systems', 'NEC 705.12(B) — inverter backfeed breaker covers combined solar+battery output'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547'],
+    isNew: true,
+  },
+  // ── Panasonic EverVolt 11.4 kWh ────────────────────────────────────────────
+  {
+    id: 'panasonic-evervolt-11',
+    manufacturer: 'Panasonic', model: 'EverVolt 11.4 kWh',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 11.4, peakPowerKw: 5.5, continuousPowerKw: 5.5,
+    roundTripEfficiencyPct: 94.0, chemistry: 'NMC', voltageNominalV: 48,
+    acOutputVoltageV: 240, maxContinuousOutputA: 23,
+    backfeedBreakerA: 30,        // NEC 705.12(B): 30A breaker adds to bus loading
+    minDedicatedBreakerA: 30,
+    weightLbs: 220, outdoorRated: true, ipRating: 'IP55',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: false,
+    warrantyYears: 10, cycleGuarantee: '6000 cycles', capacityRetentionPct: 60,
+    msrpUsd: 9000,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+    isNew: true,
+  },
+  // ── Sonnen Eco 10 ─────────────────────────────────────────────────────────
+  {
+    id: 'sonnen-eco-10',
+    manufacturer: 'Sonnen', model: 'Eco 10',
+    category: 'battery', subcategory: 'ac_coupled',
+    usableCapacityKwh: 10.0, peakPowerKw: 3.3, continuousPowerKw: 3.3,
+    roundTripEfficiencyPct: 90.0, chemistry: 'LFP', voltageNominalV: 48,
+    acOutputVoltageV: 240, maxContinuousOutputA: 14,
+    backfeedBreakerA: 20,        // NEC 705.12(B): 20A breaker adds to bus loading
+    minDedicatedBreakerA: 20,
+    weightLbs: 286, outdoorRated: false, ipRating: 'IP21',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: false,
+    requiresGateway: false,
+    warrantyYears: 10, cycleGuarantee: '10000 cycles', capacityRetentionPct: 70,
+    msrpUsd: 11000,
+    necRefs: ['NEC 705.12(B) — 120% rule: battery backfeed breaker adds to bus loading', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 9540 / UL 9540A', certifications: ['UL 9540', 'UL 9540A', 'IEEE 1547', 'IEC 62619'],
+    isNew: true,
+  },
 ];
 
 // ============================================================
@@ -920,6 +1363,7 @@ export interface GeneratorSystem {
   msrpUsd: number;
   necRefs: string[];
   ulListing: string;
+  isNew?: boolean; // UI badge flag
 }
 
 export const GENERATORS: GeneratorSystem[] = [
@@ -967,6 +1411,57 @@ export const GENERATORS: GeneratorSystem[] = [
     necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
     ulListing: 'UL 2200',
   },
+  // ── Generac expanded lineup ────────────────────────────────────────────────
+  {
+    id: 'generac-guardian-18kw',
+    manufacturer: 'Generac', model: 'Guardian 18kW',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 18, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 100, outputWireGaugeMin: '4 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 463, warrantyYears: 5, msrpUsd: 4999,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+    isNew: true,
+  },
+  {
+    id: 'generac-guardian-26kw',
+    manufacturer: 'Generac', model: 'Guardian 26kW',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 26, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 125, outputWireGaugeMin: '2 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 560, warrantyYears: 5, msrpUsd: 7499,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+    isNew: true,
+  },
+  // ── Kohler expanded lineup ─────────────────────────────────────────────────
+  {
+    id: 'kohler-14resal',
+    manufacturer: 'Kohler', model: '14RESAL',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 14, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 70, outputWireGaugeMin: '6 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 360, warrantyYears: 5, msrpUsd: 4200,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+    isNew: true,
+  },
+  // ── Cummins RS20A ──────────────────────────────────────────────────────────
+  {
+    id: 'cummins-rs20a',
+    manufacturer: 'Cummins', model: 'RS20A',
+    category: 'generator', subcategory: 'standby_natural_gas',
+    ratedOutputKw: 20, voltageOutputV: 240, phaseType: 'split_phase',
+    fuelType: 'natural_gas', outputBreakerA: 100, outputWireGaugeMin: '4 AWG',
+    neutralBonded: true, autoStart: true, remoteMonitoring: true,
+    weightLbs: 430, warrantyYears: 5, msrpUsd: 5200,
+    necRefs: ['NEC 702 — Optional Standby Systems', 'NEC 250.30 — neutral bonding at generator', 'NEC 702.5 — transfer equipment required'],
+    ulListing: 'UL 2200',
+    isNew: true,
+  },
 ];
 
 // ============================================================
@@ -992,6 +1487,7 @@ export interface ATSUnit {
   msrpUsd: number;
   necRefs: string[];
   ulListing: string;
+  isNew?: boolean; // UI badge flag
 }
 
 export const ATS_UNITS: ATSUnit[] = [
@@ -1043,6 +1539,85 @@ export const ATS_UNITS: ATSUnit[] = [
     necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required'],
     ulListing: 'UL 1008',
   },
+  // ── Enphase IQ System Controller 3 (ATS mode) ─────────────────────────────
+  // The IQ SC3 is a service-entrance-rated gateway that also functions as an ATS
+  // for Enphase battery systems — it switches the home off-grid during outages.
+  // Listed here as an ATS entry so Enphase ecosystem is complete.
+  {
+    id: 'enphase-iq-sc3-ats',
+    manufacturer: 'Enphase', model: 'IQ System Controller 3 (ATS)',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 200, voltageV: 240,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    transferType: 'automatic', neutralSwitched: true,
+    // NEC 250.30: IQ SC3 switches neutral — prevents parallel neutral path with grid
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 22, warrantyYears: 5, msrpUsd: 1800,
+    necRefs: [
+      'NEC 702.5 — transfer equipment (battery-based islanding)',
+      'NEC 250.30 — neutral switching: IQ SC3 opens neutral during island mode',
+      'NEC 230.82 — service entrance rated',
+      'NEC 706 — Energy Storage Systems: automatic transfer to battery backup',
+    ],
+    ulListing: 'UL 1741 / UL 1741-SA / UL 1008',
+    isNew: true,
+  },
+  // ── Generac RXSW100A3 (100A service entrance) ──────────────────────────────
+  {
+    id: 'generac-rxsw100a3',
+    manufacturer: 'Generac', model: 'RXSW100A3',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 100, voltageV: 240,
+    serviceEntranceRated: true, mainBreakerA: 100,
+    transferType: 'automatic', neutralSwitched: true,
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 32, warrantyYears: 5, msrpUsd: 900,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1008',
+    isNew: true,
+  },
+  // ── Kohler RXT-100 ─────────────────────────────────────────────────────────
+  {
+    id: 'kohler-rxt-100',
+    manufacturer: 'Kohler', model: 'RXT-JFNC-0100B',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 100, voltageV: 240,
+    serviceEntranceRated: true, mainBreakerA: 100,
+    transferType: 'automatic', neutralSwitched: true,
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 38, warrantyYears: 5, msrpUsd: 1050,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1008',
+    isNew: true,
+  },
+  // ── Briggs & Stratton 200A ATS ─────────────────────────────────────────────
+  {
+    id: 'briggs-stratton-ats-200',
+    manufacturer: 'Briggs & Stratton', model: '200A Automatic Transfer Switch',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 200, voltageV: 240,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    transferType: 'automatic', neutralSwitched: true,
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 42, warrantyYears: 3, msrpUsd: 1100,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1008',
+    isNew: true,
+  },
+  // ── Eaton CHT200 ───────────────────────────────────────────────────────────
+  {
+    id: 'eaton-cht200',
+    manufacturer: 'Eaton', model: 'CHT200',
+    category: 'ats', subcategory: 'whole_home_ats',
+    ampRating: 200, voltageV: 240,
+    serviceEntranceRated: true, mainBreakerA: 200,
+    transferType: 'automatic', neutralSwitched: true,
+    outdoorRated: true, enclosureType: 'NEMA 3R',
+    weightLbs: 48, warrantyYears: 5, msrpUsd: 1250,
+    necRefs: ['NEC 702.5 — transfer equipment', 'NEC 250.30 — neutral switching required', 'NEC 230.82 — service entrance rated'],
+    ulListing: 'UL 1008',
+    isNew: true,
+  },
 ];
 
 // ============================================================
@@ -1071,6 +1646,7 @@ export interface BackupInterface {
   necRefs: string[];
   ulListing: string;
   compatibleBatteries: string[];   // battery IDs
+  isNew?: boolean; // UI badge flag
 }
 
 export const BACKUP_INTERFACES: BackupInterface[] = [
@@ -1130,6 +1706,54 @@ export const BACKUP_INTERFACES: BackupInterface[] = [
     ulListing: 'UL 1741 / UL 1741-SA',
     compatibleBatteries: ['solaredge-home-battery-10'],
   },
+  // ── SolarEdge Home Hub SE10000H ────────────────────────────────────────────
+  {
+    id: 'solaredge-home-hub-10000',
+    manufacturer: 'SolarEdge', model: 'Home Hub SE10000H-US',
+    category: 'backup_interface', subcategory: 'hybrid_inverter_gateway',
+    maxBackupOutputKw: 10.0, maxContinuousOutputA: 42,
+    serviceEntranceRated: false,
+    gridFormingCapable: true, islandingCapable: true,
+    loadSheddingCapable: true, loadSheddingCircuits: 2,
+    generatorCompatible: false,
+    outdoorRated: true, weightLbs: 25.4, warrantyYears: 12, msrpUsd: 2500,
+    necRefs: ['NEC 705.12(B) — load-side backfed breaker (50A)', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 1741 / UL 1741-SA',
+    compatibleBatteries: ['solaredge-home-battery-10'],
+    isNew: true,
+  },
+  // ── Generac PWRcell Inverter 7.6kW ────────────────────────────────────────
+  {
+    id: 'generac-pwrcell-inverter-7600',
+    manufacturer: 'Generac', model: 'PWRcell Inverter 7.6kW',
+    category: 'backup_interface', subcategory: 'hybrid_inverter_charger',
+    maxBackupOutputKw: 7.6, maxContinuousOutputA: 32,
+    serviceEntranceRated: false,
+    gridFormingCapable: true, islandingCapable: true,
+    loadSheddingCapable: true, loadSheddingCircuits: 4,
+    generatorCompatible: true,
+    outdoorRated: true, weightLbs: 95, warrantyYears: 10, msrpUsd: 3500,
+    necRefs: ['NEC 705.12(B) — load-side backfed breaker (40A)', 'NEC 706 — Energy Storage Systems', 'NEC 702 — Optional Standby Systems (generator integration)'],
+    ulListing: 'UL 1741 / UL 1741-SA',
+    compatibleBatteries: ['generac-pwrcell-9', 'generac-pwrcell-17'],
+    isNew: true,
+  },
+  // ── Enphase IQ Combiner 5 (load center / backup interface) ────────────────
+  {
+    id: 'enphase-iq-combiner-5',
+    manufacturer: 'Enphase', model: 'IQ Combiner 5',
+    category: 'backup_interface', subcategory: 'energy_management_controller',
+    maxBackupOutputKw: 15.36, maxContinuousOutputA: 64,
+    serviceEntranceRated: false,
+    gridFormingCapable: false, islandingCapable: false,
+    loadSheddingCapable: true, loadSheddingCircuits: 4,
+    generatorCompatible: false,
+    outdoorRated: true, weightLbs: 18, warrantyYears: 5, msrpUsd: 1200,
+    necRefs: ['NEC 705.12(B) — load-side interconnection', 'NEC 706 — Energy Storage Systems'],
+    ulListing: 'UL 67 / UL 869A',
+    compatibleBatteries: ['enphase-iq-battery-3t', 'enphase-iq-battery-5p', 'enphase-iq-battery-10t'],
+    isNew: true,
+  },
 ];
 
 // ── Lookup helpers ────────────────────────────────────────────────────────────
@@ -1148,6 +1772,53 @@ export function getATSById(id: string): ATSUnit | undefined {
 
 export function getBackupInterfaceById(id: string): BackupInterface | undefined {
   return BACKUP_INTERFACES.find(b => b.id === id);
+}
+
+// ── Additional lookup helpers ─────────────────────────────────────────────────
+
+export function getOptimizerById(id: string): Optimizer | undefined {
+  return OPTIMIZERS.find(o => o.id === id);
+}
+
+export function getMicroinvertersByManufacturer(manufacturer: string): Microinverter[] {
+  return MICROINVERTERS.filter(m => m.manufacturer.toLowerCase() === manufacturer.toLowerCase());
+}
+
+export function getStringInvertersByManufacturer(manufacturer: string): StringInverter[] {
+  return STRING_INVERTERS.filter(i => i.manufacturer.toLowerCase() === manufacturer.toLowerCase());
+}
+
+export function getBatteriesByManufacturer(manufacturer: string): BatterySystem[] {
+  return BATTERIES.filter(b => b.manufacturer.toLowerCase() === manufacturer.toLowerCase());
+}
+
+export function getCompatibleBackupInterfaces(batteryId: string): BackupInterface[] {
+  return BACKUP_INTERFACES.filter(bi => bi.compatibleBatteries.includes(batteryId));
+}
+
+export function getCompatibleATS(manufacturer: string): ATSUnit[] {
+  return ATS_UNITS.filter(a => a.manufacturer.toLowerCase() === manufacturer.toLowerCase());
+}
+
+/** Returns all equipment marked isNew: true across all categories */
+export function getAllNewEquipment(): {
+  stringInverters: StringInverter[];
+  microinverters: Microinverter[];
+  optimizers: Optimizer[];
+  batteries: BatterySystem[];
+  generators: GeneratorSystem[];
+  atsUnits: ATSUnit[];
+  backupInterfaces: BackupInterface[];
+} {
+  return {
+    stringInverters: STRING_INVERTERS.filter(e => e.isNew),
+    microinverters: MICROINVERTERS.filter(e => e.isNew),
+    optimizers: OPTIMIZERS.filter(e => e.isNew),
+    batteries: BATTERIES.filter(e => e.isNew),
+    generators: GENERATORS.filter(e => e.isNew),
+    atsUnits: ATS_UNITS.filter(e => e.isNew),
+    backupInterfaces: BACKUP_INTERFACES.filter(e => e.isNew),
+  };
 }
 
 /**
