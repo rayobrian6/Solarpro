@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BUILD v23 — SLD Technical Requirements</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3347;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+    --accent: #3b82f6;
+    --green: #22c55e;
+    --orange: #f97316;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --purple: #a855f7;
+    --blue: #60a5fa;
+    --p1: #ef4444;
+    --p2: #f97316;
+    --p3: #eab308;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 14px;
+  }
+  .header {
+    background: linear-gradient(135deg, #1e3a5f 0%, #0f1117 60%);
+    border-bottom: 2px solid #1565C0;
+    padding: 32px 48px;
+  }
+  .header-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #1565C0; color: #fff;
+    padding: 4px 12px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; margin-bottom: 12px;
+  }
+  .header h1 { font-size: 28px; font-weight: 800; color: #fff; margin-bottom: 6px; }
+  .header p { color: var(--muted); font-size: 13px; }
+  .meta-row {
+    display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap;
+  }
+  .meta-item { display: flex; flex-direction: column; gap: 2px; }
+  .meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+  .meta-value { font-size: 13px; font-weight: 600; color: var(--text); }
+  .container { max-width: 1200px; margin: 0 auto; padding: 32px 48px; }
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 24px;
+    overflow: hidden;
+  }
+  .section-header {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .section-num {
+    width: 28px; height: 28px;
+    background: var(--accent);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800; color: #fff; flex-shrink: 0;
+  }
+  .section-title { font-size: 16px; font-weight: 700; color: #fff; }
+  .section-body { padding: 24px; }
+  h3 { font-size: 14px; font-weight: 700; color: var(--blue); margin: 20px 0 10px; }
+  h3:first-child { margin-top: 0; }
+  h4 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  p { color: var(--text); margin-bottom: 10px; }
+  .priority-grid { display: grid; gap: 12px; }
+  .priority-item {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 16px;
+    border-left: 4px solid transparent;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: start;
+  }
+  .priority-item.p1 { border-left-color: var(--p1); }
+  .priority-item.p2 { border-left-color: var(--p2); }
+  .priority-item.p3 { border-left-color: var(--p3); }
+  .priority-badge {
+    padding: 3px 10px; border-radius: 12px;
+    font-size: 10px; font-weight: 800; letter-spacing: 1px;
+    white-space: nowrap;
+  }
+  .p1 .priority-badge { background: rgba(239,68,68,0.2); color: var(--p1); }
+  .p2 .priority-badge { background: rgba(249,115,22,0.2); color: var(--p2); }
+  .p3 .priority-badge { background: rgba(234,179,8,0.2); color: var(--p3); }
+  .priority-content h4 { margin: 0 0 4px; font-size: 13px; font-weight: 700; color: var(--text); text-transform: none; letter-spacing: 0; }
+  .priority-content p { margin: 0; font-size: 12px; color: var(--muted); }
+  .file-tag {
+    font-size: 10px; font-family: 'Consolas', monospace;
+    background: rgba(59,130,246,0.15); color: var(--blue);
+    padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+  }
+  .impact-tag {
+    font-size: 10px;
+    background: rgba(239,68,68,0.1); color: #fca5a5;
+    padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+  }
+  table {
+    width: 100%; border-collapse: collapse; margin: 12px 0;
+    font-size: 12px;
+  }
+  th {
+    background: var(--surface2); color: var(--muted);
+    padding: 8px 12px; text-align: left;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 8px 12px; border-bottom: 1px solid rgba(46,51,71,0.5);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  code {
+    font-family: 'Consolas', 'Courier New', monospace;
+    background: rgba(59,130,246,0.1);
+    color: #93c5fd;
+    padding: 1px 6px; border-radius: 4px;
+    font-size: 12px;
+  }
+  pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    color: #a5f3fc;
+    margin: 12px 0;
+    line-height: 1.5;
+  }
+  .topology-diagram {
+    background: #0d1117;
+    border: 1px solid #1565C0;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 12px 0;
+    font-family: 'Consolas', monospace;
+    font-size: 12px;
+    color: #93c5fd;
+    line-height: 1.8;
+  }
+  .checklist { list-style: none; }
+  .checklist li {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(46,51,71,0.3);
+    font-size: 13px;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checkbox {
+    width: 16px; height: 16px; flex-shrink: 0;
+    border: 2px solid var(--border);
+    border-radius: 3px; margin-top: 2px;
+  }
+  .checklist-group { margin-bottom: 20px; }
+  .checklist-group-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--muted);
+    padding: 8px 0 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 4px;
+  }
+  .color-swatch {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    vertical-align: middle;
+    margin-right: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .phase-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .phase-header {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .phase-num {
+    width: 24px; height: 24px;
+    background: var(--accent);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; color: #fff; flex-shrink: 0;
+  }
+  .phase-title { font-size: 13px; font-weight: 700; color: #fff; }
+  .phase-time { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .phase-steps { list-style: none; }
+  .phase-steps li {
+    padding: 4px 0 4px 20px;
+    position: relative;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .phase-steps li::before {
+    content: '→';
+    position: absolute; left: 0;
+    color: var(--accent);
+  }
+  .nec-ref {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: rgba(34,197,94,0.1); color: #86efac;
+    padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+    margin: 2px;
+  }
+  .warning-box {
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.3);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 12px 0;
+    font-size: 13px;
+    color: #fca5a5;
+  }
+  .warning-box strong { color: var(--p1); }
+  .info-box {
+    background: rgba(59,130,246,0.08);
+    border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 12px 0;
+    font-size: 13px;
+    color: #93c5fd;
+  }
+  .info-box strong { color: var(--blue); }
+  .toc {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+  .toc h3 { color: var(--text); margin: 0 0 12px; font-size: 13px; }
+  .toc ol { padding-left: 20px; }
+  .toc li { padding: 3px 0; font-size: 13px; color: var(--muted); }
+  .toc a { color: var(--blue); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .enphase-topology {
+    background: #0a1628;
+    border: 1px solid #1565C0;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 12px 0;
+    overflow-x: auto;
+  }
+  .enphase-topology pre {
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: #93c5fd;
+  }
+  @media print {
+    body { background: #fff; color: #000; }
+    .header { background: #1565C0; }
+    .section { border: 1px solid #ccc; }
+  }
+</style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-badge">⚡ BUILD v23 · Technical Requirements</div>
+  <h1>SLD System — Technical Requirements Document</h1>
+  <p>Enphase Ecosystem Accuracy · Generator/ATS Rendering · Inverter Icon · Electrical Sizing Data Flow</p>
+  <div class="meta-row">
+    <div class="meta-item"><span class="meta-label">Document Version</span><span class="meta-value">1.0</span></div>
+    <div class="meta-item"><span class="meta-label">Date</span><span class="meta-value">2025-03-06</span></div>
+    <div class="meta-item"><span class="meta-label">Status</span><span class="meta-value" style="color:#22c55e">✓ Approved for Development</span></div>
+    <div class="meta-item"><span class="meta-label">Applies To</span><span class="meta-value">BUILD v23</span></div>
+    <div class="meta-item"><span class="meta-label">Prior Build</span><span class="meta-value">adbaaf37 (v22)</span></div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- TOC -->
+  <div class="toc">
+    <h3>📋 Table of Contents</h3>
+    <ol>
+      <li><a href="#s1">Prioritized Action Item List</a></li>
+      <li><a href="#s2">Technical Requirements Per Component</a>
+        <ul style="padding-left:16px;margin-top:4px">
+          <li><a href="#s2-1">2.1 Enphase Battery — Correct Topology</a></li>
+          <li><a href="#s2-2">2.2 Generator + Generator ATS</a></li>
+          <li><a href="#s2-3">2.3 Inverter Icon — Professional Standard</a></li>
+          <li><a href="#s2-4">2.4 Data Flow — page.tsx to SLD API</a></li>
+          <li><a href="#s2-5">2.5 Electrical Sizing Page Data Flow</a></li>
+        </ul>
+      </li>
+      <li><a href="#s3">Visual Standards</a></li>
+      <li><a href="#s4">Testing Checklist</a></li>
+      <li><a href="#s5">Implementation Sequence</a></li>
+    </ol>
+  </div>
+
+  <!-- SECTION 1: PRIORITIZED ACTION ITEMS -->
+  <div class="section" id="s1">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div class="section-title">Prioritized Action Item List</div>
+    </div>
+    <div class="section-body">
+
+      <h3>🔴 P1 — Critical (Incorrect / Code Violation Risk)</h3>
+      <div class="priority-grid">
+
+        <div class="priority-item p1">
+          <span class="priority-badge">P1</span>
+          <div class="priority-content">
+            <h4>Battery connected directly to MSP bus — WRONG for Enphase</h4>
+            <p>Current BUILD v22 draws a dashed blue line from battery directly to the MSP bus. For Enphase AC-coupled systems, the battery must connect to the IQ System Controller 3 (BUI), which then connects to the MSP via a dedicated backfeed breaker.</p>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <span class="file-tag">sld-professional-renderer.ts</span>
+            <span class="impact-tag">NEC 705.12(B) misrepresented</span>
+          </div>
+        </div>
+
+        <div class="priority-item p1">
+          <span class="priority-badge">P1</span>
+          <div class="priority-content">
+            <h4>Battery/generator/ATS data NOT sent from page.tsx to SLD API</h4>
+            <p><code>batteryBackfeedA</code>, <code>generatorBrand/Kw</code>, <code>atsBrand/AmpRating</code>, <code>backupInterfaceId</code> are never included in the SLD POST body. Components cannot appear regardless of what the user configures.</p>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <span class="file-tag">app/engineering/page.tsx</span>
+            <span class="impact-tag">Components never render</span>
+          </div>
+        </div>
+
+        <div class="priority-item p1">
+          <span class="priority-badge">P1</span>
+          <div class="priority-content">
+            <h4>Enphase IQ System Controller 3 (BUI/ATS) not rendered on SLD</h4>
+            <p>The IQ SC3 is the central component of every Enphase battery system. It is service-entrance rated, functions as an ATS, and is the connection point for the battery, backup panel, and optional generator. It must appear on the right side of the MSP.</p>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <span class="file-tag">sld-professional-renderer.ts</span>
+            <span class="impact-tag">Missing required component</span>
+          </div>
+        </div>
+
+        <div class="priority-item p1">
+          <span class="priority-badge">P1</span>
+          <div class="priority-content">
+            <h4>Generator + generator ATS not appearing on SLD</h4>
+            <p>Even when generator and ATS are configured in the UI, they do not appear on the SLD because the data is never sent from page.tsx to the API. The generator ATS must appear between the utility meter and MSP (service entrance position).</p>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+            <span class="file-tag">page.tsx · route.ts</span>
+            <span class="impact-tag">Missing required component</span>
+          </div>
+        </div>
+
+      </div>
+
+      <h3 style="margin-top:24px">🟠 P2 — High (Missing Required Components)</h3>
+      <div class="priority-grid">
+
+        <div class="priority-item p2">
+          <span class="priority-badge">P2</span>
+          <div class="priority-content">
+            <h4>Enphase backup sub-panel not shown when hasBackupPanel=true</h4>
+            <p>The backup sub-panel (critical loads panel) must appear connected to the IQ SC3 load port, not to the ATS output. The current implementation connects it to the generic ATS output which is incorrect for Enphase.</p>
+          </div>
+          <span class="file-tag">sld-professional-renderer.ts</span>
+        </div>
+
+        <div class="priority-item p2">
+          <span class="priority-badge">P2</span>
+          <div class="priority-content">
+            <h4>backupInterfaceId not tracked in config or sent to SLD API</h4>
+            <p>The <code>BackupInterface</code> entity (IQ SC3, Tesla Gateway, Generac PWRmanager) is in the equipment database but is never selected in the UI config, never stored in state, and never sent to the SLD API. This is the key missing link for manufacturer-specific BUI rendering.</p>
+          </div>
+          <span class="file-tag">page.tsx · equipment-db.ts</span>
+        </div>
+
+        <div class="priority-item p2">
+          <span class="priority-badge">P2</span>
+          <div class="priority-content">
+            <h4>120% rule calculation does not include battery backfeed amps</h4>
+            <p>NEC 705.12(B) requires that the sum of all backfeed breakers (PV + battery) does not exceed 20% of the main panel rating. The current calculation only includes the PV backfeed breaker.</p>
+          </div>
+          <span class="file-tag">sld-professional-renderer.ts · page.tsx</span>
+        </div>
+
+        <div class="priority-item p2">
+          <span class="priority-badge">P2</span>
+          <div class="priority-content">
+            <h4>Electrical sizing page missing battery/generator/ATS data points</h4>
+            <p>Battery backfeed breaker size, generator output amps, generator OCPD, ATS amp rating, and NEC 702.5 compliance status are not shown on the electrical sizing page.</p>
+          </div>
+          <span class="file-tag">app/engineering/page.tsx</span>
+        </div>
+
+      </div>
+
+      <h3 style="margin-top:24px">🟡 P3 — Medium (Visual / Professional Quality)</h3>
+      <div class="priority-grid">
+
+        <div class="priority-item p3">
+          <span class="priority-badge">P3</span>
+          <div class="priority-content">
+            <h4>Inverter icon is generic — not manufacturer-specific</h4>
+            <p>The current inverter symbol is a plain IEEE 315 circle with a sine wave. It should be replaced with a professional rectangular box showing manufacturer name, model number, DC/AC conversion arrow, and output specs.</p>
+          </div>
+          <span class="file-tag">sld-professional-renderer.ts</span>
+        </div>
+
+        <div class="priority-item p3">
+          <span class="priority-badge">P3</span>
+          <div class="priority-content">
+            <h4>Legend does not reflect all active components</h4>
+            <p>The legend must dynamically include battery, generator, and ATS conductor entries only when those components are configured. Currently the legend is static.</p>
+          </div>
+          <span class="file-tag">sld-professional-renderer.ts</span>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- SECTION 2: TECHNICAL REQUIREMENTS -->
+  <div class="section" id="s2">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <div class="section-title">Technical Requirements Per Component</div>
+    </div>
+    <div class="section-body">
+
+      <!-- 2.1 Enphase Battery -->
+      <h3 id="s2-1">2.1 Enphase Battery System — Correct Topology</h3>
+
+      <div class="warning-box">
+        <strong>⚠ CRITICAL ERROR IN BUILD v22:</strong> The battery is drawn with a dashed line directly to the MSP bus. This is incorrect for ALL Enphase AC-coupled systems. The battery must connect to the IQ System Controller 3 (BUI), which is the transfer switch and gateway device.
+      </div>
+
+      <h4>Current (WRONG)</h4>
+      <pre>MSP Bus ←──── Battery (dashed blue line directly to MSP bus)</pre>
+
+      <h4>Required (CORRECT — Enphase AC-Coupled)</h4>
+      <div class="topology-diagram">
+        <pre>
+Utility Meter → MSP → [Backfeed Breaker] → IQ System Controller 3 (BUI/ATS)
+                                                        │
+                                          ┌─────────────┴──────────────┐
+                                          │                            │
+                                    BATTERY port                  LOAD port
+                                          │                            │
+                                 IQ Battery 5P/10T/3T         Backup Sub-Panel
+                                 (LFP, 240V AC, IP55)         (Critical Loads)
+        </pre>
+      </div>
+
+      <h4>IQ System Controller 3 — Symbol Specification</h4>
+      <table>
+        <tr><th>Property</th><th>Value</th></tr>
+        <tr><td>Symbol type</td><td>Rectangular enclosure with 3 connection ports</td></tr>
+        <tr><td>Border color</td><td><span class="color-swatch" style="background:#0D47A1"></span><code>#0D47A1</code> (dark blue)</td></tr>
+        <tr><td>Header text</td><td>IQ SYSTEM CONTROLLER 3 (BUI)</td></tr>
+        <tr><td>Ports shown</td><td>GRID (left), BATTERY (bottom), LOAD (right)</td></tr>
+        <tr><td>Transfer blades</td><td>GRID→LOAD (closed), GEN→LOAD (open if no gen)</td></tr>
+        <tr><td>Labels below</td><td>Enphase IQ SC3 · 200A · SE-RTD</td></tr>
+        <tr><td>NEC refs shown</td><td>NEC 706 / NEC 230.82 / UL 1741-SA</td></tr>
+        <tr><td>Placement</td><td>Right of MSP, between MSP and utility meter</td></tr>
+      </table>
+
+      <h4>Backfeed Breaker Sizes at MSP (NEC 705.12(B))</h4>
+      <table>
+        <tr><th>Battery Model</th><th>Backfeed Breaker</th><th>Wire Gauge</th><th>NEC Reference</th></tr>
+        <tr><td>IQ Battery 3T</td><td>15A</td><td>#14 AWG THWN-2</td><td>NEC 705.12(B)</td></tr>
+        <tr><td>IQ Battery 5P</td><td>20A</td><td>#12 AWG THWN-2</td><td>NEC 705.12(B)</td></tr>
+        <tr><td>IQ Battery 10T</td><td>40A</td><td>#8 AWG THWN-2</td><td>NEC 705.12(B)</td></tr>
+        <tr><td>2× IQ Battery 5P</td><td>40A (combined)</td><td>#8 AWG THWN-2</td><td>NEC 705.12(B)</td></tr>
+      </table>
+
+      <h4>Updated 120% Rule (NEC 705.12(B)) — Includes Battery</h4>
+      <pre>Total Backfeed = PV Backfeed Breaker + Battery Backfeed Breaker
+120% Rule:     Main Panel Rating × 1.2 ≥ Main Panel Rating + Total Backfeed
+Simplified:    Total Backfeed ≤ Main Panel Rating × 0.2
+
+Example: 200A panel, 30A PV breaker, 20A battery breaker
+  Total backfeed = 30 + 20 = 50A
+  200 × 0.2 = 40A  →  50A > 40A  →  ⚠ FAIL — panel upgrade required</pre>
+
+      <!-- 2.2 Generator + ATS -->
+      <h3 id="s2-2" style="margin-top:28px">2.2 Generator + Generator ATS — Correct Topology</h3>
+
+      <div class="info-box">
+        <strong>Note:</strong> The generator ATS is a SEPARATE device from the Enphase IQ SC3 BUI. When both battery and generator are configured, the Enphase IQ SC3 handles battery backup switching while a separate generator ATS (Generac RXSW100A3, Kohler RXT-100, etc.) handles generator transfer at the service entrance.
+      </div>
+
+      <h4>Required Placement</h4>
+      <div class="topology-diagram">
+        <pre>
+[Utility Service] → [Generator ATS] → [MSP Main Breaker]
+[Generator] ──────→ [Generator ATS]
+
+Position: Generator ATS between utility meter and MSP (service entrance)
+Generator: Below and left of the ATS
+      </pre>
+      </div>
+
+      <h4>Generator Symbol Specification</h4>
+      <table>
+        <tr><th>Property</th><th>Value</th></tr>
+        <tr><td>Symbol type</td><td>IEEE 315 circle with "G" + sine wave</td></tr>
+        <tr><td>Border color</td><td><span class="color-swatch" style="background:#2E7D32"></span><code>#2E7D32</code> (dark green)</td></tr>
+        <tr><td>Labels above</td><td>STANDBY GENERATOR · Brand Model</td></tr>
+        <tr><td>Labels below</td><td>XX kW / XXA · NEC 702.5</td></tr>
+        <tr><td>Output terminal</td><td>Right side, connects to generator ATS GEN input</td></tr>
+      </table>
+
+      <h4>Generator ATS Symbol Specification</h4>
+      <table>
+        <tr><th>Property</th><th>Value</th></tr>
+        <tr><td>Symbol type</td><td>Rectangular enclosure with transfer switch blades</td></tr>
+        <tr><td>Border color</td><td><span class="color-swatch" style="background:#E65100"></span><code>#E65100</code> (orange)</td></tr>
+        <tr><td>Inputs</td><td>NORM (utility, blade closed), GEN (generator, blade open)</td></tr>
+        <tr><td>Output</td><td>LOAD → to MSP main breaker</td></tr>
+        <tr><td>Labels below</td><td>Brand Model · XXA Rated · NEC 702.5 / UL 1008</td></tr>
+        <tr><td>Placement</td><td>Between utility meter and MSP, below main bus line</td></tr>
+      </table>
+
+      <!-- 2.3 Inverter Icon -->
+      <h3 id="s2-3" style="margin-top:28px">2.3 Inverter Icon — Professional Standard</h3>
+
+      <h4>Current Issue</h4>
+      <p>The current inverter symbol is a generic IEEE 315 circle with a sine wave. While technically correct, it lacks manufacturer identification and appears unprofessional on permit drawings submitted to AHJs.</p>
+
+      <h4>Required: Rectangular Inverter Box</h4>
+      <table>
+        <tr><th>Property</th><th>Value</th></tr>
+        <tr><td>Dimensions</td><td>Minimum 96×80px at SLD scale</td></tr>
+        <tr><td>Border</td><td>SW_MED (1.5px), black</td></tr>
+        <tr><td>Header</td><td>"STRING INVERTER" or "STRING + OPTIMIZER" or "MICROINVERTER"</td></tr>
+        <tr><td>Manufacturer</td><td>F.sub (7px), italic — e.g., "Fronius · Primo 8.2-1"</td></tr>
+        <tr><td>DC/AC symbol</td><td>Left-to-right arrow: DC ──[≈]──→ AC</td></tr>
+        <tr><td>Output specs</td><td>F.tiny (6.5px) — "X.X kW / XXA"</td></tr>
+        <tr><td>MPPT info</td><td>F.tiny — "MPPT: CH1:3str CH2:3str" (string only)</td></tr>
+      </table>
+
+      <!-- 2.4 Data Flow -->
+      <h3 id="s2-4" style="margin-top:28px">2.4 Data Flow — page.tsx to SLD API</h3>
+
+      <h4>Missing Fields in Current SLD POST Body</h4>
+      <table>
+        <tr><th>Field</th><th>Source in page.tsx</th><th>Status</th></tr>
+        <tr><td><code>batteryBackfeedA</code></td><td><code>getBatteryById(config.batteryId)?.backfeedBreakerA</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>generatorBrand</code></td><td><code>getGeneratorById(config.generatorId)?.manufacturer</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>generatorModel</code></td><td><code>getGeneratorById(config.generatorId)?.model</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>generatorKw</code></td><td><code>getGeneratorById(config.generatorId)?.ratedOutputKw</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>atsBrand</code></td><td><code>getATSById(config.atsId)?.manufacturer</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>atsModel</code></td><td><code>getATSById(config.atsId)?.model</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>atsAmpRating</code></td><td><code>getATSById(config.atsId)?.ampRating</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>backupInterfaceId</code></td><td><code>config.backupInterfaceId</code> (not in config yet)</td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>backupInterfaceBrand</code></td><td><code>getBackupInterfaceById(...)?.manufacturer</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>backupInterfaceModel</code></td><td><code>getBackupInterfaceById(...)?.model</code></td><td style="color:var(--p1)">❌ Missing</td></tr>
+        <tr><td><code>batteryModel</code></td><td><code>config.batteryBrand + config.batteryModel</code></td><td style="color:var(--green)">✓ Present</td></tr>
+        <tr><td><code>batteryKwh</code></td><td><code>config.batteryKwh × config.batteryCount</code></td><td style="color:var(--green)">✓ Present</td></tr>
+      </table>
+
+      <!-- 2.5 Electrical Sizing -->
+      <h3 id="s2-5" style="margin-top:28px">2.5 Electrical Sizing Page — Required Data Points</h3>
+
+      <h4>Battery Sizing Data Points to Add</h4>
+      <table>
+        <tr><th>Field</th><th>Source</th><th>Display Label</th></tr>
+        <tr><td>Battery Backfeed Breaker</td><td><code>BatterySystem.backfeedBreakerA</code></td><td>Battery Backfeed Breaker</td></tr>
+        <tr><td>Total Storage Capacity</td><td><code>batteryKwh × batteryCount</code></td><td>Total Storage (kWh)</td></tr>
+        <tr><td>120% Rule (combined)</td><td>PV breaker + battery breaker vs. 20% of panel</td><td>NEC 705.12(B) Check</td></tr>
+        <tr><td>Min. Dedicated Breaker</td><td><code>BatterySystem.minDedicatedBreakerA</code></td><td>Min. Dedicated Breaker</td></tr>
+        <tr><td>Battery UL Listing</td><td><code>BatterySystem.ulListing</code></td><td>UL Listing</td></tr>
+      </table>
+
+      <h4>Generator Sizing Data Points to Add</h4>
+      <table>
+        <tr><th>Field</th><th>Calculation</th><th>Display Label</th></tr>
+        <tr><td>Generator Output Amps</td><td><code>ratedOutputKw × 1000 / 240</code></td><td>Generator Output Amps</td></tr>
+        <tr><td>Generator OCPD</td><td><code>ceil(outputA × 1.25 / 5) × 5</code></td><td>Generator OCPD (125%)</td></tr>
+        <tr><td>Generator Feeder Wire</td><td>NEC 310.15 lookup by amps</td><td>Generator Feeder Wire</td></tr>
+        <tr><td>ATS Rating</td><td><code>ATSUnit.ampRating</code></td><td>ATS Rating</td></tr>
+        <tr><td>Neutral Switching</td><td><code>ATSUnit.neutralSwitched</code></td><td>Neutral Switching (NEC 250.30)</td></tr>
+        <tr><td>NEC 702.5 Compliance</td><td><code>atsId !== null</code></td><td>Transfer Equipment ✓</td></tr>
+      </table>
+
+    </div>
+  </div>
+
+  <!-- SECTION 3: VISUAL STANDARDS -->
+  <div class="section" id="s3">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <div class="section-title">Visual Standards</div>
+    </div>
+    <div class="section-body">
+
+      <h3>3.1 Color Coding Standard</h3>
+      <table>
+        <tr><th>Component</th><th>Color</th><th>Hex</th><th>Usage</th></tr>
+        <tr><td>Solar PV / DC conductors</td><td><span class="color-swatch" style="background:#000000;border-color:#555"></span>Black</td><td><code>#000000</code></td><td>DC strings, DC disconnect, AC conductors</td></tr>
+        <tr><td>Open air conductors</td><td><span class="color-swatch" style="background:#005500"></span>Dark Green</td><td><code>#005500</code></td><td>Roof runs, NEC 690.31</td></tr>
+        <tr><td>Equipment grounding</td><td><span class="color-swatch" style="background:#005500"></span>Dark Green</td><td><code>#005500</code></td><td>EGC rail, ground symbols</td></tr>
+        <tr><td>Battery system</td><td><span class="color-swatch" style="background:#1565C0"></span>Blue</td><td><code>#1565C0</code></td><td>Battery symbol, AC-coupled wires</td></tr>
+        <tr><td>Enphase BUI / IQ SC3</td><td><span class="color-swatch" style="background:#0D47A1"></span>Dark Blue</td><td><code>#0D47A1</code></td><td>BUI enclosure, battery port wires</td></tr>
+        <tr><td>Generator</td><td><span class="color-swatch" style="background:#2E7D32"></span>Dark Green</td><td><code>#2E7D32</code></td><td>Generator symbol, output wire</td></tr>
+        <tr><td>Generator ATS</td><td><span class="color-swatch" style="background:#E65100"></span>Orange</td><td><code>#E65100</code></td><td>ATS symbol, transfer wires</td></tr>
+        <tr><td>Backup panel</td><td><span class="color-swatch" style="background:#6A1B9A"></span>Purple</td><td><code>#6A1B9A</code></td><td>Sub-panel, critical load wires</td></tr>
+      </table>
+
+      <h3>3.2 Enphase-Specific SLD Layout</h3>
+      <div class="enphase-topology">
+        <pre>
+LEFT ←──────────────────────────────────────────────────────────────────────────→ RIGHT
+
+[PV Array] → [J-Box] → [AC Combiner] → [AC Disco] → [MSP] → [IQ SC3 BUI] → [Meter] → [Grid]
+                                                       │            │
+                                                  [PV Breaker]  [Battery Port]
+                                                  [Bat Breaker]      │
+                                                                [IQ Battery 5P/10T]
+
+                                                               [IQ SC3 Load Port]
+                                                                      │
+                                                             [Backup Sub-Panel]
+                                                             (Critical Loads)
+
+BELOW BUS (if generator configured):
+[Generator] → [Generator ATS] → [MSP Main Breaker]
+              ↑ Utility feed
+        </pre>
+      </div>
+
+      <h3>3.3 Symbol Placement Rules</h3>
+      <table>
+        <tr><th>Component</th><th>Position</th><th>Connection Point</th></tr>
+        <tr><td>Battery</td><td>Above main bus, right of MSP</td><td>Connects to BUI battery port</td></tr>
+        <tr><td>BUI / IQ SC3</td><td>Right of MSP, between MSP and utility meter</td><td>Grid port ← MSP backfeed breaker</td></tr>
+        <tr><td>Backup sub-panel</td><td>Below BUI, right side</td><td>Connects to BUI load port</td></tr>
+        <tr><td>Generator</td><td>Below main bus, left of MSP</td><td>Connects to generator ATS GEN input</td></tr>
+        <tr><td>Generator ATS</td><td>Between utility meter and MSP, below bus</td><td>NORM ← utility, LOAD → MSP</td></tr>
+        <tr><td>Grounding rail</td><td>Horizontal green line below all equipment</td><td>Drops from each component</td></tr>
+      </table>
+
+    </div>
+  </div>
+
+  <!-- SECTION 4: TESTING CHECKLIST -->
+  <div class="section" id="s4">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <div class="section-title">Testing Checklist</div>
+    </div>
+    <div class="section-body">
+
+      <div class="checklist-group">
+        <div class="checklist-group-title">TypeScript Compilation</div>
+        <ul class="checklist">
+          <li><span class="checkbox"></span>npx tsc --noEmit returns 0 errors</li>
+          <li><span class="checkbox"></span>No implicit any types introduced</li>
+          <li><span class="checkbox"></span>All new interface fields properly typed</li>
+        </ul>
+      </div>
+
+      <div class="checklist-group">
+        <div class="checklist-group-title">Enphase Battery System Tests</div>
+        <ul class="checklist">
+          <li><span class="checkbox"></span>IQ Battery 5P: IQ SC3 appears between MSP and utility meter</li>
+          <li><span class="checkbox"></span>IQ Battery 5P: Battery connects to IQ SC3 battery port (NOT to MSP bus)</li>
+          <li><span class="checkbox"></span>IQ Battery 5P: 20A backfeed breaker shown at MSP</li>
+          <li><span class="checkbox"></span>IQ Battery 5P: #12 AWG THWN-2 conductor callout on battery circuit</li>
+          <li><span class="checkbox"></span>IQ Battery 10T: 40A backfeed breaker shown (not 20A)</li>
+          <li><span class="checkbox"></span>IQ Battery 10T: #8 AWG THWN-2 conductor callout</li>
+          <li><span class="checkbox"></span>IQ SC3 labeled: "Enphase IQ System Controller 3 · 200A · SE-RTD"</li>
+          <li><span class="checkbox"></span>NEC 230.82 reference shown on IQ SC3 symbol</li>
+          <li><span class="checkbox"></span>Backup sub-panel connects to IQ SC3 load port (not ATS output)</li>
+        </ul>
+      </div>
+
+      <div class="checklist-group">
+        <div class="checklist-group-title">Generator + ATS Tests</div>
+        <ul class="checklist">
+          <li><span class="checkbox"></span>Generator symbol shows brand, model, kW, output amps</li>
+          <li><span class="checkbox"></span>Generator ATS positioned between utility meter and MSP</li>
+          <li><span class="checkbox"></span>Generator ATS shows amp rating and NEC 702.5 reference</li>
+          <li><span class="checkbox"></span>Neutral switching noted when ATSUnit.neutralSwitched = true</li>
+          <li><span class="checkbox"></span>Generator feeder conductor callout shown</li>
+        </ul>
+      </div>
+
+      <div class="checklist-group">
+        <div class="checklist-group-title">Data Flow Tests</div>
+        <ul class="checklist">
+          <li><span class="checkbox"></span>batteryBackfeedA from page.tsx reaches renderer and appears in wire label</li>
+          <li><span class="checkbox"></span>generatorKw from page.tsx reaches generator symbol</li>
+          <li><span class="checkbox"></span>atsAmpRating from page.tsx reaches ATS symbol</li>
+          <li><span class="checkbox"></span>backupInterfaceId triggers correct BUI symbol (Enphase vs Tesla vs Generac)</li>
+          <li><span class="checkbox"></span>120% rule calculation includes battery backfeed amps</li>
+        </ul>
+      </div>
+
+      <div class="checklist-group">
+        <div class="checklist-group-title">NEC Compliance Verification</div>
+        <ul class="checklist">
+          <li><span class="checkbox"></span><span class="nec-ref">NEC 705.12(B)</span> Battery backfeed breaker amps shown at MSP, combined 120% rule calculated</li>
+          <li><span class="checkbox"></span><span class="nec-ref">NEC 706</span> Battery system labeled with UL 9540 listing</li>
+          <li><span class="checkbox"></span><span class="nec-ref">NEC 702.5</span> Generator ATS labeled with transfer equipment note</li>
+          <li><span class="checkbox"></span><span class="nec-ref">NEC 250.30</span> Neutral switching noted when ATS has neutralSwitched: true</li>
+          <li><span class="checkbox"></span><span class="nec-ref">NEC 230.82</span> IQ SC3 labeled as service entrance rated</li>
+          <li><span class="checkbox"></span><span class="nec-ref">NEC 690.12</span> Rapid shutdown note present when configured</li>
+        </ul>
+      </div>
+
+      <div class="checklist-group">
+        <div class="checklist-group-title">Regression Tests</div>
+        <ul class="checklist">
+          <li><span class="checkbox"></span>Solar-only SLD output unchanged (no new symbols appear)</li>
+          <li><span class="checkbox"></span>String topology callout numbers unchanged (1-7 for standard path)</li>
+          <li><span class="checkbox"></span>Micro topology callout numbers unchanged (1-6 for standard path)</li>
+          <li><span class="checkbox"></span>Conduit schedule still populates from computeSystem() runs</li>
+          <li><span class="checkbox"></span>Title block data unchanged</li>
+          <li><span class="checkbox"></span>PDF export still works at ANSI C (2304×1728) dimensions</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SECTION 5: IMPLEMENTATION SEQUENCE -->
+  <div class="section" id="s5">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <div class="section-title">Implementation Sequence</div>
+    </div>
+    <div class="section-body">
+
+      <div class="phase-card">
+        <div class="phase-header">
+          <div class="phase-num">1</div>
+          <div class="phase-title">Data Flow Fix — page.tsx → SLD API</div>
+          <div class="phase-time">1–2 hours</div>
+        </div>
+        <ul class="phase-steps">
+          <li>Add <code>batteryBackfeedA</code>, <code>generatorBrand/Model/Kw</code>, <code>atsBrand/Model/AmpRating</code> to SLD POST body</li>
+          <li>Add <code>backupInterfaceId</code> to config state and POST body</li>
+          <li>Add <code>backupInterfaceId/Brand/Model/IsATS</code> to <code>SLDProfessionalInput</code> interface</li>
+          <li>Wire new fields through <code>app/api/engineering/sld/route.ts</code></li>
+          <li>Verify: <code>tsc --noEmit</code> passes</li>
+        </ul>
+      </div>
+
+      <div class="phase-card">
+        <div class="phase-header">
+          <div class="phase-num">2</div>
+          <div class="phase-title">Enphase BUI / IQ SC3 Symbol</div>
+          <div class="phase-time">2–3 hours</div>
+        </div>
+        <ul class="phase-steps">
+          <li>Add <code>renderBUI()</code> function to <code>lib/sld-professional-renderer.ts</code></li>
+          <li>Implement manufacturer-aware BUI routing (Enphase → IQ SC3, Tesla → Gateway, Generic → ATS)</li>
+          <li>Move battery connection from MSP bus to BUI battery port</li>
+          <li>Add dedicated backfeed breaker at MSP for battery circuit (size from <code>batteryBackfeedA</code>)</li>
+          <li>Connect backup sub-panel to BUI load port (not generic ATS output)</li>
+          <li>Verify: Enphase battery test cases pass</li>
+        </ul>
+      </div>
+
+      <div class="phase-card">
+        <div class="phase-header">
+          <div class="phase-num">3</div>
+          <div class="phase-title">Generator + Generator ATS Rendering</div>
+          <div class="phase-time">1–2 hours</div>
+        </div>
+        <ul class="phase-steps">
+          <li>Fix generator ATS placement (between utility meter and MSP, not below MSP)</li>
+          <li>Add conductor callouts for generator feeder and ATS output</li>
+          <li>Add neutral switching note when <code>ATSUnit.neutralSwitched = true</code></li>
+          <li>Verify: Generator test cases pass</li>
+        </ul>
+      </div>
+
+      <div class="phase-card">
+        <div class="phase-header">
+          <div class="phase-num">4</div>
+          <div class="phase-title">Inverter Icon Upgrade</div>
+          <div class="phase-time">1 hour</div>
+        </div>
+        <ul class="phase-steps">
+          <li>Replace generic <code>inverterSymbol()</code> circle with <code>renderInverterBox()</code> rectangular function</li>
+          <li>Add manufacturer name, model, DC/AC arrow, output specs</li>
+          <li>Handle all topology types: STRING, STRING_WITH_OPTIMIZER, MICROINVERTER</li>
+          <li>Verify: All topology types render correctly</li>
+        </ul>
+      </div>
+
+      <div class="phase-card">
+        <div class="phase-header">
+          <div class="phase-num">5</div>
+          <div class="phase-title">Electrical Sizing Page Data Flow</div>
+          <div class="phase-time">1–2 hours</div>
+        </div>
+        <ul class="phase-steps">
+          <li>Add battery backfeed breaker size to AC calculations panel</li>
+          <li>Update 120% rule to include battery backfeed amps (combined check)</li>
+          <li>Add generator output amps and OCPD calculation</li>
+          <li>Add ATS amp rating and neutral switching status</li>
+          <li>Add NEC 702.5 compliance note when generator is configured</li>
+        </ul>
+      </div>
+
+      <div class="phase-card">
+        <div class="phase-header">
+          <div class="phase-num">6</div>
+          <div class="phase-title">Final QA + Commit</div>
+          <div class="phase-time">1 hour</div>
+        </div>
+        <ul class="phase-steps">
+          <li>Run full test checklist (Section 4)</li>
+          <li><code>tsc --noEmit</code> — 0 errors required</li>
+          <li>Commit as BUILD v23</li>
+          <li>Push to origin/master</li>
+          <li>Package ZIP deliverable</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+  <div style="text-align:center;padding:24px 0;color:var(--muted);font-size:12px">
+    BUILD v23 Technical Requirements · SolarPro Engineering · 2025-03-06 · All NEC references to NEC 2023
+  </div>
+
+</div>
+</body>
+</html>
