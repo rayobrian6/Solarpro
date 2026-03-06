@@ -451,12 +451,18 @@ export default function EngineeringPage() {
       atsAmpRating: config.atsId
         ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
         : undefined,
-      backupInterfaceMaxA: config.backupInterfaceId
-        ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.maxContinuousOutputA ?? undefined; })()
-        : undefined,
+      backupInterfaceMaxA: (() => {
+        const _atsId = config.atsId?.toLowerCase() ?? '';
+        const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
+        const _resolvedBuiId = config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : '');
+        const _bi = _resolvedBuiId ? getBackupInterfaceById(_resolvedBuiId) : undefined;
+        return _bi?.maxContinuousOutputA ?? undefined;
+      })(),
       hasEnphaseIQSC3: (() => {
         const buiId = config.backupInterfaceId?.toLowerCase() ?? '';
-        return buiId.includes('iq-system-controller-3') || buiId.includes('iq-sc3') || buiId.includes('iqsc3');
+        const atsId = config.atsId?.toLowerCase() ?? '';
+        return buiId.includes('iq-system-controller-3') || buiId.includes('iq-sc3') || buiId.includes('iqsc3')
+          || atsId.includes('enphase-iq-sc3') || atsId.includes('enphase-iq-system-controller');
       })(),
     };
 
@@ -936,22 +942,23 @@ export default function EngineeringPage() {
             ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
             : undefined,
           // Backup interface (Enphase IQ SC3, Tesla Gateway, etc.)
-          backupInterfaceId:    config.backupInterfaceId || undefined,
-          backupInterfaceBrand: config.backupInterfaceId
-            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.manufacturer ?? undefined; })()
-            : undefined,
-          backupInterfaceModel: config.backupInterfaceId
-            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.model ?? undefined; })()
-            : undefined,
-          backupInterfaceIsATS: config.backupInterfaceId
-            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.islandingCapable ?? false; })()
-            : false,
-          // Backup panel
-          hasBackupPanel:    !!(config.backupInterfaceId),
-          backupPanelAmps:   100,
-          backupPanelBrand:  config.backupInterfaceId
-            ? (() => { const bi = getBackupInterfaceById(config.backupInterfaceId); return bi?.manufacturer ?? undefined; })()
-            : undefined,
+          // If atsId is IQ SC3, resolve backupInterfaceId from BACKUP_INTERFACES
+          // IQ SC3 in ATS_UNITS (id: enphase-iq-sc3-ats) maps to BACKUP_INTERFACES (id: enphase-iq-system-controller-3)
+          ...(() => {
+            const _atsId = config.atsId?.toLowerCase() ?? '';
+            const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
+            const _resolvedBuiId = config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : '');
+            const _bi = _resolvedBuiId ? getBackupInterfaceById(_resolvedBuiId) : undefined;
+            return {
+              backupInterfaceId:    _resolvedBuiId || undefined,
+              backupInterfaceBrand: _bi?.manufacturer ?? undefined,
+              backupInterfaceModel: _bi?.model ?? undefined,
+              backupInterfaceIsATS: _bi?.islandingCapable ?? false,
+              hasBackupPanel:       !!_resolvedBuiId,
+              backupPanelAmps:      100,
+              backupPanelBrand:     _bi?.manufacturer ?? undefined,
+            };
+          })(),
           necVersion:     `NEC ${compliance.jurisdiction?.necVersion || '2023'}`,
           jurisdiction:   compliance.jurisdiction?.state || '',
           notes:          config.notes,
