@@ -1448,7 +1448,10 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // SLD, conduit sizing, and BOM must all derive from this output.
   const segmentScheduleInput: SegmentScheduleInput = {
     topology: input.topology,
-    moduleCount: input.totalPanels,
+    // NOTE: segment-schedule.ts uses moduleCount as DEVICE count (not panel count)
+    // For DS3-S (2 panels/device): 40 panels = 20 devices
+    // microDeviceCount = ceil(totalPanels / inverterModulesPerDevice)
+    moduleCount: isMicro ? microDeviceCount : input.totalPanels,
     maxDevicesPerBranch: input.inverterBranchLimit || 16,
     microAcCurrentA: isMicro ? perMicroCurrentA : 0,
     manufacturerMaxPerBranch20A: input.manufacturerMaxPerBranch20A,
@@ -1556,7 +1559,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   console.log(`[DATA_PROPAGATION] Validated: ${runs.length} runSegments -> ${segmentSchedule.length} conduit rows -> ${runs.length} equipment items`);
 
   // ── Conduit Schedule ──────────────────────────────────────────────────────
-  const conduitSchedule: ConduitScheduleRow[] = runs.map((run, idx) => ({
+  const conduitSchedule: ConduitScheduleRow[] = runs.filter(r => !r.isOpenAir && r.conduitType !== 'NONE' && r.conduitSize !== 'N/A').map((run, idx) => ({
     raceway: `C-${idx + 1}`,
     from: run.from,
     to: run.to,
@@ -1694,7 +1697,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // Verify all engineering outputs reference the same runSegments[] data source
 
   // Check 1: Conduit schedule synchronized with runSegments
-  const runsWithConduit = runs.filter(r => r.conduitType !== 'NONE' && r.conduitSize !== 'NONE');
+  const runsWithConduit = runs.filter(r => !r.isOpenAir && r.conduitType !== 'NONE' && r.conduitSize !== 'N/A');
   if (conduitSchedule.length > 0 && runsWithConduit.length !== conduitSchedule.length) {
     issues.push({
       severity: 'warning',

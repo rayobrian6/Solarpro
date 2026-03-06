@@ -578,7 +578,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
     // Neutral IS required: microinverters produce 120/240V split-phase; neutral carries
     // imbalance current and is required by NEC 200.3 and utility interconnection rules.
     // Lands on LOAD side of AC disconnect (combiner feeds load terminals).
-    const feederSizing = autoSizeGauge(totalCurrentA, ambientC, 2, false, '#10 AWG');
+    // NEC 200.3: neutral required for 120/240V split-phase; 3 current-carrying conductors (L1+L2+N)
+    const feederSizing = autoSizeGauge(totalCurrentA, ambientC, 3, false, '#10 AWG');
     const feederGauge = feederSizing.gauge;
     const feederOcpd = nextStandardOCPD(totalCurrentA * 1.25);
     const feederEgcGauge = getEGCGauge(feederOcpd);
@@ -697,7 +698,8 @@ export function buildSegmentSchedule(input: SegmentScheduleInput): SegmentSchedu
   // DISCO LOAD SIDE: conductor from combiner lands on LOAD (bottom) terminals of AC disco.
 
   const acCurrentA = input.acOutputCurrentA;
-  const feederSizing = autoSizeGauge(acCurrentA, ambientC, 2, false, '#10 AWG');
+  // NEC 200.3: neutral required for 120/240V split-phase interconnection; 3 current-carrying conductors (L1+L2+N)
+  const feederSizing = autoSizeGauge(acCurrentA, ambientC, 3, false, '#10 AWG');
   const feederGauge = feederSizing.gauge;
   const feederOcpd = nextStandardOCPD(acCurrentA * 1.25);
   const feederEgcGauge = getEGCGauge(feederOcpd);
