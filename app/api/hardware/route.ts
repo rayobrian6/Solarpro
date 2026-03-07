@@ -1,15 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/lib/db';
+import { getAllUnifiedPanels, getAllUnifiedInverters } from '@/lib/equipment-library';
 
-// Hardware/equipment data is static registry data — kept in db.ts (equipment registry)
-// This is NOT user data and does not need Neon persistence
+// Hardware/equipment data — merges engineering DB + user Equipment Library
+// GET returns unified panels (engineering specs + user pricing/dimensions)
 
 export async function GET(req: NextRequest) {
   try {
-    const panels = db.getPanels();
-    const inverters = db.getInverters();
-    const mountings = db.getMountings();
-    const batteries = db.getBatteries ? db.getBatteries() : [];
+    const libPanels    = db.getPanels();
+    const libInverters = db.getInverters();
+    const mountings    = db.getMountings();
+    const batteries    = db.getBatteries ? db.getBatteries() : [];
+
+    // Merge engineering DB + user library for panels and inverters
+    const panels    = getAllUnifiedPanels(libPanels);
+    const inverters = getAllUnifiedInverters(libInverters);
+
     return NextResponse.json({ 
       success: true, 
       data: { panels, inverters, mountings, batteries } 

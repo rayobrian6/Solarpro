@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import type { SolarPanel, Inverter, MountingSystem, Battery } from '@/types';
-import { Cpu, Plus, Edit, Trash2, Save, X, Zap, Settings, Sun, Battery as BatteryIcon, Copy, FileText, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Cpu, Plus, Edit, Trash2, Save, X, Zap, Settings, Sun, Battery as BatteryIcon, Copy, FileText, ToggleLeft, ToggleRight, Database, User } from 'lucide-react';
 
 // Debounce utility for autosave
 function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): T {
@@ -224,16 +224,31 @@ function EquipmentCard({
           )}
           
           {/* Status badges */}
-          <div className="flex gap-2 mt-2">
+          <div className="flex flex-wrap gap-1.5 mt-2">
             {item.bifacial && (
               <div className="text-xs bg-purple-500/10 border border-purple-500/20 rounded-lg px-2 py-1 text-purple-300">
                 ⚡ Bifacial ×{item.bifacialFactor}
               </div>
             )}
             {item.datasheetUrl && (
-              <a href={item.datasheetUrl} target="_blank" rel="noopener noreferrer" className="text-xs bg-blue-500/10 border border-blue-500/20 rounded-lg px-2 py-1 text-blue-300 hover:bg-blue-500/20">
-                <FileText size={10} className="inline mr-1" />Datasheet
+              <a href={item.datasheetUrl} target="_blank" rel="noopener noreferrer" className="text-xs bg-blue-500/10 border border-blue-500/20 rounded-lg px-2 py-1 text-blue-300 hover:bg-blue-500/20 flex items-center gap-1">
+                <FileText size={10} />Datasheet
               </a>
+            )}
+            {item.source === 'engineering' && (
+              <div className="text-xs bg-teal-500/10 border border-teal-500/20 rounded-lg px-2 py-1 text-teal-300 flex items-center gap-1">
+                <Database size={9} />Eng DB
+              </div>
+            )}
+            {item.source === 'merged' && (
+              <div className="text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg px-2 py-1 text-amber-300 flex items-center gap-1">
+                <Database size={9} />Merged
+              </div>
+            )}
+            {item.isCustom && (
+              <div className="text-xs bg-indigo-500/10 border border-indigo-500/20 rounded-lg px-2 py-1 text-indigo-300 flex items-center gap-1">
+                <User size={9} />Custom
+              </div>
             )}
             {!isActive && (
               <div className="text-xs bg-red-500/10 border border-red-500/20 rounded-lg px-2 py-1 text-red-300">
@@ -448,7 +463,7 @@ export default function HardwarePage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-white">Equipment Library</h1>
-              <p className="text-slate-400 text-sm">Manage your solar panels, inverters, mounting systems, and batteries</p>
+              <p className="text-slate-400 text-sm">Your equipment catalog — engineering DB specs merged with your custom pricing &amp; models</p>
             </div>
           </div>
           {saving && (

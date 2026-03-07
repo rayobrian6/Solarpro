@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v27.1';
+export const BUILD_VERSION = 'v27.2';
 export const BUILD_DATE = '2026-03-07';
 export const BUILD_DESCRIPTION = 'EQUIPMENT LIBRARY REFACTOR';
 export const BUILD_FEATURES = [

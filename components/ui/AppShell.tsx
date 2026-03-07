@@ -37,7 +37,7 @@ const navItems: NavItem[] = [
 ];
 
 const adminItems: NavItem[] = [
-  { label: 'Hardware Config', href: '/admin/hardware', icon: <Cpu size={17} /> },
+  { label: 'Equipment Library', href: '/admin/hardware', icon: <Cpu size={17} /> },
   { label: 'Pricing', href: '/admin/pricing', icon: <Settings size={17} /> },
 ];
 
