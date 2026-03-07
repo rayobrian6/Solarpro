@@ -1,122 +1,148 @@
 /**
  * lib/permissions.ts
  * Plan-based feature gating for SolarPro.
- * Use this on both server (API routes) and client (React hooks).
  */
 
 import { PlanId, getPlanPermissions } from './stripe';
 
-export type SubscriptionStatus =
-  | 'trialing'
-  | 'active'
-  | 'past_due'
-  | 'canceled'
-  | 'requires_payment'
-  | 'free_pass'
-  | 'trial_expired';
+export type FeatureKey =
+  | 'engineering'
+  | 'permitPackets'
+  | 'structuralCalcs'
+  | 'solFence'
+  | 'bom'
+  | 'whiteLabelBranding'
+  | 'proposalEsigning'
+  | 'batteryDesign'
+  | 'bulkProposals'
+  | 'apiAccess'
+  | 'multiCompany';
 
-export interface UserSubscription {
-  plan: PlanId;
-  subscriptionStatus: SubscriptionStatus;
-  trialEndsAt: string | null;
-  isFreePass: boolean;
-  hasAccess: boolean;
+export interface AccessResult {
+  allowed: boolean;
+  reason: 'active' | 'trialing' | 'trial_expired' | 'no_subscription' | 'free_pass' | 'canceled' | 'past_due';
+  daysRemaining?: number;
 }
 
 /**
- * Determine if a user has active access to the platform.
+ * Check if a user has active access to the platform at all.
  */
-export function checkAccess(sub: UserSubscription): {
-  hasAccess: boolean;
-  reason: 'active' | 'trialing' | 'free_pass' | 'trial_expired' | 'canceled' | 'past_due' | 'requires_payment';
-  daysRemaining?: number;
-} {
-  if (sub.isFreePass) return { hasAccess: true, reason: 'free_pass' };
-  if (sub.subscriptionStatus === 'active') return { hasAccess: true, reason: 'active' };
+export function checkAccess(
+  subscriptionStatus: string,
+  trialEndsAt: string | null,
+  isFreePass: boolean
+): AccessResult {
+  if (isFreePass) return { allowed: true, reason: 'free_pass' };
 
-  if (sub.subscriptionStatus === 'trialing' && sub.trialEndsAt) {
+  if (subscriptionStatus === 'active') return { allowed: true, reason: 'active' };
+
+  if (subscriptionStatus === 'trialing') {
+    if (!trialEndsAt) return { allowed: true, reason: 'trialing', daysRemaining: 3 };
     const now = new Date();
-    const end = new Date(sub.trialEndsAt);
+    const end = new Date(trialEndsAt);
     const msLeft = end.getTime() - now.getTime();
     const daysRemaining = Math.max(0, Math.ceil(msLeft / (1000 * 60 * 60 * 24)));
-    if (msLeft > 0) return { hasAccess: true, reason: 'trialing', daysRemaining };
-    return { hasAccess: false, reason: 'trial_expired', daysRemaining: 0 };
+    if (daysRemaining > 0) return { allowed: true, reason: 'trialing', daysRemaining };
+    return { allowed: false, reason: 'trial_expired', daysRemaining: 0 };
   }
 
-  if (sub.subscriptionStatus === 'past_due') return { hasAccess: false, reason: 'past_due' };
-  if (sub.subscriptionStatus === 'requires_payment') return { hasAccess: false, reason: 'requires_payment' };
-  return { hasAccess: false, reason: 'canceled' };
+  if (subscriptionStatus === 'past_due') return { allowed: true, reason: 'past_due' };
+  if (subscriptionStatus === 'canceled') return { allowed: false, reason: 'canceled' };
+  if (subscriptionStatus === 'free_pass') return { allowed: true, reason: 'free_pass' };
+
+  // Default: allow with no_subscription (new accounts)
+  return { allowed: true, reason: 'no_subscription' };
 }
 
 /**
- * Check if a user's plan allows a specific feature.
+ * Check if a plan can access a specific feature.
  */
-export function canAccess(plan: PlanId, feature: keyof ReturnType<typeof getPlanPermissions>): boolean {
+export function canAccess(plan: PlanId, feature: FeatureKey): boolean {
   const perms = getPlanPermissions(plan);
-  const val = perms[feature];
-  if (typeof val === 'boolean') return val;
-  if (typeof val === 'number') return val > 0;
-  return val !== null; // null = unlimited = allowed
+  switch (feature) {
+    case 'engineering':        return perms.engineering;
+    case 'permitPackets':      return perms.permitPackets;
+    case 'structuralCalcs':    return perms.structuralCalcs;
+    case 'solFence':           return perms.solFence;
+    case 'bom':                return perms.bom;
+    case 'whiteLabelBranding': return perms.whiteLabelBranding;
+    case 'proposalEsigning':   return perms.proposalEsigning;
+    case 'batteryDesign':      return perms.batteryDesign;
+    case 'bulkProposals':      return perms.bulkProposals;
+    case 'apiAccess':          return perms.apiAccess;
+    case 'multiCompany':       return perms.multiCompany;
+    default:                   return false;
+  }
 }
 
 /**
  * Get upgrade message for a locked feature.
  */
-export function getUpgradeMessage(feature: keyof ReturnType<typeof getPlanPermissions>): {
+export function getUpgradeMessage(feature: FeatureKey): {
   title: string;
   description: string;
   requiredPlan: string;
 } {
-  const messages: Record<string, { title: string; description: string; requiredPlan: string }> = {
+  const messages: Record<FeatureKey, { title: string; description: string; requiredPlan: string }> = {
     engineering: {
-      title: 'Engineering Tools — Professional Plan Required',
-      description: 'Single-line diagrams, NEC-compliant calculations, and full electrical engineering are available on the Professional plan and above.',
+      title: 'Engineering Tools Required',
+      description: 'Full engineering calculations including Single Line Diagrams (SLD) are available on Professional and above.',
       requiredPlan: 'Professional',
     },
     permitPackets: {
-      title: 'Permit Packets — Professional Plan Required',
-      description: 'Generate complete permit-ready packages with stamped drawings and calculations on the Professional plan.',
+      title: 'Permit Packets Locked',
+      description: 'Generate complete permit-ready packages with stamped drawings on Professional and above.',
       requiredPlan: 'Professional',
     },
     structuralCalcs: {
-      title: 'Structural Calculations — Professional Plan Required',
-      description: 'Wind, snow, and seismic load calculations for permit submissions are available on the Professional plan.',
+      title: 'Structural Calculations Locked',
+      description: 'Roof load analysis and structural engineering calculations are available on Professional and above.',
       requiredPlan: 'Professional',
     },
     solFence: {
-      title: 'Sol Fence Design — Professional Plan Required',
-      description: 'Vertical bifacial solar fence design tools are available on the Professional plan and above.',
-      requiredPlan: 'Professional',
+      title: 'Sol Fence Design Locked',
+      description: 'Sol Fence solar carport and fence design tools are available on Contractor and above.',
+      requiredPlan: 'Contractor',
     },
     bom: {
-      title: 'Bill of Materials — Professional Plan Required',
-      description: 'Automated BOM generation with pricing is available on the Professional plan.',
+      title: 'BOM Generation Locked',
+      description: 'Automated Bill of Materials generation is available on Professional and above.',
       requiredPlan: 'Professional',
     },
     whiteLabelBranding: {
-      title: 'White-Label Branding — Professional Plan Required',
-      description: 'Upload your logo and customize proposal branding on the Professional plan.',
+      title: 'White-Label Branding Locked',
+      description: 'Custom logos, colors, and branded proposals are available on Professional and above.',
+      requiredPlan: 'Professional',
+    },
+    proposalEsigning: {
+      title: 'Proposal E-Signing Locked',
+      description: 'Digital proposal signing and client approval workflows are available on Professional and above.',
+      requiredPlan: 'Professional',
+    },
+    batteryDesign: {
+      title: 'Battery System Design Locked',
+      description: 'Battery storage system design and sizing tools are available on Professional and above.',
       requiredPlan: 'Professional',
     },
     bulkProposals: {
-      title: 'Bulk Proposals — Contractor Plan Required',
-      description: 'Generate proposals in bulk for multiple clients at once on the Contractor plan.',
+      title: 'Bulk Proposals Locked',
+      description: 'Generate multiple proposals at once with advanced automation on Contractor and above.',
       requiredPlan: 'Contractor',
     },
     apiAccess: {
-      title: 'API Access — Contractor Plan Required',
-      description: 'Programmatic access to SolarPro via REST API is available on the Contractor plan.',
+      title: 'API Access Locked',
+      description: 'Programmatic API access for integrations and automation is available on Contractor and above.',
       requiredPlan: 'Contractor',
     },
     multiCompany: {
-      title: 'Multi-Company — Enterprise Plan Required',
-      description: 'Manage multiple companies and brands from a single account on the Enterprise plan.',
+      title: 'Multi-Company Accounts Locked',
+      description: 'Manage multiple company accounts from a single dashboard. Available on Enterprise.',
       requiredPlan: 'Enterprise',
     },
   };
 
   return messages[feature] || {
-    title: 'Feature Not Available',
+    title: 'Feature Locked',
     description: 'This feature requires a higher plan.',
     requiredPlan: 'Professional',
   };
