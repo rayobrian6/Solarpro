@@ -1,131 +1,136 @@
 // ============================================================
-// POST /api/engineering/structural-v2
-// Structural Calculation Engine V2
-// Realistic residential rooftop solar structural analysis
+// Structural V3 API Route
+// Accepts full panel geometry + site params
+// Returns: geometry, loads, mount layout, racking BOM, rafter check
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { runStructuralCalcV3, type StructuralInputV3 } from '@/lib/structural-engine-v3';
 
-export const dynamic = 'force-dynamic';
-
-import { 
-  runStructuralCalcV2, 
-  StructuralInputV2,
-  StructuralResultV2 
-} from '@/lib/structural-engine-v2';
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // Map request body to StructuralInputV2
-    const input: StructuralInputV2 = {
+    const {
       // Site
-      windSpeed: Number(body.windSpeed) || 115,
-      windExposure: body.windExposure ?? 'C',
-      groundSnowLoad: Number(body.groundSnowLoad) || 20,
-      meanRoofHeight: Number(body.meanRoofHeight) || 15,
+      windSpeed       = 115,
+      windExposure    = 'C',
+      groundSnowLoad  = 20,
+      meanRoofHeight  = 15,
+      roofPitch       = 20,
 
-      // Roof Framing
-      framingType: body.framingType ?? 'unknown',
-      rafterSize: body.rafterSize ?? '2x6',
-      rafterSpacing: Number(body.rafterSpacing) || 24,
-      rafterSpan: Number(body.rafterSpan) || 14,
-      rafterSpecies: body.rafterSpecies ?? 'Douglas Fir-Larch',
-      sheathingType: body.sheathingType,
-      sheathingThickness: body.sheathingThickness,
-      roofPitch: Number(body.roofPitch) || 20,
-      roofType: body.roofType ?? 'shingle',
+      // Framing
+      framingType     = 'unknown',
+      rafterSize      = '2x6',
+      rafterSpacing   = 24,
+      rafterSpan      = 16,
+      rafterSpecies   = 'Douglas Fir-Larch',
 
-      // PV Array
-      panelCount: Number(body.panelCount) || 20,
-      panelLength: Number(body.panelLength) || 70.9,
-      panelWidth: Number(body.panelWidth) || 41.7,
-      panelWeight: Number(body.panelWeight) || 44.1,
-      panelOrientation: body.panelOrientation ?? 'portrait',
-      rowCount: Number(body.rowCount) || 2,
+      // Array
+      panelCount      = 24,
+      panelLength     = 73.0,
+      panelWidth      = 41.0,
+      panelWeight     = 45.0,
+      panelOrientation = 'portrait',
+      rowCount,
+      colCount,
+      moduleGap       = 0.5,
+      rowGap          = 6,
 
-      // Mounting System
-      mountingSystem: body.mountingSystem ?? 'rt-mini',
-      rackingWeight: Number(body.rackingWeight) || 4.0,
+      // Racking
+      mountingSystem  = 'ironridge-xr100',
+      rackingWeight   = 4.0,
+    } = body;
 
-      // Optional
-      maxMountSpacing: body.maxMountSpacing ? Number(body.maxMountSpacing) : undefined,
+    // Map legacy mounting system IDs to racking-database IDs
+    const idMap: Record<string, string> = {
+      'ironridge-xr100':    'ironridge-xr100',
+      'ironridge-xr1000':   'ironridge-xr1000',
+      'unirac-solarmount':  'unirac-solarmount',
+      'unirac-sme':         'unirac-sme',
+      'snapnrack-100':      'snapnrack-100',
+      'quickmount-classic': 'quickmount-classic',
+      'quickmount-tile':    'quickmount-tile',
+      's5-pvkit':           's5-pvkit',
+      'k2-crossrail':       'k2-crossrail',
+      'ecofasten-rockit':   'ecofasten-rockit',
+      'dpw-powerrail':      'dpw-powerrail',
+      'schletter-classic':  'schletter-classic',
+      'esdec-flatfix':      'esdec-flatfix',
+      'rooftech-mini':      'rooftech-mini',
+      // Legacy aliases
+      'rt-mini':            'rooftech-mini',
+      'rail-based':         'ironridge-xr100',
+      'rail-less':          'rooftech-mini',
     };
 
-    const result = runStructuralCalcV2(input);
+    const rackingSystemId = idMap[mountingSystem] ?? mountingSystem ?? 'ironridge-xr100';
+
+    const input: StructuralInputV3 = {
+      windSpeed:       Number(windSpeed),
+      windExposure:    windExposure as 'B' | 'C' | 'D',
+      groundSnowLoad:  Number(groundSnowLoad),
+      meanRoofHeight:  Number(meanRoofHeight),
+      roofPitch:       Number(roofPitch),
+
+      framingType:     framingType as 'truss' | 'rafter' | 'unknown',
+      rafterSize:      String(rafterSize),
+      rafterSpacingIn: Number(rafterSpacing),
+      rafterSpanFt:    Number(rafterSpan),
+      woodSpecies:     rafterSpecies as any,
+
+      panelCount:      Number(panelCount),
+      panelLengthIn:   Number(panelLength),
+      panelWidthIn:    Number(panelWidth),
+      panelWeightLbs:  Number(panelWeight),
+      panelOrientation: panelOrientation as 'portrait' | 'landscape',
+      rowCount:        rowCount ? Number(rowCount) : undefined,
+      colCount:        colCount ? Number(colCount) : undefined,
+      moduleGapIn:     Number(moduleGap),
+      rowGapIn:        Number(rowGap),
+
+      rackingSystemId,
+      rackingWeightPerPanelLbs: Number(rackingWeight),
+    };
+
+    const result = runStructuralCalcV3(input);
 
     return NextResponse.json({
-      success: true,
-      status: result.status,
-
-      // Summary for UI
-      summary: {
-        status: result.status,
-        framingType: result.framing.type,
-        framingUtilization: result.framing.utilization,
-        framingPasses: result.framing.passes,
-        mountCount: result.mountLayout.mountCount,
-        mountSpacing: result.mountLayout.mountSpacing,
-        safetyFactor: result.mountLayout.upliftPerMount > 0 
-          ? (2 * 450) / result.mountLayout.upliftPerMount 
-          : 999,
-        totalSystemWeight: result.totalSystemWeight,
-        addedDeadLoadPsf: result.addedDeadLoadPsf,
+      status:        result.status,
+      arrayGeometry: result.arrayGeometry,
+      wind:          result.wind,
+      snow:          result.snow,
+      mountLayout:   result.mountLayout,
+      railAnalysis:  result.railAnalysis,
+      rafterAnalysis: result.rafterAnalysis,
+      rackingBOM:    result.rackingBOM,
+      framing: {
+        type:          result.rafterAnalysis.framingType,
+        description:   result.rafterAnalysis.framingType === 'truss'
+                         ? 'Pre-Engineered Truss'
+                         : `${result.rafterAnalysis.size} Stick-Built Rafter`,
+        capacityPsf:   result.rafterAnalysis.framingType === 'truss'
+                         ? (result.rafterAnalysis.bendingMomentCapacityFtLbs || 45)
+                         : result.rafterAnalysis.bendingMomentCapacityFtLbs,
+        actualLoadPsf: result.rafterAnalysis.totalLoadPsf,
+        utilization:   result.rafterAnalysis.overallUtilization,
+        passes:        result.rafterAnalysis.passes,
+        notes:         result.rafterAnalysis.notes,
       },
-
-      // Detailed results
-      framing: result.framing,
-      mountLayout: result.mountLayout,
-      railSystem: result.railSystem,
-      rackingBOM: result.rackingBOM,
-      wind: result.wind,
-      snow: result.snow,
-
-      // Issues
-      errors: result.errors,
-      warnings: result.warnings,
-      recommendations: result.recommendations,
-
-      // Compliance table for UI
-      complianceTable: [
-        {
-          check: 'Framing Capacity',
-          value: `${(result.framing.utilization * 100).toFixed(0)}%`,
-          limit: '≤ 100%',
-          status: result.framing.passes ? 'PASS' : 'FAIL',
-          reference: result.framing.type === 'truss' ? 'BCSI / TPI' : 'NDS 2018',
-        },
-        {
-          check: 'Mount Safety Factor',
-          value: result.mountLayout.upliftPerMount > 0 
-            ? ((2 * 450) / result.mountLayout.upliftPerMount).toFixed(2)
-            : 'N/A',
-          limit: '≥ 1.5',
-          status: result.mountLayout.upliftPerMount > 0 && (2 * 450) / result.mountLayout.upliftPerMount >= 1.5 
-            ? 'PASS' 
-            : 'FAIL',
-          reference: 'ICC-ES ESR-3575',
-        },
-        {
-          check: 'Mount Spacing',
-          value: `${result.mountLayout.mountSpacing}"`,
-          limit: `≤ ${result.mountLayout.mountSpacing}" (calculated)`,
-          status: 'PASS',
-          reference: 'ASCE 7-22',
-        },
-        {
-          check: 'Added Dead Load',
-          value: `${result.addedDeadLoadPsf.toFixed(1)} psf`,
-          limit: '≤ 5 psf (advisory)',
-          status: result.addedDeadLoadPsf <= 5 ? 'PASS' : 'WARNING',
-          reference: 'IBC 2021 §1604',
-        },
-      ],
+      totalSystemWeightLbs: result.totalSystemWeightLbs,
+      addedDeadLoadPsf:     result.addedDeadLoadPsf,
+      errors:               result.errors,
+      warnings:             result.warnings,
+      recommendations:      result.recommendations,
     });
 
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Structural calculation failed';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  } catch (err: any) {
+    console.error('[structural-v3]', err);
+    return NextResponse.json(
+      { error: 'Structural calculation failed', details: err?.message },
+      { status: 500 }
+    );
   }
 }

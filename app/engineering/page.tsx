@@ -85,7 +85,8 @@ interface ProjectConfig {
   rafterSpan: number;
   rafterSize: string;
   rafterSpecies: string;
-  framingType: 'truss' | 'rafter' | 'unknown';  // V2 structural engine
+  framingType: 'truss' | 'rafter' | 'unknown';  // V3 structural engine
+  panelOrientation?: 'portrait' | 'landscape';  // V3 array geometry
   attachmentSpacing: number;
   railSpacing: number;           // inches — distance between rail rows (row-to-row)
   // Layout fields (Phase 3 - Future Layout Engine)
@@ -822,49 +823,109 @@ export default function EngineeringPage() {
           cache: 'no-store',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            windSpeed:      config.windSpeed,
-            windExposure:   config.windExposure,
-            groundSnowLoad: config.groundSnowLoad,
-            roofType:       config.roofType,
-            roofPitch:      config.roofPitch,
-            rafterSpacing:  config.rafterSpacing,
-            rafterSpan:     config.rafterSpan,
-            rafterSize:     config.rafterSize,
-            rafterSpecies:  config.rafterSpecies,
-            framingType:    config.framingType,
-            panelCount:     totalPanels,
-            panelLength:    panelDataV2?.length ?? 70.9,
-            panelWidth:     panelDataV2?.width ?? 41.7,
-            panelWeight:    panelDataV2?.weight ?? 44.1,
-            mountingSystem: config.mountingId?.includes('rt-mini') ? 'rt-mini' : 'rail-based',
-            rowCount:       config.rowCount ?? 2,
+            // Site
+            windSpeed:        config.windSpeed,
+            windExposure:     config.windExposure,
+            groundSnowLoad:   config.groundSnowLoad,
+            roofPitch:        config.roofPitch,
+            meanRoofHeight:   15,
+            // Framing
+            framingType:      config.framingType,
+            rafterSpacing:    config.rafterSpacing,
+            rafterSpan:       config.rafterSpan,
+            rafterSize:       config.rafterSize,
+            rafterSpecies:    config.rafterSpecies,
+            // Array geometry — derived from panel specs
+            panelCount:       totalPanels,
+            panelLength:      panelDataV2?.length ?? 73.0,
+            panelWidth:       panelDataV2?.width  ?? 41.0,
+            panelWeight:      panelDataV2?.weight ?? 45.0,
+            panelOrientation: 'portrait',
+            rowCount:         config.rowCount ?? undefined,
+            // Racking
+            mountingSystem:   config.mountingId ?? 'ironridge-xr100',
+            rackingWeight:    4.0,
           }),
-        }).catch(() => null),  // V2 structural is best-effort
+        }).catch(() => null),  // V3 structural is best-effort
       ]);
 
       const calcData = await calcRes.json();
       if (calcData.success) {
-        // Merge V2 structural results into compliance data
+        // Merge V3 structural results into compliance data
         try {
           if (structV2Res && structV2Res.ok) {
             const structV2Data = await structV2Res.json();
-            if (structV2Data?.success) {
+            // V3 API returns status directly (no .success wrapper)
+            if (structV2Data?.status) {
+              const ra = structV2Data.rafterAnalysis;
+              const ml = structV2Data.mountLayout;
+              const wind = structV2Data.wind;
+              const snow = structV2Data.snow;
               calcData.structural = {
-                // V2 fields (new)
+                // V3 fields
                 status:          structV2Data.status,
                 framing:         structV2Data.framing,
-                mountLayout:     structV2Data.mountLayout,
-                railSystem:      structV2Data.railSystem,
+                arrayGeometry:   structV2Data.arrayGeometry,
+                mountLayout:     ml,
+                railAnalysis:    structV2Data.railAnalysis,
                 rackingBOM:      structV2Data.rackingBOM,
-                wind:            structV2Data.wind,
-                snow:            structV2Data.snow,
+                rafterAnalysis:  ra,
+                wind:            {
+                  velocityPressure:    wind?.velocityPressurePsf,
+                  netUpliftPressure:   wind?.netUpliftPressurePsf,
+                  upliftPerAttachment: ml?.upliftPerMountLbs,
+                  designWindSpeed:     config.windSpeed,
+                  exposureCategory:    config.windExposure,
+                  Kz:                  wind?.exposureCoeff,
+                  Kzt: 1.0, Kd: 0.85,
+                  GCp:                 wind?.gcpUplift,
+                  GCpi:                0.18,
+                  tributaryArea:       ml?.tributaryAreaPerMountFt2,
+                  totalAttachments:    ml?.mountCount,
+                },
+                snow:            {
+                  groundSnowLoad:        snow?.groundSnowLoadPsf,
+                  roofSnowLoad:          snow?.roofSnowLoadPsf,
+                  snowLoadPerAttachment: ml?.downwardPerMountLbs,
+                },
+                // V1 compatibility shims
+                rafter: {
+                  rafterSize:             ra?.size,
+                  rafterSpacing:          ra?.spacingIn,
+                  rafterSpan:             ra?.spanFt,
+                  bendingMoment:          ra?.bendingMomentDemandFtLbs,
+                  allowableBendingMoment: ra?.bendingMomentCapacityFtLbs,
+                  utilizationRatio:       ra?.overallUtilization,
+                  deflection:             ra?.deflectionIn,
+                  allowableDeflection:    ra?.allowableDeflectionIn,
+                  Fb_base:                1150,
+                  Cd: 1.15, Cr: 1.15,
+                  Fb_prime:               1150 * 1.15 * 1.15,
+                  totalLoadPsf:           ra?.totalLoadPsf,
+                  lineLoad:               ra ? ra.totalLoadPsf * (ra.spacingIn / 12) : 0,
+                },
+                attachment: {
+                  safetyFactor:             ml?.safetyFactor,
+                  lagBoltCapacity:          ml?.mountCapacityLbs,
+                  totalUpliftPerAttachment: ml?.upliftPerMountLbs,
+                  upliftPerAttachment:      ml?.upliftPerMountLbs,
+                  attachmentSpacing:        ml?.mountSpacingIn,
+                  railSpacing:              structV2Data.arrayGeometry?.railSpacingIn,
+                  tributaryArea:            ml?.tributaryAreaPerMountFt2,
+                  maxAllowedSpacing:        ml?.mountSpacingIn,
+                  spacingMarginPct:         100,
+                },
+                deadLoad: {
+                  panelWeightPsf:        structV2Data.addedDeadLoadPsf,
+                  rackingWeightPsf:      1.5,
+                  totalDeadLoadPsf:      structV2Data.addedDeadLoadPsf,
+                  deadLoadPerAttachment: ml?.downwardPerMountLbs,
+                  existingRoofDeadLoad:  15,
+                  totalRoofDeadLoad:     (structV2Data.addedDeadLoadPsf ?? 0) + 15,
+                },
                 errors:          structV2Data.errors,
                 warnings:        structV2Data.warnings,
                 recommendations: structV2Data.recommendations,
-                complianceTable: structV2Data.complianceTable,
-                // V1 compatibility fields (for existing UI references)
-                attachment: { safetyFactor: structV2Data.summary?.safetyFactor },
-                rafter:     { utilizationRatio: structV2Data.framing?.utilization },
               };
               // Auto-update framing type if detected
               if (structV2Data.framing?.type && config.framingType === 'unknown') {
@@ -872,7 +933,7 @@ export default function EngineeringPage() {
               }
             }
           }
-        } catch (_) { /* V2 structural merge is best-effort */ }
+        } catch (_) { /* V3 structural merge is best-effort */ }
 
         setCompliance(calcData);
         // Inject NEC step-by-step calculation entries into decision log
@@ -3752,25 +3813,8 @@ export default function EngineeringPage() {
                 </div>
               </div>
               <div className="card p-5">
-                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Weight size={14} className="text-amber-400" /> Attachment & Racking</h3>
-                {/* DIAGNOSTIC: log available mounts on render */}
-                {(() => { console.log('Available mounts:', RACKING_SYSTEMS.map(r => r.id)); return null; })()}
+                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Weight size={14} className="text-amber-400" /> Racking System</h3>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Attachment Spacing (in)</label>
-                    <select value={config.attachmentSpacing} onChange={e => updateConfig({ attachmentSpacing: +e.target.value })}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
-                      {[24, 36, 48, 60, 72].map(s => <option key={s} value={s}>{s}"</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Rail Spacing — Row-to-Row (in)</label>
-                    <select value={config.railSpacing} onChange={e => updateConfig({ railSpacing: +e.target.value })}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
-                      {[36, 48, 60, 72, 84, 96].map(s => <option key={s} value={s}>{s}" ({(s/12).toFixed(1)}ft)</option>)}
-                    </select>
-                    <p className="text-xs text-slate-500 mt-1">Distance between rail rows (tributary area calc)</p>
-                  </div>
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">Mount Brand</label>
                     <select
@@ -3795,7 +3839,44 @@ export default function EngineeringPage() {
                         .map(r => <option key={r.id} value={r.id}>{r.model}</option>)}
                     </select>
                   </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Panel Orientation</label>
+                    <select value={config.panelOrientation ?? 'portrait'} onChange={e => updateConfig({ panelOrientation: e.target.value as 'portrait' | 'landscape' })}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
+                      <option value="portrait">Portrait</option>
+                      <option value="landscape">Landscape</option>
+                    </select>
+                  </div>
                 </div>
+                {/* Calculated mount spacing display */}
+                {compliance.structural?.mountLayout ? (
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="bg-slate-800/40 rounded-lg p-3 text-center">
+                      <div className="text-xs text-slate-400 mb-1">Calc. Mount Spacing</div>
+                      <div className="text-lg font-bold text-amber-400">{compliance.structural.mountLayout.mountSpacingIn ?? compliance.structural.mountLayout.finalSpacingIn ?? '—'}"</div>
+                      <div className="text-xs text-slate-500">O.C. (from loads)</div>
+                    </div>
+                    <div className="bg-slate-800/40 rounded-lg p-3 text-center">
+                      <div className="text-xs text-slate-400 mb-1">Total Mounts</div>
+                      <div className="text-lg font-bold text-white">{compliance.structural.mountLayout.mountCount ?? '—'}</div>
+                      <div className="text-xs text-slate-500">attachments</div>
+                    </div>
+                    <div className="bg-slate-800/40 rounded-lg p-3 text-center">
+                      <div className="text-xs text-slate-400 mb-1">Uplift / Mount</div>
+                      <div className="text-lg font-bold text-amber-400">{compliance.structural.mountLayout.upliftPerMountLbs?.toFixed(0) ?? compliance.structural.mountLayout.upliftPerMount?.toFixed(0) ?? '—'} lbs</div>
+                      <div className="text-xs text-slate-500">demand</div>
+                    </div>
+                    <div className="bg-slate-800/40 rounded-lg p-3 text-center">
+                      <div className="text-xs text-slate-400 mb-1">Safety Factor</div>
+                      <div className={`text-lg font-bold ${(compliance.structural.mountLayout.safetyFactor ?? 0) >= 2 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {compliance.structural.mountLayout.safetyFactor?.toFixed(2) ?? '—'}
+                      </div>
+                      <div className="text-xs text-slate-500">capacity/demand</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 text-xs text-slate-500 italic">Run calculation to see computed mount spacing and loads.</div>
+                )}
                 {/* Selected mount structural specs */}
                 {(() => {
                   const sel = RACKING_SYSTEMS.find(r => r.id === config.mountingId);
@@ -3803,10 +3884,9 @@ export default function EngineeringPage() {
                   return (
                     <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400 bg-slate-800/40 rounded-lg px-3 py-2">
                       <span>Load model: <span className="text-white font-bold">{sel.loadModel ?? 'distributed'}</span></span>
-                      {sel.fastenersPerAttachment && <span>Fasteners/attachment: <span className="text-amber-300 font-bold">{sel.fastenersPerAttachment}</span></span>}
+                      {sel.fastenersPerAttachment && <span>Fasteners/mount: <span className="text-amber-300 font-bold">{sel.fastenersPerAttachment}</span></span>}
                       {sel.upliftCapacity && <span>Uplift capacity: <span className="text-amber-300 font-bold">{sel.upliftCapacity} lbf/lag</span></span>}
-                      {sel.tributaryArea && <span>Tributary area: <span className="text-white">{sel.tributaryArea} ft²</span></span>}
-                      <span className="text-slate-500 italic ml-auto">Changing this will recalculate engineering values.</span>
+                      <span className="text-slate-500 italic ml-auto">Mount spacing is calculated from wind/snow loads.</span>
                     </div>
                   );
                 })()}
@@ -3817,50 +3897,176 @@ export default function EngineeringPage() {
                     <BarChart2 size={14} className="text-amber-400" /> Structural Analysis Results
                     <StatusBadge status={compliance.structural.status} size="sm" />
                   </h3>
+                  {/* Array Geometry Summary */}
+                  {compliance.structural.arrayGeometry && (
+                    <div className="mb-4 bg-slate-800/40 rounded-xl p-4">
+                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Grid size={11} /> Array Geometry</div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                        <div className="flex justify-between"><span className="text-slate-400">Array Size</span><span className="text-white">{compliance.structural.arrayGeometry.colCount} × {compliance.structural.arrayGeometry.rowCount}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Array Width</span><span className="text-white">{(compliance.structural.arrayGeometry.arrayWidthIn / 12).toFixed(1)} ft</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Array Height</span><span className="text-white">{(compliance.structural.arrayGeometry.arrayHeightIn / 12).toFixed(1)} ft</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Rail Length</span><span className="text-white">{compliance.structural.arrayGeometry.railLengthFt?.toFixed(1)} ft</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Rail Count</span><span className="text-white">{compliance.structural.arrayGeometry.railCount}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">System Weight</span><span className="text-white">{compliance.structural.totalSystemWeightLbs?.toFixed(0)} lbs</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Added Dead Load</span><span className="text-white">{compliance.structural.addedDeadLoadPsf?.toFixed(1)} psf</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Mid Clamps</span><span className="text-white">{compliance.structural.arrayGeometry.totalMidClamps}</span></div>
+                      </div>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Wind Analysis */}
                     <div className="bg-slate-800/40 rounded-xl p-4">
                       <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Wind size={11} /> Wind Analysis</div>
                       <div className="space-y-1.5 text-xs">
-                        <div className="flex justify-between"><span className="text-slate-400">Velocity Pressure (qz)</span><span className="text-white">{compliance.structural.wind?.velocityPressure?.toFixed(2)} psf</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">Net Uplift Pressure</span><span className="text-amber-400 font-bold">{compliance.structural.wind?.netUpliftPressure?.toFixed(2)} psf</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">Uplift per Attachment</span><span className="text-amber-400 font-bold">{compliance.structural.wind?.upliftPerAttachment?.toFixed(0)} lbs</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Velocity Pressure (qz)</span><span className="text-white">{(compliance.structural.wind?.velocityPressurePsf ?? compliance.structural.wind?.velocityPressure)?.toFixed(2)} psf</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Net Uplift Pressure</span><span className="text-amber-400 font-bold">{(compliance.structural.wind?.netUpliftPressurePsf ?? compliance.structural.wind?.netUpliftPressure)?.toFixed(2)} psf</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Uplift per Mount</span><span className="text-amber-400 font-bold">{(compliance.structural.mountLayout?.upliftPerMountLbs ?? compliance.structural.wind?.upliftPerAttachment)?.toFixed(0)} lbs</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Roof Zone</span><span className="text-white capitalize">{compliance.structural.wind?.roofZone ?? 'interior'}</span></div>
                       </div>
                     </div>
+                    {/* Snow Analysis */}
                     <div className="bg-slate-800/40 rounded-xl p-4">
                       <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Snowflake size={11} /> Snow Analysis</div>
                       <div className="space-y-1.5 text-xs">
-                        <div className="flex justify-between"><span className="text-slate-400">Ground Snow Load</span><span className="text-white">{compliance.structural.snow?.groundSnowLoad} psf</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">Roof Snow Load</span><span className="text-white">{compliance.structural.snow?.roofSnowLoad?.toFixed(1)} psf</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">Snow per Attachment</span><span className="text-white">{compliance.structural.snow?.snowLoadPerAttachment?.toFixed(0)} lbs</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Ground Snow Load</span><span className="text-white">{compliance.structural.snow?.groundSnowLoadPsf ?? compliance.structural.snow?.groundSnowLoad} psf</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Roof Snow Load</span><span className="text-white">{(compliance.structural.snow?.roofSnowLoadPsf ?? compliance.structural.snow?.roofSnowLoad)?.toFixed(1)} psf</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Slope Factor (Cs)</span><span className="text-white">{compliance.structural.snow?.slopeFactor?.toFixed(2)}</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Snow per Mount</span><span className="text-white">{compliance.structural.mountLayout?.downwardPerMountLbs?.toFixed(0)} lbs</span></div>
                       </div>
                     </div>
+                    {/* Rafter / Framing Analysis */}
                     <div className="bg-slate-800/40 rounded-xl p-4">
-                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Ruler size={11} /> Rafter Analysis</div>
+                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Ruler size={11} /> {compliance.structural.rafterAnalysis?.framingType === 'truss' ? 'Truss Analysis' : 'Rafter Analysis (NDS 2018)'}</div>
                       <div className="space-y-1.5 text-xs">
-                        <div className="flex justify-between"><span className="text-slate-400">Bending Moment</span><span className="text-white">{compliance.structural.rafter?.bendingMoment?.toFixed(0)} ft-lbs</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">Allowable Moment</span><span className="text-white">{compliance.structural.rafter?.allowableBendingMoment?.toFixed(0)} ft-lbs</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">Utilization Ratio</span>
-                          <span className={compliance.structural.rafter?.utilizationRatio > 1 ? 'text-red-400 font-bold' : compliance.structural.rafter?.utilizationRatio > 0.85 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
-                            {(compliance.structural.rafter?.utilizationRatio * 100)?.toFixed(0)}%
-                          </span>
-                        </div>
-                        <div className="flex justify-between"><span className="text-slate-400">Deflection / Allowable</span><span className="text-white">{compliance.structural.rafter?.deflection?.toFixed(3)}" / {compliance.structural.rafter?.allowableDeflection?.toFixed(3)}"</span></div>
+                        {compliance.structural.rafterAnalysis?.framingType === 'truss' ? (
+                          <>
+                            <div className="flex justify-between"><span className="text-slate-400">Framing Type</span><span className="text-white">Pre-Engineered Truss</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Total Load</span><span className="text-white">{compliance.structural.rafterAnalysis?.totalLoadPsf?.toFixed(1)} psf</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Utilization</span>
+                              <span className={(compliance.structural.rafterAnalysis?.overallUtilization ?? 0) > 1 ? 'text-red-400 font-bold' : (compliance.structural.rafterAnalysis?.overallUtilization ?? 0) > 0.85 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
+                                {((compliance.structural.rafterAnalysis?.overallUtilization ?? compliance.structural.rafter?.utilizationRatio ?? 0) * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                            <div className="flex justify-between"><span className="text-slate-400">Status</span><span className={compliance.structural.rafterAnalysis?.passes ? 'text-emerald-400' : 'text-red-400'}>{compliance.structural.rafterAnalysis?.passes ? 'PASS' : 'FAIL'}</span></div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="flex justify-between"><span className="text-slate-400">Bending Moment</span><span className="text-white">{(compliance.structural.rafterAnalysis?.bendingMomentDemandFtLbs ?? compliance.structural.rafter?.bendingMoment)?.toFixed(0)} ft-lbs</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Allowable Moment</span><span className="text-white">{(compliance.structural.rafterAnalysis?.bendingMomentCapacityFtLbs ?? compliance.structural.rafter?.allowableBendingMoment)?.toFixed(0)} ft-lbs</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Utilization Ratio</span>
+                              <span className={(compliance.structural.rafterAnalysis?.overallUtilization ?? compliance.structural.rafter?.utilizationRatio ?? 0) > 1 ? 'text-red-400 font-bold' : (compliance.structural.rafterAnalysis?.overallUtilization ?? compliance.structural.rafter?.utilizationRatio ?? 0) > 0.85 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
+                                {((compliance.structural.rafterAnalysis?.overallUtilization ?? compliance.structural.rafter?.utilizationRatio ?? 0) * 100).toFixed(0)}%
+                              </span>
+                            </div>
+                            <div className="flex justify-between"><span className="text-slate-400">Deflection / Allow.</span><span className="text-white">{(compliance.structural.rafterAnalysis?.deflectionIn ?? compliance.structural.rafter?.deflection)?.toFixed(3)}" / {(compliance.structural.rafterAnalysis?.allowableDeflectionIn ?? compliance.structural.rafter?.allowableDeflection)?.toFixed(3)}"</span></div>
+                          </>
+                        )}
                       </div>
                     </div>
+                    {/* Mount / Attachment Analysis */}
                     <div className="bg-slate-800/40 rounded-xl p-4">
-                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Weight size={11} /> Attachment Analysis</div>
+                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Weight size={11} /> Mount Analysis</div>
                       <div className="space-y-1.5 text-xs">
-                        <div className="flex justify-between"><span className="text-slate-400">Lag Bolt Capacity</span><span className="text-white">{compliance.structural.attachment?.lagBoltCapacity?.toFixed(0)} lbs</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">Uplift per Attachment</span><span className="text-amber-400">{compliance.structural.attachment?.totalUpliftPerAttachment?.toFixed(0)} lbs</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Mount Capacity</span><span className="text-white">{(compliance.structural.mountLayout?.mountCapacityLbs ?? compliance.structural.attachment?.lagBoltCapacity)?.toFixed(0)} lbs</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Uplift per Mount</span><span className="text-amber-400">{(compliance.structural.mountLayout?.upliftPerMountLbs ?? compliance.structural.attachment?.upliftPerAttachment)?.toFixed(0)} lbs</span></div>
                         <div className="flex justify-between"><span className="text-slate-400">Safety Factor</span>
-                          <span className={compliance.structural.attachment?.safetyFactor < 2 ? 'text-red-400 font-bold' : compliance.structural.attachment?.safetyFactor < 3 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
-                            {compliance.structural.attachment?.safetyFactor?.toFixed(2)}
+                          <span className={(compliance.structural.mountLayout?.safetyFactor ?? compliance.structural.attachment?.safetyFactor ?? 0) < 1.5 ? 'text-red-400 font-bold' : (compliance.structural.mountLayout?.safetyFactor ?? compliance.structural.attachment?.safetyFactor ?? 0) < 2.5 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>
+                            {(compliance.structural.mountLayout?.safetyFactor ?? compliance.structural.attachment?.safetyFactor)?.toFixed(2)}
                           </span>
                         </div>
-                        <div className="flex justify-between"><span className="text-slate-400">Max Allowed Spacing</span><span className="text-white">{compliance.structural.attachment?.maxAllowedSpacing}"</span></div>
+                        <div className="flex justify-between"><span className="text-slate-400">Calc. Spacing</span><span className="text-white">{compliance.structural.mountLayout?.mountSpacingIn ?? compliance.structural.mountLayout?.finalSpacingIn ?? compliance.structural.attachment?.maxAllowedSpacing}"</span></div>
+                        {compliance.structural.mountLayout?.spacingWasReduced && (
+                          <div className="text-amber-400 text-xs mt-1">⚠ Spacing auto-reduced for safety</div>
+                        )}
                       </div>
                     </div>
+                    {/* Rail Analysis (if applicable) */}
+                    {compliance.structural.railAnalysis && (
+                      <div className="bg-slate-800/40 rounded-xl p-4 md:col-span-2">
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Ruler size={11} /> Rail Analysis</div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                          <div className="flex justify-between"><span className="text-slate-400">Rail Count</span><span className="text-white">{compliance.structural.railAnalysis.railCount}</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Rail Length</span><span className="text-white">{compliance.structural.railAnalysis.railLengthFt?.toFixed(1)} ft</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Rail Span</span><span className="text-white">{compliance.structural.railAnalysis.railSpanIn}" (max {compliance.structural.railAnalysis.maxAllowedSpanIn}")</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Cantilever</span><span className="text-white">{compliance.structural.railAnalysis.cantileverIn}" (max {compliance.structural.railAnalysis.maxAllowedCantileverIn}")</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Moment Demand</span><span className="text-white">{compliance.structural.railAnalysis.momentDemandInLbs?.toFixed(0)} in·lbs</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Moment Capacity</span><span className="text-white">{compliance.structural.railAnalysis.momentCapacityInLbs?.toFixed(0)} in·lbs</span></div>
+                          <div className="flex justify-between"><span className="text-slate-400">Utilization</span>
+                            <span className={(compliance.structural.railAnalysis.utilizationRatio ?? 0) > 1 ? 'text-red-400 font-bold' : 'text-emerald-400 font-bold'}>
+                              {((compliance.structural.railAnalysis.utilizationRatio ?? 0) * 100).toFixed(0)}%
+                            </span>
+                          </div>
+                          <div className="flex justify-between"><span className="text-slate-400">Status</span><span className={compliance.structural.railAnalysis.passes ? 'text-emerald-400' : 'text-red-400'}>{compliance.structural.railAnalysis.passes ? 'PASS' : 'FAIL'}</span></div>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                  {/* Racking BOM Summary */}
+                  {compliance.structural.rackingBOM && (
+                    <div className="mt-4 bg-slate-800/40 rounded-xl p-4">
+                      <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 flex items-center gap-1"><Package size={11} /> Racking Materials (Calculated)</div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        {compliance.structural.rackingBOM.rails?.qty > 0 && (
+                          <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                            <span className="text-slate-400">Rails</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.rails.qty} × {compliance.structural.rackingBOM.rails.lengthFt?.toFixed(1)}ft</span>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.railSplices?.qty > 0 && (
+                          <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                            <span className="text-slate-400">Rail Splices</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.railSplices.qty} ea</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                          <span className="text-slate-400">Mounts</span>
+                          <span className="text-white font-bold">{compliance.structural.rackingBOM.mounts?.qty} ea</span>
+                        </div>
+                        {compliance.structural.rackingBOM.lFeet?.qty > 0 && (
+                          <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                            <span className="text-slate-400">L-Feet</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.lFeet.qty} ea</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                          <span className="text-slate-400">Mid Clamps</span>
+                          <span className="text-white font-bold">{compliance.structural.rackingBOM.midClamps?.qty} ea</span>
+                        </div>
+                        <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                          <span className="text-slate-400">End Clamps</span>
+                          <span className="text-white font-bold">{compliance.structural.rackingBOM.endClamps?.qty} ea</span>
+                        </div>
+                        <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                          <span className="text-slate-400">Ground Lugs</span>
+                          <span className="text-white font-bold">{compliance.structural.rackingBOM.groundLugs?.qty} ea</span>
+                        </div>
+                        <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                          <span className="text-slate-400">Lag Bolts</span>
+                          <span className="text-white font-bold">{compliance.structural.rackingBOM.lagBolts?.qty} ea</span>
+                        </div>
+                        {compliance.structural.rackingBOM.flashingKits?.qty > 0 && (
+                          <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                            <span className="text-slate-400">Flashing Kits</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.flashingKits.qty} ea</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between bg-slate-900/40 rounded px-2 py-1.5">
+                          <span className="text-slate-400">Bonding Clips</span>
+                          <span className="text-white font-bold">{compliance.structural.rackingBOM.bondingClips?.qty} ea</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Recommendations */}
+                  {compliance.structural.recommendations?.length > 0 && (
+                    <div className="mt-3 space-y-1">
+                      {compliance.structural.recommendations.map((rec: string, i: number) => (
+                        <div key={i} className="text-xs text-amber-300/80 flex items-start gap-1.5">
+                          <span className="text-amber-400 mt-0.5">→</span>{rec}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -5187,72 +5393,84 @@ export default function EngineeringPage() {
                     )}
                   </div>
 
-                  {/* ── Racking Materials (from Structural V2) */}
+                  {/* ── Racking Materials (from Structural V3 Engine) */}
                   {compliance.structural?.rackingBOM && (
                     <div className="bg-slate-800/60 border border-amber-500/20 rounded-xl p-4">
                       <div className="flex items-center gap-2 mb-3">
                         <Wrench size={13} className="text-amber-400" />
                         <span className="text-xs font-bold text-amber-400 uppercase tracking-wide">Racking Materials</span>
-                        <span className="text-xs text-slate-500 ml-1">Auto-calculated from Structural V2 engine</span>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        {compliance.structural.rackingBOM.mounts && (
-                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.mounts.qty}</div>
-                            <div className="text-xs text-slate-500">Roof Mounts</div>
-                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.mounts.description}</div>
-                          </div>
-                        )}
-                        {compliance.structural.rackingBOM.rails && (
-                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.rails.qty} {compliance.structural.rackingBOM.rails.unit}</div>
-                            <div className="text-xs text-slate-500">Rails</div>
-                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.rails.description}</div>
-                          </div>
-                        )}
-                        {compliance.structural.rackingBOM.lFeet && (
-                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.lFeet.qty}</div>
-                            <div className="text-xs text-slate-500">L-Feet</div>
-                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.lFeet.description}</div>
-                          </div>
-                        )}
-                        {compliance.structural.rackingBOM.railSplices && (
-                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.railSplices.qty}</div>
-                            <div className="text-xs text-slate-500">Rail Splices</div>
-                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.railSplices.description}</div>
-                          </div>
-                        )}
-                        {compliance.structural.rackingBOM.midClamps && (
-                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.midClamps.qty}</div>
-                            <div className="text-xs text-slate-500">Mid Clamps</div>
-                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.midClamps.description}</div>
-                          </div>
-                        )}
-                        {compliance.structural.rackingBOM.endClamps && (
-                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.endClamps.qty}</div>
-                            <div className="text-xs text-slate-500">End Clamps</div>
-                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.endClamps.description}</div>
-                          </div>
-                        )}
-                        {compliance.structural.rackingBOM.groundLugs && (
-                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.groundLugs.qty}</div>
-                            <div className="text-xs text-slate-500">Grounding Lugs</div>
-                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.groundLugs.description}</div>
-                          </div>
-                        )}
+                        <span className="text-xs text-slate-500 ml-1">Derived from array geometry · ASCE 7-22 loads · {RACKING_SYSTEMS.find(r => r.id === config.mountingId)?.manufacturer ?? 'Racking'} system</span>
                         {compliance.structural.mountLayout && (
-                          <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-center">
-                            <div className="text-sm font-bold text-amber-300">{compliance.structural.mountLayout.mountSpacing}"</div>
-                            <div className="text-xs text-slate-500">Mount Spacing</div>
-                            <div className="text-xs text-slate-600">Calculated per ASCE 7-22</div>
+                          <span className="ml-auto text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                            {compliance.structural.mountLayout.mountSpacingIn ?? compliance.structural.mountLayout.finalSpacingIn}"  O.C. calculated
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3">
+                        {/* Mount spacing highlight */}
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-center">
+                          <div className="text-base font-bold text-amber-300">{compliance.structural.mountLayout?.mountSpacingIn ?? compliance.structural.mountLayout?.finalSpacingIn ?? '—'}"</div>
+                          <div className="text-xs text-slate-400">Mount Spacing</div>
+                          <div className="text-xs text-slate-600">ASCE 7-22 calc</div>
+                        </div>
+                        <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                          <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.mounts?.qty ?? '—'}</div>
+                          <div className="text-xs text-slate-400">Roof Mounts</div>
+                          <div className="text-xs text-slate-600 truncate">{compliance.structural.rackingBOM.mounts?.partNumber}</div>
+                        </div>
+                        {(compliance.structural.rackingBOM.rails?.qty ?? 0) > 0 && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.rails.qty} × {compliance.structural.rackingBOM.rails.lengthFt?.toFixed(1)}ft</div>
+                            <div className="text-xs text-slate-400">Rails</div>
+                            <div className="text-xs text-slate-600 truncate">{compliance.structural.rackingBOM.rails.partNumber}</div>
+                          </div>
+                        )}
+                        {(compliance.structural.rackingBOM.lFeet?.qty ?? 0) > 0 && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.lFeet.qty}</div>
+                            <div className="text-xs text-slate-400">L-Feet</div>
+                            <div className="text-xs text-slate-600 truncate">{compliance.structural.rackingBOM.lFeet.partNumber}</div>
+                          </div>
+                        )}
+                        {(compliance.structural.rackingBOM.railSplices?.qty ?? 0) > 0 && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.railSplices.qty}</div>
+                            <div className="text-xs text-slate-400">Rail Splices</div>
+                            <div className="text-xs text-slate-600 truncate">{compliance.structural.rackingBOM.railSplices.partNumber}</div>
                           </div>
                         )}
                       </div>
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                        <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                          <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.midClamps?.qty ?? '—'}</div>
+                          <div className="text-xs text-slate-400">Mid Clamps</div>
+                        </div>
+                        <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                          <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.endClamps?.qty ?? '—'}</div>
+                          <div className="text-xs text-slate-400">End Clamps</div>
+                        </div>
+                        <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                          <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.groundLugs?.qty ?? '—'}</div>
+                          <div className="text-xs text-slate-400">Ground Lugs</div>
+                        </div>
+                        <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                          <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.lagBolts?.qty ?? '—'}</div>
+                          <div className="text-xs text-slate-400">Lag Bolts</div>
+                        </div>
+                        <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                          <div className="text-base font-bold text-white">{compliance.structural.rackingBOM.bondingClips?.qty ?? '—'}</div>
+                          <div className="text-xs text-slate-400">Bonding Clips</div>
+                        </div>
+                      </div>
+                      {/* Array geometry summary */}
+                      {compliance.structural.arrayGeometry && (
+                        <div className="mt-3 pt-3 border-t border-slate-700/50 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-slate-400">
+                          <div>Array: <span className="text-white">{compliance.structural.arrayGeometry.colCount}×{compliance.structural.arrayGeometry.rowCount} ({compliance.structural.arrayGeometry.totalPanels} panels)</span></div>
+                          <div>Width: <span className="text-white">{(compliance.structural.arrayGeometry.arrayWidthIn/12).toFixed(1)} ft</span></div>
+                          <div>Height: <span className="text-white">{(compliance.structural.arrayGeometry.arrayHeightIn/12).toFixed(1)} ft</span></div>
+                          <div>Rail Length: <span className="text-white">{compliance.structural.arrayGeometry.railLengthFt?.toFixed(1)} ft ea</span></div>
+                        </div>
+                      )}
                     </div>
                   )}
 
