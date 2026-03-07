@@ -58,6 +58,10 @@ export interface SolarPanel {
   warranty?: number;           // years
   cellType?: string;           // Mono PERC, TOPCon, HJT, etc.
   datasheet?: string;
+  datasheetUrl?: string;       // URL to manufacturer datasheet
+  weight?: number;             // kg
+  isActive?: boolean;          // for user equipment library
+  isCustom?: boolean;          // true if user-created
 }
 
 export interface Inverter {
@@ -66,11 +70,14 @@ export interface Inverter {
   model: string;
   capacity: number;            // kW
   efficiency: number;          // %
-  type: 'string' | 'micro' | 'optimizer';
+  type: 'string' | 'micro' | 'optimizer' | 'hybrid';
   pricePerUnit: number;
   warranty?: number;
   mpptChannels?: number;
   batteryCompatible?: boolean;
+  datasheetUrl?: string;       // URL to manufacturer datasheet
+  isActive?: boolean;          // for user equipment library
+  isCustom?: boolean;          // true if user-created
 }
 
 export interface Battery {
@@ -89,7 +96,10 @@ export interface Battery {
   stackable?: boolean;         // can add multiple units
   maxUnits?: number;
   dimensions?: string;
-  weight?: number;             // kg
+  weight?: number;             // lbs
+  datasheetUrl?: string;       // URL to manufacturer datasheet
+  isActive?: boolean;          // for user equipment library
+  isCustom?: boolean;          // true if user-created
 }
 
 export interface MountingSystem {

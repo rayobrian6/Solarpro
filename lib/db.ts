@@ -727,14 +727,67 @@ class Database {
     return updated;
   }
 
+  // Inverters
   getInverters(): Inverter[] { return Array.from(this.inverters.values()); }
   getInverter(id: string): Inverter | undefined { return this.inverters.get(id); }
+  saveInverter(data: Omit<Inverter, 'id'>): Inverter {
+    const inverter: Inverter = { ...data, id: uuidv4() };
+    this.inverters.set(inverter.id, inverter);
+    return inverter;
+  }
+  updateInverter(id: string, data: Partial<Inverter>): Inverter | undefined {
+    const existing = this.inverters.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...data };
+    this.inverters.set(id, updated);
+    return updated;
+  }
+  deleteInverter(id: string): boolean {
+    return this.inverters.delete(id);
+  }
 
+  // Batteries
   getBatteries(): Battery[] { return Array.from(this.batteries.values()); }
   getBattery(id: string): Battery | undefined { return this.batteries.get(id); }
+  saveBattery(data: Omit<Battery, 'id'>): Battery {
+    const battery: Battery = { ...data, id: uuidv4() };
+    this.batteries.set(battery.id, battery);
+    return battery;
+  }
+  updateBattery(id: string, data: Partial<Battery>): Battery | undefined {
+    const existing = this.batteries.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...data };
+    this.batteries.set(id, updated);
+    return updated;
+  }
+  deleteBattery(id: string): boolean {
+    return this.batteries.delete(id);
+  }
 
+  // Mounting Systems
   getMountings(): MountingSystem[] { return Array.from(this.mountings.values()); }
   getMounting(id: string): MountingSystem | undefined { return this.mountings.get(id); }
+  saveMounting(data: Omit<MountingSystem, 'id'>): MountingSystem {
+    const mounting: MountingSystem = { ...data, id: uuidv4() };
+    this.mountings.set(mounting.id, mounting);
+    return mounting;
+  }
+  updateMounting(id: string, data: Partial<MountingSystem>): MountingSystem | undefined {
+    const existing = this.mountings.get(id);
+    if (!existing) return undefined;
+    const updated = { ...existing, ...data };
+    this.mountings.set(id, updated);
+    return updated;
+  }
+  deleteMounting(id: string): boolean {
+    return this.mountings.delete(id);
+  }
+
+  // Panel delete
+  deletePanel(id: string): boolean {
+    return this.panels.delete(id);
+  }
 
   getPricing(): PricingConfig { return this.pricing; }
   updatePricing(data: Partial<PricingConfig>): PricingConfig {

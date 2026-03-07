@@ -1,24 +1,41 @@
-# Mounting & Structural UI Audit + Upgrade
+# Hardware Configuration Refactor - Equipment Library System
 
-## Phase 1: Audit & Analysis [DONE]
-- [x] Review both UI screenshots
-- [x] Audit Structural page data sources (RACKING_SYSTEMS from equipment-db.ts)
-- [x] Audit Mounting Details page data sources (mounting-hardware-db.ts)
-- [x] Audit BOM engine (equipment-registry-v4.ts)
-- [x] Identify all data flow disconnects
+## Phase 1: Analysis & Setup
+- [x] Review current Hardware Config implementation
+- [x] Review HardwareConfigPricing.tsx for removal (inline in page.tsx)
+- [x] Check current database schema for equipment tables
+- [x] Review screenshots for UI context
 
-## Phase 2: Fix Data Flow Disconnects [DONE]
-- [x] Add Roof Tech model variations to mounting-hardware-db (5 variants: RT-MINI, RT-MINI-S, RT-MINI-T, RT-HOOK, RT-MINI-M)
-- [x] Fix Structural page: replace RACKING_SYSTEMS with ALL_MOUNTING_SYSTEMS (42 systems, 24 brands)
-- [x] Fix rackingIdMap in page.tsx to include all 42 systems + legacy aliases
-- [x] Structural calc mountSpecs uses correct MountingSystemSpec field names
-- [x] BUILD_SUCCESS v25.7 — pushed to GitHub
+## Phase 2: Database Schema - User Equipment Tables
+- [x] Create migration for user_equipment_panels
+- [x] Create migration for user_equipment_inverters
+- [x] Create migration for user_equipment_mounting
+- [x] Create migration for user_equipment_batteries
 
-## Phase 3: UI Upgrades
-- [ ] Structural page: upgrade Racking System section
-- [ ] Mounting Details page: add search/filter and model variations display
-- [ ] Both pages: ensure selected system syncs via config.mountingId
+## Phase 3: Remove Pricing Tab from Hardware Config
+- [x] Delete HardwareConfigPricing.tsx component (was inline in page.tsx)
+- [x] Remove Pricing tab from Hardware Config page
+- [x] Remove pricePerWattGlobal, laborCost, profitMargin, utilityEscalation, systemLife references
+- [x] Clean up any orphaned imports
 
-## Phase 4: Build & Deploy
-- [ ] Build and verify TypeScript passes
-- [ ] Commit and push
+## Phase 4: Create Equipment Library API
+- [x] Create /api/equipment/save route
+- [x] Update /api/hardware route for full CRUD
+- [x] Add delete operations to db.ts
+- [x] Add saveInverter, saveMounting, saveBattery to db.ts
+
+## Phase 5: Equipment Library Service
+- [x] Add autosave with debounce in HardwarePage component
+- [x] Create equipment-library.ts service (optional - deferred, inline in component)
+
+## Phase 6: UI Improvements - Hardware Cards
+- [x] Add Edit button to hardware cards
+- [x] Add Duplicate button to hardware cards
+- [x] Add Disable/Toggle button to hardware cards
+- [x] Add Datasheet link to hardware cards
+
+## Phase 7: Testing & Verification
+- [x] Test equipment save flow
+- [x] Test equipment load/merge
+- [x] Test autosave
+- [x] Verify build passes
