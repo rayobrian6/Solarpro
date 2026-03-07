@@ -8,6 +8,8 @@ const PUBLIC_PATHS = [
   '/auth/login',
   '/auth/register',
   '/auth/subscribe',
+  '/subscribe',
+  '/enterprise',
   '/api/auth/login',
   '/api/auth/register',
   '/api/auth/logout',
@@ -16,6 +18,8 @@ const PUBLIC_PATHS = [
   '/api/version',
   '/api/engineering/sld',
   '/api/engineering/sld/test',
+  '/api/enterprise',
+  '/api/stripe/webhook',
 ];
 
 // Simple JWT decode without verification (verification happens in API routes)

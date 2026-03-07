@@ -157,6 +157,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ============================================================
+    // Migration 007: Enterprise leads table
+    // ============================================================
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS enterprise_leads (
+          id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          company_name        TEXT NOT NULL,
+          contact_email       TEXT NOT NULL,
+          contact_phone       TEXT,
+          number_of_installers INTEGER,
+          monthly_installs    INTEGER,
+          message             TEXT,
+          status              TEXT NOT NULL DEFAULT 'new',
+          created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ enterprise_leads table ready');
+    } catch (e: any) {
+      results.push(`⚠️ enterprise_leads: ${e.message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     console.error('[POST /api/migrate]', error);

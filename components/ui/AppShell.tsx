@@ -7,8 +7,10 @@ import {
   FileText, Settings, ChevronLeft, ChevronRight,
   Bell, Search, Menu, X,
   Cpu, BarChart3, Map, Home, Sprout, Fence,
-  LogOut, HelpCircle, ExternalLink, Wrench
+  LogOut, HelpCircle, ExternalLink, Wrench,
+  CreditCard, ArrowRight, Clock, AlertTriangle, Star, ChevronDown
 } from 'lucide-react';
+import SubscriptionBanner from './SubscriptionBanner';
 
 interface NavItem {
   label: string;
@@ -24,6 +26,10 @@ interface AuthUser {
   email: string;
   role: string;
   company?: string;
+  plan?: string;
+  subscriptionStatus?: string;
+  trialEndsAt?: string | null;
+  isFreePass?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -56,6 +62,97 @@ function getInitials(name: string): string {
     .join('')
     .toUpperCase()
     .slice(0, 2);
+}
+
+function UserDropdown({ initials, displayName, displayRole, userLoading, user, onLogout }: {
+  initials: string;
+  displayName: string;
+  displayRole: string;
+  userLoading: boolean;
+  user: AuthUser | null;
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const router = useRouter();
+
+  const planColors: Record<string, string> = {
+    starter: 'text-slate-400',
+    professional: 'text-amber-400',
+    contractor: 'text-blue-400',
+    enterprise: 'text-purple-400',
+    free_pass: 'text-emerald-400',
+  };
+  const planColor = planColors[user?.plan || 'starter'] || 'text-slate-400';
+
+  return (
+    <div className="relative">
+      <div
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-slate-700/40 cursor-pointer transition-colors group"
+      >
+        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-xs flex-shrink-0">
+          {userLoading ? '…' : initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-white truncate">
+            {userLoading ? 'Loading...' : displayName}
+          </div>
+          <div className={`text-xs truncate capitalize font-medium ${planColor}`}>
+            {userLoading ? '…' : (user?.isFreePass ? 'Free Pass' : (user?.plan || 'starter'))}
+          </div>
+        </div>
+        <ChevronDown size={13} className={`text-slate-500 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </div>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute bottom-full left-0 right-0 mb-1 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-20 overflow-hidden">
+            {/* User info */}
+            <div className="px-3 py-3 border-b border-slate-700/50">
+              <div className="text-white font-semibold text-sm truncate">{displayName}</div>
+              <div className="text-slate-500 text-xs truncate">{user?.email}</div>
+            </div>
+
+            {/* Menu items */}
+            <div className="py-1">
+              <Link
+                href="/account/billing"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors"
+              >
+                <CreditCard size={14} className="text-slate-500" /> Billing
+              </Link>
+              <Link
+                href="/subscribe"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-slate-700/50 transition-colors"
+              >
+                <ArrowRight size={14} /> Upgrade Plan
+              </Link>
+              <Link
+                href="/settings"
+                onClick={() => setOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors"
+              >
+                <Settings size={14} className="text-slate-500" /> Settings
+              </Link>
+            </div>
+
+            {/* Logout */}
+            <div className="border-t border-slate-700/50 py-1">
+              <button
+                onClick={() => { setOpen(false); onLogout(); }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+              >
+                <LogOut size={14} /> Sign Out
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -93,6 +190,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             email: userData.email,
             role: userData.role || 'Solar Designer',
             company: userData.company,
+            plan: userData.plan || 'starter',
+            subscriptionStatus: userData.subscriptionStatus || 'trialing',
+            trialEndsAt: userData.trialEndsAt || null,
+            isFreePass: userData.isFreePass || false,
           });
         }
       } catch (err) {
@@ -222,17 +323,33 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Subscription CTA */}
-      {!collapsed && (
+      {!collapsed && user && !user.isFreePass && (
         <div className="px-3 pb-2">
-          <Link href="/auth/subscribe" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-colors">
-            <div className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-              <ExternalLink size={11} className="text-amber-400" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-bold text-amber-400">Upgrade Plan</div>
-              <div className="text-xs text-slate-500">Unlock e-signing & branding</div>
-            </div>
-          </Link>
+          {user.subscriptionStatus === 'active' ? (
+            <Link href="/account/billing" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors">
+              <div className="w-6 h-6 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                <CreditCard size={11} className="text-emerald-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-emerald-400 capitalize">{user.plan} Plan</div>
+                <div className="text-xs text-slate-500">Manage billing</div>
+              </div>
+            </Link>
+          ) : (
+            <Link href="/subscribe" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 transition-colors">
+              <div className="w-6 h-6 rounded-lg bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                <ArrowRight size={11} className="text-amber-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-bold text-amber-400">Upgrade Plan</div>
+                <div className="text-xs text-slate-500">
+                  {user.subscriptionStatus === 'trialing' && user.trialEndsAt
+                    ? `Trial: ${Math.max(0, Math.ceil((new Date(user.trialEndsAt).getTime() - Date.now()) / 86400000))} days left`
+                    : 'Unlock all features'}
+                </div>
+              </div>
+            </Link>
+          )}
         </div>
       )}
 
@@ -247,24 +364,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {userLoading ? '…' : initials}
           </div>
         ) : (
-          <div
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-slate-700/40 cursor-pointer transition-colors group"
-            title="Click to logout"
-          >
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-xs flex-shrink-0">
-              {userLoading ? '…' : initials}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-white truncate">
-                {userLoading ? 'Loading...' : displayName}
-              </div>
-              <div className="text-xs text-slate-500 truncate">
-                {userLoading ? '…' : displayRole}
-              </div>
-            </div>
-            <LogOut size={13} className="text-slate-600 group-hover:text-red-400 flex-shrink-0 transition-colors" />
-          </div>
+          <UserDropdown
+            initials={initials}
+            displayName={displayName}
+            displayRole={displayRole}
+            userLoading={userLoading}
+            user={user}
+            onLogout={handleLogout}
+          />
         )}
       </div>
     </div>
@@ -305,6 +412,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Subscription Banner */}
+        <SubscriptionBanner />
         {/* Top Header */}
         <header className="h-14 bg-slate-900/90 border-b border-slate-700/50 flex items-center gap-3 px-4 lg:px-5 flex-shrink-0 backdrop-blur-sm">
           <button
