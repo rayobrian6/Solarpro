@@ -182,10 +182,46 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
 
   // Pricing config from DB (fetched on mount)
   const [pricingCfg, setPricingCfg] = useState<any>(null);
+  // White-label branding
+  const [branding, setBranding] = useState<{
+    companyName: string;
+    companyLogoUrl: string | null;
+    companyWebsite: string | null;
+    companyAddress: string | null;
+    companyPhone: string | null;
+    brandPrimaryColor: string;
+    proposalFooterText: string | null;
+  }>({
+    companyName: 'SolarPro',
+    companyLogoUrl: null,
+    companyWebsite: null,
+    companyAddress: null,
+    companyPhone: null,
+    brandPrimaryColor: '#f59e0b',
+    proposalFooterText: null,
+  });
+
   useEffect(() => {
     fetch('/api/pricing')
       .then(r => r.json())
       .then(d => { if (d.success) setPricingCfg(d.data); })
+      .catch(() => {});
+    // Load branding
+    fetch('/api/settings/branding')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success && d.data) {
+          setBranding({
+            companyName: d.data.companyName || 'SolarPro',
+            companyLogoUrl: d.data.companyLogoUrl || null,
+            companyWebsite: d.data.companyWebsite || null,
+            companyAddress: d.data.companyAddress || null,
+            companyPhone: d.data.companyPhone || null,
+            brandPrimaryColor: d.data.brandPrimaryColor || '#f59e0b',
+            proposalFooterText: d.data.proposalFooterText || null,
+          });
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -289,20 +325,32 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
             </div>
 
             <div className="relative z-10 p-10 md:p-14">
-              {/* Header */}
+              {/* Header — white-label branding */}
               <div className="flex items-center justify-between mb-12">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
-                    <Sun size={24} className="text-slate-900" />
-                  </div>
-                  <div>
-                    <div className="font-black text-xl tracking-tight">SolarPro</div>
-                    <div className="text-amber-400 text-sm font-medium">Design Platform</div>
-                  </div>
+                  {branding.companyLogoUrl ? (
+                    <img
+                      src={branding.companyLogoUrl}
+                      alt={branding.companyName}
+                      className="h-12 max-w-[180px] object-contain"
+                    />
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-lg" style={{ backgroundColor: branding.brandPrimaryColor }}>
+                        <Sun size={24} className="text-slate-900" />
+                      </div>
+                      <div>
+                        <div className="font-black text-xl tracking-tight">{branding.companyName}</div>
+                        <div className="text-sm font-medium" style={{ color: branding.brandPrimaryColor }}>Solar Design Platform</div>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className="text-right text-sm text-slate-400">
                   <div>Proposal #{proposal.id?.substring(0, 8).toUpperCase()}</div>
                   <div>{new Date(proposal.preparedDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+                  {branding.companyPhone && <div className="mt-1">{branding.companyPhone}</div>}
+                  {branding.companyWebsite && <div><a href={branding.companyWebsite} className="hover:underline" style={{ color: branding.brandPrimaryColor }}>{branding.companyWebsite.replace(/^https?:\/\//, '')}</a></div>}
                 </div>
               </div>
 
@@ -1047,24 +1095,36 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
             </div>
           </div>
 
-          {/* ── Footer ── */}
-          <div className="p-8 md:p-10 bg-gradient-to-br from-slate-900 to-slate-800 text-white">
+          {/* ── Footer — white-label branding ── */}
+          <div className="p-8 md:p-10 text-white" style={{ background: `linear-gradient(135deg, ${branding.brandPrimaryColor}22, #0f172a)`, backgroundColor: '#0f172a' }}>
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
-                  <Sun size={24} className="text-slate-900" />
-                </div>
-                <div>
-                  <div className="font-black text-lg">SolarPro Design Platform</div>
-                  <div className="text-amber-400 text-sm">Professional Solar Solutions</div>
-                </div>
+                {branding.companyLogoUrl ? (
+                  <img src={branding.companyLogoUrl} alt={branding.companyName} className="h-10 max-w-[160px] object-contain brightness-0 invert" />
+                ) : (
+                  <>
+                    <div className="w-12 h-12 rounded-xl flex items-center justify-center shadow-lg" style={{ backgroundColor: branding.brandPrimaryColor }}>
+                      <Sun size={24} className="text-slate-900" />
+                    </div>
+                    <div>
+                      <div className="font-black text-lg">{branding.companyName}</div>
+                      <div className="text-sm" style={{ color: branding.brandPrimaryColor }}>Professional Solar Solutions</div>
+                    </div>
+                  </>
+                )}
               </div>
               <div className="text-center md:text-right">
                 <p className="text-slate-300 text-sm font-medium">This proposal is valid until</p>
-                <p className="text-amber-400 font-bold">{new Date(proposal.validUntil).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                <p className="font-bold" style={{ color: branding.brandPrimaryColor }}>{new Date(proposal.validUntil).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
               </div>
             </div>
-            <div className="mt-6 pt-6 border-t border-slate-700 text-center">
+            <div className="mt-6 pt-6 border-t border-slate-700 text-center space-y-2">
+              {branding.proposalFooterText && (
+                <p className="text-slate-300 text-sm font-medium">{branding.proposalFooterText}</p>
+              )}
+              {branding.companyAddress && (
+                <p className="text-slate-500 text-xs">{branding.companyAddress}</p>
+              )}
               <p className="text-slate-500 text-xs">Production estimates based on NREL PVWatts data and Google Solar API analysis. Actual results may vary based on weather, shading, and system performance. Federal tax credit eligibility subject to individual tax situation.</p>
             </div>
           </div>

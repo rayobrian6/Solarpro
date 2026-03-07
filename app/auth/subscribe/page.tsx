@@ -11,9 +11,9 @@ const PLANS = [
   {
     id: 'starter',
     name: 'Starter',
-    price: 49,
+    price: 79,
     period: 'month',
-    description: 'Perfect for solo solar designers getting started.',
+    description: 'Perfect for solo solar installers getting started.',
     color: 'border-slate-600',
     headerColor: 'bg-slate-800',
     badge: null,
@@ -22,7 +22,7 @@ const PLANS = [
       { text: 'Up to 10 active projects', included: true },
       { text: 'Up to 25 clients', included: true },
       { text: 'PDF proposal generation', included: true },
-      { text: 'Incentive & SREC calculator', included: true },
+      { text: 'Production analysis (NREL PVWatts)', included: true },
       { text: 'Google Solar API integration', included: true },
       { text: 'Proposal e-signing', included: false },
       { text: 'White-label branding', included: false },
@@ -33,66 +33,67 @@ const PLANS = [
     ctaStyle: 'btn-secondary',
   },
   {
-    id: 'pro',
-    name: 'Pro',
-    price: 99,
+    id: 'professional',
+    name: 'Professional',
+    price: 149,
     period: 'month',
-    description: 'For growing solar businesses that need more power.',
+    description: 'For growing solar install teams that need more power.',
     color: 'border-amber-500/60',
     headerColor: 'bg-gradient-to-br from-amber-500/20 to-orange-500/10',
     badge: 'Most Popular',
     features: [
       { text: '3D Solar Design Studio', included: true },
-      { text: 'Unlimited projects', included: true },
-      { text: 'Unlimited clients', included: true },
-      { text: 'PDF proposal generation', included: true },
-      { text: 'Incentive & SREC calculator', included: true },
-      { text: 'Google Solar API integration', included: true },
+      { text: 'Unlimited projects & clients', included: true },
+      { text: 'Electrical engineering (SLD)', included: true },
+      { text: 'Sol Fence design', included: true },
+      { text: 'BOM + structural calcs', included: true },
+      { text: 'PDF permit packages', included: true },
       { text: 'Proposal e-signing', included: true },
       { text: 'White-label branding', included: true },
-      { text: 'Up to 3 team members', included: false },
       { text: 'Priority support', included: true },
+      { text: 'Team members (up to 3)', included: false },
     ],
-    cta: 'Start Pro — Most Popular',
+    cta: 'Start Professional — Most Popular',
     ctaStyle: 'btn-primary',
   },
   {
-    id: 'business',
-    name: 'Business',
+    id: 'contractor',
+    name: 'Contractor',
     price: 249,
     period: 'month',
-    description: 'For solar companies with teams and high volume.',
+    description: 'For large contracting firms with teams and high volume.',
     color: 'border-blue-500/40',
     headerColor: 'bg-gradient-to-br from-blue-500/20 to-indigo-500/10',
     badge: 'Best Value',
     features: [
       { text: '3D Solar Design Studio', included: true },
-      { text: 'Unlimited projects', included: true },
-      { text: 'Unlimited clients', included: true },
-      { text: 'PDF proposal generation', included: true },
-      { text: 'Incentive & SREC calculator', included: true },
-      { text: 'Google Solar API integration', included: true },
+      { text: 'Unlimited projects & clients', included: true },
+      { text: 'Electrical engineering (SLD)', included: true },
+      { text: 'Sol Fence design', included: true },
+      { text: 'BOM + structural calcs', included: true },
+      { text: 'PDF permit packages', included: true },
       { text: 'Proposal e-signing', included: true },
-      { text: 'White-label branding', included: true },
+      { text: 'White-label branding & logo upload', included: true },
       { text: 'Unlimited team members', included: true },
-      { text: 'Priority support + onboarding', included: true },
+      { text: 'Dedicated onboarding + SLA support', included: true },
     ],
-    cta: 'Start Business Plan',
+    cta: 'Start Contractor Plan',
     ctaStyle: 'btn-secondary',
   },
 ];
 
 const FAQS = [
   { q: 'Can I cancel anytime?', a: 'Yes. Cancel anytime from your account settings. No cancellation fees, no questions asked.' },
-  { q: 'What is proposal e-signing?', a: 'Pro and Business plans include a unique shareable link for each proposal. Clients can review and digitally sign the proposal online — no DocuSign needed.' },
-  { q: 'Is there a free trial?', a: 'Yes — all plans include a 14-day free trial. No credit card required to start.' },
-  { q: 'What does white-label branding mean?', a: 'Replace the SolarPro logo with your company logo and colors on all proposals and client-facing documents.' },
+  { q: 'What is proposal e-signing?', a: 'Professional and Contractor plans include a unique shareable link for each proposal. Clients can review and digitally sign the proposal online — no DocuSign needed.' },
+  { q: 'Is there a free trial?', a: 'Yes — all plans include a 3-day free trial. No credit card required to start.' },
+  { q: 'What does white-label branding mean?', a: 'Replace the SolarPro logo with your company logo and colors on all proposals and client-facing documents. Upload your logo in Settings → Branding.' },
   { q: 'Do you offer annual billing?', a: 'Yes — pay annually and save 20%. Contact us for annual pricing.' },
+  { q: 'What is Sol Fence design?', a: 'Sol Fence is a vertical bifacial solar fence system. SolarPro is the only platform that supports fence-mounted solar design with specialized layout algorithms.' },
 ];
 
 export default function SubscribePage() {
   const router = useRouter();
-  const [selectedPlan, setSelectedPlan] = useState('pro');
+  const [selectedPlan, setSelectedPlan] = useState('professional');
   const [billing, setBilling] = useState<'monthly' | 'annual'>('monthly');
   const [loading, setLoading] = useState(false);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -137,7 +138,7 @@ export default function SubscribePage() {
         {/* Hero */}
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-4">
-            <Star size={12} /> 14-day free trial — no credit card required
+            <Star size={12} /> 3-day free trial — no credit card required
           </div>
           <h1 className="text-4xl md:text-5xl font-black text-white mb-4">
             Choose Your Plan
@@ -220,7 +221,7 @@ export default function SubscribePage() {
                   onClick={() => handleSubscribe(plan.id)}
                   disabled={loading && selectedPlan === plan.id}
                   className={`w-full py-3 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
-                    plan.id === 'pro'
+                    plan.id === 'professional'
                       ? 'bg-amber-500 hover:bg-amber-400 text-slate-900'
                       : 'bg-slate-700 hover:bg-slate-600 text-white border border-slate-600'
                   }`}
@@ -233,7 +234,7 @@ export default function SubscribePage() {
                 </button>
 
                 <p className="text-center text-xs text-slate-600 mt-3">
-                  14-day free trial · No credit card required
+                  3-day free trial · No credit card required
                 </p>
               </div>
             </div>
@@ -245,10 +246,10 @@ export default function SubscribePage() {
           <h2 className="text-xl font-black text-white text-center mb-8">Everything included in every plan</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {[
-              { icon: <Zap size={20} />, title: '3D Design Studio', desc: 'Google Maps + CesiumJS 3D terrain', color: 'text-amber-400' },
+              { icon: <Zap size={20} />, title: '3D Design Studio', desc: 'Google Maps + satellite imagery', color: 'text-amber-400' },
               { icon: <FileText size={20} />, title: 'PDF Proposals', desc: 'Professional branded proposals', color: 'text-blue-400' },
               { icon: <BarChart3 size={20} />, title: 'Production Analytics', desc: 'NREL PVWatts calculations', color: 'text-emerald-400' },
-              { icon: <Shield size={20} />, title: 'Incentive + SREC Info', desc: 'State & commercial incentives + SREC income', color: 'text-purple-400' },
+              { icon: <Shield size={20} />, title: 'Incentive + SREC Info', desc: 'State & commercial incentives', color: 'text-purple-400' },
               { icon: <Users size={20} />, title: 'Client Management', desc: 'Full CRM for solar clients', color: 'text-teal-400' },
               { icon: <Sun size={20} />, title: 'Google Solar API', desc: 'AI roof segment detection', color: 'text-orange-400' },
               { icon: <Lock size={20} />, title: 'Secure & Private', desc: 'Your data stays yours', color: 'text-rose-400' },

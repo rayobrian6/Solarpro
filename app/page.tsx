@@ -21,7 +21,7 @@ const FEATURES = [
   {
     icon: <Zap size={22} />,
     title: 'Electrical Engineering',
-    desc: 'Full NEC-compliant single-line diagrams, conductor sizing, AC/DC disconnect specs, and interconnection rules for 8 major utilities — auto-generated.',
+    desc: 'Full NEC-compliant single-line diagrams, conductor sizing, AC/DC disconnect specs, and interconnection rules for 19 utilities including 8 major utilities — auto-generated.',
     color: 'from-blue-500/20 to-cyan-500/10 border-blue-500/20',
     iconColor: 'text-blue-400 bg-blue-500/10',
     tag: 'NEC Compliant',
@@ -111,10 +111,11 @@ const PRICING = [
     desc: 'Perfect for solo installers',
     features: [
       '3D Design Studio',
-      'Up to 10 projects/mo',
-      'PDF permit packages',
-      'Production analysis',
-      'Email support',
+      'Up to 10 active projects',
+      'Up to 25 clients',
+      'PDF proposal generation',
+      'Production analysis (NREL)',
+      'Google Solar API',
     ],
     cta: 'Start Free Trial',
     highlight: false,
@@ -126,12 +127,13 @@ const PRICING = [
     period: '/mo',
     desc: 'For growing install teams',
     features: [
-      'Unlimited projects',
+      'Unlimited projects & clients',
       'Electrical engineering (SLD)',
       'Sol Fence design',
       'BOM + structural calcs',
+      'Proposal e-signing',
+      'White-label branding',
       'Priority support',
-      'White-label proposals',
     ],
     cta: 'Start Free Trial',
     highlight: true,
@@ -146,12 +148,11 @@ const PRICING = [
     features: [
       'Everything in Professional',
       'Unlimited team members',
-      'Custom branding',
-      'API access',
+      'Custom branding & logo upload',
       'Dedicated onboarding',
       'SLA support',
     ],
-    cta: 'Contact Sales',
+    cta: 'Start Free Trial',
     highlight: false,
   },
 ];
@@ -292,7 +293,7 @@ export default function LandingPage() {
               Book a Demo <ArrowRight size={16} />
             </Link>
           </div>
-          <p className="text-slate-500 text-sm mb-14">No credit card required · 14-day free trial · Cancel anytime</p>
+          <p className="text-slate-500 text-sm mb-14">No credit card required · 3-day free trial · Cancel anytime</p>
 
           {/* Social proof */}
           <div className="flex items-center justify-center gap-3 mb-12">
@@ -605,7 +606,7 @@ export default function LandingPage() {
               Start Free, Scale as You Grow
             </h2>
             <p className="text-lg text-slate-400 max-w-2xl mx-auto mb-8">
-              14-day free trial on all plans. No credit card required. Cancel anytime.
+              3-day free trial on all plans. No credit card required. Cancel anytime.
             </p>
             {/* Billing toggle */}
             <div className="inline-flex items-center gap-3 bg-slate-800/60 border border-slate-700/50 rounded-xl p-1">
@@ -759,7 +760,7 @@ export default function LandingPage() {
               Start Designing Free
             </Link>
           </div>
-          <p className="text-slate-500 text-sm mb-8">14-day free trial · No credit card required · Cancel anytime</p>
+          <p className="text-slate-500 text-sm mb-8">3-day free trial · No credit card required · Cancel anytime</p>
 
           <div className="flex flex-wrap justify-center gap-6 text-sm text-slate-400">
             {[

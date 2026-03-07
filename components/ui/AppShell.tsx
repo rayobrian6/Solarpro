@@ -34,6 +34,7 @@ const navItems: NavItem[] = [
   { label: 'Engineering', href: '/engineering', icon: <Wrench size={17} />, color: 'text-blue-400' },
   { label: 'Proposals', href: '/proposals', icon: <FileText size={17} /> },
   { label: 'Analytics', href: '/analytics', icon: <BarChart3 size={17} /> },
+  { label: 'Settings', href: '/settings', icon: <Settings size={17} /> },
 ];
 
 const adminItems: NavItem[] = [
