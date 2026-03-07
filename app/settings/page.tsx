@@ -102,6 +102,25 @@ export default function SettingsPage() {
     setTimeout(() => setSaveStatus('idle'), 3500);
   };
 
+  const handleManageBilling = async () => {
+    try {
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+      });
+      const data = await res.json();
+
+      if (data.success && data.url) {
+        window.location.href = data.url;
+      } else {
+        // No Stripe customer yet — redirect to subscribe page
+        window.location.href = '/auth/subscribe';
+      }
+    } catch (err) {
+      console.error('Portal error:', err);
+      window.location.href = '/auth/subscribe';
+    }
+  };
+
   const handleSaveProfile = async () => {
     setSaving(true);
     try {
@@ -608,12 +627,15 @@ export default function SettingsPage() {
                 <h2 className="text-lg font-bold text-white mb-2">Billing</h2>
                 <p className="text-slate-400 text-sm mb-4">Manage your subscription and billing through our secure payment portal.</p>
                 <div className="flex gap-3">
-                  <a href="/auth/subscribe" className="btn-primary text-sm flex items-center gap-2">
+                  <button 
+                    onClick={handleManageBilling}
+                    className="btn-primary text-sm flex items-center gap-2"
+                  >
                     <CreditCard size={14} /> Manage Billing
-                  </a>
-                  <button className="btn-secondary text-sm text-red-400 border-red-500/20 hover:bg-red-500/10">
-                    Cancel Subscription
                   </button>
+                  <a href="/auth/subscribe" className="btn-secondary text-sm flex items-center gap-2">
+                    Change Plan
+                  </a>
                 </div>
               </div>
             )}

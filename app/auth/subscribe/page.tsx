@@ -101,12 +101,31 @@ export default function SubscribePage() {
   const handleSubscribe = async (planId: string) => {
     setSelectedPlan(planId);
     setLoading(true);
-    // Simulate Stripe checkout redirect
-    await new Promise(r => setTimeout(r, 800));
-    setLoading(false);
-    // In production: redirect to Stripe Checkout
-    // window.location.href = `/api/stripe/checkout?plan=${planId}&billing=${billing}`;
-    router.push('/dashboard');
+    // Call Stripe checkout API
+    try {
+      const res = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ planId }),
+      });
+      const data = await res.json();
+
+      setLoading(false);
+
+      if (data.success && data.url) {
+        // Redirect to Stripe Checkout
+        window.location.href = data.url;
+      } else {
+        // Payment not configured yet — redirect to dashboard with trial
+        console.warn('Stripe checkout not configured:', data.error);
+        router.push('/dashboard?subscription=trial');
+      }
+    } catch (err) {
+      setLoading(false);
+      console.error('Checkout error:', err);
+      // Fallback to dashboard
+      router.push('/dashboard?subscription=error');
+    }
   };
 
   const getPrice = (basePrice: number) => {
