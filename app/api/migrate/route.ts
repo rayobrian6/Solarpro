@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
 
     // Grant free pass to specified users (upsert by email)
     const freePassUsers = [
-      { name: "Raymond O'Brian", email: 'raymond.obrian@yahoo.com',      company: 'SolarPro',            role: 'admin', note: 'Owner / Founder' },
+      { name: "Raymond O'Brian", email: 'raymond.obrian@yahoo.com',      company: 'SolarPro',            role: 'user',  note: 'Owner / Founder' },
       { name: 'James Carpenter',  email: 'carpenterjames88@gmail.com',    company: 'SolarPro',            role: 'user',  note: 'Team member — free pass granted by owner' },
       { name: 'Cody',             email: 'cody@underthesun.solutions',    company: 'Under The Sun',       role: 'user',  note: 'Team member — free pass granted by owner' },
       { name: 'Angelique',        email: 'angelique@lmdsolarllc.com',     company: 'LMD Solar LLC',       role: 'user',  note: 'LMD Solar partner — free pass granted by owner' },
