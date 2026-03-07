@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, getDb } from '@/lib/auth';
 
+type RouteContext = { params: Promise<{id: string}> };
+
+
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, context: RouteContext) {
   try {
+    const { id } = await context.params;
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
     }
 
-    const projectId = parseInt(params.id);
+    const projectId = parseInt(id);
 
     // Verify user has access to this project
     const sql = getDb();

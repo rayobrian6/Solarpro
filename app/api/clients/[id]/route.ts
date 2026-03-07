@@ -2,12 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getClientById, updateClient, softDeleteClient } from '@/lib/db-neon';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function GET(req: NextRequest, context: RouteContext) {
   try {
+    const { id } = await context.params;
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
-    const client = await getClientById(params.id, user.id);
+    const client = await getClientById(id, user.id);
     if (!client) return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: client });
@@ -17,8 +20,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(req: NextRequest, context: RouteContext) {
   try {
+    const { id } = await context.params;
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -32,7 +36,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       return NextResponse.json({ success: false, error: 'Valid email address is required' }, { status: 400 });
     }
 
-    const updated = await updateClient(params.id, user.id, body);
+    const updated = await updateClient(id, user.id, body);
     if (!updated) return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: updated });
@@ -42,13 +46,14 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(req: NextRequest, context: RouteContext) {
   try {
+    const { id } = await context.params;
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
     // Soft delete — sets deleted_at, never removes data
-    const deleted = await softDeleteClient(params.id, user.id);
+    const deleted = await softDeleteClient(id, user.id);
     if (!deleted) return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, message: 'Client deleted' });

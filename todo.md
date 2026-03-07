@@ -81,8 +81,8 @@ The current structural engine produces **unrealistic failures** for standard res
 - [x] Update Structural tab to display V2 results (framing analysis, mount layout, racking BOM)
 - [x] Add racking section to BOM tab
 - [x] V2 structural results now auto-populate on every runCalc (not just handleAutoFixAll)
-- [ ] Add mount visualization to design viewer (future)
-- [ ] Show rail spans and cantilevers (future)
+- [ ] Add mount visualization to design viewer (future — deferred)
+- [ ] Show rail spans and cantilevers (future — deferred)
 
 ---
 

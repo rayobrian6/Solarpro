@@ -3,18 +3,19 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getProjectById, getProjectVersion, upsertLayout, saveProjectVersion } from '@/lib/db-neon';
 import { Layout } from '@/types';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { id: string; versionId: string } }
-) {
+type RouteContext = { params: Promise<{id: string; versionId: string}> };
+
+
+export async function GET(req: NextRequest, context: RouteContext) {
   try {
+    const { id, versionId } = await context.params;
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
-    const project = await getProjectById(params.id, user.id);
+    const project = await getProjectById(id, user.id);
     if (!project) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
 
-    const version = await getProjectVersion(params.id, params.versionId, user.id);
+    const version = await getProjectVersion(id, versionId, user.id);
     if (!version) return NextResponse.json({ success: false, error: 'Version not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: version });
@@ -25,18 +26,16 @@ export async function GET(
 }
 
 // POST to restore a version
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string; versionId: string } }
-) {
+export async function POST(req: NextRequest, context: RouteContext) {
   try {
+    const { id, versionId } = await context.params;
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
-    const project = await getProjectById(params.id, user.id);
+    const project = await getProjectById(id, user.id);
     if (!project) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
 
-    const version = await getProjectVersion(params.id, params.versionId, user.id);
+    const version = await getProjectVersion(id, versionId, user.id);
     if (!version) return NextResponse.json({ success: false, error: 'Version not found' }, { status: 404 });
 
     // Extract layout from snapshot
@@ -49,7 +48,7 @@ export async function POST(
 
     // Restore the layout from the snapshot
     const restoredLayout = await upsertLayout({
-      projectId: params.id,
+      projectId: id,
       userId: user.id,
       systemType: snapshotLayout.systemType,
       panels: snapshotLayout.panels || [],
@@ -70,10 +69,10 @@ export async function POST(
 
     // Save a new version recording the restore
     await saveProjectVersion({
-      projectId: params.id,
+      projectId: id,
       userId: user.id,
       snapshot: {
-        projectId: params.id,
+        projectId: id,
         projectName: project.name,
         layout: restoredLayout,
         restoredFromVersion: version.versionNumber,
