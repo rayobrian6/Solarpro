@@ -1,53 +1,40 @@
-# SLD Segment Generation System — Audit & Refinement
+# Generator/Battery Data Flow Fix
 
-## Status: COMPLETE ✅
+## Problem Summary
+When generators or batteries are added on the SLD:
+1. ✅ ComputedSystem engine gets the data (BATTERY_TO_BUI_RUN, GENERATOR_TO_ATS_RUN segments computed)
+2. ❌ NEC Calculations (electrical-calc.ts) - NO battery/generator awareness
+3. ❌ Electrical BoM - missing generatorId, atsId, backupInterfaceId in BOM call
+4. ❌ Equipment Schedule (computed-system.ts) - missing generator, ATS, backup interface entries
+5. ❌ NEC Calc Steps display - doesn't show battery/generator NEC sections
 
-## Changes Required (from audit)
+## Tasks
 
-### A. lib/segment-model.ts
-- [x] Add BUILD v24 segment types to SegmentType enum
-- [x] Add terminal point interfaces (EquipmentTerminal, TerminalPoint)
-- [x] Add voltage/phase fields to Segment interface
+### 1. Fix Equipment Schedule in computed-system.ts
+- [ ] Add generator to equipment schedule (GENERATOR tag)
+- [ ] Add ATS to equipment schedule (ATS tag)  
+- [ ] Add backup interface/BUI to equipment schedule (BUI tag)
+- [ ] Add battery count support (multiple batteries)
 
-### B. lib/computed-system.ts
-- [x] Add `voltage` and `phase` fields to RunSegment interface
-- [x] Populate voltage/phase in makeRunSegment() for all BUILD v24 segments
-- [x] Add `sourceTerminal` / `destTerminal` fields to RunSegment
-- [x] Ensure conductorMaterial defaults to 'CU' on all segments
-- [x] Verify conduit callout format is consistent across all segments
+### 2. Fix BOM call in engineering/page.tsx
+- [ ] Pass generatorId, atsId, backupInterfaceId to BOM API
+- [ ] Pass batteryCount to BOM engine
 
-### C. lib/sld-professional-renderer.ts
-- [x] Define EquipmentTerminals type and terminal coordinate helpers
-- [x] Add terminal return values to renderBattery() — acOutX/Y
-- [x] Add terminal return values to renderGenerator() — genOutX/Y
-- [x] Add terminal return values to renderATS() — utilInX/Y, genInX/Y, loadOutX/Y
-- [x] Add terminal return values to renderInverterBox() — dcInX/Y, acOutX/Y
-- [x] Add terminal return values to renderDisco() — loadInX/Y, lineOutX/Y
-- [x] Add terminal return values to renderMSPLoad() / renderMSPSupply() — bkfdInX/Y, busOutX/Y
-- [x] Add terminal return values to renderCombiner() — feederOutX/Y
-- [x] Add terminal return values to renderBUI() — gridPortX/Y, genPortX/Y (NEW)
-- [x] Update all segment wire routing to use terminal coordinates:
-      - Battery acOutX/Y → BUI batPortX/Y
-      - MSP busOut → BUI gridPortX/Y
-      - Generator genOutX/Y → BUI genPortX/Y (Mode A: IQ SC3)
-      - Generator genOutX/Y → ATS genInX/Y (Mode B: standalone ATS)
-      - ATS loadOutX/Y → MSP bkfdInX/Y
-      - ATS utilInX/Y ← utility drop
-      - Combiner feederOutX → Disco loadInX/Y
-      - Inverter acOutX → Disco loadInX/Y
-      - Disco lineOutX/Y → MSP bkfdInX/Y
-      - MSP busOutY → Utility meter
-- [x] Fix generator → BUI GEN port routing (was BUS_Y+60 hardcoded, now uses buiResult.genPortY)
-- [x] Add segment overlap guard (makeOverlapGuard / resolveSegY — 4px offset for parallel wires)
-- [x] Hoist buiResult to outer scope so generator section can access BUI terminal coords
-- [x] Ensure all wire labels use computed conductorCallout (no hardcoded fallbacks)
+### 3. Fix BOM engine (bom-engine-v4.ts)
+- [ ] Add generatorId, atsId, backupInterfaceId to BOMGenerationInputV4 interface
+- [ ] Add generator, ATS, backup interface line items to BOM output
 
-### D. lib/segment-builder.ts
-- [x] Add phase: '1Ø' and conductorMaterial: 'CU' to all 7 segment objects
+### 4. Fix NEC Calculations (electrical-calc.ts + calculate/route.ts)
+- [ ] Add battery/generator NEC sections to ElectricalCalcInput
+- [ ] Add battery NEC 705.12(B) bus impact to busbar calculation
+- [ ] Add generator NEC 702 transfer equipment note
+- [ ] Pass battery/generator data from calculate/route.ts
 
-### E. Validation
-- [x] Add overallPass computation to makeRunSegment()
-- [x] Verify conduitFillPass, ampacityPass, voltageDropPass all set correctly
+### 5. Fix NEC Calc Steps display in engineering/page.tsx
+- [ ] Show battery NEC 705.12(B) section when battery present
+- [ ] Show generator NEC 702 section when generator present
+- [ ] Show ATS/BUI section when present
 
-## Testing
-- [x] Verify TypeScript compiles without errors after changes — PASSED (0 errors)
+### 6. Test and verify
+- [ ] Build and verify no TypeScript errors
+- [ ] Verify data flows correctly end-to-end

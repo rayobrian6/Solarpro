@@ -108,6 +108,24 @@ export async function POST(req: NextRequest) {
         designTempMax: electrical.designTempMax ?? designTemps.maxTemp,
         rooftopTempAdder: electrical.rooftopTempAdder ?? 35,
         necVersion: jurisdiction.necVersion,
+        // Battery NEC 705.12(B) — pass through from request body
+        batteryBackfeedA:         electrical.batteryBackfeedA         ?? 0,
+        batteryCount:             electrical.batteryCount             ?? 0,
+        batteryContinuousOutputA: electrical.batteryContinuousOutputA ?? 0,
+        batteryModel:             electrical.batteryModel             ?? undefined,
+        batteryManufacturer:      electrical.batteryManufacturer      ?? undefined,
+        // Generator NEC 702
+        generatorKw:              electrical.generatorKw              ?? undefined,
+        generatorOutputBreakerA:  electrical.generatorOutputBreakerA  ?? undefined,
+        generatorModel:           electrical.generatorModel           ?? undefined,
+        generatorManufacturer:    electrical.generatorManufacturer    ?? undefined,
+        // ATS NEC 702.5
+        atsAmpRating:             electrical.atsAmpRating             ?? undefined,
+        atsModel:                 electrical.atsModel                 ?? undefined,
+        // BUI NEC 706
+        backupInterfaceMaxA:      electrical.backupInterfaceMaxA      ?? undefined,
+        backupInterfaceModel:     electrical.backupInterfaceModel     ?? undefined,
+        hasEnphaseIQSC3:          electrical.hasEnphaseIQSC3          ?? false,
       };
       electricalResult = runElectricalCalc(electricalInput);
     }

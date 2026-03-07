@@ -106,6 +106,28 @@ export interface ElectricalCalcInput {
   necVersion: '2017' | '2020' | '2023';
   engineeringMode?: 'AUTO' | 'MANUAL';
   interconnection?: InterconnectionInput;  // Interconnection method — defaults to LOAD_SIDE
+
+  // Battery storage — NEC 705.12(B): AC-coupled battery backfeed adds to bus loading
+  batteryBackfeedA?: number;        // A — battery backfeed breaker amps (from equipment-db)
+  batteryCount?: number;            // qty of battery units
+  batteryContinuousOutputA?: number; // A — battery continuous output current
+  batteryModel?: string;            // for display in NEC calc steps
+  batteryManufacturer?: string;     // for display in NEC calc steps
+
+  // Generator — NEC 702 Optional Standby Systems
+  generatorKw?: number;             // kW — generator rated output
+  generatorOutputBreakerA?: number; // A — generator output breaker
+  generatorModel?: string;          // for display
+  generatorManufacturer?: string;   // for display
+
+  // ATS — NEC 702.5 Transfer Equipment
+  atsAmpRating?: number;            // A — ATS amp rating
+  atsModel?: string;                // for display
+
+  // Backup Interface Unit — NEC 706 / NEC 230.82
+  backupInterfaceMaxA?: number;     // A — BUI max continuous output
+  backupInterfaceModel?: string;    // for display
+  hasEnphaseIQSC3?: boolean;        // true = IQ SC3 is the ATS
 }
 
 // ─── Issue / Result Types ─────────────────────────────────────────────────────
@@ -607,11 +629,17 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     ? nextStandardOCPD(totalAcOutputAmps * 1.25)
     : nextStandardOCPD((totalAcOutputAmps / Math.max(input.inverters.length, 1)) * 1.25);
 
+  // Battery NEC 705.12(B) bus impact — AC-coupled battery backfeed breakers add to bus loading
+  // NEC 705.12(B): ALL backfeed breakers (solar + battery) count toward 120% rule
+  const batteryBackfeedA = input.batteryBackfeedA ?? 0;
+  const totalBackfeedWithBattery = solarBreakerRequired + batteryBackfeedA;
+
   // Resolve interconnection config — default to LOAD_SIDE with mainPanelAmps as bus
   const icMethod: InterconnectionMethod = input.interconnection?.method ?? 'LOAD_SIDE';
   const icBusRating   = input.interconnection?.busRating   ?? input.mainPanelAmps;
   const icMainBreaker = input.interconnection?.mainBreaker ?? input.mainPanelAmps;
-  const icSolarBreaker = input.interconnection?.solarBreaker ?? solarBreakerRequired;
+  // Use combined solar + battery backfeed for 120% rule check (NEC 705.12(B))
+  const icSolarBreaker = input.interconnection?.solarBreaker ?? totalBackfeedWithBattery;
 
   // Helper: nearest standard breaker at or below a value
   const prevStandardOCPD = (amps: number): number => {

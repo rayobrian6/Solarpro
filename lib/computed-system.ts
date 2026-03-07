@@ -27,7 +27,7 @@ import {
 
 import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
-import { computeBatteryBusImpact, getBatteryById } from './equipment-db';
+import { computeBatteryBusImpact, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
@@ -396,6 +396,18 @@ export interface ComputedSystemInput {
     generatorToAts?: number;        // ft — generator to ATS/BUI (default 50)
     atsToMsp?: number;              // ft — ATS to MSP (default 20)
   };
+
+  // Equipment IDs — for equipment schedule lookup (display only, not used for sizing)
+  generatorId?: string;             // equipment-db generator ID
+  atsId?: string;                   // equipment-db ATS ID
+  backupInterfaceId?: string;       // equipment-db backup interface ID
+  // Derived labels for equipment schedule (when IDs not available)
+  generatorBrand?: string;
+  generatorModel?: string;
+  atsBrand?: string;
+  atsModel?: string;
+  backupInterfaceBrand?: string;
+  backupInterfaceModel?: string;
 }
 
 // ─── NEC Tables ──────────────────────────────────────────────────────────────
@@ -1988,6 +2000,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     input.batteryIds.forEach((batId, idx) => {
       const bat = getBatteryById(batId);
       if (bat) {
+        const batQty = input.batteryCount && input.batteryCount > 1 ? input.batteryCount : 1;
         const busNote = bat.backfeedBreakerA
           ? ` · ${bat.backfeedBreakerA}A backfeed breaker (NEC 705.12B bus loading)`
           : ' · DC-coupled (no separate backfeed breaker)';
@@ -1996,7 +2009,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
           description: `Battery Storage (${bat.subcategory === 'ac_coupled' ? 'AC-Coupled' : 'DC-Coupled'})`,
           manufacturer: bat.manufacturer,
           model: bat.model,
-          qty: 1,
+          qty: batQty,
           rating: `${bat.usableCapacityKwh} kWh / ${bat.continuousPowerKw} kW${busNote}`,
           necReference: 'NEC 706 / NEC 705.12(B)',
         });
@@ -2012,6 +2025,63 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
           });
         }
       }
+    });
+  }
+
+  // Generator — add to equipment schedule if configured
+  if (input.generatorOutputBreakerA && input.generatorOutputBreakerA > 0) {
+    const gen = input.generatorId ? getGeneratorById(input.generatorId) : undefined;
+    const genMfr   = gen?.manufacturer ?? input.generatorBrand ?? 'Standby Generator';
+    const genModel = gen?.model        ?? input.generatorModel  ?? `${input.generatorKw ?? ''}kW Generator`;
+    const genKw    = gen?.ratedOutputKw ?? input.generatorKw ?? 0;
+    const genBkrA  = gen?.outputBreakerA ?? input.generatorOutputBreakerA;
+    equipmentSchedule.push({
+      tag: 'GENERATOR-1',
+      description: `Standby Generator — ${gen?.fuelType?.replace('_', ' ') ?? 'Natural Gas'} / ${gen?.phaseType === 'three_phase' ? '3-Phase' : 'Split-Phase'}`,
+      manufacturer: genMfr,
+      model: genModel,
+      qty: 1,
+      rating: `${genKw}kW / ${genBkrA}A / 240V — NEC 702.5: Transfer Equipment Required`,
+      necReference: 'NEC 702 / NEC 250.30',
+    });
+  }
+
+  // ATS — add to equipment schedule if configured (standalone ATS only, not IQ SC3)
+  if (input.atsAmpRating && input.atsAmpRating > 0 && !input.hasEnphaseIQSC3) {
+    const ats = input.atsId ? getATSById(input.atsId) : undefined;
+    const atsMfr   = ats?.manufacturer ?? input.atsBrand   ?? 'ATS';
+    const atsModel = ats?.model        ?? input.atsModel   ?? `${input.atsAmpRating}A ATS`;
+    const atsAmpR  = ats?.ampRating    ?? input.atsAmpRating;
+    const atsSeR   = ats?.serviceEntranceRated ? ' — Service Entrance Rated' : '';
+    equipmentSchedule.push({
+      tag: 'ATS-1',
+      description: `Automatic Transfer Switch${atsSeR} — ${ats?.transferType === 'automatic' ? 'Auto' : 'Manual'} Transfer`,
+      manufacturer: atsMfr,
+      model: atsModel,
+      qty: 1,
+      rating: `${atsAmpR}A / 240V — NEC 702.5: Transfer Equipment${ats?.neutralSwitched ? ' · Neutral Switched (NEC 250.30)' : ''}`,
+      necReference: 'NEC 702.5 / NEC 250.30',
+    });
+  }
+
+  // Backup Interface Unit (BUI) — add to equipment schedule if configured
+  // For Enphase IQ SC3: this IS the ATS — show as combined ATS/BUI
+  if (input.backupInterfaceMaxA && input.backupInterfaceMaxA > 0) {
+    const bui = input.backupInterfaceId ? getBackupInterfaceById(input.backupInterfaceId) : undefined;
+    const buiMfr   = bui?.manufacturer ?? input.backupInterfaceBrand ?? 'Backup Interface';
+    const buiModel = bui?.model        ?? input.backupInterfaceModel ?? 'System Controller';
+    const buiMaxA  = bui?.maxContinuousOutputA ?? input.backupInterfaceMaxA;
+    const isIQSC3  = input.hasEnphaseIQSC3 || (bui?.model?.toLowerCase().includes('sc3') ?? false);
+    equipmentSchedule.push({
+      tag: 'BUI-1',
+      description: isIQSC3
+        ? 'Backup Interface Unit / ATS (Enphase IQ System Controller 3) — Service Entrance Rated'
+        : 'Backup Interface Unit / Energy Management System',
+      manufacturer: buiMfr,
+      model: buiModel,
+      qty: 1,
+      rating: `${buiMaxA}A / 240V — NEC 706 / NEC 230.82${isIQSC3 ? ' — Replaces Standalone ATS' : ''}`,
+      necReference: isIQSC3 ? 'NEC 706 / NEC 230.82 / NEC 702.5' : 'NEC 706 / NEC 705.12(B)',
     });
   }
 

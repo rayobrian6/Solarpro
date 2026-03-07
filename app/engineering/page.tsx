@@ -464,6 +464,22 @@ export default function EngineeringPage() {
         return buiId.includes('iq-system-controller-3') || buiId.includes('iq-sc3') || buiId.includes('iqsc3')
           || atsId.includes('enphase-iq-sc3') || atsId.includes('enphase-iq-system-controller');
       })(),
+      // Equipment IDs — for equipment schedule display
+      generatorId:    config.generatorId || undefined,
+      atsId:          config.atsId || undefined,
+      backupInterfaceId: (() => {
+        const _atsId = config.atsId?.toLowerCase() ?? '';
+        const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
+        return config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : undefined);
+      })(),
+      // Derived labels for equipment schedule fallback
+      generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })() : undefined,
+      generatorModel: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? undefined; })() : undefined,
+      atsBrand:       config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? undefined; })() : undefined,
+      atsModel:       config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? undefined; })() : undefined,
+      backupInterfaceBrand: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.manufacturer ?? undefined; })() : undefined,
+      backupInterfaceModel: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.model ?? undefined; })() : undefined,
+      batteryCount:   config.batteryCount || undefined,
     };
 
     try {
@@ -693,6 +709,49 @@ export default function EngineeringPage() {
           busRating: config.panelBusRating ?? 200,
           mainBreaker: config.mainPanelAmps ?? 200,
         },
+        // Battery NEC 705.12(B) — bus loading impact
+        batteryBackfeedA: config.batteryId
+          ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
+          : 0,
+        batteryCount: config.batteryCount || 0,
+        batteryContinuousOutputA: config.batteryId
+          ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
+          : 0,
+        batteryModel: config.batteryModel || undefined,
+        batteryManufacturer: config.batteryBrand || undefined,
+        // Generator NEC 702
+        generatorKw: config.generatorId
+          ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })()
+          : undefined,
+        generatorOutputBreakerA: config.generatorId
+          ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? undefined; })()
+          : undefined,
+        generatorModel: config.generatorId
+          ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? undefined; })()
+          : undefined,
+        generatorManufacturer: config.generatorId
+          ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })()
+          : undefined,
+        // ATS NEC 702.5
+        atsAmpRating: config.atsId
+          ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
+          : undefined,
+        atsModel: config.atsId
+          ? (() => { const a = getATSById(config.atsId); return a?.model ?? undefined; })()
+          : undefined,
+        // BUI NEC 706
+        backupInterfaceMaxA: config.backupInterfaceId
+          ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.maxContinuousOutputA ?? undefined; })()
+          : undefined,
+        backupInterfaceModel: config.backupInterfaceId
+          ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.model ?? undefined; })()
+          : undefined,
+        hasEnphaseIQSC3: (() => {
+          const buiId = config.backupInterfaceId?.toLowerCase() ?? '';
+          const atsId = config.atsId?.toLowerCase() ?? '';
+          return buiId.includes('iq-system-controller-3') || buiId.includes('iq-sc3')
+            || atsId.includes('enphase-iq-sc3') || atsId.includes('enphase-iq-system-controller');
+        })(),
       },
       structural: (() => {
         // FIX: pass mountSpecs from RACKING_SYSTEMS so structural calc uses correct load model
@@ -1125,6 +1184,13 @@ export default function EngineeringPage() {
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
           runs:             cs.runs,
+          // Generator / ATS / BUI — for BOM line items
+          generatorId:      config.generatorId || undefined,
+          atsId:            config.atsId || undefined,
+          backupInterfaceId: config.backupInterfaceId || undefined,
+          generatorKw:      config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? undefined; })() : undefined,
+          atsAmpRating:     config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })() : undefined,
+          backupInterfaceMaxA: config.backupInterfaceId ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.maxContinuousOutputA ?? undefined; })() : undefined,
           format:           'json',
         }),
       });
@@ -3094,6 +3160,80 @@ export default function EngineeringPage() {
                   },
                 ];
 
+                // Battery NEC 705.12(B) step — add if battery is configured
+                const batteryBackfeedADisplay = config.batteryId
+                  ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
+                  : 0;
+                if (batteryBackfeedADisplay > 0) {
+                  const batModel = config.batteryModel || 'Battery Storage';
+                  const batMfr   = config.batteryBrand || '';
+                  const totalBusLoad = feederOcpdAmps + batteryBackfeedADisplay + (config.mainPanelAmps ?? 200);
+                  const busRating = config.panelBusRating ?? config.mainPanelAmps ?? 200;
+                  const busMax = busRating * 1.2;
+                  const busPass = totalBusLoad <= busMax;
+                  steps.push({
+                    num: steps.length + 1,
+                    title: 'Battery Backfeed — NEC 705.12(B) Bus Loading',
+                    nec: 'NEC 705.12(B)',
+                    formula: `Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A + Main ${config.mainPanelAmps ?? 200}A = ${totalBusLoad}A vs ${busRating}A bus × 120% = ${busMax}A max`,
+                    result: busPass ? `PASS — ${totalBusLoad}A ≤ ${busMax}A` : `FAIL — ${totalBusLoad}A > ${busMax}A`,
+                    detail: `${batMfr} ${batModel} — ${batteryBackfeedADisplay}A dedicated backfeed breaker (NEC 705.12(B)). AC-coupled battery backfeed breakers add to bus loading.`,
+                    color: busPass ? 'emerald' : 'red',
+                  } as any);
+                }
+
+                // Generator NEC 702 step — add if generator is configured
+                const genKwDisplay = config.generatorId
+                  ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })()
+                  : 0;
+                const genBkrDisplay = config.generatorId
+                  ? (() => { const g = getGeneratorById(config.generatorId); return g?.outputBreakerA ?? 0; })()
+                  : 0;
+                if (genKwDisplay > 0) {
+                  const genModel = config.generatorId
+                    ? (() => { const g = getGeneratorById(config.generatorId); return `${g?.manufacturer ?? ''} ${g?.model ?? ''}`; })()
+                    : 'Standby Generator';
+                  steps.push({
+                    num: steps.length + 1,
+                    title: 'Standby Generator — NEC 702 Transfer Equipment',
+                    nec: 'NEC 702 / NEC 702.5',
+                    formula: `${genKwDisplay}kW generator → ${genBkrDisplay}A output breaker → ATS/BUI transfer switch`,
+                    result: `${genBkrDisplay}A Output Breaker`,
+                    detail: `${genModel} — NEC 702.5: Transfer equipment required between generator and load. NEC 250.30: Floating neutral required at ATS (generator has bonded neutral).`,
+                    color: 'orange',
+                  } as any);
+                }
+
+                // ATS/BUI NEC 702.5 step — add if ATS or BUI is configured
+                const atsAmpDisplay = config.atsId
+                  ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })()
+                  : 0;
+                const buiMaxADisplay = config.backupInterfaceId
+                  ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b?.maxContinuousOutputA ?? 0; })()
+                  : 0;
+                if (atsAmpDisplay > 0 || buiMaxADisplay > 0) {
+                  const isIQSC3 = config.backupInterfaceId?.toLowerCase().includes('sc3') || config.atsId?.toLowerCase().includes('enphase-iq-sc3');
+                  const atsModel = config.atsId
+                    ? (() => { const a = getATSById(config.atsId); return `${a?.manufacturer ?? ''} ${a?.model ?? ''}`; })()
+                    : '';
+                  const buiModel = config.backupInterfaceId
+                    ? (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return `${b?.manufacturer ?? ''} ${b?.model ?? ''}`; })()
+                    : '';
+                  const displayAmp = buiMaxADisplay > 0 ? buiMaxADisplay : atsAmpDisplay;
+                  const displayModel = buiModel || atsModel;
+                  steps.push({
+                    num: steps.length + 1,
+                    title: isIQSC3 ? 'Backup Interface / ATS (IQ SC3) — NEC 706 / NEC 230.82' : 'Transfer Switch / Backup Interface — NEC 702.5',
+                    nec: isIQSC3 ? 'NEC 706 / NEC 230.82' : 'NEC 702.5 / NEC 706',
+                    formula: isIQSC3
+                      ? `IQ SC3 = ATS + BUI combined — ${displayAmp}A service entrance rated`
+                      : `ATS ${atsAmpDisplay}A${buiMaxADisplay > 0 ? ` + BUI ${buiMaxADisplay}A` : ''} — transfer equipment per NEC 702.5`,
+                    result: `${displayAmp}A / 240V`,
+                    detail: `${displayModel}${isIQSC3 ? ' — Service Entrance Rated. Replaces standalone ATS. Manages solar + battery + generator transfer.' : ' — NEC 702.5: Automatic transfer switch required for standby generator systems.'}`,
+                    color: 'teal',
+                  } as any);
+                }
+
                 const colorMap: Record<string, string> = {
                   blue:    'bg-blue-500/10 border-blue-500/30 text-blue-400',
                   purple:  'bg-purple-500/10 border-purple-500/30 text-purple-400',
@@ -3101,6 +3241,7 @@ export default function EngineeringPage() {
                   orange:  'bg-orange-500/10 border-orange-500/30 text-orange-400',
                   emerald: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400',
                   teal:    'bg-teal-500/10 border-teal-500/30 text-teal-400',
+                  red:     'bg-red-500/10 border-red-500/30 text-red-400',
                 };
 
                 return (
@@ -4114,6 +4255,9 @@ export default function EngineeringPage() {
                     { label: 'AC Inverter Capacity', value: `${totalInverterKw} kW` },
                     { label: 'Total Panels', value: `${totalPanels}` },
                     { label: 'Battery Storage', value: config.batteryId ? (() => { const b = getBatteryById(config.batteryId); return b ? `${config.batteryCount}× ${b.manufacturer} ${b.model} (${(config.batteryCount * b.usableCapacityKwh).toFixed(1)} kWh)` : `${(config.batteryCount * config.batteryKwh).toFixed(1)} kWh`; })() : 'None' },
+                    ...(config.generatorId ? [{ label: 'Standby Generator', value: (() => { const g = getGeneratorById(config.generatorId); return g ? `${g.manufacturer} ${g.model} (${g.ratedOutputKw}kW)` : 'Generator'; })() }] : []),
+                    ...(config.atsId ? [{ label: 'Transfer Switch', value: (() => { const a = getATSById(config.atsId); return a ? `${a.manufacturer} ${a.model} (${a.ampRating}A)` : 'ATS'; })() }] : []),
+                    ...(config.backupInterfaceId ? [{ label: 'Backup Interface', value: (() => { const b = getBackupInterfaceById(config.backupInterfaceId); return b ? `${b.manufacturer} ${b.model}` : 'BUI'; })() }] : []),
                   ].map(item => (
                     <div key={item.label} className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
                       <div className="text-lg font-black text-amber-700">{item.value}</div>

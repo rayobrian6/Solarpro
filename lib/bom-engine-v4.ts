@@ -22,6 +22,7 @@ import {
 } from './topology-manager';
 
 import type { RunSegment } from './computed-system';
+import { getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
 
 // ─── BOM Stage IDs ────────────────────────────────────────────────────────────
 
@@ -114,6 +115,15 @@ export interface BOMGenerationInputV4 {
   // 'LOAD_SIDE' | 'SUPPLY_SIDE_TAP' | 'MAIN_BREAKER_DERATE' | 'PANEL_UPGRADE' | 'BACKFED_BREAKER'
   interconnectionMethod?: string;
   panelBusRating?: number;  // For NEC 705.12(B) 120% rule calculation
+
+  // Generator / ATS / BUI — for BOM line items
+  generatorId?: string;
+  atsId?: string;
+  backupInterfaceId?: string;
+  generatorKw?: number;
+  atsAmpRating?: number;
+  backupInterfaceMaxA?: number;
+  batteryCount?: number;        // qty of battery units
 }
 
 // ─── BOM Generation Result ────────────────────────────────────────────────────
@@ -343,12 +353,71 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   // Battery
   if (batteryEntry) {
+    const batQty = input.batteryCount && input.batteryCount > 1 ? input.batteryCount : 1;
     items.push(addItem('inverter', 'battery', batteryEntry.manufacturer, batteryEntry.model,
       batteryEntry.partNumber ?? batteryEntry.id,
       `Battery Storage System — ${batteryEntry.electricalSpecs.acOutputKw ?? ''}kW`,
-      1, 'ea', 'NEC 706', 'perSystem', '1', true));
+      batQty, 'ea', 'NEC 706', 'batteryCount', String(batQty), true));
     log.push({ stageId: 'inverter', category: 'battery', item: batteryEntry.model,
-      quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: 'NEC 706' });
+      quantity: batQty, derivedFrom: 'batteryCount', formula: String(batQty), necReference: 'NEC 706' });
+  }
+
+  // Generator — add to BOM if configured (NEC 702 Optional Standby Systems)
+  if (input.generatorId) {
+    const gen = getGeneratorById(input.generatorId);
+    if (gen) {
+      items.push(addItem('inverter', 'generator', gen.manufacturer, gen.model,
+        input.generatorId.toUpperCase(),
+        `Standby Generator — ${gen.ratedOutputKw}kW / ${gen.fuelType.replace('_', ' ')} / ${gen.outputBreakerA}A output breaker`,
+        1, 'ea', 'NEC 702', 'perSystem', '1', true));
+      log.push({ stageId: 'inverter', category: 'generator', item: gen.model,
+        quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: 'NEC 702' });
+    }
+  } else if (input.generatorKw && input.generatorKw > 0) {
+    // Fallback: no ID but kW provided
+    items.push(addItem('inverter', 'generator', 'TBD', `${input.generatorKw}kW Standby Generator`,
+      'GEN-TBD',
+      `Standby Generator — ${input.generatorKw}kW — NEC 702.5: Transfer Equipment Required`,
+      1, 'ea', 'NEC 702', 'perSystem', '1', true));
+  }
+
+  // ATS — add to BOM if configured (NEC 702.5 Transfer Equipment)
+  if (input.atsId) {
+    const ats = getATSById(input.atsId);
+    if (ats) {
+      items.push(addItem('inverter', 'ats', ats.manufacturer, ats.model,
+        input.atsId.toUpperCase(),
+        `Automatic Transfer Switch — ${ats.ampRating}A / ${ats.voltageV}V${ats.serviceEntranceRated ? ' — Service Entrance Rated' : ''}`,
+        1, 'ea', 'NEC 702.5', 'perSystem', '1', true));
+      log.push({ stageId: 'inverter', category: 'ats', item: ats.model,
+        quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: 'NEC 702.5' });
+    }
+  } else if (input.atsAmpRating && input.atsAmpRating > 0) {
+    // Fallback: no ID but amp rating provided
+    items.push(addItem('inverter', 'ats', 'TBD', `${input.atsAmpRating}A Automatic Transfer Switch`,
+      'ATS-TBD',
+      `Automatic Transfer Switch — ${input.atsAmpRating}A — NEC 702.5: Transfer Equipment Required`,
+      1, 'ea', 'NEC 702.5', 'perSystem', '1', true));
+  }
+
+  // Backup Interface Unit (BUI) — add to BOM if configured (NEC 706 / NEC 230.82)
+  if (input.backupInterfaceId) {
+    const bui = getBackupInterfaceById(input.backupInterfaceId);
+    if (bui) {
+      const isIQSC3 = bui.model?.toLowerCase().includes('sc3') || bui.model?.toLowerCase().includes('system controller 3');
+      items.push(addItem('inverter', 'backup_interface', bui.manufacturer, bui.model,
+        input.backupInterfaceId.toUpperCase(),
+        `Backup Interface Unit${isIQSC3 ? ' / ATS (Service Entrance Rated)' : ''} — ${bui.maxContinuousOutputA}A / 240V`,
+        1, 'ea', isIQSC3 ? 'NEC 706 / NEC 230.82' : 'NEC 706', 'perSystem', '1', true));
+      log.push({ stageId: 'inverter', category: 'backup_interface', item: bui.model,
+        quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: 'NEC 706' });
+    }
+  } else if (input.backupInterfaceMaxA && input.backupInterfaceMaxA > 0) {
+    // Fallback: no ID but max amps provided
+    items.push(addItem('inverter', 'backup_interface', 'TBD', `${input.backupInterfaceMaxA}A Backup Interface Unit`,
+      'BUI-TBD',
+      `Backup Interface Unit — ${input.backupInterfaceMaxA}A / 240V — NEC 706`,
+      1, 'ea', 'NEC 706', 'perSystem', '1', true));
   }
 
   // Gateway (optimizer or microinverter topology)
