@@ -1,54 +1,24 @@
-# Full Architectural Audit & Redesign — Solar Mounting + Structural Platform
+# Mounting & Structural UI Audit + Upgrade
 
-## SECTION 1: Fix Project Status Failure Logic
-- [ ] Audit calculate route — old structural-calc.ts causes FAIL with default attachmentSpacing=48
-- [ ] Fix calculate route to use V3 engine (not old structural-calc.ts)
-- [ ] Fix overallStatus aggregation: use V3 structural result + electrical result
-- [ ] Add debug inspector panel to compliance tab (rule source, result, auto-fix, final status)
-- [ ] Ensure auto-fixes clear error flags before final status computation
+## Phase 1: Audit & Analysis [DONE]
+- [x] Review both UI screenshots
+- [x] Audit Structural page data sources (RACKING_SYSTEMS from equipment-db.ts)
+- [x] Audit Mounting Details page data sources (mounting-hardware-db.ts)
+- [x] Audit BOM engine (equipment-registry-v4.ts)
+- [x] Identify all data flow disconnects
 
-## SECTION 2-3: Global Hardware Database (lib/mounting-hardware-db.ts)
-- [ ] Build comprehensive database: 16 manufacturers, all system types
-- [ ] Roof systems: rail+L-foot, tile hook, rail-less, standing seam, corrugated, flat roof
-- [ ] Commercial: ballasted, mechanically attached, tilt-leg, large-span
-- [ ] Ground mount: single/dual-post, driven pile, helical pile, concrete pier
-- [ ] Tracker: single-axis, dual-axis
-- [ ] Solar fence systems
-- [ ] Each system: max span, cantilever, uplift capacity, fastener pull-out, shear, ballast tables
-- [ ] Source references for every engineering value
+## Phase 2: Fix Data Flow Disconnects
+- [ ] Add Roof Tech model variations to mounting-hardware-db
+- [ ] Fix Structural page: replace RACKING_SYSTEMS with getAllMountingSystems()
+- [ ] Fix rackingIdMap in page.tsx to include all 38 systems
+- [ ] Update LEGACY_ID_MAP with all new system IDs
+- [ ] Add missing registry entries to equipment-registry-v4.ts for new brands
 
-## SECTION 4-6: Structural Engine V4 (lib/structural-engine-v4.ts)
-- [ ] Extend V3 with commercial ballasted flat roof support
-- [ ] Add ground mount pile spacing + foundation load calculations
-- [ ] Add tracker geometry (row spacing, rotation clearance)
-- [ ] Improve load path: modules→rails→mounts→fasteners→rafters/structure
-- [ ] Auto-resolve: reduce spacing, add mounts, increase rail count, recommend upgrade
+## Phase 3: UI Upgrades
+- [ ] Structural page: upgrade Racking System section
+- [ ] Mounting Details page: add search/filter and model variations display
+- [ ] Both pages: ensure selected system syncs via config.mountingId
 
-## SECTION 7: Commercial System Support
-- [ ] Ballasted flat roof: ballast block count, weight distribution, tilt frame spacing
-- [ ] Ground mount: pile spacing, foundation loads, frame spans
-- [ ] Tracker: actuator geometry, row spacing, rotation clearance
-
-## SECTION 8: BOM Integration
-- [ ] All racking quantities from geometry (never static)
-- [ ] Commercial: ballast blocks, foundations
-- [ ] Ground mount: piles, frames, hardware
-
-## SECTION 9: Mounting Details UI Redesign (app/engineering/page.tsx)
-- [ ] Residential/Commercial/Ground toggle
-- [ ] Mounting system selector with manufacturer specs panel
-- [ ] Real-time mount spacing diagram (SVG)
-- [ ] Rail layout visualization
-- [ ] Ballast block layout visualization (commercial)
-- [ ] Mount load visualization
-- [ ] BOM preview panel
-- [ ] All elements update in real time
-
-## SECTION 10: Validation Test Cases
-- [ ] Test 1: 10 panels, asphalt shingles, 2x6 @ 24" OC, 115mph, 20psf → PASS
-- [ ] Test 2: 200 panels, ballasted flat roof, Exposure B → ballast weight + layout
-- [ ] Test 3: 50 panels, dual-post ground mount → pile spacing + foundation loads
-
-## Phase Final: Build + Push
-- [ ] Run npm run build — must compile clean
-- [ ] Commit and push as v25.1
+## Phase 4: Build & Deploy
+- [ ] Build and verify TypeScript passes
+- [ ] Commit and push

@@ -13,6 +13,10 @@ import {
 } from 'lucide-react';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from '@/lib/equipment-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
+
+// ── Mounting systems from the canonical mounting-hardware-db (38 systems, 24 manufacturers) ──
+const ALL_MOUNTING_SYSTEMS: MountingSystemSpec[] = getAllMountingSystems();
+const MOUNTING_BRANDS: string[] = Array.from(new Set(ALL_MOUNTING_SYSTEMS.map(s => s.manufacturer))).sort();
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
 import { getUtilitiesByState } from '@/lib/utility-rules';
 import { getAhjsByState } from '@/lib/computed-plan';
@@ -762,14 +766,12 @@ export default function EngineeringPage() {
         })(),
       },
       structural: (() => {
-        // FIX: pass mountSpecs from RACKING_SYSTEMS so structural calc uses correct load model
-        const racking = RACKING_SYSTEMS.find(r => r.id === config.mountingId);
-        const mountSpecs = racking ? {
-          loadModel: racking.loadModel,
-          fastenersPerAttachment: racking.fastenersPerAttachment,
-          upliftCapacity: racking.upliftCapacity,
-          tributaryArea: racking.tributaryArea,
-          attachmentSpacingMax: racking.attachmentSpacingMax,
+        // Use mounting-hardware-db (42 systems) for structural calc specs
+        const mountingSystem = ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId);
+        const mountSpecs = mountingSystem ? {
+          fastenersPerAttachment: mountingSystem.mount?.fastenersPerMount ?? 2,
+          upliftCapacity: mountingSystem.mount?.upliftCapacityLbs ?? 500,
+          attachmentSpacingMax: mountingSystem.mount?.maxSpacingIn,
         } : undefined;
         return {
           windSpeed: config.windSpeed,
@@ -1235,18 +1237,19 @@ export default function EngineeringPage() {
           }, 0);
       }
 
-      // Map config.mountingId to a V4 racking ID
+      // Map config.mountingId to a V4 racking ID (auto-includes all mounting-hardware-db IDs)
       const rackingIdMap: Record<string, string> = {
-        'ironridge-xr100':    'ironridge-xr100',
-        'ironridge-xr1000':   'ironridge-xr1000',
-        'snapnrack-100':      'snapnrack-100',
-        'unirac-sunframe':    'unirac-sunframe',
-        'unirac-rm-ballast':  'unirac-rm-ballast',
-        'rooftech-rt-mini':   'rooftech-rt-mini',
-        'quickmount-classic': 'quickmount-classic',
-        'ecofasten-rock-it':  'ecofasten-rock-it',
-        's5-pvkit':           's5-pvkit',
-        'plp-power-peak':     'plp-power-peak',
+        // Legacy ID mappings (old IDs → new IDs)
+        'rooftech-rt-mini':   'rooftech-mini',
+        'unirac-sunframe':    'unirac-solarmount',
+        'unirac-rm-ballast':  'unirac-rm10-evo',
+        'snapnrack-series-100': 'snapnrack-100',
+        'quickmount-tile-hook': 'quickmount-tile',
+        's5-pvkit-2':         's5-pvkit',
+        'ecofasten-rock-it':  'ecofasten-rockit',
+        'plp-power-peak':     'ironridge-xr100',
+        // Current IDs pass through (all 42 systems in mounting-hardware-db)
+        ...Object.fromEntries(ALL_MOUNTING_SYSTEMS.map(s => [s.id, s.id])),
       };
       const rackingId = rackingIdMap[config.mountingId] || config.mountingId || 'ironridge-xr100';
 
@@ -3838,14 +3841,14 @@ export default function EngineeringPage() {
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">Mount Brand</label>
                     <select
-                      value={RACKING_SYSTEMS.find(r => r.id === config.mountingId)?.manufacturer ?? ''}
+                      value={ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.manufacturer ?? MOUNTING_BRANDS[0]}
                       onChange={e => {
-                        const first = RACKING_SYSTEMS.find(r => r.manufacturer === e.target.value);
+                        const first = ALL_MOUNTING_SYSTEMS.find(s => s.manufacturer === e.target.value);
                         if (first) updateConfig({ mountingId: first.id });
                       }}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60"
                     >
-                      {Array.from(new Set(RACKING_SYSTEMS.map(r => r.manufacturer))).map(brand => (
+                      {MOUNTING_BRANDS.map(brand => (
                         <option key={brand} value={brand}>{brand}</option>
                       ))}
                     </select>
@@ -3854,9 +3857,9 @@ export default function EngineeringPage() {
                     <label className="text-xs text-slate-400 mb-1 block">Mount Type / Model</label>
                     <select value={config.mountingId} onChange={e => updateConfig({ mountingId: e.target.value })}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
-                      {RACKING_SYSTEMS
-                        .filter(r => r.manufacturer === (RACKING_SYSTEMS.find(x => x.id === config.mountingId)?.manufacturer ?? RACKING_SYSTEMS[0]?.manufacturer))
-                        .map(r => <option key={r.id} value={r.id}>{r.model}</option>)}
+                      {ALL_MOUNTING_SYSTEMS
+                        .filter(s => s.manufacturer === (ALL_MOUNTING_SYSTEMS.find(x => x.id === config.mountingId)?.manufacturer ?? MOUNTING_BRANDS[0]))
+                        .map(s => <option key={s.id} value={s.id}>{s.model}</option>)}
                     </select>
                   </div>
                   <div>
@@ -3899,13 +3902,18 @@ export default function EngineeringPage() {
                 )}
                 {/* Selected mount structural specs */}
                 {(() => {
-                  const sel = RACKING_SYSTEMS.find(r => r.id === config.mountingId);
+                  const sel = ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId);
                   if (!sel) return null;
                   return (
                     <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-400 bg-slate-800/40 rounded-lg px-3 py-2">
-                      <span>Load model: <span className="text-white font-bold">{sel.loadModel ?? 'distributed'}</span></span>
-                      {sel.fastenersPerAttachment && <span>Fasteners/mount: <span className="text-amber-300 font-bold">{sel.fastenersPerAttachment}</span></span>}
-                      {sel.upliftCapacity && <span>Uplift capacity: <span className="text-amber-300 font-bold">{sel.upliftCapacity} lbf/lag</span></span>}
+                      <span>System: <span className="text-white font-bold">{sel.productLine} {sel.model}</span></span>
+                      <span>Type: <span className="text-amber-300 font-bold">{sel.systemType.replace(/_/g, ' ')}</span></span>
+                      {sel.mount?.fastenersPerMount && <span>Fasteners/mount: <span className="text-amber-300 font-bold">{sel.mount.fastenersPerMount}</span></span>}
+                      {sel.mount?.upliftCapacityLbs && <span>Uplift capacity: <span className="text-amber-300 font-bold">{sel.mount.upliftCapacityLbs} lbf</span></span>}
+                      {sel.mount?.maxSpacingIn && <span>Max spacing: <span className="text-slate-300 font-bold">{sel.mount.maxSpacingIn}&quot;</span></span>}
+                      {sel.maxWindSpeedMph && <span>Max wind: <span className="text-slate-300 font-bold">{sel.maxWindSpeedMph} mph</span></span>}
+                      {sel.maxSnowLoadPsf && <span>Max snow: <span className="text-slate-300 font-bold">{sel.maxSnowLoadPsf} psf</span></span>}
+                      {sel.ul2703Listed && <span className="text-emerald-400 font-bold">✓ UL 2703</span>}
                       <span className="text-slate-500 italic ml-auto">Mount spacing is calculated from wind/snow loads.</span>
                     </div>
                   );
@@ -6013,7 +6021,7 @@ export default function EngineeringPage() {
                       <div className="flex items-center gap-2 mb-3">
                         <Wrench size={13} className="text-amber-400" />
                         <span className="text-xs font-bold text-amber-400 uppercase tracking-wide">Racking Materials</span>
-                        <span className="text-xs text-slate-500 ml-1">Derived from array geometry · ASCE 7-22 loads · {RACKING_SYSTEMS.find(r => r.id === config.mountingId)?.manufacturer ?? 'Racking'} system</span>
+                        <span className="text-xs text-slate-500 ml-1">Derived from array geometry · ASCE 7-22 loads · {ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.manufacturer ?? 'Racking'} system</span>
                         {compliance.structural.mountLayout && (
                           <span className="ml-auto text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full">
                             {compliance.structural.mountLayout.mountSpacingIn ?? compliance.structural.mountLayout.finalSpacingIn}"  O.C. calculated
