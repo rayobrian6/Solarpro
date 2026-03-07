@@ -20,6 +20,7 @@ const PUBLIC_PATHS = [
   '/api/engineering/sld/test',
   '/api/enterprise',
   '/api/stripe/webhook',
+  '/api/migrate',
 ];
 
 // Simple JWT decode without verification (verification happens in API routes)
