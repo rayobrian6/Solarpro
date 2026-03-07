@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v25.3';
+export const BUILD_VERSION = 'v25.5';
 export const BUILD_DATE = '2026-03-07';
 export const BUILD_DESCRIPTION = 'FULL STRUCTURAL OVERHAUL + MOUNTING DETAILS UI';
 export const BUILD_FEATURES = [
