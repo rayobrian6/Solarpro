@@ -11,6 +11,7 @@ import {
   CreditCard, ArrowRight, Clock, AlertTriangle, Star, ChevronDown
 } from 'lucide-react';
 import SubscriptionBanner from './SubscriptionBanner';
+import { checkAccess } from '@/lib/permissions';
 
 interface NavItem {
   label: string;
@@ -205,6 +206,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     fetchUser();
     return () => { cancelled = true; };
   }, [router]);
+
+  // Trial expiration redirect — push expired users to /subscribe
+  useEffect(() => {
+    if (!user) return;
+    // Don't redirect on subscribe/auth/enterprise pages
+    const allowedPaths = ['/subscribe', '/auth', '/enterprise', '/account/billing'];
+    if (allowedPaths.some(p => pathname?.startsWith(p))) return;
+
+    const access = checkAccess(
+      user.subscriptionStatus || 'trialing',
+      user.trialEndsAt || null,
+      user.isFreePass || false
+    );
+    if (!access.allowed) {
+      router.push('/subscribe?expired=1');
+    }
+  }, [user, pathname, router]);
 
   async function handleLogout() {
     try {

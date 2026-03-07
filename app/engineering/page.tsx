@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import AppShell from '@/components/ui/AppShell';
+import PlanGate from '@/components/ui/PlanGate';
 import {
   Zap, Download, Printer, Plus, Trash2, Settings,
   ChevronDown, ChevronRight, Sun, Shield, AlertTriangle,
@@ -1873,6 +1874,7 @@ export default function EngineeringPage() {
 
   return (
     <AppShell>
+      <PlanGate feature="engineering">
       <div className="flex flex-col h-full">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50 bg-slate-900/50 flex-shrink-0">
@@ -6642,6 +6644,7 @@ export default function EngineeringPage() {
 
         </div>{/* end content + panel row */}
       </div>
+      </PlanGate>
     </AppShell>
   );
 }

@@ -7,9 +7,11 @@ import Link from 'next/link';
 import {
   Users, Plus, Search, Phone, Mail, MapPin,
   Zap, DollarSign, ChevronRight, Edit, Trash2,
-  Building2, RefreshCw, AlertCircle
+  Building2, RefreshCw, AlertCircle, Lock
 } from 'lucide-react';
 import type { Client } from '@/types';
+import { useSubscription } from '@/hooks/useSubscription';
+import UpgradeModal from '@/components/ui/UpgradeModal';
 
 export default function ClientsPage() {
   const clients = useAppStore(s => s.clients);
@@ -21,6 +23,12 @@ export default function ClientsPage() {
 
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'annualKwh' | 'annualBill'>('name');
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  // Plan gating — Starter: max 5 clients
+  const { plan } = useSubscription();
+  const maxClients = plan === 'starter' ? 5 : null;
+  const atClientLimit = maxClients !== null && clients.length >= maxClients;
 
   // Always reload from server on page visit
   useEffect(() => {
@@ -71,11 +79,39 @@ export default function ClientsPage() {
             >
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             </button>
-            <Link href="/clients/new" className="btn-primary">
-              <Plus size={16} /> Add Client
-            </Link>
+            {atClientLimit ? (
+              <button onClick={() => setUpgradeOpen(true)} className="btn-secondary flex items-center gap-2 opacity-70">
+                <Lock size={14} /> Add Client
+                <span className="text-xs text-amber-400 font-normal">({clients.length}/{maxClients})</span>
+              </button>
+            ) : (
+              <Link href="/clients/new" className="btn-primary">
+                <Plus size={16} /> Add Client
+              </Link>
+            )}
           </div>
         </div>
+
+        {/* Upgrade modal */}
+        <UpgradeModal
+          isOpen={upgradeOpen}
+          onClose={() => setUpgradeOpen(false)}
+          title="Client Limit Reached"
+          description={`Starter plan is limited to ${maxClients} clients. Upgrade to Professional for unlimited clients.`}
+          requiredPlan="Professional"
+        />
+
+        {/* Starter limit banner */}
+        {atClientLimit && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3">
+            <Lock size={16} className="text-amber-400 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-amber-300 font-semibold text-sm">Client limit reached ({clients.length}/{maxClients})</p>
+              <p className="text-amber-400/70 text-xs mt-0.5">Starter plan allows up to {maxClients} clients. Upgrade to Professional for unlimited clients.</p>
+            </div>
+            <button onClick={() => setUpgradeOpen(true)} className="btn-primary btn-sm flex-shrink-0">Upgrade</button>
+          </div>
+        )}
 
         {/* Error banner */}
         {clientsError && clients.length === 0 && (

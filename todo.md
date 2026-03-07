@@ -1,8 +1,11 @@
-# Pricing Update — v27.9 → v28.0
+# Plan Gating Implementation — v28.1
 
 ## Tasks
-- [ ] Update lib/stripe.ts — new prices ($79/$149/$250), updated features per plan
-- [ ] Update lib/permissions.ts — Starter: max 2 projects, 5 clients, no engineering
-- [ ] Update app/subscribe/page.tsx — new prices, new feature lists
-- [ ] Update app/account/billing/page.tsx — new prices
-- [ ] Build + push
+- [ ] Create PlanGate component (reusable gate wrapper with UpgradeModal)
+- [ ] Gate /engineering page — requires Professional
+- [ ] Gate /proposals page — Starter gets preview-only mode
+- [ ] Gate /design page — no gate (all plans)
+- [ ] Gate projects/clients limits — Starter max 2 projects, 5 clients
+- [ ] Add trial expiration redirect to /subscribe
+- [ ] Update lib/version.ts to v28.1
+- [ ] Build + push v28.1

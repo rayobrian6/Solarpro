@@ -5,10 +5,12 @@ import Link from 'next/link';
 import {
   FolderOpen, Plus, Search, Sun, Zap, DollarSign,
   ChevronRight, Edit, Trash2, Filter, Map, FileText,
-  Calendar, User, RefreshCw, AlertCircle
+  Calendar, User, RefreshCw, AlertCircle, Lock
 } from 'lucide-react';
 import type { Project } from '@/types';
 import { useAppStore } from '@/store/appStore';
+import { useSubscription } from '@/hooks/useSubscription';
+import UpgradeModal from '@/components/ui/UpgradeModal';
 
 const STATUS_STEPS = ['lead', 'design', 'proposal', 'approved', 'installed'];
 const statusColors: Record<string, string> = {
@@ -34,6 +36,12 @@ export default function ProjectsPage() {
   const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  // Plan gating — Starter: max 2 projects
+  const { plan, loading: subLoading } = useSubscription();
+  const maxProjects = plan === 'starter' ? 2 : null;
+  const atProjectLimit = maxProjects !== null && projects.length >= maxProjects;
 
   // ✅ Phase 6: Force-refresh from server on every page visit
   useEffect(() => {
@@ -66,11 +74,32 @@ export default function ProjectsPage() {
   return (
     <AppShell>
       <div className="p-6 space-y-6 animate-fade-in">
+        {/* Upgrade modal */}
+        <UpgradeModal
+          isOpen={upgradeOpen}
+          onClose={() => setUpgradeOpen(false)}
+          title="Project Limit Reached"
+          description={`Starter plan is limited to ${maxProjects} projects. Upgrade to Professional for unlimited projects.`}
+          requiredPlan="Professional"
+        />
+
+        {/* Starter limit banner */}
+        {atProjectLimit && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center gap-3">
+            <Lock size={16} className="text-amber-400 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-amber-300 font-semibold text-sm">Project limit reached ({projects.length}/{maxProjects})</p>
+              <p className="text-amber-400/70 text-xs mt-0.5">Starter plan allows up to {maxProjects} projects. Upgrade to Professional for unlimited projects.</p>
+            </div>
+            <button onClick={() => setUpgradeOpen(true)} className="btn-primary btn-sm flex-shrink-0">Upgrade</button>
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">Projects</h1>
-            <p className="text-slate-400 text-sm mt-0.5">{projects.length} total projects</p>
+            <p className="text-slate-400 text-sm mt-0.5">{projects.length} total projects{maxProjects ? ` (${maxProjects} max on Starter)` : ''}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -81,9 +110,16 @@ export default function ProjectsPage() {
             >
               <RefreshCw size={15} className={projectsState === 'loading' ? 'animate-spin' : ''} />
             </button>
-            <Link href="/projects/new" className="btn-primary">
-              <Plus size={16} /> New Project
-            </Link>
+            {atProjectLimit ? (
+              <button onClick={() => setUpgradeOpen(true)} className="btn-secondary flex items-center gap-2 opacity-70">
+                <Lock size={14} /> New Project
+                <span className="text-xs text-amber-400 font-normal">({projects.length}/{maxProjects})</span>
+              </button>
+            ) : (
+              <Link href="/projects/new" className="btn-primary">
+                <Plus size={16} /> New Project
+              </Link>
+            )}
           </div>
         </div>
 

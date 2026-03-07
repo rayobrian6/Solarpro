@@ -2,19 +2,18 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v28.0';
+export const BUILD_VERSION = 'v28.2';
 export const BUILD_DATE = '2026-03-07';
-export const BUILD_DESCRIPTION = 'EQUIPMENT LIBRARY REFACTOR';
+export const BUILD_DESCRIPTION = 'PLAN GATING + TRIAL EXPIRATION';
 export const BUILD_FEATURES = [
-  'Hardware Config → Equipment Library rebrand',
-  'Removed Pricing tab from Hardware Config',
-  'Added user equipment persistence with autosave',
-  'Added Edit, Duplicate, Disable, Datasheet buttons to equipment cards',
-  'Batteries tab added to Equipment Library',
-  'New equipment types: SolarPanel, Inverter, Battery, MountingSystem',
-  'Database migration for user_equipment_* tables',
-  'Equipment save API with debounce autosave',
-  'Default equipment library + user custom equipment merge pattern',
+  'PlanGate component — reusable feature lock screen with upgrade CTA',
+  'Engineering page gated — requires Professional plan',
+  'Proposals page — Starter gets preview-only (no generate, no PDF download)',
+  'Projects page — Starter limited to 2 projects with upgrade prompt',
+  'Clients page — Starter limited to 5 clients with upgrade prompt',
+  'Trial expiration redirect — expired users redirected to /subscribe',
+  'Subscribe page — expired=1 banner for redirected users',
+  'UpgradeModal integrated across all gated pages',
 ] as const;
 
 export function getBuildBadge(): string {

@@ -1,0 +1,115 @@
+
+> solar-platform@1.0.0 build
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+  Creating an optimized production build ...
+✓ Compiled successfully in 13.3s
+  Running TypeScript ...
+  Collecting page data using 1 worker ...
+  Generating static pages using 1 worker (0/47) ...
+  Generating static pages using 1 worker (11/47) 
+  Generating static pages using 1 worker (23/47) 
+[CONDUIT SIZING] selected_conduit_size: 3/4", calculated_fill_percent: 26.1%
+[CONDUIT SIZING] selected_conduit_size: 3/4", calculated_fill_percent: 26.1%
+[CONDUIT SIZING] selected_conduit_size: 1", calculated_fill_percent: 27.3%
+[CONDUIT SIZING] selected_conduit_size: 1", calculated_fill_percent: 27.3%
+[CONDUIT SIZING] selected_conduit_size: 1", calculated_fill_percent: 37.8%
+[CONDUIT SIZING] selected_conduit_size: 3/4", calculated_fill_percent: 26.1%
+[CONDUIT SIZING] selected_conduit_size: 1", calculated_fill_percent: 27.3%
+[CONDUIT SIZING] selected_conduit_size: 1", calculated_fill_percent: 37.8%
+[CONDUIT SIZING] selected_conduit_size: 2-1/2", calculated_fill_percent: 30.6%
+[SEGMENT_SCHEDULE] Built 5 segments for string topology
+[DATA_PROPAGATION] Validated: 5 runSegments -> 5 conduit rows -> 5 equipment items
+[DATA_PROPAGATION] Validated: 5 runSegments -> 4 conduit rows -> 6 equipment items
+  Generating static pages using 1 worker (35/47) 
+✓ Generating static pages using 1 worker (47/47) in 555.2ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /account/billing
+├ ○ /admin/hardware
+├ ○ /admin/pricing
+├ ○ /analytics
+├ ƒ /api/auth/login
+├ ƒ /api/auth/logout
+├ ƒ /api/auth/me
+├ ƒ /api/auth/register
+├ ƒ /api/clients
+├ ƒ /api/clients/[id]
+├ ƒ /api/dsm
+├ ƒ /api/elevation
+├ ƒ /api/engineering/assist
+├ ƒ /api/engineering/auto-configure
+├ ƒ /api/engineering/bom
+├ ƒ /api/engineering/bom-v2
+├ ƒ /api/engineering/calculate
+├ ƒ /api/engineering/enphase
+├ ƒ /api/engineering/equipment
+├ ƒ /api/engineering/ironridge
+├ ƒ /api/engineering/override
+├ ƒ /api/engineering/permit
+├ ƒ /api/engineering/pvwatts
+├ ƒ /api/engineering/rules
+├ ƒ /api/engineering/sld
+├ ƒ /api/engineering/sld/pdf
+├ ƒ /api/engineering/slg/generate
+├ ƒ /api/engineering/structural
+├ ƒ /api/engineering/structural-v2
+├ ƒ /api/engineering/topology
+├ ƒ /api/enterprise/contact
+├ ƒ /api/equipment
+├ ƒ /api/equipment/save
+├ ƒ /api/geocode
+├ ƒ /api/hardware
+├ ƒ /api/maps-session
+├ ƒ /api/migrate
+├ ƒ /api/pricing
+├ ƒ /api/production
+├ ƒ /api/projects
+├ ƒ /api/projects/[id]
+├ ƒ /api/projects/[id]/layout
+├ ƒ /api/projects/[id]/site-conditions
+├ ƒ /api/projects/[id]/versions
+├ ƒ /api/projects/[id]/versions/[versionId]
+├ ƒ /api/proposals
+├ ƒ /api/proposals/[id]
+├ ƒ /api/settings/branding
+├ ƒ /api/settings/logo
+├ ƒ /api/settings/profile
+├ ƒ /api/solar
+├ ƒ /api/stats
+├ ƒ /api/stripe/checkout
+├ ƒ /api/stripe/portal
+├ ƒ /api/stripe/webhook
+├ ƒ /api/tile
+├ ƒ /api/version
+├ ○ /auth/login
+├ ○ /auth/register
+├ ○ /auth/subscribe
+├ ○ /clients
+├ ƒ /clients/[id]
+├ ƒ /clients/[id]/edit
+├ ○ /clients/new
+├ ○ /dashboard
+├ ○ /design
+├ ○ /engineering
+├ ○ /engineering/assist
+├ ○ /enterprise
+├ ○ /projects
+├ ƒ /projects/[id]
+├ ○ /projects/new
+├ ○ /proposals
+├ ○ /settings
+└ ○ /subscribe
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

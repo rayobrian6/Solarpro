@@ -165,6 +165,7 @@ function SubscribePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const canceled = searchParams.get('canceled');
+  const expired = searchParams.get('expired');
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showComparison, setShowComparison] = useState(false);
@@ -236,6 +237,14 @@ function SubscribePageInner() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-16">
+        {/* Trial expired banner */}
+        {expired && (
+          <div className="mb-8 bg-red-900/30 border border-red-500/50 rounded-xl p-5 text-center">
+            <p className="text-red-300 font-semibold text-lg mb-1">⏰ Your free trial has expired</p>
+            <p className="text-red-400/80 text-sm">Choose a plan below to continue using SolarPro and keep all your projects and data.</p>
+          </div>
+        )}
+
         {/* Canceled banner */}
         {canceled && (
           <div className="mb-8 bg-slate-800 border border-slate-600 rounded-xl p-4 text-center text-slate-300">

@@ -9,10 +9,12 @@ import {
   Sun, Zap, DollarSign, Leaf, TrendingUp, Shield,
   Star, Phone, Mail, MapPin, Calendar, Award,
   ChevronRight, BarChart2, Home, Sprout, Fence, Users,
-  Settings, Percent, Tag
+  Settings, Percent, Tag, Lock
 } from 'lucide-react';
 import Link from 'next/link';
 import { resolveEquipment, getSystemTypeLabel } from '@/lib/systemEquipmentResolver';
+import { useSubscription } from '@/hooks/useSubscription';
+import UpgradeModal from '@/components/ui/UpgradeModal';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -26,6 +28,12 @@ function ProposalContent() {
   const [generating, setGenerating] = useState(false);
   const [activeProposal, setActiveProposal] = useState<Proposal | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'preview'>('list');
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+
+  // Plan gating — Starter = preview only (no generate, no download, no e-sign)
+  const { can, loading: subLoading } = useSubscription();
+  const canGenerate = can('proposalEsigning'); // Professional+ can generate & e-sign
+  const isPreviewOnly = !canGenerate;
 
   useEffect(() => {
     const load = async () => {
@@ -89,12 +97,23 @@ function ProposalContent() {
         proposal={enrichedProposal}
         onBack={() => setViewMode('list')}
         onDownload={() => handleDownloadPDF(activeProposal)}
+        isPreviewOnly={isPreviewOnly}
+        onUpgrade={() => setUpgradeOpen(true)}
       />
     );
   }
 
   return (
     <div className="p-6 space-y-6 animate-fade-in">
+      {/* Upgrade modal for Starter users */}
+      <UpgradeModal
+        isOpen={upgradeOpen}
+        onClose={() => setUpgradeOpen(false)}
+        title="Proposal Generation Locked"
+        description="Generating and downloading proposals requires Professional plan or above. Starter plan allows preview only."
+        requiredPlan="Professional"
+      />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-white">Proposals</h1>
@@ -103,9 +122,20 @@ function ProposalContent() {
           </p>
         </div>
         <div className="flex gap-3">
-          {projectId && (
+          {/* Preview-only banner for Starter */}
+          {isPreviewOnly && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-300">
+              <Lock size={12} /> Preview Only — <button onClick={() => setUpgradeOpen(true)} className="underline font-semibold hover:text-amber-200">Upgrade to generate</button>
+            </div>
+          )}
+          {projectId && !isPreviewOnly && (
             <button onClick={generateProposal} disabled={generating} className="btn-primary">
               {generating ? <><span className="spinner w-4 h-4" /> Generating...</> : <><Plus size={16} /> Generate Proposal</>}
+            </button>
+          )}
+          {projectId && isPreviewOnly && (
+            <button onClick={() => setUpgradeOpen(true)} className="btn-secondary opacity-60 cursor-not-allowed" disabled>
+              <Lock size={14} /> Generate Proposal
             </button>
           )}
         </div>
@@ -120,9 +150,15 @@ function ProposalContent() {
           {projectId ? (
             <>
               <p className="text-slate-400 text-sm mb-6">Generate a professional proposal for this project</p>
-              <button onClick={generateProposal} className="btn-primary inline-flex">
-                <Plus size={16} /> Generate First Proposal
-              </button>
+              {isPreviewOnly ? (
+                <button onClick={() => setUpgradeOpen(true)} className="btn-secondary inline-flex gap-2 opacity-70">
+                  <Lock size={14} /> Upgrade to Generate Proposals
+                </button>
+              ) : (
+                <button onClick={generateProposal} className="btn-primary inline-flex">
+                  <Plus size={16} /> Generate First Proposal
+                </button>
+              )}
             </>
           ) : (
             <p className="text-slate-500 text-sm mt-1">Open a project to generate proposals</p>
@@ -155,9 +191,15 @@ function ProposalContent() {
                 <button onClick={() => { setActiveProposal(proposal); setViewMode('preview'); }} className="btn-primary btn-sm">
                   <Eye size={13} /> Preview
                 </button>
-                <button onClick={() => handleDownloadPDF(proposal)} className="btn-secondary btn-sm" title="Download PDF">
-                  <Download size={13} /> PDF
-                </button>
+                {isPreviewOnly ? (
+                  <button onClick={() => setUpgradeOpen(true)} className="btn-secondary btn-sm opacity-50" title="Upgrade to download PDF">
+                    <Lock size={13} /> PDF
+                  </button>
+                ) : (
+                  <button onClick={() => handleDownloadPDF(proposal)} className="btn-secondary btn-sm" title="Download PDF">
+                    <Download size={13} /> PDF
+                  </button>
+                )}
                 <button className="btn-ghost p-2 rounded-lg" title="Share">
                   <Share2 size={15} />
                 </button>
@@ -171,8 +213,9 @@ function ProposalContent() {
 }
 
 // ── Beautiful Proposal Preview ──────────────────────────────────────────────
-function ProposalPreview({ proposal, onBack, onDownload }: {
+function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, onUpgrade }: {
   proposal: Proposal; onBack: () => void; onDownload: () => void;
+  isPreviewOnly?: boolean; onUpgrade?: () => void;
 }) {
   const proj = proposal.project;
   const client = proj?.client;
@@ -300,7 +343,13 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
         <div className="w-px h-5 bg-slate-700" />
         <span className="text-sm font-medium text-white truncate">{proposal.title}</span>
         <div className="ml-auto flex gap-2">
-          <button onClick={onDownload} className="btn-primary btn-sm"><Download size={13} /> Download PDF</button>
+          {isPreviewOnly ? (
+            <button onClick={onUpgrade} className="btn-secondary btn-sm opacity-60 flex items-center gap-1.5" title="Upgrade to download">
+              <Lock size={13} /> Download PDF
+            </button>
+          ) : (
+            <button onClick={onDownload} className="btn-primary btn-sm"><Download size={13} /> Download PDF</button>
+          )}
           <button className="btn-secondary btn-sm"><Share2 size={13} /> Share</button>
           <button onClick={() => window.print()} className="btn-secondary btn-sm hidden md:flex"><Printer size={13} /> Print</button>
         </div>
