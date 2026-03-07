@@ -266,6 +266,8 @@ export default function EngineeringPage() {
   const [mountingInstallType, setMountingInstallType] = useState<'residential' | 'commercial' | 'ground'>('residential');
   const [selectedMountingId, setSelectedMountingId] = useState<string>('ironridge-xr100');
   const [showAllSystems, setShowAllSystems] = useState(false);
+  const [mountingRoofTypeFilter, setMountingRoofTypeFilter] = useState<string>('all');
+  const [mountingSearchQuery, setMountingSearchQuery] = useState<string>('');
   const [aiQuery, setAiQuery] = useState('');
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -5098,8 +5100,47 @@ export default function EngineeringPage() {
               commercial: ['roof_commercial'],
               ground: ['ground_mount', 'tracker'],
             };
-            const filteredSystems = allSystems.filter(s => categoryMap[mountingInstallType].includes(s.category));
+            const baseFiltered = allSystems.filter(s => categoryMap[mountingInstallType].includes(s.category));
+            // Apply roof type filter
+            const roofTypeFiltered = mountingRoofTypeFilter === 'all'
+              ? baseFiltered
+              : baseFiltered.filter(s =>
+                  s.compatibleRoofTypes.includes(mountingRoofTypeFilter as any) ||
+                  s.compatibleRoofTypes.includes('any') ||
+                  (s.mount?.compatibleRoofTypes?.includes(mountingRoofTypeFilter as any))
+                );
+            // Apply search filter
+            const filteredSystems = mountingSearchQuery.trim()
+              ? roofTypeFiltered.filter(s =>
+                  s.manufacturer.toLowerCase().includes(mountingSearchQuery.toLowerCase()) ||
+                  s.model.toLowerCase().includes(mountingSearchQuery.toLowerCase()) ||
+                  s.productLine.toLowerCase().includes(mountingSearchQuery.toLowerCase()) ||
+                  s.systemType.toLowerCase().includes(mountingSearchQuery.toLowerCase())
+                )
+              : roofTypeFiltered;
             const selectedSystem = allSystems.find(s => s.id === selectedMountingId) || filteredSystems[0];
+
+            // Roof type options for filter chips (residential/commercial only)
+            const roofTypeOptions: { value: string; label: string }[] = mountingInstallType === 'residential'
+              ? [
+                  { value: 'all', label: 'All Roofs' },
+                  { value: 'asphalt_shingle', label: '🏠 Shingle' },
+                  { value: 'tile_concrete', label: '🏛 Concrete Tile' },
+                  { value: 'tile_clay', label: '🏺 Clay Tile' },
+                  { value: 'metal_standing_seam', label: '🔩 Standing Seam' },
+                  { value: 'metal_corrugated', label: '〰 Corrugated' },
+                  { value: 'slate', label: '🪨 Slate' },
+                ]
+              : mountingInstallType === 'commercial'
+              ? [
+                  { value: 'all', label: 'All Roofs' },
+                  { value: 'flat_tpo', label: '⬜ TPO' },
+                  { value: 'flat_epdm', label: '⬛ EPDM' },
+                  { value: 'flat_pvc', label: '🔲 PVC' },
+                  { value: 'flat_gravel', label: '🪨 Gravel' },
+                  { value: 'metal_standing_seam', label: '🔩 Standing Seam' },
+                ]
+              : [];
 
             // Compute layout from structural result or config
             const mountCount = compliance.structural?.mountLayout?.mountCount ?? compliance.structural?.rackingBOM?.mounts?.qty ?? Math.ceil(totalPanels * 2.5);
@@ -5242,41 +5283,106 @@ export default function EngineeringPage() {
               <div className="max-w-5xl space-y-5">
                 {/* ── Header + Install Type Toggle ── */}
                 <div className="card p-5">
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center justify-between mb-3">
                     <div>
                       <h3 className="text-lg font-black text-white">Mounting Details</h3>
                       <p className="text-slate-400 text-xs mt-0.5">Full engineering specifications · ASCE 7-22 · ICC-ES rated hardware</p>
                     </div>
                     <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
                       {(['residential', 'commercial', 'ground'] as const).map(t => (
-                        <button key={t} onClick={() => { setMountingInstallType(t); setShowAllSystems(false); }}
+                        <button key={t} onClick={() => { setMountingInstallType(t); setShowAllSystems(false); setMountingSearchQuery(''); }}
                           className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all capitalize ${mountingInstallType === t ? 'bg-amber-500 text-slate-900' : 'text-slate-400 hover:text-white'}`}>
                           {t === 'residential' ? '🏠 Residential' : t === 'commercial' ? '🏢 Commercial' : '🌿 Ground Mount'}
                         </button>
                       ))}
                     </div>
                   </div>
+                  {/* Search bar + roof type indicator */}
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="flex-1 relative">
+                      <input
+                        type="text"
+                        placeholder="Search by brand, model, or system type..."
+                        value={mountingSearchQuery}
+                        onChange={e => setMountingSearchQuery(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60"
+                      />
+                      {mountingSearchQuery && (
+                        <button onClick={() => setMountingSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white text-xs">✕</button>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-slate-500">Roof:</span>
+                      <span className="bg-slate-700 text-amber-300 font-bold px-2 py-1 rounded-lg capitalize">{config.roofType?.replace(/_/g,' ') ?? 'any'}</span>
+                      <span className="text-slate-600">·</span>
+                      <span className="text-slate-400">{filteredSystems.length} systems</span>
+                    </div>
+                  </div>
+                  {/* Active system indicator */}
+                  {config.mountingId && (
+                    <div className="mb-3 flex items-center gap-2 text-xs bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                      <span className="text-amber-400 font-bold">⚡ Active in project:</span>
+                      <span className="text-white font-bold">{ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.manufacturer} {ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId)?.model}</span>
+                      {config.mountingId !== selectedMountingId && (
+                        <button onClick={() => setSelectedMountingId(config.mountingId)} className="ml-auto text-amber-400 hover:text-amber-300 font-bold">View →</button>
+                      )}
+                    </div>
+                  )}
 
-                  {/* System Selector */}
+                  {/* Roof Type Filter Chips (residential/commercial only) */}
+                  {roofTypeOptions.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {roofTypeOptions.map(opt => (
+                        <button key={opt.value} onClick={() => { setMountingRoofTypeFilter(opt.value); setShowAllSystems(false); }}
+                          className={`px-2.5 py-1 rounded-full text-xs font-bold transition-all border ${mountingRoofTypeFilter === opt.value ? 'bg-amber-500/20 border-amber-500/60 text-amber-300' : 'border-slate-700/50 text-slate-400 hover:border-slate-500 hover:text-slate-300'}`}>
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* System Selector Grid */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {(showAllSystems ? filteredSystems : filteredSystems.slice(0, 6)).map(sys => (
+                    {(showAllSystems ? filteredSystems : filteredSystems.slice(0, 9)).map(sys => (
                       <button key={sys.id} onClick={() => setSelectedMountingId(sys.id)}
-                        className={`text-left p-3 rounded-xl border transition-all ${selectedMountingId === sys.id ? 'border-amber-500/60 bg-amber-500/10' : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600'}`}>
+                        className={`text-left p-3 rounded-xl border transition-all ${selectedMountingId === sys.id ? 'border-amber-500/60 bg-amber-500/10' : config.mountingId === sys.id ? 'border-blue-500/40 bg-blue-500/5' : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600'}`}>
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="text-xs font-bold text-white leading-tight">{sys.manufacturer}</div>
-                          {sys.iccEsReport && <span className="text-xs text-emerald-400 font-bold flex-shrink-0">ICC-ES</span>}
+                          <div className="flex gap-1 flex-shrink-0">
+                            {sys.iccEsReport && <span className="text-xs text-emerald-400 font-bold">ICC-ES</span>}
+                            {config.mountingId === sys.id && <span className="text-xs text-blue-400 font-bold">⚡</span>}
+                          </div>
                         </div>
-                        <div className="text-xs text-amber-300 font-bold mb-1">{sys.model}</div>
-                        <div className="text-xs text-slate-500 capitalize">{sys.systemType.replace(/_/g,' ')}</div>
-                        {selectedMountingId === sys.id && <div className="mt-1.5 text-xs text-amber-400 font-bold">✓ Selected</div>}
+                        <div className="text-xs text-amber-300 font-bold mb-0.5">{sys.model}</div>
+                        <div className="text-xs text-slate-500 capitalize mb-1">{sys.systemType.replace(/_/g,' ')}</div>
+                        {selectedMountingId === sys.id && (
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <span className="text-xs text-amber-400 font-bold">✓ Viewing</span>
+                            {config.mountingId !== sys.id && (
+                              <button
+                                onClick={e => { e.stopPropagation(); updateConfig({ mountingId: sys.id }); }}
+                                className="text-xs bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold px-2 py-0.5 rounded-full transition-colors"
+                              >Use This</button>
+                            )}
+                            {config.mountingId === sys.id && <span className="text-xs text-blue-400 font-bold">⚡ Active</span>}
+                          </div>
+                        )}
                       </button>
                     ))}
                   </div>
-                  {filteredSystems.length > 6 && (
-                    <button onClick={() => setShowAllSystems(!showAllSystems)} className="mt-3 text-xs text-amber-400 hover:text-amber-300 font-bold">
-                      {showAllSystems ? '▲ Show Less' : `▼ Show All ${filteredSystems.length} Systems`}
-                    </button>
+                  {filteredSystems.length === 0 && (
+                    <div className="text-center py-6 text-slate-500 text-xs">
+                      No systems match your filters. <button onClick={() => { setMountingRoofTypeFilter('all'); setMountingSearchQuery(''); }} className="text-amber-400 hover:text-amber-300 font-bold">Clear filters</button>
+                    </div>
                   )}
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-xs text-slate-500">{filteredSystems.length} system{filteredSystems.length !== 1 ? 's' : ''} shown</span>
+                    {filteredSystems.length > 9 && (
+                      <button onClick={() => setShowAllSystems(!showAllSystems)} className="text-xs text-amber-400 hover:text-amber-300 font-bold">
+                        {showAllSystems ? '▲ Show Less' : `▼ Show All ${filteredSystems.length} Systems`}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* ── Selected System Spec Panel ── */}
@@ -5292,9 +5398,19 @@ export default function EngineeringPage() {
                         <h4 className="text-xl font-black text-white">{selectedSystem.manufacturer} {selectedSystem.model}</h4>
                         <p className="text-slate-400 text-xs mt-0.5">{selectedSystem.description}</p>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right flex flex-col items-end gap-2">
                         <div className="text-xs text-slate-500 capitalize">{selectedSystem.category.replace(/_/g,' ')}</div>
-                        <div className="text-xs text-amber-400 font-bold capitalize mt-0.5">{selectedSystem.systemType.replace(/_/g,' ')}</div>
+                        <div className="text-xs text-amber-400 font-bold capitalize">{selectedSystem.systemType.replace(/_/g,' ')}</div>
+                        {config.mountingId === selectedSystem.id ? (
+                          <span className="text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-1 rounded-lg">⚡ Active in Structural</span>
+                        ) : (
+                          <button
+                            onClick={() => { updateConfig({ mountingId: selectedSystem.id }); }}
+                            className="text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-900 px-3 py-1.5 rounded-lg transition-all"
+                          >
+                            ✓ Use This System
+                          </button>
+                        )}
                       </div>
                     </div>
 
