@@ -32,7 +32,8 @@ export function checkAccess(
   trialEndsAt: string | null,
   isFreePass: boolean
 ): AccessResult {
-  if (isFreePass) return { allowed: true, reason: 'free_pass' };
+  // Free pass — always allowed, no expiry, no feature gates
+  if (isFreePass || subscriptionStatus === 'free_pass') return { allowed: true, reason: 'free_pass' };
 
   if (subscriptionStatus === 'active') return { allowed: true, reason: 'active' };
 
@@ -48,7 +49,6 @@ export function checkAccess(
 
   if (subscriptionStatus === 'past_due') return { allowed: true, reason: 'past_due' };
   if (subscriptionStatus === 'canceled') return { allowed: false, reason: 'canceled' };
-  if (subscriptionStatus === 'free_pass') return { allowed: true, reason: 'free_pass' };
 
   // Default: allow with no_subscription (new accounts)
   return { allowed: true, reason: 'no_subscription' };

@@ -185,6 +185,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         if (!cancelled) {
           // Handle both { data: user } and { user } response shapes
           const userData = json.data || json.user || json;
+          const isFP = userData.isFreePass === true || userData.subscriptionStatus === 'free_pass';
           setUser({
             id: userData.id,
             name: userData.name || userData.email,
@@ -194,7 +195,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             plan: userData.plan || 'starter',
             subscriptionStatus: userData.subscriptionStatus || 'trialing',
             trialEndsAt: userData.trialEndsAt || null,
-            isFreePass: userData.isFreePass || false,
+            isFreePass: isFP,
           });
         }
       } catch (err) {
@@ -208,16 +209,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   // Trial expiration redirect — push expired users to /subscribe
+  // Free pass users are NEVER redirected regardless of status
   useEffect(() => {
     if (!user) return;
-    // Don't redirect on subscribe/auth/enterprise pages
+
+    // Free pass users always have full access — never redirect
+    const isFreePassUser = user.isFreePass || user.subscriptionStatus === 'free_pass';
+    if (isFreePassUser) return;
+
+    // Don't redirect on subscribe/auth/enterprise/billing pages
     const allowedPaths = ['/subscribe', '/auth', '/enterprise', '/account/billing'];
     if (allowedPaths.some(p => pathname?.startsWith(p))) return;
 
     const access = checkAccess(
       user.subscriptionStatus || 'trialing',
       user.trialEndsAt || null,
-      user.isFreePass || false
+      false // already handled free_pass above
     );
     if (!access.allowed) {
       router.push('/subscribe?expired=1');

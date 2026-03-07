@@ -2,18 +2,17 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v28.2';
+export const BUILD_VERSION = 'v28.4';
 export const BUILD_DATE = '2026-03-07';
-export const BUILD_DESCRIPTION = 'PLAN GATING + TRIAL EXPIRATION';
+export const BUILD_DESCRIPTION = 'FREE PASS + AUTH FIXES';
 export const BUILD_FEATURES = [
-  'PlanGate component — reusable feature lock screen with upgrade CTA',
-  'Engineering page gated — requires Professional plan',
-  'Proposals page — Starter gets preview-only (no generate, no PDF download)',
-  'Projects page — Starter limited to 2 projects with upgrade prompt',
-  'Clients page — Starter limited to 5 clients with upgrade prompt',
-  'Trial expiration redirect — expired users redirected to /subscribe',
-  'Subscribe page — expired=1 banner for redirected users',
-  'UpgradeModal integrated across all gated pages',
+  'FIXED: useSubscription hook — correctly unwraps /api/auth/me { data: {...} } response',
+  'FIXED: billing/page.tsx — correctly unwraps nested API response, no more login redirect',
+  'FIXED: AppShell trial redirect — free_pass users never redirected to /subscribe',
+  'FIXED: checkAccess — free_pass status always returns allowed=true regardless of isFreePass flag',
+  'FIXED: AppShell isFreePass detection — also checks subscriptionStatus === free_pass',
+  'NEW: /api/admin/free-pass — grant/revoke/list free passes by email with admin secret',
+  'NEW: /api/admin/free-pass added to middleware PUBLIC_PATHS',
 ] as const;
 
 export function getBuildBadge(): string {

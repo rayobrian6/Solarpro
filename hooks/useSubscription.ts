@@ -65,12 +65,16 @@ export function useSubscription(): SubscriptionState {
   useEffect(() => {
     fetch('/api/auth/me')
       .then(r => r.json())
-      .then(user => {
+      .then(json => {
+        // API returns { success: true, data: { id, plan, ... } }
+        // Support both shapes: { data: { ... } } and flat { id, plan, ... }
+        const user = json?.data || json;
         if (user?.id) {
+          const isFP = user.isFreePass === true || user.subscriptionStatus === 'free_pass';
           setData({
             plan: (user.plan || 'starter') as PlanId,
             status: user.subscriptionStatus || 'trialing',
-            isFreePass: user.isFreePass || false,
+            isFreePass: isFP,
             trialEndsAt: user.trialEndsAt || null,
             hasAccess: user.hasAccess !== false,
           });
@@ -83,18 +87,23 @@ export function useSubscription(): SubscriptionState {
   const access = checkAccess(data.status, data.trialEndsAt, data.isFreePass);
   const trialDaysRemaining = access.daysRemaining ?? 0;
 
-  const isTrialing = data.status === 'trialing' && trialDaysRemaining > 0;
-  const isExpired = data.status === 'trial_expired' ||
-    (data.status === 'trialing' && trialDaysRemaining === 0 && !data.isFreePass);
-  const isActive = data.status === 'active' || data.isFreePass || data.status === 'free_pass';
-  const isPastDue = data.status === 'past_due';
+  // Free pass users are always active — never expired
+  const isFreePassUser = data.isFreePass || data.status === 'free_pass';
+
+  const isTrialing = !isFreePassUser && data.status === 'trialing' && trialDaysRemaining > 0;
+  const isExpired  = !isFreePassUser && (
+    data.status === 'trial_expired' ||
+    (data.status === 'trialing' && trialDaysRemaining === 0)
+  );
+  const isActive   = data.status === 'active' || isFreePassUser;
+  const isPastDue  = data.status === 'past_due';
   const isCanceled = data.status === 'canceled';
 
   return {
     loading,
     plan: data.plan,
     status: data.status,
-    isFreePass: data.isFreePass,
+    isFreePass: isFreePassUser,
     hasAccess: access.allowed,
     trialDaysRemaining,
     isTrialing,
@@ -102,11 +111,12 @@ export function useSubscription(): SubscriptionState {
     isExpired,
     isPastDue,
     isCanceled,
-    planLabel: PLAN_LABELS[data.plan] || 'Starter',
-    planPrice: PLAN_PRICES[data.plan] || '$79/mo',
-    planColor: PLAN_COLORS[data.plan] || 'text-slate-300',
+    planLabel: PLAN_LABELS[data.plan] || PLAN_LABELS[data.status] || 'Free Pass',
+    planPrice: PLAN_PRICES[data.plan] || PLAN_PRICES[data.status] || 'Free',
+    planColor: PLAN_COLORS[data.plan] || PLAN_COLORS[data.status] || 'text-green-400',
     can: (feature: FeatureKey) => {
-      if (data.isFreePass || data.status === 'free_pass') return true;
+      // Free pass users bypass ALL feature gates — full access
+      if (isFreePassUser) return true;
       if (!access.allowed) return false;
       return canAccess(data.plan, feature);
     },

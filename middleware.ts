@@ -21,6 +21,7 @@ const PUBLIC_PATHS = [
   '/api/enterprise',
   '/api/stripe/webhook',
   '/api/migrate',
+  '/api/admin/free-pass',
 ];
 
 // Simple JWT decode without verification (verification happens in API routes)

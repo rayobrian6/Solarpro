@@ -54,15 +54,18 @@ export default function BillingPage() {
   useEffect(() => {
     fetch('/api/auth/me')
       .then(r => r.json())
-      .then(data => {
-        if (!data.id) { router.push('/auth/login'); return; }
+      .then(json => {
+        // API returns { success: true, data: { id, plan, ... } }
+        const u = json?.data || json;
+        if (!u?.id) { router.push('/auth/login'); return; }
+        const isFP = u.isFreePass === true || u.subscriptionStatus === 'free_pass';
         setUser({
-          plan: data.plan || 'starter',
-          subscriptionStatus: data.subscriptionStatus || 'trialing',
-          trialEndsAt: data.trialEndsAt || null,
-          isFreePass: data.isFreePass || false,
-          hasAccess: data.hasAccess !== false,
-          stripeCustomerId: data.stripeCustomerId,
+          plan: isFP ? 'free_pass' : (u.plan || 'starter'),
+          subscriptionStatus: u.subscriptionStatus || 'trialing',
+          trialEndsAt: u.trialEndsAt || null,
+          isFreePass: isFP,
+          hasAccess: u.hasAccess !== false,
+          stripeCustomerId: u.stripeCustomerId,
         });
       })
       .catch(() => router.push('/auth/login'))
