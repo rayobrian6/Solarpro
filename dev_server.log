@@ -1,0 +1,11 @@
+
+> solar-platform@1.0.0 dev
+> next dev -p 3008
+
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3008
+- Network:       http://172.29.75.5:3008
+
+✓ Starting...
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+✓ Ready in 768ms

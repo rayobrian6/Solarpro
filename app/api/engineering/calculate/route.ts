@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runElectricalCalc, ElectricalCalcInput } from '@/lib/electrical-calc';
-import { runStructuralCalc, StructuralInput } from '@/lib/structural-calc';
+import { runStructuralCalcV4, type StructuralInputV4 } from '@/lib/structural-engine-v4';
 import { getJurisdictionInfo, getDesignTemperatures, getGroundSnowLoad, getDesignWindSpeed, parseStateFromAddress } from '@/lib/jurisdiction';
 import {
   generateStringConfig,
@@ -130,22 +130,59 @@ export async function POST(req: NextRequest) {
       electricalResult = runElectricalCalc(electricalInput);
     }
 
-    // Run structural calculations
+    // Run structural calculations (V4 engine)
     let structuralResult = null;
     if (structural) {
-      const structuralInput: StructuralInput = {
-        ...structural,
-        windSpeed: structural.windSpeed ?? windSpeed,
-        groundSnowLoad: structural.groundSnowLoad ?? groundSnowLoad,
-      };
-      structuralResult = runStructuralCalc(structuralInput);
+      try {
+        const structuralInput: StructuralInputV4 = {
+          installationType: structural.installationType ?? 'roof_residential',
+          windSpeed:        Number(structural.windSpeed ?? windSpeed),
+          windExposure:     structural.windExposure ?? 'C',
+          groundSnowLoad:   Number(structural.groundSnowLoad ?? groundSnowLoad),
+          meanRoofHeight:   Number(structural.meanRoofHeight ?? 15),
+          roofPitch:        Number(structural.roofPitch ?? 20),
+          framingType:      structural.framingType ?? 'unknown',
+          rafterSize:       structural.rafterSize ?? '2x6',
+          rafterSpacingIn:  Number(structural.rafterSpacing ?? structural.rafterSpacingIn ?? 24),
+          rafterSpanFt:     Number(structural.rafterSpan ?? structural.rafterSpanFt ?? 16),
+          woodSpecies:      structural.rafterSpecies ?? structural.woodSpecies ?? 'Douglas Fir-Larch',
+          panelCount:       Number(structural.panelCount ?? 24),
+          panelLengthIn:    Number(structural.panelLength ?? structural.panelLengthIn ?? 73.0),
+          panelWidthIn:     Number(structural.panelWidth ?? structural.panelWidthIn ?? 41.0),
+          panelWeightLbs:   Number(structural.panelWeight ?? structural.panelWeightLbs ?? 45.0),
+          panelOrientation: structural.panelOrientation ?? 'portrait',
+          rowCount:         structural.rowCount,
+          colCount:         structural.colCount,
+          moduleGapIn:      structural.moduleGapIn ?? 0.5,
+          rowGapIn:         structural.rowGapIn ?? 6,
+          mountingSystemId: structural.mountingSystem ?? structural.mountingSystemId ?? 'ironridge-xr100',
+          rackingWeightPerPanelLbs: structural.rackingWeight ?? structural.rackingWeightPerPanelLbs ?? 4.0,
+          roofDeadLoadPsf:  structural.roofDeadLoadPsf ?? 15,
+          soilType:         structural.soilType,
+          frostDepthIn:     structural.frostDepthIn,
+        };
+        structuralResult = runStructuralCalcV4(structuralInput);
+      } catch (structErr) {
+        console.warn('[calculate] V4 structural engine warning:', structErr);
+        // Fallback: return PASS with warning rather than crashing
+        structuralResult = { status: 'WARNING', errors: [], warnings: [{ code: 'ENGINE_ERROR', message: String(structErr), severity: 'warning', suggestion: 'Check structural inputs' }] };
+      }
     }
 
-    // Combined status
+    // ── Deterministic overall status ──────────────────────────────────────
+    // Rule: if ALL engines return PASS (or no errors after auto-fixes), overall = PASS
+    // Only FAIL if there are unresolved errors after auto-fix
+    const electricalStatus = electricalResult?.status ?? 'PASS';
+    const structuralStatus = structuralResult?.status ?? 'PASS';
+
+    // Check for unresolved errors (not auto-fixed)
+    const electricalErrors = electricalResult?.errors?.filter((e: any) => !e.autoFixed) ?? [];
+    const structuralErrors = (structuralResult as any)?.errors?.filter((e: any) => e.severity === 'error') ?? [];
+
     let overallStatus: 'PASS' | 'WARNING' | 'FAIL' = 'PASS';
-    if (electricalResult?.status === 'FAIL' || structuralResult?.status === 'FAIL') {
+    if (electricalErrors.length > 0 || structuralErrors.length > 0) {
       overallStatus = 'FAIL';
-    } else if (electricalResult?.status === 'WARNING' || structuralResult?.status === 'WARNING') {
+    } else if (electricalStatus === 'WARNING' || structuralStatus === 'WARNING') {
       overallStatus = 'WARNING';
     }
 

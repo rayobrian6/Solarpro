@@ -1,45 +1,54 @@
-# Solar Platform Structural & Racking Engine Overhaul
+# Full Architectural Audit & Redesign — Solar Mounting + Structural Platform
 
-## Phase 1: Array Geometry Engine
-- [x] Create `lib/array-geometry.ts` — compute full array geometry from panel specs
-- [x] Inputs: panel count, dimensions, orientation, rows, cols, spacing
-- [x] Outputs: array W/H, rail lengths, rail count, clamp positions, cantilever
+## SECTION 1: Fix Project Status Failure Logic
+- [ ] Audit calculate route — old structural-calc.ts causes FAIL with default attachmentSpacing=48
+- [ ] Fix calculate route to use V3 engine (not old structural-calc.ts)
+- [ ] Fix overallStatus aggregation: use V3 structural result + electrical result
+- [ ] Add debug inspector panel to compliance tab (rule source, result, auto-fix, final status)
+- [ ] Ensure auto-fixes clear error flags before final status computation
 
-## Phase 2: Racking System Database
-- [x] Create `lib/racking-database.ts` — comprehensive manufacturer database
-- [x] Include: IronRidge, Unirac, Roof Tech, SnapNrack, QuickMount, S-5!, K2, EcoFasten, DPW, Schletter
-- [x] Each system: rail dims, max span, mount spacing limits, fastener types, uplift capacity
-- [x] Hardware components: rails, L-feet, tile hooks, clamps, splices, grounding lugs
+## SECTION 2-3: Global Hardware Database (lib/mounting-hardware-db.ts)
+- [ ] Build comprehensive database: 16 manufacturers, all system types
+- [ ] Roof systems: rail+L-foot, tile hook, rail-less, standing seam, corrugated, flat roof
+- [ ] Commercial: ballasted, mechanically attached, tilt-leg, large-span
+- [ ] Ground mount: single/dual-post, driven pile, helical pile, concrete pier
+- [ ] Tracker: single-axis, dual-axis
+- [ ] Solar fence systems
+- [ ] Each system: max span, cantilever, uplift capacity, fastener pull-out, shear, ballast tables
+- [ ] Source references for every engineering value
 
-## Phase 3: Structural Load Engine (V3)
-- [x] Create `lib/structural-engine-v3.ts` — deterministic load engine
-- [x] ASCE 7-22 wind loads (zones: interior/edge/corner)
-- [x] Snow load with slope factor
-- [x] Load path: modules → rails → mounts → fasteners → rafters
-- [x] Mount spacing CALCULATED from loads (not user input)
-- [x] Auto-resolve failures by adjusting spacing/count
-- [x] NDS 2018 rafter checks: bending, deflection, shear
-- [x] Auto-detect framing type: 24" OC → TRUSS, 16" OC → RAFTER
+## SECTION 4-6: Structural Engine V4 (lib/structural-engine-v4.ts)
+- [ ] Extend V3 with commercial ballasted flat roof support
+- [ ] Add ground mount pile spacing + foundation load calculations
+- [ ] Add tracker geometry (row spacing, rotation clearance)
+- [ ] Improve load path: modules→rails→mounts→fasteners→rafters/structure
+- [ ] Auto-resolve: reduce spacing, add mounts, increase rail count, recommend upgrade
 
-## Phase 4: Racking Material Calculator
-- [x] Create `lib/racking-calculator.ts` — BOM quantities from geometry (integrated into V3)
-- [x] Rail count, lengths, splices from array geometry
-- [x] Mount count from calculated spacing
-- [x] Mid/end clamp quantities
-- [x] Grounding hardware
+## SECTION 7: Commercial System Support
+- [ ] Ballasted flat roof: ballast block count, weight distribution, tilt frame spacing
+- [ ] Ground mount: pile spacing, foundation loads, frame spans
+- [ ] Tracker: actuator geometry, row spacing, rotation clearance
 
-## Phase 5: API Route
-- [x] Update `app/api/engineering/structural-v2/route.ts` to use V3 engine
-- [x] Accept full panel geometry inputs
-- [x] Return: geometry, loads, mount layout, racking BOM, rafter check
+## SECTION 8: BOM Integration
+- [ ] All racking quantities from geometry (never static)
+- [ ] Commercial: ballast blocks, foundations
+- [ ] Ground mount: piles, frames, hardware
 
-## Phase 6: UI Integration
-- [x] Update Structural tab display
-- [x] Update BOM tab with racking materials
-- [x] Update System Config panel geometry inputs
-- [x] Remove static attachment spacing — show calculated value
+## SECTION 9: Mounting Details UI Redesign (app/engineering/page.tsx)
+- [ ] Residential/Commercial/Ground toggle
+- [ ] Mounting system selector with manufacturer specs panel
+- [ ] Real-time mount spacing diagram (SVG)
+- [ ] Rail layout visualization
+- [ ] Ballast block layout visualization (commercial)
+- [ ] Mount load visualization
+- [ ] BOM preview panel
+- [ ] All elements update in real time
 
-## Phase 7: Validation & Build
-- [x] Test 34-panel, 2x6 rafter, 24" OC, 115mph, 20psf case → PASS (55% truss util, SF=1.69)
-- [x] Run build — compiled clean in 11.6s, zero errors
-- [x] Commit and push v24.10
+## SECTION 10: Validation Test Cases
+- [ ] Test 1: 10 panels, asphalt shingles, 2x6 @ 24" OC, 115mph, 20psf → PASS
+- [ ] Test 2: 200 panels, ballasted flat roof, Exposure B → ballast weight + layout
+- [ ] Test 3: 50 panels, dual-post ground mount → pile spacing + foundation loads
+
+## Phase Final: Build + Push
+- [ ] Run npm run build — must compile clean
+- [ ] Commit and push as v25.1

@@ -12,6 +12,7 @@ import {
   ChevronUp, Eye, EyeOff, Lock, Stamp, Package, Cpu as CpuIcon
 } from 'lucide-react';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from '@/lib/equipment-db';
+import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
 import { getUtilitiesByState } from '@/lib/utility-rules';
 import { getAhjsByState } from '@/lib/computed-plan';
@@ -4165,6 +4166,67 @@ export default function EngineeringPage() {
                 </div>
               )}
 
+            {/* ── STATUS AGGREGATION DEBUG INSPECTOR ── */}
+            {(compliance.overallStatus || rulesResult) && (
+              <div className="card p-5 border border-slate-700/50">
+                <details>
+                  <summary className="text-xs font-bold text-slate-400 uppercase tracking-wide cursor-pointer flex items-center gap-2 select-none hover:text-amber-400 transition-colors">
+                    <span className="text-blue-400">⚙</span> Status Aggregation Inspector
+                    <span className="text-xs font-normal text-slate-600 ml-1">(click to expand — shows how Overall status is computed)</span>
+                  </summary>
+                  <div className="mt-4 space-y-3 font-mono text-xs">
+                    <div className="bg-slate-900/60 rounded-lg p-3">
+                      <div className="text-blue-400 font-bold mb-2">── Final Status Computation ──</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-slate-300">
+                        <div>electricalStatus = <span className={compliance.electrical?.status === 'FAIL' ? 'text-red-400 font-bold' : compliance.electrical?.status === 'WARNING' ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>{compliance.electrical?.status ?? 'NOT RUN'}</span></div>
+                        <div>structuralStatus = <span className={compliance.structural?.status === 'FAIL' ? 'text-red-400 font-bold' : compliance.structural?.status === 'WARNING' ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>{compliance.structural?.status ?? 'NOT RUN'}</span></div>
+                        <div>rulesEngineStatus = <span className={rulesResult?.overallStatus === 'FAIL' ? 'text-red-400 font-bold' : rulesResult?.overallStatus === 'WARNING' ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>{rulesResult?.overallStatus ?? 'NOT RUN'}</span></div>
+                        <div>overallStatus = <span className={compliance.overallStatus === 'FAIL' ? 'text-red-400 font-bold' : compliance.overallStatus === 'WARNING' ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'}>{compliance.overallStatus ?? 'NOT RUN'}</span></div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-3">
+                      <div className="text-amber-400 font-bold mb-2">── Unresolved Errors (cause FAIL) ──</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-slate-300">
+                        <div>electricalErrors (not autoFixed) = <span className="text-white font-bold">{compliance.electrical?.errors?.filter((e: any) => !e.autoFixed)?.length ?? 0}</span></div>
+                        <div>structuralErrors (severity=error) = <span className="text-white font-bold">{compliance.structural?.errors?.filter((e: any) => e.severity === 'error')?.length ?? 0}</span></div>
+                        <div>autoFixedElectrical = <span className="text-emerald-400 font-bold">{compliance.electrical?.errors?.filter((e: any) => e.autoFixed)?.length ?? 0}</span></div>
+                        <div>structuralWarnings = <span className="text-amber-400 font-bold">{compliance.structural?.warnings?.length ?? 0}</span></div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-900/60 rounded-lg p-3">
+                      <div className="text-slate-400 font-bold mb-2">── Aggregation Logic ──</div>
+                      <div className="text-slate-400 space-y-0.5">
+                        <div>if (electricalErrors &gt; 0 || structuralErrors &gt; 0) → <span className="text-red-400 font-bold">FAIL</span></div>
+                        <div>else if (electricalStatus=WARNING || structuralStatus=WARNING) → <span className="text-amber-400 font-bold">WARNING</span></div>
+                        <div>else → <span className="text-emerald-400 font-bold">PASS</span></div>
+                        <div className="mt-2 text-blue-300">Result: <span className={`font-bold ${compliance.overallStatus === 'FAIL' ? 'text-red-400' : compliance.overallStatus === 'WARNING' ? 'text-amber-400' : 'text-emerald-400'}`}>{compliance.overallStatus ?? '—'}</span></div>
+                      </div>
+                    </div>
+                    {compliance.electrical?.errors?.length > 0 && (
+                      <div className="bg-slate-900/60 rounded-lg p-3">
+                        <div className="text-red-400 font-bold mb-2">── Electrical Errors ──</div>
+                        {compliance.electrical.errors.map((e: any, i: number) => (
+                          <div key={i} className={`text-xs mb-1 ${e.autoFixed ? 'text-emerald-400' : 'text-red-300'}`}>
+                            [{e.autoFixed ? 'AUTO-FIXED' : 'ERROR'}] {e.code}: {e.message}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {compliance.structural?.errors?.length > 0 && (
+                      <div className="bg-slate-900/60 rounded-lg p-3">
+                        <div className="text-red-400 font-bold mb-2">── Structural Errors ──</div>
+                        {compliance.structural.errors.map((e: any, i: number) => (
+                          <div key={i} className={`text-xs mb-1 ${e.severity === 'error' ? 'text-red-300' : 'text-amber-300'}`}>
+                            [{e.severity?.toUpperCase() ?? 'ERROR'}] {e.code}: {e.message}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </div>
+            )}
+
             {/* ── RULES ENGINE RESULTS ── */}
             {rulesResult && (
               <div className="space-y-3">
@@ -4999,60 +5061,596 @@ export default function EngineeringPage() {
           )}
 
           {/* ── MOUNTING DETAILS TAB ── */}
-          {activeTab === 'mounting' && (
-            <div className="max-w-4xl space-y-6">
-              <div className="card p-5">
-                <h3 className="text-lg font-black text-white mb-1">Roof Attachment Details</h3>
-                <p className="text-slate-400 text-sm mb-5">Mounting hardware specifications by roof type.</p>
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-5">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-xs font-bold bg-amber-500 text-slate-900 px-2 py-0.5 rounded-full">SELECTED</span>
-                    <span className="text-white font-bold">{ROOF_TYPES[config.roofType].label}</span>
+          {activeTab === 'mounting' && (() => {
+            // ── Mounting Details Tab ── Full Redesign ──────────────────────────────
+            const allSystems = getAllMountingSystems();
+            const [mountingInstallType, setMountingInstallType] = React.useState<'residential' | 'commercial' | 'ground'>('residential');
+            const [selectedMountingId, setSelectedMountingId] = React.useState<string>(config.mountingId || 'ironridge-xr100');
+            const [showAllSystems, setShowAllSystems] = React.useState(false);
+
+            // Filter systems by install type
+            const categoryMap: Record<string, MountingCategory[]> = {
+              residential: ['roof_residential'],
+              commercial: ['roof_commercial'],
+              ground: ['ground_mount', 'tracker'],
+            };
+            const filteredSystems = allSystems.filter(s => categoryMap[mountingInstallType].includes(s.category));
+            const selectedSystem = allSystems.find(s => s.id === selectedMountingId) || filteredSystems[0];
+
+            // Compute layout from structural result or config
+            const mountCount = compliance.structural?.mountLayout?.mountCount ?? compliance.structural?.rackingBOM?.mounts?.qty ?? Math.ceil(totalPanels * 2.5);
+            const mountSpacing = compliance.structural?.mountLayout?.mountSpacing ?? config.attachmentSpacing ?? 48;
+            const upliftPerMount = compliance.structural?.wind?.upliftPerAttachment ?? compliance.structural?.mountLayout?.upliftPerMount ?? 0;
+            const downwardPerMount = compliance.structural?.deadLoad?.deadLoadPerAttachment ?? compliance.structural?.mountLayout?.downwardPerMount ?? 0;
+            const railCount = compliance.structural?.rackingBOM?.rails?.qty ?? Math.ceil(totalPanels / 4) * 2;
+            const safetyFactor = compliance.structural?.attachment?.safetyFactor ?? compliance.structural?.mountLayout?.safetyFactor ?? 0;
+
+            // SVG mount spacing diagram
+            const MountSpacingDiagram = () => {
+              const panelW = 60; const panelH = 36; const gap = 6;
+              const cols = Math.min(5, Math.ceil(Math.sqrt(totalPanels)));
+              const rows = Math.min(3, Math.ceil(totalPanels / cols));
+              const svgW = cols * (panelW + gap) + 80;
+              const svgH = rows * (panelH + gap) + 60;
+              const mountPositions: {x:number,y:number}[] = [];
+              for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                  if (c % 2 === 0) mountPositions.push({ x: 40 + c * (panelW + gap), y: 20 + r * (panelH + gap) + panelH / 2 });
+                }
+              }
+              return (
+                <svg width={svgW} height={svgH} className="w-full" viewBox={`0 0 ${svgW} ${svgH}`}>
+                  {/* Rail lines */}
+                  {Array.from({length: rows}).map((_, r) => (
+                    <line key={`rail-top-${r}`} x1={30} y1={20 + r*(panelH+gap) + 8} x2={svgW-10} y2={20 + r*(panelH+gap) + 8} stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,2" opacity="0.6"/>
+                  ))}
+                  {Array.from({length: rows}).map((_, r) => (
+                    <line key={`rail-bot-${r}`} x1={30} y1={20 + r*(panelH+gap) + panelH - 8} x2={svgW-10} y2={20 + r*(panelH+gap) + panelH - 8} stroke="#f59e0b" strokeWidth="2" strokeDasharray="4,2" opacity="0.6"/>
+                  ))}
+                  {/* Panels */}
+                  {Array.from({length: rows}).map((_, r) =>
+                    Array.from({length: cols}).map((_, c) => (
+                      <rect key={`p-${r}-${c}`} x={40 + c*(panelW+gap)} y={20 + r*(panelH+gap)} width={panelW} height={panelH} rx={2} fill="#1e293b" stroke="#334155" strokeWidth="1"/>
+                    ))
+                  )}
+                  {/* Mount points */}
+                  {mountPositions.map((m, i) => (
+                    <g key={`m-${i}`}>
+                      <circle cx={m.x} cy={m.y} r={5} fill="#ef4444" stroke="#fca5a5" strokeWidth="1.5"/>
+                      <line x1={m.x} y1={m.y - 5} x2={m.x} y2={m.y - 14} stroke="#ef4444" strokeWidth="1.5"/>
+                    </g>
+                  ))}
+                  {/* Spacing annotation */}
+                  {mountPositions.length >= 2 && (
+                    <g>
+                      <line x1={mountPositions[0].x} y1={svgH - 15} x2={mountPositions[1]?.x ?? mountPositions[0].x + 66} y2={svgH - 15} stroke="#64748b" strokeWidth="1" markerEnd="url(#arrow)"/>
+                      <text x={(mountPositions[0].x + (mountPositions[1]?.x ?? mountPositions[0].x + 66)) / 2} y={svgH - 4} textAnchor="middle" fill="#94a3b8" fontSize="9">{mountSpacing}"</text>
+                    </g>
+                  )}
+                  <defs>
+                    <marker id="arrow" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                      <path d="M0,0 L0,6 L6,3 z" fill="#64748b"/>
+                    </marker>
+                  </defs>
+                  {/* Legend */}
+                  <g transform={`translate(10, ${svgH - 30})`}>
+                    <rect x={0} y={0} width={10} height={8} fill="#1e293b" stroke="#334155"/>
+                    <text x={14} y={8} fill="#94a3b8" fontSize="8">Panel</text>
+                    <line x1={50} y1={4} x2={60} y2={4} stroke="#f59e0b" strokeWidth="2" strokeDasharray="3,2"/>
+                    <text x={64} y={8} fill="#94a3b8" fontSize="8">Rail</text>
+                    <circle cx={100} cy={4} r={4} fill="#ef4444"/>
+                    <text x={107} y={8} fill="#94a3b8" fontSize="8">Mount</text>
+                  </g>
+                </svg>
+              );
+            };
+
+            // Ballast layout SVG (commercial)
+            const BallastLayoutDiagram = () => {
+              const cols = Math.min(8, Math.ceil(Math.sqrt(totalPanels)));
+              const rows = Math.min(4, Math.ceil(totalPanels / cols));
+              const pW = 50; const pH = 30; const gap = 4;
+              const svgW = cols * (pW + gap) + 20;
+              const svgH = rows * (pH + gap) + 30;
+              const ballastBlocks = (compliance.structural as any)?.ballastAnalysis?.blocksPerModule ?? selectedSystem?.ballast?.minBlocksPerModule ?? 2;
+              return (
+                <svg width={svgW} height={svgH} className="w-full" viewBox={`0 0 ${svgW} ${svgH}`}>
+                  {Array.from({length: rows}).map((_, r) =>
+                    Array.from({length: cols}).map((_, c) => (
+                      <g key={`bp-${r}-${c}`}>
+                        <rect x={10 + c*(pW+gap)} y={10 + r*(pH+gap)} width={pW} height={pH} rx={2} fill="#1e293b" stroke="#334155" strokeWidth="1"/>
+                        {/* Ballast blocks at corners */}
+                        {Array.from({length: Math.min(ballastBlocks, 4)}).map((_, b) => {
+                          const bx = b % 2 === 0 ? 10 + c*(pW+gap) + 3 : 10 + c*(pW+gap) + pW - 9;
+                          const by = b < 2 ? 10 + r*(pH+gap) + 3 : 10 + r*(pH+gap) + pH - 9;
+                          return <rect key={`bb-${b}`} x={bx} y={by} width={6} height={6} rx={1} fill="#6366f1" opacity="0.8"/>;
+                        })}
+                      </g>
+                    ))
+                  )}
+                  <g transform={`translate(10, ${svgH - 16})`}>
+                    <rect x={0} y={0} width={8} height={8} fill="#1e293b" stroke="#334155"/>
+                    <text x={12} y={8} fill="#94a3b8" fontSize="8">Panel</text>
+                    <rect x={50} y={0} width={8} height={8} fill="#6366f1" rx={1}/>
+                    <text x={62} y={8} fill="#94a3b8" fontSize="8">Ballast Block</text>
+                  </g>
+                </svg>
+              );
+            };
+
+            // Ground mount pile diagram
+            const GroundMountDiagram = () => {
+              const cols = Math.min(6, Math.ceil(Math.sqrt(totalPanels)));
+              const rows = Math.min(3, Math.ceil(totalPanels / cols));
+              const pW = 52; const pH = 32; const gap = 8;
+              const svgW = cols * (pW + gap) + 60;
+              const svgH = rows * (pH + gap) + 60;
+              const pileSpacing = (compliance.structural as any)?.groundMountAnalysis?.pileSpacingFt ?? 10;
+              return (
+                <svg width={svgW} height={svgH} className="w-full" viewBox={`0 0 ${svgW} ${svgH}`}>
+                  {/* Ground line */}
+                  <line x1={0} y1={svgH - 20} x2={svgW} y2={svgH - 20} stroke="#78716c" strokeWidth="2"/>
+                  {/* Posts */}
+                  {Array.from({length: cols + 1}).map((_, c) => (
+                    <g key={`post-${c}`}>
+                      <rect x={30 + c*(pW+gap) - 3} y={svgH - 40} width={6} height={20} fill="#78716c"/>
+                      <polygon points={`${30 + c*(pW+gap) - 5},${svgH - 20} ${30 + c*(pW+gap) + 5},${svgH - 20} ${30 + c*(pW+gap)},${svgH - 8}`} fill="#57534e"/>
+                    </g>
+                  ))}
+                  {/* Panels */}
+                  {Array.from({length: rows}).map((_, r) =>
+                    Array.from({length: cols}).map((_, c) => (
+                      <rect key={`gp-${r}-${c}`} x={10 + c*(pW+gap)} y={10 + r*(pH+gap)} width={pW} height={pH} rx={2} fill="#1e293b" stroke="#334155" strokeWidth="1" transform={`rotate(-10, ${10 + c*(pW+gap) + pW/2}, ${10 + r*(pH+gap) + pH/2})`}/>
+                    ))
+                  )}
+                  {/* Pile spacing annotation */}
+                  <line x1={30} y1={svgH - 10} x2={30 + (pW+gap)} y2={svgH - 10} stroke="#64748b" strokeWidth="1"/>
+                  <text x={30 + (pW+gap)/2} y={svgH - 2} textAnchor="middle" fill="#94a3b8" fontSize="9">{pileSpacing}ft</text>
+                  <g transform={`translate(10, ${svgH - 16})`}>
+                    <rect x={0} y={0} width={8} height={8} fill="#78716c"/>
+                    <text x={12} y={8} fill="#94a3b8" fontSize="8">Post/Pile</text>
+                  </g>
+                </svg>
+              );
+            };
+
+            return (
+              <div className="max-w-5xl space-y-5">
+                {/* ── Header + Install Type Toggle ── */}
+                <div className="card p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-black text-white">Mounting Details</h3>
+                      <p className="text-slate-400 text-xs mt-0.5">Full engineering specifications · ASCE 7-22 · ICC-ES rated hardware</p>
+                    </div>
+                    <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
+                      {(['residential', 'commercial', 'ground'] as const).map(t => (
+                        <button key={t} onClick={() => { setMountingInstallType(t); setShowAllSystems(false); }}
+                          className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all capitalize ${mountingInstallType === t ? 'bg-amber-500 text-slate-900' : 'text-slate-400 hover:text-white'}`}>
+                          {t === 'residential' ? '🏠 Residential' : t === 'commercial' ? '🏢 Commercial' : '🌿 Ground Mount'}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                    <div><div className="text-xs text-slate-400 mb-1">Attachment Method</div><div className="text-white">{ROOF_TYPES[config.roofType].attachment}</div></div>
-                    <div><div className="text-xs text-slate-400 mb-1">Hardware</div><div className="text-white">{ROOF_TYPES[config.roofType].hardware}</div></div>
-                    <div className="md:col-span-2"><div className="text-xs text-slate-400 mb-1">Installation Notes</div><div className="text-amber-200">{ROOF_TYPES[config.roofType].notes}</div></div>
+
+                  {/* System Selector */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {(showAllSystems ? filteredSystems : filteredSystems.slice(0, 6)).map(sys => (
+                      <button key={sys.id} onClick={() => setSelectedMountingId(sys.id)}
+                        className={`text-left p-3 rounded-xl border transition-all ${selectedMountingId === sys.id ? 'border-amber-500/60 bg-amber-500/10' : 'border-slate-700/50 bg-slate-800/30 hover:border-slate-600'}`}>
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="text-xs font-bold text-white leading-tight">{sys.manufacturer}</div>
+                          {sys.iccEsReport && <span className="text-xs text-emerald-400 font-bold flex-shrink-0">ICC-ES</span>}
+                        </div>
+                        <div className="text-xs text-amber-300 font-bold mb-1">{sys.model}</div>
+                        <div className="text-xs text-slate-500 capitalize">{sys.systemType.replace(/_/g,' ')}</div>
+                        {selectedMountingId === sys.id && <div className="mt-1.5 text-xs text-amber-400 font-bold">✓ Selected</div>}
+                      </button>
+                    ))}
                   </div>
+                  {filteredSystems.length > 6 && (
+                    <button onClick={() => setShowAllSystems(!showAllSystems)} className="mt-3 text-xs text-amber-400 hover:text-amber-300 font-bold">
+                      {showAllSystems ? '▲ Show Less' : `▼ Show All ${filteredSystems.length} Systems`}
+                    </button>
+                  )}
                 </div>
-                <div className="space-y-3">
-                  {Object.entries(ROOF_TYPES).map(([key, rt]) => (
-                    <div key={key} className={`border rounded-xl p-4 transition-all ${key === config.roofType ? 'border-amber-500/40 bg-amber-500/5' : 'border-slate-700/50'}`}>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-sm font-bold text-white">{rt.label}</span>
-                        {key === config.roofType && <span className="text-xs text-amber-400">← Current</span>}
+
+                {/* ── Selected System Spec Panel ── */}
+                {selectedSystem && (
+                  <div className="card p-5">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-bold bg-amber-500 text-slate-900 px-2 py-0.5 rounded-full">SELECTED SYSTEM</span>
+                          {selectedSystem.iccEsReport && <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">{selectedSystem.iccEsReport}</span>}
+                          {selectedSystem.ul2703Listed && <span className="text-xs font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full">UL 2703</span>}
+                        </div>
+                        <h4 className="text-xl font-black text-white">{selectedSystem.manufacturer} {selectedSystem.model}</h4>
+                        <p className="text-slate-400 text-xs mt-0.5">{selectedSystem.description}</p>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                        <div><div className="text-slate-500 mb-0.5">Attachment</div><div className="text-slate-300">{rt.attachment}</div></div>
-                        <div><div className="text-slate-500 mb-0.5">Hardware</div><div className="text-slate-300">{rt.hardware}</div></div>
-                        <div><div className="text-slate-500 mb-0.5">Key Notes</div><div className="text-slate-400">{rt.notes}</div></div>
+                      <div className="text-right">
+                        <div className="text-xs text-slate-500 capitalize">{selectedSystem.category.replace(/_/g,' ')}</div>
+                        <div className="text-xs text-amber-400 font-bold capitalize mt-0.5">{selectedSystem.systemType.replace(/_/g,' ')}</div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-              <div className="card p-5">
-                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Book size={14} className="text-amber-400" /> NEC Code Reference</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {[
-                    { code: 'NEC 690', title: 'Solar Photovoltaic Systems', desc: 'Primary article governing PV system installation' },
-                    { code: 'NEC 690.12', title: 'Rapid Shutdown', desc: 'Required for rooftop PV — module-level shutdown within 30 seconds' },
-                    { code: 'NEC 690.14', title: 'AC Disconnect', desc: 'Utility-accessible AC disconnect required at point of interconnection' },
-                    { code: 'NEC 690.15', title: 'DC Disconnect', desc: 'DC disconnect required for each inverter' },
-                    { code: 'NEC 705.12', title: 'Load-Side Connection', desc: '120% rule: breaker ≤ 20% of panel busbar rating' },
-                    { code: 'NEC 690.8', title: 'Circuit Sizing', desc: 'Isc × 1.25 × 1.25 = 156% for OCPD sizing' },
-                    { code: 'NEC 310.15', title: 'Conductor Ampacity', desc: 'Temperature and conduit fill derating required' },
-                    { code: 'UL 1741', title: 'Inverter Listing', desc: 'Required listing for all grid-tied inverters' },
-                  ].map(item => (
-                    <div key={item.code} className="flex gap-3 bg-slate-800/30 rounded-lg p-3">
-                      <div className="text-xs font-black text-amber-400 w-20 flex-shrink-0">{item.code}</div>
-                      <div><div className="text-xs font-bold text-white">{item.title}</div><div className="text-xs text-slate-400">{item.desc}</div></div>
+
+                    {/* Rail Specs */}
+                    {selectedSystem.rail && (
+                      <div className="mb-4">
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+                          <Ruler size={12} className="text-amber-400"/> Rail Specifications
+                        </div>
+                        <div className="bg-slate-900/60 rounded-xl p-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                            <div><div className="text-slate-500 mb-0.5">Model</div><div className="text-white font-bold">{selectedSystem.rail.model}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Material</div><div className="text-white">{selectedSystem.rail.materialAlloy}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Max Span</div><div className="text-amber-300 font-bold">{selectedSystem.rail.maxSpanIn}"</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Max Cantilever</div><div className="text-white">{selectedSystem.rail.maxCantileverIn}"</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Moment Capacity</div><div className="text-white">{selectedSystem.rail.momentCapacityInLbs.toLocaleString()} in·lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Shear Capacity</div><div className="text-white">{selectedSystem.rail.shearCapacityLbs.toLocaleString()} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Section Length</div><div className="text-white">{selectedSystem.rail.spliceIntervalIn}"</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Weight</div><div className="text-white">{selectedSystem.rail.weightLbsPerFt} lbs/ft</div></div>
+                          </div>
+                          {selectedSystem.rail.iccEsReport && (
+                            <div className="mt-2 text-xs text-emerald-400">Source: {selectedSystem.rail.iccEsReport}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Mount Specs */}
+                    {selectedSystem.mount && (
+                      <div className="mb-4">
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+                          <MapPin size={12} className="text-red-400"/> Mount / Attachment Specifications
+                        </div>
+                        <div className="bg-slate-900/60 rounded-xl p-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                            <div><div className="text-slate-500 mb-0.5">Model</div><div className="text-white font-bold">{selectedSystem.mount.model}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Method</div><div className="text-white capitalize">{selectedSystem.mount.attachmentMethod.replace(/_/g,' ')}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Uplift Capacity</div><div className="text-red-300 font-bold">{selectedSystem.mount.upliftCapacityLbs.toLocaleString()} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Downward Capacity</div><div className="text-white">{selectedSystem.mount.downwardCapacityLbs.toLocaleString()} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Shear Capacity</div><div className="text-white">{selectedSystem.mount.shearCapacityLbs.toLocaleString()} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Max Spacing</div><div className="text-amber-300 font-bold">{selectedSystem.mount.maxSpacingIn}"</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Fasteners/Mount</div><div className="text-white">{selectedSystem.mount.fastenersPerMount} × {selectedSystem.mount.fastenerDiameterIn}" dia</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Embedment</div><div className="text-white">{selectedSystem.mount.fastenerEmbedmentIn}" min</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Pullout/Fastener</div><div className="text-white">{selectedSystem.mount.fastenerPulloutLbs} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Min Rafter Depth</div><div className="text-white">{selectedSystem.mount.minRafterDepthIn}"</div></div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {selectedSystem.mount.compatibleRoofTypes.map(rt => (
+                              <span key={rt} className="text-xs bg-slate-700/60 text-slate-300 px-2 py-0.5 rounded-full capitalize">{rt.replace(/_/g,' ')}</span>
+                            ))}
+                          </div>
+                          {selectedSystem.mount.iccEsReport && (
+                            <div className="mt-2 text-xs text-emerald-400">Source: {selectedSystem.mount.iccEsReport}</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Ballast Specs (commercial) */}
+                    {selectedSystem.ballast && (
+                      <div className="mb-4">
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+                          <Weight size={12} className="text-purple-400"/> Ballast Specifications
+                        </div>
+                        <div className="bg-slate-900/60 rounded-xl p-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                            <div><div className="text-slate-500 mb-0.5">Block Weight</div><div className="text-purple-300 font-bold">{selectedSystem.ballast.blockWeightLbs} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Dimensions</div><div className="text-white">{selectedSystem.ballast.blockDimensionsIn.join('×')}"</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Blocks/Module</div><div className="text-white">{selectedSystem.ballast.minBlocksPerModule}–{selectedSystem.ballast.maxBlocksPerModule}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Tilt Angle</div><div className="text-white">{selectedSystem.ballast.tiltAngleDeg}°</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Max Wind Speed</div><div className="text-amber-300 font-bold">{selectedSystem.ballast.maxWindSpeedMph} mph</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Uplift Resistance</div><div className="text-white">{selectedSystem.ballast.windUpliftResistanceLbs} lbs/block</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Exposure Categories</div><div className="text-white">{selectedSystem.ballast.exposureCategories.join(', ')}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Total Ballast</div><div className="text-purple-300 font-bold">{(totalPanels * ((selectedSystem.ballast.minBlocksPerModule + selectedSystem.ballast.maxBlocksPerModule) / 2) * selectedSystem.ballast.blockWeightLbs).toFixed(0)} lbs est.</div></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Ground Mount Specs */}
+                    {selectedSystem.groundMount && (
+                      <div className="mb-4">
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+                          <MapPin size={12} className="text-green-400"/> Ground Mount Specifications
+                        </div>
+                        <div className="bg-slate-900/60 rounded-xl p-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                            <div><div className="text-slate-500 mb-0.5">Pile Type</div><div className="text-white capitalize">{selectedSystem.groundMount.pileType}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Pile Spacing</div><div className="text-white">{selectedSystem.groundMount.pileSpacingFt}ft</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Embedment Depth</div><div className="text-green-300 font-bold">{selectedSystem.groundMount.pileEmbedmentFt}ft</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Max Pile Span</div><div className="text-white">{selectedSystem.groundMount.maxPileSpanFt}ft</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Uplift Capacity</div><div className="text-red-300 font-bold">{selectedSystem.groundMount.pileCapacityUpliftLbs.toLocaleString()} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Downward Capacity</div><div className="text-white">{selectedSystem.groundMount.pileCapacityDownwardLbs.toLocaleString()} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Lateral Capacity</div><div className="text-white">{selectedSystem.groundMount.pileCapacityLateralLbs.toLocaleString()} lbs</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Tilt Angle</div><div className="text-white">{selectedSystem.groundMount.tiltAngleDeg}°</div></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tracker Specs */}
+                    {selectedSystem.tracker && (
+                      <div className="mb-4">
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+                          <Sun size={12} className="text-yellow-400"/> Tracker Specifications
+                        </div>
+                        <div className="bg-slate-900/60 rounded-xl p-4">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                            <div><div className="text-slate-500 mb-0.5">Type</div><div className="text-white capitalize">{selectedSystem.tracker.trackerType.replace(/_/g,' ')}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Rotation Range</div><div className="text-yellow-300 font-bold">±{selectedSystem.tracker.rotationRangeDeg}°</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Stow Angle</div><div className="text-white">{selectedSystem.tracker.stowAngleDeg}°</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Max Wind Speed</div><div className="text-amber-300 font-bold">{selectedSystem.tracker.windSpeedMaxMph} mph</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Row Spacing</div><div className="text-white">{selectedSystem.tracker.rowSpacingFt}ft</div></div>
+                            <div><div className="text-slate-500 mb-0.5">GCR</div><div className="text-white">{(selectedSystem.tracker.gcoverageRatio * 100).toFixed(0)}%</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Modules/Row</div><div className="text-white">{selectedSystem.tracker.moduleRowsPerTracker}</div></div>
+                            <div><div className="text-slate-500 mb-0.5">Actuator</div><div className="text-white capitalize">{selectedSystem.tracker.actuatorType.replace(/_/g,' ')}</div></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Hardware Kit */}
+                    {selectedSystem.hardware && (
+                      <div className="mb-4">
+                        <div className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-2 flex items-center gap-2">
+                          <Package size={12} className="text-blue-400"/> Hardware Kit Components
+                        </div>
+                        <div className="bg-slate-900/60 rounded-xl p-4">
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                            {selectedSystem.hardware.midClamp && <div><div className="text-slate-500 mb-0.5">Mid Clamp</div><div className="text-white">{selectedSystem.hardware.midClamp}</div></div>}
+                            {selectedSystem.hardware.endClamp && <div><div className="text-slate-500 mb-0.5">End Clamp</div><div className="text-white">{selectedSystem.hardware.endClamp}</div></div>}
+                            {selectedSystem.hardware.railSplice && <div><div className="text-slate-500 mb-0.5">Rail Splice</div><div className="text-white">{selectedSystem.hardware.railSplice}</div></div>}
+                            {selectedSystem.hardware.groundLug && <div><div className="text-slate-500 mb-0.5">Ground Lug</div><div className="text-white">{selectedSystem.hardware.groundLug}</div></div>}
+                            {selectedSystem.hardware.lagBolt && <div><div className="text-slate-500 mb-0.5">Lag Bolt</div><div className="text-white">{selectedSystem.hardware.lagBolt}</div></div>}
+                            {selectedSystem.hardware.bondingHardware && <div><div className="text-slate-500 mb-0.5">Bonding</div><div className="text-white">{selectedSystem.hardware.bondingHardware}</div></div>}
+                            {selectedSystem.hardware.flashingKit && <div><div className="text-slate-500 mb-0.5">Flashing Kit</div><div className="text-white">{selectedSystem.hardware.flashingKit}</div></div>}
+                            {selectedSystem.hardware.tileHook && <div><div className="text-slate-500 mb-0.5">Tile Hook</div><div className="text-white">{selectedSystem.hardware.tileHook}</div></div>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Real-Time Layout Visualization ── */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Mount Spacing Diagram */}
+                  <div className="card p-5">
+                    <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                      <Grid size={14} className="text-amber-400"/>
+                      {mountingInstallType === 'ground' ? 'Ground Mount Layout' : mountingInstallType === 'commercial' ? 'Ballast Layout' : 'Mount Spacing Diagram'}
+                    </h4>
+                    <div className="bg-slate-900/60 rounded-xl p-3 mb-3">
+                      {mountingInstallType === 'residential' && <MountSpacingDiagram />}
+                      {mountingInstallType === 'commercial' && <BallastLayoutDiagram />}
+                      {mountingInstallType === 'ground' && <GroundMountDiagram />}
                     </div>
-                  ))}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {mountingInstallType === 'residential' && <>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Mount Count</div><div className="text-white font-bold">{mountCount}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Mount Spacing</div><div className="text-amber-300 font-bold">{mountSpacing}"</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Rail Count</div><div className="text-white font-bold">{railCount}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Safety Factor</div><div className={`font-bold ${safetyFactor >= 2 ? 'text-emerald-400' : safetyFactor >= 1.5 ? 'text-amber-400' : 'text-red-400'}`}>{safetyFactor > 0 ? safetyFactor.toFixed(2) : '—'}</div></div>
+                      </>}
+                      {mountingInstallType === 'commercial' && <>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Blocks/Module</div><div className="text-purple-300 font-bold">{(compliance.structural as any)?.ballastAnalysis?.blocksPerModule ?? selectedSystem?.ballast?.minBlocksPerModule ?? '—'}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Blocks</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.totalBallastBlocks ?? (totalPanels * (selectedSystem?.ballast?.minBlocksPerModule ?? 2))}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Total Ballast</div><div className="text-purple-300 font-bold">{(compliance.structural as any)?.ballastAnalysis?.ballastWeightLbs ? `${(compliance.structural as any).ballastAnalysis.ballastWeightLbs.toLocaleString()} lbs` : '—'}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Roof Load</div><div className="text-white font-bold">{(compliance.structural as any)?.ballastAnalysis?.roofLoadPsf ? `${(compliance.structural as any).ballastAnalysis.roofLoadPsf.toFixed(1)} psf` : '—'}</div></div>
+                      </>}
+                      {mountingInstallType === 'ground' && <>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Count</div><div className="text-green-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileCount ?? Math.ceil(totalPanels / 4)}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Pile Spacing</div><div className="text-white font-bold">{(compliance.structural as any)?.groundMountAnalysis?.pileSpacingFt ?? selectedSystem?.groundMount?.pileSpacingFt ?? '—'}ft</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Uplift/Pile</div><div className="text-red-300 font-bold">{(compliance.structural as any)?.groundMountAnalysis?.upliftPerPileLbs ? `${(compliance.structural as any).groundMountAnalysis.upliftPerPileLbs.toFixed(0)} lbs` : '—'}</div></div>
+                        <div className="bg-slate-800/50 rounded-lg p-2"><div className="text-slate-500">Safety Factor</div><div className={`font-bold ${((compliance.structural as any)?.groundMountAnalysis?.safetyFactorUplift ?? 0) >= 2 ? 'text-emerald-400' : 'text-amber-400'}`}>{(compliance.structural as any)?.groundMountAnalysis?.safetyFactorUplift?.toFixed(2) ?? '—'}</div></div>
+                      </>}
+                    </div>
+                  </div>
+
+                  {/* Load Visualization */}
+                  <div className="card p-5">
+                    <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                      <Weight size={14} className="text-blue-400"/> Mount Load Analysis
+                    </h4>
+                    {compliance.structural ? (
+                      <div className="space-y-3">
+                        {/* Uplift bar */}
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-slate-400">Wind Uplift / Mount</span>
+                            <span className="text-red-300 font-bold">{upliftPerMount.toFixed(0)} lbs</span>
+                          </div>
+                          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-red-500 rounded-full transition-all" style={{width: `${Math.min(100, (upliftPerMount / (selectedSystem?.mount?.upliftCapacityLbs ?? 800)) * 100)}%`}}/>
+                          </div>
+                          <div className="text-xs text-slate-600 mt-0.5">Capacity: {selectedSystem?.mount?.upliftCapacityLbs ?? '—'} lbs</div>
+                        </div>
+                        {/* Downward bar */}
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-slate-400">Dead Load / Mount</span>
+                            <span className="text-blue-300 font-bold">{downwardPerMount.toFixed(0)} lbs</span>
+                          </div>
+                          <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full transition-all" style={{width: `${Math.min(100, (downwardPerMount / (selectedSystem?.mount?.downwardCapacityLbs ?? 1200)) * 100)}%`}}/>
+                          </div>
+                          <div className="text-xs text-slate-600 mt-0.5">Capacity: {selectedSystem?.mount?.downwardCapacityLbs ?? '—'} lbs</div>
+                        </div>
+                        {/* Safety factor gauge */}
+                        <div className="bg-slate-900/60 rounded-xl p-3 mt-2">
+                          <div className="text-xs text-slate-400 mb-2">Attachment Safety Factor</div>
+                          <div className="flex items-center gap-3">
+                            <div className={`text-3xl font-black ${safetyFactor >= 2 ? 'text-emerald-400' : safetyFactor >= 1.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                              {safetyFactor > 0 ? safetyFactor.toFixed(2) : '—'}
+                            </div>
+                            <div className="flex-1">
+                              <div className="h-3 bg-slate-800 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all ${safetyFactor >= 2 ? 'bg-emerald-500' : safetyFactor >= 1.5 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                  style={{width: `${Math.min(100, (safetyFactor / 3) * 100)}%`}}/>
+                              </div>
+                              <div className="flex justify-between text-xs text-slate-600 mt-0.5">
+                                <span>0</span><span>1.5 min</span><span>3.0</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-xs mt-2">
+                            {safetyFactor >= 2 ? <span className="text-emerald-400">✓ Adequate safety factor (≥ 2.0)</span>
+                              : safetyFactor >= 1.5 ? <span className="text-amber-400">⚠ Marginal — consider reducing spacing</span>
+                              : safetyFactor > 0 ? <span className="text-red-400">✗ Insufficient — reduce attachment spacing</span>
+                              : <span className="text-slate-500">Run compliance check for load analysis</span>}
+                          </div>
+                        </div>
+                        {/* Wind/Snow summary */}
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-slate-800/50 rounded-lg p-2">
+                            <div className="text-slate-500 flex items-center gap-1"><Wind size={10}/> Wind Speed</div>
+                            <div className="text-white font-bold">{compliance.structural.wind?.designWindSpeed ?? config.windSpeed ?? '—'} mph</div>
+                          </div>
+                          <div className="bg-slate-800/50 rounded-lg p-2">
+                            <div className="text-slate-500 flex items-center gap-1"><Snowflake size={10}/> Snow Load</div>
+                            <div className="text-white font-bold">{compliance.structural.snow?.groundSnowLoad ?? config.groundSnowLoad ?? '—'} psf</div>
+                          </div>
+                          <div className="bg-slate-800/50 rounded-lg p-2">
+                            <div className="text-slate-500">Exposure Cat.</div>
+                            <div className="text-white font-bold">{compliance.structural.wind?.exposureCategory ?? config.windExposure ?? '—'}</div>
+                          </div>
+                          <div className="bg-slate-800/50 rounded-lg p-2">
+                            <div className="text-slate-500">Net Uplift Pressure</div>
+                            <div className="text-red-300 font-bold">{compliance.structural.wind?.netUpliftPressure?.toFixed(1) ?? '—'} psf</div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-slate-500">
+                        <Activity size={28} className="mx-auto mb-2 opacity-30"/>
+                        <div className="text-xs">Run compliance check to see live load analysis</div>
+                        <button onClick={runCalc} className="btn-primary btn-sm mt-3 text-xs">Run Compliance Check</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── BOM Preview Panel ── */}
+                <div className="card p-5">
+                  <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                    <Package size={14} className="text-amber-400"/> Racking BOM Preview
+                    <span className="text-xs text-slate-500 font-normal ml-1">— derived from array geometry</span>
+                  </h4>
+                  {compliance.structural?.rackingBOM ? (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {compliance.structural.rackingBOM.mounts && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">Mounts / L-Feet</div>
+                          <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.mounts.qty}</div>
+                          <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.mounts.description}</div>
+                        </div>
+                      )}
+                      {compliance.structural.rackingBOM.rails && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">Rails</div>
+                          <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.rails.qty} <span className="text-sm font-normal text-slate-400">{compliance.structural.rackingBOM.rails.unit}</span></div>
+                          <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.rails.description}</div>
+                        </div>
+                      )}
+                      {compliance.structural.rackingBOM.lFeet && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">L-Feet</div>
+                          <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.lFeet.qty}</div>
+                          <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.lFeet.description}</div>
+                        </div>
+                      )}
+                      {compliance.structural.rackingBOM.railSplices && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">Rail Splices</div>
+                          <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.railSplices.qty}</div>
+                          <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.railSplices.description}</div>
+                        </div>
+                      )}
+                      {compliance.structural.rackingBOM.midClamps && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">Mid Clamps</div>
+                          <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.midClamps.qty}</div>
+                          <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.midClamps.description}</div>
+                        </div>
+                      )}
+                      {compliance.structural.rackingBOM.endClamps && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">End Clamps</div>
+                          <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.endClamps.qty}</div>
+                          <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.endClamps.description}</div>
+                        </div>
+                      )}
+                      {compliance.structural.rackingBOM.groundLugs && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">Ground Lugs</div>
+                          <div className="text-lg font-black text-white">{compliance.structural.rackingBOM.groundLugs.qty}</div>
+                          <div className="text-xs text-slate-400">{compliance.structural.rackingBOM.groundLugs.description}</div>
+                        </div>
+                      )}
+                      {(compliance.structural as any)?.rackingBOM?.ballastBlocks && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">Ballast Blocks</div>
+                          <div className="text-lg font-black text-purple-300">{(compliance.structural as any).rackingBOM.ballastBlocks.qty}</div>
+                          <div className="text-xs text-slate-400">{(compliance.structural as any).rackingBOM.ballastBlocks.description}</div>
+                        </div>
+                      )}
+                      {(compliance.structural as any)?.rackingBOM?.piles && (
+                        <div className="bg-slate-800/50 rounded-xl p-3">
+                          <div className="text-xs text-slate-500 mb-1">Ground Piles</div>
+                          <div className="text-lg font-black text-green-300">{(compliance.structural as any).rackingBOM.piles.qty}</div>
+                          <div className="text-xs text-slate-400">{(compliance.structural as any).rackingBOM.piles.description}</div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-slate-500">
+                      <Package size={24} className="mx-auto mb-2 opacity-30"/>
+                      <div className="text-xs">Run compliance check to generate racking BOM from array geometry</div>
+                    </div>
+                  )}
+                  {/* Estimated BOM from system specs when no compliance data */}
+                  {!compliance.structural?.rackingBOM && totalPanels > 0 && selectedSystem && (
+                    <div className="mt-3 border-t border-slate-700/50 pt-3">
+                      <div className="text-xs text-slate-500 mb-2">Estimated quantities (from system specs, {totalPanels} panels):</div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        {selectedSystem.mount && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mounts (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 2.5)}</div></div>}
+                        {selectedSystem.rail && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Rail (est.)</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.8 * 2)} ft</div></div>}
+                        {selectedSystem.hardware?.midClamp && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Mid Clamps</div><div className="text-white font-bold">{totalPanels * 2} est.</div></div>}
+                        {selectedSystem.hardware?.endClamp && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">End Clamps</div><div className="text-white font-bold">{Math.ceil(totalPanels * 0.5)} est.</div></div>}
+                        {selectedSystem.ballast && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Ballast Blocks</div><div className="text-purple-300 font-bold">{totalPanels * selectedSystem.ballast.minBlocksPerModule}–{totalPanels * selectedSystem.ballast.maxBlocksPerModule}</div></div>}
+                        {selectedSystem.groundMount && <div className="bg-slate-800/30 rounded-lg p-2"><div className="text-slate-500">Piles (est.)</div><div className="text-green-300 font-bold">{Math.ceil(totalPanels / 4)}</div></div>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Code References ── */}
+                <div className="card p-5">
+                  <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2"><Book size={14} className="text-amber-400"/> Structural Code References</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {[
+                      { code: 'ASCE 7-22', title: 'Minimum Design Loads', desc: 'Wind (Ch.26-30), Snow (Ch.7), Dead/Live loads for PV arrays' },
+                      { code: 'IBC 2021', title: 'International Building Code', desc: 'Structural requirements, load combinations, seismic provisions' },
+                      { code: 'NDS 2018', title: 'National Design Spec (Wood)', desc: 'Rafter bending (Fb\'), shear (Fv\'), withdrawal (W\') for lag bolts' },
+                      { code: 'ICC-ES AC428', title: 'PV Mounting Systems', desc: 'Acceptance criteria for roof-mounted PV racking systems' },
+                      { code: 'UL 2703', title: 'Racking & Mounting Systems', desc: 'Grounding/bonding, fire classification for PV mounting' },
+                      { code: 'BCSI 2015', title: 'Truss Bracing', desc: 'Pre-engineered truss capacity tables for PV dead load' },
+                      { code: 'IFC 2021', title: 'Fire Code', desc: 'Setback requirements: 3ft ridge, 18" eave, 3ft hip/valley' },
+                      { code: 'NEC 690.12', title: 'Rapid Shutdown', desc: 'Module-level shutdown within 30 seconds for rooftop PV' },
+                    ].map(item => (
+                      <div key={item.code} className="flex gap-3 bg-slate-800/30 rounded-lg p-3">
+                        <div className="text-xs font-black text-amber-400 w-24 flex-shrink-0">{item.code}</div>
+                        <div><div className="text-xs font-bold text-white">{item.title}</div><div className="text-xs text-slate-400">{item.desc}</div></div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── PERMIT PACKAGE TAB ── */}
           {activeTab === 'permit' && (
