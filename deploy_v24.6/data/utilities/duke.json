@@ -1,0 +1,41 @@
+{
+  "id": "duke",
+  "name": "Duke Energy",
+  "states": ["NC", "SC", "FL", "IN", "OH", "KY"],
+  "preferredInterconnection": "LOAD_SIDE",
+  "maxLoadSideBreaker": 60,
+  "maxSystemSizeKw": 1000,
+  "allowsMainBreakerDerate": true,
+  "allowsLineSideTap": true,
+  "requiresVisibleDisconnect": true,
+  "requiresProductionMeter": true,
+  "requiresAntiIslanding": true,
+  "netMeteringAvailable": true,
+  "netMeteringMaxKw": 1000,
+  "netMeteringProgram": "Net Metering",
+  "interconnectionApplicationRequired": true,
+  "interconnectionApplicationUrl": "https://www.duke-energy.com/home/products/renewable-energy/solar-energy/solar-interconnection",
+  "preApplicationRequired": false,
+  "preApplicationThresholdKw": 20,
+  "studyRequiredAboveKw": 20,
+  "ieee1547Compliant": true,
+  "ul1741Compliant": true,
+  "ruleReferences": [
+    { "rule": "Duke Energy Interconnection Standards", "description": "Duke Energy distributed generation interconnection requirements", "requirement": "Submit interconnection application and receive approval before energizing" },
+    { "rule": "IEEE 1547-2018", "description": "Standard for interconnection of distributed energy resources", "requirement": "Inverter must be IEEE 1547-2018 certified" },
+    { "rule": "UL 1741 SA", "description": "Inverter supplemental advanced functions", "requirement": "Smart inverter functions required for new interconnections" }
+  ],
+  "disconnectRequirements": {
+    "acDisconnect": true,
+    "acDisconnectVisible": true,
+    "acDisconnectLockable": true,
+    "utilityAccessible": true,
+    "notes": "Duke Energy requires a visible, lockable AC disconnect accessible to utility personnel. Must be within sight of the utility meter."
+  },
+  "labelingRequirements": [
+    "NEC 705.10 — Identification of power sources",
+    "NEC 690.54 — Equipment identification",
+    "Duke Energy requires 'SOLAR ELECTRIC SYSTEM' placard at main panel and meter"
+  ],
+  "notes": "Duke Energy requires pre-approval for all interconnections. Systems above 20 kW AC may require an interconnection study. Contact Duke Energy interconnection team for commercial systems."
+}

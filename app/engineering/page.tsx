@@ -85,6 +85,7 @@ interface ProjectConfig {
   rafterSpan: number;
   rafterSize: string;
   rafterSpecies: string;
+  framingType: 'truss' | 'rafter' | 'unknown';  // V2 structural engine
   attachmentSpacing: number;
   railSpacing: number;           // inches — distance between rail rows (row-to-row)
   // Layout fields (Phase 3 - Future Layout Engine)
@@ -171,6 +172,7 @@ const defaultProject: ProjectConfig = {
   wireGauge: '#10 AWG THWN-2', conduitType: 'EMT', wireLength: 50,
   windSpeed: 115, windExposure: 'C', groundSnowLoad: 20, roofPitch: 20,
   rafterSpacing: 24, rafterSpan: 16, rafterSize: '2x6', rafterSpecies: 'Douglas Fir-Larch',
+  framingType: 'unknown',  // V2 structural engine — auto-detected or user-specified
   attachmentSpacing: 48, railSpacing: 60, notes: '',
   interconnectionMethod: 'LOAD_SIDE', panelBusRating: 200,
   utilityId: '', ahjId: '',
@@ -792,8 +794,12 @@ export default function EngineeringPage() {
     try {
       const payload = buildCalcPayload();
 
-      // Run legacy calculate + new rules engine in parallel
-      const [calcRes, rulesRes] = await Promise.all([
+      // Get panel data for V2 structural calc
+      const firstStrV2 = config.inverters[0]?.strings[0];
+      const panelDataV2 = firstStrV2?.panelId ? (SOLAR_PANELS as any[]).find((p: any) => p.id === firstStrV2.panelId) : null;
+
+      // Run legacy calculate + new rules engine + V2 structural in parallel
+      const [calcRes, rulesRes, structV2Res] = await Promise.all([
         fetch('/api/engineering/calculate', {
           method: 'POST',
         cache: 'no-store',
@@ -811,10 +817,63 @@ export default function EngineeringPage() {
             overrides,
           }),
         }),
+        fetch('/api/engineering/structural-v2', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            windSpeed:      config.windSpeed,
+            windExposure:   config.windExposure,
+            groundSnowLoad: config.groundSnowLoad,
+            roofType:       config.roofType,
+            roofPitch:      config.roofPitch,
+            rafterSpacing:  config.rafterSpacing,
+            rafterSpan:     config.rafterSpan,
+            rafterSize:     config.rafterSize,
+            rafterSpecies:  config.rafterSpecies,
+            framingType:    config.framingType,
+            panelCount:     totalPanels,
+            panelLength:    panelDataV2?.length ?? 70.9,
+            panelWidth:     panelDataV2?.width ?? 41.7,
+            panelWeight:    panelDataV2?.weight ?? 44.1,
+            mountingSystem: config.mountingId?.includes('rt-mini') ? 'rt-mini' : 'rail-based',
+            rowCount:       config.rowCount ?? 2,
+          }),
+        }).catch(() => null),  // V2 structural is best-effort
       ]);
 
       const calcData = await calcRes.json();
       if (calcData.success) {
+        // Merge V2 structural results into compliance data
+        try {
+          if (structV2Res && structV2Res.ok) {
+            const structV2Data = await structV2Res.json();
+            if (structV2Data?.success) {
+              calcData.structural = {
+                // V2 fields (new)
+                status:          structV2Data.status,
+                framing:         structV2Data.framing,
+                mountLayout:     structV2Data.mountLayout,
+                railSystem:      structV2Data.railSystem,
+                rackingBOM:      structV2Data.rackingBOM,
+                wind:            structV2Data.wind,
+                snow:            structV2Data.snow,
+                errors:          structV2Data.errors,
+                warnings:        structV2Data.warnings,
+                recommendations: structV2Data.recommendations,
+                complianceTable: structV2Data.complianceTable,
+                // V1 compatibility fields (for existing UI references)
+                attachment: { safetyFactor: structV2Data.summary?.safetyFactor },
+                rafter:     { utilizationRatio: structV2Data.framing?.utilization },
+              };
+              // Auto-update framing type if detected
+              if (structV2Data.framing?.type && config.framingType === 'unknown') {
+                updateConfig({ framingType: structV2Data.framing.type });
+              }
+            }
+          }
+        } catch (_) { /* V2 structural merge is best-effort */ }
+
         setCompliance(calcData);
         // Inject NEC step-by-step calculation entries into decision log
         const ac = calcData?.acSizing;
@@ -845,7 +904,7 @@ export default function EngineeringPage() {
     } finally {
       setCalculating(false);
     }
-  }, [buildCalcPayload, engineeringMode, overrides]);
+  }, [buildCalcPayload, engineeringMode, overrides, config, totalPanels, updateConfig]);
 
   // Auto-recalculate 800ms after config changes
   useEffect(() => {
@@ -1439,9 +1498,9 @@ export default function EngineeringPage() {
       await runCalc();
     }
 
-    // Call V4 structural API to get precise safety factor
+    // Call V2 structural API with truss/rafter distinction
     try {
-      const structRes = await fetch('/api/engineering/structural', {
+      const structRes = await fetch('/api/engineering/structural-v2', {
         method: 'POST',
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json' },
@@ -1455,21 +1514,34 @@ export default function EngineeringPage() {
           rafterSpan:        config.rafterSpan,
           rafterSize:        config.rafterSize,
           rafterSpecies:     config.rafterSpecies,
+          framingType:       config.framingType,
           panelCount:        totalPanels,
-          attachmentSpacing: config.attachmentSpacing,
-          railSpan:          config.railSpacing,
+          mountingId:        config.mountingId,
           systemType:        config.systemType,
         }),
       });
       if (structRes.ok) {
         const structData = await structRes.json();
-        if (structData.success && structData.status === 'FAIL') {
-          // Reduce attachment spacing until SF ≥ 2.0
-          const newSpacing = Math.max(24, config.attachmentSpacing - 12);
-          updateConfig({ attachmentSpacing: newSpacing });
-          logDecision('Auto Fix', `Structural FAIL (SF=${structData.summary?.safetyFactor?.toFixed(2)}) — reduced attachment spacing ${config.attachmentSpacing}" → ${newSpacing}"`, 'auto');
-        } else if (structData.success) {
-          logDecision('Auto Fix', `Structural OK — SF=${structData.summary?.safetyFactor?.toFixed(2)}, margin=${structData.summary?.marginPct?.toFixed(1)}%`, 'info');
+        if (structData.success) {
+          // Update framing type if auto-detected
+          if (structData.framing?.type && config.framingType === 'unknown') {
+            updateConfig({ framingType: structData.framing.type });
+          }
+          // Log mount spacing recommendation
+          if (structData.mountLayout?.mountSpacing) {
+            logDecision('Structural V2',
+              `${structData.framing?.type ?? config.framingType} — ` +
+              `mount spacing: ${structData.mountLayout.mountSpacing}", ` +
+              `${structData.mountLayout.mountCount} mounts, ` +
+              `SF=${structData.summary?.safetyFactor?.toFixed(2)} ` +
+              `${structData.status === 'PASS' ? '✓' : '⚠'}`,
+              structData.status === 'PASS' ? 'info' : 'auto'
+            );
+          }
+          if (structData.status === 'FAIL') {
+            // V2 calculates optimal spacing automatically — no need to reduce
+            logDecision('Auto Fix', `Structural FAIL — check recommendations: ${structData.recommendations?.join('; ')}`, 'auto');
+          }
         }
       }
     } catch (_) { /* structural fix is best-effort */ }
@@ -2870,15 +2942,44 @@ export default function EngineeringPage() {
               {compliance.structural && (
                 <div className="card p-5">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold text-white flex items-center gap-2"><Wrench size={14} className="text-amber-400" /> Structural Compliance — ASCE 7-22</h3>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2"><Wrench size={14} className="text-amber-400" /> Structural Compliance — ASCE 7-22 / V2 Engine</h3>
                     <StatusBadge status={compliance.structural.status} />
                   </div>
+
+                  {/* Framing Analysis (V2) */}
+                  {compliance.structural.framing && (
+                    <div className="mb-4 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
+                      <div className="text-xs font-bold text-amber-400 mb-2 flex items-center gap-2">
+                        <Grid size={12} /> Framing Analysis
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white capitalize">{compliance.structural.framing.type || config.framingType}</div>
+                          <div className="text-xs text-slate-500">Framing Type</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white">{config.rafterSize} @ {config.rafterSpacing}" OC</div>
+                          <div className="text-xs text-slate-500">Rafter/Truss Spacing</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white">{config.rafterSpan}' span</div>
+                          <div className="text-xs text-slate-500">Span Length</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white">{compliance.structural.framing.capacityPsf?.toFixed(0) ?? '—'} psf</div>
+                          <div className="text-xs text-slate-500">Capacity</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Load Summary */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                     {[
-                      { label: 'Wind Uplift/Attach.', value: `${compliance.structural.wind?.upliftPerAttachment?.toFixed(0)} lbs` },
-                      { label: 'Snow Load/Attach.', value: `${compliance.structural.snow?.snowLoadPerAttachment?.toFixed(0)} lbs` },
-                      { label: 'Rafter Utilization', value: `${(compliance.structural.rafter?.utilizationRatio * 100)?.toFixed(0)}%` },
-                      { label: 'Attachment SF', value: compliance.structural.attachment?.safetyFactor?.toFixed(2) },
+                      { label: 'Wind Uplift/Attach.', value: `${compliance.structural.wind?.upliftPerAttachment?.toFixed(0) ?? compliance.structural.mountLayout?.upliftPerMount?.toFixed(0) ?? '—'} lbs` },
+                      { label: 'Snow Load/Attach.', value: `${compliance.structural.snow?.snowLoadPerAttachment?.toFixed(0) ?? compliance.structural.mountLayout?.snowLoadPerMount?.toFixed(0) ?? '—'} lbs` },
+                      { label: 'Framing Utilization', value: `${((compliance.structural.rafter?.utilizationRatio ?? compliance.structural.framing?.utilization ?? 0) * 100).toFixed(0)}%` },
+                      { label: 'Safety Factor', value: (compliance.structural.attachment?.safetyFactor ?? compliance.structural.mountLayout?.safetyFactor ?? 0).toFixed(2) },
                     ].map(item => (
                       <div key={item.label} className="bg-slate-800/50 rounded-lg p-3 text-center">
                         <div className="text-sm font-bold text-white">{item.value}</div>
@@ -2886,6 +2987,88 @@ export default function EngineeringPage() {
                       </div>
                     ))}
                   </div>
+
+                  {/* Mount Layout (V2) */}
+                  {compliance.structural.mountLayout && (
+                    <div className="mb-4 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
+                      <div className="text-xs font-bold text-amber-400 mb-2 flex items-center gap-2">
+                        <MapPin size={12} /> Mount Layout — {config.mountingId?.includes('rt-mini') ? 'Roof Tech RT-MINI' : config.mountingId || 'Standard'}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white">{compliance.structural.mountLayout.mountCount ?? '—'}</div>
+                          <div className="text-xs text-slate-500">Total Mounts</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white">{compliance.structural.mountLayout.mountSpacing ?? config.attachmentSpacing}"</div>
+                          <div className="text-xs text-slate-500">Mount Spacing</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white">{compliance.structural.mountLayout.upliftPerMount?.toFixed(0) ?? '—'} lbs</div>
+                          <div className="text-xs text-slate-500">Uplift/Mount</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-sm font-bold text-white">{compliance.structural.mountLayout.downwardPerMount?.toFixed(0) ?? '—'} lbs</div>
+                          <div className="text-xs text-slate-500">Downward/Mount</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Racking BOM (V2) */}
+                  {compliance.structural.rackingBOM && (
+                    <div className="mb-4 p-3 bg-slate-800/30 rounded-lg border border-slate-700/50">
+                      <div className="text-xs font-bold text-amber-400 mb-2 flex items-center gap-2">
+                        <Package size={12} /> Racking Bill of Materials
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        {compliance.structural.rackingBOM.mounts && (
+                          <div className="flex justify-between p-2 bg-slate-800/40 rounded">
+                            <span className="text-slate-400">Roof Mounts</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.mounts.qty}</span>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.rails && (
+                          <div className="flex justify-between p-2 bg-slate-800/40 rounded">
+                            <span className="text-slate-400">{compliance.structural.rackingBOM.rails.description}</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.rails.qty} {compliance.structural.rackingBOM.rails.unit}</span>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.lFeet && (
+                          <div className="flex justify-between p-2 bg-slate-800/40 rounded">
+                            <span className="text-slate-400">L-Feet</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.lFeet.qty}</span>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.railSplices && (
+                          <div className="flex justify-between p-2 bg-slate-800/40 rounded">
+                            <span className="text-slate-400">Rail Splices</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.railSplices.qty}</span>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.midClamps && (
+                          <div className="flex justify-between p-2 bg-slate-800/40 rounded">
+                            <span className="text-slate-400">Mid Clamps</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.midClamps.qty}</span>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.endClamps && (
+                          <div className="flex justify-between p-2 bg-slate-800/40 rounded">
+                            <span className="text-slate-400">End Clamps</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.endClamps.qty}</span>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.groundLugs && (
+                          <div className="flex justify-between p-2 bg-slate-800/40 rounded">
+                            <span className="text-slate-400">Grounding Lugs</span>
+                            <span className="text-white font-bold">{compliance.structural.rackingBOM.groundLugs.qty}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Issues */}
                   {[...(compliance.structural.errors || []), ...(compliance.structural.warnings || [])].map((issue: any, i: number) => (
                     <div key={i} className="mb-2"><IssueRow issue={issue} /></div>
                   ))}
@@ -3531,6 +3714,15 @@ export default function EngineeringPage() {
               <div className="card p-5">
                 <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Ruler size={14} className="text-amber-400" /> Roof Framing</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Framing Type</label>
+                    <select value={config.framingType} onChange={e => updateConfig({ framingType: e.target.value as 'truss' | 'rafter' | 'unknown' })}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
+                      <option value="unknown">Auto-Detect (24" OC = Truss)</option>
+                      <option value="truss">Truss (Pre-Engineered)</option>
+                      <option value="rafter">Rafter (Stick-Built)</option>
+                    </select>
+                  </div>
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">Rafter Size</label>
                     <select value={config.rafterSize} onChange={e => updateConfig({ rafterSize: e.target.value })}
@@ -4994,6 +5186,75 @@ export default function EngineeringPage() {
                       </div>
                     )}
                   </div>
+
+                  {/* ── Racking Materials (from Structural V2) */}
+                  {compliance.structural?.rackingBOM && (
+                    <div className="bg-slate-800/60 border border-amber-500/20 rounded-xl p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Wrench size={13} className="text-amber-400" />
+                        <span className="text-xs font-bold text-amber-400 uppercase tracking-wide">Racking Materials</span>
+                        <span className="text-xs text-slate-500 ml-1">Auto-calculated from Structural V2 engine</span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {compliance.structural.rackingBOM.mounts && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.mounts.qty}</div>
+                            <div className="text-xs text-slate-500">Roof Mounts</div>
+                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.mounts.description}</div>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.rails && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.rails.qty} {compliance.structural.rackingBOM.rails.unit}</div>
+                            <div className="text-xs text-slate-500">Rails</div>
+                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.rails.description}</div>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.lFeet && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.lFeet.qty}</div>
+                            <div className="text-xs text-slate-500">L-Feet</div>
+                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.lFeet.description}</div>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.railSplices && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.railSplices.qty}</div>
+                            <div className="text-xs text-slate-500">Rail Splices</div>
+                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.railSplices.description}</div>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.midClamps && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.midClamps.qty}</div>
+                            <div className="text-xs text-slate-500">Mid Clamps</div>
+                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.midClamps.description}</div>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.endClamps && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.endClamps.qty}</div>
+                            <div className="text-xs text-slate-500">End Clamps</div>
+                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.endClamps.description}</div>
+                          </div>
+                        )}
+                        {compliance.structural.rackingBOM.groundLugs && (
+                          <div className="bg-slate-900/50 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-white">{compliance.structural.rackingBOM.groundLugs.qty}</div>
+                            <div className="text-xs text-slate-500">Grounding Lugs</div>
+                            <div className="text-xs text-slate-600">{compliance.structural.rackingBOM.groundLugs.description}</div>
+                          </div>
+                        )}
+                        {compliance.structural.mountLayout && (
+                          <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-center">
+                            <div className="text-sm font-bold text-amber-300">{compliance.structural.mountLayout.mountSpacing}"</div>
+                            <div className="text-xs text-slate-500">Mount Spacing</div>
+                            <div className="text-xs text-slate-600">Calculated per ASCE 7-22</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* BOM Table by Category */}
                   {([...new Set(bom.map((i: any) => i.category))] as string[]).map(cat => (

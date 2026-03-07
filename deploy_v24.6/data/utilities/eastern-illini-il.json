@@ -1,0 +1,48 @@
+{
+  "id": "eastern-illini-il",
+  "name": "Eastern Illini Electric Cooperative",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "Ford, Iroquois, and Kankakee counties, Illinois",
+  "website": "https://www.eiec.coop",
+  "phone": "815-432-4955",
+  "interconnectionEmail": "office@eiec.coop",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Standard residential application fee; larger systems subject to engineering study",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R",
+    "avgRetailRatePerKwh": 0.1221,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 27.50,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines (ABP) available for RECs; federal ITC applies"
+  },
+  "eia": {
+    "utilityId": "5860",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}

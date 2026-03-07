@@ -16,6 +16,7 @@
 // ============================================================
 
 import { runStructuralCalc, StructuralInput, StructuralCalcResult } from './structural-calc';
+import { runStructuralCalcV2, StructuralInputV2, StructuralResultV2 } from './structural-engine-v2';
 import { StructuralResolutionEntry } from './system-state';
 
 // ─── Resolution Types ─────────────────────────────────────────────────────────

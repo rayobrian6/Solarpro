@@ -1,0 +1,48 @@
+{
+  "id": "spoon-river-il",
+  "name": "Spoon River Electric Cooperative",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "Fulton, Knox, Warren, and McDonough counties, west-central Illinois",
+  "website": "https://www.srec.coop",
+  "phone": "309-647-1321",
+  "interconnectionEmail": "office@srec.coop",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies; west-central IL territory"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Residential ≤ 10 kW standard fee; larger systems require engineering review",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application", "SREC Distributed Generation Agreement"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R",
+    "avgRetailRatePerKwh": 0.1202,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 28.00,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines (ABP) available; USDA REAP grants for agricultural members"
+  },
+  "eia": {
+    "utilityId": "17868",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}

@@ -1,0 +1,41 @@
+{
+  "id": "comed",
+  "name": "ComEd",
+  "states": ["IL"],
+  "preferredInterconnection": "LOAD_SIDE",
+  "maxLoadSideBreaker": 60,
+  "maxSystemSizeKw": 2000,
+  "allowsMainBreakerDerate": true,
+  "allowsLineSideTap": true,
+  "requiresVisibleDisconnect": true,
+  "requiresProductionMeter": true,
+  "requiresAntiIslanding": true,
+  "netMeteringAvailable": true,
+  "netMeteringMaxKw": 2000,
+  "netMeteringProgram": "Net Metering",
+  "interconnectionApplicationRequired": true,
+  "interconnectionApplicationUrl": "https://www.comed.com/SiteCollectionDocuments/MyAccount/MyBillUsage/RenewableEnergy/InterconnectionApplication.pdf",
+  "preApplicationRequired": false,
+  "preApplicationThresholdKw": 10,
+  "studyRequiredAboveKw": 10,
+  "ieee1547Compliant": true,
+  "ul1741Compliant": true,
+  "ruleReferences": [
+    { "rule": "ComEd Tariff DSGS", "description": "Distributed Solar Generation Service tariff", "requirement": "Net metering enrollment required before energizing" },
+    { "rule": "ICC Docket 19-0368", "description": "Illinois Commerce Commission interconnection rules", "requirement": "All systems must comply with ICC interconnection standards" },
+    { "rule": "IEEE 1547-2018", "description": "Standard for interconnection of distributed energy resources", "requirement": "Inverter must be IEEE 1547-2018 certified" }
+  ],
+  "disconnectRequirements": {
+    "acDisconnect": true,
+    "acDisconnectVisible": true,
+    "acDisconnectLockable": true,
+    "utilityAccessible": true,
+    "notes": "ComEd requires a visible, lockable AC disconnect. For systems using load-side connection, disconnect must be within sight of the main panel."
+  },
+  "labelingRequirements": [
+    "NEC 705.10 — Identification of power sources",
+    "NEC 690.54 — Equipment identification",
+    "ComEd requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter"
+  ],
+  "notes": "ComEd allows load-side connection up to 60A solar breaker on 200A bus. For larger systems, supply-side tap or panel upgrade required."
+}

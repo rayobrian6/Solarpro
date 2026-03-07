@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Cesium 3D Tiles Test</title>
+  <script>
+    // Set CESIUM_BASE_URL BEFORE loading Cesium
+    window.CESIUM_BASE_URL = 'https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/';
+  </script>
+  <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+  <style>
+    html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; background: #000; }
+    #log { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); color: #0f0; font-family: monospace; font-size: 11px; padding: 10px; max-width: 500px; max-height: 400px; overflow-y: auto; z-index: 100; border: 1px solid #0f0; border-radius: 4px; }
+    #status { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); color: #ff0; font-family: monospace; font-size: 12px; padding: 10px; z-index: 100; border: 1px solid #ff0; border-radius: 4px; }
+  </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="log"><b>[LOG]</b><br></div>
+  <div id="status">Initializing...</div>
+
+  <script>
+    const GOOGLE_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+    const CESIUM_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNTc4YjkiLCJpZCI6NTc3MzMsImlhdCI6MTYyNzg0NTE4Mn0.XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
+    
+    // Test location: Edwardsville, IL
+    const LAT = 38.8123;
+    const LNG = -89.9523;
+
+    const logEl = document.getElementById('log');
+    const statusEl = document.getElementById('status');
+
+    function log(msg, color) {
+      const line = document.createElement('div');
+      line.style.color = color || '#0f0';
+      line.textContent = '[' + new Date().toISOString().substr(11,8) + '] ' + msg;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
+    }
+
+    function setStatus(msg, color) {
+      statusEl.style.color = color || '#ff0';
+      statusEl.textContent = msg;
+    }
+
+    async function init() {
+      try {
+        log('CESIUM_BASE_URL = ' + window.CESIUM_BASE_URL);
+        log('Cesium version: ' + Cesium.VERSION);
+        
+        // Try Ion token (may be invalid)
+        try { Cesium.Ion.defaultAccessToken = CESIUM_TOKEN; } catch(e) { log('Ion token error: ' + e.message, '#f80'); }
+
+        setStatus('Creating viewer...');
+        log('Creating Cesium.Viewer...');
+
+        const viewer = new Cesium.Viewer('cesiumContainer', {
+          baseLayerPicker: false,
+          geocoder: false,
+          homeButton: false,
+          sceneModePicker: false,
+          navigationHelpButton: false,
+          animation: false,
+          timeline: false,
+          fullscreenButton: false,
+          infoBox: false,
+          selectionIndicator: false,
+          shadows: false,
+          requestRenderMode: false,
+          imageryProvider: false,
+          terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+        });
+
+        log('Viewer created OK', '#0ff');
+
+        // Add imagery
+        viewer.imageryLayers.removeAll();
+        viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 19,
+        }));
+        log('Imagery layer added');
+
+        viewer.scene.globe.depthTestAgainstTerrain = false;
+        viewer.scene.globe.show = true;
+
+        // Render error handler
+        viewer.scene.renderError.addEventListener(function(scene, error) {
+          log('RENDER ERROR: ' + (error && error.message ? error.message : error), '#f00');
+        });
+
+        // Fly to location
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(LNG, LAT, 500),
+          orientation: { heading: 0, pitch: Cesium.Math.toRadians(-45), roll: 0 },
+          duration: 1.5,
+        });
+        log('Camera flying to ' + LAT + ', ' + LNG);
+        setStatus('Flying to location...');
+
+        // Wait for camera
+        await new Promise(resolve => {
+          let done = false;
+          const fallback = setTimeout(() => { if (!done) { done = true; resolve(); } }, 4000);
+          viewer.camera.moveEnd.addEventListener(function() {
+            if (!done) { done = true; clearTimeout(fallback); resolve(); }
+          });
+        });
+
+        log('Camera arrived. Loading Google 3D Tiles...');
+        setStatus('Loading 3D Tiles...');
+
+        // Load Google 3D Tiles
+        try {
+          const tileset = await Cesium.Cesium3DTileset.fromUrl(
+            'https://tile.googleapis.com/v1/3dtiles/root.json?key=' + GOOGLE_API_KEY,
+            {
+              showCreditsOnScreen: false,
+              maximumScreenSpaceError: 8,
+              skipLevelOfDetail: false,
+              preferLeaves: true,
+              dynamicScreenSpaceError: true,
+              dynamicScreenSpaceErrorDensity: 0.00278,
+              dynamicScreenSpaceErrorFactor: 4.0,
+              maximumMemoryUsage: 256,
+            }
+          );
+
+          viewer.scene.primitives.add(tileset);
+          log('Tileset added to scene!', '#0ff');
+          setStatus('Tileset loaded! Waiting for tiles...', '#0f0');
+
+          tileset.initialTilesLoaded.addEventListener(function() {
+            log('initialTilesLoaded fired!', '#0f0');
+            setStatus('3D TILES VISIBLE!', '#0f0');
+          });
+
+          tileset.allTilesLoaded.addEventListener(function() {
+            log('allTilesLoaded fired!', '#0f0');
+          });
+
+          tileset.tileFailed.addEventListener(function(e) {
+            log('TILE FAILED: ' + e.url + ' - ' + e.message, '#f00');
+          });
+
+          // Check tileset bounds
+          log('Tileset boundingSphere radius: ' + tileset.boundingSphere.radius.toFixed(0) + 'm');
+
+        } catch(e) {
+          log('TILESET LOAD FAILED: ' + e.message, '#f00');
+          setStatus('TILESET FAILED: ' + e.message, '#f00');
+        }
+
+      } catch(e) {
+        log('INIT FAILED: ' + e.message, '#f00');
+        setStatus('INIT FAILED: ' + e.message, '#f00');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

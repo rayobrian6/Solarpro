@@ -1,0 +1,48 @@
+{
+  "id": "corn-belt-il",
+  "name": "Corn Belt Energy Corporation",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "McLean, DeWitt, Livingston, Woodford, and Tazewell counties, Illinois",
+  "website": "https://www.cornbeltenergy.com",
+  "phone": "309-467-2315",
+  "interconnectionEmail": "engineering@cornbeltenergy.com",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually in April",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies; co-op members only"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Residential ≤ 10 kW; commercial/larger systems require additional engineering review fee",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application", "Corn Belt Supplemental Interconnection Form"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R-1",
+    "avgRetailRatePerKwh": 0.1198,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 30.00,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines Adjustable Block Program (ABP) available; USDA REAP grants available for agricultural members"
+  },
+  "eia": {
+    "utilityId": "4254",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}

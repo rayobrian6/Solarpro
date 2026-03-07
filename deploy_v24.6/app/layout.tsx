@@ -1,0 +1,33 @@
+// BUILD v24 — 2026-03-06
+import type { Metadata } from 'next';
+import './globals.css';
+import { ToastProvider } from '@/components/ui/Toast';
+import { StoreProvider } from '@/store/StoreProvider';
+
+export const metadata: Metadata = {
+  title: 'SolarPro Design Platform',
+  description: 'Professional solar design and proposal platform for roof, ground mount, and vertical fence systems',
+  icons: { icon: '/favicon.ico' },
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en" className="dark">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
+        <ToastProvider>
+          <StoreProvider>
+            {children}
+          </StoreProvider>
+        </ToastProvider>
+      </body>
+    </html>
+  );
+}

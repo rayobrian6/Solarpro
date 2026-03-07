@@ -1,0 +1,242 @@
+{
+  "schemaVersion": "1.0",
+  "category": "ats",
+  "lastUpdated": "2025-01-01",
+  "items": [
+    {
+      "id": "generac-rxsw200a3",
+      "manufacturer": "Generac",
+      "model": "RXSW200A3 Smart Transfer Switch",
+      "sku": "RXSW200A3",
+      "category": "ats",
+      "subcategory": "whole_home_ats",
+      "certifications": ["UL 1008", "CSA"],
+      "specs": {
+        "ampRating": 200,
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "transferTimeMs": 10000,
+        "transferTypeSec": 10,
+        "serviceEntranceRated": true,
+        "mainBreakerIncluded": true,
+        "mainBreakerA": 200,
+        "circuitCount": null,
+        "loadSheddingCapable": false,
+        "outdoorRated": true,
+        "enclosureType": "NEMA 3R",
+        "weightLbs": 45,
+        "dimensionsInches": "20 x 14 x 6",
+        "wifiEnabled": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Generac Mobile Link",
+        "exerciseCapable": true
+      },
+      "electrical": {
+        "inputWireGaugeMin": "2/0 AWG",
+        "outputWireGaugeMin": "2/0 AWG",
+        "groundingRequired": true,
+        "neutralSwitched": true
+      },
+      "warranty": {
+        "years": 5,
+        "notes": "5-year limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 1200,
+        "installationEstimateUsd": 800,
+        "notes": "Whole-home ATS; replaces main panel service entrance"
+      },
+      "compatibility": {
+        "generatorBrands": ["Generac"],
+        "solarCompatible": true,
+        "batteryCompatible": true,
+        "notes": "Designed for Generac Guardian series; compatible with solar+storage systems"
+      }
+    },
+    {
+      "id": "generac-rtsw200a3",
+      "manufacturer": "Generac",
+      "model": "RTSW200A3 Smart Transfer Switch",
+      "sku": "RTSW200A3",
+      "category": "ats",
+      "subcategory": "whole_home_ats",
+      "certifications": ["UL 1008", "CSA"],
+      "specs": {
+        "ampRating": 200,
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "transferTimeMs": 10000,
+        "serviceEntranceRated": false,
+        "mainBreakerIncluded": false,
+        "circuitCount": null,
+        "loadSheddingCapable": false,
+        "outdoorRated": true,
+        "enclosureType": "NEMA 3R",
+        "weightLbs": 38,
+        "dimensionsInches": "18 x 12 x 6",
+        "wifiEnabled": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Generac Mobile Link"
+      },
+      "electrical": {
+        "inputWireGaugeMin": "2/0 AWG",
+        "outputWireGaugeMin": "2/0 AWG",
+        "groundingRequired": true,
+        "neutralSwitched": true
+      },
+      "warranty": {
+        "years": 5
+      },
+      "pricing": {
+        "msrpUsd": 950,
+        "installationEstimateUsd": 700
+      },
+      "compatibility": {
+        "generatorBrands": ["Generac"],
+        "solarCompatible": true,
+        "batteryCompatible": true
+      }
+    },
+    {
+      "id": "kohler-rdt-series-200",
+      "manufacturer": "Kohler",
+      "model": "RDT-CFNC-0200B",
+      "sku": "RDT-CFNC-0200B",
+      "category": "ats",
+      "subcategory": "whole_home_ats",
+      "certifications": ["UL 1008", "CSA"],
+      "specs": {
+        "ampRating": 200,
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "transferTimeMs": 10000,
+        "serviceEntranceRated": true,
+        "mainBreakerIncluded": true,
+        "mainBreakerA": 200,
+        "circuitCount": null,
+        "loadSheddingCapable": false,
+        "outdoorRated": true,
+        "enclosureType": "NEMA 3R",
+        "weightLbs": 50,
+        "dimensionsInches": "21 x 15 x 7",
+        "wifiEnabled": true,
+        "remoteMonitoring": true,
+        "remoteMonitoringPlatform": "Kohler OnCue Plus"
+      },
+      "electrical": {
+        "inputWireGaugeMin": "2/0 AWG",
+        "outputWireGaugeMin": "2/0 AWG",
+        "groundingRequired": true,
+        "neutralSwitched": true
+      },
+      "warranty": {
+        "years": 5,
+        "notes": "5-year/2000-hour limited warranty"
+      },
+      "pricing": {
+        "msrpUsd": 1350,
+        "installationEstimateUsd": 850
+      },
+      "compatibility": {
+        "generatorBrands": ["Kohler"],
+        "solarCompatible": true,
+        "batteryCompatible": true
+      }
+    },
+    {
+      "id": "siemens-ats-200a",
+      "manufacturer": "Siemens",
+      "model": "TF222R 200A Transfer Switch",
+      "sku": "TF222R",
+      "category": "ats",
+      "subcategory": "manual_transfer_switch",
+      "certifications": ["UL 1008"],
+      "specs": {
+        "ampRating": 200,
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "transferTimeMs": null,
+        "transferType": "manual",
+        "serviceEntranceRated": false,
+        "mainBreakerIncluded": false,
+        "circuitCount": null,
+        "loadSheddingCapable": false,
+        "outdoorRated": false,
+        "enclosureType": "NEMA 1",
+        "weightLbs": 22,
+        "dimensionsInches": "14 x 10 x 5",
+        "wifiEnabled": false,
+        "remoteMonitoring": false
+      },
+      "electrical": {
+        "inputWireGaugeMin": "2/0 AWG",
+        "outputWireGaugeMin": "2/0 AWG",
+        "groundingRequired": true,
+        "neutralSwitched": true
+      },
+      "warranty": {
+        "years": 1
+      },
+      "pricing": {
+        "msrpUsd": 350,
+        "installationEstimateUsd": 400,
+        "notes": "Manual transfer switch; lower cost option"
+      },
+      "compatibility": {
+        "generatorBrands": ["Any"],
+        "solarCompatible": true,
+        "batteryCompatible": true
+      }
+    },
+    {
+      "id": "reliance-controls-310crk",
+      "manufacturer": "Reliance Controls",
+      "model": "310CRK 10-Circuit Transfer Switch Kit",
+      "sku": "310CRK",
+      "category": "ats",
+      "subcategory": "manual_transfer_switch",
+      "certifications": ["UL 1008"],
+      "specs": {
+        "ampRating": 30,
+        "voltageV": 240,
+        "phaseType": "split_phase",
+        "frequencyHz": 60,
+        "transferType": "manual",
+        "serviceEntranceRated": false,
+        "mainBreakerIncluded": false,
+        "circuitCount": 10,
+        "loadSheddingCapable": false,
+        "outdoorRated": false,
+        "enclosureType": "NEMA 1",
+        "weightLbs": 8,
+        "dimensionsInches": "12 x 8 x 4",
+        "wifiEnabled": false,
+        "remoteMonitoring": false
+      },
+      "electrical": {
+        "inputWireGaugeMin": "10 AWG",
+        "outputWireGaugeMin": "10 AWG",
+        "groundingRequired": true,
+        "neutralSwitched": true
+      },
+      "warranty": {
+        "years": 1
+      },
+      "pricing": {
+        "msrpUsd": 180,
+        "installationEstimateUsd": 300,
+        "notes": "10-circuit manual transfer switch; budget option for critical loads only"
+      },
+      "compatibility": {
+        "generatorBrands": ["Any portable generator"],
+        "solarCompatible": false,
+        "batteryCompatible": false,
+        "notes": "For portable generator use only; not recommended for solar+storage integration"
+      }
+    }
+  ]
+}
