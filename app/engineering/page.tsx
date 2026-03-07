@@ -258,6 +258,10 @@ export default function EngineeringPage() {
 
   // ── Engineering Intelligence Panel state ──────────────────────────────────
   const [intelligencePanelOpen, setIntelligencePanelOpen] = useState(true);
+  // ── Mounting Details Tab state (moved to top-level to fix React Rules of Hooks) ──
+  const [mountingInstallType, setMountingInstallType] = useState<'residential' | 'commercial' | 'ground'>('residential');
+  const [selectedMountingId, setSelectedMountingId] = useState<string>('ironridge-xr100');
+  const [showAllSystems, setShowAllSystems] = useState(false);
   const [aiQuery, setAiQuery] = useState('');
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -1446,6 +1450,21 @@ export default function EngineeringPage() {
   }, [compliance]);
 
   const handlePrint = () => window.print();
+
+  // ── Sync selectedMountingId with config.mountingId when config changes ──────────
+  useEffect(() => {
+    if (config.mountingId && config.mountingId !== selectedMountingId) {
+      setSelectedMountingId(config.mountingId);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.mountingId]);
+
+  // ── DB load verification (console log on mount) ──────────────────────────────────
+  useEffect(() => {
+    const systems = getAllMountingSystems();
+    console.log('[MountingDB] Startup: mounting-hardware-db loaded with', systems.length, 'systems');
+    console.log('[MountingDB] Available system IDs:', systems.map(s => s.id).join(', '));
+  }, []);
 
   // ── Intelligence Panel helpers ────────────────────────────────────────────
   const logDecision = (action: string, detail: string, type: 'auto' | 'manual' | 'info' = 'info') => {
@@ -5064,9 +5083,6 @@ export default function EngineeringPage() {
           {activeTab === 'mounting' && (() => {
             // ── Mounting Details Tab ── Full Redesign ──────────────────────────────
             const allSystems = getAllMountingSystems();
-            const [mountingInstallType, setMountingInstallType] = React.useState<'residential' | 'commercial' | 'ground'>('residential');
-            const [selectedMountingId, setSelectedMountingId] = React.useState<string>(config.mountingId || 'ironridge-xr100');
-            const [showAllSystems, setShowAllSystems] = React.useState(false);
 
             // Filter systems by install type
             const categoryMap: Record<string, MountingCategory[]> = {
