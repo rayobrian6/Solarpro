@@ -2,12 +2,17 @@
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    domains: ['api.mapbox.com', 'maps.googleapis.com'],
+    remotePatterns: [
+      { hostname: 'api.mapbox.com' },
+      { hostname: 'maps.googleapis.com' },
+    ],
   },
   webpack: (config) => {
     config.externals = [...(config.externals || []), { canvas: 'canvas' }];
     return config;
   },
+  // Add empty turbopack config to allow webpack config to work with Next.js 16
+  turbopack: {},
   // Force unique build ID on every deploy to bust CDN/browser cache
   generateBuildId: async () => {
     return `build-${Date.now()}`;
