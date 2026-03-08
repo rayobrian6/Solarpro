@@ -2327,6 +2327,18 @@ function SolarEngine3D({
 
     // Replace ALL panels with Auto Fill result (do NOT append to existing panels).
     panelsRef.current = newPanels;
+
+    // Directly render panels into Cesium NOW (synchronous, bypasses React prop cycle).
+    // This ensures panels are visible immediately without waiting for React re-render.
+    // The panels useEffect will also fire later (via onPanelsChange) but renderAllPanels
+    // is idempotent - it diffs and finds no changes since lastRenderedPanelsRef is updated here.
+    if (renderAllPanelsRef.current) {
+      addLog('AUTO', `calling renderAllPanels directly with ${newPanels.length} panels`);
+      renderAllPanelsRef.current(viewer, C, newPanels);
+    } else {
+      addLog('AUTO', 'renderAllPanelsRef not set - panels will render via useEffect');
+    }
+
     onPanelsChange(newPanels);
     setPanelCount(newPanels.length);
     setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligibleSegs.length} segments`);
@@ -2457,7 +2469,10 @@ function SolarEngine3D({
           heading, pitch: pitchDeg, roll: 0, orientation: gpOrient,
         });
         panels.push(panel);
-        addPanelEntity(viewer, C, panel);
+        // NOTE: Do NOT call addPanelEntity here.
+        // handleAutoRoof calls renderAllPanels(newPanels) after collecting all segments,
+        // which does a clean full-rebuild. Direct addPanelEntity here would cause
+        // entities to be added then immediately removed by renderAllPanels full-rebuild.
         placed++;
       }
       addLog('FILL', `seg ${seg?.id}: PRIMARY placed=${placed} skipped=${skipped}`);
@@ -2564,7 +2579,8 @@ function SolarEngine3D({
           heading, pitch: pitchDeg, roll: 0, orientation: orient,
         });
         panels.push(panel);
-        addPanelEntity(viewer, C, panel);
+        // NOTE: Do NOT call addPanelEntity here.
+        // handleAutoRoof calls renderAllPanels(newPanels) after collecting all segments.
         placed++;
       }
     }
