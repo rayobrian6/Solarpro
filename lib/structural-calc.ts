@@ -344,7 +344,9 @@ export function runStructuralCalc(input: StructuralInput): StructuralCalcResult 
   const Ce = 1.0;  // exposure factor (normal)
   const Ct = 1.0;  // thermal factor (heated building)
   const Is = 1.0;  // importance factor (residential)
-  const roofSnowLoad = Cs * Ce * Ct * Is * input.groundSnowLoad;
+  // ASCE 7-22 §7.3: flat roof snow load pf = 0.7 × Ce × Ct × Is × pg
+  // The 0.7 factor accounts for the fact that not all ground snow accumulates on roofs
+  const roofSnowLoad = 0.7 * Cs * Ce * Ct * Is * input.groundSnowLoad;
   const panelSnowLoad = roofSnowLoad * Math.cos(pitchRad);
   const snowLoadPerAttachment = panelSnowLoad * tributaryArea;
 

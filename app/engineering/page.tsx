@@ -881,7 +881,7 @@ export default function EngineeringPage() {
         const mountingSystem = ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId);
         const mountSpecs = mountingSystem ? {
           fastenersPerAttachment: mountingSystem.mount?.fastenersPerMount ?? 2,
-          upliftCapacity: mountingSystem.mount?.upliftCapacityLbs ?? 500,
+          upliftCapacity: mountingSystem.mount?.upliftCapacityLbs ?? 984,  // 984 lbs = NDS 2018 Table 12.2A: 5/16" lag × 2.5" embed × Cd=1.6
           attachmentSpacingMax: mountingSystem.mount?.maxSpacingIn,
         } : undefined;
         return {
@@ -3782,7 +3782,14 @@ export default function EngineeringPage() {
 
                 // Battery NEC 705.12(B) step — add if battery is configured
                 const batteryBackfeedADisplay = config.batteryId
-                  ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
+                  ? (() => {
+                      const b = getBatteryById(config.batteryId);
+                      const perUnit = b?.backfeedBreakerA ?? 0;
+                      // NEC 705.12(B): each battery unit adds its own backfeed breaker to bus loading
+                      // Multiple batteries in parallel each require their own breaker
+                      const qty = config.batteryCount && config.batteryCount > 0 ? config.batteryCount : 1;
+                      return perUnit * qty;
+                    })()
                   : 0;
                 if (batteryBackfeedADisplay > 0) {
                   const batModel = config.batteryModel || 'Battery Storage';
@@ -3800,7 +3807,7 @@ export default function EngineeringPage() {
                     nec: 'NEC 705.12(B)',
                     formula: `Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A = ${totalBackfeedA}A vs (${busRating}A bus × 120%) − ${mainBreaker}A main = ${busMax}A max`,
                     result: busPass ? `PASS — ${totalBackfeedA}A ≤ ${busMax}A` : `FAIL — ${totalBackfeedA}A > ${busMax}A`,
-                    detail: `${batMfr} ${batModel} — ${batteryBackfeedADisplay}A dedicated backfeed breaker (NEC 705.12(B)). NEC 705.12(B)(2): sum of all backfeed breakers must not exceed (bus rating × 120%) minus main breaker rating.`,
+                    detail: `${config.batteryCount > 1 ? `${config.batteryCount}× ` : ''}${batMfr} ${batModel} — ${batteryBackfeedADisplay}A total backfeed (${config.batteryCount > 1 ? `${config.batteryCount} units × ${batteryBackfeedADisplay / (config.batteryCount || 1)}A each` : `${batteryBackfeedADisplay}A dedicated breaker`}) (NEC 705.12(B)). NEC 705.12(B)(2): sum of all backfeed breakers must not exceed (bus rating × 120%) minus main breaker rating. If failing: use supply-side tap (NEC 705.11), upgrade panel bus, or reduce battery count.`,
                     color: busPass ? 'emerald' : 'red',
                   } as any);
                 }

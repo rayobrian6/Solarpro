@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v29.6';
+export const BUILD_VERSION = 'v29.7';
 export const BUILD_DATE = '2026-03-08';
 export const BUILD_DESCRIPTION = 'COMPLIANCE ENGINE FIXES — NEC 705.12(B) + STRUCTURAL DEFAULTS';
 export const BUILD_FEATURES = [
