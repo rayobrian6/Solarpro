@@ -21,6 +21,7 @@ const ALL_MOUNTING_SYSTEMS: MountingSystemSpec[] = getAllMountingSystems();
 const MOUNTING_BRANDS: string[] = Array.from(new Set(ALL_MOUNTING_SYSTEMS.map(s => s.manufacturer))).sort();
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
 import { getUtilitiesByState } from '@/lib/utility-rules';
+import { getUtilitiesByStateNational, STATE_UTILITY_FALLBACK } from '@/lib/utilityDetector';
 import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 
@@ -2123,7 +2124,7 @@ export default function EngineeringPage() {
                     </div>
                   )}
 
-                  {/* Utility Selector — filtered by state, persisted to project */}
+                  {/* Utility Selector — national data from utilityDetector.ts (all 50 states) */}
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">Utility Provider</label>
                     <select
@@ -2132,19 +2133,31 @@ export default function EngineeringPage() {
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60"
                     >
                       <option value="">— Manual / Unknown —</option>
-                      {getUtilitiesByState(config.state || '').map(u => (
+                      {config.state && getUtilitiesByStateNational(config.state).map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                      {!config.state && getUtilitiesByState('').map(u => (
                         <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
                     </select>
-                    {config.utilityId && (
-                      <div className="text-xs text-slate-500 mt-1">
-                        {(() => {
-                          const utils = getUtilitiesByState(config.state || '');
-                          const u = utils.find(x => x.id === config.utilityId);
-                          return u ? `Net metering: ${u.netMeteringProgram || 'Standard'} · ${u.requiresSmartInverter ? 'Smart inverter required' : 'Standard inverter OK'}` : '';
-                        })()}
-                      </div>
-                    )}
+                    {config.utilityId && config.state && (() => {
+                      const stateData = STATE_UTILITY_FALLBACK[config.state];
+                      if (!stateData) return null;
+                      return (
+                        <div className="text-xs text-slate-400 mt-1.5 space-y-0.5">
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-500">Avg Rate:</span>
+                            <span className="text-amber-400 font-medium">${stateData.avgRate.toFixed(3)}/kWh</span>
+                            <span className="text-slate-500">Net Metering:</span>
+                            <span className={stateData.netMetering ? 'text-emerald-400' : 'text-red-400'}>
+                              {stateData.netMetering ? '✓ Eligible' : '✗ Not Available'}
+                            </span>
+                          </div>
+                          <div className="text-slate-500 text-xs">{stateData.netMeteringPolicy}</div>
+                          <div className="text-slate-500 text-xs">Max system: {stateData.interconnectionMaxKw} kW · Export rate: ${stateData.exportRate.toFixed(3)}/kWh</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                   {/* AHJ Selector — filtered by state, persisted to project */}
                   <div>

@@ -248,6 +248,34 @@ function NewProjectContent() {
             </div>
           </div>
 
+          {/* ── Bill Upload — always visible ── */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <Upload size={16} className="text-amber-400" />
+                <div>
+                  <h2 className="font-semibold text-white text-sm">Upload Electric Bill</h2>
+                  <p className="text-slate-400 text-xs">Auto-detect utility, location &amp; system size from a PDF or photo</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBillUpload(!showBillUpload)}
+                className="btn-secondary text-xs py-1.5 px-3"
+              >
+                {showBillUpload ? 'Hide' : 'Upload Bill'}
+              </button>
+            </div>
+            {showBillUpload && (
+              <div className="mt-4">
+                <BillUploadFlow
+                  onComplete={handleBillUploadComplete}
+                  onClose={() => setShowBillUpload(false)}
+                />
+              </div>
+            )}
+          </div>
+
           {/* Project Name */}
           {selectedClient && selectedType && (
             <div className="card p-5 animate-fade-in">
@@ -259,34 +287,6 @@ function NewProjectContent() {
                 <div>
                   <label className="input-label">Project Name *</label>
                   <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Smith Residence - Roof Mount" />
-                </div>
-
-                {/* ── Bill Upload Shortcut ── */}
-                <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Upload size={15} className="text-amber-400" />
-                      <div>
-                        <p className="text-white text-sm font-medium">Upload Electric Bill</p>
-                        <p className="text-slate-400 text-xs">Auto-detect utility, location &amp; system size</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowBillUpload(!showBillUpload)}
-                      className="btn-secondary text-xs py-1.5 px-3"
-                    >
-                      {showBillUpload ? 'Hide' : 'Upload Bill'}
-                    </button>
-                  </div>
-                  {showBillUpload && (
-                    <div className="mt-4">
-                      <BillUploadFlow
-                        onComplete={handleBillUploadComplete}
-                        onClose={() => setShowBillUpload(false)}
-                      />
-                    </div>
-                  )}
                 </div>
 
                 {/* ── Project Address ── */}

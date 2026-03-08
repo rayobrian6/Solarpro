@@ -223,3 +223,29 @@ export function getUtilityRateSummary(utility: UtilityInfo): string {
   if (!parts.length) parts.push('Flat Rate');
   return parts.join(' + ');
 }
+// ── National utility list by state (for dropdowns) ────────────────────────────
+export interface UtilityOption {
+  id: string;
+  name: string;
+  avgRatePerKwh: number;
+  netMeteringEligible: boolean;
+  netMeteringPolicy: string;
+  netMeteringMaxKw: number;
+  exportRate: number;
+  interconnectionMaxKw: number;
+}
+
+export function getUtilitiesByStateNational(stateCode: string): UtilityOption[] {
+  const fallback = STATE_UTILITY_FALLBACK[stateCode];
+  if (!fallback) return [];
+  return fallback.majorUtilities.map((name, i) => ({
+    id: `${stateCode.toLowerCase()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')}`,
+    name,
+    avgRatePerKwh: fallback.avgRate,
+    netMeteringEligible: fallback.netMetering,
+    netMeteringPolicy: fallback.netMeteringPolicy,
+    netMeteringMaxKw: fallback.netMeteringMaxKw,
+    exportRate: fallback.exportRate,
+    interconnectionMaxKw: fallback.interconnectionMaxKw,
+  }));
+}
