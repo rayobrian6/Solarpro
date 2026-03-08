@@ -470,61 +470,128 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
   // ── STAGE 4: AC ──────────────────────────────────────────────────────────────
 
-  // AC Wire & Conduit — use ComputedSystem.runs as single source of truth
-  let acWireQty: number;
-  let acConduitQty: number;
-  let acWireDerivation: string;
-
-  // Derive acWireGauge from runs when available (single source of truth)
-  let resolvedAcWireGauge = input.acWireGauge ?? '#8 AWG';
-  let resolvedConduitSize = input.conduitSizeInch ?? '3/4';
+  // Wire & Conduit — use ComputedSystem.runs as single source of truth
+  // Generate ONE line item per wire gauge and ONE per conduit type/size
+  // This ensures BOM line items match the summary card quantities (wire10AWG, wire8AWG, etc.)
 
   if (input.runs && input.runs.length > 0) {
-    // Get AC feeder run for gauge/conduit size
-    const acRuns = input.runs.filter(r =>
-      !r.isUtilityOwned && // Exclude utility-owned service conductors from BOM
-      (r.color === 'ac' ||
-      r.id === 'COMBINER_TO_DISCO_RUN' ||
-      r.id === 'INV_TO_DISCO_RUN' ||
-      r.id === 'DISCO_TO_METER_RUN')
-      // METER_TO_MSP_RUN removed — no separate production meter per industry standard
-    );
-    const primaryAcRun = input.runs.find(r =>
-      r.id === 'COMBINER_TO_DISCO_RUN' || r.id === 'INV_TO_DISCO_RUN'
-    ) ?? acRuns[0];
+    // ── All customer-owned runs (exclude utility-owned service conductors) ──
+    const allBomRuns = input.runs.filter((r: any) => !r.isUtilityOwned);
 
-    if (primaryAcRun) {
-      resolvedAcWireGauge = primaryAcRun.wireGauge;
-      resolvedConduitSize = primaryAcRun.conduitSize.replace('"', '');
+    // ── DC wire runs (ROOF_RUN for micro, DC_STRING_RUN / DC_DISCO_TO_INV_RUN for string) ──
+    // For string topology, DC wire is already added in Stage 2 (USE-2 PV wire).
+    // For micro topology, ROOF_RUN is open-air DC wiring — add as separate BOM line item.
+    const dcRunIds = new Set(['ROOF_RUN', 'DC_STRING_RUN', 'DC_DISCO_TO_INV_RUN']);
+    const dcBomRuns = allBomRuns.filter((r: any) => dcRunIds.has(r.id));
+    const acBomRuns = allBomRuns.filter((r: any) => !dcRunIds.has(r.id));
+
+    // ── Group DC runs by wire gauge → one line item per gauge (micro only) ──
+    if (isMicro && dcBomRuns.length > 0) {
+      const dcGaugeMap = new Map<string, number>();
+      for (const r of dcBomRuns) {
+        const gauge: string = (r as any).wireGauge ?? '#10 AWG';
+        const conductors: number = (r as any).conductorCount ?? 2;
+        const qty = Math.ceil((r as any).onewayLengthFt * (conductors + 1) * 1.15);
+        dcGaugeMap.set(gauge, (dcGaugeMap.get(gauge) ?? 0) + qty);
+      }
+      for (const [gauge, qty] of dcGaugeMap.entries()) {
+        const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
+        items.push(addItem('dc', 'wire', 'Southwire', `${gauge} USE-2/THWN-2`,
+          `USE2-${gaugeNum}`,
+          `${gauge} USE-2 — DC roof wiring (open-air, panels to microinverters)`,
+          qty, 'ft', 'NEC 690.31',
+          'Sum(ROOF_RUN.length x conductors x 1.15)',
+          `${gauge} DC runs x 1.15`, true));
+        log.push({ stageId: 'dc', category: 'wire', item: `${gauge} USE-2`,
+          quantity: qty, derivedFrom: 'dcBomRuns',
+          formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 690.31' });
+      }
     }
 
-    // Derive wire length from runSegments: Σ(segment.length × (conductors + 1 EGC) × 1.15)
-    acWireQty = acRuns.reduce((sum, r) =>
-      sum + Math.ceil(r.onewayLengthFt * (r.conductorCount + 1) * 1.15), 0);
-    // Derive conduit length from runSegments: Σ(segment.length × 1.15)
-    acConduitQty = acRuns.reduce((sum, r) =>
-      sum + Math.ceil(r.onewayLengthFt * 1.15), 0);
-    acWireDerivation = 'Σ(runSegments.length × (conductors+1) × 1.15)';
+    // ── Group AC runs by wire gauge → one line item per gauge ──
+    // Produces separate line items for #10, #8, #6, #4 AWG matching summary cards
+    const acGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
+    for (const r of acBomRuns) {
+      const gauge: string = (r as any).wireGauge ?? input.acWireGauge ?? '#8 AWG';
+      const conductors: number = (r as any).conductorCount ?? 3;
+      const qty = Math.ceil((r as any).onewayLengthFt * (conductors + 1) * 1.15); // +1 for EGC
+      const existing = acGaugeMap.get(gauge);
+      if (existing) {
+        existing.qty += qty;
+        existing.runIds.push((r as any).id);
+      } else {
+        acGaugeMap.set(gauge, { qty, runIds: [(r as any).id] });
+      }
+    }
+
+    // Emit one wire line item per gauge (sorted: smaller AWG number = larger wire = first)
+    const sortedAcGauges = [...acGaugeMap.entries()].sort((a, b) => {
+      const numA = parseInt(a[0].replace('#', '').replace(' AWG', '')) || 99;
+      const numB = parseInt(b[0].replace('#', '').replace(' AWG', '')) || 99;
+      return numA - numB;
+    });
+
+    for (const [gauge, { qty, runIds }] of sortedAcGauges) {
+      const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
+      const runLabel = runIds.join(', ');
+      items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`,
+        `THWN2-${gaugeNum}`,
+        `${gauge} THWN-2 — AC wiring (${runLabel})`,
+        qty, 'ft', 'NEC 310.15 / 250.122',
+        `Sum(runs[${runLabel}].length x (conductors+1) x 1.15)`,
+        `${gauge} AC runs x 1.15`, true));
+      log.push({ stageId: 'ac', category: 'wire', item: `${gauge} THWN-2`,
+        quantity: qty, derivedFrom: runLabel,
+        formula: 'Sum(length x (conductors+1) x 1.15)', necReference: 'NEC 310.15 / 250.122' });
+    }
+
+    // ── Group ALL runs by conduit type+size → one conduit line item per type/size ──
+    const conduitMap = new Map<string, { qty: number; type: string; size: string }>();
+    for (const r of allBomRuns) {
+      const cType: string = (r as any).conduitType ?? input.conduitType ?? 'EMT';
+      const cSize: string = ((r as any).conduitSize ?? `${input.conduitSizeInch ?? '3/4'}"`).replace('"', '');
+      const key = `${cType}-${cSize}`;
+      const qty = Math.ceil((r as any).onewayLengthFt * 1.15);
+      const existing = conduitMap.get(key);
+      if (existing) {
+        existing.qty += qty;
+      } else {
+        conduitMap.set(key, { qty, type: cType, size: cSize });
+      }
+    }
+
+    for (const [, { qty, type, size }] of conduitMap.entries()) {
+      items.push(addItem('ac', 'conduit', 'Generic', `${size}" ${type} Conduit`,
+        `${type}-${size.replace('/', '-')}`,
+        `${size}" ${type} conduit — all runs`,
+        qty, 'ft', 'NEC 358',
+        'Sum(allRuns.length x 1.15)',
+        `${size}" ${type} x 1.15`, true));
+    }
+
   } else {
-    // Fallback: AC home run has 4 conductors: L1, L2, N (current-carrying) + EGC
-    acWireQty = conduitLength(input.acWireLength * 4);
-    acConduitQty = conduitLength(input.acWireLength);
-    acWireDerivation = 'acWireLength × 4 × 1.15';
+    // ── Fallback when no runs provided ──
+    const resolvedAcWireGauge = input.acWireGauge ?? '#8 AWG';
+    const resolvedConduitSize = input.conduitSizeInch ?? '3/4';
+    // AC home run: 3 current-carrying conductors + 1 EGC = 4 total
+    const acWireQty = conduitLength(input.acWireLength * 4);
+    const acConduitQty = conduitLength(input.acWireLength);
+
+    items.push(addItem('ac', 'wire', 'Southwire', `${resolvedAcWireGauge} THWN-2`,
+      `THWN2-${resolvedAcWireGauge.replace('#', '').replace(' AWG', '')}`,
+      `${resolvedAcWireGauge} THWN-2 — AC home run (3 CC + 1 EGC = 4 conductors)`,
+      acWireQty, 'ft', 'NEC 310.15 / 250.122',
+      'acWireLength x 4 x 1.15', `${input.acWireLength} x 4 x 1.15`, true));
+    log.push({ stageId: 'ac', category: 'wire', item: `${resolvedAcWireGauge} THWN-2`,
+      quantity: acWireQty, derivedFrom: 'acWireLength x 4 conductors x 1.15 fitting',
+      formula: 'acWireLength * 4 * 1.15', necReference: 'NEC 310.15 / 250.122' });
+
+    items.push(addItem('ac', 'conduit', 'Generic', `${resolvedConduitSize}" ${input.conduitType} Conduit`,
+      `${input.conduitType}-${resolvedConduitSize.replace('/', '-')}`,
+      `${resolvedConduitSize}" ${input.conduitType} conduit — AC home run`,
+      acConduitQty, 'ft', 'NEC 358',
+      'acWireLength x 1.15', `${input.acWireLength} x 1.15`, true));
   }
-
-  // AC Wire item — gauge derived from ComputedSystem.runs
-  items.push(addItem('ac', 'wire', 'Southwire', `${resolvedAcWireGauge} THWN-2`,
-    `THWN2-${resolvedAcWireGauge.replace('#', '').replace(' AWG', '')}`,
-    `${resolvedAcWireGauge} THWN-2 — AC home run (3 CC + 1 EGC = 4 conductors)`,
-    acWireQty, 'ft', 'NEC 310.15 / 250.122', acWireDerivation, `${input.acWireLength} × 4 × 1.15`, true));
-  log.push({ stageId: 'ac', category: 'wire', item: `${resolvedAcWireGauge} THWN-2`,
-    quantity: acWireQty, derivedFrom: acWireDerivation, formula: 'acWireLength * 4 * 1.15', necReference: 'NEC 310.15 / 250.122' });
-
-  // AC Conduit item — size derived from ComputedSystem.runs
-  items.push(addItem('ac', 'conduit', 'Generic', `${resolvedConduitSize}" ${input.conduitType} Conduit`,
-    `${input.conduitType}-${resolvedConduitSize.replace('/', '-')}`,
-    `${resolvedConduitSize}" ${input.conduitType} conduit — AC home run`,
-    acConduitQty, 'ft', 'NEC 358', 'Σ(runSegments.length × 1.15)', `${input.acWireLength} × 1.15`, true));
 
   // AC Disconnect
   if (input.requiresACDisconnect !== false) {

@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v30.0';
+export const BUILD_VERSION = 'v30.2';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'COMPLIANCE ENGINE FIXES — NEC 705.12(B) + STRUCTURAL DEFAULTS';
+export const BUILD_DESCRIPTION = 'BOM WIRE FIX — Per-gauge line items match summary card quantities';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -56,6 +56,11 @@ export const BUILD_FEATURES = [
   'FIX: Battery Backfeed NEC 705.12(B) — correct formula: Solar+Battery ≤ (Bus×1.2)−Main [was wrongly adding Main to load]',
   'FIX: Default rafterSpan 16ft → 12ft — 2×6 at 16ft always failed with snow load; 12ft is typical residential',
   'FIX: Busbar violation message — now shows full formula + remediation options (supply-side tap, derate, upgrade)',
+  // Phase 14: BOM Wire Gauge Fix
+  'FIX: BOM line items now generate ONE wire line item per gauge (#10/#8/#6/#4 AWG) matching summary card quantities',
+  'FIX: BOM DC wire (ROOF_RUN #10 AWG) now appears as separate line item for microinverter systems',
+  'FIX: BOM conduit now grouped by type+size — one line item per conduit type/size combination',
+  'FIX: BOM wire quantities derived from ComputedSystem.runs (conductorCount × length × 1.15) — matches wire-in-conduit sizing section',
 ] as const;
 
 export function getBuildBadge(): string {
