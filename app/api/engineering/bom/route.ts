@@ -50,6 +50,8 @@ export async function POST(req: NextRequest) {
       interconnectionMethod:   body.interconnectionMethod ?? body.interconnection ?? 'LOAD_SIDE',
       panelBusRating:          Number(body.panelBusRating) || Number(body.mainPanelAmps) || 200,
       runs:                    body.runs,
+      // Pre-calculated quantities from ComputedSystem.bomQuantities (exact match with summary cards)
+      bomQuantities:            body.bomQuantities,
     };
 
     const result = generateBOMV4(input);

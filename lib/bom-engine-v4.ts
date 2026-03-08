@@ -84,6 +84,17 @@ export interface BOMGenerationInputV4 {
   
   // ComputedSystem.runs — single source of truth for wire/conduit quantities
   runs?:                   RunSegment[];
+  
+  // ComputedSystem.bomQuantities — pre-calculated wire/conduit quantities from segmentSchedule
+  // When provided, these are used DIRECTLY for wire line items (guarantees exact match with summary cards)
+  bomQuantities?: {
+    wire10AWG?: number;
+    wire8AWG?: number;
+    wire6AWG?: number;
+    wire4AWG?: number;
+    conduitEMT?: number;
+    conduitPVC?: number;
+  };
 
   // Structural
   roofType: string;

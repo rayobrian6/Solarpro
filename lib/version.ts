@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v30.3';
+export const BUILD_VERSION = 'v30.4';
 export const BUILD_DATE = '2026-03-08';
 export const BUILD_DESCRIPTION = 'BOM WIRE FIX — EGC separate gauge handling, matches calcBOMFromSegments exactly';
 export const BUILD_FEATURES = [

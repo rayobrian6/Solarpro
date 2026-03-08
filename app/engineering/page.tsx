@@ -1441,6 +1441,8 @@ export default function EngineeringPage() {
           panelBusRating:   config.panelBusRating ?? config.mainPanelAmps ?? 200,
           // Pass ComputedSystem.runs as single source of truth for wire/conduit quantities
           runs:             cs.runs,
+          // Pass ComputedSystem.bomQuantities for EXACT match with summary card quantities
+          bomQuantities:    cs.bomQuantities,
           // Generator / ATS / BUI — for BOM line items
           generatorId:      config.generatorId || undefined,
           atsId:            config.atsId || undefined,
