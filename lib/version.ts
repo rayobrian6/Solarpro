@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v32.2';
+export const BUILD_VERSION = 'v32.4';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'AUTO FILL INFINITE LOOP FIX — 3 root causes fixed: (1) removed handleAutoRoof from canvas click handler, (2) auto_roof trigger now inside prevMode guard, (3) mode resets to select after fill completes';
+export const BUILD_DESCRIPTION = 'AUTO FILL DOUBLE-EXECUTION FIX — 4 root causes fixed: (1) removed direct handleAutoRoof call from toolbar button (was firing twice), (2) handleAutoRoof now REPLACES panels instead of appending (was multiplying count), (3) mutex ref prevents concurrent runs, (4) terrainReadyRef replaces elevation>0 check for reliable terrain-ready detection';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',

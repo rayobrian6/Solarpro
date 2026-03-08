@@ -186,6 +186,12 @@ function SolarEngine3D({
   const overlayRef  = useRef<any[]>([]);
   const handlerRef  = useRef<any>(null);
   const initDone    = useRef(false);
+  // autoFillRunningRef: mutex to prevent Auto Fill from running more than once concurrently.
+  // Set to true at the start of handleAutoRoof, cleared when done.
+  const autoFillRunningRef = useRef(false);
+  // terrainReadyRef: mirrors terrainReady state as a ref so it can be read inside
+  // setInterval callbacks without stale closure issues.
+  const terrainReadyRef = useRef(false);
 
   // pendingPanelsRef: stores panels that arrive via props BEFORE boot() completes.
   // boot() checks this ref at completion and renders them if panels prop is still [].
@@ -309,16 +315,16 @@ function SolarEngine3D({
       const C = (window as any).Cesium;
       if (viewer && C && twinRef.current) {
         // Wait for terrain sampling to complete before running Auto Fill.
-        // cesiumGroundElevRef is set at the end of boot() after sampleTerrainMostDetailed.
-        // If it's already set (> 0), run immediately. Otherwise poll every 200ms (max 5s).
+        // terrainReadyRef is set true at the end of boot() after sampleTerrainMostDetailed.
+        // If terrain is already ready, run immediately. Otherwise poll every 200ms (max 5s).
         const runAutoFill = () => handleAutoRoof(viewer, C);
-        if (cesiumGroundElevRef.current > 0) {
+        if (terrainReadyRef.current) {
           setTimeout(runAutoFill, 50);
         } else {
           let waited = 0;
           const poll = setInterval(() => {
             waited += 200;
-            if (cesiumGroundElevRef.current > 0 || waited >= 5000) {
+            if (terrainReadyRef.current || waited >= 5000) {
               clearInterval(poll);
               runAutoFill();
             }
@@ -599,6 +605,7 @@ function SolarEngine3D({
         addLog('WARN', `Terrain sampling failed: ${e.message}, using geoid estimate: ${cesiumGroundElev.toFixed(1)}m`);
       }
       cesiumGroundElevRef.current = cesiumGroundElev;
+      terrainReadyRef.current = true;
       setTerrainReady(true);
       // NOW set twin state - cesiumGroundElevRef is ready, so drawOverlays will use correct elevation
       if (twinData) setTwin(twinData);
@@ -2278,15 +2285,28 @@ function SolarEngine3D({
   //        Fills each eligible segment (sunshineHours >= 50% of best AND areaM2 >= one panel).
   //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
   function handleAutoRoof(viewer: any, C: any) {
+    // Mutex guard: prevent concurrent / double-execution of Auto Fill.
+    // This fires from the placementMode useEffect only (NOT from the toolbar button directly).
+    // Without this guard, rapid clicks or React re-renders can trigger multiple concurrent fills.
+    if (autoFillRunningRef.current) {
+      addLog('AUTO', 'handleAutoRoof: already running - skipped duplicate call');
+      return;
+    }
+    autoFillRunningRef.current = true;
+
     const twinData = twinRef.current;
     if (!twinData || twinData.roofSegments.length === 0) {
-      setStatusMsg('\u274c No roof segments \u2014 Solar API data required');
-      addLog('AUTO', '\u274c handleAutoRoof: no twinData or no roofSegments');
+      setStatusMsg('No roof segments - Solar API data required');
+      addLog('AUTO', 'handleAutoRoof: no twinData or no roofSegments');
+      autoFillRunningRef.current = false;
       return;
     }
 
     addLog('AUTO', `handleAutoRoof: ${twinData.roofSegments.length} segments, cesiumGroundElev=${cesiumGroundElevRef.current.toFixed(1)}m`);
 
+    // IMPORTANT: Start fresh - do NOT spread panelsRef.current here.
+    // Previously used [...panelsRef.current, ...newPanels] which APPENDED panels
+    // on every Auto Fill call, causing panel count to multiply on repeated clicks.
     const newPanels: PlacedPanel[] = [];
     const sortedSegs = [...twinData.roofSegments].sort((a: any, b: any) => b.sunshineHours - a.sunshineHours);
     const maxSunshine = sortedSegs[0]?.sunshineHours ?? 0;
@@ -2299,22 +2319,27 @@ function SolarEngine3D({
     addLog('AUTO', `eligible: ${eligibleSegs.length}/${sortedSegs.length} segs (threshold=${minThreshold.toFixed(0)}h)`);
 
     eligibleSegs.forEach((seg: any, idx: number) => {
-      addLog('AUTO', `seg[${idx}] id=${seg.id} area=${seg.areaM2?.toFixed(1)}m\u00b2 hAG=${seg.heightAboveGround?.toFixed(2)}m pitch=${seg.pitchDegrees?.toFixed(1)}\u00b0 az=${seg.azimuthDegrees?.toFixed(1)}\u00b0 maxP=${seg.maxPanels} googlePanels=${seg.googlePanels?.length ?? 0}`);
+      addLog('AUTO', `seg[${idx}] id=${seg.id} area=${seg.areaM2?.toFixed(1)}m2 hAG=${seg.heightAboveGround?.toFixed(2)}m pitch=${seg.pitchDegrees?.toFixed(1)}deg az=${seg.azimuthDegrees?.toFixed(1)}deg maxP=${seg.maxPanels} googlePanels=${seg.googlePanels?.length ?? 0}`);
       const segPanels = fillRoofSegmentWithPanels(viewer, C, seg);
-      addLog('AUTO', `seg[${idx}] \u2192 placed ${segPanels.length} panels`);
+      addLog('AUTO', `seg[${idx}] placed ${segPanels.length} panels`);
       newPanels.push(...segPanels);
     });
 
-    const allPanels = [...panelsRef.current, ...newPanels];
-    panelsRef.current = allPanels;
-    onPanelsChange(allPanels);
-    setPanelCount(allPanels.length);
-    setStatusMsg(`\u2705 Auto-roof: ${newPanels.length} panels on ${eligibleSegs.length} segments`);
-    addLog('AUTO', `\u2705 total placed: ${newPanels.length} panels`);
+    // Replace ALL panels with Auto Fill result (do NOT append to existing panels).
+    panelsRef.current = newPanels;
+    onPanelsChange(newPanels);
+    setPanelCount(newPanels.length);
+    setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligibleSegs.length} segments`);
+    addLog('AUTO', `total placed: ${newPanels.length} panels`);
     try { viewer.scene.requestRender(); } catch {}
-    // Switch back to 'select' after Auto Fill completes.
-    // Prevents re-running Auto Fill on every subsequent canvas click.
-    setTimeout(() => onPlacementModeChange('select'), 100);
+
+    // Release mutex then reset mode to 'select'.
+    // Delay ensures mode state settles before mutex releases,
+    // preventing a rapid select->auto_roof re-trigger.
+    setTimeout(() => {
+      autoFillRunningRef.current = false;
+      onPlacementModeChange('select');
+    }, 300);
   }
 
   // ── Fill roof segment with panels ──────────────────────────────────────────────────────────────
@@ -2906,11 +2931,8 @@ function SolarEngine3D({
               key={mode}
               onClick={() => {
                 onPlacementModeChange(mode);
-                if (mode === 'auto_roof') {
-                  const viewer = viewerRef.current;
-                  const C = (window as any).Cesium;
-                  if (viewer && C) handleAutoRoof(viewer, C);
-                }
+                // auto_roof: fires once via placementMode useEffect — NOT directly here.
+                // Calling handleAutoRoof here AND in the useEffect caused double-execution.
                 // Cancel any in-progress ground array when switching modes
                 if (mode !== 'ground_array' && groundArrayRowsRef.current.length > 0) {
                   cancelGroundArray();
