@@ -126,15 +126,18 @@ function ruleNEC690_7(panelVoc: number, panelCount: number, tempCoeffVoc: number
     message:`String Voc ${stringVoc.toFixed(1)}V <= max ${maxDcVoltage}V`, value:stringVoc.toFixed(1), limit:maxDcVoltage, necReference:'NEC 690.7(A)' };
 }
 
-function ruleNEC705_12(mainPanelAmps: number, backfeedAmps: number): RuleResult {
-  const maxAllowed = mainPanelAmps * 1.2 - mainPanelAmps;
+function ruleNEC705_12(busRating: number, backfeedAmps: number, mainBreaker?: number): RuleResult {
+  // NEC 705.12(B)(2): sum of all backfeed breakers ≤ (busRating × 1.2) − mainBreaker
+  const main = mainBreaker ?? busRating; // if mainBreaker not provided, assume = busRating
+  const maxAllowed = (busRating * 1.2) - main;
   if (backfeedAmps > maxAllowed) {
     return { ruleId:'NEC_705_12_BUSBAR', category:'electrical', severity:'error', title:'120% Busbar Rule Violation',
-      message:`Backfeed ${backfeedAmps}A exceeds max allowed ${maxAllowed.toFixed(0)}A for ${mainPanelAmps}A panel`,
+      message:`Backfeed ${backfeedAmps}A exceeds max allowed ${maxAllowed.toFixed(0)}A. Formula: (${busRating}A bus × 120%) − ${main}A main = ${maxAllowed.toFixed(0)}A max`,
       value:backfeedAmps, limit:maxAllowed.toFixed(0), necReference:'NEC 705.12(B)(2)', overridable:true, overrideField:'mainPanelAmps' };
   }
   return { ruleId:'NEC_705_12_BUSBAR', category:'electrical', severity:'pass', title:'NEC 705.12 Busbar Rule',
-    message:`Backfeed ${backfeedAmps}A <= max ${maxAllowed.toFixed(0)}A`, value:backfeedAmps, limit:maxAllowed.toFixed(0), necReference:'NEC 705.12(B)(2)' };
+    message:`Backfeed ${backfeedAmps}A ≤ max ${maxAllowed.toFixed(0)}A. Formula: (${busRating}A bus × 120%) − ${main}A main = ${maxAllowed.toFixed(0)}A max`,
+    value:backfeedAmps, limit:maxAllowed.toFixed(0), necReference:'NEC 705.12(B)(2)' };
 }
 
 function ruleVoltageDrop(voltageDrop: number, conductorCallout: string, wireLength: number, isAC: boolean): RuleResult {
@@ -253,7 +256,10 @@ export function runRulesEngine(input: RulesEngineInput): RulesEngineResult {
 
   if (electricalResult.busbar) {
     dependencyChain.push('NEC_705_12_BUSBAR');
-    rules.push(ruleNEC705_12(electricalResult.busbar.mainPanelAmps, electricalResult.busbar.backfeedBreakerRequired));
+    // NEC 705.12(B)(2): (busRating × 1.2) − mainBreaker = max allowed backfeed
+    const busRating = electricalResult.interconnection?.busRating ?? electricalResult.busbar.mainPanelAmps;
+    const mainBreaker = electricalResult.interconnection?.mainBreaker ?? busRating;
+    rules.push(ruleNEC705_12(busRating, electricalResult.busbar.backfeedBreakerRequired, mainBreaker));
   }
   if (electricalResult.conduitFill) {
     dependencyChain.push('NEC_358_CONDUIT_FILL');
@@ -264,7 +270,10 @@ export function runRulesEngine(input: RulesEngineInput): RulesEngineResult {
 
   if (resolvedStructural.wind) {
     dependencyChain.push('ASCE_ATTACHMENT_SPACING');
-    rules.push(ruleAttachmentSpacing(input.structural.attachmentSpacing, resolvedStructural.wind.upliftPerAttachment, 500));
+    // Use actual lagBoltCapacity from structural calc result (attachment.lagBoltCapacity)
+    // NOT a hardcoded 500 lbs — standard 5/16" lag bolt NDS capacity is 984 lbs
+    const allowableUplift = (resolvedStructural as any).attachment?.lagBoltCapacity ?? 984;
+    rules.push(ruleAttachmentSpacing(input.structural.attachmentSpacing, resolvedStructural.wind.upliftPerAttachment, allowableUplift));
   }
   if (resolvedStructural.rafter) {
     dependencyChain.push('ASCE_RAFTER_BENDING');

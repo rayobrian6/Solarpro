@@ -26,6 +26,30 @@ import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
+/**
+ * Calculate total battery backfeed breaker amps for NEC 705.12(B) bus loading.
+ *
+ * KEY RULE: Gateway-based systems (Enphase IQ, Tesla Powerwall) use ONE shared
+ * backfeed breaker for ALL units — the gateway/controller is the single point of
+ * interconnection. Non-gateway systems (Franklin WH, SolarEdge Home Battery)
+ * each require their own dedicated breaker, so multiply by count.
+ *
+ * References:
+ *   - Enphase IQ Battery install guide: single 20A/40A breaker per system (not per unit)
+ *   - Tesla Powerwall install guide: single 50A breaker per Backup Gateway
+ *   - NEC 705.12(B)(2): each separately-fused backfeed source counts
+ */
+function calcBatteryBackfeedAmps(batteryId: string | undefined, batteryCount: number): number {
+  if (!batteryId) return 0;
+  const b = getBatteryById(batteryId);
+  if (!b || !b.backfeedBreakerA) return 0;
+  // Gateway-based: single shared breaker regardless of unit count
+  if (b.requiresGateway) return b.backfeedBreakerA;
+  // Non-gateway: each unit has its own breaker
+  const qty = batteryCount && batteryCount > 0 ? batteryCount : 1;
+  return b.backfeedBreakerA * qty;
+}
+
 function parseStateFromAddress(address: string): string | null {
   if (!address) return null;
   // Match "City, ST 12345" or "City, ST" or ", ST " patterns
@@ -413,7 +437,7 @@ export default function EngineeringPage() {
       batteryModel: config.batteryModel,
       batteryCount: config.batteryCount,
       batteryKwh: config.batteryKwh,
-      batteryBackfeedA: config.batteryId ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })() : 0,
+      batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
       generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
       generatorModel: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? ''; })() : undefined,
       generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
@@ -559,9 +583,7 @@ export default function EngineeringPage() {
       // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading
       batteryIds: config.batteryId ? [config.batteryId] : [],
       // BUILD v24: Battery/Generator/ATS NEC-sized segment inputs
-      batteryBackfeedA: config.batteryId
-        ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
-        : undefined,
+      batteryBackfeedA: config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
       batteryContinuousOutputA: config.batteryId
         ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
         : undefined,
@@ -833,9 +855,7 @@ export default function EngineeringPage() {
           mainBreaker: config.mainPanelAmps ?? 200,
         },
         // Battery NEC 705.12(B) — bus loading impact
-        batteryBackfeedA: config.batteryId
-          ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
-          : 0,
+        batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
         batteryCount: config.batteryCount || 0,
         batteryContinuousOutputA: config.batteryId
           ? (() => { const b = getBatteryById(config.batteryId); return b?.maxContinuousOutputA ?? 0; })()
@@ -1215,9 +1235,7 @@ export default function EngineeringPage() {
           batteryModel:   config.batteryBrand ? `${config.batteryBrand} ${config.batteryModel}` : undefined,
           batteryKwh:     config.batteryKwh * config.batteryCount || undefined,
           // Battery backfeed breaker (NEC 705.12(B)) — from equipment-db
-          batteryBackfeedA: config.batteryId
-            ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })()
-            : undefined,
+          batteryBackfeedA: config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
           // Generator fields
           generatorBrand: config.generatorId
             ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? undefined; })()
@@ -3781,16 +3799,7 @@ export default function EngineeringPage() {
                 ];
 
                 // Battery NEC 705.12(B) step — add if battery is configured
-                const batteryBackfeedADisplay = config.batteryId
-                  ? (() => {
-                      const b = getBatteryById(config.batteryId);
-                      const perUnit = b?.backfeedBreakerA ?? 0;
-                      // NEC 705.12(B): each battery unit adds its own backfeed breaker to bus loading
-                      // Multiple batteries in parallel each require their own breaker
-                      const qty = config.batteryCount && config.batteryCount > 0 ? config.batteryCount : 1;
-                      return perUnit * qty;
-                    })()
-                  : 0;
+                const batteryBackfeedADisplay = calcBatteryBackfeedAmps(config.batteryId, config.batteryCount);
                 if (batteryBackfeedADisplay > 0) {
                   const batModel = config.batteryModel || 'Battery Storage';
                   const batMfr   = config.batteryBrand || '';
@@ -3807,7 +3816,16 @@ export default function EngineeringPage() {
                     nec: 'NEC 705.12(B)',
                     formula: `Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A = ${totalBackfeedA}A vs (${busRating}A bus × 120%) − ${mainBreaker}A main = ${busMax}A max`,
                     result: busPass ? `PASS — ${totalBackfeedA}A ≤ ${busMax}A` : `FAIL — ${totalBackfeedA}A > ${busMax}A`,
-                    detail: `${config.batteryCount > 1 ? `${config.batteryCount}× ` : ''}${batMfr} ${batModel} — ${batteryBackfeedADisplay}A total backfeed (${config.batteryCount > 1 ? `${config.batteryCount} units × ${batteryBackfeedADisplay / (config.batteryCount || 1)}A each` : `${batteryBackfeedADisplay}A dedicated breaker`}) (NEC 705.12(B)). NEC 705.12(B)(2): sum of all backfeed breakers must not exceed (bus rating × 120%) minus main breaker rating. If failing: use supply-side tap (NEC 705.11), upgrade panel bus, or reduce battery count.`,
+                    detail: (() => {
+                      const batSpec = getBatteryById(config.batteryId);
+                      const isGateway = batSpec?.requiresGateway ?? false;
+                      const qty = config.batteryCount && config.batteryCount > 0 ? config.batteryCount : 1;
+                      const perUnit = batSpec?.backfeedBreakerA ?? batteryBackfeedADisplay;
+                      const breakerDesc = isGateway
+                        ? `${qty > 1 ? `${qty}× units share ` : ''}${batteryBackfeedADisplay}A single backfeed breaker via ${batSpec?.gatewayModel ?? 'gateway'}`
+                        : `${qty > 1 ? `${qty} units × ${perUnit}A = ${batteryBackfeedADisplay}A total` : `${batteryBackfeedADisplay}A dedicated breaker`}`;
+                      return `${qty > 1 ? `${qty}× ` : ''}${batMfr} ${batModel} — ${breakerDesc} (NEC 705.12(B)). NEC 705.12(B)(2): sum of all backfeed breakers must not exceed (bus rating × 120%) minus main breaker rating. If failing: use supply-side tap (NEC 705.11), upgrade panel bus, or reduce battery count.`;
+                    })(),
                     color: busPass ? 'emerald' : 'red',
                   } as any);
                 }
@@ -6218,7 +6236,7 @@ export default function EngineeringPage() {
                         wireGauge: config.wireGauge, wireLength: config.wireLength,
                         batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
                         batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
-                        batteryBackfeedA: config.batteryId ? (() => { const b = getBatteryById(config.batteryId); return b?.backfeedBreakerA ?? 0; })() : 0,
+                        batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
                         generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
                         generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
                         atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
