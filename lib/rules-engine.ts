@@ -127,17 +127,21 @@ function ruleNEC690_7(panelVoc: number, panelCount: number, tempCoeffVoc: number
 }
 
 function ruleNEC705_12(busRating: number, backfeedAmps: number, mainBreaker?: number): RuleResult {
-  // NEC 705.12(B)(2): sum of all backfeed breakers ≤ (busRating × 1.2) − mainBreaker
-  const main = mainBreaker ?? busRating; // if mainBreaker not provided, assume = busRating
+  // NEC 705.12(B)(3)(2) — 120% Rule:
+  // Solar breaker + Battery breaker + Main breaker ≤ Bus rating × 120%
+  // Equivalent: backfeed breakers ≤ (busRating × 1.2) − mainBreaker
+  const main = mainBreaker ?? busRating;
   const maxAllowed = (busRating * 1.2) - main;
+  const totalWithMain = backfeedAmps + main;
+  const busMax120 = busRating * 1.2;
   if (backfeedAmps > maxAllowed) {
     return { ruleId:'NEC_705_12_BUSBAR', category:'electrical', severity:'error', title:'120% Busbar Rule Violation',
-      message:`Backfeed ${backfeedAmps}A exceeds max allowed ${maxAllowed.toFixed(0)}A. Formula: (${busRating}A bus × 120%) − ${main}A main = ${maxAllowed.toFixed(0)}A max`,
-      value:backfeedAmps, limit:maxAllowed.toFixed(0), necReference:'NEC 705.12(B)(2)', overridable:true, overrideField:'mainPanelAmps' };
+      message:`NEC 705.12(B)(3)(2): Backfeed ${backfeedAmps}A + Main ${main}A = ${totalWithMain}A exceeds ${busRating}A bus × 120% = ${busMax120}A. Max backfeed allowed = ${maxAllowed.toFixed(0)}A. Fix: supply-side tap (NEC 705.11), derate main to ${Math.floor((busMax120 - backfeedAmps)/5)*5}A, or upgrade bus.`,
+      value:backfeedAmps, limit:maxAllowed.toFixed(0), necReference:'NEC 705.12(B)(3)(2)', overridable:true, overrideField:'mainPanelAmps' };
   }
   return { ruleId:'NEC_705_12_BUSBAR', category:'electrical', severity:'pass', title:'NEC 705.12 Busbar Rule',
-    message:`Backfeed ${backfeedAmps}A ≤ max ${maxAllowed.toFixed(0)}A. Formula: (${busRating}A bus × 120%) − ${main}A main = ${maxAllowed.toFixed(0)}A max`,
-    value:backfeedAmps, limit:maxAllowed.toFixed(0), necReference:'NEC 705.12(B)(2)' };
+    message:`NEC 705.12(B)(3)(2): Backfeed ${backfeedAmps}A + Main ${main}A = ${totalWithMain}A ≤ ${busRating}A bus × 120% = ${busMax120}A ✓`,
+    value:backfeedAmps, limit:maxAllowed.toFixed(0), necReference:'NEC 705.12(B)(3)(2)' };
 }
 
 function ruleVoltageDrop(voltageDrop: number, conductorCallout: string, wireLength: number, isAC: boolean): RuleResult {

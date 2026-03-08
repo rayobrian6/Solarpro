@@ -3814,8 +3814,8 @@ export default function EngineeringPage() {
                     num: steps.length + 1,
                     title: 'Battery Backfeed — NEC 705.12(B) Bus Loading',
                     nec: 'NEC 705.12(B)',
-                    formula: `Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A = ${totalBackfeedA}A vs (${busRating}A bus × 120%) − ${mainBreaker}A main = ${busMax}A max`,
-                    result: busPass ? `PASS — ${totalBackfeedA}A ≤ ${busMax}A` : `FAIL — ${totalBackfeedA}A > ${busMax}A`,
+                    formula: `NEC 705.12(B)(3)(2): Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A + Main ${mainBreaker}A = ${totalBackfeedA + mainBreaker}A vs ${busRating}A bus × 120% = ${busRating * 1.2}A max`,
+                    result: busPass ? `PASS — ${totalBackfeedA}A backfeed ≤ ${busMax}A allowed` : `FAIL — ${totalBackfeedA}A backfeed > ${busMax}A allowed`,
                     detail: (() => {
                       const batSpec = getBatteryById(config.batteryId);
                       const isGateway = batSpec?.requiresGateway ?? false;
@@ -3824,7 +3824,8 @@ export default function EngineeringPage() {
                       const breakerDesc = isGateway
                         ? `${qty > 1 ? `${qty}× units share ` : ''}${batteryBackfeedADisplay}A single backfeed breaker via ${batSpec?.gatewayModel ?? 'gateway'}`
                         : `${qty > 1 ? `${qty} units × ${perUnit}A = ${batteryBackfeedADisplay}A total` : `${batteryBackfeedADisplay}A dedicated breaker`}`;
-                      return `${qty > 1 ? `${qty}× ` : ''}${batMfr} ${batModel} — ${breakerDesc} (NEC 705.12(B)). NEC 705.12(B)(2): sum of all backfeed breakers must not exceed (bus rating × 120%) minus main breaker rating. If failing: use supply-side tap (NEC 705.11), upgrade panel bus, or reduce battery count.`;
+                      const remediation = busPass ? '' : ` ⚠️ To fix: (1) Supply-side tap per NEC 705.11 — no busbar limit applies. (2) Derate main breaker to ${Math.floor((busRating * 1.2 - totalBackfeedA) / 5) * 5}A — allows this backfeed. (3) Upgrade panel bus to ${Math.ceil((totalBackfeedA + mainBreaker) / 1.2 / 25) * 25}A or larger.`;
+                      return `${qty > 1 ? `${qty}× ` : ''}${batMfr} ${batModel} — ${breakerDesc}. NEC 705.12(B)(3)(2): Solar breaker + Battery breaker + Main breaker must not exceed Bus × 120% (${busRating}A × 120% = ${busRating * 1.2}A). This is a real NEC constraint — not a calculation error.${remediation}`;
                     })(),
                     color: busPass ? 'emerald' : 'red',
                   } as any);
