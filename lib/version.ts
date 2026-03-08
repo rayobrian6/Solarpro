@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v32.8';
+export const BUILD_VERSION = 'v33.0';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'AUTO FILL RENDERING FIX v2 — panels now visible: handleAutoRoof now mirrors Row tool pattern exactly: (1) clears existing entities first, (2) calls addPanelEntity directly for each panel (same as Row tool), (3) updates lastRenderedPanelsRef to prevent panels useEffect from re-rendering, (4) multiple requestRender pumps to ensure visibility';
+export const BUILD_DESCRIPTION = 'AUTO FILL RENDERING FIX v3 — clampToHeightMostDetailed: handleAutoRoof now uses scene.clampToHeightMostDetailed to get ACTUAL Google 3D Tile surface heights (same source as Row tool pickPosition). Fixes 30m+ height mismatch caused by EllipsoidTerrainProvider + geoid undulation fallback. Panels placed at real tile surface + PANEL_OFFSET. Falls back to computed heights if API unavailable.';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
