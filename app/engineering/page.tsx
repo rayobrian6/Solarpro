@@ -144,6 +144,7 @@ interface ProjectConfig {
   batteryKwh: number;
   batteryId: string;        // equipment-db battery ID — drives NEC 705.12(B) bus impact calc
   generatorId: string;      // equipment-db generator ID
+  generatorWireLength: number;  // ft — distance from generator to ATS (user-configurable)
   atsId: string;            // equipment-db ATS ID
   backupInterfaceId: string; // equipment-db backup interface ID (Enphase IQ SC3, Tesla Gateway, etc.)
   mainPanelAmps: number;
@@ -247,7 +248,7 @@ const defaultProject: ProjectConfig = {
   date: new Date().toISOString().split('T')[0], systemType: 'roof',
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
-  batteryId: '', generatorId: '', atsId: '', backupInterfaceId: '',
+  batteryId: '', generatorId: '', generatorWireLength: 50, atsId: '', backupInterfaceId: '',
   mainPanelAmps: 200, mainPanelBrand: 'Square D', utilityMeter: 'Bidirectional Net Meter',
   acDisconnect: true, dcDisconnect: true, productionMeter: true, rapidShutdown: true,
   roofType: 'shingle', mountingId: 'ironridge-xr100',
@@ -571,6 +572,9 @@ export default function EngineeringPage() {
         METER_TO_MSP_RUN: 10,
         MSP_TO_UTILITY_RUN: 5,
         DC_DISCO_TO_INV_RUN: 10,
+      },
+      runLengthsBatteryGen: {
+        generatorToAts: config.generatorWireLength ?? 50,
       },
       conduitType: config.conduitType ?? 'EMT',
       mainPanelAmps: config.mainPanelAmps ?? 200,
@@ -2462,6 +2466,39 @@ export default function EngineeringPage() {
                     })()}
                   </div>
                 </div>
+                {/* Generator Wire Length — only shown when generator is selected */}
+                {config.generatorId && (
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-xs text-slate-400 mb-1 block flex items-center gap-1">
+                        <span>Generator → ATS Wire Length</span>
+                        <span className="text-slate-500">(ft)</span>
+                      </label>
+                      <input
+                        type="number" min={5} max={500} step={5}
+                        value={config.generatorWireLength ?? 50}
+                        onChange={e => updateConfig({ generatorWireLength: Math.max(5, +e.target.value) })}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60"
+                      />
+                      <p className="text-xs text-slate-500 mt-1">
+                        Distance from generator to ATS. ATS is placed close to meter/MSP.
+                      </p>
+                    </div>
+                    <div className="flex items-end">
+                      {config.generatorWireLength && (() => {
+                        const genRun = cs.runs?.find((r: any) => r.id === 'GENERATOR_TO_ATS_RUN');
+                        if (!genRun) return null;
+                        return (
+                          <div className="bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 w-full">
+                            <div className="font-bold text-amber-400">{genRun.wireGauge}</div>
+                            <div className="text-slate-400">{genRun.conduitSize} {genRun.conduitType} conduit</div>
+                            <div className="text-slate-500">{config.generatorWireLength}ft run · {genRun.ocpdAmps}A OCPD</div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Inverters & Strings */}

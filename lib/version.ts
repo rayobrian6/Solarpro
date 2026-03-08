@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v30.4';
+export const BUILD_VERSION = 'v30.6';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'BOM WIRE FIX — EGC separate gauge handling, matches calcBOMFromSegments exactly';
+export const BUILD_DESCRIPTION = '3D PERF + GROUND MOUNT — incremental panel rendering, debounced updates, row tool systemType context';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -61,6 +61,14 @@ export const BUILD_FEATURES = [
   'FIX: BOM DC wire (ROOF_RUN #10 AWG) now appears as separate line item for microinverter systems',
   'FIX: BOM conduit now grouped by type+size — one line item per conduit type/size combination',
   'FIX: BOM wire quantities derived from ComputedSystem.runs (conductorCount × length × 1.15) — matches wire-in-conduit sizing section',
+  // Phase 15: Generator Wire Run + 3D Performance + Ground Mount
+  'NEW: Engineering — Generator to ATS Wire Length input (conditional, only shown when generator selected)',
+  'NEW: Engineering — Live wire gauge/conduit/OCPD display from GENERATOR_TO_ATS_RUN when generator configured',
+  'PERF: 3D — Incremental panel rendering (diff old vs new, only add/remove changed entities)',
+  'PERF: 3D — Debounced panel useEffect (16ms batching prevents redundant rebuilds during auto-fill)',
+  'PERF: 3D — clearPanels() resets incremental diff state for correct full rebuild on next render',
+  'FIX: 3D — Row tool now inherits systemType from last active mode (roof/ground/fence) instead of hardcoded roof',
+  'FIX: 3D — Ground row placement: switch to Ground mode then Row mode to place ground-type panel rows',
 ] as const;
 
 export function getBuildBadge(): string {

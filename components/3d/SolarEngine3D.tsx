@@ -173,6 +173,13 @@ export default function SolarEngine3D({
   const pendingPanelsRef    = useRef<PlacedPanel[]>([]);
   // renderAllPanelsRef: exposes renderAllPanels to the panels useEffect below.
   const renderAllPanelsRef  = useRef<((viewer: any, C: any, list: PlacedPanel[]) => void) | null>(null);
+  // Performance: debounce timer for panel re-renders during bulk operations
+  const renderDebounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Performance: snapshot of last rendered panel list for incremental diff
+  const lastRenderedPanelsRef = useRef<PlacedPanel[]>([]);
+  // Row tool context: tracks which systemType to use for row-placed panels
+  // (row mode is a placement style, not a system type — inherits from last active mode)
+  const rowSystemTypeRef = useRef<SystemType>('roof');
   // prevLatRef / prevLngRef: track previous coordinates for address-change fly.
   const prevLatRef = useRef<number>(lat);
   const prevLngRef = useRef<number>(lng);
@@ -292,7 +299,7 @@ export default function SolarEngine3D({
   }, []);
 
   // ── Restore panels when they arrive from DesignStudio (after boot) ──────────
-  // If viewer is ready: render immediately.
+  // If viewer is ready: render with debounce (16ms) to batch rapid updates.
   // If viewer not ready yet: store in pendingPanelsRef so boot() can pick them up.
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -302,8 +309,20 @@ export default function SolarEngine3D({
       if (panels.length > 0) pendingPanelsRef.current = panels;
       return;
     }
-    // Viewer is ready — render immediately
-    renderAllPanelsRef.current(viewer, C, panels);
+    // Cancel any pending debounced render
+    if (renderDebounceRef.current) {
+      clearTimeout(renderDebounceRef.current);
+    }
+    // Debounce: batch rapid panel changes (e.g. auto-fill, undo/redo) into one render
+    // 16ms = one animation frame — imperceptible to user but prevents redundant rebuilds
+    const snapshot = panels; // capture current value for closure
+    renderDebounceRef.current = setTimeout(() => {
+      renderDebounceRef.current = null;
+      const v = viewerRef.current;
+      const Cs = (window as any).Cesium;
+      if (!v || !Cs || !renderAllPanelsRef.current) return;
+      renderAllPanelsRef.current(v, Cs, snapshot);
+    }, 16);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panels]);
 
@@ -776,15 +795,76 @@ export default function SolarEngine3D({
    * This is the ONLY correct way to update the panel display — never call addPanelEntity
    * directly without first clearing, or panels will multiply on re-renders.
    *
+   * Performance: uses incremental diff rendering — only adds new panels and removes
+   * deleted ones, rather than clearing and rebuilding all entities on every change.
+   * Falls back to full rebuild when shade mode changes (colors must be recomputed).
+   *
    * @param viewer   - Active Cesium Viewer instance
    * @param C        - Cesium namespace (window.Cesium)
    * @param panelList - Full list of panels to render (replaces current display entirely)
+   * @param forceFullRebuild - If true, clears all entities and rebuilds (used for shade toggle)
    */
-  function renderAllPanels(viewer: any, C: any, panelList: PlacedPanel[]) {
-    panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
-    panelMapRef.current.clear();
-    panelList.forEach(p => addPanelEntity(viewer, C, p));
-    try { viewer.scene.requestRender(); } catch {}
+  function renderAllPanels(viewer: any, C: any, panelList: PlacedPanel[], forceFullRebuild = false) {
+    const prev = lastRenderedPanelsRef.current;
+
+    // Full rebuild path: shade mode changed, or first render, or forced
+    if (forceFullRebuild || (prev.length === 0 && panelList.length > 0)) {
+      panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+      panelMapRef.current.clear();
+      panelList.forEach(p => addPanelEntity(viewer, C, p));
+      lastRenderedPanelsRef.current = panelList;
+      try { viewer.scene.requestRender(); } catch {}
+      return;
+    }
+
+    // Incremental diff: build lookup maps for O(1) access
+    const prevMap = new Map<string, PlacedPanel>(prev.map(p => [p.id, p]));
+    const nextMap = new Map<string, PlacedPanel>(panelList.map(p => [p.id, p]));
+
+    // Remove panels that no longer exist
+    let changed = false;
+    prevMap.forEach((_, id) => {
+      if (!nextMap.has(id)) {
+        const entity = panelMapRef.current.get(id);
+        if (entity) {
+          try { viewer.entities.remove(entity); } catch {}
+          panelMapRef.current.delete(id);
+          changed = true;
+        }
+      }
+    });
+
+    // Add new panels (not in prev)
+    nextMap.forEach((panel, id) => {
+      if (!prevMap.has(id)) {
+        addPanelEntity(viewer, C, panel);
+        changed = true;
+      }
+    });
+
+    // Update panels whose position/tilt/azimuth/type changed
+    nextMap.forEach((panel, id) => {
+      const old = prevMap.get(id);
+      if (!old) return; // already handled above
+      const posChanged = old.lat !== panel.lat || old.lng !== panel.lng ||
+                         old.height !== panel.height || old.tilt !== panel.tilt ||
+                         old.azimuth !== panel.azimuth || old.heading !== panel.heading ||
+                         old.systemType !== panel.systemType;
+      if (posChanged) {
+        const oldEntity = panelMapRef.current.get(id);
+        if (oldEntity) {
+          try { viewer.entities.remove(oldEntity); } catch {}
+          panelMapRef.current.delete(id);
+        }
+        addPanelEntity(viewer, C, panel);
+        changed = true;
+      }
+    });
+
+    lastRenderedPanelsRef.current = panelList;
+    if (changed) {
+      try { viewer.scene.requestRender(); } catch {}
+    }
   }
 
   // ── Add single panel entity ────────────────────────────────────────────────
@@ -1558,7 +1638,7 @@ export default function SolarEngine3D({
       if (!isValidCoord(pLat, pLng, pHeight)) continue;
       const panel = createPanel({
         lat: pLat, lng: pLng, height: pHeight + PANEL_OFFSET,
-        tilt: pitchDeg, azimuth: azimuthDeg, systemType: 'roof',
+        tilt: pitchDeg, azimuth: azimuthDeg, systemType: rowSystemTypeRef.current,
         heading, pitch: pitchDeg, roll: 0, orientation: orient,
       });
       newPanels.push(panel);
@@ -1993,6 +2073,7 @@ export default function SolarEngine3D({
     if (!viewer) return;
     panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     panelMapRef.current.clear();
+    lastRenderedPanelsRef.current = []; // reset incremental diff state
     panelsRef.current = [];
     onPanelsChange([]);
     setPanelCount(0);
@@ -2226,6 +2307,10 @@ export default function SolarEngine3D({
                   const viewer = viewerRef.current;
                   const C = (window as any).Cesium;
                   if (viewer && C) handleAutoRoof(viewer, C);
+                }
+                // Track system type context for row tool (row inherits from last non-row mode)
+                if (mode === 'roof' || mode === 'ground' || mode === 'fence') {
+                  rowSystemTypeRef.current = mode as SystemType;
                 }
                 if (mode !== 'fence') { fencePtsRef.current = []; setFencePtCount(0); }
                 if (mode !== 'plane') { planePtsRef.current = []; setPlanePtCount(0); }
