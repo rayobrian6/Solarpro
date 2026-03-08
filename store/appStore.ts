@@ -61,6 +61,14 @@ export interface AppStore {
     systemType: string;
     notes?: string;
     address?: string;
+    lat?: number;
+    lng?: number;
+    stateCode?: string;
+    city?: string;
+    county?: string;
+    zip?: string;
+    utilityName?: string;
+    utilityRatePerKwh?: number;
   }) => Promise<Project>;
   updateProjectInStore: (id: string, data: Partial<Project>) => Promise<Project>;
   removeProject: (id: string) => Promise<void>;

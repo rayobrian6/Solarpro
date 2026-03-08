@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
     const body = await req.json();
-    const { clientId, name, systemType, notes, address } = body;
+    const { clientId, name, systemType, notes, address, stateCode, city, county, zip, utilityName, utilityRatePerKwh } = body;
 
     if (!name || typeof name !== 'string' || name.trim().length < 1) {
       return NextResponse.json({ success: false, error: 'Project name is required' }, { status: 400 });
@@ -94,6 +94,12 @@ export async function POST(req: NextRequest) {
       address: projectAddress,
       lat,
       lng,
+      stateCode: stateCode || undefined,
+      city: city || undefined,
+      county: county || undefined,
+      zip: zip || undefined,
+      utilityName: utilityName || undefined,
+      utilityRatePerKwh: utilityRatePerKwh || undefined,
     });
 
     return NextResponse.json({ success: true, data: project }, { status: 201 });

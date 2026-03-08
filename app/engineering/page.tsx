@@ -21,6 +21,7 @@ const ALL_MOUNTING_SYSTEMS: MountingSystemSpec[] = getAllMountingSystems();
 const MOUNTING_BRANDS: string[] = Array.from(new Set(ALL_MOUNTING_SYSTEMS.map(s => s.manufacturer))).sort();
 import { BUILD_VERSION, BUILD_DATE, BUILD_FEATURES } from '@/lib/version';
 import { getUtilitiesByState } from '@/lib/utility-rules';
+import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -60,6 +61,8 @@ interface ProjectConfig {
   clientName: string;
   address: string;
   state: string;          // Explicit state code (e.g. 'CA', 'TX') — overrides address parsing
+  city: string;           // City name — used for AHJ city-level overrides
+  county: string;         // County name — used for AHJ county-level overrides
   designer: string;
   date: string;
   systemType: SystemType;
@@ -169,7 +172,7 @@ function newInverter(type: InverterType): InverterConfig {
 }
 
 const defaultProject: ProjectConfig = {
-  projectName: 'Solar Installation', clientName: '', address: '', state: '', designer: '',
+  projectName: 'Solar Installation', clientName: '', address: '', state: '', city: '', county: '', designer: '',
   date: new Date().toISOString().split('T')[0], systemType: 'roof',
   inverters: [newInverter('string')],
   batteryBrand: '', batteryModel: '', batteryCount: 0, batteryKwh: 0,
@@ -272,6 +275,18 @@ export default function EngineeringPage() {
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
   const [compliance, setCompliance] = useState<ComplianceResult>({ overallStatus: null });
+  const [ahjInfo, setAhjInfo] = useState<any>(null);
+
+  // Auto-lookup AHJ when state/city/county changes
+  useEffect(() => {
+    if (!config.state) { setAhjInfo(null); return; }
+    const result = lookupAhj(config.state, config.county || '', config.city || '');
+    if (result.success && result.ahj) {
+      setAhjInfo(result.ahj);
+    } else {
+      setAhjInfo(null);
+    }
+  }, [config.state, config.city, config.county]);
   const [rulesResult, setRulesResult] = useState<any>(null);
   const [overrides, setOverrides] = useState<any[]>([]);
   const [overrideForm, setOverrideForm] = useState<{ ruleId: string; field: string; value: string; justification: string } | null>(null);
@@ -2047,6 +2062,67 @@ export default function EngineeringPage() {
                       ))}
                     </select>
                   </div>
+                  {/* City + County for AHJ override */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-slate-400 mb-1 block">City</label>
+                      <input
+                        type="text"
+                        value={config.city || ''}
+                        onChange={e => updateConfig({ city: e.target.value })}
+                        placeholder="e.g. Austin"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-400 mb-1 block">County</label>
+                      <input
+                        type="text"
+                        value={config.county || ''}
+                        onChange={e => updateConfig({ county: e.target.value })}
+                        placeholder="e.g. Travis"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60"
+                      />
+                    </div>
+                  </div>
+
+                  {/* AHJ Auto-Detected Info */}
+                  {ahjInfo && (
+                    <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <MapPin size={12} className="text-amber-400" />
+                        <span className="text-xs font-bold text-amber-400">{ahjInfo.ahjName}</span>
+                        <span className="text-xs px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded-full">{ahjInfo.necVersion}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-slate-500">Permit Fee:</span>
+                          <span className="text-slate-300 ml-1">{ahjInfo.typicalPermitFee}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Permit Days:</span>
+                          <span className="text-slate-300 ml-1">{ahjInfo.typicalPermitDays}d</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Rapid Shutdown:</span>
+                          <span className={`ml-1 ${ahjInfo.rapidShutdownRequired ? 'text-amber-400' : 'text-emerald-400'}`}>
+                            {ahjInfo.rapidShutdownRequired ? 'Required' : 'Not Required'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500">Roof Setback:</span>
+                          <span className="text-slate-300 ml-1">{ahjInfo.roofSetbackInches}"</span>
+                        </div>
+                      </div>
+                      {ahjInfo.localAmendments?.length > 0 && (
+                        <div className="mt-2 text-xs text-slate-400">
+                          <span className="font-semibold text-slate-300">Local Amendments: </span>
+                          {ahjInfo.localAmendments.slice(0, 2).join(' · ')}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Utility Selector — filtered by state, persisted to project */}
                   <div>
                     <label className="text-xs text-slate-400 mb-1 block">Utility Provider</label>

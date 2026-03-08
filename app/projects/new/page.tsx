@@ -7,6 +7,8 @@ import Link from 'next/link';
 import type { Client, SystemType } from '@/types';
 import { useToast } from '@/components/ui/Toast';
 import { useAppStore } from '@/store/appStore';
+import { MapPin, Upload, Zap, Building2, Loader2, CheckCircle } from 'lucide-react';
+import BillUploadFlow from '@/components/onboarding/BillUploadFlow';
 
 const SYSTEM_TYPES = [
   {
@@ -52,6 +54,17 @@ function NewProjectContent() {
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showBillUpload, setShowBillUpload] = useState(false);
+  const [address, setAddress] = useState('');
+  const [geocoding, setGeocoding] = useState(false);
+  const [locationData, setLocationData] = useState<{
+    city: string; county: string; state: string; stateCode: string;
+    zip: string; lat: number; lng: number;
+  } | null>(null);
+  const [utilityData, setUtilityData] = useState<{
+    utilityName: string; avgRatePerKwh: number; netMeteringEligible: boolean;
+  } | null>(null);
+  const [billSystemKw, setBillSystemKw] = useState<number | null>(null);
 
   // ✅ Phase 4: Force-refresh clients from server on page visit
   useEffect(() => {
@@ -66,6 +79,48 @@ function NewProjectContent() {
     }
   }, [selectedClient, selectedType, clients]);
 
+  // Auto-geocode address and detect utility
+  const handleAddressBlur = async () => {
+    if (!address.trim() || geocoding) return;
+    setGeocoding(true);
+    try {
+      const res = await fetch('/api/geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address }),
+      });
+      const geo = await res.json();
+      if (geo.success && geo.location) {
+        setLocationData(geo.location);
+        // Auto-detect utility
+        const uRes = await fetch('/api/utility-detect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            lat: geo.location.lat,
+            lng: geo.location.lng,
+            stateCode: geo.location.stateCode,
+            city: geo.location.city,
+          }),
+        });
+        const uData = await uRes.json();
+        if (uData.success && uData.utility) {
+          setUtilityData(uData.utility);
+        }
+      }
+    } catch {}
+    setGeocoding(false);
+  };
+
+  const handleBillUploadComplete = (result: any) => {
+    if (result.locationData) setLocationData(result.locationData);
+    if (result.utilityData) setUtilityData(result.utilityData);
+    if (result.systemKw) setBillSystemKw(result.systemKw);
+    if (result.billData?.serviceAddress) setAddress(result.billData.serviceAddress);
+    setShowBillUpload(false);
+    toast.success('Bill processed!', 'Location, utility, and system size auto-populated');
+  };
+
   const handleSubmit = async () => {
     if (!selectedClient || !selectedType || !name) return;
     setSaving(true);
@@ -78,6 +133,15 @@ function NewProjectContent() {
         name,
         systemType: selectedType,
         notes,
+        address: address || undefined,
+        lat: locationData?.lat,
+        lng: locationData?.lng,
+        stateCode: locationData?.stateCode,
+        city: locationData?.city,
+        county: locationData?.county,
+        zip: locationData?.zip,
+        utilityName: utilityData?.utilityName,
+        utilityRatePerKwh: utilityData?.avgRatePerKwh,
       });
 
       toast.update(toastId, {

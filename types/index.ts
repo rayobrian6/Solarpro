@@ -288,6 +288,12 @@ export interface Project {
   address?: string;            // project site address
   lat?: number;                // geocoded latitude
   lng?: number;                // geocoded longitude
+  stateCode?: string;          // 2-letter state code (e.g. 'CA', 'TX')
+  city?: string;               // city name
+  county?: string;             // county name
+  zip?: string;                // ZIP code
+  utilityName?: string;        // detected utility provider name
+  utilityRatePerKwh?: number;  // detected utility rate $/kWh
   systemSizeKw?: number;       // calculated system size
   layout?: Layout;
   production?: ProductionResult;

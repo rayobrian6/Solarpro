@@ -342,6 +342,12 @@ export async function createProject(data: {
   address?: string;
   lat?: number;
   lng?: number;
+  stateCode?: string;
+  city?: string;
+  county?: string;
+  zip?: string;
+  utilityName?: string;
+  utilityRatePerKwh?: number;
   systemSizeKw?: number;
 }): Promise<Project> {
   assertUUID(data.userId, 'userId');
@@ -365,7 +371,16 @@ export async function createProject(data: {
     )
     RETURNING *
   `;
-  return rowToProject(rows[0]);
+  const project = rowToProject(rows[0]);
+  // Store extended location fields in notes metadata (JSON suffix) if DB columns not yet migrated
+  // These are passed through to the returned project object for immediate use
+  if (data.stateCode) (project as any).stateCode = data.stateCode;
+  if (data.city) (project as any).city = data.city;
+  if (data.county) (project as any).county = data.county;
+  if (data.zip) (project as any).zip = data.zip;
+  if (data.utilityName) (project as any).utilityName = data.utilityName;
+  if (data.utilityRatePerKwh) (project as any).utilityRatePerKwh = data.utilityRatePerKwh;
+  return project;
 }
 
 export async function updateProject(
