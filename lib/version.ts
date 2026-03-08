@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v32.6';
+export const BUILD_VERSION = 'v32.8';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'AUTO FILL RENDERING FIX — panels now visible after Auto Fill: (1) handleAutoRoof calls renderAllPanels directly (bypasses React prop cycle delay), (2) fillRoofSegmentWithPanels no longer calls addPanelEntity directly (was causing double-add/remove cycle), (3) renderAllPanels is now single source of truth for panel rendering';
+export const BUILD_DESCRIPTION = 'AUTO FILL RENDERING FIX v2 — panels now visible: handleAutoRoof now mirrors Row tool pattern exactly: (1) clears existing entities first, (2) calls addPanelEntity directly for each panel (same as Row tool), (3) updates lastRenderedPanelsRef to prevent panels useEffect from re-rendering, (4) multiple requestRender pumps to ensure visibility';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',

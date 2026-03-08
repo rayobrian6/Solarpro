@@ -2286,8 +2286,6 @@ function SolarEngine3D({
   //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
   function handleAutoRoof(viewer: any, C: any) {
     // Mutex guard: prevent concurrent / double-execution of Auto Fill.
-    // This fires from the placementMode useEffect only (NOT from the toolbar button directly).
-    // Without this guard, rapid clicks or React re-renders can trigger multiple concurrent fills.
     if (autoFillRunningRef.current) {
       addLog('AUTO', 'handleAutoRoof: already running - skipped duplicate call');
       return;
@@ -2304,9 +2302,12 @@ function SolarEngine3D({
 
     addLog('AUTO', `handleAutoRoof: ${twinData.roofSegments.length} segments, cesiumGroundElev=${cesiumGroundElevRef.current.toFixed(1)}m`);
 
-    // IMPORTANT: Start fresh - do NOT spread panelsRef.current here.
-    // Previously used [...panelsRef.current, ...newPanels] which APPENDED panels
-    // on every Auto Fill call, causing panel count to multiply on repeated clicks.
+    // Step 1: Clear ALL existing panel entities from Cesium viewer.
+    // This ensures a clean slate before adding new Auto Fill panels.
+    panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+    panelMapRef.current.clear();
+    lastRenderedPanelsRef.current = [];
+
     const newPanels: PlacedPanel[] = [];
     const sortedSegs = [...twinData.roofSegments].sort((a: any, b: any) => b.sunshineHours - a.sunshineHours);
     const maxSunshine = sortedSegs[0]?.sunshineHours ?? 0;
@@ -2318,6 +2319,7 @@ function SolarEngine3D({
 
     addLog('AUTO', `eligible: ${eligibleSegs.length}/${sortedSegs.length} segs (threshold=${minThreshold.toFixed(0)}h)`);
 
+    // Step 2: Fill each segment - panels are returned but NOT added to Cesium yet.
     eligibleSegs.forEach((seg: any, idx: number) => {
       addLog('AUTO', `seg[${idx}] id=${seg.id} area=${seg.areaM2?.toFixed(1)}m2 hAG=${seg.heightAboveGround?.toFixed(2)}m pitch=${seg.pitchDegrees?.toFixed(1)}deg az=${seg.azimuthDegrees?.toFixed(1)}deg maxP=${seg.maxPanels} googlePanels=${seg.googlePanels?.length ?? 0}`);
       const segPanels = fillRoofSegmentWithPanels(viewer, C, seg);
@@ -2325,29 +2327,37 @@ function SolarEngine3D({
       newPanels.push(...segPanels);
     });
 
-    // Replace ALL panels with Auto Fill result (do NOT append to existing panels).
+    addLog('AUTO', `total placed: ${newPanels.length} panels - adding entities to Cesium now`);
+
+    // Step 3: Add each panel entity directly to Cesium (same pattern as Row tool).
+    // This is the ONLY place entities are created for Auto Fill panels.
+    // We do NOT use renderAllPanels here to avoid the React prop cycle timing issue.
+    let entityCount = 0;
+    newPanels.forEach(panel => {
+      const entity = addPanelEntity(viewer, C, panel);
+      if (entity) entityCount++;
+    });
+
+    addLog('AUTO', `entities added to Cesium: ${entityCount}/${newPanels.length}`);
+
+    // Step 4: Update lastRenderedPanelsRef so the panels useEffect incremental diff
+    // finds no changes and skips re-rendering (avoids double-add/remove cycle).
+    lastRenderedPanelsRef.current = newPanels;
+
+    // Step 5: Update React state.
     panelsRef.current = newPanels;
-
-    // Directly render panels into Cesium NOW (synchronous, bypasses React prop cycle).
-    // This ensures panels are visible immediately without waiting for React re-render.
-    // The panels useEffect will also fire later (via onPanelsChange) but renderAllPanels
-    // is idempotent - it diffs and finds no changes since lastRenderedPanelsRef is updated here.
-    if (renderAllPanelsRef.current) {
-      addLog('AUTO', `calling renderAllPanels directly with ${newPanels.length} panels`);
-      renderAllPanelsRef.current(viewer, C, newPanels);
-    } else {
-      addLog('AUTO', 'renderAllPanelsRef not set - panels will render via useEffect');
-    }
-
     onPanelsChange(newPanels);
     setPanelCount(newPanels.length);
     setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligibleSegs.length} segments`);
-    addLog('AUTO', `total placed: ${newPanels.length} panels`);
-    try { viewer.scene.requestRender(); } catch {}
 
-    // Release mutex then reset mode to 'select'.
-    // Delay ensures mode state settles before mutex releases,
-    // preventing a rapid select->auto_roof re-trigger.
+    // Step 6: Force Cesium to render the scene with new entities.
+    try { viewer.scene.requestRender(); } catch {}
+    // Multiple render pumps to ensure tiles + panels are visible
+    [100, 300, 600, 1200].forEach(t =>
+      setTimeout(() => { try { viewer.scene.requestRender(); } catch {} }, t)
+    );
+
+    // Step 7: Release mutex and reset mode to 'select'.
     setTimeout(() => {
       autoFillRunningRef.current = false;
       onPlacementModeChange('select');
