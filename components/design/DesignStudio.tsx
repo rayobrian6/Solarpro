@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import type {
   Project, Layout, PlacedPanel, SolarPanel, Inverter, Battery,
   SystemType, DrawingMode, RoofPlane, BillAnalysis, BatteryRecommendation
@@ -426,6 +426,34 @@ export default function DesignStudio({ project, onSave }: Props) {
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
 
   const systemSizeKw = calculateSystemSize(panels);
+
+  // Quick production estimate (shown before full PVWatts calculation)
+  const quickEstimate = useMemo(() => {
+    if (panels.length === 0 || systemSizeKw === 0) return null;
+    // Regional sun-hours lookup by latitude (rough estimate)
+    const lat = mapCenter.lat;
+    let peakSunHours = 4.5; // national average
+    if (lat >= 25 && lat <= 35) peakSunHours = 5.8;       // Southwest (AZ, NM, TX, FL)
+    else if (lat > 35 && lat <= 40) peakSunHours = 5.2;   // Mid-South (CA, CO, NC)
+    else if (lat > 40 && lat <= 45) peakSunHours = 4.8;   // Mid-North (OH, PA, OR)
+    else if (lat > 45) peakSunHours = 4.2;                 // Northwest/Northeast
+    else if (lat < 25) peakSunHours = 5.5;                 // Hawaii/Puerto Rico
+
+    // Tilt adjustment factor (optimal ~latitude angle)
+    const tiltDiff = Math.abs(tilt - lat);
+    const tiltFactor = 1 - (tiltDiff / 180) * 0.15;
+
+    // System losses: ~14% (wiring, inverter, soiling, temp)
+    const systemLoss = 0.86;
+    const annualKwh = Math.round(systemSizeKw * peakSunHours * 365 * tiltFactor * systemLoss);
+    const monthlyAvg = Math.round(annualKwh / 12);
+
+    // Savings estimate at $0.15/kWh average
+    const utilityRate = 0.15;
+    const annualSavings = Math.round(annualKwh * utilityRate);
+
+    return { annualKwh, monthlyAvg, annualSavings, peakSunHours };
+  }, [panels.length, systemSizeKw, mapCenter.lat, tilt]);
 
   // Keep refs in sync with state
   useEffect(() => { mapCenterRef.current = mapCenter; }, [mapCenter]);
@@ -1187,6 +1215,138 @@ export default function DesignStudio({ project, onSave }: Props) {
     setPanels(prev => [...prev, ...newPanels]);
   };
 
+  // ── Auto Layout: fill all existing zones with current settings ────────────────
+  const [autoLayoutRunning, setAutoLayoutRunning] = useState(false);
+
+  const autoLayoutAll = useCallback(() => {
+    const hasZones = roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0;
+    if (!hasZones) {
+      toast.error('No zones defined', 'Draw a roof, ground, or fence zone first, then click Auto Layout.');
+      return;
+    }
+    setAutoLayoutRunning(true);
+    let allNew: PlacedPanel[] = [];
+
+    roofPlanes.forEach(plane => {
+      const layoutId = uuidv4();
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback, panelSpacing, rowSpacing,
+        tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+      });
+      allNew = [...allNew, ...newPanels];
+    });
+
+    if (groundArea.length >= 3) {
+      const layoutId = uuidv4();
+      const newPanels = generateGroundLayoutOptimized({
+        layoutId, area: groundArea, panel: selectedPanel,
+        tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    if (fenceLine.length >= 2) {
+      const layoutId = uuidv4();
+      const newPanels = generateFenceLayout({
+        layoutId, fenceLine, panel: selectedPanel,
+        azimuth, panelSpacing, fenceHeight, bifacialOptimized,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    setPanels(allNew);
+    setAutoLayoutRunning(false);
+    toast.success(
+      'Auto Layout complete',
+      `${allNew.length} panels placed · ${(calculateSystemSize(allNew)).toFixed(2)} kW`
+    );
+  }, [roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized]);
+
+  // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
+  const fillRoof = useCallback(() => {
+    if (roofPlanes.length === 0 && groundArea.length === 0) {
+      toast.error('No zones defined', 'Draw a roof or ground zone first.');
+      return;
+    }
+    setAutoLayoutRunning(true);
+    const minSetback = 0.3;
+    const tightSpacing = 0.01;
+    let allNew: PlacedPanel[] = [];
+
+    roofPlanes.forEach(plane => {
+      const layoutId = uuidv4();
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback: minSetback, panelSpacing: tightSpacing,
+        rowSpacing: Math.max(rowSpacing * 0.85, selectedPanel.height + 0.05),
+        tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+      });
+      allNew = [...allNew, ...newPanels];
+    });
+
+    if (groundArea.length >= 3) {
+      const layoutId = uuidv4();
+      const newPanels = generateGroundLayoutOptimized({
+        layoutId, area: groundArea, panel: selectedPanel,
+        tilt, azimuth,
+        rowSpacing: Math.max(rowSpacing * 0.85, selectedPanel.height + 0.05),
+        panelSpacing: tightSpacing, panelsPerRow, groundHeight,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    setPanels(allNew);
+    setAutoLayoutRunning(false);
+    toast.success(
+      'Fill Roof complete',
+      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW (max density)`
+    );
+  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight]);
+
+  // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
+  const optimizeLayout = useCallback(() => {
+    if (roofPlanes.length === 0 && groundArea.length === 0) {
+      toast.error('No zones defined', 'Draw a roof or ground zone first.');
+      return;
+    }
+    setAutoLayoutRunning(true);
+    // Optimal row spacing: panel height / tan(tilt) * 2 to avoid inter-row shading
+    const tiltRad = (tilt * Math.PI) / 180;
+    const shadowLength = tiltRad > 0.05 ? selectedPanel.height * Math.cos(tiltRad) / Math.tan(tiltRad) : selectedPanel.height;
+    const optRowSpacing = Math.max(rowSpacing, selectedPanel.height + shadowLength * 0.5);
+    const optSetback = Math.max(setback, 0.6);
+    let allNew: PlacedPanel[] = [];
+
+    roofPlanes.forEach(plane => {
+      const layoutId = uuidv4();
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback: optSetback, panelSpacing: 0.02, rowSpacing: optRowSpacing,
+        tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+      });
+      allNew = [...allNew, ...newPanels];
+    });
+
+    if (groundArea.length >= 3) {
+      const layoutId = uuidv4();
+      const newPanels = generateGroundLayoutOptimized({
+        layoutId, area: groundArea, panel: selectedPanel,
+        tilt, azimuth, rowSpacing: optRowSpacing, panelSpacing: 0.02,
+        panelsPerRow, groundHeight,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    setPanels(allNew);
+    setAutoLayoutRunning(false);
+    toast.success(
+      'Optimized Layout complete',
+      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW · min shading`
+    );
+  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight]);
+
   // ── Calculate production ───────────────────────────────────
   const calculateProduction = async () => {
     if (panels.length === 0) return;
@@ -1418,6 +1578,38 @@ export default function DesignStudio({ project, onSave }: Props) {
         </div>
 
         <div className="flex items-center gap-2 ml-auto">
+          {/* Automation buttons */}
+          {(roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0) && (
+            <div className="flex items-center gap-1 bg-slate-800/60 rounded-lg px-2 py-1">
+              <button
+                onClick={autoLayoutAll}
+                disabled={autoLayoutRunning}
+                className="btn-sm btn-secondary flex items-center gap-1 text-xs"
+                title="Auto Layout: fill all zones with current settings"
+              >
+                {autoLayoutRunning ? <Loader size={11} className="animate-spin" /> : <Zap size={11} className="text-amber-400" />}
+                Auto Layout
+              </button>
+              <button
+                onClick={fillRoof}
+                disabled={autoLayoutRunning}
+                className="btn-sm btn-secondary flex items-center gap-1 text-xs"
+                title="Fill Roof: maximize panel count with minimal setback"
+              >
+                <Layers size={11} className="text-teal-400" />
+                Fill Roof
+              </button>
+              <button
+                onClick={optimizeLayout}
+                disabled={autoLayoutRunning}
+                className="btn-sm btn-secondary flex items-center gap-1 text-xs"
+                title="Optimize: best production/cost ratio with inter-row shading avoidance"
+              >
+                <TrendingUp size={11} className="text-purple-400" />
+                Optimize
+              </button>
+            </div>
+          )}
           {panels.length > 0 && (
             <div className="flex items-center gap-3 text-xs bg-slate-800/60 rounded-lg px-3 py-1.5">
               <span className="text-slate-400">{panels.length} panels</span>
@@ -1920,6 +2112,31 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                       ))}
                     </div>
+                    {/* Quick production estimate preview */}
+                    {quickEstimate && !production && (
+                      <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <Sun size={11} className="text-amber-400" />
+                          <span className="text-xs text-slate-400 font-medium">Quick Estimate</span>
+                          <span className="text-xs text-slate-600 ml-auto">(pre-calculation)</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-xs">
+                          <div className="text-center">
+                            <div className="text-amber-400 font-bold">{quickEstimate.annualKwh.toLocaleString()}</div>
+                            <div className="text-slate-500">kWh/yr</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-emerald-400 font-bold">${quickEstimate.annualSavings.toLocaleString()}</div>
+                            <div className="text-slate-500">est. savings</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-blue-400 font-bold">{quickEstimate.peakSunHours}</div>
+                            <div className="text-slate-500">sun hrs/day</div>
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
+                      </div>
+                    )}
                     <button
                       onClick={calculateProduction}
                       disabled={calculating}

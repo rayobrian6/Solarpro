@@ -98,6 +98,43 @@ export default function DashboardPage() {
   const totalRevenue = projects.reduce((sum, p) => sum + (p.costEstimate?.netCost || 0), 0);
   const recentProjects = [...projects].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
 
+  // Additional metrics
+  const avgSystemKw = projects.length > 0
+    ? projects.reduce((sum, p) => sum + (p.layout?.systemSizeKw || 0), 0) / projects.filter(p => p.layout?.systemSizeKw).length || 0
+    : 0;
+  const proposalCount = projects.filter(p => p.status === 'proposal' || p.status === 'approved' || p.status === 'installed').length;
+  const approvedCount = projects.filter(p => p.status === 'approved' || p.status === 'installed').length;
+  const conversionRate = proposalCount > 0 ? Math.round((approvedCount / proposalCount) * 100) : 0;
+  const totalAnnualKwhAll = projects.reduce((sum, p) => sum + (p.production?.annualProductionKwh || 0), 0);
+
+  // 25-year cumulative savings projection
+  const avgUtilityRate = 0.15;
+  const utilityInflation = 0.03;
+  const yearlyProjection = Array.from({ length: 25 }, (_, i) => {
+    const year = i + 1;
+    const rate = avgUtilityRate * Math.pow(1 + utilityInflation, i);
+    const production = totalAnnualKwhAll * Math.pow(0.995, i); // 0.5% degradation
+    const savings = Math.round(production * rate);
+    const cumulative = Array.from({ length: year }, (_, j) => {
+      const r = avgUtilityRate * Math.pow(1 + utilityInflation, j);
+      const p = totalAnnualKwhAll * Math.pow(0.995, j);
+      return p * r;
+    }).reduce((a, b) => a + b, 0);
+    return { year, savings: Math.round(savings), cumulative: Math.round(cumulative) };
+  });
+
+  // Monthly bill before/after (using avg utility rate)
+  const avgMonthlyKwh = totalAnnualKwhAll > 0 ? totalAnnualKwhAll / 12 : 0;
+  const billBeforeAfter = MONTHS.map((month, i) => {
+    const seasonal = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87];
+    const monthlyKwh = avgMonthlyKwh * seasonal[i];
+    const before = Math.round(monthlyKwh * avgUtilityRate * 12); // rough monthly bill
+    const production = projects.reduce((sum, p) => sum + (p.production?.monthlyProductionKwh?.[i] || 0), 0);
+    const after = Math.max(0, Math.round((monthlyKwh - production) * avgUtilityRate * 12));
+    return { month, before: Math.round(monthlyKwh * avgUtilityRate), after: Math.max(0, Math.round((monthlyKwh - production) * avgUtilityRate)) };
+  });
+  const hasBillData = billBeforeAfter.some(m => m.before > 0);
+
   // System type breakdown
   const typeBreakdown = [
     { name: 'Roof Mount', value: projects.filter(p => p.systemType === 'roof').length, color: '#f59e0b' },
@@ -159,7 +196,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
           <StatCard
             icon={<FolderOpen size={18} className="text-amber-400" />}
             label="Total Projects"
@@ -189,6 +226,20 @@ export default function DashboardPage() {
             value={loading ? '—' : `$${(totalRevenue / 1000).toFixed(0)}k`}
             sub="Net after tax credit"
             color="bg-purple-500/10"
+          />
+          <StatCard
+            icon={<BarChart2 size={18} className="text-sky-400" />}
+            label="Avg System Size"
+            value={loading ? '—' : `${(isNaN(avgSystemKw) ? 0 : avgSystemKw).toFixed(1)} kW`}
+            sub="Per designed project"
+            color="bg-sky-500/10"
+          />
+          <StatCard
+            icon={<TrendingUp size={18} className="text-rose-400" />}
+            label="Conversion Rate"
+            value={loading ? '—' : `${conversionRate}%`}
+            sub={`${approvedCount} of ${proposalCount} proposals`}
+            color="bg-rose-500/10"
           />
         </div>
 
@@ -415,6 +466,81 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* Financial Visualizations */}
+        {totalAnnualKwhAll > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Before/After Monthly Bill */}
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-white text-sm">Monthly Bill: Before vs After Solar</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Estimated utility savings across all projects</p>
+                </div>
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-red-500/70 inline-block" />Before</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />After</span>
+                </div>
+              </div>
+              {mounted && (
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={billBeforeAfter} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => `$${v}`} />
+                    <Tooltip
+                      contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }}
+                      formatter={(v: number, name: string) => [`$${v}`, name === 'before' ? 'Before Solar' : 'After Solar']}
+                    />
+                    <Bar dataKey="before" fill="#ef4444" opacity={0.6} radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="after" fill="#10b981" radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+
+            {/* 25-Year Cumulative Savings */}
+            <div className="card p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-semibold text-white text-sm">25-Year Cumulative Savings</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">3% utility inflation · 0.5% panel degradation</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-black text-emerald-400">
+                    ${(yearlyProjection[24]?.cumulative / 1000).toFixed(0)}k
+                  </div>
+                  <div className="text-xs text-slate-500">total savings</div>
+                </div>
+              </div>
+              {mounted && (
+                <ResponsiveContainer width="100%" height={180}>
+                  <AreaChart data={yearlyProjection} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="savingsGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                    <XAxis dataKey="year" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false}
+                      tickFormatter={v => `Yr ${v}`} interval={4} />
+                    <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false}
+                      tickFormatter={v => v >= 1000 ? `$${(v/1000).toFixed(0)}k` : `$${v}`} />
+                    <Tooltip
+                      contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '12px' }}
+                      formatter={(v: number, name: string) => [
+                        `$${v.toLocaleString()}`,
+                        name === 'cumulative' ? 'Cumulative Savings' : 'Annual Savings'
+                      ]}
+                    />
+                    <Area type="monotone" dataKey="cumulative" stroke="#10b981" fill="url(#savingsGrad)" strokeWidth={2} name="cumulative" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Environmental Impact */}
         <div className="card p-5">
