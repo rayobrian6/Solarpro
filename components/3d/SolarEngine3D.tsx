@@ -302,7 +302,9 @@ function SolarEngine3D({
         try { viewer.scene.requestRender(); } catch {}
       }
     }
-    if (placementMode === 'auto_roof') {
+    // Auto Fill: only trigger when mode CHANGES TO 'auto_roof' (not on every re-render)
+    // This is inside prevMode !== placementMode guard to prevent duplicate runs.
+    if (placementMode === 'auto_roof' && prevMode !== 'auto_roof') {
       const viewer = viewerRef.current;
       const C = (window as any).Cesium;
       if (viewer && C && twinRef.current) {
@@ -1223,7 +1225,7 @@ function SolarEngine3D({
         else if (mode === 'plane')  handlePlaneClick(viewer, C, screenPos);
         else if (mode === 'row')    handleRowClick(viewer, C, screenPos);
         else if (mode === 'measure') handleMeasureClick(viewer, C, screenPos);
-        else if (mode === 'auto_roof') handleAutoRoof(viewer, C);
+        // auto_roof: fires once via placementMode useEffect — NOT on canvas click
       } catch (err: any) {
         addLog('ERROR', `Click handler: ${err.message}`);
       }
@@ -2310,6 +2312,9 @@ function SolarEngine3D({
     setStatusMsg(`\u2705 Auto-roof: ${newPanels.length} panels on ${eligibleSegs.length} segments`);
     addLog('AUTO', `\u2705 total placed: ${newPanels.length} panels`);
     try { viewer.scene.requestRender(); } catch {}
+    // Switch back to 'select' after Auto Fill completes.
+    // Prevents re-running Auto Fill on every subsequent canvas click.
+    setTimeout(() => onPlacementModeChange('select'), 100);
   }
 
   // ── Fill roof segment with panels ──────────────────────────────────────────────────────────────
