@@ -874,6 +874,62 @@ function SolarEngine3D({
               }
             } catch (e) { handleCesiumError(`Segment ${i} label`, e, true); }
           }
+
+          // ── Setback boundary visualization ──────────────────────────────────────────
+          // Show the buildable area boundary (inset from roof polygon by fire setback).
+          // This helps the user see exactly where panels can be placed.
+          // Only shown when placementMode === 'auto_roof' (Auto Fill active).
+          if (modeRef.current === 'auto_roof') {
+            try {
+              const SETBACK_M = 0.5; // meters — matches fillRoofSegmentWithPanels SETBACK
+              // Use convexHull or polygon as the roof boundary
+              const roofPoly: Array<{ lat: number; lng: number }> =
+                (seg.convexHull && seg.convexHull.length >= 3) ? seg.convexHull :
+                (seg.polygon    && seg.polygon.length    >= 3) ? seg.polygon    : [];
+
+              if (roofPoly.length >= 3) {
+                // Inset the polygon by SETBACK_M to get the buildable area boundary
+                // Simple centroid-based inset: move each vertex toward centroid by SETBACK_M
+                const cLat = roofPoly.reduce((s, p) => s + p.lat, 0) / roofPoly.length;
+                const cLng = roofPoly.reduce((s, p) => s + p.lng, 0) / roofPoly.length;
+                const cosLatSB = Math.cos(cLat * Math.PI / 180);
+                const mLatSB = 111320;
+                const mLngSB = 111320 * cosLatSB;
+
+                const insetPoly = roofPoly.map(p => {
+                  const dLat = p.lat - cLat;
+                  const dLng = p.lng - cLng;
+                  const distM = Math.sqrt((dLat * mLatSB) ** 2 + (dLng * mLngSB) ** 2);
+                  if (distM < 0.001) return p;
+                  const scale = Math.max(0, (distM - SETBACK_M) / distM);
+                  return { lat: cLat + dLat * scale, lng: cLng + dLng * scale };
+                });
+
+                const sbElev = segElev + 0.15; // slightly above roof surface
+                const sbPositions = [...insetPoly, insetPoly[0]]
+                  .map(p => safeCartesian3(C, p.lng, p.lat, sbElev))
+                  .filter(Boolean);
+
+                if (sbPositions.length >= 3) {
+                  // Dashed cyan line = buildable area boundary
+                  const sbLine = viewer.entities.add({
+                    polyline: {
+                      positions: sbPositions,
+                      width: 2,
+                      material: new C.PolylineDashMaterialProperty({
+                        color: C.Color.fromCssColorString('#00ffff').withAlpha(0.85),
+                        dashLength: 12,
+                        dashPattern: 0xFF00,
+                      }),
+                      clampToGround: false,
+                      arcType: C.ArcType.NONE,
+                    },
+                  });
+                  overlayRef.current.push(sbLine);
+                }
+              }
+            } catch (sbErr: any) { addLog('WARN', `Setback overlay seg ${i}: ${sbErr.message}`); }
+          }
         } catch (e: any) { addLog('WARN', `Segment ${i} overlay: ${e.message}`); }
       });
     }
@@ -2215,12 +2271,19 @@ function SolarEngine3D({
   // v31.5: Fills each eligible segment using fillRoofSegmentWithPanels().
   //        Eligible = sunshineHours >= 50% of best segment AND areaM2 >= one panel.
   //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
+  // ── Auto Fill: fill all eligible roof segments ──────────────────────────────────────────────────
+  // v31.9: Added rich debug logging + fixed elevation for PRIMARY PATH + setback polygon support.
+  //        Fills each eligible segment (sunshineHours >= 50% of best AND areaM2 >= one panel).
+  //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
   function handleAutoRoof(viewer: any, C: any) {
     const twinData = twinRef.current;
     if (!twinData || twinData.roofSegments.length === 0) {
-      setStatusMsg('❌ No roof segments — Solar API data required');
+      setStatusMsg('\u274c No roof segments \u2014 Solar API data required');
+      addLog('AUTO', '\u274c handleAutoRoof: no twinData or no roofSegments');
       return;
     }
+
+    addLog('AUTO', `handleAutoRoof: ${twinData.roofSegments.length} segments, cesiumGroundElev=${cesiumGroundElevRef.current.toFixed(1)}m`);
 
     const newPanels: PlacedPanel[] = [];
     const sortedSegs = [...twinData.roofSegments].sort((a: any, b: any) => b.sunshineHours - a.sunshineHours);
@@ -2231,8 +2294,12 @@ function SolarEngine3D({
       seg.sunshineHours >= minThreshold && seg.areaM2 >= (PW * PH)
     );
 
-    eligibleSegs.forEach((seg: any) => {
+    addLog('AUTO', `eligible: ${eligibleSegs.length}/${sortedSegs.length} segs (threshold=${minThreshold.toFixed(0)}h)`);
+
+    eligibleSegs.forEach((seg: any, idx: number) => {
+      addLog('AUTO', `seg[${idx}] id=${seg.id} area=${seg.areaM2?.toFixed(1)}m\u00b2 hAG=${seg.heightAboveGround?.toFixed(2)}m pitch=${seg.pitchDegrees?.toFixed(1)}\u00b0 az=${seg.azimuthDegrees?.toFixed(1)}\u00b0 maxP=${seg.maxPanels} googlePanels=${seg.googlePanels?.length ?? 0}`);
       const segPanels = fillRoofSegmentWithPanels(viewer, C, seg);
+      addLog('AUTO', `seg[${idx}] \u2192 placed ${segPanels.length} panels`);
       newPanels.push(...segPanels);
     });
 
@@ -2240,37 +2307,44 @@ function SolarEngine3D({
     panelsRef.current = allPanels;
     onPanelsChange(allPanels);
     setPanelCount(allPanels.length);
-    setStatusMsg(`✅ Auto-roof: ${newPanels.length} panels on ${eligibleSegs.length} segments`);
+    setStatusMsg(`\u2705 Auto-roof: ${newPanels.length} panels on ${eligibleSegs.length} segments`);
+    addLog('AUTO', `\u2705 total placed: ${newPanels.length} panels`);
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Fill roof segment with panels ─────────────────────────────────────────────────────────────────────
-  // v31.5: Complete rewrite aligned with Row tool's world-space Cartesian3 approach.
+  // ── Fill roof segment with panels ──────────────────────────────────────────────────────────────
+  // v31.9: Complete audit + fix.
   //
-  // PRIMARY PATH  — seg.googlePanels (Google Solar API pre-computed positions)
-  //   • Uses exact lat/lng from Google's roof analysis
-  //   • Height computed via azimuth-projected slope offset from segment center
-  //   • Capped at seg.maxPanels (area-based realistic limit)
+  // ELEVATION FORMULA (critical):
+  //   cesiumGroundElevRef = Cesium ellipsoidal height at ground level (from terrain sampling or
+  //                         googleGroundElev + OHIO_GEOID_UNDULATION fallback).
+  //   seg.heightAboveGround = meters the roof center is above ground (from Google Solar API).
+  //   segElev = cesiumGroundElevRef + seg.heightAboveGround  <- correct Cesium ellipsoidal height
   //
-  // FALLBACK PATH — Row-tool-aligned Cartesian3 grid (when googlePanels is empty)
-  //   • Builds grid in world-space using C.Cartesian3.fromDegrees
-  //   • Walks along ridge direction (perpendicular to azimuth) and slope direction
-  //   • Each panel position converted back to lat/lng via Cartographic.fromCartesian
-  //   • Clips to seg.convexHull using point-in-polygon test
-  //   • Capped at seg.maxPanels
+  // PRIMARY PATH  -- seg.googlePanels (Google Solar API pre-computed positions)
+  //   * Uses exact lat/lng from Google's roof analysis
+  //   * Height = segElev + tanPitch * (slope projection from center) + PANEL_OFFSET
+  //   * Capped at seg.maxPanels
   //
-  // ELEVATION     — geoidOff uses OHIO_GEOID_UNDULATION fallback when terrain not yet sampled
+  // FALLBACK PATH -- Row-tool-aligned Cartesian3 grid (when googlePanels is empty)
+  //   * Builds grid in world-space using C.Cartesian3.fromDegrees at segElev
+  //   * Walks along ridge direction (perpendicular to azimuth) and slope direction
+  //   * Each panel position converted back to lat/lng via Cartographic.fromCartesian
+  //   * Clips to seg.convexHull using point-in-polygon test
+  //   * Capped at seg.maxPanels
   function fillRoofSegmentWithPanels(viewer: any, C: any, seg: any): PlacedPanel[] {
     const panels: PlacedPanel[] = [];
 
-    if (!seg?.center || !isValidCoord(seg.center.lat, seg.center.lng)) return panels;
+    if (!seg?.center || !isValidCoord(seg.center.lat, seg.center.lng)) {
+      addLog('FILL', `seg ${seg?.id}: invalid center`);
+      return panels;
+    }
 
     // ── Upper bound: seg.maxPanels is computed from actual roof area with setbacks ──
-    // This is the authoritative realistic limit per segment.
     const maxPanelsLimit = (isFinite(seg.maxPanels) && seg.maxPanels > 0) ? seg.maxPanels : 60;
 
-    // ── Shared geometry constants ─────────────────────────────────────────────
-    const OHIO_GEOID_UNDULATION = -33.5; // CONUS geoid approximation (meters)
+    // ── Shared geometry constants ──────────────────────────────────────────────────
+    const OHIO_GEOID_UNDULATION = -33.5;
     const mLat = 111320;
     const cosLat = Math.cos(seg.center.lat * Math.PI / 180);
     const mLng = isFinite(cosLat) && cosLat > 0.001 ? 111320 * cosLat : 111320;
@@ -2279,29 +2353,24 @@ function SolarEngine3D({
     const pitchDeg = isFinite(seg.pitchDegrees)   ? Math.max(0, Math.min(60, seg.pitchDegrees)) : 20;
     const heading  = headingFromAzimuth(azDeg);
     const tanPitch = Math.tan(pitchDeg * Math.PI / 180);
-    if (!isFinite(tanPitch)) return panels;
+    if (!isFinite(tanPitch)) { addLog('FILL', `seg ${seg?.id}: invalid tanPitch`); return panels; }
 
-    // ── Elevation: use cesiumGroundElevRef + seg.heightAboveGround ─────────────
-    // seg.heightAboveGround = meters above terrain (from Google Solar API).
-    // cesiumGroundElevRef = true Cesium ellipsoidal ground elevation (sampled from terrain).
-    // This approach bypasses geoid undulation entirely — no OHIO_GEOID_UNDULATION needed.
-    //
-    // If cesiumGroundElevRef not yet set (terrain sampling still in progress),
-    // fall back to Google orthometric elevation + OHIO_GEOID_UNDULATION estimate.
-    // NOTE: handleAutoRoof now waits for cesiumGroundElevRef > 0 before calling this,
-    // so the fallback should rarely be needed.
+    // ── Elevation: cesiumGroundElevRef + heightAboveGround ─────────────────────────
     const heightAboveGround = isFinite(seg.heightAboveGround) ? seg.heightAboveGround : 3.0;
-    const segElev = cesiumGroundElevRef.current > 0
-      ? cesiumGroundElevRef.current + heightAboveGround
+    const groundElev = cesiumGroundElevRef.current > 0
+      ? cesiumGroundElevRef.current
       : (isFinite(seg.elevation) ? seg.elevation : 0) + OHIO_GEOID_UNDULATION;
+    const segElev = groundElev + heightAboveGround;
 
-    // ── Panel dimensions ──────────────────────────────────────────────────────
+    addLog('FILL', `seg ${seg?.id}: groundElev=${groundElev.toFixed(1)} hAG=${heightAboveGround.toFixed(2)} segElev=${segElev.toFixed(1)} pitch=${pitchDeg.toFixed(1)} az=${azDeg.toFixed(1)}`);
+
+    // ── Panel dimensions ───────────────────────────────────────────────────────────
     const orient = panelOrientationRef.current ?? 'portrait';
     const { pw: PW_O, ph: PH_O } = panelDims(orient);
-    const panelW = PW_O + 0.05;  // +5cm inter-panel gap (along ridge)
-    const panelH = PH_O + 0.10;  // +10cm inter-panel gap (along slope)
+    const panelW = PW_O + 0.05;
+    const panelH = PH_O + 0.10;
 
-    // ── Point-in-polygon (ray casting) ───────────────────────────────────────
+    // ── Point-in-polygon (ray casting) ────────────────────────────────────────────
     function pointInPolygon(
       lat: number, lng: number,
       poly: Array<{ lat: number; lng: number }>
@@ -2319,34 +2388,35 @@ function SolarEngine3D({
       return inside;
     }
 
-    // ── Clip polygon: prefer convexHull (from Google panel centers), then polygon ──
+    // ── Clip polygon ──────────────────────────────────────────────────────────────
     const clipPoly: Array<{ lat: number; lng: number }> =
       (seg.convexHull && seg.convexHull.length >= 3) ? seg.convexHull :
       (seg.polygon    && seg.polygon.length    >= 3) ? seg.polygon    : [];
 
-    // ════════════════════════════════════════════════════════════════════════
+    // ============================================================================
     // PRIMARY PATH: Google's pre-computed panel positions
-    // ════════════════════════════════════════════════════════════════════════
+    // ============================================================================
     const googlePanels: Array<{ lat: number; lng: number; orientation: string; yearlyEnergyDcKwh: number }>
       = seg.googlePanels ?? [];
 
     if (googlePanels.length > 0) {
+      addLog('FILL', `seg ${seg?.id}: PRIMARY PATH -- ${googlePanels.length} googlePanels, limit=${Math.min(googlePanels.length, maxPanelsLimit)}`);
       const limit  = Math.min(googlePanels.length, maxPanelsLimit);
       const azRad  = azDeg * Math.PI / 180;
       const slopeE = Math.sin(azRad);
       const slopeN = Math.cos(azRad);
 
+      let placed = 0, skipped = 0;
       for (let i = 0; i < limit; i++) {
         const gp = googlePanels[i];
-        if (!isValidCoord(gp.lat, gp.lng)) continue;
+        if (!isValidCoord(gp.lat, gp.lng)) { skipped++; continue; }
 
-        // Height: segment center elevation + slope rise to this panel position
         const dN = (gp.lat - seg.center.lat) * mLat;
         const dE = (gp.lng - seg.center.lng) * mLng;
         const alongSlope = dE * slopeE + dN * slopeN;
         const pHeight = segElev + tanPitch * alongSlope + PANEL_OFFSET;
 
-        if (!isValidCoord(gp.lat, gp.lng, pHeight)) continue;
+        if (!isValidCoord(gp.lat, gp.lng, pHeight)) { skipped++; continue; }
 
         const gpOrient: PanelOrientation =
           gp.orientation?.toUpperCase() === 'PORTRAIT' ? 'portrait' : 'landscape';
@@ -2358,42 +2428,41 @@ function SolarEngine3D({
         });
         panels.push(panel);
         addPanelEntity(viewer, C, panel);
+        placed++;
       }
+      addLog('FILL', `seg ${seg?.id}: PRIMARY placed=${placed} skipped=${skipped}`);
       if (panels.length > 0) return panels;
     }
 
-    // ════════════════════════════════════════════════════════════════════════
+    // ============================================================================
     // FALLBACK PATH: Row-tool-aligned Cartesian3 grid
-    // Mirrors finalizeRow() logic: work in world-space Cartesian3, walk along
-    // ridge and slope direction vectors, convert back to lat/lng per panel.
-    // ════════════════════════════════════════════════════════════════════════
-    if (!seg.boundingBox?.sw || !seg.boundingBox?.ne) return panels;
+    // ============================================================================
+    addLog('FILL', `seg ${seg?.id}: FALLBACK PATH (no googlePanels)`);
 
-    const SETBACK = 0.5; // meters from roof edge
+    if (!seg.boundingBox?.sw || !seg.boundingBox?.ne) {
+      addLog('FILL', `seg ${seg?.id}: no boundingBox, abort`);
+      return panels;
+    }
 
-    // Build world-space origin at segment center
+    const SETBACK = 0.5;
+
     const originCart = C.Cartesian3.fromDegrees(seg.center.lng, seg.center.lat, segElev);
-    if (!originCart || !isFinite(originCart.x)) return panels;
+    if (!originCart || !isFinite(originCart.x)) {
+      addLog('FILL', `seg ${seg?.id}: invalid originCart`);
+      return panels;
+    }
 
-    // ENU frame at segment center — same approach as finalizeRow()
     const enuMatrix = C.Transforms.eastNorthUpToFixedFrame(originCart);
 
-    // Ridge direction = perpendicular to azimuth (along the roof peak)
-    // Slope direction = along azimuth (downhill direction)
     const azRad  = azDeg * Math.PI / 180;
-    // In ENU: East=x, North=y
-    // Slope direction (down-slope): East=sin(az), North=cos(az)
-    // Ridge direction (along ridge): East=cos(az), North=-sin(az)
     const slopeLocal = new C.Cartesian3(Math.sin(azRad),  Math.cos(azRad),  0);
     const ridgeLocal = new C.Cartesian3(Math.cos(azRad), -Math.sin(azRad),  0);
 
-    // Convert local ENU direction vectors to world-space Cartesian3
     const slopeWorld = C.Matrix4.multiplyByPointAsVector(enuMatrix, slopeLocal, new C.Cartesian3());
     const ridgeWorld = C.Matrix4.multiplyByPointAsVector(enuMatrix, ridgeLocal, new C.Cartesian3());
     C.Cartesian3.normalize(slopeWorld, slopeWorld);
     C.Cartesian3.normalize(ridgeWorld, ridgeWorld);
 
-    // Compute roof extent in azimuth-rotated frame by projecting BB corners
     const bbCorners = [
       { lat: seg.boundingBox.sw.lat, lng: seg.boundingBox.sw.lng },
       { lat: seg.boundingBox.sw.lat, lng: seg.boundingBox.ne.lng },
@@ -2416,35 +2485,39 @@ function SolarEngine3D({
 
     const roofW = maxRidge - minRidge;
     const roofH = maxSlope - minSlope;
-    if (!isFinite(roofW) || !isFinite(roofH) || roofW <= 0 || roofH <= 0) return panels;
+    if (!isFinite(roofW) || !isFinite(roofH) || roofW <= 0 || roofH <= 0) {
+      addLog('FILL', `seg ${seg?.id}: invalid roofW=${roofW.toFixed(1)} roofH=${roofH.toFixed(1)}`);
+      return panels;
+    }
 
     const usableW = Math.max(0, roofW - 2 * SETBACK);
     const usableH = Math.max(0, roofH - 2 * SETBACK);
-    if (usableW < panelW || usableH < panelH) return panels;
+    if (usableW < panelW || usableH < panelH) {
+      addLog('FILL', `seg ${seg?.id}: usable area too small (${usableW.toFixed(1)}x${usableH.toFixed(1)}m)`);
+      return panels;
+    }
 
     const cols = Math.floor(usableW / panelW);
     const rows = Math.floor(usableH / panelH);
+    addLog('FILL', `seg ${seg?.id}: grid ${cols}x${rows} (roofW=${roofW.toFixed(1)} roofH=${roofH.toFixed(1)} usable=${usableW.toFixed(1)}x${usableH.toFixed(1)})`);
+
     if (cols < 1 || rows < 1) return panels;
 
-    // Center the grid within the usable area
     const ridgeStart = minRidge + SETBACK + (usableW - cols * panelW) / 2;
     const slopeStart = minSlope + SETBACK + (usableH - rows * panelH) / 2;
 
-    // Walk grid row by row — same pattern as finalizeRow() panel loop
+    let placed = 0, clipped = 0;
     for (let r = 0; r < rows && panels.length < maxPanelsLimit; r++) {
       for (let c = 0; c < cols && panels.length < maxPanelsLimit; c++) {
         const alongRidge = ridgeStart + (c + 0.5) * panelW;
         const alongSlope = slopeStart + (r + 0.5) * panelH;
 
-        // World-space panel position: origin + ridge_offset + slope_offset
-        // This mirrors how finalizeRow() interpolates along the row vector
         const worldPos = new C.Cartesian3(
           originCart.x + ridgeWorld.x * alongRidge + slopeWorld.x * alongSlope,
           originCart.y + ridgeWorld.y * alongRidge + slopeWorld.y * alongSlope,
           originCart.z + ridgeWorld.z * alongRidge + slopeWorld.z * alongSlope,
         );
 
-        // Convert back to lat/lng — same as finalizeRow()'s Cartographic.fromCartesian
         const panelCarto = C.Cartographic.fromCartesian(worldPos);
         if (!panelCarto) continue;
         const pLat    = C.Math.toDegrees(panelCarto.latitude);
@@ -2453,8 +2526,7 @@ function SolarEngine3D({
 
         if (!isValidCoord(pLat, pLng, pHeight)) continue;
 
-        // Polygon clipping: discard panels outside the roof polygon
-        if (clipPoly.length >= 3 && !pointInPolygon(pLat, pLng, clipPoly)) continue;
+        if (clipPoly.length >= 3 && !pointInPolygon(pLat, pLng, clipPoly)) { clipped++; continue; }
 
         const panel = createPanel({
           lat: pLat, lng: pLng, height: pHeight,
@@ -2463,8 +2535,10 @@ function SolarEngine3D({
         });
         panels.push(panel);
         addPanelEntity(viewer, C, panel);
+        placed++;
       }
     }
+    addLog('FILL', `seg ${seg?.id}: FALLBACK placed=${placed} clipped=${clipped}`);
     return panels;
   }
 
@@ -2692,10 +2766,13 @@ function SolarEngine3D({
           <div><span style={{ color: '#888' }}>terrainReady:</span> <span style={{ color: terrainReady ? '#44ff88' : '#ff4444' }}>{String(terrainReady)}</span></div>
           <div><span style={{ color: '#888' }}>tilesetReady:</span> <span style={{ color: tilesetReady ? '#44ff88' : '#ffaa44' }}>{String(tilesetReady)}</span></div>
           <div><span style={{ color: '#888' }}>activeTool:</span> <span style={{ color: '#00ccff' }}>{placementMode}</span></div>
+          <div><span style={{ color: '#888' }}>panels:</span> <span style={{ color: '#ffd700' }}>{panelCount}</span></div>
           <div><span style={{ color: '#888' }}>clickCount:</span> <span style={{ color: '#ffd700' }}>{clickCountForTool}</span></div>
           <div><span style={{ color: '#888' }}>pickMethod:</span> <span style={{ color: '#ff88ff' }}>{lastPickMethod}</span></div>
           <div style={{ color: '#888' }}>lastPick:</div>
           <div style={{ color: '#aaaaff', fontSize: 9, paddingLeft: 8 }}>{lastPickLatLon}</div>
+          <div style={{ color: '#888', marginTop: 2 }}>lastLog:</div>
+          <div style={{ color: '#ffcc44', fontSize: 9, paddingLeft: 8, maxWidth: 280, wordBreak: 'break-all' }}>{lastLog}</div>
         </div>
       )}
 

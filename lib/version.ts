@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v31.8';
+export const BUILD_VERSION = 'v32.0';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'AUTO FILL RENDERING & PLACEMENT FIX — terrain-ready wait, heightAboveGround elevation, disableDepthTestDistance on panels, setTerrainReady/setRenderMode wired, Row-tool Cartesian3 grid';
+export const BUILD_DESCRIPTION = 'AUTO FILL DEBUG + SETBACK VIZ — rich AUTO/FILL debug logging, setback boundary overlay (cyan dashed), debug panel shows panelCount+lastLog, panel count verification';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
