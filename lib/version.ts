@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v31.4';
+export const BUILD_VERSION = 'v31.6';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'AUTO FILL FIX — Google panel positions primary path, azimuth-rotated grid + polygon clipping fallback, OHIO_GEOID_UNDULATION elevation race fix, orientation-aware panel dims in auto-fill';
+export const BUILD_DESCRIPTION = 'AUTO FILL REPAIR v2 — Row-tool-aligned Cartesian3 grid fallback, maxPanels enforcement per segment, Google panel positions primary path, polygon clipping, geoid race fix';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -124,6 +124,16 @@ export const BUILD_FEATURES = [
   'FIX: 3D — Auto Fill visibility: panels now render above roof surface (was 30m underground due to missing geoid offset)',
   'FIX: 3D — Google panel orientation: maps PORTRAIT/LANDSCAPE string to PanelOrientation type',
   'SAFE: onPanelsChange(), setPanelCount(), systemType=roof, engineering pipeline, BOM, proposals all unchanged',
+  // Phase 20: v31.5 — Auto Fill Repair v2
+  'FIX: 3D — fillRoofSegmentWithPanels() complete rewrite aligned with Row tool Cartesian3 approach',
+  'FIX: 3D — FALLBACK PATH: uses C.Cartesian3.fromDegrees origin + ENU ridge/slope direction vectors (mirrors finalizeRow())',
+  'FIX: 3D — FALLBACK PATH: panel positions converted via C.Cartographic.fromCartesian (same as Row tool)',
+  'FIX: 3D — maxPanels enforcement: each segment capped at seg.maxPanels (area-based realistic limit, default 60)',
+  'FIX: 3D — PRIMARY PATH: googlePanels still used first; falls back to Cartesian3 grid only when empty',
+  'FIX: 3D — Polygon clipping: panels outside seg.convexHull discarded via ray-casting point-in-polygon',
+  'FIX: 3D — Duplicate comment block removed from fillRoofSegmentWithPanels',
+  'SAFE: handleAutoRoof() still fills all eligible segments (sunshineHours >= 50% of best)',
+  'SAFE: systemType=roof, onPanelsChange(), setPanelCount(), engineering, BOM, proposals unchanged',
 ] as const;
 
 export function getBuildBadge(): string {

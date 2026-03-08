@@ -2191,6 +2191,10 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
+  // ── Auto Fill: fill all eligible roof segments ────────────────────────────────────────────────────────
+  // v31.5: Fills each eligible segment using fillRoofSegmentWithPanels().
+  //        Eligible = sunshineHours >= 50% of best segment AND areaM2 >= one panel.
+  //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
   function handleAutoRoof(viewer: any, C: any) {
     const twinData = twinRef.current;
     if (!twinData || twinData.roofSegments.length === 0) {
@@ -2221,117 +2225,151 @@ function SolarEngine3D({
   }
 
   // ── Fill roof segment with panels ─────────────────────────────────────────────────────────────────────
-  // v31.3 FIX: Primary path uses Google's pre-computed panel positions (seg.googlePanels).
-  //            Fallback path uses azimuth-rotated grid with point-in-polygon clipping.
-  //            Elevation fix: always use OHIO_GEOID_UNDULATION when cesiumGroundElevRef not yet set.
+  // v31.5: Complete rewrite aligned with Row tool's world-space Cartesian3 approach.
+  //
+  // PRIMARY PATH  — seg.googlePanels (Google Solar API pre-computed positions)
+  //   • Uses exact lat/lng from Google's roof analysis
+  //   • Height computed via azimuth-projected slope offset from segment center
+  //   • Capped at seg.maxPanels (area-based realistic limit)
+  //
+  // FALLBACK PATH — Row-tool-aligned Cartesian3 grid (when googlePanels is empty)
+  //   • Builds grid in world-space using C.Cartesian3.fromDegrees
+  //   • Walks along ridge direction (perpendicular to azimuth) and slope direction
+  //   • Each panel position converted back to lat/lng via Cartographic.fromCartesian
+  //   • Clips to seg.convexHull using point-in-polygon test
+  //   • Capped at seg.maxPanels
+  //
+  // ELEVATION     — geoidOff uses OHIO_GEOID_UNDULATION fallback when terrain not yet sampled
   function fillRoofSegmentWithPanels(viewer: any, C: any, seg: any): PlacedPanel[] {
     const panels: PlacedPanel[] = [];
 
     if (!seg?.center || !isValidCoord(seg.center.lat, seg.center.lng)) return panels;
 
-    // ── Shared constants ──────────────────────────────────────────────────────
+    // ── Upper bound: seg.maxPanels is computed from actual roof area with setbacks ──
+    // This is the authoritative realistic limit per segment.
+    const maxPanelsLimit = (isFinite(seg.maxPanels) && seg.maxPanels > 0) ? seg.maxPanels : 60;
+
+    // ── Shared geometry constants ─────────────────────────────────────────────
     const OHIO_GEOID_UNDULATION = -33.5; // CONUS geoid approximation (meters)
     const mLat = 111320;
     const cosLat = Math.cos(seg.center.lat * Math.PI / 180);
     const mLng = isFinite(cosLat) && cosLat > 0.001 ? 111320 * cosLat : 111320;
 
-    const azDeg = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
-    const pitchDeg = isFinite(seg.pitchDegrees) ? Math.max(0, Math.min(60, seg.pitchDegrees)) : 20;
-    const heading = headingFromAzimuth(azDeg);
+    const azDeg    = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
+    const pitchDeg = isFinite(seg.pitchDegrees)   ? Math.max(0, Math.min(60, seg.pitchDegrees)) : 20;
+    const heading  = headingFromAzimuth(azDeg);
     const tanPitch = Math.tan(pitchDeg * Math.PI / 180);
     if (!isFinite(tanPitch)) return panels;
 
     // ── Elevation: Google orthometric → Cesium ellipsoidal ───────────────────
-    // cesiumGroundElevRef is populated asynchronously by terrain sampling in boot().
-    // If it hasn't been set yet (= 0), fall back to OHIO_GEOID_UNDULATION constant
-    // so panels are not placed 30m underground.
+    // cesiumGroundElevRef is populated asynchronously. Fall back to OHIO_GEOID_UNDULATION
+    // so panels are not placed 30m underground when terrain sampling hasn't completed.
     const googleSegElev = isFinite(seg.elevation) ? seg.elevation : 0;
     const geoidOff = cesiumGroundElevRef.current > 0
       ? cesiumGroundElevRef.current - (twinRef.current?.elevation ?? 0)
       : OHIO_GEOID_UNDULATION;
     const segElev = googleSegElev + geoidOff;
 
-    // ── Panel dimensions (respect user orientation setting) ───────────────────
+    // ── Panel dimensions ──────────────────────────────────────────────────────
     const orient = panelOrientationRef.current ?? 'portrait';
     const { pw: PW_O, ph: PH_O } = panelDims(orient);
-    const panelW = PW_O + 0.05;  // +5cm inter-panel gap
-    const panelH = PH_O + 0.10;  // +10cm inter-panel gap
+    const panelW = PW_O + 0.05;  // +5cm inter-panel gap (along ridge)
+    const panelH = PH_O + 0.10;  // +10cm inter-panel gap (along slope)
 
-    // ── Point-in-polygon helper (ray casting) ─────────────────────────────────
+    // ── Point-in-polygon (ray casting) ───────────────────────────────────────
     function pointInPolygon(
       lat: number, lng: number,
       poly: Array<{ lat: number; lng: number }>
     ): boolean {
-      if (!poly || poly.length < 3) return true; // no polygon = no clipping
+      if (!poly || poly.length < 3) return true;
       let inside = false;
       for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
         const xi = poly[i].lng, yi = poly[i].lat;
         const xj = poly[j].lng, yj = poly[j].lat;
-        const intersect =
-          yi > lat !== yj > lat &&
-          lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-        if (intersect) inside = !inside;
+        if ((yi > lat) !== (yj > lat) &&
+            lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+          inside = !inside;
+        }
       }
       return inside;
     }
 
-    // ── PRIMARY PATH: Use Google's pre-computed panel positions ───────────────
-    // Google Solar API provides exact lat/lng for each panel, already correctly
-    // placed on the roof surface. This is the most accurate data source.
+    // ── Clip polygon: prefer convexHull (from Google panel centers), then polygon ──
+    const clipPoly: Array<{ lat: number; lng: number }> =
+      (seg.convexHull && seg.convexHull.length >= 3) ? seg.convexHull :
+      (seg.polygon    && seg.polygon.length    >= 3) ? seg.polygon    : [];
+
+    // ════════════════════════════════════════════════════════════════════════
+    // PRIMARY PATH: Google's pre-computed panel positions
+    // ════════════════════════════════════════════════════════════════════════
     const googlePanels: Array<{ lat: number; lng: number; orientation: string; yearlyEnergyDcKwh: number }>
       = seg.googlePanels ?? [];
 
     if (googlePanels.length > 0) {
-      const azRad = azDeg * Math.PI / 180;
+      const limit  = Math.min(googlePanels.length, maxPanelsLimit);
+      const azRad  = azDeg * Math.PI / 180;
       const slopeE = Math.sin(azRad);
       const slopeN = Math.cos(azRad);
 
-      for (const gp of googlePanels) {
+      for (let i = 0; i < limit; i++) {
+        const gp = googlePanels[i];
         if (!isValidCoord(gp.lat, gp.lng)) continue;
 
-        // Compute along-slope offset from segment center for height calculation
-        const dLat = gp.lat - seg.center.lat;
-        const dLng = gp.lng - seg.center.lng;
-        const dN = dLat * mLat;
-        const dE = dLng * mLng;
-        // Project displacement onto slope direction
+        // Height: segment center elevation + slope rise to this panel position
+        const dN = (gp.lat - seg.center.lat) * mLat;
+        const dE = (gp.lng - seg.center.lng) * mLng;
         const alongSlope = dE * slopeE + dN * slopeN;
         const pHeight = segElev + tanPitch * alongSlope + PANEL_OFFSET;
 
         if (!isValidCoord(gp.lat, gp.lng, pHeight)) continue;
 
-        // Map Google orientation string to our PanelOrientation type
         const gpOrient: PanelOrientation =
           gp.orientation?.toUpperCase() === 'PORTRAIT' ? 'portrait' : 'landscape';
 
         const panel = createPanel({
           lat: gp.lat, lng: gp.lng, height: pHeight,
           tilt: pitchDeg, azimuth: azDeg, systemType: 'roof',
-          heading, pitch: pitchDeg, roll: 0,
-          orientation: gpOrient,
+          heading, pitch: pitchDeg, roll: 0, orientation: gpOrient,
         });
         panels.push(panel);
         addPanelEntity(viewer, C, panel);
       }
-      return panels;
+      if (panels.length > 0) return panels;
     }
 
-    // ── FALLBACK PATH: Azimuth-rotated grid with polygon clipping ─────────────
-    // Used when seg.googlePanels is empty (synthetic segments, manual roof draws).
-    // Generates grid in azimuth-rotated coordinate frame and clips to convexHull.
+    // ════════════════════════════════════════════════════════════════════════
+    // FALLBACK PATH: Row-tool-aligned Cartesian3 grid
+    // Mirrors finalizeRow() logic: work in world-space Cartesian3, walk along
+    // ridge and slope direction vectors, convert back to lat/lng per panel.
+    // ════════════════════════════════════════════════════════════════════════
     if (!seg.boundingBox?.sw || !seg.boundingBox?.ne) return panels;
 
     const SETBACK = 0.5; // meters from roof edge
 
-    // Compute roof extent in azimuth-rotated frame (along-ridge × along-slope)
-    // by projecting all 4 bounding-box corners into the rotated frame
-    const azRad = azDeg * Math.PI / 180;
-    const slopeE = Math.sin(azRad);  // east component of down-slope direction
-    const slopeN = Math.cos(azRad);  // north component of down-slope direction
-    const ridgeE = Math.cos(azRad);  // east component of along-ridge direction
-    const ridgeN = -Math.sin(azRad); // north component of along-ridge direction
+    // Build world-space origin at segment center
+    const originCart = C.Cartesian3.fromDegrees(seg.center.lng, seg.center.lat, segElev);
+    if (!originCart || !isFinite(originCart.x)) return panels;
 
-    const corners = [
+    // ENU frame at segment center — same approach as finalizeRow()
+    const enuMatrix = C.Transforms.eastNorthUpToFixedFrame(originCart);
+
+    // Ridge direction = perpendicular to azimuth (along the roof peak)
+    // Slope direction = along azimuth (downhill direction)
+    const azRad  = azDeg * Math.PI / 180;
+    // In ENU: East=x, North=y
+    // Slope direction (down-slope): East=sin(az), North=cos(az)
+    // Ridge direction (along ridge): East=cos(az), North=-sin(az)
+    const slopeLocal = new C.Cartesian3(Math.sin(azRad),  Math.cos(azRad),  0);
+    const ridgeLocal = new C.Cartesian3(Math.cos(azRad), -Math.sin(azRad),  0);
+
+    // Convert local ENU direction vectors to world-space Cartesian3
+    const slopeWorld = C.Matrix4.multiplyByPointAsVector(enuMatrix, slopeLocal, new C.Cartesian3());
+    const ridgeWorld = C.Matrix4.multiplyByPointAsVector(enuMatrix, ridgeLocal, new C.Cartesian3());
+    C.Cartesian3.normalize(slopeWorld, slopeWorld);
+    C.Cartesian3.normalize(ridgeWorld, ridgeWorld);
+
+    // Compute roof extent in azimuth-rotated frame by projecting BB corners
+    const bbCorners = [
       { lat: seg.boundingBox.sw.lat, lng: seg.boundingBox.sw.lng },
       { lat: seg.boundingBox.sw.lat, lng: seg.boundingBox.ne.lng },
       { lat: seg.boundingBox.ne.lat, lng: seg.boundingBox.sw.lng },
@@ -2340,20 +2378,19 @@ function SolarEngine3D({
 
     let minRidge = Infinity, maxRidge = -Infinity;
     let minSlope = Infinity, maxSlope = -Infinity;
-    for (const c of corners) {
+    for (const c of bbCorners) {
       const dN = (c.lat - seg.center.lat) * mLat;
       const dE = (c.lng - seg.center.lng) * mLng;
-      const r = dE * ridgeE + dN * ridgeN;
-      const s = dE * slopeE + dN * slopeN;
-      if (r < minRidge) minRidge = r;
-      if (r > maxRidge) maxRidge = r;
-      if (s < minSlope) minSlope = s;
-      if (s > maxSlope) maxSlope = s;
+      const rProj = dE * Math.cos(azRad) + dN * (-Math.sin(azRad));
+      const sProj = dE * Math.sin(azRad) + dN * Math.cos(azRad);
+      if (rProj < minRidge) minRidge = rProj;
+      if (rProj > maxRidge) maxRidge = rProj;
+      if (sProj < minSlope) minSlope = sProj;
+      if (sProj > maxSlope) maxSlope = sProj;
     }
 
-    const roofW = maxRidge - minRidge; // width along ridge
-    const roofH = maxSlope - minSlope; // height along slope
-
+    const roofW = maxRidge - minRidge;
+    const roofH = maxSlope - minSlope;
     if (!isFinite(roofW) || !isFinite(roofH) || roofW <= 0 || roofH <= 0) return panels;
 
     const usableW = Math.max(0, roofW - 2 * SETBACK);
@@ -2364,29 +2401,30 @@ function SolarEngine3D({
     const rows = Math.floor(usableH / panelH);
     if (cols < 1 || rows < 1) return panels;
 
-    // Use convexHull for polygon clipping (most accurate roof shape)
-    const clipPoly: Array<{ lat: number; lng: number }> =
-      (seg.convexHull && seg.convexHull.length >= 3)
-        ? seg.convexHull
-        : (seg.polygon && seg.polygon.length >= 3)
-          ? seg.polygon
-          : [];
-
     // Center the grid within the usable area
     const ridgeStart = minRidge + SETBACK + (usableW - cols * panelW) / 2;
     const slopeStart = minSlope + SETBACK + (usableH - rows * panelH) / 2;
 
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
+    // Walk grid row by row — same pattern as finalizeRow() panel loop
+    for (let r = 0; r < rows && panels.length < maxPanelsLimit; r++) {
+      for (let c = 0; c < cols && panels.length < maxPanelsLimit; c++) {
         const alongRidge = ridgeStart + (c + 0.5) * panelW;
         const alongSlope = slopeStart + (r + 0.5) * panelH;
 
-        // Convert from rotated frame back to lat/lng
-        const dE = alongRidge * ridgeE + alongSlope * slopeE;
-        const dN = alongRidge * ridgeN + alongSlope * slopeN;
-        const pLat = seg.center.lat + dN / mLat;
-        const pLng = seg.center.lng + dE / mLng;
-        const pHeight = segElev + tanPitch * alongSlope + PANEL_OFFSET;
+        // World-space panel position: origin + ridge_offset + slope_offset
+        // This mirrors how finalizeRow() interpolates along the row vector
+        const worldPos = new C.Cartesian3(
+          originCart.x + ridgeWorld.x * alongRidge + slopeWorld.x * alongSlope,
+          originCart.y + ridgeWorld.y * alongRidge + slopeWorld.y * alongSlope,
+          originCart.z + ridgeWorld.z * alongRidge + slopeWorld.z * alongSlope,
+        );
+
+        // Convert back to lat/lng — same as finalizeRow()'s Cartographic.fromCartesian
+        const panelCarto = C.Cartographic.fromCartesian(worldPos);
+        if (!panelCarto) continue;
+        const pLat    = C.Math.toDegrees(panelCarto.latitude);
+        const pLng    = C.Math.toDegrees(panelCarto.longitude);
+        const pHeight = panelCarto.height + PANEL_OFFSET;
 
         if (!isValidCoord(pLat, pLng, pHeight)) continue;
 
@@ -2396,8 +2434,7 @@ function SolarEngine3D({
         const panel = createPanel({
           lat: pLat, lng: pLng, height: pHeight,
           tilt: pitchDeg, azimuth: azDeg, systemType: 'roof',
-          heading, pitch: pitchDeg, roll: 0,
-          orientation: orient,
+          heading, pitch: pitchDeg, roll: 0, orientation: orient,
         });
         panels.push(panel);
         addPanelEntity(viewer, C, panel);
