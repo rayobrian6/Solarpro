@@ -485,64 +485,110 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     const dcBomRuns = allBomRuns.filter((r: any) => dcRunIds.has(r.id));
     const acBomRuns = allBomRuns.filter((r: any) => !dcRunIds.has(r.id));
 
-    // ── Group DC runs by wire gauge → one line item per gauge (micro only) ──
+    // ── Group DC runs by wire gauge → one line item per gauge (micro only, matches calcBOMFromSegments) ──
+    // Key insight: EGC can be a DIFFERENT gauge than DC conductors
     if (isMicro && dcBomRuns.length > 0) {
-      const dcGaugeMap = new Map<string, number>();
+      const dcGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
+      
       for (const r of dcBomRuns) {
         const gauge: string = (r as any).wireGauge ?? '#10 AWG';
+        const egcGauge: string = (r as any).egcGauge ?? '#10 AWG';
         const conductors: number = (r as any).conductorCount ?? 2;
-        const qty = Math.ceil((r as any).onewayLengthFt * (conductors + 1) * 1.15);
-        dcGaugeMap.set(gauge, (dcGaugeMap.get(gauge) ?? 0) + qty);
+        const length: number = (r as any).onewayLengthFt ?? 30;
+        
+        // Add DC conductor quantity (gauge = wireGauge)
+        const dcQty = Math.ceil(length * conductors * 1.15);
+        const dcExisting = dcGaugeMap.get(gauge);
+        if (dcExisting) {
+          dcExisting.qty += dcQty;
+          dcExisting.runIds.push((r as any).id);
+        } else {
+          dcGaugeMap.set(gauge, { qty: dcQty, runIds: [(r as any).id] });
+        }
+        
+        // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
+        const egcQty = Math.ceil(length * 1 * 1.15);
+        const egcExisting = dcGaugeMap.get(egcGauge);
+        if (egcExisting) {
+          egcExisting.qty += egcQty;
+          if (!egcExisting.runIds.includes((r as any).id)) {
+            egcExisting.runIds.push((r as any).id);
+          }
+        } else {
+          dcGaugeMap.set(egcGauge, { qty: egcQty, runIds: [(r as any).id] });
+        }
       }
-      for (const [gauge, qty] of dcGaugeMap.entries()) {
+      
+      for (const [gauge, { qty, runIds }] of dcGaugeMap.entries()) {
         const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
         items.push(addItem('dc', 'wire', 'Southwire', `${gauge} USE-2/THWN-2`,
           `USE2-${gaugeNum}`,
           `${gauge} USE-2 — DC roof wiring (open-air, panels to microinverters)`,
           qty, 'ft', 'NEC 690.31',
-          'Sum(ROOF_RUN.length x conductors x 1.15)',
+          'Sum(length x conductors x 1.15)',
           `${gauge} DC runs x 1.15`, true));
         log.push({ stageId: 'dc', category: 'wire', item: `${gauge} USE-2`,
-          quantity: qty, derivedFrom: 'dcBomRuns',
+          quantity: qty, derivedFrom: runIds.join(', '),
           formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 690.31' });
       }
     }
 
-    // ── Group AC runs by wire gauge → one line item per gauge ──
+    // ── Group AC runs by wire gauge → one line item per gauge (matches calcBOMFromSegments) ──
     // Produces separate line items for #10, #8, #6, #4 AWG matching summary cards
-    const acGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
+    // Key insight: EGC can be a DIFFERENT gauge than hot conductors
+    // - Hot/neutral: length × conductorCount × 1.15 of wireGauge
+    // - EGC: length × 1 × 1.15 of egcGauge (may differ from wireGauge)
+    const wireGaugeMap = new Map<string, { qty: number; runIds: string[] }>();
+    
     for (const r of acBomRuns) {
       const gauge: string = (r as any).wireGauge ?? input.acWireGauge ?? '#8 AWG';
+      const egcGauge: string = (r as any).egcGauge ?? '#10 AWG';
       const conductors: number = (r as any).conductorCount ?? 3;
-      const qty = Math.ceil((r as any).onewayLengthFt * (conductors + 1) * 1.15); // +1 for EGC
-      const existing = acGaugeMap.get(gauge);
-      if (existing) {
-        existing.qty += qty;
-        existing.runIds.push((r as any).id);
+      const length: number = (r as any).onewayLengthFt ?? 50;
+      
+      // Add hot/neutral conductor quantity (gauge = wireGauge)
+      const hotQty = Math.ceil(length * conductors * 1.15);
+      const hotExisting = wireGaugeMap.get(gauge);
+      if (hotExisting) {
+        hotExisting.qty += hotQty;
+        hotExisting.runIds.push((r as any).id);
       } else {
-        acGaugeMap.set(gauge, { qty, runIds: [(r as any).id] });
+        wireGaugeMap.set(gauge, { qty: hotQty, runIds: [(r as any).id] });
+      }
+      
+      // Add EGC quantity (gauge = egcGauge, may differ from wireGauge)
+      // EGC is always 1 conductor per run
+      const egcQty = Math.ceil(length * 1 * 1.15);
+      const egcExisting = wireGaugeMap.get(egcGauge);
+      if (egcExisting) {
+        egcExisting.qty += egcQty;
+        if (!egcExisting.runIds.includes((r as any).id)) {
+          egcExisting.runIds.push((r as any).id);
+        }
+      } else {
+        wireGaugeMap.set(egcGauge, { qty: egcQty, runIds: [(r as any).id] });
       }
     }
 
     // Emit one wire line item per gauge (sorted: smaller AWG number = larger wire = first)
-    const sortedAcGauges = [...acGaugeMap.entries()].sort((a, b) => {
+    const sortedGauges = [...wireGaugeMap.entries()].sort((a, b) => {
       const numA = parseInt(a[0].replace('#', '').replace(' AWG', '')) || 99;
       const numB = parseInt(b[0].replace('#', '').replace(' AWG', '')) || 99;
       return numA - numB;
     });
 
-    for (const [gauge, { qty, runIds }] of sortedAcGauges) {
+    for (const [gauge, { qty, runIds }] of sortedGauges) {
       const gaugeNum = gauge.replace('#', '').replace(' AWG', '');
       const runLabel = runIds.join(', ');
       items.push(addItem('ac', 'wire', 'Southwire', `${gauge} THWN-2`,
         `THWN2-${gaugeNum}`,
         `${gauge} THWN-2 — AC wiring (${runLabel})`,
         qty, 'ft', 'NEC 310.15 / 250.122',
-        `Sum(runs[${runLabel}].length x (conductors+1) x 1.15)`,
-        `${gauge} AC runs x 1.15`, true));
+        `Sum(length x conductors x 1.15)`,
+        `${gauge} wire runs x 1.15`, true));
       log.push({ stageId: 'ac', category: 'wire', item: `${gauge} THWN-2`,
         quantity: qty, derivedFrom: runLabel,
-        formula: 'Sum(length x (conductors+1) x 1.15)', necReference: 'NEC 310.15 / 250.122' });
+        formula: 'Sum(length x conductors x 1.15)', necReference: 'NEC 310.15 / 250.122' });
     }
 
     // ── Group ALL runs by conduit type+size → one conduit line item per type/size ──

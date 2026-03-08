@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v30.2';
+export const BUILD_VERSION = 'v30.3';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'BOM WIRE FIX — Per-gauge line items match summary card quantities';
+export const BUILD_DESCRIPTION = 'BOM WIRE FIX — EGC separate gauge handling, matches calcBOMFromSegments exactly';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
