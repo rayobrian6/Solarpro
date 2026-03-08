@@ -229,7 +229,7 @@ const defaultProject: ProjectConfig = {
   roofType: 'shingle', mountingId: 'ironridge-xr100',
   wireGauge: '#10 AWG THWN-2', conduitType: 'EMT', wireLength: 50,
   windSpeed: 115, windExposure: 'C', groundSnowLoad: 20, roofPitch: 20,
-  rafterSpacing: 24, rafterSpan: 16, rafterSize: '2x6', rafterSpecies: 'Douglas Fir-Larch',
+  rafterSpacing: 24, rafterSpan: 12, rafterSize: '2x6', rafterSpecies: 'Douglas Fir-Larch',
   framingType: 'unknown',  // V2 structural engine — auto-detected or user-specified
   attachmentSpacing: 48, railSpacing: 60, notes: '',
   interconnectionMethod: 'LOAD_SIDE', panelBusRating: 200,
@@ -3787,17 +3787,20 @@ export default function EngineeringPage() {
                 if (batteryBackfeedADisplay > 0) {
                   const batModel = config.batteryModel || 'Battery Storage';
                   const batMfr   = config.batteryBrand || '';
-                  const totalBusLoad = feederOcpdAmps + batteryBackfeedADisplay + (config.mainPanelAmps ?? 200);
+                  // NEC 705.12(B)(2): ALL backfeed breakers (solar + battery) ≤ (busRating × 1.2) - mainBreaker
+                  // The main breaker is NOT added to the load — it defines the limit
                   const busRating = config.panelBusRating ?? config.mainPanelAmps ?? 200;
-                  const busMax = busRating * 1.2;
-                  const busPass = totalBusLoad <= busMax;
+                  const mainBreaker = config.mainPanelAmps ?? 200;
+                  const totalBackfeedA = feederOcpdAmps + batteryBackfeedADisplay;
+                  const busMax = (busRating * 1.2) - mainBreaker;
+                  const busPass = totalBackfeedA <= busMax;
                   steps.push({
                     num: steps.length + 1,
                     title: 'Battery Backfeed — NEC 705.12(B) Bus Loading',
                     nec: 'NEC 705.12(B)',
-                    formula: `Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A + Main ${config.mainPanelAmps ?? 200}A = ${totalBusLoad}A vs ${busRating}A bus × 120% = ${busMax}A max`,
-                    result: busPass ? `PASS — ${totalBusLoad}A ≤ ${busMax}A` : `FAIL — ${totalBusLoad}A > ${busMax}A`,
-                    detail: `${batMfr} ${batModel} — ${batteryBackfeedADisplay}A dedicated backfeed breaker (NEC 705.12(B)). AC-coupled battery backfeed breakers add to bus loading.`,
+                    formula: `Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A = ${totalBackfeedA}A vs (${busRating}A bus × 120%) − ${mainBreaker}A main = ${busMax}A max`,
+                    result: busPass ? `PASS — ${totalBackfeedA}A ≤ ${busMax}A` : `FAIL — ${totalBackfeedA}A > ${busMax}A`,
+                    detail: `${batMfr} ${batModel} — ${batteryBackfeedADisplay}A dedicated backfeed breaker (NEC 705.12(B)). NEC 705.12(B)(2): sum of all backfeed breakers must not exceed (bus rating × 120%) minus main breaker rating.`,
                     color: busPass ? 'emerald' : 'red',
                   } as any);
                 }

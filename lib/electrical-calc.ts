@@ -667,7 +667,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     interconnectionPasses = icSolarBreaker <= maxAllowedSolarBreaker;
 
     if (interconnectionPasses) {
-      interconnectionMessage = `120% Rule: PASS — Solar breaker (${icSolarBreaker}A) ≤ max allowed (${maxAllowedSolarBreaker}A) on ${icBusRating}A bus`;
+      interconnectionMessage = `120% Rule: PASS — Total backfeed (${icSolarBreaker}A) ≤ max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max`;
       allInfos.push({
         code: 'I-BUSBAR-OK',
         severity: 'info',
@@ -675,7 +675,7 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
         necReference: interconnectionNecRef,
       });
     } else {
-      interconnectionMessage = `120% Busbar Rule Violation. Required backfeed (${icSolarBreaker}A) exceeds maximum allowed (${maxAllowedSolarBreaker}A) on ${icBusRating}A bus with ${icMainBreaker}A main breaker.`;
+      interconnectionMessage = `120% Busbar Rule Violation. Total backfeed (${icSolarBreaker}A) exceeds max allowed (${maxAllowedSolarBreaker}A). Formula: (${icBusRating}A bus × 120%) − ${icMainBreaker}A main = ${maxAllowedSolarBreaker}A max. Options: supply-side tap, derate main breaker, or upgrade panel bus.`;
       interconnectionIssues.push({
         code: 'E-BUSBAR-120',
         severity: 'error',

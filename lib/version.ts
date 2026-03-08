@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v29.5';
+export const BUILD_VERSION = 'v29.6';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'NATIONAL PLATFORM UPGRADE — ALL 50 STATES + CO-OPS';
+export const BUILD_DESCRIPTION = 'COMPLIANCE ENGINE FIXES — NEC 705.12(B) + STRUCTURAL DEFAULTS';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -52,6 +52,10 @@ export const BUILD_FEATURES = [
   'DATA: IA — 30+ utilities including all major co-ops (Allamakee-Clayton, Boone Valley, Eastern Iowa, etc.)',
   'DATA: IN — 35+ utilities including all REMCs (Bartholomew, Boone, Carroll White, Daviess-Martin, etc.)',
   'DATA: GA — 30+ utilities including all EMCs (Cobb, Sawnee, Jackson, Walton, Snapping Shoals, etc.)',
+  // Phase 13: Compliance Engine Fixes
+  'FIX: Battery Backfeed NEC 705.12(B) — correct formula: Solar+Battery ≤ (Bus×1.2)−Main [was wrongly adding Main to load]',
+  'FIX: Default rafterSpan 16ft → 12ft — 2×6 at 16ft always failed with snow load; 12ft is typical residential',
+  'FIX: Busbar violation message — now shows full formula + remediation options (supply-side tap, derate, upgrade)',
 ] as const;
 
 export function getBuildBadge(): string {
