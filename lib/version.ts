@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v29.3';
+export const BUILD_VERSION = 'v29.5';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'NATIONAL PLATFORM UPGRADE — ALL 50 STATES';
+export const BUILD_DESCRIPTION = 'NATIONAL PLATFORM UPGRADE — ALL 50 STATES + CO-OPS';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -42,6 +42,16 @@ export const BUILD_FEATURES = [
   'NEW: Projects/New — Utility auto-detection display (name, rate, net metering status)',
   // Phase 11: National Scalability
   'UPGRADE: types/index.ts — Project type extended with stateCode, city, county, zip, utilityName, utilityRatePerKwh',
+  // Phase 12: Co-op Expansion + Address Auto-Detection
+  'UPGRADE: lib/utilityDetector.ts — All 50 states now include electric co-ops, REMCs, EMCs, REAs, PUDs, municipal utilities',
+  'NEW: Engineering — Address onBlur auto-detects state + city + auto-selects first utility',
+  'NEW: Engineering — State dropdown auto-selects first utility when state changes',
+  'NEW: Engineering — Auto-detected badge shown when state matches address',
+  'DATA: IL — 25 utilities including all major co-ops (Adams, Coles-Moultrie, Corn Belt, Eastern Illini, Egyptian, etc.)',
+  'DATA: TX — 55+ utilities including all major co-ops (Pedernales, Bluebonnet, CoServ, Guadalupe Valley, etc.)',
+  'DATA: IA — 30+ utilities including all major co-ops (Allamakee-Clayton, Boone Valley, Eastern Iowa, etc.)',
+  'DATA: IN — 35+ utilities including all REMCs (Bartholomew, Boone, Carroll White, Daviess-Martin, etc.)',
+  'DATA: GA — 30+ utilities including all EMCs (Cobb, Sawnee, Jackson, Walton, Snapping Shoals, etc.)',
 ] as const;
 
 export function getBuildBadge(): string {

@@ -1,47 +1,16 @@
-/**
- * lib/utilityDetector.ts
- * National Utility Detection — finds electric utility provider from lat/lng
- * using NREL URDB API with comprehensive state-level fallback data.
- */
+#!/usr/bin/env python3
+"""
+Patch lib/utilityDetector.ts — expand majorUtilities for all 50 states
+to include electric co-ops, municipal utilities, and rural electric associations.
+Also adds address auto-detect logic to engineering page.
+"""
 
-export interface UtilityInfo {
-  utilityId: string;
-  utilityName: string;
-  state: string;
-  serviceTerritory?: string;
-  // Rate data
-  avgRatePerKwh: number;       // $/kWh residential average
-  commercialRatePerKwh: number;
-  // Rate plans available
-  hasResidentialRate: boolean;
-  hasCommercialRate: boolean;
-  hasTouRate: boolean;
-  hasTieredRate: boolean;
-  hasDemandCharge: boolean;
-  // Net metering
-  netMeteringEligible: boolean;
-  netMeteringPolicy: string;
-  netMeteringMaxKw: number;
-  exportCompensationRate: number; // $/kWh for exported energy
-  // Interconnection
-  interconnectionMaxKw: number;
-  interconnectionProcess: string;
-  // Source
-  urdbRateId?: string;
-  source: 'urdb' | 'state_fallback' | 'manual';
-  detectedAt: string;
-}
+import re
 
-export interface UtilityDetectResult {
-  success: boolean;
-  utility?: UtilityInfo;
-  alternatives?: UtilityInfo[];
-  error?: string;
-}
+UTILITY_FILE = 'lib/utilityDetector.ts'
 
-// ── State-level fallback utility data (all 50 states) ────────────────────────
-// Average residential rates from EIA 2024 data
-export const STATE_UTILITY_FALLBACK: Record<string, {
+# Full 50-state utility data with co-ops included
+NEW_FALLBACK = '''export const STATE_UTILITY_FALLBACK: Record<string, {
   avgRate: number;
   commercialRate: number;
   netMetering: boolean;
@@ -71,7 +40,7 @@ export const STATE_UTILITY_FALLBACK: Record<string, {
   LA: { avgRate: 0.108, commercialRate: 0.092, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 25,   exportRate: 0.108, interconnectionMaxKw: 25,   majorUtilities: ['Entergy Louisiana', 'Cleco', 'SWEPCO', 'Beauregard Electric Coop', 'Bossier REC', 'Cajun Electric Power Coop', 'Claiborne Electric Coop', 'Concordia Electric Coop', 'Dixie Electric Membership Corp', 'Jefferson Davis Electric Coop', 'Northeast Louisiana Power Coop', 'Pointe Coupee Electric Membership Corp', 'South Louisiana Electric Coop', 'Valley Electric Membership Corp', 'Washington-St. Tammany Electric Coop'] },
   ME: { avgRate: 0.198, commercialRate: 0.162, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 660,  exportRate: 0.198, interconnectionMaxKw: 660,  majorUtilities: ['Central Maine Power', 'Versant Power', 'Bangor Hydro-Electric', 'Eastern Maine Electric Coop', 'Fox Islands Electric Coop', 'Houlton Water Company', 'Van Buren Light & Power District'] },
   MD: { avgRate: 0.148, commercialRate: 0.122, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 2000, exportRate: 0.148, interconnectionMaxKw: 2000, majorUtilities: ['BGE', 'Pepco', 'Delmarva Power', 'Potomac Edison', 'Choptank Electric Coop', 'Southern Maryland Electric Coop', 'A&N Electric Coop', 'City of Hagerstown Electric', 'City of Thurmont Electric', 'Easton Utilities'] },
-  MA: { avgRate: 0.248, commercialRate: 0.198, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 2000, exportRate: 0.248, interconnectionMaxKw: 2000, majorUtilities: ['Eversource', 'National Grid', 'Unitil', 'Cape Light Compact', 'Belmont Municipal Light', 'Braintree Electric Light', 'Concord Municipal Light Plant', 'Danvers Electric', 'Groton Electric Light', 'Holden Municipal Light', 'Hull Municipal Lighting Plant', 'Littleton Electric Light', 'Mansfield Municipal Electric', 'Marblehead Municipal Light', 'Middleborough Gas & Electric', 'Norwood Municipal Light', 'Peabody Municipal Light', 'Reading Municipal Light', 'Rowley Municipal Light', 'Shrewsbury Electric & Cable', 'Sterling Municipal Light', 'Taunton Municipal Lighting Plant', 'Wakefield Municipal Gas & Light', 'Westfield Gas & Electric', 'Wilmington Municipal Light'] },
+  MA: { avgRate: 0.248, commercialRate: 0.198, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 2000, exportRate: 0.248, interconnectionMaxKw: 2000, majorUtilities: ['Eversource', 'National Grid', 'Unitil', 'Cape Light Compact', 'Belmont Municipal Light', 'Braintree Electric Light', 'Concord Municipal Light Plant', 'Danvers Electric', 'Groton Electric Light', 'Holden Municipal Light', 'Hull Municipal Lighting Plant', 'Littleton Electric Light', 'Mansfield Municipal Electric', 'Marblehead Municipal Light', 'Middleborough Gas & Electric', 'Norwood Municipal Light', 'Peabody Municipal Light', 'Reading Municipal Light', 'Rowley Municipal Light', 'Shrewsbury Electric & Cable', 'Sterling Municipal Light', 'Taunton Municipal Lighting Plant', 'Wakefield Municipal Gas & Light', 'Westfield Gas & Electric', 'Wilmington Municipal Light'] },
   MI: { avgRate: 0.178, commercialRate: 0.148, netMetering: true,  netMeteringPolicy: 'Inflow/Outflow billing', netMeteringMaxKw: 150,  exportRate: 0.09,  interconnectionMaxKw: 150,  majorUtilities: ['DTE Energy', 'Consumers Energy', 'UPPCO', 'Cherryland Electric Coop', 'Cloverland Electric Coop', 'Great Lakes Energy', 'HomeWorks Tri-County Electric Coop', 'Midwest Energy Coop', 'Ontonagon County REA', 'Presque Isle Electric & Gas Coop', 'Thumb Electric Coop', 'Traverse City Light & Power', 'Zeeland Board of Public Works', 'Lansing Board of Water & Light', 'Holland Board of Public Works'] },
   MN: { avgRate: 0.138, commercialRate: 0.112, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 40,   exportRate: 0.138, interconnectionMaxKw: 40,   majorUtilities: ['Xcel Energy', 'Minnesota Power', 'Great Plains Energy', 'Otter Tail Power', 'Connexus Energy', 'Dakota Electric Association', 'East Central Energy', 'Goodhue County Electric Coop', 'Itasca-Mantrap Coop Electrical Association', 'Kandiyohi Power Coop', 'Lake Region Electric Coop', 'McLeod Cooperative Power Association', 'Meeker Cooperative Light & Power', 'Mille Lacs Energy Coop', 'Minnesota Valley Electric Coop', 'Nobles Cooperative Electric', 'North Itasca Electric Coop', 'Peoples Energy Coop', 'Red Lake Electric Coop', 'Redwood Electric Coop', 'Renville-Sibley Cooperative Power', 'Rice-Watonwan Electric Coop', 'Runestone Electric Association', 'South Central Electric Association', 'Stearns Electric Association', 'Todd-Wadena Electric Coop', 'Traverse Electric Coop', 'Wild Rice Electric Coop', 'Wright-Hennepin Cooperative Electric Association'] },
   MS: { avgRate: 0.118, commercialRate: 0.098, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 20,   exportRate: 0.118, interconnectionMaxKw: 20,   majorUtilities: ['Entergy Mississippi', 'Mississippi Power', 'Alcorn County Electric Power Association', 'Bolivar Electric Power Association', 'Coahoma Electric Power Association', 'Coast Electric Power Association', 'Delta Electric Power Association', 'Dixie Electric Power Association', 'Four County Electric Power Association', 'Jones County Electric Power Association', 'Magnolia Electric Power Association', 'Mississippi Delta Electric Power Association', 'North East Mississippi Electric Power Association', 'Pearl River Valley Electric Power Association', 'Singing River Electric Power Association', 'Southwest Mississippi Electric Power Association', 'Tallahatchie Valley Electric Power Association', 'Tippah Electric Power Association', 'Tombigbee Electric Power Association', 'Twin County Electric Power Association'] },
@@ -86,7 +55,7 @@ export const STATE_UTILITY_FALLBACK: Record<string, {
   NC: { avgRate: 0.118, commercialRate: 0.098, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 1000, exportRate: 0.118, interconnectionMaxKw: 1000, majorUtilities: ['Duke Energy Carolinas', 'Duke Energy Progress', 'Dominion Energy NC', 'Blue Ridge Electric Membership Corp', 'Brunswick Electric Membership Corp', 'Cape Hatteras Electric Coop', 'Carteret-Craven Electric Coop', 'Central Electric Membership Corp', 'Edgecombe-Martin County Electric Membership Corp', 'EnergyUnited Electric Membership Corp', 'Four County Electric Membership Corp', 'French Broad Electric Membership Corp', 'Halifax Electric Membership Corp', 'Haywood Electric Membership Corp', 'Jones-Onslow Electric Membership Corp', 'Lumbee River Electric Membership Corp', 'New Hanover County Electric Membership Corp', 'Pee Dee Electric Membership Corp', 'Piedmont Electric Membership Corp', 'Randolph Electric Membership Corp', 'Roanoke Electric Coop', 'Rutherford Electric Membership Corp', 'South River Electric Membership Corp', 'Surry-Yadkin Electric Membership Corp', 'Tideland Electric Membership Corp', 'Tri-County Electric Membership Corp', 'Union Power Coop', 'Wake Electric Membership Corp', 'Yadkin Valley Telephone Membership Corp'] },
   ND: { avgRate: 0.108, commercialRate: 0.092, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 100,  exportRate: 0.108, interconnectionMaxKw: 100,  majorUtilities: ['Xcel Energy ND', 'Montana-Dakota Utilities', 'Otter Tail Power', 'Basin Electric Power Coop', 'Cass County Electric Coop', 'Cavalier Rural Electric Coop', 'Dakotas Electric Coop', 'Dickey Rural Networks', 'Dunn County Electric Coop', 'Emmons-Logan Electric Coop', 'Garrison Diversion Conservancy District', 'KEM Electric Coop', 'McLean Electric Coop', 'Mor-Gran-Sou Electric Coop', 'Mountrail-Williams Electric Coop', 'North Central Electric Coop', 'Nodak Electric Coop', 'Oliver-Mercer Electric Coop', 'Roughrider Electric Coop', 'Slope Electric Coop', 'Tri-County Electric Coop (ND)', 'West Plains Electric Coop'] },
   OH: { avgRate: 0.128, commercialRate: 0.108, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 2000, exportRate: 0.128, interconnectionMaxKw: 2000, majorUtilities: ['AEP Ohio', 'FirstEnergy', 'Duke Energy Ohio', 'Dayton Power & Light', 'Adams Rural Electric Coop', 'Buckeye Rural Electric Coop', 'Carroll Electric Coop (OH)', 'Consolidated Electric Coop (OH)', 'Darke Rural Electric Coop', 'Delaware Rural Electric Coop', 'Firelands Electric Coop', 'Frontier Power', 'Guernsey-Muskingum Electric Coop', 'Hancock-Wood Electric Coop', 'Holmes-Wayne Electric Coop', 'Licking Rural Electrification', 'Lorain-Medina Rural Electric Coop', 'Mid-Ohio Energy Coop', 'North Central Electric Coop (OH)', 'Northwestern Rural Electric Coop', 'Ohio Rural Electric Cooperatives', 'Paulding-Putnam Electric Coop', 'Pioneer Rural Electric Coop', 'South Central Power', 'Tri-County Rural Electric Coop (OH)', 'Union Rural Electric Coop', 'Vinton County Electric Coop', 'Washington Electric Coop (OH)'] },
-  OK: { avgRate: 0.108, commercialRate: 0.092, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 100,  exportRate: 0.108, interconnectionMaxKw: 100,  majorUtilities: ['OG&E', 'PSO', 'OEC', 'Alfalfa Electric Coop', 'Caddo Electric Coop', 'Canadian Valley Electric Coop', 'Central Rural Electric Coop', 'Choctaw Electric Coop', 'Cimarron Electric Coop (OK)', 'Consolidated Rural Electric Coop', 'Cotton Electric Coop', 'Creek Electric Coop', 'East Central Electric Coop', 'Harmon Electric Association', 'Indian Electric Coop', 'Kay Electric Coop', 'Kiamichi Electric Coop', 'Lake Region Electric Coop (OK)', 'Midwest Electric Coop (OK)', 'Northfork Electric Coop', 'Northeast Oklahoma Electric Coop', 'Northwestern Electric Coop', 'Oklahoma Electric Coop', 'Ozarks Electric Coop (OK)', 'Peoples Electric Coop', 'Red River Valley REA', 'Rural Electric Coop', 'Southeastern Electric Coop', 'Southwest Rural Electric Association', 'Verdigris Valley Electric Coop', 'Western Farmers Electric Coop', 'Woodward Electric Coop'] },
+  OK: { avgRate: 0.108, commercialRate: 0.092, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 100,  exportRate: 0.108, interconnectionMaxKw: 100,  majorUtilities: ['OG&E', 'PSO', 'OEC', 'Alfalfa Electric Coop', 'Caddo Electric Coop', 'Canadian Valley Electric Coop', 'Central Rural Electric Coop', 'Choctaw Electric Coop', 'Cimarron Electric Coop (OK)', 'Consolidated Rural Electric Coop', 'Cotton Electric Coop', 'Creek Electric Coop', 'East Central Electric Coop', 'Harmon Electric Association', 'Indian Electric Coop', 'Kay Electric Coop', 'Kiamichi Electric Coop', 'Lake Region Electric Coop (OK)', 'Midwest Electric Coop (OK)', 'Northfork Electric Coop', 'Northeast Oklahoma Electric Coop', 'Northwestern Electric Coop', 'Oklahoma Electric Coop', 'Ozarks Electric Coop (OK)', 'People\'s Electric Coop', 'Red River Valley REA', 'Rural Electric Coop', 'Southeastern Electric Coop', 'Southwest Rural Electric Association', 'Verdigris Valley Electric Coop', 'Western Farmers Electric Coop', 'Woodward Electric Coop'] },
   OR: { avgRate: 0.128, commercialRate: 0.108, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 25,   exportRate: 0.128, interconnectionMaxKw: 25,   majorUtilities: ['PacifiCorp', 'Portland General Electric', 'Pacific Power', 'Blachly-Lane Electric Coop', 'Clatskanie PUD', 'Clearwater Power (OR)', 'Columbia Basin Electric Coop', 'Columbia River PUD', 'Consumers Power', 'Coos-Curry Electric Coop', 'Emerald PUD', 'Eugene Water & Electric Board', 'Harney Electric Coop (OR)', 'Hood River Electric Coop', 'Lane Electric Coop', 'Lincoln Electric Coop', 'Lost River Electric Coop (OR)', 'Midstate Electric Coop', 'Northern Wasco County PUD', 'Oregon Trail Electric Coop', 'Salem Electric', 'Tillamook PUD', 'Umatilla Electric Coop', 'Wasco Electric Coop', 'West Oregon Electric Coop'] },
   PA: { avgRate: 0.148, commercialRate: 0.122, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 50,   exportRate: 0.148, interconnectionMaxKw: 50,   majorUtilities: ['PECO', 'PPL', 'Duquesne Light', 'Met-Ed', 'Penelec', 'Penn Power', 'West Penn Power', 'Adams Electric Coop (PA)', 'Bedford Rural Electric Coop', 'Claverack Rural Electric Coop (PA)', 'New Enterprise Rural Electric Coop', 'Northwestern Rural Electric Coop (PA)', 'Palmerton Telephone', 'Penn Lines', 'Pike Electric Coop', 'REA Energy Coop', 'Sullivan County Rural Electric Coop', 'Tri-County Rural Electric Coop (PA)', 'UGI Utilities', 'Valley Rural Electric Coop', 'Wellsboro Electric Company'] },
   RI: { avgRate: 0.248, commercialRate: 0.198, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 5000, exportRate: 0.248, interconnectionMaxKw: 5000, majorUtilities: ['National Grid RI', 'Pascoag Utility District', 'Block Island Power Company'] },
@@ -102,150 +71,41 @@ export const STATE_UTILITY_FALLBACK: Record<string, {
   WI: { avgRate: 0.178, commercialRate: 0.148, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 20,   exportRate: 0.178, interconnectionMaxKw: 20,   majorUtilities: ['We Energies', 'WPS', 'Alliant Energy WI', 'Madison Gas & Electric', 'Dairyland Power Coop', 'Adams-Columbia Electric Coop', 'Barron Electric Coop', 'Bayfield Electric Coop', 'Buffalo-Jackson Electric Coop', 'Central Wisconsin Electric Coop', 'Clark Electric Coop (WI)', 'Dunn Energy Coop', 'Eau Claire Energy Coop', 'Jump River Electric Coop', 'Kickapoo Valley Electric Coop', 'Lakelands Electric Coop', 'Oakdale Electric Coop', 'Polk-Burnett Electric Coop', 'Price Electric Coop', 'Richland Electric Coop', 'Rock Energy Coop', 'Scenic Rivers Energy Coop', 'Taylor Electric Coop (WI)', 'Tri-County Electric Coop (WI)', 'Vernon Electric Coop', 'Viroqua Electric Coop', 'Westby Cooperative Electric Association', 'Wisconsin Electric Coop', 'Wood County Electric Coop (WI)'] },
   WY: { avgRate: 0.108, commercialRate: 0.092, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 25,   exportRate: 0.108, interconnectionMaxKw: 25,   majorUtilities: ['Rocky Mountain Power', 'Black Hills Energy WY', 'Bridger Valley Electric Association', 'Carbon Power & Light (WY)', 'High West Energy', 'Highline Electric Association (WY)', 'Lower Valley Energy', 'Niobrara Electric Association', 'Powder River Energy Corp', 'Tri-County Electric Association (WY)', 'Wheatland Rural Electric Association', 'Wyrulec Company'] },
   DC: { avgRate: 0.168, commercialRate: 0.138, netMetering: true,  netMeteringPolicy: 'Net metering at retail rate', netMeteringMaxKw: 1000, exportRate: 0.168, interconnectionMaxKw: 1000, majorUtilities: ['Pepco'] },
-};
+};'''
 
-// ── URDB API lookup ───────────────────────────────────────────────────────────
-async function lookupUrdb(lat: number, lng: number, stateCode: string): Promise<UtilityInfo | null> {
-  const apiKey = process.env.NREL_API_KEY || 'DEMO_KEY';
-  try {
-    const url = `https://developer.nrel.gov/api/utility_rates/v3.json?api_key=${apiKey}&lat=${lat}&lon=${lng}&radius=0&limit=5`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const outputs = data?.outputs;
-    if (!outputs) return null;
+with open(UTILITY_FILE, 'r') as f:
+    content = f.read()
 
-    const utilityName = outputs.utility_name || outputs.company_id || 'Unknown Utility';
-    const avgRate = parseFloat(outputs.residential || outputs.commercial || '0.13');
-    const commercialRate = parseFloat(outputs.commercial || outputs.residential || '0.11');
+# Find and replace the STATE_UTILITY_FALLBACK block
+start_marker = 'export const STATE_UTILITY_FALLBACK: Record<string, {'
+end_marker = '};'
 
-    const fallback = STATE_UTILITY_FALLBACK[stateCode];
+start_idx = content.find(start_marker)
+if start_idx == -1:
+    print("ERROR: Could not find STATE_UTILITY_FALLBACK start")
+    exit(1)
 
-    return {
-      utilityId: String(outputs.utility_id || outputs.company_id || ''),
-      utilityName,
-      state: stateCode,
-      serviceTerritory: outputs.county || '',
-      avgRatePerKwh: avgRate || fallback?.avgRate || 0.13,
-      commercialRatePerKwh: commercialRate || fallback?.commercialRate || 0.11,
-      hasResidentialRate: true,
-      hasCommercialRate: true,
-      hasTouRate: false,
-      hasTieredRate: stateCode === 'CA' || stateCode === 'NY',
-      hasDemandCharge: false,
-      netMeteringEligible: fallback?.netMetering ?? true,
-      netMeteringPolicy: fallback?.netMeteringPolicy || 'Net metering at retail rate',
-      netMeteringMaxKw: fallback?.netMeteringMaxKw || 25,
-      exportCompensationRate: fallback?.exportRate || avgRate,
-      interconnectionMaxKw: fallback?.interconnectionMaxKw || 25,
-      interconnectionProcess: 'Standard interconnection application',
-      urdbRateId: String(outputs.utility_id || ''),
-      source: 'urdb',
-      detectedAt: new Date().toISOString(),
-    };
-  } catch {
-    return null;
-  }
-}
+# Find the closing }; after the start
+# We need to find the matching closing brace
+search_from = start_idx + len(start_marker)
+# Find the end of the object - look for "};" at the start of a line after the data
+end_idx = content.find('\n};\n', search_from)
+if end_idx == -1:
+    end_idx = content.find('\n};\n\n', search_from)
+if end_idx == -1:
+    print("ERROR: Could not find STATE_UTILITY_FALLBACK end")
+    exit(1)
 
-// ── Main detect function ──────────────────────────────────────────────────────
-export async function detectUtility(
-  lat: number,
-  lng: number,
-  stateCode: string,
-  city?: string,
-): Promise<UtilityDetectResult> {
-  // 1. Try URDB API
-  const urdbResult = await lookupUrdb(lat, lng, stateCode);
-  if (urdbResult) {
-    return { success: true, utility: urdbResult };
-  }
+end_idx += 4  # include the "};\n"
 
-  // 2. Fall back to state-level data
-  const fallback = STATE_UTILITY_FALLBACK[stateCode];
-  if (!fallback) {
-    return { success: false, error: `No utility data for state: ${stateCode}` };
-  }
+old_block = content[start_idx:end_idx]
+print(f"Found block from {start_idx} to {end_idx}, length {len(old_block)}")
+print(f"First 100 chars: {old_block[:100]}")
+print(f"Last 100 chars: {old_block[-100:]}")
 
-  const utilityName = fallback.majorUtilities[0] || `${stateCode} Electric Utility`;
+new_content = content[:start_idx] + NEW_FALLBACK + '\n' + content[end_idx:]
 
-  return {
-    success: true,
-    utility: {
-      utilityId: `state_${stateCode}`,
-      utilityName,
-      state: stateCode,
-      avgRatePerKwh: fallback.avgRate,
-      commercialRatePerKwh: fallback.commercialRate,
-      hasResidentialRate: true,
-      hasCommercialRate: true,
-      hasTouRate: ['CA', 'NY', 'MA', 'CT', 'NJ', 'IL'].includes(stateCode),
-      hasTieredRate: ['CA', 'NY', 'HI', 'MA'].includes(stateCode),
-      hasDemandCharge: false,
-      netMeteringEligible: fallback.netMetering,
-      netMeteringPolicy: fallback.netMeteringPolicy,
-      netMeteringMaxKw: fallback.netMeteringMaxKw,
-      exportCompensationRate: fallback.exportRate,
-      interconnectionMaxKw: fallback.interconnectionMaxKw,
-      interconnectionProcess: 'Standard interconnection application',
-      source: 'state_fallback',
-      detectedAt: new Date().toISOString(),
-    },
-    alternatives: fallback.majorUtilities.slice(1).map((name, i) => ({
-      utilityId: `state_${stateCode}_${i + 1}`,
-      utilityName: name,
-      state: stateCode,
-      avgRatePerKwh: fallback.avgRate,
-      commercialRatePerKwh: fallback.commercialRate,
-      hasResidentialRate: true,
-      hasCommercialRate: true,
-      hasTouRate: false,
-      hasTieredRate: false,
-      hasDemandCharge: false,
-      netMeteringEligible: fallback.netMetering,
-      netMeteringPolicy: fallback.netMeteringPolicy,
-      netMeteringMaxKw: fallback.netMeteringMaxKw,
-      exportCompensationRate: fallback.exportRate,
-      interconnectionMaxKw: fallback.interconnectionMaxKw,
-      interconnectionProcess: 'Standard interconnection application',
-      source: 'state_fallback' as const,
-      detectedAt: new Date().toISOString(),
-    })),
-  };
-}
+with open(UTILITY_FILE, 'w') as f:
+    f.write(new_content)
 
-// ── Get rate summary for display ─────────────────────────────────────────────
-export function getUtilityRateSummary(utility: UtilityInfo): string {
-  const parts: string[] = [];
-  if (utility.hasTieredRate) parts.push('Tiered');
-  if (utility.hasTouRate) parts.push('TOU');
-  if (utility.hasDemandCharge) parts.push('Demand');
-  if (!parts.length) parts.push('Flat Rate');
-  return parts.join(' + ');
-}
-// ── National utility list by state (for dropdowns) ────────────────────────────
-export interface UtilityOption {
-  id: string;
-  name: string;
-  avgRatePerKwh: number;
-  netMeteringEligible: boolean;
-  netMeteringPolicy: string;
-  netMeteringMaxKw: number;
-  exportRate: number;
-  interconnectionMaxKw: number;
-}
-
-export function getUtilitiesByStateNational(stateCode: string): UtilityOption[] {
-  const fallback = STATE_UTILITY_FALLBACK[stateCode];
-  if (!fallback) return [];
-  return fallback.majorUtilities.map((name, i) => ({
-    id: `${stateCode.toLowerCase()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')}`,
-    name,
-    avgRatePerKwh: fallback.avgRate,
-    netMeteringEligible: fallback.netMetering,
-    netMeteringPolicy: fallback.netMeteringPolicy,
-    netMeteringMaxKw: fallback.netMeteringMaxKw,
-    exportRate: fallback.exportRate,
-    interconnectionMaxKw: fallback.interconnectionMaxKw,
-  }));
-}
+print("✅ STATE_UTILITY_FALLBACK updated with full co-op data for all 50 states")

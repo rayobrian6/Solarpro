@@ -25,6 +25,52 @@ import { getUtilitiesByStateNational, STATE_UTILITY_FALLBACK } from '@/lib/utili
 import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 
+// ── Auto-detect state + utility from address string ──────────────────────────
+function parseStateFromAddress(address: string): string | null {
+  if (!address) return null;
+  // Match "City, ST 12345" or "City, ST" or ", ST " patterns
+  const stateAbbrevMatch = address.match(/,\s*([A-Z]{2})(?:\s+\d{5})?(?:\s*,|\s*$)/);
+  if (stateAbbrevMatch) {
+    const code = stateAbbrevMatch[1];
+    const validStates = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID',
+      'IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV',
+      'NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT',
+      'VT','VA','WA','WV','WI','WY','DC'];
+    if (validStates.includes(code)) return code;
+  }
+  // Match full state names
+  const stateNames: Record<string, string> = {
+    'alabama':'AL','alaska':'AK','arizona':'AZ','arkansas':'AR','california':'CA',
+    'colorado':'CO','connecticut':'CT','delaware':'DE','florida':'FL','georgia':'GA',
+    'hawaii':'HI','idaho':'ID','illinois':'IL','indiana':'IN','iowa':'IA','kansas':'KS',
+    'kentucky':'KY','louisiana':'LA','maine':'ME','maryland':'MD','massachusetts':'MA',
+    'michigan':'MI','minnesota':'MN','mississippi':'MS','missouri':'MO','montana':'MT',
+    'nebraska':'NE','nevada':'NV','new hampshire':'NH','new jersey':'NJ','new mexico':'NM',
+    'new york':'NY','north carolina':'NC','north dakota':'ND','ohio':'OH','oklahoma':'OK',
+    'oregon':'OR','pennsylvania':'PA','rhode island':'RI','south carolina':'SC',
+    'south dakota':'SD','tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT',
+    'virginia':'VA','washington':'WA','west virginia':'WV','wisconsin':'WI','wyoming':'WY',
+    'district of columbia':'DC','washington dc':'DC','washington d.c.':'DC',
+  };
+  const lower = address.toLowerCase();
+  for (const [name, code] of Object.entries(stateNames)) {
+    if (lower.includes(name)) return code;
+  }
+  return null;
+}
+
+function parseCityFromAddress(address: string): string | null {
+  if (!address) return null;
+  // "123 Main St, Chicago, IL 60601" → "Chicago"
+  const parts = address.split(',').map(p => p.trim());
+  if (parts.length >= 2) {
+    // Second-to-last part before state is usually city
+    const cityPart = parts[parts.length - 2];
+    if (cityPart && !/^\d/.test(cityPart)) return cityPart;
+  }
+  return null;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 type InverterType = 'string' | 'micro' | 'optimizer';
 type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' | 'flat_tpo' | 'flat_epdm' | 'flat_gravel';
@@ -2035,13 +2081,41 @@ export default function EngineeringPage() {
                       <label className="text-xs text-slate-400 mb-1 block">{f.label}</label>
                       <input type={f.type || 'text'} value={(config as any)[f.key]} placeholder={f.placeholder || ''}
                         onChange={e => updateConfig({ [f.key]: e.target.value } as any)}
+                        onBlur={f.key === 'address' ? (e) => {
+                          const addr = e.target.value;
+                          if (!addr) return;
+                          const detectedState = parseStateFromAddress(addr);
+                          const detectedCity = parseCityFromAddress(addr);
+                          if (detectedState && !config.state) {
+                            const updates: any = { state: detectedState };
+                            if (detectedCity && !config.city) updates.city = detectedCity;
+                            // Auto-select first utility for detected state
+                            const utils = getUtilitiesByStateNational(detectedState);
+                            if (utils.length > 0 && !config.utilityId) {
+                              updates.utilityId = utils[0].id;
+                            }
+                            updateConfig(updates);
+                          }
+                        } : undefined}
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60" />
                     </div>
                   ))}
                   {/* State / Jurisdiction Selector — fixes Utility/AHJ "Unknown" issue */}
                   <div>
-                    <label className="text-xs text-slate-400 mb-1 block">State / Jurisdiction</label>
-                    <select value={config.state} onChange={e => updateConfig({ state: e.target.value })}
+                    <label className="text-xs text-slate-400 mb-1 block flex items-center gap-2">
+                      State / Jurisdiction
+                      {config.state && config.address && parseStateFromAddress(config.address) === config.state && (
+                        <span className="text-emerald-400 text-xs font-normal">✓ auto-detected</span>
+                      )}
+                    </label>
+                    <select value={config.state} onChange={e => {
+                      const newState = e.target.value;
+                      const updates: any = { state: newState, utilityId: '' };
+                      // Auto-select first utility when state changes
+                      const utils = getUtilitiesByStateNational(newState);
+                      if (utils.length > 0) updates.utilityId = utils[0].id;
+                      updateConfig(updates);
+                    }}
                       className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/60">
                       <option value="">— Select State —</option>
                       {[
