@@ -1,26 +1,25 @@
-# SolarPro v30.7 — Performance + Ground Array + AI Support Bot
+# SolarPro v30.9 — Panel Placement Engine Upgrade
 
-## Task A: 3D Performance Optimizations
-- [x] A.1 React.memo on SolarEngine3D with custom comparison
-- [x] A.2 Dynamic shadow map resolution based on camera height
-- [x] A.3 Tile loading tuning (maximumScreenSpaceError, preloadFlightDestinations)
-- [x] A.4 In-place entity position update (avoid remove+re-add for position changes)
-- [x] A.5 Dynamic debounce window based on panel count delta
+## Phase 1: New Placement Engine Library
+- [ ] 1.1 Create lib/placementEngine.ts — grid snapping, setback zones, orientation, row generation
+- [ ] 1.2 Add orientation ('portrait'|'landscape') to PlacedPanel type + DesignToolState
+- [ ] 1.3 Add setback config type (FireSetbackConfig) to types/index.ts
 
-## Task B: Ground Array Mode (Chained Rows with Auto-Spacing)
-- [x] B.1 Add calcMinRowSpacing() formula (winter solstice, tilt + latitude)
-- [x] B.2 Add 'ground_array' PlacementMode to SolarEngine3D
-- [x] B.3 Implement handleGroundArrayClick() — chained row placement with auto-offset
-- [x] B.4 Add ghost/preview rendering for next row position
-- [x] B.5 Add Ground Array button to 3D toolbar with row count display
-- [x] B.6 Add confirmation card (panel count, kW, rows × panels)
+## Phase 2: DesignStudio Upgrades
+- [ ] 2.1 Add orientation toggle (Portrait/Landscape) to sidebar + toolbar
+- [ ] 2.2 Add fire setback controls (edge/ridge/pathway) to sidebar
+- [ ] 2.3 Upgrade autoPlacePanels() to use new engine with setbacks + orientation
+- [ ] 2.4 Upgrade fillRoof() to use fire-code setbacks + orientation
+- [ ] 2.5 Add multi-row placement tool (row count selector + auto-generate rows)
+- [ ] 2.6 Add setback zone overlay rendering on canvas (red/green zones)
+- [ ] 2.7 Add grid snap visual feedback on canvas
 
-## Task C: Free AI Support Bot
-- [x] C.1 Research and select best free AI chat option (rule-based, zero cost)
-- [x] C.2 Create SolarAIBot component with solar knowledge base
-- [ ] C.3 Integrate SolarAIBot into app layout (floating widget on all pages)
+## Phase 3: panelLayoutOptimized.ts Upgrades
+- [ ] 3.1 Add orientation support (portrait/landscape swaps width/height)
+- [ ] 3.2 Add azimuth-aligned grid rotation for roof arrays
+- [ ] 3.3 Add fire setback inset to generateRoofLayoutOptimized()
 
-## Final Steps
-- [ ] D.1 TypeScript compile check — zero errors
-- [ ] D.2 Full build — clean
-- [ ] D.3 Bump version to v30.7, package ZIP, push to git
+## Phase 4: Build + Version
+- [ ] 4.1 TypeScript compile check — zero errors
+- [ ] 4.2 Full build — clean
+- [ ] 4.3 Bump version to v30.9, package ZIP, push to git

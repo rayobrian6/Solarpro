@@ -160,6 +160,8 @@ export interface PlacedPanel {
   roll?: number;               // degrees roll
   systemType?: 'roof' | 'ground' | 'fence';
   arrayId?: string;
+  // v30.9: Panel orientation (portrait = tall, landscape = wide)
+  orientation?: 'portrait' | 'landscape';
 }
 
 // ─── Roof Plane ───────────────────────────────────────────────
@@ -360,6 +362,25 @@ export type DrawingMode =
   | 'place_panels' 
   | 'measure';
 
+// ─── Fire Setback Config ──────────────────────────────────────────────────────
+export interface FireSetbackConfig {
+  /** Minimum distance from roof edge in meters (default: 0.457m = 18 inches) */
+  edgeSetbackM: number;
+  /** Firefighter pathway width in meters (default: 0.914m = 36 inches) */
+  pathwayWidthM: number;
+  /** Ridge setback in meters (default: 0.457m = 18 inches) */
+  ridgeSetbackM: number;
+  /** Whether to enforce pathway requirement */
+  enforcePathway: boolean;
+}
+
+export const DEFAULT_FIRE_SETBACKS: FireSetbackConfig = {
+  edgeSetbackM: 0.457,
+  pathwayWidthM: 0.914,
+  ridgeSetbackM: 0.457,
+  enforcePathway: true,
+};
+
 export interface DesignToolState {
   mode: DrawingMode;
   systemType: SystemType;
@@ -373,4 +394,7 @@ export interface DesignToolState {
   bifacialGain: number;
   showShadows: boolean;
   show3D: boolean;
+  // v30.9 additions
+  orientation?: 'portrait' | 'landscape';
+  fireSetbacks?: FireSetbackConfig;
 }

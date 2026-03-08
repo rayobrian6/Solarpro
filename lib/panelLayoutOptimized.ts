@@ -158,8 +158,18 @@ export function generateRoofLayoutOptimized(params: {
   rowSpacing: number;
   tilt: number;
   azimuth: number;
+  /** v30.9: panel orientation — portrait (default) or landscape */
+  orientation?: 'portrait' | 'landscape';
+  /** v30.9: fire setback edge override (overrides setback if larger) */
+  fireSetbackM?: number;
 }): PlacedPanel[] {
-  const { layoutId, roofPlane, panel, setback, panelSpacing, rowSpacing, tilt, azimuth } = params;
+  const { layoutId, roofPlane, panel, panelSpacing, rowSpacing, tilt, azimuth } = params;
+  // v30.9: use fire setback if larger than manual setback
+  const setback = Math.max(params.setback, params.fireSetbackM ?? 0);
+  // v30.9: orientation-aware panel dimensions
+  const orientation = params.orientation ?? 'portrait';
+  const panelW = orientation === 'landscape' ? panel.height : panel.width;
+  const panelH = orientation === 'landscape' ? panel.width : panel.height;
 
   if (roofPlane.vertices.length < 3) return [];
 
@@ -167,8 +177,9 @@ export function generateRoofLayoutOptimized(params: {
   const baseLat = roofPlane.vertices.reduce((s, v) => s + v.lat, 0) / roofPlane.vertices.length;
   const mPerDegLng = metersPerDegLng(baseLat);
 
-  const panelWidthDeg  = panel.width  / mPerDegLng;
-  const panelHeightDeg = panel.height / METERS_PER_DEG_LAT;
+  // v30.9: use orientation-aware dimensions (panelW/panelH set above)
+  const panelWidthDeg  = panelW / mPerDegLng;
+  const panelHeightDeg = panelH / METERS_PER_DEG_LAT;
   const rowSpacingDeg  = rowSpacing   / METERS_PER_DEG_LAT;
   const colSpacingDeg  = panelSpacing / mPerDegLng;
   const setbackLatDeg  = setback / METERS_PER_DEG_LAT;
@@ -195,21 +206,22 @@ export function generateRoofLayoutOptimized(params: {
   const cacheKey = makeGridCacheKey({
     polygonHash,
     setback,
-    panelW: panel.width,
-    panelH: panel.height,
+    panelW,
+    panelH,
     panelSpacing,
     rowSpacing,
   });
 
   const cached = getCachedGrid(cacheKey);
   if (cached) {
-    // Re-stamp with new layoutId, tilt, azimuth (geometry is same, metadata differs)
+    // Re-stamp with new layoutId, tilt, azimuth, orientation (geometry is same, metadata differs)
     return cached.map(p => ({
       ...p,
       id: uuidv4(),
       layoutId,
       tilt,
       azimuth,
+      orientation,
     }));
   }
 
@@ -236,14 +248,15 @@ export function generateRoofLayoutOptimized(params: {
           layoutId,
           lat: centerLat,
           lng: centerLng,
-          x: col * (panel.width + panelSpacing),
-          y: row * (panel.height + rowSpacing),
+          x: col * (panelW + panelSpacing),
+          y: row * (panelH + rowSpacing),
           tilt,
           azimuth,
           wattage: panel.wattage,
           bifacialGain: panel.bifacialFactor,
           row,
           col,
+          orientation,
         });
       }
     }
@@ -267,8 +280,13 @@ export function generateGroundLayoutOptimized(params: {
   panelSpacing: number;
   panelsPerRow: number;
   groundHeight: number;
+  /** v30.9: panel orientation */
+  orientation?: 'portrait' | 'landscape';
 }): PlacedPanel[] {
   const { layoutId, area, panel, tilt, azimuth, rowSpacing, panelSpacing } = params;
+  const orientation = params.orientation ?? 'portrait';
+  const panelW = orientation === 'landscape' ? panel.height : panel.width;
+  const panelH = orientation === 'landscape' ? panel.width : panel.height;
 
   if (area.length < 2) return [];
 
@@ -284,11 +302,12 @@ export function generateGroundLayoutOptimized(params: {
   const baseLat = (minLat + maxLat) / 2;
   const mPerDegLng = metersPerDegLng(baseLat);
 
-  const panelWidthDeg  = panel.width  / mPerDegLng;
-  const panelHeightDeg = panel.height / METERS_PER_DEG_LAT;
+  // v30.9: use orientation-aware dimensions
+  const panelWidthDeg  = panelW / mPerDegLng;
+  const panelHeightDeg = panelH / METERS_PER_DEG_LAT;
 
   // Row spacing accounts for tilt shadow
-  const shadowLength = panel.height * Math.cos(tilt * DEG_TO_RAD);
+  const shadowLength = panelH * Math.cos(tilt * DEG_TO_RAD);
   const effectiveRowSpacing = Math.max(rowSpacing, shadowLength + 0.5);
   const rowSpacingDeg = effectiveRowSpacing / METERS_PER_DEG_LAT;
   const colSpacingDeg = panelSpacing / mPerDegLng;
@@ -319,14 +338,15 @@ export function generateGroundLayoutOptimized(params: {
         layoutId,
         lat: lat + halfH,
         lng: lng + halfW,
-        x: col * (panel.width + panelSpacing),
-        y: row * (panel.height + effectiveRowSpacing),
+        x: col * (panelW + panelSpacing),
+        y: row * (panelH + effectiveRowSpacing),
         tilt,
         azimuth,
         wattage: panel.wattage,
         bifacialGain: panel.bifacialFactor,
         row,
         col,
+        orientation,
       });
     }
   }

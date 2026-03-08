@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v30.8';
+export const BUILD_VERSION = 'v31.0';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = '3D PERF v2 + GROUND ARRAY MODE + AI SUPPORT BOT — React.memo, dynamic shadow map, camera optimizer, in-place entity update, dynamic debounce, chained ground array rows, free AI chat widget';
+export const BUILD_DESCRIPTION = 'PANEL PLACEMENT ENGINE v2 — Grid snapping, portrait/landscape orientation, fire setbacks (AHJ-configurable), auto-fill roof, multi-row placement tool, setback zone overlay, azimuth-aligned grid';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -84,6 +84,23 @@ export const BUILD_FEATURES = [
   'NEW: SolarAIBot — Covers: NEC wire sizing, panel placement, battery/generator wiring, BOM, SLD, proposals, incentives',
   'NEW: SolarAIBot — Quick replies, typing indicator, markdown formatting, floating button with unread badge',
   'NEW: app/layout.tsx — SolarAIBot integrated as global floating widget on all pages',
+  // Phase 17: v30.9 — Panel Placement Engine v2
+  'NEW: lib/placementEngine.ts — Grid snapping, orientation-aware layout, fire setback zones, multi-row placement',
+  'NEW: PanelOrientation — portrait/landscape toggle swaps panel width/height for all layout calculations',
+  'NEW: FireSetbackConfig — AHJ-configurable edge (18″), ridge (18″), pathway (36″) setbacks with per-AHJ override',
+  'NEW: generateSetbackZones() — red restricted / green buildable polygon overlays on canvas',
+  'NEW: generateAlignedGrid() — azimuth-rotated grid engine (ENU local frame + rotation + PIP test)',
+  'NEW: generateMultipleRows() — multi-row placement from start/end line with auto row spacing',
+  'NEW: calcMinRowSpacing() — winter solstice shadow formula (same as SolarEngine3D)',
+  'NEW: snapToGrid() — invisible grid snapping anchored to first panel of array',
+  'UPGRADE: panelLayoutOptimized.ts — orientation + fireSetbackM params, cache key uses panelW/panelH',
+  'UPGRADE: DesignStudio — Portrait/Landscape toggle in Configuration sidebar',
+  'UPGRADE: DesignStudio — Fire setback controls (edge/ridge sliders + pathway toggle) in sidebar',
+  'UPGRADE: DesignStudio — Multi-row placement tool (⊞ toolbar button + row count selector)',
+  'UPGRADE: DesignStudio — Setback zone overlay rendering (red/green zones on canvas)',
+  'UPGRADE: DesignStudio — Multi-row guide line with cursor tracking on canvas',
+  'UPGRADE: DesignStudio — Multi-row hint banner (top-center overlay when tool active)',
+  'SAFE: All new features are additive — panel classification, BOM, proposals, engineering unchanged',
 ] as const;
 
 export function getBuildBadge(): string {

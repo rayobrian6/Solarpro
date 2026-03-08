@@ -6,6 +6,16 @@ import type {
 } from '@/types';
 import { generateFenceLayout, calculateSystemSize, polygonAreaM2 } from '@/lib/panelLayout';
 import { generateRoofLayoutOptimized, generateGroundLayoutOptimized, clearGridCache } from '@/lib/panelLayoutOptimized';
+import {
+  type PanelOrientation,
+  type FireSetbackConfig,
+  type SetbackZone,
+  DEFAULT_FIRE_SETBACKS,
+  generateSetbackZones,
+  calcEffectiveSetback,
+  generateMultipleRows,
+  calcMinRowSpacing,
+} from '@/lib/placementEngine';
 import { v4 as uuidv4 } from 'uuid';
 import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
 import { useToast } from '@/components/ui/Toast';
@@ -404,6 +414,21 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [panelsPerRow, setPanelsPerRow] = useState(10);
   const [show3D, setShow3D] = useState(true);  // Default to 3D view
   const [showPanels, setShowPanels] = useState(true);
+
+  // v30.9: Panel orientation (portrait/landscape)
+  const [orientation, setOrientation] = useState<PanelOrientation>('portrait');
+
+  // v30.9: Fire setback configuration (AHJ-configurable)
+  const [fireSetbacks, setFireSetbacks] = useState<FireSetbackConfig>(DEFAULT_FIRE_SETBACKS);
+  const [showSetbackZones, setShowSetbackZones] = useState(false);
+  const [setbackZones, setSetbackZones] = useState<SetbackZone[]>([]);
+
+  // v30.9: Multi-row placement tool
+  const [multiRowMode, setMultiRowMode] = useState(false);
+  const [multiRowCount, setMultiRowCount] = useState(3);
+  const [multiRowStart, setMultiRowStart] = useState<{lat: number; lng: number} | null>(null);
+  const [multiRowEnd, setMultiRowEnd] = useState<{lat: number; lng: number} | null>(null);
+  const [hoverPos, setHoverPos] = useState<{lat: number; lng: number} | null>(null); // v30.9: cursor tracking
 
   // Bill analysis state
   const [billAnalysis, setBillAnalysis] = useState<BillAnalysis | null>(null);
@@ -860,6 +885,31 @@ export default function DesignStudio({ project, onSave }: Props) {
       ctx.stroke();
     });
 
+    // v30.9: Draw fire setback zones (red restricted / green buildable)
+    if (showSetbackZones && setbackZones.length > 0) {
+      setbackZones.forEach(zone => {
+        if (zone.vertices.length < 3) return;
+        ctx.beginPath();
+        zone.vertices.forEach((v, i) => {
+          const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+        if (zone.type === 'restricted') {
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.18)';
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+        } else {
+          ctx.fillStyle = 'rgba(34, 197, 94, 0.12)';
+          ctx.strokeStyle = 'rgba(34, 197, 94, 0.5)';
+        }
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash(zone.type === 'restricted' ? [4, 3] : []);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+    }
+
     // Draw ground area
     if (groundArea.length >= 2) {
       ctx.beginPath();
@@ -952,6 +1002,38 @@ export default function DesignStudio({ project, onSave }: Props) {
       });
     }
 
+    // v30.9: Draw multi-row placement guide line
+    if (multiRowMode && multiRowStart) {
+      const startPx = latLngToCanvas(multiRowStart.lat, multiRowStart.lng, mapCenter, zoom, W, H);
+      // Draw start point marker
+      ctx.beginPath();
+      ctx.arc(startPx.x, startPx.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Draw guide line to hover position
+      if (hoverPos) {
+        const endPx = latLngToCanvas(hoverPos.lat, hoverPos.lng, mapCenter, zoom, W, H);
+        ctx.beginPath();
+        ctx.moveTo(startPx.x, startPx.y);
+        ctx.lineTo(endPx.x, endPx.y);
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Label
+        ctx.fillStyle = 'rgba(15,23,42,0.85)';
+        ctx.fillRect(endPx.x + 8, endPx.y - 14, 90, 18);
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${multiRowCount} rows — click end`, endPx.x + 12, endPx.y - 2);
+      }
+    }
+
     // Draw current drawing points
     if (drawnPoints.length > 0) {
       ctx.beginPath();
@@ -1011,7 +1093,8 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   }, [mapCenter, zoom, mapTiles, panels, roofPlanes, groundArea, fenceLine,
       drawnPoints, selectedPanelIds, selectedPanel, drawingMode, showPanels,
-      measurePoints, measureDistance]);
+      measurePoints, measureDistance, showSetbackZones, setbackZones,
+      multiRowMode, multiRowStart, hoverPos, multiRowCount]);
 
   function drawCompass(ctx: CanvasRenderingContext2D, x: number, y: number) {
     ctx.save();
@@ -1094,6 +1177,14 @@ export default function DesignStudio({ project, onSave }: Props) {
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const pos = canvasToLatLng(cx, cy, mapCenter, zoom, canvas.width, canvas.height);
+      setHoverPos(pos);
+    }
     if (!isDragging || drawingMode !== 'select') return;
     const dx = e.clientX - dragStart.x;
     const dy = e.clientY - dragStart.y;
@@ -1122,7 +1213,39 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   };
 
+  // ── Multi-row placement handler ──────────────────────────────────────────────
+  const handleMultiRowClick = (lat: number, lng: number) => {
+    if (!multiRowStart) {
+      setMultiRowStart({ lat, lng });
+      toast.info('Multi-Row Tool', 'First point set — click end of row to place panels');
+    } else {
+      const layoutId = uuidv4();
+      const minSpacing = calcMinRowSpacing(tilt, selectedPanel.height, mapCenter.lat);
+      const newPanels = generateMultipleRows({
+        layoutId,
+        startLat: multiRowStart.lat, startLng: multiRowStart.lng,
+        endLat: lat, endLng: lng,
+        rowCount: multiRowCount,
+        rowSpacingM: Math.max(rowSpacing, minSpacing),
+        panel: selectedPanel, orientation, tilt, azimuth,
+        panelSpacingM: panelSpacing, systemType: activeZoneType,
+      });
+      if (newPanels.length > 0) {
+        setPanels(prev => [...prev, ...newPanels]);
+        toast.success('Multi-Row placed', `${multiRowCount} rows · ${newPanels.length} panels · ${(calculateSystemSize(newPanels)).toFixed(2)} kW`);
+      }
+      setMultiRowStart(null);
+      setMultiRowEnd(null);
+      setMultiRowMode(false);
+    }
+  };
+
   const handleCanvasClick = (x: number, y: number, lat: number, lng: number, canvas: HTMLCanvasElement) => {
+    // v30.9: multi-row placement mode
+    if (multiRowMode) {
+      handleMultiRowClick(lat, lng);
+      return;
+    }
     if (drawingMode === 'draw_roof' || drawingMode === 'draw_ground' || drawingMode === 'draw_fence') {
       setDrawnPoints(prev => [...prev, { x, y, lat, lng }]);
     } else if (drawingMode === 'measure') {
@@ -1205,9 +1328,23 @@ export default function DesignStudio({ project, onSave }: Props) {
         id: uuidv4(), vertices: points, pitch: tilt, azimuth,
         area: polygonAreaM2(points), usableArea: polygonAreaM2(points) * 0.75,
       };
-      newPanels = generateRoofLayoutOptimized({ layoutId, roofPlane: plane, panel: selectedPanel, setback, panelSpacing, rowSpacing, tilt, azimuth });
+      // v30.9: pass orientation + fire setback
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback, panelSpacing, rowSpacing, tilt, azimuth,
+        orientation, fireSetbackM,
+      });
+      // Update setback zone overlay
+      if (showSetbackZones) {
+        setSetbackZones(generateSetbackZones(points, fireSetbacks));
+      }
     } else if (type === 'ground') {
-      newPanels = generateGroundLayoutOptimized({ layoutId, area: points, panel: selectedPanel, tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight });
+      newPanels = generateGroundLayoutOptimized({
+        layoutId, area: points, panel: selectedPanel,
+        tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
+        orientation,
+      });
     } else if (type === 'fence') {
       newPanels = generateFenceLayout({ layoutId, fenceLine: points, panel: selectedPanel, azimuth, panelSpacing, fenceHeight, bifacialOptimized });
     }
@@ -1229,10 +1366,12 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     roofPlanes.forEach(plane => {
       const layoutId = uuidv4();
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback, panelSpacing, rowSpacing,
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+        orientation, fireSetbackM,
       });
       allNew = [...allNew, ...newPanels];
     });
@@ -1242,6 +1381,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       const newPanels = generateGroundLayoutOptimized({
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
+        orientation,
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -1277,11 +1417,15 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     roofPlanes.forEach(plane => {
       const layoutId = uuidv4();
+      // v30.9: fire setback takes precedence over minSetback
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      const effectiveSetback = Math.max(minSetback, fireSetbackM);
       const newPanels = generateRoofLayoutOptimized({
         layoutId, roofPlane: plane, panel: selectedPanel,
-        setback: minSetback, panelSpacing: tightSpacing,
+        setback: effectiveSetback, panelSpacing: tightSpacing,
         rowSpacing: Math.max(rowSpacing * 0.85, selectedPanel.height + 0.05),
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+        orientation, fireSetbackM,
       });
       allNew = [...allNew, ...newPanels];
     });
@@ -1293,6 +1437,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         tilt, azimuth,
         rowSpacing: Math.max(rowSpacing * 0.85, selectedPanel.height + 0.05),
         panelSpacing: tightSpacing, panelsPerRow, groundHeight,
+        orientation,
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -1321,10 +1466,12 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     roofPlanes.forEach(plane => {
       const layoutId = uuidv4();
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
       const newPanels = generateRoofLayoutOptimized({
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback: optSetback, panelSpacing: 0.02, rowSpacing: optRowSpacing,
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+        orientation, fireSetbackM,
       });
       allNew = [...allNew, ...newPanels];
     });
@@ -1335,6 +1482,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing: optRowSpacing, panelSpacing: 0.02,
         panelsPerRow, groundHeight,
+        orientation,
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -1705,6 +1853,22 @@ export default function DesignStudio({ project, onSave }: Props) {
 
           <div className="w-8 border-t border-slate-700/50 my-1" />
 
+          {/* v30.9: Multi-Row Tool */}
+          <button
+            onClick={() => { setMultiRowMode(v => !v); setMultiRowStart(null); setMultiRowEnd(null); }}
+            title={`Multi-Row Placement (${multiRowCount} rows)`}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all group relative border ${
+              multiRowMode
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                : 'border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-700/60'
+            }`}
+          >
+            <span className="text-sm font-bold leading-none">⊞</span>
+            <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50 transition-opacity">
+              Multi-Row ({multiRowCount} rows)
+            </div>
+          </button>
+
           {drawnPoints.length >= 2 && (
             <button
               onClick={finalizeDrawing}
@@ -1836,6 +2000,15 @@ export default function DesignStudio({ project, onSave }: Props) {
                 </div>
               )}
 
+              {/* v30.9: Multi-row mode hint */}
+              {multiRowMode && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-amber-300 pointer-events-none flex items-center gap-2">
+                  <span>⊞ Multi-Row Tool ({multiRowCount} rows)</span>
+                  <span className="text-slate-400">•</span>
+                  <span>{multiRowStart ? '📍 Click end of first row' : '📍 Click start of first row'}</span>
+                </div>
+              )}
+
               {/* Zoom controls */}
               <div className="absolute bottom-10 right-4 flex flex-col gap-1">
                 <button onClick={() => setZoom(z => Math.min(21, z + 1))} className="w-8 h-8 bg-slate-800 border border-slate-600 rounded-lg text-white hover:bg-slate-700 flex items-center justify-center font-bold text-lg">+</button>
@@ -1962,6 +2135,93 @@ export default function DesignStudio({ project, onSave }: Props) {
                     <SliderRow label="Row Spacing" value={rowSpacing} min={0.5} max={5.0} step={0.1} unit="m" onChange={v => { clearGridCache(); setRowSpacing(v); }} />
                   )}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.01} max={0.1} step={0.01} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
+
+                  {/* v30.9: Panel Orientation Toggle */}
+                  <div className="flex items-center justify-between py-1">
+                    <label className="text-xs text-slate-400">Panel Orientation</label>
+                    <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                      <button
+                        onClick={() => { setOrientation('portrait'); clearGridCache(); }}
+                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'portrait' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                      >
+                        ▯ Portrait
+                      </button>
+                      <button
+                        onClick={() => { setOrientation('landscape'); clearGridCache(); }}
+                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'landscape' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                      >
+                        ▭ Landscape
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* v30.9: Fire Setback Controls (roof only) */}
+                  {activeZoneType === 'roof' && (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-red-400">🔥 Fire Setbacks</span>
+                        <button
+                          onClick={() => setShowSetbackZones(v => !v)}
+                          className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${showSetbackZones ? 'border-red-500/50 bg-red-500/10 text-red-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                        >
+                          {showSetbackZones ? <Eye size={10} /> : <EyeOff size={10} />}
+                          {showSetbackZones ? 'Zones On' : 'Zones Off'}
+                        </button>
+                      </div>
+                      <SliderRow
+                        label="Edge Setback"
+                        value={Math.round(fireSetbacks.edgeSetbackM * 39.37)}
+                        min={12} max={36} step={1} unit="in"
+                        onChange={v => setFireSetbacks(prev => ({ ...prev, edgeSetbackM: v / 39.37 }))}
+                      />
+                      <SliderRow
+                        label="Ridge Setback"
+                        value={Math.round(fireSetbacks.ridgeSetbackM * 39.37)}
+                        min={12} max={36} step={1} unit="in"
+                        onChange={v => setFireSetbacks(prev => ({ ...prev, ridgeSetbackM: v / 39.37 }))}
+                      />
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-slate-400">Pathway (36″)</label>
+                        <button
+                          onClick={() => setFireSetbacks(prev => ({ ...prev, enforcePathway: !prev.enforcePathway }))}
+                          className={`w-10 h-5 rounded-full transition-colors relative ${fireSetbacks.enforcePathway ? 'bg-red-500' : 'bg-slate-600'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${fireSetbacks.enforcePathway ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                        </button>
+                      </div>
+                      {fireSetbacks.enforcePathway && (
+                        <div className="text-xs text-red-400/80 bg-red-500/10 rounded-lg p-2">
+                          36″ pathway enforced — panels will not be placed in pathway zone
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* v30.9: Multi-Row Placement Tool */}
+                  <div className="mt-2 pt-2 border-t border-slate-700/50">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-slate-300">Multi-Row Tool</span>
+                      <button
+                        onClick={() => { setMultiRowMode(v => !v); setMultiRowStart(null); setMultiRowEnd(null); }}
+                        className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border transition-colors ${multiRowMode ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                      >
+                        {multiRowMode ? '✓ Active' : '⊞ Activate'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-400 flex-1">Row Count</label>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setMultiRowCount(v => Math.max(2, v - 1))} className="w-6 h-6 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center justify-center text-xs">−</button>
+                        <span className="text-xs font-semibold text-white w-5 text-center">{multiRowCount}</span>
+                        <button onClick={() => setMultiRowCount(v => Math.min(20, v + 1))} className="w-6 h-6 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center justify-center text-xs">+</button>
+                      </div>
+                    </div>
+                    {multiRowMode && (
+                      <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2">
+                        {multiRowStart ? '📍 Click end of first row to generate all rows' : '📍 Click start of first row on the map'}
+                      </div>
+                    )}
+                  </div>
 
                   {activeZoneType === 'ground' && (
                     <>
