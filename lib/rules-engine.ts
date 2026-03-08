@@ -260,10 +260,19 @@ export function runRulesEngine(input: RulesEngineInput): RulesEngineResult {
 
   if (electricalResult.busbar) {
     dependencyChain.push('NEC_705_12_BUSBAR');
-    // NEC 705.12(B)(2): (busRating × 1.2) − mainBreaker = max allowed backfeed
-    const busRating = electricalResult.interconnection?.busRating ?? electricalResult.busbar.mainPanelAmps;
-    const mainBreaker = electricalResult.interconnection?.mainBreaker ?? busRating;
-    rules.push(ruleNEC705_12(busRating, electricalResult.busbar.backfeedBreakerRequired, mainBreaker));
+    const icMethod = electricalResult.interconnection?.method ?? 'LOAD_SIDE';
+    if (icMethod === 'SUPPLY_SIDE_TAP') {
+      // Supply-side tap (NEC 705.11): 120% busbar rule does NOT apply — always pass
+      rules.push({ ruleId:'NEC_705_12_BUSBAR', category:'electrical', severity:'pass',
+        title:'NEC 705.12 Busbar Rule — N/A (Supply-Side Tap)',
+        message:'Supply-side tap (NEC 705.11) — 120% busbar rule does not apply. No busbar loading concern.',
+        value:'N/A', limit:'N/A', necReference:'NEC 705.11' } as any);
+    } else {
+      // Load-side: apply NEC 705.12(B)(3)(2) 120% rule
+      const busRating = electricalResult.interconnection?.busRating ?? electricalResult.busbar.mainPanelAmps;
+      const mainBreaker = electricalResult.interconnection?.mainBreaker ?? busRating;
+      rules.push(ruleNEC705_12(busRating, electricalResult.busbar.backfeedBreakerRequired, mainBreaker));
+    }
   }
   if (electricalResult.conduitFill) {
     dependencyChain.push('NEC_358_CONDUIT_FILL');

@@ -3803,19 +3803,24 @@ export default function EngineeringPage() {
                 if (batteryBackfeedADisplay > 0) {
                   const batModel = config.batteryModel || 'Battery Storage';
                   const batMfr   = config.batteryBrand || '';
-                  // NEC 705.12(B)(2): ALL backfeed breakers (solar + battery) ≤ (busRating × 1.2) - mainBreaker
-                  // The main breaker is NOT added to the load — it defines the limit
                   const busRating = config.panelBusRating ?? config.mainPanelAmps ?? 200;
                   const mainBreaker = config.mainPanelAmps ?? 200;
                   const totalBackfeedA = feederOcpdAmps + batteryBackfeedADisplay;
                   const busMax = (busRating * 1.2) - mainBreaker;
-                  const busPass = totalBackfeedA <= busMax;
+                  // If supply-side tap is selected, NEC 705.12(B) 120% rule does NOT apply
+                  // Supply-side tap (NEC 705.11) connects before the main breaker — no busbar loading concern
+                  const isSupplySide = config.interconnectionMethod === 'SUPPLY_SIDE_TAP';
+                  const busPass = isSupplySide || totalBackfeedA <= busMax;
                   steps.push({
                     num: steps.length + 1,
                     title: 'Battery Backfeed — NEC 705.12(B) Bus Loading',
                     nec: 'NEC 705.12(B)',
-                    formula: `NEC 705.12(B)(3)(2): Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A + Main ${mainBreaker}A = ${totalBackfeedA + mainBreaker}A vs ${busRating}A bus × 120% = ${busRating * 1.2}A max`,
-                    result: busPass ? `PASS — ${totalBackfeedA}A backfeed ≤ ${busMax}A allowed` : `FAIL — ${totalBackfeedA}A backfeed > ${busMax}A allowed`,
+                    formula: isSupplySide
+                      ? `Supply-Side Tap (NEC 705.11) — 120% busbar rule does not apply. Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A connect line-side of main breaker.`
+                      : `NEC 705.12(B)(3)(2): Solar ${feederOcpdAmps}A + Battery ${batteryBackfeedADisplay}A + Main ${mainBreaker}A = ${totalBackfeedA + mainBreaker}A vs ${busRating}A bus × 120% = ${busRating * 1.2}A max`,
+                    result: isSupplySide
+                      ? `PASS — Supply-side tap bypasses 120% rule (NEC 705.11)`
+                      : busPass ? `PASS — ${totalBackfeedA}A backfeed ≤ ${busMax}A allowed` : `FAIL — ${totalBackfeedA}A backfeed > ${busMax}A allowed`,
                     detail: (() => {
                       const batSpec = getBatteryById(config.batteryId);
                       const isGateway = batSpec?.requiresGateway ?? false;
@@ -3824,8 +3829,11 @@ export default function EngineeringPage() {
                       const breakerDesc = isGateway
                         ? `${qty > 1 ? `${qty}× units share ` : ''}${batteryBackfeedADisplay}A single backfeed breaker via ${batSpec?.gatewayModel ?? 'gateway'}`
                         : `${qty > 1 ? `${qty} units × ${perUnit}A = ${batteryBackfeedADisplay}A total` : `${batteryBackfeedADisplay}A dedicated breaker`}`;
-                      const remediation = busPass ? '' : ` ⚠️ To fix: (1) Supply-side tap per NEC 705.11 — no busbar limit applies. (2) Derate main breaker to ${Math.floor((busRating * 1.2 - totalBackfeedA) / 5) * 5}A — allows this backfeed. (3) Upgrade panel bus to ${Math.ceil((totalBackfeedA + mainBreaker) / 1.2 / 25) * 25}A or larger.`;
-                      return `${qty > 1 ? `${qty}× ` : ''}${batMfr} ${batModel} — ${breakerDesc}. NEC 705.12(B)(3)(2): Solar breaker + Battery breaker + Main breaker must not exceed Bus × 120% (${busRating}A × 120% = ${busRating * 1.2}A). This is a real NEC constraint — not a calculation error.${remediation}`;
+                      if (isSupplySide) {
+                        return `${qty > 1 ? `${qty}× ` : ''}${batMfr} ${batModel} — ${breakerDesc}. Supply-side tap (NEC 705.11): connection is made line-side of the main breaker. The 120% busbar rule (NEC 705.12(B)) does not apply — there is no busbar loading concern. This is the recommended interconnection method for solar+battery systems on standard 200A panels.`;
+                      }
+                      const remediation = busPass ? '' : ` ⚠️ LOAD-SIDE FAILS — Fix options: (1) Switch to Supply-Side Tap (NEC 705.11) in the Interconnection Method dropdown — no busbar limit applies. (2) Derate main breaker to ${Math.floor((busRating * 1.2 - totalBackfeedA) / 5) * 5}A. (3) Upgrade panel bus to ${Math.ceil((totalBackfeedA + mainBreaker) / 1.2 / 25) * 25}A.`;
+                      return `${qty > 1 ? `${qty}× ` : ''}${batMfr} ${batModel} — ${breakerDesc}. NEC 705.12(B)(3)(2): Solar + Battery + Main must not exceed Bus × 120% (${busRating * 1.2}A). This is a real NEC constraint.${remediation}`;
                     })(),
                     color: busPass ? 'emerald' : 'red',
                   } as any);
@@ -3913,6 +3921,15 @@ export default function EngineeringPage() {
                               </div>
                               <div className="text-xs text-slate-400 font-mono mb-1">{step.formula}</div>
                               <div className="text-xs text-slate-500">{step.detail}</div>
+                              {/* Quick-fix button: switch to supply-side tap when battery backfeed fails */}
+                              {step.color === 'red' && step.title?.includes('Battery Backfeed') && config.interconnectionMethod !== 'SUPPLY_SIDE_TAP' && (
+                                <button
+                                  onClick={() => { updateConfig({ interconnectionMethod: 'SUPPLY_SIDE_TAP' }); setTimeout(runCalc, 100); }}
+                                  className="mt-2 px-3 py-1.5 text-xs font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40 rounded-lg transition-colors"
+                                >
+                                  ⚡ Switch to Supply-Side Tap (NEC 705.11) — Fixes This
+                                </button>
+                              )}
                             </div>
                             <div className={`flex-shrink-0 text-sm font-bold px-3 py-1 rounded-lg border ${colorMap[step.color]}`}>
                               {step.result}
