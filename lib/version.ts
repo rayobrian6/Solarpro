@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v31.6';
+export const BUILD_VERSION = 'v31.8';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'AUTO FILL REPAIR v2 — Row-tool-aligned Cartesian3 grid fallback, maxPanels enforcement per segment, Google panel positions primary path, polygon clipping, geoid race fix';
+export const BUILD_DESCRIPTION = 'AUTO FILL RENDERING & PLACEMENT FIX — terrain-ready wait, heightAboveGround elevation, disableDepthTestDistance on panels, setTerrainReady/setRenderMode wired, Row-tool Cartesian3 grid';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -134,6 +134,13 @@ export const BUILD_FEATURES = [
   'FIX: 3D — Duplicate comment block removed from fillRoofSegmentWithPanels',
   'SAFE: handleAutoRoof() still fills all eligible segments (sunshineHours >= 50% of best)',
   'SAFE: systemType=roof, onPanelsChange(), setPanelCount(), engineering, BOM, proposals unchanged',
+  // Phase 21: v31.7 — Auto Fill Rendering & Placement Fix
+  'FIX: 3D — Auto Fill now waits for cesiumGroundElevRef > 0 before running (terrain-ready poll, max 5s)',
+  'FIX: 3D — fillRoofSegmentWithPanels elevation: uses cesiumGroundElevRef + seg.heightAboveGround (bypasses geoid undulation)',
+  'FIX: 3D — addPanelEntity box: disableDepthTestDistance=POSITIVE_INFINITY (panels always visible, no 3D tile clipping)',
+  'FIX: 3D — setTerrainReady(true) called after terrain sampling completes (debug panel now shows correct state)',
+  'FIX: 3D — setRenderMode(TILES) called after Google 3D Tiles load (debug panel now shows correct state)',
+  'SAFE: Row tool, manual placement, panel counting, engineering, BOM, proposals all unchanged',
 ] as const;
 
 export function getBuildBadge(): string {

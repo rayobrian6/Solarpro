@@ -306,7 +306,22 @@ function SolarEngine3D({
       const viewer = viewerRef.current;
       const C = (window as any).Cesium;
       if (viewer && C && twinRef.current) {
-        setTimeout(() => handleAutoRoof(viewer, C), 100);
+        // Wait for terrain sampling to complete before running Auto Fill.
+        // cesiumGroundElevRef is set at the end of boot() after sampleTerrainMostDetailed.
+        // If it's already set (> 0), run immediately. Otherwise poll every 200ms (max 5s).
+        const runAutoFill = () => handleAutoRoof(viewer, C);
+        if (cesiumGroundElevRef.current > 0) {
+          setTimeout(runAutoFill, 50);
+        } else {
+          let waited = 0;
+          const poll = setInterval(() => {
+            waited += 200;
+            if (cesiumGroundElevRef.current > 0 || waited >= 5000) {
+              clearInterval(poll);
+              runAutoFill();
+            }
+          }, 200);
+        }
       }
     }
   }, [placementMode]);
@@ -517,6 +532,7 @@ function SolarEngine3D({
         tilesetRef.current = tileset;
         addLog('BOOT', '\u2705 Google 3D Tiles loaded OK');
         setTileStatus('loaded');
+        setRenderMode('TILES');
         try {
           tileset.allTilesLoaded.addEventListener(() => {
             addLog('BOOT', '✅ All 3D tiles loaded');
@@ -581,6 +597,7 @@ function SolarEngine3D({
         addLog('WARN', `Terrain sampling failed: ${e.message}, using geoid estimate: ${cesiumGroundElev.toFixed(1)}m`);
       }
       cesiumGroundElevRef.current = cesiumGroundElev;
+      setTerrainReady(true);
       // NOW set twin state - cesiumGroundElevRef is ready, so drawOverlays will use correct elevation
       if (twinData) setTwin(twinData);
 
@@ -1037,6 +1054,9 @@ function SolarEngine3D({
           material: color, outline: true,
           outlineColor: C.Color.fromCssColorString('#1a1a2e').withAlpha(0.8),
           outlineWidth: 1, shadows: C.ShadowMode.ENABLED,
+          // disableDepthTestDistance ensures panels are always visible even if
+          // elevation math is slightly off (prevents clipping by 3D tile mesh)
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
       });
       panelMapRef.current.set(panel.id, entity);
@@ -2261,14 +2281,19 @@ function SolarEngine3D({
     const tanPitch = Math.tan(pitchDeg * Math.PI / 180);
     if (!isFinite(tanPitch)) return panels;
 
-    // ── Elevation: Google orthometric → Cesium ellipsoidal ───────────────────
-    // cesiumGroundElevRef is populated asynchronously. Fall back to OHIO_GEOID_UNDULATION
-    // so panels are not placed 30m underground when terrain sampling hasn't completed.
-    const googleSegElev = isFinite(seg.elevation) ? seg.elevation : 0;
-    const geoidOff = cesiumGroundElevRef.current > 0
-      ? cesiumGroundElevRef.current - (twinRef.current?.elevation ?? 0)
-      : OHIO_GEOID_UNDULATION;
-    const segElev = googleSegElev + geoidOff;
+    // ── Elevation: use cesiumGroundElevRef + seg.heightAboveGround ─────────────
+    // seg.heightAboveGround = meters above terrain (from Google Solar API).
+    // cesiumGroundElevRef = true Cesium ellipsoidal ground elevation (sampled from terrain).
+    // This approach bypasses geoid undulation entirely — no OHIO_GEOID_UNDULATION needed.
+    //
+    // If cesiumGroundElevRef not yet set (terrain sampling still in progress),
+    // fall back to Google orthometric elevation + OHIO_GEOID_UNDULATION estimate.
+    // NOTE: handleAutoRoof now waits for cesiumGroundElevRef > 0 before calling this,
+    // so the fallback should rarely be needed.
+    const heightAboveGround = isFinite(seg.heightAboveGround) ? seg.heightAboveGround : 3.0;
+    const segElev = cesiumGroundElevRef.current > 0
+      ? cesiumGroundElevRef.current + heightAboveGround
+      : (isFinite(seg.elevation) ? seg.elevation : 0) + OHIO_GEOID_UNDULATION;
 
     // ── Panel dimensions ──────────────────────────────────────────────────────
     const orient = panelOrientationRef.current ?? 'portrait';
