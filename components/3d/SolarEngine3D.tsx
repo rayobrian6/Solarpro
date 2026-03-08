@@ -1986,14 +1986,34 @@ function SolarEngine3D({
 
   function handleSelectClick(viewer: any, C: any, screenPos: any) {
     try {
-      const picked = viewer.scene.pick(screenPos);
-      if (!picked || !picked.id) { clearPanelSelection(); return; }
-      const entity = picked.id;
+      // v31.1: Use drillPick to find panel entities even when occluded by terrain/3D tiles
+      // drillPick returns ALL objects at the screen position in depth order
       let foundId: string | null = null;
-      panelMapRef.current.forEach((ent, id) => { if (ent === entity) foundId = id; });
-      if (!foundId) { clearPanelSelection(); return; }
+      let foundEntity: any = null;
+
+      try {
+        const drilled = viewer.scene.drillPick(screenPos, 10); // max 10 objects deep
+        for (const pickedObj of drilled) {
+          if (!pickedObj || !pickedObj.id) continue;
+          const entity = pickedObj.id;
+          panelMapRef.current.forEach((ent, id) => {
+            if (!foundId && ent === entity) { foundId = id; foundEntity = entity; }
+          });
+          if (foundId) break;
+        }
+      } catch {
+        // Fallback to single pick if drillPick fails
+        const picked = viewer.scene.pick(screenPos);
+        if (picked && picked.id) {
+          panelMapRef.current.forEach((ent, id) => {
+            if (!foundId && ent === picked.id) { foundId = id; foundEntity = picked.id; }
+          });
+        }
+      }
+
+      if (!foundId || !foundEntity) { clearPanelSelection(); return; }
       clearPanelSelection();
-      entity.box.material = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
+      foundEntity.box.material = new C.ColorMaterialProperty(C.Color.fromCssColorString('#ff3333').withAlpha(0.92));
       selectedPanelIdRef.current = foundId;
       setSelectedPanelId(foundId);
       const panel = panelsRef.current.find(p => p.id === foundId);
@@ -2654,6 +2674,29 @@ function SolarEngine3D({
               {icon} {label}
             </button>
           ))}
+
+          <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
+
+          {/* v31.1: Active tool indicator */}
+          <div style={{
+            fontSize: 10, color: '#888', padding: '2px 6px',
+            background: 'rgba(255,255,255,0.05)', borderRadius: 5,
+            border: '1px solid rgba(255,255,255,0.08)',
+            whiteSpace: 'nowrap',
+          }}>
+            <span style={{ color: '#555' }}>Tool: </span>
+            <span style={{ color: placementMode === 'select' ? '#10b981' : '#ff8c00', fontWeight: 700 }}>
+              {placementMode === 'select' ? '↖ Select' :
+               placementMode === 'roof' ? '🏠 Place Roof' :
+               placementMode === 'ground' ? '🌍 Place Ground' :
+               placementMode === 'ground_array' ? '🌱 G-Array' :
+               placementMode === 'fence' ? '⚡ Fence' :
+               placementMode === 'plane' ? '📐 Plane' :
+               placementMode === 'row' ? '➡ Row' :
+               placementMode === 'measure' ? '📏 Measure' :
+               placementMode === 'auto_roof' ? '✨ Auto Fill' : placementMode}
+            </span>
+          </div>
 
           <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
 

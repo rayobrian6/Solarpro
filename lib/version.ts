@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v31.0';
+export const BUILD_VERSION = 'v31.2';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'PANEL PLACEMENT ENGINE v2 — Grid snapping, portrait/landscape orientation, fire setbacks (AHJ-configurable), auto-fill roof, multi-row placement tool, setback zone overlay, azimuth-aligned grid';
+export const BUILD_DESCRIPTION = 'INTERACTION AUDIT & REPAIR — drillPick panel selection, orientation-aware hit detection, keyboard shortcuts (V/R/G/F/M/Del/Esc), active tool indicator, multiRowMode/Select conflict fix, per-panel systemType color';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -101,6 +101,20 @@ export const BUILD_FEATURES = [
   'UPGRADE: DesignStudio — Multi-row guide line with cursor tracking on canvas',
   'UPGRADE: DesignStudio — Multi-row hint banner (top-center overlay when tool active)',
   'SAFE: All new features are additive — panel classification, BOM, proposals, engineering unchanged',
+  // Phase 18: v31.1 — Interaction Audit & Repair
+  'AUDIT: DIAGNOSTIC_REPORT.md — 9 bugs identified across 2D canvas + 3D Cesium engine',
+  'FIX: 3D — drillPick replaces scene.pick() for panel selection (panels selectable through terrain/tile mesh)',
+  'FIX: 2D — Per-panel orientation-aware hit detection (landscape panels now selectable)',
+  'FIX: 2D — Per-panel systemType color (mixed roof+ground designs show correct colors)',
+  'FIX: 2D — multiRowMode cleared when switching tools (Select tool no longer blocked)',
+  'FIX: 2D — Keyboard shortcuts: V=Select, R=Roof, G=Ground, F=Fence, M=Measure, Del=Delete, Esc=Cancel',
+  'FIX: 2D — Delete/Backspace key deletes selected panels (updates panel count + system size)',
+  'FIX: 2D — Escape key cancels drawing / deactivates multi-row mode',
+  'NEW: 2D — Active tool indicator (bottom-center canvas overlay with tool name + selection count)',
+  'NEW: 3D — Active tool indicator badge in 3D toolbar (shows current PlacementMode)',
+  'FIX: UI — 3D placement mode labels clarified (Place Roof / Place Ground vs ambiguous Roof/Ground)',
+  'FIX: UI — Placement safety guard comment in handleCanvasClick (Select never places panels)',
+  'SAFE: panel counting, systemType classification, engineering, BOM, proposals all unchanged',
 ] as const;
 
 export function getBuildBadge(): string {

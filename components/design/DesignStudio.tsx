@@ -949,18 +949,23 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     // Draw panels
     if (showPanels) {
-      const pw = selectedPanel.width * pxPerM;
-      const ph = selectedPanel.height * pxPerM;
-
       panels.forEach(panel => {
+        // v31.1: per-panel orientation-aware dimensions
+        const panelW = panel.orientation === 'landscape' ? selectedPanel.height : selectedPanel.width;
+        const panelH = panel.orientation === 'landscape' ? selectedPanel.width : selectedPanel.height;
+        const pw = panelW * pxPerM;
+        const ph = panelH * pxPerM;
+
         const p = latLngToCanvas(panel.lat, panel.lng, mapCenter, zoom, W, H);
         const isSelected = selectedPanelIds.has(panel.id);
 
         ctx.save();
         ctx.translate(p.x, p.y);
 
-        const color = project.systemType === 'roof' ? '#f59e0b' :
-                      project.systemType === 'ground' ? '#14b8a6' : '#a855f7';
+        // v31.1: use per-panel systemType for color (supports mixed designs)
+        const sType = panel.systemType ?? project.systemType;
+        const color = sType === 'roof' ? '#f59e0b' :
+                      sType === 'ground' ? '#14b8a6' : '#a855f7';
 
         // Panel shadow
         ctx.shadowColor = 'rgba(0,0,0,0.4)';
@@ -1167,6 +1172,61 @@ export default function DesignStudio({ project, onSave }: Props) {
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); window.removeEventListener('resize', resize); };
   }, [drawCanvas, show3D]);
 
+  // v31.1: Global keyboard shortcuts — tool switching + panel deletion + escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in an input/textarea/select
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+      switch (e.key) {
+        case 'v': case 'V':
+          e.preventDefault();
+          setDrawingMode('select');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'r': case 'R':
+          e.preventDefault();
+          setDrawingMode('draw_roof'); setActiveZoneType('roof');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'g': case 'G':
+          e.preventDefault();
+          setDrawingMode('draw_ground'); setActiveZoneType('ground');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'f': case 'F':
+          e.preventDefault();
+          setDrawingMode('draw_fence'); setActiveZoneType('fence');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'm': case 'M':
+          e.preventDefault();
+          setDrawingMode('measure');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'Delete': case 'Backspace':
+          if (selectedPanelIds.size > 0) {
+            e.preventDefault();
+            setPanels(prev => prev.filter(p => !selectedPanelIds.has(p.id)));
+            setSelectedPanelIds(new Set());
+          }
+          break;
+        case 'Escape':
+          if (multiRowMode) {
+            setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          } else if (drawingMode !== 'select') {
+            setDrawingMode('select');
+            setDrawnPoints([]);
+          }
+          setSelectedPanelIds(new Set());
+          break;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedPanelIds, multiRowMode, drawingMode]);
+
   // ── Mouse handlers ─────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (drawingMode === 'select') {
@@ -1241,11 +1301,13 @@ export default function DesignStudio({ project, onSave }: Props) {
   };
 
   const handleCanvasClick = (x: number, y: number, lat: number, lng: number, canvas: HTMLCanvasElement) => {
-    // v30.9: multi-row placement mode
+    // v31.1: Multi-row placement mode takes priority
     if (multiRowMode) {
       handleMultiRowClick(lat, lng);
       return;
     }
+    // v31.1: Placement safety guard — only place geometry when a draw tool is active
+    // Select mode NEVER places panels (prevents accidental placement)
     if (drawingMode === 'draw_roof' || drawingMode === 'draw_ground' || drawingMode === 'draw_fence') {
       setDrawnPoints(prev => [...prev, { x, y, lat, lng }]);
     } else if (drawingMode === 'measure') {
@@ -1261,13 +1323,17 @@ export default function DesignStudio({ project, onSave }: Props) {
     } else if (drawingMode === 'select') {
       const mpp = metersPerPixel(mapCenter.lat, zoom);
       const pxPerM = 1 / mpp;
-      const pw = selectedPanel.width * pxPerM;
-      const ph = selectedPanel.height * pxPerM;
 
       let clicked = false;
+      // v31.1: use per-panel orientation-aware hit box (not selectedPanel global dims)
       panels.forEach(panel => {
+        const panelW = panel.orientation === 'landscape' ? selectedPanel.height : selectedPanel.width;
+        const panelH = panel.orientation === 'landscape' ? selectedPanel.width : selectedPanel.height;
+        const pw = panelW * pxPerM;
+        const ph = panelH * pxPerM;
         const p = latLngToCanvas(panel.lat, panel.lng, mapCenter, zoom, canvas.width, canvas.height);
-        if (Math.abs(x - p.x) < pw / 2 + 2 && Math.abs(y - p.y) < ph / 2 + 2) {
+        // Use generous hit tolerance (+4px) to make panels easier to click
+        if (Math.abs(x - p.x) < pw / 2 + 4 && Math.abs(y - p.y) < ph / 2 + 4) {
           setSelectedPanelIds(prev => {
             const next = new Set(prev);
             next.has(panel.id) ? next.delete(panel.id) : next.add(panel.id);
@@ -1832,6 +1898,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                 setDrawingMode(tool.id);
                 setMeasurePoints([]);
                 setMeasureDistance(null);
+                // v31.1: deactivate multi-row mode when switching tools
+                setMultiRowMode(false);
+                setMultiRowStart(null);
+                setMultiRowEnd(null);
                 // Set active zone type based on tool
                 if (tool.id === 'draw_roof') setActiveZoneType('roof');
                 else if (tool.id === 'draw_ground') setActiveZoneType('ground');
@@ -2008,6 +2078,32 @@ export default function DesignStudio({ project, onSave }: Props) {
                   <span>{multiRowStart ? '📍 Click end of first row' : '📍 Click start of first row'}</span>
                 </div>
               )}
+
+              {/* v31.1: Active Tool Indicator */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 glass rounded-xl px-3 py-1.5 pointer-events-none">
+                <span className={`w-2 h-2 rounded-full ${
+                  multiRowMode ? 'bg-amber-400 animate-pulse' :
+                  drawingMode === 'select' ? 'bg-emerald-400' :
+                  drawingMode === 'draw_roof' ? 'bg-amber-400' :
+                  drawingMode === 'draw_ground' ? 'bg-teal-400' :
+                  drawingMode === 'draw_fence' ? 'bg-purple-400' :
+                  drawingMode === 'measure' ? 'bg-cyan-400' : 'bg-slate-400'
+                }`} />
+                <span className="text-xs text-slate-300 font-medium">
+                  {multiRowMode ? `⊞ Multi-Row (${multiRowCount} rows)` :
+                   drawingMode === 'select' ? '↖ Select' :
+                   drawingMode === 'draw_roof' ? '🏠 Draw Roof Zone' :
+                   drawingMode === 'draw_ground' ? '🌱 Draw Ground Zone' :
+                   drawingMode === 'draw_fence' ? '🔲 Draw Fence Line' :
+                   drawingMode === 'measure' ? '📏 Measure' : drawingMode}
+                </span>
+                {selectedPanelIds.size > 0 && (
+                  <span className="text-xs text-amber-400 font-semibold ml-1">
+                    · {selectedPanelIds.size} selected
+                  </span>
+                )}
+                <span className="text-xs text-slate-600 ml-1">V/R/G/F/M</span>
+              </div>
 
               {/* Zoom controls */}
               <div className="absolute bottom-10 right-4 flex flex-col gap-1">
@@ -2260,10 +2356,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </div>
                       <div className="grid grid-cols-2 gap-1.5 text-xs">
                         {[
-                          { mode: 'select' as PlacementMode, icon: '↖', label: 'Select', desc: 'Navigate' },
-                          { mode: 'roof' as PlacementMode, icon: '🏠', label: 'Roof', desc: 'Click roof' },
-                          { mode: 'ground' as PlacementMode, icon: '🌍', label: 'Ground', desc: 'Click ground' },
-                          { mode: 'auto_roof' as PlacementMode, icon: '✨', label: 'Auto', desc: 'Fill all roofs' },
+                          { mode: 'select' as PlacementMode, icon: '↖', label: 'Select', desc: 'Select / pan' },
+                          { mode: 'roof' as PlacementMode, icon: '🏠', label: 'Place Roof', desc: 'Click to place panel' },
+                          { mode: 'ground' as PlacementMode, icon: '🌍', label: 'Place Ground', desc: 'Click to place panel' },
+                          { mode: 'auto_roof' as PlacementMode, icon: '✨', label: 'Auto Fill', desc: 'Fill all roofs' },
                         ].map(({ mode, icon, label, desc }) => (
                           <button
                             key={mode}
