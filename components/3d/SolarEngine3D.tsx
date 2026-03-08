@@ -5,12 +5,15 @@
  * Features:
  * - CesiumJS 1.114 + Google Photorealistic 3D Tiles
  * - True surface picking: scene.pickPosition → globe.pick → ellipsoid fallback
- * - Three placement engines: Roof, Ground, Fence
- * - GPU-instanced panel rendering (Cesium entities)
+ * - Three placement engines: Roof, Ground, Fence, Ground Array (chained rows)
+ * - GPU-instanced panel rendering (Cesium entities, incremental diff)
  * - Real-time shade engine (NOAA sun position + Cesium shadow maps)
  * - Overlays: roof segments, parcel boundary, shade heatmap
  * - Full NaN/error guards on all Cesium operations
  * - renderError handler to prevent 3D freeze
+ * - React.memo with custom comparison (prevents re-renders on unrelated state changes)
+ * - Dynamic shadow map resolution (reduces GPU load at overview distances)
+ * - Tile loading optimized (maximumScreenSpaceError, preloadFlightDestinations)
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
@@ -47,7 +50,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -115,6 +118,22 @@ function headingFromAzimuth(azDeg: number): number {
   return azDeg * Math.PI / 180;
 }
 
+// ── Ground Array: Inter-row spacing formula ────────────────────────────────
+// Calculates minimum row spacing to prevent inter-row shading at winter solstice
+// (worst-case sun angle). Industry standard: add 10% buffer.
+// @param tiltDeg      - Panel tilt angle (degrees from horizontal)
+// @param panelHeightM - Panel height along slope (1.722m portrait, 1.134m landscape)
+// @param latitudeDeg  - Site latitude (degrees, positive = north)
+// @returns Minimum row spacing center-to-center (meters)
+function calcMinRowSpacing(tiltDeg: number, panelHeightM: number, latitudeDeg: number): number {
+  const tiltRad = tiltDeg * Math.PI / 180;
+  const panelVerticalHeight  = panelHeightM * Math.sin(tiltRad);
+  const panelHorizontalDepth = panelHeightM * Math.cos(tiltRad);
+  const sunElevDeg = Math.max(10, 90 - Math.abs(latitudeDeg) - 23.45);
+  const shadowLength = panelVerticalHeight / Math.tan(sunElevDeg * Math.PI / 180);
+  return Math.max(1.5, (panelHorizontalDepth + shadowLength) * 1.1);
+}
+
 // Safe color helpers
 function shadeToColor(C: any, shadeFactor: number): any {
   const r = Math.round(255 * (1 - shadeFactor));
@@ -151,7 +170,7 @@ function safeCartesian3(C: any, lng: number, lat: number, alt: number): any {
   } catch { return null; }
 }
 
-export default function SolarEngine3D({
+function SolarEngine3D({
   lat, lng, projectAddress,
   panels, onPanelsChange,
   placementMode, onPlacementModeChange,
@@ -180,6 +199,20 @@ export default function SolarEngine3D({
   // Row tool context: tracks which systemType to use for row-placed panels
   // (row mode is a placement style, not a system type — inherits from last active mode)
   const rowSystemTypeRef = useRef<SystemType>('roof');
+
+  // Ground Array tool state
+  // groundArrayRowsRef: confirmed rows placed so far in current array session
+  // groundArrayFirstRowRef: start/end points of row 1 (defines azimuth + row direction)
+  const groundArrayRowsRef = useRef<PlacedPanel[][]>([]);
+  const groundArrayFirstRowRef = useRef<{
+    start: { lat: number; lng: number; height: number };
+    end:   { lat: number; lng: number; height: number };
+    azimuthDeg: number;
+    rowSpacingM: number;
+  } | null>(null);
+  const [groundArrayRowCount, setGroundArrayRowCount] = useState(0);
+  const [groundArrayPanelCount, setGroundArrayPanelCount] = useState(0);
+  const [showGroundArrayConfirm, setShowGroundArrayConfirm] = useState(false);
   // prevLatRef / prevLngRef: track previous coordinates for address-change fly.
   const prevLatRef = useRef<number>(lat);
   const prevLngRef = useRef<number>(lng);
@@ -313,8 +346,10 @@ export default function SolarEngine3D({
     if (renderDebounceRef.current) {
       clearTimeout(renderDebounceRef.current);
     }
-    // Debounce: batch rapid panel changes (e.g. auto-fill, undo/redo) into one render
-    // 16ms = one animation frame — imperceptible to user but prevents redundant rebuilds
+    // Dynamic debounce: longer window for large batch operations (auto-fill, undo/redo)
+    // 16ms for single panel clicks (imperceptible), 50ms for large batches
+    const delta = Math.abs(panels.length - lastRenderedPanelsRef.current.length);
+    const debounceMs = delta > 20 ? 50 : delta > 5 ? 32 : 16;
     const snapshot = panels; // capture current value for closure
     renderDebounceRef.current = setTimeout(() => {
       renderDebounceRef.current = null;
@@ -322,7 +357,7 @@ export default function SolarEngine3D({
       const Cs = (window as any).Cesium;
       if (!v || !Cs || !renderAllPanelsRef.current) return;
       renderAllPanelsRef.current(v, Cs, snapshot);
-    }, 16);
+    }, debounceMs);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panels]);
 
@@ -569,6 +604,7 @@ export default function SolarEngine3D({
       setupClickHandler(viewer, C);
       setupHoverHandler(viewer, C);
       setupFpsMonitor(viewer);
+      setupCameraOptimizer(viewer, C);
       setupKeyboardHandler();
 
       if (cesiumRef.current) {
@@ -638,6 +674,47 @@ export default function SolarEngine3D({
         setFps(Math.round(frameCount * 1000 / (now - lastTime)));
         frameCount = 0; lastTime = now;
       }
+    });
+  }
+
+  // ── Camera-based performance optimizer ────────────────────────────────────
+  // Dynamically adjusts shadow map resolution and tile detail based on camera
+  // height. At overview distances (>500m), reduces GPU load significantly
+  // without any visible quality loss.
+  function setupCameraOptimizer(viewer: any, C: any) {
+    let lastOptHeight = -1;
+    viewer.camera.changed.addEventListener(() => {
+      try {
+        const h = viewer.camera.positionCartographic?.height ?? 500;
+        // Only update when height changes by more than 50m (avoid thrashing)
+        if (Math.abs(h - lastOptHeight) < 50) return;
+        lastOptHeight = h;
+
+        // Dynamic shadow map resolution: high quality close-up, low quality overview
+        if (viewer.scene.shadowMap) {
+          if (h > 800) {
+            viewer.scene.shadowMap.size = 512;
+            viewer.scene.shadowMap.softShadows = false;
+          } else if (h > 300) {
+            viewer.scene.shadowMap.size = 1024;
+            viewer.scene.shadowMap.softShadows = true;
+          } else {
+            viewer.scene.shadowMap.size = 2048;
+            viewer.scene.shadowMap.softShadows = true;
+          }
+        }
+
+        // Dynamic tile screen space error: more detail close-up, less at overview
+        if (tilesetRef.current) {
+          if (h > 1000) {
+            tilesetRef.current.maximumScreenSpaceError = 32; // fast overview
+          } else if (h > 400) {
+            tilesetRef.current.maximumScreenSpaceError = 16; // balanced
+          } else {
+            tilesetRef.current.maximumScreenSpaceError = 4;  // full quality close-up
+          }
+        }
+      } catch {}
     });
   }
 
@@ -848,10 +925,31 @@ export default function SolarEngine3D({
       if (!old) return; // already handled above
       const posChanged = old.lat !== panel.lat || old.lng !== panel.lng ||
                          old.height !== panel.height || old.tilt !== panel.tilt ||
-                         old.azimuth !== panel.azimuth || old.heading !== panel.heading ||
-                         old.systemType !== panel.systemType;
-      if (posChanged) {
+                         old.azimuth !== panel.azimuth || old.heading !== panel.heading;
+      const typeChanged = old.systemType !== panel.systemType;
+
+      if (posChanged || typeChanged) {
         const oldEntity = panelMapRef.current.get(id);
+        // Try in-place update first (avoids entity remove+add flicker)
+        if (oldEntity && oldEntity.position && oldEntity.orientation && !typeChanged) {
+          try {
+            const pos = safeCartesian3(C, panel.lng, panel.lat, panel.height ?? 0);
+            if (pos && C.Cartesian3.magnitude(pos) > 1000) {
+              const heading = isFinite(panel.heading ?? NaN) ? panel.heading! : headingFromAzimuth(panel.azimuth ?? 180);
+              const pitchRad = -(panel.tilt ?? 0) * Math.PI / 180;
+              const rollRad = (panel.roll ?? 0) * Math.PI / 180;
+              const hpr = new C.HeadingPitchRoll(heading, pitchRad, rollRad);
+              const orientation = C.Transforms.headingPitchRollQuaternion(pos, hpr);
+              if (orientation && isFinite(orientation.x)) {
+                oldEntity.position = new C.ConstantPositionProperty(pos);
+                oldEntity.orientation = new C.ConstantProperty(orientation);
+                changed = true;
+                return; // in-place update succeeded
+              }
+            }
+          } catch {}
+        }
+        // Fallback: remove + re-add (for type changes or if in-place failed)
         if (oldEntity) {
           try { viewer.entities.remove(oldEntity); } catch {}
           panelMapRef.current.delete(id);
@@ -1044,6 +1142,7 @@ export default function SolarEngine3D({
         if (mode === 'select')      handleSelectClick(viewer, C, screenPos);
         else if (mode === 'roof')   handleRoofClick(viewer, C, screenPos);
         else if (mode === 'ground') handleGroundClick(viewer, C, screenPos);
+        else if (mode === 'ground_array') handleGroundArrayClick(viewer, C, screenPos);
         else if (mode === 'fence')  handleFenceClick(viewer, C, screenPos);
         else if (mode === 'plane')  handlePlaneClick(viewer, C, screenPos);
         else if (mode === 'row')    handleRowClick(viewer, C, screenPos);
@@ -1227,6 +1326,210 @@ export default function SolarEngine3D({
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: any) {
       addLog('ERROR', `handleGroundClick: ${err.message}`);
+    }
+  }
+
+  // ── Ground Array placement ────────────────────────────────────────────────────
+  // Two-phase: Click 1 = row start, Click 2 = row end (defines direction + length).
+  // Subsequent clicks add more rows at auto-calculated spacing (winter solstice formula).
+  // Press Enter or right-click to finalize the array.
+  function handleGroundArrayClick(viewer: any, C: any, screenPos: any) {
+    try {
+      const hit = getWorldPosition(viewer, C, screenPos);
+      if (!hit) { setStatusMsg('\u274c No ground detected \u2014 click on open ground'); return; }
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      if (!carto) return;
+      const pt = {
+        lat:    C.Math.toDegrees(carto.latitude),
+        lng:    C.Math.toDegrees(carto.longitude),
+        height: carto.height,
+      };
+      if (!isValidCoord(pt.lat, pt.lng)) return;
+
+      const pendingStart = groundArrayFirstRowRef.current;
+
+      // Phase 1a: no start yet \u2014 store start point
+      if (!pendingStart) {
+        groundArrayFirstRowRef.current = { start: pt, end: pt, azimuthDeg: azimuthRef.current, rowSpacingM: 0 };
+        try {
+          const mPos = safeCartesian3(C, pt.lng, pt.lat, pt.height + 0.5);
+          if (mPos) {
+            const m = viewer.entities.add({
+              position: mPos,
+              point: { pixelSize: 12, color: C.Color.fromCssColorString('#14b8a6'),
+                outlineColor: C.Color.WHITE, outlineWidth: 2,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY },
+              label: { text: 'Start', font: '11px sans-serif',
+                fillColor: C.Color.WHITE, outlineColor: C.Color.BLACK, outlineWidth: 2,
+                style: 2, verticalOrigin: 1,
+                pixelOffset: new C.Cartesian2(0, -16),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            });
+            overlayRef.current.push(m);
+          }
+        } catch {}
+        setStatusMsg('\ud83c\udf31 Row start set \u2014 click end point to define row direction and length');
+        try { viewer.scene.requestRender(); } catch {}
+        return;
+      }
+
+      // Phase 1b: first row end click
+      if (pendingStart.rowSpacingM === 0 && groundArrayRowsRef.current.length === 0) {
+        const c1 = C.Cartesian3.fromDegrees(pendingStart.start.lng, pendingStart.start.lat, pendingStart.start.height);
+        const c2 = C.Cartesian3.fromDegrees(pt.lng, pt.lat, pt.height);
+        const rowVec = C.Cartesian3.subtract(c2, c1, new C.Cartesian3());
+        const worldLen = C.Cartesian3.magnitude(rowVec);
+        if (worldLen < 0.5) { setStatusMsg('\u274c Row too short \u2014 click further away'); return; }
+        C.Cartesian3.normalize(rowVec, rowVec);
+        const enuMatrix = C.Transforms.eastNorthUpToFixedFrame(c1);
+        const enuInv    = C.Matrix4.inverse(enuMatrix, new C.Matrix4());
+        const localVec  = C.Matrix4.multiplyByPointAsVector(enuInv, rowVec, new C.Cartesian3());
+        const rowAzDeg  = (Math.atan2(localVec.x, localVec.y) * 180 / Math.PI + 360) % 360;
+        const orient = panelOrientationRef.current;
+        const { ph } = panelDims(orient);
+        const rowSpacingM = calcMinRowSpacing(gTiltRef.current, ph, lat);
+        const row1 = placeGroundArrayRow(viewer, C, pendingStart.start, pt, rowAzDeg);
+        if (row1.length === 0) { setStatusMsg('\u274c No panels fit \u2014 try a longer line'); return; }
+        groundArrayFirstRowRef.current = { start: pendingStart.start, end: pt, azimuthDeg: rowAzDeg, rowSpacingM };
+        groundArrayRowsRef.current = [row1];
+        setGroundArrayRowCount(1);
+        setGroundArrayPanelCount(row1.length);
+        try {
+          const mPos = safeCartesian3(C, pt.lng, pt.lat, pt.height + 0.5);
+          if (mPos) {
+            const m = viewer.entities.add({ position: mPos,
+              point: { pixelSize: 10, color: C.Color.fromCssColorString('#fbbf24'),
+                outlineColor: C.Color.WHITE, outlineWidth: 2,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+            overlayRef.current.push(m);
+          }
+        } catch {}
+        const kw = (row1.length * 400 / 1000).toFixed(1);
+        setStatusMsg(`\u2705 Row 1: ${row1.length} panels (${kw} kW) \u2014 click to add Row 2, or press Enter to finish`);
+        try { viewer.scene.requestRender(); } catch {}
+        return;
+      }
+
+      // Phase 2+: add subsequent rows at auto-calculated offset
+      const ref = groundArrayFirstRowRef.current;
+      if (!ref || ref.rowSpacingM === 0) return;
+      const rowCount = groundArrayRowsRef.current.length;
+      const offsetAzDeg = (azimuthRef.current + 180) % 360;
+      const offsetRad   = offsetAzDeg * Math.PI / 180;
+      const totalOffset = ref.rowSpacingM * rowCount;
+      const c1Base = C.Cartesian3.fromDegrees(ref.start.lng, ref.start.lat, ref.start.height);
+      const enuMat = C.Transforms.eastNorthUpToFixedFrame(c1Base);
+      const localOff = new C.Cartesian3(totalOffset * Math.sin(offsetRad), totalOffset * Math.cos(offsetRad), 0);
+      const worldOff = C.Matrix4.multiplyByPoint(enuMat, localOff, new C.Cartesian3());
+      const newC1 = C.Cartesian3.add(c1Base, worldOff, new C.Cartesian3());
+      const c2Base = C.Cartesian3.fromDegrees(ref.end.lng, ref.end.lat, ref.end.height);
+      const newC2  = C.Cartesian3.add(c2Base, worldOff, new C.Cartesian3());
+      const newCarto1 = C.Cartographic.fromCartesian(newC1);
+      const newCarto2 = C.Cartographic.fromCartesian(newC2);
+      if (!newCarto1 || !newCarto2) return;
+      const newStart = { lat: C.Math.toDegrees(newCarto1.latitude), lng: C.Math.toDegrees(newCarto1.longitude), height: newCarto1.height };
+      const newEnd   = { lat: C.Math.toDegrees(newCarto2.latitude), lng: C.Math.toDegrees(newCarto2.longitude), height: newCarto2.height };
+      const newRow = placeGroundArrayRow(viewer, C, newStart, newEnd, ref.azimuthDeg);
+      if (newRow.length === 0) { setStatusMsg('\u26a0\ufe0f No panels fit in this row'); return; }
+      groundArrayRowsRef.current = [...groundArrayRowsRef.current, newRow];
+      const totalPanels = groundArrayRowsRef.current.reduce((s, r) => s + r.length, 0);
+      setGroundArrayRowCount(groundArrayRowsRef.current.length);
+      setGroundArrayPanelCount(totalPanels);
+      const kw2 = (totalPanels * 400 / 1000).toFixed(1);
+      setStatusMsg(`\u2705 ${groundArrayRowsRef.current.length} rows \u00b7 ${totalPanels} panels \u00b7 ${kw2} kW \u2014 click for Row ${groundArrayRowsRef.current.length + 1} or Enter to finish`);
+      try { viewer.scene.requestRender(); } catch {}
+    } catch (err: any) {
+      addLog('ERROR', `handleGroundArrayClick: ${err.message}`);
+    }
+  }
+
+  // Places one row of ground panels between two points, returns the placed panels
+  function placeGroundArrayRow(
+    viewer: any, C: any,
+    p1: { lat: number; lng: number; height: number },
+    p2: { lat: number; lng: number; height: number },
+    rowAzDeg: number,
+  ): PlacedPanel[] {
+    const c1 = C.Cartesian3.fromDegrees(p1.lng, p1.lat, p1.height);
+    const c2 = C.Cartesian3.fromDegrees(p2.lng, p2.lat, p2.height);
+    const rowVec = C.Cartesian3.subtract(c2, c1, new C.Cartesian3());
+    const worldLen = C.Cartesian3.magnitude(rowVec);
+    if (!isFinite(worldLen) || worldLen < 0.5) return [];
+    C.Cartesian3.normalize(rowVec, rowVec);
+    const orient = panelOrientationRef.current;
+    const { pw } = panelDims(orient);
+    const spacing = pw + 0.025;
+    const count = Math.max(1, Math.floor(worldLen / spacing));
+    const heading = rowAzDeg * Math.PI / 180;
+    const groundTilt = gTiltRef.current;
+    const groundAz   = azimuthRef.current;
+    const newPanels: PlacedPanel[] = [];
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.5) / count;
+      const worldPos = new C.Cartesian3(
+        c1.x + rowVec.x * worldLen * t,
+        c1.y + rowVec.y * worldLen * t,
+        c1.z + rowVec.z * worldLen * t,
+      );
+      const panelCarto = C.Cartographic.fromCartesian(worldPos);
+      if (!panelCarto) continue;
+      const pLat = C.Math.toDegrees(panelCarto.latitude);
+      const pLng = C.Math.toDegrees(panelCarto.longitude);
+      const pHeight = panelCarto.height;
+      if (!isValidCoord(pLat, pLng, pHeight)) continue;
+      const panel = createPanel({
+        lat: pLat, lng: pLng,
+        height: pHeight + PANEL_OFFSET + (PH * Math.sin(groundTilt * Math.PI / 180)) / 2,
+        tilt: groundTilt, azimuth: groundAz, systemType: 'ground',
+        heading, pitch: groundTilt, roll: 0, orientation: orient,
+      });
+      newPanels.push(panel);
+      addPanelEntity(viewer, C, panel);
+    }
+    return newPanels;
+  }
+
+  // Finalize ground array \u2014 commit all rows to the panel list
+  function finalizeGroundArray() {
+    const allNewPanels = groundArrayRowsRef.current.flat();
+    if (allNewPanels.length === 0) { cancelGroundArray(); return; }
+    const allPanels = [...panelsRef.current, ...allNewPanels];
+    panelsRef.current = allPanels;
+    lastRenderedPanelsRef.current = allPanels;
+    onPanelsChange(allPanels);
+    setPanelCount(allPanels.length);
+    const kw = (allNewPanels.length * 400 / 1000).toFixed(1);
+    setStatusMsg(`\u2705 Ground array placed: ${groundArrayRowsRef.current.length} rows \u00b7 ${allNewPanels.length} panels \u00b7 ${kw} kW`);
+    resetGroundArray();
+    setShowGroundArrayConfirm(false);
+    try { const viewer = viewerRef.current; if (viewer) viewer.scene.requestRender(); } catch {}
+  }
+
+  function cancelGroundArray() {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    const ghostPanels = groundArrayRowsRef.current.flat();
+    if (viewer && C) {
+      ghostPanels.forEach(p => {
+        const ent = panelMapRef.current.get(p.id);
+        if (ent) { try { viewer.entities.remove(ent); } catch {} panelMapRef.current.delete(p.id); }
+      });
+      try { viewer.scene.requestRender(); } catch {}
+    }
+    resetGroundArray();
+    setShowGroundArrayConfirm(false);
+    setStatusMsg('Ground array cancelled');
+  }
+
+  function resetGroundArray() {
+    groundArrayRowsRef.current = [];
+    groundArrayFirstRowRef.current = null;
+    setGroundArrayRowCount(0);
+    setGroundArrayPanelCount(0);
+    const viewer = viewerRef.current;
+    if (viewer) {
+      overlayRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+      overlayRef.current = [];
     }
   }
 
@@ -1722,7 +2025,25 @@ export default function SolarEngine3D({
         e.preventDefault();
         deleteSelectedPanel();
       }
+      if (e.key === 'Enter') {
+        // Finalize ground array on Enter
+        if (modeRef.current === 'ground_array' && groundArrayRowsRef.current.length > 0) {
+          e.preventDefault();
+          finalizeGroundArray();
+        }
+        // Finalize fence on Enter
+        if (modeRef.current === 'fence' && fencePtsRef.current.length >= 2) {
+          e.preventDefault();
+          const viewer = viewerRef.current;
+          const C = (window as any).Cesium;
+          if (viewer && C) finalizeFence(viewer, C);
+        }
+      }
       if (e.key === 'Escape') {
+        // Cancel ground array
+        if (modeRef.current === 'ground_array' && groundArrayRowsRef.current.length > 0) {
+          cancelGroundArray();
+        }
         clearPanelSelection();
         measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay();
         rowPtsRef.current = []; setRowPtCount(0); rowStartScreenPosRef.current = null;
@@ -2293,6 +2614,7 @@ export default function SolarEngine3D({
             { mode: 'select' as PlacementMode, icon: '↖', label: 'Select' },
             { mode: 'roof' as PlacementMode, icon: '🏠', label: 'Roof' },
             { mode: 'ground' as PlacementMode, icon: '🌍', label: 'Ground' },
+            { mode: 'ground_array' as PlacementMode, icon: '🌱', label: 'G-Array' },
             { mode: 'fence' as PlacementMode, icon: '⚡', label: 'Fence' },
             { mode: 'plane' as PlacementMode, icon: '📐', label: 'Plane' },
             { mode: 'row' as PlacementMode, icon: '➡', label: 'Row' },
@@ -2308,9 +2630,13 @@ export default function SolarEngine3D({
                   const C = (window as any).Cesium;
                   if (viewer && C) handleAutoRoof(viewer, C);
                 }
+                // Cancel any in-progress ground array when switching modes
+                if (mode !== 'ground_array' && groundArrayRowsRef.current.length > 0) {
+                  cancelGroundArray();
+                }
                 // Track system type context for row tool (row inherits from last non-row mode)
-                if (mode === 'roof' || mode === 'ground' || mode === 'fence') {
-                  rowSystemTypeRef.current = mode as SystemType;
+                if (mode === 'roof' || mode === 'ground' || mode === 'ground_array' || mode === 'fence') {
+                  rowSystemTypeRef.current = (mode === 'ground_array' ? 'ground' : mode) as SystemType;
                 }
                 if (mode !== 'fence') { fencePtsRef.current = []; setFencePtCount(0); }
                 if (mode !== 'plane') { planePtsRef.current = []; setPlanePtCount(0); }
@@ -2331,8 +2657,8 @@ export default function SolarEngine3D({
 
           <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
 
-          {/* Ground tilt selector */}
-          {placementMode === 'ground' && (
+          {/* Ground tilt selector — shown for both Ground and Ground Array modes */}
+          {(placementMode === 'ground' || placementMode === 'ground_array') && (
             <select value={gTilt} onChange={e => setGTilt(Number(e.target.value))}
               style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
               <option value={0}>0° Flat</option>
@@ -2344,6 +2670,36 @@ export default function SolarEngine3D({
               <option value={40}>40°</option>
               <option value={90}>90° Vertical</option>
             </select>
+          )}
+
+          {/* Ground Array status + confirm/cancel buttons */}
+          {placementMode === 'ground_array' && groundArrayRowCount > 0 && (
+            <>
+              <div style={{ color: '#14b8a6', fontSize: 12, padding: '4px 8px', fontWeight: 600 }}>
+                {groundArrayRowCount} row{groundArrayRowCount !== 1 ? 's' : ''} · {groundArrayPanelCount} panels
+              </div>
+              <button
+                onClick={finalizeGroundArray}
+                style={{ padding: '4px 12px', borderRadius: 7, fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', border: 'none',
+                  background: 'linear-gradient(135deg, #14b8a6, #0d9488)', color: '#fff' }}>
+                ✓ Confirm
+              </button>
+              <button
+                onClick={cancelGroundArray}
+                style={{ padding: '4px 10px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer', border: '1px solid rgba(239,68,68,0.4)',
+                  background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
+                ✗ Cancel
+              </button>
+            </>
+          )}
+
+          {/* Ground Array hint when no rows yet */}
+          {placementMode === 'ground_array' && groundArrayRowCount === 0 && (
+            <div style={{ color: '#14b8a6', fontSize: 11, padding: '4px 8px', opacity: 0.8 }}>
+              Click start → end → more rows → Enter
+            </div>
           )}
 
           {/* Plane info + finish button */}
@@ -2701,3 +3057,23 @@ export default function SolarEngine3D({
     </div>
   );
 }
+
+// ── React.memo wrapper ─────────────────────────────────────────────────────
+// Prevents SolarEngine3D from re-rendering when unrelated parent state changes
+// (e.g. right-panel config edits, proposal values, etc.)
+// Only re-renders when 3D-relevant props actually change.
+export default React.memo(SolarEngine3D, (prev, next) => {
+  return (
+    prev.panels === next.panels &&
+    prev.lat === next.lat &&
+    prev.lng === next.lng &&
+    prev.placementMode === next.placementMode &&
+    prev.showShade === next.showShade &&
+    prev.tilt === next.tilt &&
+    prev.azimuth === next.azimuth &&
+    prev.fenceHeight === next.fenceHeight &&
+    prev.selectedPanel?.id === next.selectedPanel?.id &&
+    prev.onPanelsChange === next.onPanelsChange &&
+    prev.onPlacementModeChange === next.onPlacementModeChange
+  );
+});

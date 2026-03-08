@@ -42,6 +42,7 @@
   "exclude": [
     "node_modules",
     "lib/engineering-core.test.ts",
+    "deploy_v24.6/**",
     "scripts/**",
     "debug_*.ts"
   ]

@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SolarPro — Expert Technical Guidance v30.6</title>
+<style>
+  :root {
+    --bg: #0f172a; --bg2: #1e293b; --bg3: #334155;
+    --accent: #f59e0b; --accent2: #10b981; --accent3: #3b82f6;
+    --red: #ef4444; --orange: #f97316; --purple: #a855f7;
+    --text: #e2e8f0; --text2: #94a3b8; --text3: #64748b;
+    --border: rgba(255,255,255,0.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+  
+  .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%); border-bottom: 1px solid var(--border); padding: 32px 48px; }
+  .header h1 { font-size: 28px; font-weight: 700; color: var(--accent); letter-spacing: -0.5px; }
+  .header .subtitle { color: var(--text2); margin-top: 6px; font-size: 13px; }
+  .header .badges { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  .badge-green { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+  .badge-amber { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+  .badge-blue { background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); }
+  .badge-purple { background: rgba(168,85,247,0.15); color: #c084fc; border: 1px solid rgba(168,85,247,0.3); }
+
+  .nav { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 48px; display: flex; gap: 0; }
+  .nav a { padding: 14px 20px; color: var(--text2); text-decoration: none; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .nav a:hover { color: var(--text); border-bottom-color: var(--accent); }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 48px; }
+  
+  .issue-header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .issue-num { width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; flex-shrink: 0; }
+  .issue-num-1 { background: rgba(245,158,11,0.15); color: var(--accent); border: 1px solid rgba(245,158,11,0.3); }
+  .issue-num-2 { background: rgba(16,185,129,0.15); color: var(--accent2); border: 1px solid rgba(16,185,129,0.3); }
+  .issue-title { font-size: 22px; font-weight: 700; }
+  .issue-subtitle { color: var(--text2); font-size: 13px; margin-top: 2px; }
+
+  .priority-section { margin-bottom: 32px; }
+  .priority-label { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 16px; }
+  .p1 { background: rgba(239,68,68,0.12); color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+  .p2 { background: rgba(245,158,11,0.12); color: #fbbf24; border: 1px solid rgba(245,158,11,0.25); }
+  .p3 { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.25); }
+
+  .opt-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; }
+  .opt-card.done { border-left: 3px solid var(--accent2); }
+  .opt-card.recommended { border-left: 3px solid var(--accent); }
+  .opt-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .opt-title { font-size: 15px; font-weight: 700; color: var(--text); }
+  .opt-meta { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+  .tag { padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+  .tag-done { background: rgba(16,185,129,0.15); color: #10b981; }
+  .tag-easy { background: rgba(59,130,246,0.12); color: #60a5fa; }
+  .tag-mod { background: rgba(245,158,11,0.12); color: #fbbf24; }
+  .tag-complex { background: rgba(239,68,68,0.12); color: #f87171; }
+  .tag-impact { background: rgba(168,85,247,0.12); color: #c084fc; }
+
+  .opt-body { color: var(--text2); font-size: 13px; }
+  .opt-body p { margin-bottom: 8px; }
+  .opt-body ul { padding-left: 18px; margin-bottom: 8px; }
+  .opt-body li { margin-bottom: 4px; }
+  .opt-body strong { color: var(--text); }
+
+  .impact-bar { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .impact-label { font-size: 11px; color: var(--text3); font-weight: 600; text-transform: uppercase; width: 80px; flex-shrink: 0; }
+  .impact-track { flex: 1; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+  .impact-fill { height: 100%; border-radius: 3px; }
+  .impact-value { font-size: 12px; font-weight: 700; width: 60px; text-align: right; flex-shrink: 0; }
+
+  pre, code { font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace; }
+  .code-block { background: #0a0f1a; border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 16px 20px; margin: 12px 0; overflow-x: auto; font-size: 12px; line-height: 1.7; color: #a8d8a8; }
+  .code-block .comment { color: #4a6a4a; }
+  .code-block .keyword { color: #7dd3fc; }
+  .code-block .string { color: #fca5a5; }
+  .code-block .number { color: #fbbf24; }
+  .code-block .fn { color: #c084fc; }
+
+  .roadmap-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  .roadmap-table th { background: rgba(255,255,255,0.04); color: var(--text2); font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .roadmap-table td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text2); vertical-align: top; }
+  .roadmap-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .roadmap-table .done-row td { color: var(--accent2); }
+  .roadmap-table .done-row td:first-child::before { content: '✅ '; }
+
+  .comparison-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 12px; }
+  .comparison-table th { background: rgba(255,255,255,0.04); color: var(--text2); font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; }
+  .comparison-table td { padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.04); color: var(--text2); vertical-align: top; }
+  .comparison-table .recommended-row td { background: rgba(245,158,11,0.05); color: var(--text); }
+  .comparison-table .recommended-row td:first-child { color: var(--accent); font-weight: 700; }
+  .score-high { color: #10b981; font-weight: 700; }
+  .score-med { color: #f59e0b; font-weight: 700; }
+  .score-low { color: #ef4444; font-weight: 700; }
+
+  .flow-step { display: flex; gap: 16px; margin-bottom: 16px; }
+  .flow-num { width: 32px; height: 32px; border-radius: 50%; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); color: var(--accent); font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; }
+  .flow-content { flex: 1; }
+  .flow-title { font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .flow-desc { color: var(--text2); font-size: 13px; }
+
+  .formula-box { background: rgba(59,130,246,0.06); border: 1px solid rgba(59,130,246,0.2); border-radius: 10px; padding: 16px 20px; margin: 12px 0; }
+  .formula-title { color: #60a5fa; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+
+  .validation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+  .validation-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .validation-card h4 { font-size: 12px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .validation-card p { font-size: 12px; color: var(--text2); }
+
+  .visual-state { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
+  .visual-state-header { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .state-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .state-title { font-weight: 700; font-size: 13px; }
+  .state-body { font-size: 12px; color: var(--text2); padding-left: 20px; }
+  .state-body li { margin-bottom: 3px; }
+
+  .error-example { background: var(--bg2); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; }
+  .error-bad { color: #f87171; font-size: 12px; margin-bottom: 6px; }
+  .error-good { color: #4ade80; font-size: 12px; }
+  .error-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+
+  .bonus-section { background: var(--bg2); border: 1px solid rgba(168,85,247,0.2); border-radius: 12px; padding: 24px; margin-top: 40px; }
+  .bonus-header { color: var(--purple); font-size: 16px; font-weight: 700; margin-bottom: 16px; }
+  .pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .pros { background: rgba(16,185,129,0.06); border: 1px solid rgba(16,185,129,0.15); border-radius: 8px; padding: 12px 16px; }
+  .cons { background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.15); border-radius: 8px; padding: 12px 16px; }
+  .pros h4 { color: #10b981; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 8px; }
+  .cons h4 { color: #f87171; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-bottom: 8px; }
+  .pros li, .cons li { font-size: 12px; color: var(--text2); margin-bottom: 4px; padding-left: 4px; }
+
+  .rec-box { background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; }
+  .rec-box p { font-size: 13px; color: var(--text); }
+
+  .impl-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .impl-option { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .impl-option h4 { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+  .impl-option p { font-size: 12px; color: var(--text2); }
+
+  .section-divider { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+  h2 { font-size: 18px; font-weight: 700; color: var(--text); margin: 28px 0 16px; }
+  h3 { font-size: 15px; font-weight: 700; color: var(--text); margin: 20px 0 12px; }
+  h4 { font-size: 13px; font-weight: 700; color: var(--text2); margin: 14px 0 8px; }
+  p { color: var(--text2); font-size: 13px; margin-bottom: 10px; }
+  ul { padding-left: 18px; color: var(--text2); font-size: 13px; }
+  li { margin-bottom: 4px; }
+  .highlight { color: var(--accent); font-weight: 600; }
+  .highlight-green { color: var(--accent2); font-weight: 600; }
+  .highlight-blue { color: #60a5fa; font-weight: 600; }
+  .note { background: rgba(59,130,246,0.06); border-left: 3px solid #3b82f6; padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; font-size: 12px; color: var(--text2); }
+  .warning { background: rgba(245,158,11,0.06); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 12px 0; font-size: 12px; color: var(--text2); }
+</style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ SolarPro — Expert Technical Guidance</h1>
+  <div class="subtitle">Issue 1: 3D Render Performance Optimization &nbsp;·&nbsp; Issue 2: Ground Mount Panel Placement UX & Implementation</div>
+  <div class="badges">
+    <span class="badge badge-green">CesiumJS 1.114</span>
+    <span class="badge badge-blue">Next.js / React / TypeScript</span>
+    <span class="badge badge-amber">Google Photorealistic 3D Tiles</span>
+    <span class="badge badge-purple">Production Stage</span>
+    <span class="badge badge-green">v30.6 Context</span>
+  </div>
+</div>
+
+<div class="nav">
+  <a href="#issue1">Issue 1: Performance</a>
+  <a href="#issue2">Issue 2: Ground Mount</a>
+  <a href="#roadmap">Roadmap</a>
+  <a href="#bonus">Bonus: AI Chat</a>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ISSUE 1 -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="issue1">
+  <div class="issue-header">
+    <div class="issue-num issue-num-1">1</div>
+    <div>
+      <div class="issue-title">3D Render Performance Optimization</div>
+      <div class="issue-subtitle">CesiumJS entity-based rendering · requestRenderMode: true · Google Photorealistic 3D Tiles</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Architecture context (from codebase analysis):</strong> Current pipeline: <code>panels</code> prop change → <code>useEffect</code> → <code>renderAllPanels()</code> → remove ALL entities → rebuild ALL entities. Root bottleneck: O(n) full rebuild on every panel change, even when only 1 panel was added. <code>requestRenderMode: true</code> is already enabled (good baseline — GPU only renders on demand).
+  </div>
+
+  <!-- PRIORITY 1 -->
+  <div class="priority-section">
+    <div class="priority-label p1">🔴 Priority 1 — High Impact</div>
+
+    <div class="opt-card done">
+      <div class="opt-header">
+        <div class="opt-title">1. Incremental Diff Rendering</div>
+        <div class="opt-meta">
+          <span class="tag tag-done">✅ Done in v30.5</span>
+          <span class="tag tag-impact">95-99% fewer entity ops</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <p><strong>What was implemented:</strong> <code>renderAllPanels()</code> now diffs <code>lastRenderedPanelsRef</code> vs new panel list. Only removes deleted panels, only adds new panels, only rebuilds panels whose geometry changed.</p>
+        <ul>
+          <li><strong>Before:</strong> 200 entity removes + 201 entity adds = 401 Cesium operations for adding 1 panel</li>
+          <li><strong>After:</strong> 1 entity add = 1 Cesium operation</li>
+        </ul>
+        <p><strong>Remaining opportunity:</strong> Panel position updates currently remove+re-add the entity. For drag operations, update <code>entity.position</code> and <code>entity.orientation</code> in-place:</p>
+        <div class="code-block"><span class="comment">// Instead of remove + re-add for position changes:</span>
+<span class="keyword">function</span> <span class="fn">updatePanelEntityInPlace</span>(entity, C, panel) {
+  <span class="keyword">const</span> pos = safeCartesian3(C, panel.lng, panel.lat, panel.height);
+  <span class="keyword">const</span> hpr = <span class="keyword">new</span> C.HeadingPitchRoll(panel.heading, -panel.tilt * Math.PI/<span class="number">180</span>, <span class="number">0</span>);
+  <span class="keyword">const</span> orientation = C.Transforms.headingPitchRollQuaternion(pos, hpr);
+  entity.position = <span class="keyword">new</span> C.ConstantPositionProperty(pos);
+  entity.orientation = <span class="keyword">new</span> C.ConstantProperty(orientation);
+  <span class="comment">// No entity remove/add — eliminates flicker during drag</span>
+}</div>
+        <div class="impact-bar">
+          <span class="impact-label">Impact</span>
+          <div class="impact-track"><div class="impact-fill" style="width:97%;background:linear-gradient(90deg,#10b981,#34d399)"></div></div>
+          <span class="impact-value" style="color:#10b981">97%↓ ops</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="opt-card done">
+      <div class="opt-header">
+        <div class="opt-title">2. Debounced Batch Rendering</div>
+        <div class="opt-meta">
+          <span class="tag tag-done">✅ Done in v30.5</span>
+          <span class="tag tag-impact">Eliminates redundant rebuilds</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <p><strong>What was implemented:</strong> 16ms debounce on the panels <code>useEffect</code> batches rapid state changes (auto-fill, undo/redo) into a single render call.</p>
+        <p><strong>Remaining opportunity:</strong> Dynamic debounce window based on panel count delta:</p>
+        <div class="code-block"><span class="keyword">const</span> delta = Math.abs(panels.length - lastRenderedPanelsRef.current.length);
+<span class="keyword">const</span> debounceMs = delta > <span class="number">20</span> ? <span class="number">50</span> : delta > <span class="number">5</span> ? <span class="number">32</span> : <span class="number">16</span>;
+<span class="comment">// 50ms for 200-panel auto-fill, 16ms for single panel clicks</span></div>
+        <div class="impact-bar">
+          <span class="impact-label">Impact</span>
+          <div class="impact-track"><div class="impact-fill" style="width:80%;background:linear-gradient(90deg,#10b981,#34d399)"></div></div>
+          <span class="impact-value" style="color:#10b981">High</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="opt-card recommended">
+      <div class="opt-header">
+        <div class="opt-title">3. Cesium Primitive-Based Rendering (GPU Instancing)</div>
+        <div class="opt-meta">
+          <span class="tag tag-mod">Moderate — 2 days</span>
+          <span class="tag tag-impact">60-80% GPU reduction</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <p><strong>Current problem:</strong> <code>viewer.entities.add()</code> — each panel is a separate JavaScript object with full Cesium property system overhead. Cesium entities are designed for data-driven visualization, not high-frequency geometric rendering.</p>
+        <p><strong>Solution:</strong> Replace with <code>GeometryInstance</code> + <code>Primitive</code> — single GPU draw call for ALL panels:</p>
+        <div class="code-block"><span class="keyword">function</span> <span class="fn">buildPanelPrimitive</span>(C, panels) {
+  <span class="keyword">const</span> instances = panels.map(panel => {
+    <span class="keyword">const</span> pos = C.Cartesian3.fromDegrees(panel.lng, panel.lat, panel.height);
+    <span class="keyword">const</span> hpr = <span class="keyword">new</span> C.HeadingPitchRoll(panel.heading, -panel.tilt * Math.PI/<span class="number">180</span>, <span class="number">0</span>);
+    <span class="keyword">const</span> modelMatrix = C.Transforms.headingPitchRollToFixedFrame(pos, hpr);
+    C.Matrix4.multiplyByScale(modelMatrix, <span class="keyword">new</span> C.Cartesian3(PW, PH, PT), modelMatrix);
+    
+    <span class="keyword">return new</span> C.GeometryInstance({
+      geometry: <span class="keyword">new</span> C.BoxGeometry({ vertexFormat: C.PerInstanceColorAppearance.VERTEX_FORMAT }),
+      modelMatrix,
+      attributes: { color: C.ColorGeometryInstanceAttribute.fromColor(systemTypeColor(C, panel.systemType)) },
+      id: panel.id, <span class="comment">// for picking</span>
+    });
+  });
+
+  <span class="keyword">return new</span> C.Primitive({
+    geometryInstances: instances,
+    appearance: <span class="keyword">new</span> C.PerInstanceColorAppearance({ flat: <span class="keyword">false</span> }),
+    releaseGeometryInstances: <span class="keyword">false</span>, <span class="comment">// keep for picking</span>
+    allowPicking: <span class="keyword">true</span>,
+    asynchronous: <span class="keyword">true</span>, <span class="comment">// compile on worker thread</span>
+  });
+}</div>
+        <ul>
+          <li><strong>Single draw call</strong> for ALL panels (GPU instancing) vs. one draw call per panel</li>
+          <li><strong>No JS property system overhead</strong> per panel — pure geometry</li>
+          <li><strong>Shadow rendering:</strong> one shadow pass for all panels vs. n passes</li>
+          <li><strong>Memory:</strong> ~70% reduction (no per-entity JS objects)</li>
+          <li><strong>Color updates:</strong> <code>primitive.getGeometryInstanceAttributes(id).color = newColor</code> — in-place, no rebuild</li>
+        </ul>
+        <div class="impact-bar">
+          <span class="impact-label">GPU Impact</span>
+          <div class="impact-track"><div class="impact-fill" style="width:75%;background:linear-gradient(90deg,#f59e0b,#fbbf24)"></div></div>
+          <span class="impact-value" style="color:#f59e0b">60-80%↓</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="opt-card">
+      <div class="opt-header">
+        <div class="opt-title">4. React.memo on SolarEngine3D</div>
+        <div class="opt-meta">
+          <span class="tag tag-easy">Easy — 30 min</span>
+          <span class="tag tag-impact">10-20% React overhead</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <p>The component likely re-renders when parent state changes (e.g., right panel config values), even when 3D-irrelevant state changes. Wrap with custom comparison:</p>
+        <div class="code-block"><span class="keyword">export default</span> React.memo(SolarEngine3D, (prev, next) => {
+  <span class="keyword">return</span> (
+    prev.panels === next.panels &&
+    prev.lat === next.lat && prev.lng === next.lng &&
+    prev.placementMode === next.placementMode &&
+    prev.showShade === next.showShade &&
+    prev.tilt === next.tilt && prev.azimuth === next.azimuth &&
+    prev.selectedPanel?.id === next.selectedPanel?.id
+  );
+});</div>
+        <div class="impact-bar">
+          <span class="impact-label">Impact</span>
+          <div class="impact-track"><div class="impact-fill" style="width:20%;background:linear-gradient(90deg,#3b82f6,#60a5fa)"></div></div>
+          <span class="impact-value" style="color:#60a5fa">Medium</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRIORITY 2 -->
+  <div class="priority-section">
+    <div class="priority-label p2">🟡 Priority 2 — Medium Impact</div>
+
+    <div class="opt-card">
+      <div class="opt-header">
+        <div class="opt-title">5. Level of Detail (LOD) — Distance-Based Quality Switching</div>
+        <div class="opt-meta">
+          <span class="tag tag-mod">Moderate — 1 day</span>
+          <span class="tag tag-impact">40-60% GPU at overview</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <p>At camera distances &gt; 500m, individual panel geometry is sub-pixel. Rendering full box geometry wastes GPU cycles.</p>
+        <table class="roadmap-table" style="margin:10px 0">
+          <tr><th>LOD Level</th><th>Distance</th><th>Geometry</th><th>Shadows</th><th>Draw Cost</th></tr>
+          <tr><td>LOD0 (Full)</td><td>&lt; 100m</td><td>Box + outlines</td><td>On</td><td>100%</td></tr>
+          <tr><td>LOD1</td><td>100–300m</td><td>Box, no outlines</td><td>On</td><td>70%</td></tr>
+          <tr><td>LOD2</td><td>300–800m</td><td>Flat rectangle</td><td>Off</td><td>15%</td></tr>
+          <tr><td>LOD3</td><td>&gt; 800m</td><td>Billboard sprite</td><td>Off</td><td>5%</td></tr>
+        </table>
+        <div class="code-block">viewer.camera.changed.addEventListener(() => {
+  <span class="keyword">const</span> h = viewer.camera.positionCartographic.height;
+  <span class="keyword">if</span> (h > <span class="number">800</span>) switchToLOD(<span class="string">'billboard'</span>);
+  <span class="keyword">else if</span> (h > <span class="number">300</span>) switchToLOD(<span class="string">'flat'</span>);
+  <span class="keyword">else if</span> (h > <span class="number">100</span>) switchToLOD(<span class="string">'box_no_shadow'</span>);
+  <span class="keyword">else</span> switchToLOD(<span class="string">'full'</span>);
+});</div>
+      </div>
+    </div>
+
+    <div class="opt-card">
+      <div class="opt-header">
+        <div class="opt-title">6. Dynamic Shadow Map Resolution</div>
+        <div class="opt-meta">
+          <span class="tag tag-easy">Easy — 1 hour</span>
+          <span class="tag tag-impact">20-35% GPU in shade mode</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <p>Shadow maps are expensive. Reduce resolution at overview distances — users can't see shadow detail from 500m anyway.</p>
+        <div class="code-block">viewer.camera.changed.addEventListener(() => {
+  <span class="keyword">const</span> h = viewer.camera.positionCartographic.height;
+  <span class="keyword">if</span> (viewer.scene.shadowMap) {
+    viewer.scene.shadowMap.size = h > <span class="number">500</span> ? <span class="number">512</span> : h > <span class="number">200</span> ? <span class="number">1024</span> : <span class="number">2048</span>;
+    viewer.scene.shadowMap.softShadows = h < <span class="number">300</span>;
+  }
+});</div>
+      </div>
+    </div>
+
+    <div class="opt-card">
+      <div class="opt-header">
+        <div class="opt-title">7. Tile Loading Optimization</div>
+        <div class="opt-meta">
+          <span class="tag tag-easy">Easy — 2 hours</span>
+          <span class="tag tag-impact">30-50% faster initial load</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <div class="code-block"><span class="comment">// In Cesium viewer initialization:</span>
+<span class="keyword">const</span> viewer = <span class="keyword">new</span> C.Viewer(cesiumRef.current, {
+  maximumScreenSpaceError: <span class="number">16</span>, <span class="comment">// increase to 32 for faster load</span>
+  preloadFlightDestinations: <span class="keyword">true</span>,
+});
+
+<span class="comment">// Tileset-specific:</span>
+tileset.maximumMemoryUsage = <span class="number">512</span>; <span class="comment">// MB — limit VRAM usage</span>
+tileset.skipLevelOfDetail = <span class="keyword">true</span>; <span class="comment">// skip intermediate LOD levels</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PRIORITY 3 -->
+  <div class="priority-section">
+    <div class="priority-label p3">⚪ Priority 3 — Future / Large Arrays</div>
+
+    <div class="opt-card">
+      <div class="opt-header">
+        <div class="opt-title">8. Web Worker for Panel Geometry Computation</div>
+        <div class="opt-meta">
+          <span class="tag tag-mod">Moderate — 6 hours</span>
+          <span class="tag tag-impact">Best for 100+ panels</span>
+        </div>
+      </div>
+      <div class="opt-body">
+        <p>Move coordinate transforms and quaternion math off the main thread. Frees UI for interaction during large array placement.</p>
+        <div class="code-block"><span class="comment">// panel-geometry.worker.ts</span>
+self.onmessage = (e) => {
+  <span class="keyword">const</span> results = e.data.map(panel => ({
+    id: panel.id,
+    cartesian: fromDegrees(panel.lng, panel.lat, panel.height),
+    quaternion: computeQuaternion(panel.heading, panel.tilt, panel.roll),
+  }));
+  self.postMessage(results);
+};</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROFILING TOOLS -->
+  <h2>🔬 Profiling Tools</h2>
+  <div class="validation-grid">
+    <div class="validation-card">
+      <h4>Chrome DevTools Performance</h4>
+      <p>Record while placing panels. Watch: <strong>Scripting</strong> (entity creation), <strong>Rendering</strong> (layout), <strong>Painting</strong> (GPU rasterization). Memory tab: watch for entity accumulation leaks.</p>
+    </div>
+    <div class="validation-card">
+      <h4>Cesium Inspector Mixin</h4>
+      <p><code>viewer.extend(C.viewerCesiumInspectorMixin)</code> — shows draw call count, primitive count, tile load times, FPS graph. Enable in dev mode only.</p>
+    </div>
+    <div class="validation-card">
+      <h4>Stats.js Integration</h4>
+      <p>Hook into <code>viewer.scene.preRender</code> / <code>postRender</code> events for real-time FPS overlay. Shows frame time, memory, draw calls.</p>
+    </div>
+    <div class="validation-card">
+      <h4>Chrome GPU Profiler</h4>
+      <p>chrome://tracing → enable "gpu" category. Shows GPU command buffer, shader compilation time, texture uploads. Critical for identifying GPU-side bottlenecks.</p>
+    </div>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- ISSUE 2 -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<div id="issue2">
+  <div class="issue-header">
+    <div class="issue-num issue-num-2">2</div>
+    <div>
+      <div class="issue-title">Ground Mount Panel Placement — UX & Implementation Design</div>
+      <div class="issue-subtitle">4-point system evaluation · Recommended approach · Algorithm · Constraints · Visual feedback</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Current state (from screenshot + codebase):</strong> ✅ Ground mode (single-panel click) · ✅ Row mode (two-click, now inherits systemType in v30.5) · ✅ Plane mode (3-point) · ✅ 2D draw_ground zone with auto-fill · ❌ Missing: 4-corner quadrilateral in 3D · ❌ Missing: Ground Array (chained rows with auto-spacing)
+  </div>
+
+  <!-- COMPARISON TABLE -->
+  <h2>Approach Comparison</h2>
+  <table class="comparison-table">
+    <tr>
+      <th>Approach</th>
+      <th>User Score</th>
+      <th>Flexibility</th>
+      <th>Complexity</th>
+      <th>Best For</th>
+    </tr>
+    <tr>
+      <td>4-Point Quadrilateral</td>
+      <td><span class="score-med">7/10</span></td>
+      <td>High — any quad shape</td>
+      <td>Moderate</td>
+      <td>Technical users, irregular sites</td>
+    </tr>
+    <tr>
+      <td>Drag Rectangle</td>
+      <td><span class="score-high">9/10</span></td>
+      <td>Low — rectangles only</td>
+      <td>Simple</td>
+      <td>Quick placement, beginners</td>
+    </tr>
+    <tr>
+      <td>Polygon Draw (N-point)</td>
+      <td><span class="score-low">6/10</span></td>
+      <td>Very High — any polygon</td>
+      <td>Complex</td>
+      <td>Expert users, complex sites</td>
+    </tr>
+    <tr class="recommended-row">
+      <td>⭐ Row-by-Row Builder</td>
+      <td><span class="score-high">8.5/10</span></td>
+      <td>High — row control</td>
+      <td>Moderate</td>
+      <td><strong>Solar pros — mirrors install process</strong></td>
+    </tr>
+    <tr>
+      <td>Lasso / Paint</td>
+      <td><span class="score-med">8/10</span></td>
+      <td>High — freeform</td>
+      <td>Moderate</td>
+      <td>Field workers, irregular obstacles</td>
+    </tr>
+  </table>
+
+  <div class="warning">
+    <strong>Why Row-by-Row Builder wins for solar professionals:</strong> Solar installers think in rows — "4 rows of 12 panels facing 180°, 25° tilt." This matches their mental model exactly. The existing Row tool (two-click) is already the foundation. Enhancement = chain multiple rows with auto-spacing.
+  </div>
+
+  <!-- RECOMMENDED APPROACH -->
+  <h2>⭐ Recommended Approach: Enhanced Row-by-Row Builder</h2>
+
+  <h3>A. User Interaction Flow</h3>
+  <div class="flow-step">
+    <div class="flow-num">1</div>
+    <div class="flow-content">
+      <div class="flow-title">Activate Ground Array Mode</div>
+      <div class="flow-desc">User clicks "Ground" in toolbar → selects tilt angle (0°–40°) from existing dropdown → clicks "Array" sub-mode (or holds Shift with Row mode). Status: <em>"🌱 Ground Array — Click to set first row start point"</em></div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">2</div>
+    <div class="flow-content">
+      <div class="flow-title">Define First Row (2 clicks)</div>
+      <div class="flow-desc">Click 1: Row start → green dot appears, ghost line follows cursor. Click 2: Row end → ghost panels preview along line, panel count badge shows "12 panels × 400W = 4.8 kW", row spacing preview lines extend behind showing where rows 2–4 will go.</div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">3</div>
+    <div class="flow-content">
+      <div class="flow-title">Add Additional Rows (Auto-Offset)</div>
+      <div class="flow-desc">Each subsequent click places another row at configured row spacing. Running total updates live: "3 rows × 12 panels = 36 panels · 14.4 kW". Row spacing auto-calculated from tilt + latitude (winter solstice formula).</div>
+    </div>
+  </div>
+  <div class="flow-step">
+    <div class="flow-num">4</div>
+    <div class="flow-content">
+      <div class="flow-title">Confirm Array (Enter or Right-Click)</div>
+      <div class="flow-desc">All ghost panels become solid. Confirmation card slides up: panel count, kW, rows × panels, tilt, azimuth. [✓ Confirm] [✗ Cancel] buttons. Undo button appears for 10 seconds after confirmation.</div>
+    </div>
+  </div>
+
+  <!-- ALGORITHM -->
+  <h3>B. Panel Arrangement Algorithm</h3>
+
+  <div class="formula-box">
+    <div class="formula-title">⚡ Inter-Row Spacing Formula (Industry Standard — Winter Solstice)</div>
+    <div class="code-block"><span class="comment">/**
+ * Minimum row spacing to prevent inter-row shading
+ * Based on winter solstice sun angle (worst case for shading)
+ */</span>
+<span class="keyword">function</span> <span class="fn">calcMinRowSpacing</span>(tiltDeg, panelHeightM, latitudeDeg) {
+  <span class="keyword">const</span> tiltRad = tiltDeg * Math.PI / <span class="number">180</span>;
+  <span class="keyword">const</span> panelVerticalHeight = panelHeightM * Math.sin(tiltRad);   <span class="comment">// vertical rise</span>
+  <span class="keyword">const</span> panelHorizontalDepth = panelHeightM * Math.cos(tiltRad);  <span class="comment">// horizontal footprint</span>
+  
+  <span class="comment">// Winter solstice sun elevation = 90° - |latitude| - 23.45°</span>
+  <span class="keyword">const</span> sunElevDeg = Math.max(<span class="number">10</span>, <span class="number">90</span> - Math.abs(latitudeDeg) - <span class="number">23.45</span>);
+  <span class="keyword">const</span> shadowLength = panelVerticalHeight / Math.tan(sunElevDeg * Math.PI / <span class="number">180</span>);
+  
+  <span class="keyword">return</span> (panelHorizontalDepth + shadowLength) * <span class="number">1.1</span>; <span class="comment">// +10% buffer</span>
+}
+
+<span class="comment">// Example: 25° tilt, 1.722m panel, 38° latitude (Illinois)
+// → panelVerticalHeight = 0.728m
+// → sunElevation = 28.55°  
+// → shadowLength = 1.333m
+// → rowSpacing = (1.560 + 1.333) × 1.1 = 3.18m ≈ 10.4 ft</span></div>
+  </div>
+
+  <h4>Industry-Standard Spacing Requirements</h4>
+  <table class="roadmap-table">
+    <tr><th>Spacing Type</th><th>Minimum</th><th>Standard</th><th>Reference</th></tr>
+    <tr><td>Panel-to-panel (same row)</td><td>20mm (0.8")</td><td>25mm (1")</td><td>NEC 690.4</td></tr>
+    <tr><td>Row-to-row (inter-row)</td><td>1.5m (5ft)</td><td>Formula above</td><td>NREL Best Practices</td></tr>
+    <tr><td>Array perimeter setback</td><td>0.3m (1ft)</td><td>0.6m (2ft)</td><td>Local AHJ</td></tr>
+    <tr><td>Maintenance aisle</td><td>1.2m (4ft)</td><td>1.5m (5ft)</td><td>Every 6 rows</td></tr>
+  </table>
+
+  <!-- CONSTRAINTS -->
+  <h3>C. Constraints & Validation Rules</h3>
+  <div class="validation-grid">
+    <div class="validation-card">
+      <h4>Minimum Area</h4>
+      <p><strong>1 panel minimum:</strong> 1.434m × 2.222m ≈ 3.2 m²<br>
+      <strong>Practical minimum:</strong> 10 m² (2–3 panels with spacing)<br>
+      Anything smaller is not economically viable for ground mount.</p>
+    </div>
+    <div class="validation-card">
+      <h4>Maximum Area (Performance)</h4>
+      <p><strong>Soft limit:</strong> 500 panels — warn, offer to split<br>
+      <strong>Hard limit:</strong> 1000 panels — prevent browser freeze<br>
+      With primitive rendering: hard limit → 5000+</p>
+    </div>
+    <div class="validation-card">
+      <h4>Terrain Slope</h4>
+      <p><strong>&lt; 5%:</strong> No warning<br>
+      <strong>5–15%:</strong> ⚠️ Row spacing adjusted<br>
+      <strong>15–25%:</strong> ⚠️ Structural review required<br>
+      <strong>&gt; 25%:</strong> ❌ Exceeds standard ground mount limit</p>
+    </div>
+    <div class="validation-card">
+      <h4>Shape Validation (4-Point)</h4>
+      <p>Check for self-intersection (bowtie) → error with diagram<br>
+      Check for concavity → warning, panels near indentation excluded<br>
+      Check minimum area → error with specific dimensions needed</p>
+    </div>
+  </div>
+
+  <!-- VISUAL FEEDBACK -->
+  <h3>D. Visual Feedback System</h3>
+
+  <div class="visual-state">
+    <div class="visual-state-header">
+      <div class="state-dot" style="background:#64748b"></div>
+      <div class="state-title">State 1: Mode Activated (no clicks)</div>
+    </div>
+    <ul class="state-body">
+      <li>Cursor: crosshair with green dot</li>
+      <li>Ground surface: subtle green tint overlay (shows clickable area)</li>
+      <li>Status bar: "🌱 Ground Array — Click to set first row start point"</li>
+      <li>Tooltip on hover: lat/lng + elevation</li>
+    </ul>
+  </div>
+
+  <div class="visual-state">
+    <div class="visual-state-header">
+      <div class="state-dot" style="background:#f59e0b"></div>
+      <div class="state-title">State 2: First Point Placed</div>
+    </div>
+    <ul class="state-body">
+      <li>Point 1: Green filled circle (8px) with white outline</li>
+      <li>Ghost line: Dashed green line follows cursor from point 1</li>
+      <li>Ghost panels: Translucent blue-green panels preview along ghost line</li>
+      <li>Panel count badge: Floating "~12 panels" updates as cursor moves</li>
+      <li>Row spacing preview: Dashed lines showing where rows 2–4 would go</li>
+    </ul>
+  </div>
+
+  <div class="visual-state">
+    <div class="visual-state-header">
+      <div class="state-dot" style="background:#10b981"></div>
+      <div class="state-title">State 3: First Row Confirmed, Building Array</div>
+    </div>
+    <ul class="state-body">
+      <li>Confirmed rows: Solid green panels (70% opacity)</li>
+      <li>Next row preview: Ghost panels at auto-calculated spacing position</li>
+      <li>Running total: "3 rows · 36 panels · 14.4 kW" — updates live</li>
+      <li>Maintenance aisle indicator: Yellow dashed line every 6 rows</li>
+      <li>Cancel button: "✗ Cancel" appears in toolbar</li>
+    </ul>
+  </div>
+
+  <div class="visual-state">
+    <div class="visual-state-header">
+      <div class="state-dot" style="background:#3b82f6"></div>
+      <div class="state-title">State 4: Finalization</div>
+    </div>
+    <ul class="state-body">
+      <li>All panels: Transition from green preview → final system color</li>
+      <li>Confirmation card slides up: count, kW, rows × panels, tilt, azimuth</li>
+      <li>Undo button: Appears in toolbar for 10 seconds</li>
+    </ul>
+  </div>
+
+  <!-- EDGE CASES -->
+  <h3>E. Edge Cases & Error Handling</h3>
+
+  <div class="error-example">
+    <div class="error-label" style="color:#f87171">❌ Wrong Corner Order (4-Point Mode)</div>
+    <div class="error-bad">Generic: "Invalid shape"</div>
+    <div class="error-good">✅ Specific: "Corners crossed — try clicking clockwise: top-left → top-right → bottom-right → bottom-left" + animated diagram + "Fix automatically" button</div>
+  </div>
+
+  <div class="error-example">
+    <div class="error-label" style="color:#f87171">❌ Area Too Small</div>
+    <div class="error-bad">Generic: "Area too small"</div>
+    <div class="error-good">✅ Specific: "This area fits 0 panels. You need at least 1.4m × 2.2m (about 4.5ft × 7ft) for one panel. Try expanding the area."</div>
+  </div>
+
+  <div class="error-example">
+    <div class="error-label" style="color:#f97316">⚠️ Overlapping Arrays</div>
+    <div class="error-bad">Generic: "Collision detected"</div>
+    <div class="error-good">✅ Specific: "8 panels overlap your existing roof array. They've been removed from this placement. [Show which ones] [Place anyway]"</div>
+  </div>
+
+  <div class="error-example">
+    <div class="error-label" style="color:#f59e0b">⚠️ Steep Terrain</div>
+    <div class="error-bad">Generic: "Warning: slope detected"</div>
+    <div class="error-good">✅ Specific: "This area has 23% slope — panels need extra ballast. Confirm with your structural engineer before installation. Row spacing has been increased by 15% to compensate."</div>
+  </div>
+
+  <!-- UX BEST PRACTICES -->
+  <h3>F. UX Best Practices</h3>
+
+  <h4>Progressive Disclosure (Non-Technical Users)</h4>
+  <table class="roadmap-table">
+    <tr><th>Mode</th><th>Visible Controls</th><th>Target User</th></tr>
+    <tr><td>Basic (default)</td><td>Tilt angle + Direction only</td><td>Field workers</td></tr>
+    <tr><td>Advanced (toggle)</td><td>+ Row spacing, panel spacing, orientation, maintenance aisles</td><td>Designers</td></tr>
+    <tr><td>Expert</td><td>+ NEC references, structural calculations, wire sizing</td><td>Engineers</td></tr>
+  </table>
+
+  <h4>Undo/Redo — Command Pattern</h4>
+  <div class="code-block"><span class="keyword">interface</span> PanelCommand {
+  type: <span class="string">'ADD' | 'REMOVE' | 'MOVE' | 'ADD_ARRAY' | 'REMOVE_ARRAY'</span>;
+  panels: PlacedPanel[];
+  previousState?: PlacedPanel[];
+}
+
+<span class="comment">// Keyboard shortcuts: Ctrl+Z (undo), Ctrl+Y / Ctrl+Shift+Z (redo)
+// Each array placement = one command (undo removes entire array at once)</span>
+<span class="keyword">function</span> <span class="fn">executeCommand</span>(cmd: PanelCommand) {
+  undoStack.current.push(cmd);
+  redoStack.current = []; <span class="comment">// clear redo on new action</span>
+  applyCommand(cmd);
+}</div>
+
+  <h4>Array-Level Editing (After Placement)</h4>
+  <ul>
+    <li><strong>Click array:</strong> Shows selection handles — drag to move, rotate handle for azimuth, +/- for rows/panels</li>
+    <li><strong>Click row:</strong> Row highlights — drag to reposition, +/- for panel count, delete row</li>
+    <li><strong>Double-click panel:</strong> Individual panel selected — drag, delete, or adjust tilt/azimuth independently</li>
+  </ul>
+</div>
+
+<hr class="section-divider">
+
+<!-- IMPLEMENTATION ROADMAP -->
+<div id="roadmap">
+  <h2>📋 Implementation Roadmap</h2>
+  <table class="roadmap-table">
+    <tr><th>Phase</th><th>Feature</th><th>Effort</th><th>Impact</th><th>Status</th></tr>
+    <tr class="done-row"><td>Done</td><td>Incremental diff rendering</td><td>4h</td><td>Very High</td><td>v30.5 ✅</td></tr>
+    <tr class="done-row"><td>Done</td><td>Debounced useEffect</td><td>1h</td><td>High</td><td>v30.5 ✅</td></tr>
+    <tr class="done-row"><td>Done</td><td>Row tool systemType inheritance</td><td>1h</td><td>Medium</td><td>v30.5 ✅</td></tr>
+    <tr><td>Phase A</td><td>React.memo on SolarEngine3D</td><td>30min</td><td>Medium</td><td>Next sprint</td></tr>
+    <tr><td>Phase A</td><td>Dynamic shadow map resolution</td><td>1h</td><td>Medium</td><td>Next sprint</td></tr>
+    <tr><td>Phase A</td><td>Tile loading tuning</td><td>2h</td><td>Medium</td><td>Next sprint</td></tr>
+    <tr><td>Phase A</td><td>Ground Array mode (chained rows)</td><td>1–2 days</td><td>High</td><td>Next sprint</td></tr>
+    <tr><td>Phase B</td><td>In-place entity position update</td><td>3h</td><td>High</td><td>Next sprint</td></tr>
+    <tr><td>Phase B</td><td>Row spacing formula (tilt + latitude)</td><td>4h</td><td>High</td><td>Next sprint</td></tr>
+    <tr><td>Phase B</td><td>Collision detection for arrays</td><td>4h</td><td>Medium</td><td>Next sprint</td></tr>
+    <tr><td>Phase C</td><td>Primitive-based rendering (GPU instancing)</td><td>2 days</td><td>Very High</td><td>Major version</td></tr>
+    <tr><td>Phase C</td><td>LOD system (4 distance levels)</td><td>1 day</td><td>High</td><td>Major version</td></tr>
+    <tr><td>Phase C</td><td>Undo/redo command stack</td><td>1 day</td><td>High</td><td>Major version</td></tr>
+    <tr><td>Phase D</td><td>Array-level editing handles</td><td>2 days</td><td>Medium</td><td>Future</td></tr>
+    <tr><td>Phase D</td><td>Web Worker geometry computation</td><td>6h</td><td>Medium</td><td>Future</td></tr>
+  </table>
+</div>
+
+<hr class="section-divider">
+
+<!-- BONUS -->
+<div id="bonus" class="bonus-section">
+  <div class="bonus-header">💬 Bonus: AI Chat Support for Customer Assistance</div>
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>✅ Pros</h4>
+      <ul>
+        <li>24/7 instant answers for common questions (wire sizing, NEC codes, permit requirements)</li>
+        <li>Reduces support ticket volume 40–60% for repetitive queries</li>
+        <li>Can be trained on your equipment database and pricing</li>
+        <li>Scales with user growth at near-zero marginal cost</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>❌ Cons</h4>
+      <ul>
+        <li>Hallucination risk for NEC code questions — wrong answers could cause failed inspections</li>
+        <li>Requires ongoing maintenance as NEC codes and equipment change annually</li>
+        <li>Users may over-trust AI for structural/electrical decisions needing PE review</li>
+        <li>Monthly API costs: $200–2,000/month depending on volume</li>
+      </ul>
+    </div>
+  </div>
+  <div class="rec-box">
+    <p><strong>Recommendation:</strong> Implement with a clear "AI Assistant — Not a licensed engineer" disclaimer, limited to non-safety-critical queries (equipment selection, proposal questions, scheduling). Avoid letting it answer structural load or NEC compliance questions without a human review flag.</p>
+  </div>
+  <div class="impl-options">
+    <div class="impl-option">
+      <h4>Option 1: Third-Party (Fastest)</h4>
+      <p>Intercom + OpenAI fine-tuning on your docs. 1–2 weeks setup, ~$500/month. Best for quick launch.</p>
+    </div>
+    <div class="impl-option">
+      <h4>Option 2: Custom RAG System</h4>
+      <p>Next.js API route + OpenAI + your equipment/NEC database as context. 2–4 weeks, ~$100–300/month. Full control over responses and safety guardrails.</p>
+    </div>
+  </div>
+</div>
+
+</div><!-- /container -->
+</body>
+</html>

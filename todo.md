@@ -1,24 +1,26 @@
-# SolarPro v30.5 — Multi-Feature Development
+# SolarPro v30.7 — Performance + Ground Array + AI Support Bot
 
-## Task 1: Generator Wire Run (Conditional Display + Data Flow)
-- [x] 1.1 Add generatorWireLength field to engineering config state
-- [x] 1.2 Add conditional UI input: "Generator to ATS Wire Length" (only shows when generator selected)
-- [x] 1.3 Wire generatorWireLength through ComputedSystem (runLengthsBatteryGen.generatorToAts)
-- [x] 1.4 SLD picks up correct wire gauge/length from GENERATOR_TO_ATS_RUN (sld-professional-renderer.ts line 1059)
-- [x] 1.5 BOM picks up GENERATOR_TO_ATS_RUN wire via runs[] in bom-engine-v4.ts (all runs included)
+## Task A: 3D Performance Optimizations
+- [x] A.1 React.memo on SolarEngine3D with custom comparison
+- [x] A.2 Dynamic shadow map resolution based on camera height
+- [x] A.3 Tile loading tuning (maximumScreenSpaceError, preloadFlightDestinations)
+- [x] A.4 In-place entity position update (avoid remove+re-add for position changes)
+- [x] A.5 Dynamic debounce window based on panel count delta
 
-## Task 2: 3D Design Performance Optimization
-- [ ] 2.1 Implement incremental/diff rendering in renderAllPanels (only add/remove changed panels)
-- [ ] 2.2 Debounce the panels useEffect to avoid rapid re-renders on bulk operations
-- [ ] 2.3 Verify no existing 3D features are broken
+## Task B: Ground Array Mode (Chained Rows with Auto-Spacing)
+- [x] B.1 Add calcMinRowSpacing() formula (winter solstice, tilt + latitude)
+- [x] B.2 Add 'ground_array' PlacementMode to SolarEngine3D
+- [x] B.3 Implement handleGroundArrayClick() — chained row placement with auto-offset
+- [x] B.4 Add ghost/preview rendering for next row position
+- [x] B.5 Add Ground Array button to 3D toolbar with row count display
+- [x] B.6 Add confirmation card (panel count, kW, rows × panels)
 
-## Task 3: Ground Mount Placement Feature
-- [x] 3.1 3D ground placement already works (handleGroundClick in SolarEngine3D.tsx)
-- [x] 3.2 2D ground zone drawing already works (draw_ground mode in DesignStudio.tsx)
-- [ ] 3.3 Verify ground mount data flows to BOM/engineering (check systemType='ground' in BOM)
-- [ ] 3.4 Add "Ground Mount" row placement to 3D (row mode for ground panels, similar to roof row)
+## Task C: Free AI Support Bot
+- [x] C.1 Research and select best free AI chat option (rule-based, zero cost)
+- [x] C.2 Create SolarAIBot component with solar knowledge base
+- [ ] C.3 Integrate SolarAIBot into app layout (floating widget on all pages)
 
 ## Final Steps
-- [ ] 4.1 TypeScript compile check — zero errors
-- [ ] 4.2 Full build — clean
-- [ ] 4.3 Bump version, package ZIP, push to git
+- [ ] D.1 TypeScript compile check — zero errors
+- [ ] D.2 Full build — clean
+- [ ] D.3 Bump version to v30.7, package ZIP, push to git

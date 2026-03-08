@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v30.6';
+export const BUILD_VERSION = 'v30.8';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = '3D PERF + GROUND MOUNT — incremental panel rendering, debounced updates, row tool systemType context';
+export const BUILD_DESCRIPTION = '3D PERF v2 + GROUND ARRAY MODE + AI SUPPORT BOT — React.memo, dynamic shadow map, camera optimizer, in-place entity update, dynamic debounce, chained ground array rows, free AI chat widget';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -69,6 +69,21 @@ export const BUILD_FEATURES = [
   'PERF: 3D — clearPanels() resets incremental diff state for correct full rebuild on next render',
   'FIX: 3D — Row tool now inherits systemType from last active mode (roof/ground/fence) instead of hardcoded roof',
   'FIX: 3D — Ground row placement: switch to Ground mode then Row mode to place ground-type panel rows',
+  // Phase 16: v30.7 — 3D Performance v2 + Ground Array Mode + AI Support Bot
+  'PERF: 3D — React.memo with custom prop comparison (prevents re-renders on unrelated parent state changes)',
+  'PERF: 3D — Dynamic shadow map resolution: 512px >800m, 1024px 300-800m, 2048px close-up (GPU load reduction)',
+  'PERF: 3D — Camera-based tile LOD: maximumScreenSpaceError 32/16/4 based on camera height',
+  'PERF: 3D — In-place entity position update (updates entity.position/orientation directly, eliminates flicker)',
+  'PERF: 3D — Dynamic debounce window: 16ms single panel, 32ms 5+ panels, 50ms 20+ panels',
+  'NEW: 3D — Ground Array mode (🌱 G-Array): chained row placement with auto-calculated inter-row spacing',
+  'NEW: 3D — calcMinRowSpacing(): winter solstice shadow formula (tilt + latitude → minimum row spacing)',
+  'NEW: 3D — Ground array keyboard shortcuts: Enter to finalize, Escape to cancel',
+  'NEW: 3D — Ground array status UI: row count, panel count, kW, Confirm/Cancel buttons',
+  'NEW: components/support/SolarAIBot.tsx — Free built-in AI chat widget (zero cost, no API keys)',
+  'NEW: SolarAIBot — Rule-based pattern matching engine with 20+ solar knowledge base entries',
+  'NEW: SolarAIBot — Covers: NEC wire sizing, panel placement, battery/generator wiring, BOM, SLD, proposals, incentives',
+  'NEW: SolarAIBot — Quick replies, typing indicator, markdown formatting, floating button with unread badge',
+  'NEW: app/layout.tsx — SolarAIBot integrated as global floating widget on all pages',
 ] as const;
 
 export function getBuildBadge(): string {

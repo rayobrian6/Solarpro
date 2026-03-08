@@ -1,8 +1,9 @@
-// BUILD v24 — 2026-03-06
+// BUILD v30.7 — 2026-03-06
 import type { Metadata } from 'next';
 import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
+import SolarAIBot from '@/components/support/SolarAIBot';
 
 export const metadata: Metadata = {
   title: 'SolarPro Design Platform',
@@ -25,6 +26,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ToastProvider>
           <StoreProvider>
             {children}
+            {/* Free AI Support Bot — floating widget, visible on all pages */}
+            <SolarAIBot />
           </StoreProvider>
         </ToastProvider>
       </body>
