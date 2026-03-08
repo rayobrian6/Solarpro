@@ -20,10 +20,10 @@
 ## Phase 10: UI — National Workflow
 - [x] components/onboarding/BillUploadFlow.tsx — full upload → proposal workflow
 - [x] Update project creation form with location auto-detect (patch_projects_new.py)
-- [ ] Update engineering page with auto-populated jurisdiction data (AHJ banner)
-- [ ] Update proposals page with state incentives section (dynamic by state)
+- [x] Update engineering page with auto-populated jurisdiction data (AHJ banner)
+- [x] Update proposals page with state incentives section (dynamic by state)
 
 ## Phase 11: Version + Build + Push
-- [ ] Update lib/version.ts to v29.0
-- [ ] npm run build — zero errors
-- [ ] git commit + push
+- [x] Update lib/version.ts to v29.0
+- [x] npm run build — zero errors
+- [x] git commit + push → v29.1 pushed to rayobrian6/Solarpro
