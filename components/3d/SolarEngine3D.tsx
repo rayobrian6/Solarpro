@@ -2220,56 +2220,168 @@ function SolarEngine3D({
     try { viewer.scene.requestRender(); } catch {}
   }
 
-  // ── Fill roof segment with panels ─────────────────────────────────────────
+  // ── Fill roof segment with panels ─────────────────────────────────────────────────────────────────────
+  // v31.3 FIX: Primary path uses Google's pre-computed panel positions (seg.googlePanels).
+  //            Fallback path uses azimuth-rotated grid with point-in-polygon clipping.
+  //            Elevation fix: always use OHIO_GEOID_UNDULATION when cesiumGroundElevRef not yet set.
   function fillRoofSegmentWithPanels(viewer: any, C: any, seg: any): PlacedPanel[] {
     const panels: PlacedPanel[] = [];
 
     if (!seg?.center || !isValidCoord(seg.center.lat, seg.center.lng)) return panels;
-    if (!seg.boundingBox?.sw || !seg.boundingBox?.ne) return panels;
 
-    const panelW = PW + 0.05;
-    const panelH = PH + 0.10;
-    const SETBACK = 0.5;
-
+    // ── Shared constants ──────────────────────────────────────────────────────
+    const OHIO_GEOID_UNDULATION = -33.5; // CONUS geoid approximation (meters)
     const mLat = 111320;
     const cosLat = Math.cos(seg.center.lat * Math.PI / 180);
     const mLng = isFinite(cosLat) && cosLat > 0.001 ? 111320 * cosLat : 111320;
 
-    const bbW = (seg.boundingBox.ne.lng - seg.boundingBox.sw.lng) * mLng;
-    const bbH = (seg.boundingBox.ne.lat - seg.boundingBox.sw.lat) * mLat;
+    const azDeg = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
+    const pitchDeg = isFinite(seg.pitchDegrees) ? Math.max(0, Math.min(60, seg.pitchDegrees)) : 20;
+    const heading = headingFromAzimuth(azDeg);
+    const tanPitch = Math.tan(pitchDeg * Math.PI / 180);
+    if (!isFinite(tanPitch)) return panels;
 
-    if (!isFinite(bbW) || !isFinite(bbH) || bbW <= 0 || bbH <= 0) return panels;
+    // ── Elevation: Google orthometric → Cesium ellipsoidal ───────────────────
+    // cesiumGroundElevRef is populated asynchronously by terrain sampling in boot().
+    // If it hasn't been set yet (= 0), fall back to OHIO_GEOID_UNDULATION constant
+    // so panels are not placed 30m underground.
+    const googleSegElev = isFinite(seg.elevation) ? seg.elevation : 0;
+    const geoidOff = cesiumGroundElevRef.current > 0
+      ? cesiumGroundElevRef.current - (twinRef.current?.elevation ?? 0)
+      : OHIO_GEOID_UNDULATION;
+    const segElev = googleSegElev + geoidOff;
 
-    const usableW = Math.max(0, bbW - 2 * SETBACK);
-    const usableH = Math.max(0, bbH - 2 * SETBACK);
+    // ── Panel dimensions (respect user orientation setting) ───────────────────
+    const orient = panelOrientationRef.current ?? 'portrait';
+    const { pw: PW_O, ph: PH_O } = panelDims(orient);
+    const panelW = PW_O + 0.05;  // +5cm inter-panel gap
+    const panelH = PH_O + 0.10;  // +10cm inter-panel gap
+
+    // ── Point-in-polygon helper (ray casting) ─────────────────────────────────
+    function pointInPolygon(
+      lat: number, lng: number,
+      poly: Array<{ lat: number; lng: number }>
+    ): boolean {
+      if (!poly || poly.length < 3) return true; // no polygon = no clipping
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].lng, yi = poly[i].lat;
+        const xj = poly[j].lng, yj = poly[j].lat;
+        const intersect =
+          yi > lat !== yj > lat &&
+          lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    // ── PRIMARY PATH: Use Google's pre-computed panel positions ───────────────
+    // Google Solar API provides exact lat/lng for each panel, already correctly
+    // placed on the roof surface. This is the most accurate data source.
+    const googlePanels: Array<{ lat: number; lng: number; orientation: string; yearlyEnergyDcKwh: number }>
+      = seg.googlePanels ?? [];
+
+    if (googlePanels.length > 0) {
+      const azRad = azDeg * Math.PI / 180;
+      const slopeE = Math.sin(azRad);
+      const slopeN = Math.cos(azRad);
+
+      for (const gp of googlePanels) {
+        if (!isValidCoord(gp.lat, gp.lng)) continue;
+
+        // Compute along-slope offset from segment center for height calculation
+        const dLat = gp.lat - seg.center.lat;
+        const dLng = gp.lng - seg.center.lng;
+        const dN = dLat * mLat;
+        const dE = dLng * mLng;
+        // Project displacement onto slope direction
+        const alongSlope = dE * slopeE + dN * slopeN;
+        const pHeight = segElev + tanPitch * alongSlope + PANEL_OFFSET;
+
+        if (!isValidCoord(gp.lat, gp.lng, pHeight)) continue;
+
+        // Map Google orientation string to our PanelOrientation type
+        const gpOrient: PanelOrientation =
+          gp.orientation?.toUpperCase() === 'PORTRAIT' ? 'portrait' : 'landscape';
+
+        const panel = createPanel({
+          lat: gp.lat, lng: gp.lng, height: pHeight,
+          tilt: pitchDeg, azimuth: azDeg, systemType: 'roof',
+          heading, pitch: pitchDeg, roll: 0,
+          orientation: gpOrient,
+        });
+        panels.push(panel);
+        addPanelEntity(viewer, C, panel);
+      }
+      return panels;
+    }
+
+    // ── FALLBACK PATH: Azimuth-rotated grid with polygon clipping ─────────────
+    // Used when seg.googlePanels is empty (synthetic segments, manual roof draws).
+    // Generates grid in azimuth-rotated coordinate frame and clips to convexHull.
+    if (!seg.boundingBox?.sw || !seg.boundingBox?.ne) return panels;
+
+    const SETBACK = 0.5; // meters from roof edge
+
+    // Compute roof extent in azimuth-rotated frame (along-ridge × along-slope)
+    // by projecting all 4 bounding-box corners into the rotated frame
+    const azRad = azDeg * Math.PI / 180;
+    const slopeE = Math.sin(azRad);  // east component of down-slope direction
+    const slopeN = Math.cos(azRad);  // north component of down-slope direction
+    const ridgeE = Math.cos(azRad);  // east component of along-ridge direction
+    const ridgeN = -Math.sin(azRad); // north component of along-ridge direction
+
+    const corners = [
+      { lat: seg.boundingBox.sw.lat, lng: seg.boundingBox.sw.lng },
+      { lat: seg.boundingBox.sw.lat, lng: seg.boundingBox.ne.lng },
+      { lat: seg.boundingBox.ne.lat, lng: seg.boundingBox.sw.lng },
+      { lat: seg.boundingBox.ne.lat, lng: seg.boundingBox.ne.lng },
+    ];
+
+    let minRidge = Infinity, maxRidge = -Infinity;
+    let minSlope = Infinity, maxSlope = -Infinity;
+    for (const c of corners) {
+      const dN = (c.lat - seg.center.lat) * mLat;
+      const dE = (c.lng - seg.center.lng) * mLng;
+      const r = dE * ridgeE + dN * ridgeN;
+      const s = dE * slopeE + dN * slopeN;
+      if (r < minRidge) minRidge = r;
+      if (r > maxRidge) maxRidge = r;
+      if (s < minSlope) minSlope = s;
+      if (s > maxSlope) maxSlope = s;
+    }
+
+    const roofW = maxRidge - minRidge; // width along ridge
+    const roofH = maxSlope - minSlope; // height along slope
+
+    if (!isFinite(roofW) || !isFinite(roofH) || roofW <= 0 || roofH <= 0) return panels;
+
+    const usableW = Math.max(0, roofW - 2 * SETBACK);
+    const usableH = Math.max(0, roofH - 2 * SETBACK);
     if (usableW < panelW || usableH < panelH) return panels;
 
     const cols = Math.floor(usableW / panelW);
     const rows = Math.floor(usableH / panelH);
     if (cols < 1 || rows < 1) return panels;
 
-    const azDeg = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
-    const pitchDeg = isFinite(seg.pitchDegrees) ? Math.max(0, Math.min(60, seg.pitchDegrees)) : 20;
-    // Apply geoidOffset to convert Google orthometric elevation to Cesium ellipsoidal
-    const googleSegElev = isFinite(seg.elevation) ? seg.elevation : 0;
-    const geoidOff = cesiumGroundElevRef.current > 0
-      ? cesiumGroundElevRef.current - (twinRef.current?.elevation ?? 0)
-      : 0;
-    const segElev = googleSegElev + geoidOff;
-    const heading = headingFromAzimuth(azDeg);
-    const azRad = azDeg * Math.PI / 180;
-    const slopeE = Math.sin(azRad), slopeN = Math.cos(azRad);
-    const ridgeE = Math.cos(azRad), ridgeN = -Math.sin(azRad);
-    const tanPitch = Math.tan(pitchDeg * Math.PI / 180);
-    if (!isFinite(tanPitch)) return panels;
+    // Use convexHull for polygon clipping (most accurate roof shape)
+    const clipPoly: Array<{ lat: number; lng: number }> =
+      (seg.convexHull && seg.convexHull.length >= 3)
+        ? seg.convexHull
+        : (seg.polygon && seg.polygon.length >= 3)
+          ? seg.polygon
+          : [];
 
-    const startOffsetW = (bbW - cols * panelW) / 2;
-    const startOffsetH = (bbH - rows * panelH) / 2;
+    // Center the grid within the usable area
+    const ridgeStart = minRidge + SETBACK + (usableW - cols * panelW) / 2;
+    const slopeStart = minSlope + SETBACK + (usableH - rows * panelH) / 2;
 
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        const alongRidge = (c + 0.5) * panelW + startOffsetW - bbW / 2;
-        const alongSlope = (r + 0.5) * panelH + startOffsetH - bbH / 2;
+        const alongRidge = ridgeStart + (c + 0.5) * panelW;
+        const alongSlope = slopeStart + (r + 0.5) * panelH;
+
+        // Convert from rotated frame back to lat/lng
         const dE = alongRidge * ridgeE + alongSlope * slopeE;
         const dN = alongRidge * ridgeN + alongSlope * slopeN;
         const pLat = seg.center.lat + dN / mLat;
@@ -2278,10 +2390,14 @@ function SolarEngine3D({
 
         if (!isValidCoord(pLat, pLng, pHeight)) continue;
 
+        // Polygon clipping: discard panels outside the roof polygon
+        if (clipPoly.length >= 3 && !pointInPolygon(pLat, pLng, clipPoly)) continue;
+
         const panel = createPanel({
           lat: pLat, lng: pLng, height: pHeight,
           tilt: pitchDeg, azimuth: azDeg, systemType: 'roof',
           heading, pitch: pitchDeg, roll: 0,
+          orientation: orient,
         });
         panels.push(panel);
         addPanelEntity(viewer, C, panel);
@@ -2289,6 +2405,7 @@ function SolarEngine3D({
     }
     return panels;
   }
+
 
   // ── Compute surface normal ─────────────────────────────────────────────────
   function computeSurfaceNormal(

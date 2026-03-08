@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v31.2';
+export const BUILD_VERSION = 'v31.4';
 export const BUILD_DATE = '2026-03-08';
-export const BUILD_DESCRIPTION = 'INTERACTION AUDIT & REPAIR — drillPick panel selection, orientation-aware hit detection, keyboard shortcuts (V/R/G/F/M/Del/Esc), active tool indicator, multiRowMode/Select conflict fix, per-panel systemType color';
+export const BUILD_DESCRIPTION = 'AUTO FILL FIX — Google panel positions primary path, azimuth-rotated grid + polygon clipping fallback, OHIO_GEOID_UNDULATION elevation race fix, orientation-aware panel dims in auto-fill';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
@@ -115,6 +115,15 @@ export const BUILD_FEATURES = [
   'FIX: UI — 3D placement mode labels clarified (Place Roof / Place Ground vs ambiguous Roof/Ground)',
   'FIX: UI — Placement safety guard comment in handleCanvasClick (Select never places panels)',
   'SAFE: panel counting, systemType classification, engineering, BOM, proposals all unchanged',
+  // Phase 19: v31.3 — Auto Fill Fix
+  'FIX: 3D — fillRoofSegmentWithPanels() primary path: uses seg.googlePanels (Google pre-computed positions)',
+  'FIX: 3D — fillRoofSegmentWithPanels() elevation: OHIO_GEOID_UNDULATION fallback when cesiumGroundElevRef not yet set (race condition fix)',
+  'FIX: 3D — fillRoofSegmentWithPanels() fallback path: azimuth-rotated grid (not axis-aligned BB) with point-in-polygon clipping against seg.convexHull',
+  'FIX: 3D — fillRoofSegmentWithPanels() orientation: respects panelOrientationRef in both primary and fallback paths',
+  'FIX: 3D — Auto Fill panel count: residential roof now generates 15-30 panels (was 1801 due to unclipped BB grid)',
+  'FIX: 3D — Auto Fill visibility: panels now render above roof surface (was 30m underground due to missing geoid offset)',
+  'FIX: 3D — Google panel orientation: maps PORTRAIT/LANDSCAPE string to PanelOrientation type',
+  'SAFE: onPanelsChange(), setPanelCount(), systemType=roof, engineering pipeline, BOM, proposals all unchanged',
 ] as const;
 
 export function getBuildBadge(): string {
