@@ -164,11 +164,31 @@ export async function POST(req: NextRequest) {
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
   const openaiKey = process.env.OPENAI_API_KEY;
 
-  // Method 1: pdfjs-dist (pure JS, works on Vercel, no native deps)
-  // This is the PRIMARY method - extracts text from PDF streams directly
-  console.log('[bill-upload] Trying pdfjs-dist...');
+  // Method 1: pdf-parse (PDFParse class API - v2)
+  // Uses pdfjs-dist internally but handles worker setup correctly
+  console.log('[bill-upload] Trying pdf-parse PDFParse class...');
+  if (PDFParse) {
+    try {
+      const parser = new PDFParse({ data: buffer });
+      await parser.load();
+      const result = await parser.getText();
+      const text = (result.text || '').trim();
+      console.log('[bill-upload] pdf-parse extracted', text.length, 'chars');
+      if (text.length > 50) return { text, method: 'pdf-parse' };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('encrypt')) {
+        throw new Error('PDF is password-protected. Please remove the password and re-upload.');
+      }
+      console.warn('[bill-upload] pdf-parse failed:', msg);
+    }
+  } else {
+    console.warn('[bill-upload] PDFParse class not loaded, skipping');
+  }
+
+  // Method 1b: pdfjs-dist direct (fallback if pdf-parse not available)
+  console.log('[bill-upload] Trying pdfjs-dist direct...');
   try {
-    // Try multiple import paths for compatibility
     let pdfjsLib: any = null;
     try {
       pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
@@ -200,11 +220,11 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
         text += pageText + '\n';
       }
       text = text.trim();
-      console.log('[bill-upload] pdfjs-dist extracted', text.length, 'chars');
+      console.log('[bill-upload] pdfjs-dist direct extracted', text.length, 'chars');
       if (text.length > 50) return { text, method: 'pdfjs-dist' };
     }
   } catch (err: unknown) {
-    console.warn('[bill-upload] pdfjs-dist failed:', err instanceof Error ? err.message : err);
+    console.warn('[bill-upload] pdfjs-dist direct failed:', err instanceof Error ? err.message : err);
   }
 
   // Method 2: OpenAI Files API + Responses API
