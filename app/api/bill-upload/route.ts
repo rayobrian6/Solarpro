@@ -76,6 +76,12 @@ export async function POST(req: NextRequest) {
         success: false,
         error: 'Could not extract text from file. Please ensure the file is a clear, readable utility bill.',
         stage: extractionMethod,
+        debug: {
+          hasOpenAI: !!process.env.OPENAI_API_KEY,
+          pdfParseLoaded: !!PDFParse,
+          fileType: file?.type,
+          fileSize: file?.size,
+        },
       }, { status: 422 });
     }
 

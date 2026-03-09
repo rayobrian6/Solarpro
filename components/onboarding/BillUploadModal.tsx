@@ -163,6 +163,10 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         if (res.status === 413) msg = `File too large. Max ${MAX_FILE_SIZE_MB} MB.`;
         if (res.status === 415) msg = 'Unsupported file type.';
         if (data.stage) msg += ` [stage: ${data.stage}]`;
+        if (data.debug) {
+          const d = data.debug;
+          msg += ` | AI:${d.hasOpenAI ? 'yes' : 'NO'} PDF-parse:${d.pdfParseLoaded ? 'yes' : 'no'}`;
+        }
         setError(msg);
         setProcessingStage('uploading');
         return;
