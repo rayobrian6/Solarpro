@@ -96,6 +96,7 @@ const UTILITY_PATTERNS: [RegExp, string][] = [
   [/idaho\s+power/i, 'Idaho Power'],
   [/nevada\s+power/i, 'Nevada Power'],
   [/el\s+paso\s+electric/i, 'El Paso Electric'],
+  [/southwestern\s+electric\s+cooperative/i, 'Southwestern Electric Cooperative'],
   [/southwestern\s+public\s+service|sps\b/i, 'Southwestern Public Service'],
 ];
 
@@ -128,10 +129,17 @@ function extractKwh(text: string): { monthly?: number; annual?: number } {
   const result: { monthly?: number; annual?: number } = {};
 
   const monthlyPatterns = [
+    // "Energy 4,993 kWh @ 0.03770" — energy line item (most specific, check first)
+    /energy\s+([0-9,]+)\s*kwh\s*@/i,
+    // "4,993 kWh 31 days" — usage followed by billing days (This Month block)
+    /([1-9][0-9,]{2,})\s*kwh\s+\d+\s*days/i,
+    // "kWh Usage ... 1 4,993" — meter reading table
+    /kwh\s+usage[^0-9]*(?:\d+\s+)?([0-9,]{3,})/i,
+    // Multiplier table: "Multiplier kWh Usage ... 1 4,993"
+    /multiplier\s+kwh\s+usage[^0-9]*\d+\s+([0-9,]+)/i,
     /(?:total\s+)?(?:energy\s+)?(?:usage|used|consumption|kwh\s+used)[:\s]+([0-9,]+)\s*kwh/i,
     /([0-9,]+)\s*kwh\s+(?:used|usage|consumed|billed)/i,
     /(?:electric\s+)?(?:usage|consumption)[:\s]+([0-9,]+)\s*(?:kwh|kw-?h)/i,
-    /kwh[:\s]+([0-9,]+)/i,
     /([0-9,]+)\s*kw[h-]?\s*@/i,
     /(?:current\s+)?(?:month(?:ly)?\s+)?usage[:\s]+([0-9,]+)/i,
     /(?:billing\s+)?(?:period\s+)?usage[:\s]+([0-9,]+)\s*kwh/i,
@@ -224,7 +232,7 @@ function extractRate(text: string): number | undefined {
     if (match) {
       let rate = parseFloat(match[1]);
       if (rate > 1) rate = rate / 100; // cents → dollars
-      if (rate > 0.04 && rate < 1.5) return Math.round(rate * 10000) / 10000;
+      if (rate > 0.01 && rate < 1.5) return Math.round(rate * 10000) / 10000;
     }
   }
   return undefined;
@@ -390,7 +398,9 @@ function extractBillingPeriod(text: string): {
 // ── Extract customer name ─────────────────────────────────────────────────────
 function extractCustomerName(text: string): string | undefined {
   const namePatterns = [
-    /(?:account\s+(?:name|holder)|customer\s+name|service\s+(?:for|to))[:\s]+([A-Z][a-zA-Z\s,]+?)(?:\n|$)/,
+    // "Customer Name MARSHA A CARPENTER Account" — no colon, stops at next label
+    /customer\s+name\s+([A-Z][A-Z\s]+?)(?:\s+Account|\s+Billing|\s+Service|\s*$)/i,
+    /(?:account\s+(?:name|holder)|customer\s+name|service\s+(?:for|to))[:\s]+([A-Z][a-zA-Z\s,]+?)(?:\s{2,}|\n|$)/,
     /(?:bill(?:ed)?\s+to|invoice\s+to)[:\s]+([A-Z][a-zA-Z\s,]+?)(?:\n|$)/,
     /(?:name)[:\s]+([A-Z][a-zA-Z\s,]{2,40})(?:\n|$)/,
   ];
@@ -408,10 +418,15 @@ function extractCustomerName(text: string): string | undefined {
 // ── Extract service address ───────────────────────────────────────────────────
 function extractServiceAddress(text: string): string | undefined {
   const addrPatterns = [
+    // Full address with zip: "Service Address: 123 Main St, City, IL 62246"
     /(?:service\s+address|premises|property\s+address)[:\s]+([0-9]+[^,\n]+,[^,\n]+,\s*[A-Z]{2}\s+\d{5})/i,
+    // Address with state but no zip
     /(?:service\s+address|premises)[:\s]+([0-9]+\s+[A-Za-z\s]+(?:St|Ave|Blvd|Dr|Rd|Ln|Way|Ct|Pl|Hwy|Pkwy)[.,\s]+[A-Za-z\s]+,\s*[A-Z]{2})/i,
-    /(?:service\s+address)[:\s]+([0-9]+\s+.{5,60})/i,
-    // Address at start of line: "123 Main St, City, CA 90210"
+    // Mailing block: "1016 FRANKLIN ST POCAHONTAS IL 62275-3123" (all caps, no comma)
+    /([0-9]+\s+[A-Z][A-Z\s]+(?:ST|AVE|BLVD|DR|RD|LN|WAY|CT|PL|HWY)\s+[A-Z][A-Z\s]+[A-Z]{2}\s+\d{5}(?:-\d{4})?)/,
+    // Service address stopping at "Service Location", "Rate Schedule", "Meter"
+    /(?:service\s+address)[:\s]+([0-9]+\s+[A-Z][A-Z\s,]+?)(?:\s+Service\s+Location|\s+Rate\s+Schedule|\s+Meter\s+No|\s{3,}|$)/i,
+    // Address at start of line
     /^([0-9]+\s+[A-Za-z\s]+(?:St|Ave|Blvd|Dr|Rd|Ln|Way|Ct|Pl)\b[^,\n]*,[^,\n]+,\s*[A-Z]{2}\s+\d{5})/im,
   ];
 
@@ -664,7 +679,7 @@ export function validateBillData(result: BillExtractResult): {
   if (!result.electricityRate) {
     warnings.push('Could not extract electricity rate — will use state average');
   }
-  if (result.electricityRate && (result.electricityRate < 0.04 || result.electricityRate > 1.5)) {
+  if (result.electricityRate && (result.electricityRate < 0.01 || result.electricityRate > 1.5)) {
     warnings.push(`Unusual electricity rate: $${result.electricityRate}/kWh — please verify`);
   }
   if (result.billType === 'combined') {
