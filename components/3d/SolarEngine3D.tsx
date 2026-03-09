@@ -2358,7 +2358,7 @@ function SolarEngine3D({
   //        Eligible = sunshineHours >= 50% of best segment AND areaM2 >= one panel.
   //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
   // ── Auto Fill: fill all eligible roof segments ──────────────────────────────────────────────────
-  // v31.9: Added rich debug logging + fixed elevation for PRIMARY PATH + setback polygon support.
+  // v34.3: PRIMARY PATH now filters against original boundary polygon only (Google panels already have setbacks).
   //        Fills each eligible segment (sunshineHours >= 50% of best AND areaM2 >= one panel).
   //        Panel count per segment is capped by seg.maxPanels (area-based realistic limit).
   function handleAutoRoof(viewer: any, C: any) {
@@ -2766,14 +2766,24 @@ function SolarEngine3D({
         validGp.push({ lat: gp.lat, lng: gp.lng, orientation: gp.orientation, slopeProj, ridgeProj, height });
       }
 
-      // ── Step 2: Apply fire setback filter using shrunk clip polygon ──
-      // Re-enable setback clipping for PRIMARY PATH now that we use the correct
-      // shrunk polygon (shrinkPoly uses the actual fireSetbacks values from UI).
-      const setbackFilteredGp = clipPoly.length >= 3
-        ? validGp.filter(gp => pointInPolygon(gp.lat, gp.lng, clipPoly))
-        : validGp;
-
-      addLog('FILL', `seg ${seg?.id}: PRIMARY after setback filter: ${setbackFilteredGp.length}/${validGp.length} panels kept`);
+      // ── Step 2: Boundary-clip Google panels against ORIGINAL (unshrunk) polygon ──
+      // IMPORTANT: Google Solar API already places panels with fire setbacks applied.
+      // We must NOT filter against the shrunk polygon (clipPoly) — that rejects
+      // all Google panels since they are already inset from the roof edge.
+      // Instead, filter against the original roof boundary (rawClipPoly) to remove
+      // any panels truly outside the roof footprint (data quality guard only).
+      // Safety fallback: if rawClipPoly rejects ALL panels, trust Google's positions
+      // (handles coordinate system mismatches between convexHull and Google lat/lng).
+      let setbackFilteredGp: GpWithCoords[];
+      if (rawClipPoly.length >= 3) {
+        const boundaryFiltered = validGp.filter(gp => pointInPolygon(gp.lat, gp.lng, rawClipPoly));
+        // If boundary filter removes everything, skip it (trust Google's setback-compliant positions)
+        setbackFilteredGp = boundaryFiltered.length > 0 ? boundaryFiltered : validGp;
+        addLog('FILL', `seg ${seg?.id}: PRIMARY boundary-clip: ${boundaryFiltered.length}/${validGp.length} kept (safety=${boundaryFiltered.length === 0 ? 'BYPASSED' : 'ok'})`);
+      } else {
+        setbackFilteredGp = validGp;
+        addLog('FILL', `seg ${seg?.id}: PRIMARY no boundary polygon — using all ${validGp.length} Google panels`);
+      }
 
       // ── Step 3: Sort into clean aligned rows (by slopeProj then ridgeProj) ──
       // Quantize slopeProj into rows using panel height as bucket size.

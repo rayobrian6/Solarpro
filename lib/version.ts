@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v34.2';
+export const BUILD_VERSION = 'v34.4';
 export const BUILD_DATE = '2026-03-09';
-export const BUILD_DESCRIPTION = 'AUTO FILL FIX v8 — Fire Setbacks + Clean Row Alignment: (1) fireSetbacks prop now passed from DesignStudio to SolarEngine3D. (2) PRIMARY PATH now applies actual edge/ridge setback filter (was hardcoded 0.5m, now reads UI values). (3) PRIMARY PATH re-sorts Google panels into clean aligned rows by slope/ridge projection (same clean appearance as manual Row tool). (4) Setback boundary visualization updated to use actual UI setback values.';
+export const BUILD_DESCRIPTION = 'AUTO FILL FIX v9 — PRIMARY PATH Boundary Fix: Google Solar API panels already have fire setbacks applied by Google. PRIMARY PATH now filters against original roof boundary polygon only (not shrunk polygon). Safety fallback: if boundary filter removes all panels, trust Google positions entirely. FALLBACK PATH unchanged (still uses shrunk polygon for our own Cartesian3 grid). Fixes 0-panel regression introduced in v34.2.';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
