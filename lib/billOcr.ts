@@ -548,43 +548,37 @@ export async function parseBillTextWithLLM(text: string): Promise<BillExtractRes
   console.log('[billOcr] Low confidence — attempting LLM fallback');
 
   try {
-    // Dynamic require to avoid webpack bundling errors if openai not installed
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const openaiModule = require('openai');
-    const OpenAI = openaiModule.default || openaiModule.OpenAI || openaiModule;
-    const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      response_format: { type: 'json_object' },
-      max_tokens: 500,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a utility bill data extractor. Extract structured data from utility bill text and return ONLY valid JSON with these fields (use null for missing):
-{
-  "monthlyKwh": number or null,
-  "annualKwh": number or null,
-  "electricityRate": number ($/kWh) or null,
-  "totalAmount": number ($) or null,
-  "utilityProvider": string or null,
-  "serviceAddress": string or null,
-  "customerName": string or null,
-  "accountNumber": string or null,
-  "billingPeriodStart": string or null,
-  "billingPeriodEnd": string or null,
-  "demandCharge": number ($) or null,
-  "billType": "electric" | "gas" | "combined" | "unknown"
-}
-Only extract values clearly present in the text. Do not guess.`,
-        },
-        {
-          role: 'user',
-          content: `Extract data from this utility bill:\n\n${text.substring(0, 4000)}`,
-        },
-      ],
+    // Use fetch directly to avoid webpack bundling issues with openai SDK
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        response_format: { type: 'json_object' },
+        max_tokens: 500,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a utility bill data extractor. Extract structured data from utility bill text and return ONLY valid JSON with these fields (use null for missing):\n{\n  "monthlyKwh": number or null,\n  "annualKwh": number or null,\n  "electricityRate": number ($/kWh) or null,\n  "totalAmount": number ($) or null,\n  "utilityProvider": string or null,\n  "serviceAddress": string or null,\n  "customerName": string or null,\n  "accountNumber": string or null,\n  "billingPeriodStart": string or null,\n  "billingPeriodEnd": string or null,\n  "demandCharge": number ($) or null,\n  "billType": "electric" | "gas" | "combined" | "unknown"\n}\nOnly extract values clearly present in the text. Do not guess.`,
+          },
+          {
+            role: 'user',
+            content: `Extract data from this utility bill:\n\n${text.substring(0, 4000)}`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(20000),
     });
 
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`OpenAI API error ${res.status}: ${errBody.slice(0, 200)}`);
+    }
+
+    const completion = await res.json();
     const raw = completion.choices[0]?.message?.content || '{}';
     const llm = JSON.parse(raw);
 

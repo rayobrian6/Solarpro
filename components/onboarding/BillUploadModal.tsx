@@ -162,6 +162,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         let msg = data.error || 'Failed to process bill';
         if (res.status === 413) msg = `File too large. Max ${MAX_FILE_SIZE_MB} MB.`;
         if (res.status === 415) msg = 'Unsupported file type.';
+        if (res.status === 500) msg = `Server error: ${data.error || 'Unknown'}`;
         if (data.stage) msg += ` [stage: ${data.stage}]`;
         if (data.debug) {
           const d = data.debug;
