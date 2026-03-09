@@ -230,9 +230,19 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         (result.locationData ? `${result.locationData.city}, ${result.locationData.stateCode}` : '');
 
       // Build placeholder email (API requires valid email format)
-      const emailSlug = clientName.toLowerCase().replace(/[^a-z0-9]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/, '');
+      const emailSlug = (clientName.toLowerCase()
+        .replace(/[^a-z0-9]/g, '.')
+        .replace(/\.+/g, '.')
+        .replace(/^\.|\.$/, '')
+        .substring(0, 30)) || 'customer';
       const placeholderEmail = `${emailSlug}@pending.solarpro`;
-      const safeAddress = clientAddress.length >= 5 ? clientAddress : `${clientAddress || 'Unknown'}, USA`;
+
+      // Address must be >= 5 chars for API validation
+      const safeAddress = (clientAddress && clientAddress.trim().length >= 5)
+        ? clientAddress.trim()
+        : result.locationData
+          ? `${result.locationData.city}, ${result.locationData.stateCode} ${result.locationData.zip || '00000'}`
+          : 'Address Pending, USA';
 
       const clientRes = await fetch('/api/clients', {
         method: 'POST',
@@ -276,7 +286,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
           name: projectName,
           status: 'lead',
           systemType: 'roof',
-          address: clientAddress,
+          address: safeAddress,
           lat: result.locationData?.lat,
           lng: result.locationData?.lng,
           systemSizeKw: systemKw || undefined,
