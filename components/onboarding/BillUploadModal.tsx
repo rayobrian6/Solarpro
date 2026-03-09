@@ -162,6 +162,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         let msg = data.error || 'Failed to process bill';
         if (res.status === 413) msg = `File too large. Max ${MAX_FILE_SIZE_MB} MB.`;
         if (res.status === 415) msg = 'Unsupported file type.';
+        if (data.stage) msg += ` [stage: ${data.stage}]`;
         setError(msg);
         setProcessingStage('uploading');
         return;
