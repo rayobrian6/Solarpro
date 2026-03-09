@@ -6,9 +6,10 @@ import {
   Sun, Zap, Users, FolderOpen, FileText, TrendingUp,
   ArrowUpRight, ArrowRight, Plus, Leaf,
   DollarSign, BarChart2, ChevronRight, Activity,
-  Home, Sprout, Fence, Clock, CheckCircle, AlertCircle
+  Home, Sprout, Fence, Clock, CheckCircle, AlertCircle, Upload
 } from 'lucide-react';
 import Link from 'next/link';
+import BillUploadModal from '@/components/onboarding/BillUploadModal';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
@@ -74,6 +75,7 @@ function MiniSparkline({ data, color }: { data: number[]; color: string }) {
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
+  const [showBillUpload, setShowBillUpload] = useState(false);
 
   // ✅ Phase 6: Read from global store — single source of truth
   const projects = useAppStore(s => s.projects);
@@ -186,6 +188,12 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex gap-3">
+            <button
+              onClick={() => setShowBillUpload(true)}
+              className="btn-secondary btn-sm flex items-center gap-1.5"
+            >
+              <Upload size={14} /> Upload Bill
+            </button>
             <Link href="/clients/new" className="btn-secondary btn-sm">
               <Plus size={14} /> New Client
             </Link>
@@ -566,9 +574,16 @@ export default function DashboardPage() {
 
         {/* Quick Actions */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <button
+            onClick={() => setShowBillUpload(true)}
+            className="flex items-center gap-3 p-4 rounded-xl border transition-all hover:scale-[1.02] bg-amber-500/10 border-amber-500/20 hover:border-amber-500/40 text-amber-400"
+          >
+            <Upload size={16} />
+            <span className="text-sm font-medium text-white">Upload Bill</span>
+            <ArrowRight size={13} className="ml-auto opacity-50" />
+          </button>
           {[
             { label: 'New Client', href: '/clients/new', icon: <Users size={16} />, color: 'bg-blue-500/10 border-blue-500/20 hover:border-blue-500/40 text-blue-400' },
-            { label: 'New Project', href: '/projects/new', icon: <FolderOpen size={16} />, color: 'bg-amber-500/10 border-amber-500/20 hover:border-amber-500/40 text-amber-400' },
             { label: 'Design Studio', href: '/design', icon: <Activity size={16} />, color: 'bg-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/40 text-emerald-400' },
             { label: 'View Proposals', href: '/proposals', icon: <FileText size={16} />, color: 'bg-purple-500/10 border-purple-500/20 hover:border-purple-500/40 text-purple-400' },
           ].map((action) => (
@@ -584,6 +599,21 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {/* Bill Upload Modal */}
+      {showBillUpload && (
+        <BillUploadModal
+          onClose={() => setShowBillUpload(false)}
+          onComplete={(entities) => {
+            setShowBillUpload(false);
+            // Refresh data after creation
+            loadProjects(true);
+            loadClients(true);
+            // Navigate to the new project
+            window.location.href = `/projects/${entities.projectId}`;
+          }}
+        />
+      )}
     </AppShell>
   );
 }
