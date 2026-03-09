@@ -36,8 +36,9 @@ function ProposalContent() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Plan gating — Starter = preview only (no generate, no download, no e-sign)
-  const { can, loading: subLoading } = useSubscription();
-  const canGenerate = can('proposalEsigning'); // Professional+ can generate & e-sign
+  const { can, loading: subLoading, isFreePass } = useSubscription();
+  // While subscription is loading, never show upgrade walls (avoids flash for free pass / paid users)
+  const canGenerate = subLoading ? true : can('proposalEsigning'); // Professional+ can generate & e-sign
   const isPreviewOnly = !canGenerate;
 
   useEffect(() => {

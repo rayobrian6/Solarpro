@@ -26,8 +26,9 @@ export default function ClientsPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Plan gating — Starter: max 5 clients
-  const { plan } = useSubscription();
-  const maxClients = plan === 'starter' ? 5 : null;
+  const { plan, loading: subLoading } = useSubscription();
+  // While loading, never enforce limits (avoids flash upgrade wall for paid/free-pass users)
+  const maxClients = (!subLoading && plan === 'starter') ? 5 : null;
   const atClientLimit = maxClients !== null && clients.length >= maxClients;
 
   // Always reload from server on page visit

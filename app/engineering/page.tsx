@@ -2015,10 +2015,11 @@ function EngineeringPageInner() {
     : 'text-amber-400 border-amber-500/40 bg-amber-500/10';
 
   // Per-tab feature gating
-  const { can } = useSubscription();
-  const canSLD    = can('engineering');      // Professional+
-  const canPermit = can('permitPackets');    // Professional+
-  const canBOM    = can('bom');              // Professional+
+  const { can, loading: subLoading } = useSubscription();
+  // While loading, grant access to avoid flash-of-locked-content for paid/free-pass users
+  const canSLD    = subLoading ? true : can('engineering');
+  const canPermit = subLoading ? true : can('permitPackets');
+  const canBOM    = subLoading ? true : can('bom');
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'config',     label: 'System Config',      icon: <Settings size={14} /> },
