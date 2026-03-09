@@ -4,6 +4,11 @@
  * Uses Census Bureau Geocoding API (free, no key required) with Google Maps fallback.
  */
 
+// ── Title case helper ────────────────────────────────────────────────────────
+function toTitleCase(str: string): string {
+  return str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
 export interface LocationData {
   // Raw input
   rawAddress: string;
@@ -79,17 +84,29 @@ async function geocodeCensus(address: string): Promise<GeocodeResult> {
     const match = matches[0];
     const coords = match.coordinates;
     const addrComp = match.addressComponents;
+    // matchedAddress format: "1010 FRANKLIN ST, POCAHONTAS, IL, 62275"
+    // Use it to extract house number since addressComponents doesn't include it
+    const matchedParts = (match.matchedAddress || '').split(',').map((s: string) => s.trim());
+    const matchedStreet = matchedParts[0] || '';
+    const matchedCity = matchedParts[1] || '';
 
     const stateCode = addrComp?.state || '';
     const stateName = STATE_NAMES[stateCode] || stateCode;
     const fipsState = STATE_FIPS[stateCode] || '';
 
+    const streetFromMatched = matchedStreet
+      ? toTitleCase(matchedStreet)
+      : `${addrComp?.streetName || ''} ${addrComp?.suffixType || ''}`.trim();
+    const cityFromMatched = matchedCity
+      ? toTitleCase(matchedCity)
+      : (addrComp?.city || '');
+
     return {
       success: true,
       location: {
         rawAddress: address,
-        street: `${addrComp?.streetName || ''} ${addrComp?.suffixType || ''}`.trim(),
-        city: addrComp?.city || '',
+        street: streetFromMatched,
+        city: cityFromMatched,
         county: '',
         state: stateName,
         stateCode,
@@ -126,18 +143,26 @@ async function geocodeCensusWithGeo(address: string): Promise<GeocodeResult> {
     const county = geos?.Counties?.[0];
     const tract = geos?.['Census Tracts']?.[0];
 
+    // matchedAddress format: "1010 FRANKLIN ST, POCAHONTAS, IL, 62275"
+    const matchedParts = (match.matchedAddress || '').split(',').map((s: string) => s.trim());
+    const matchedStreet = matchedParts[0] || '';
+    const matchedCity = matchedParts[1] || '';
+
     const stateCode = addrComp?.state || '';
     const stateName = STATE_NAMES[stateCode] || stateCode;
     const fipsState = STATE_FIPS[stateCode] || '';
     const fipsCounty = county?.COUNTY || '';
     const fips = fipsState + fipsCounty;
 
+    const streetFromMatched = matchedStreet ? toTitleCase(matchedStreet) : (addrComp?.streetName || '') + ' ' + (addrComp?.suffixType || '');
+    const cityFromMatched = matchedCity ? toTitleCase(matchedCity) : (addrComp?.city || '');
+
     return {
       success: true,
       location: {
         rawAddress: address,
-        street: `${addrComp?.streetName || ''} ${addrComp?.suffixType || ''}`.trim(),
-        city: addrComp?.city || '',
+        street: streetFromMatched.trim(),
+        city: cityFromMatched,
         county: county?.NAME || '',
         state: stateName,
         stateCode,
