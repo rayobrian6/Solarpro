@@ -168,7 +168,18 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
   // This is the PRIMARY method - extracts text from PDF streams directly
   console.log('[bill-upload] Trying pdfjs-dist...');
   try {
-    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
+    // Try multiple import paths for compatibility
+    let pdfjsLib: any = null;
+    try {
+      pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
+    } catch {
+      try {
+        pdfjsLib = await import('pdfjs-dist' as any);
+      } catch {
+        pdfjsLib = null;
+      }
+    }
+    if (!pdfjsLib) throw new Error('pdfjs-dist not available');
     const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
     if (getDocument) {
       const uint8 = new Uint8Array(buffer);
