@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v35.2';
+export const BUILD_VERSION = 'v35.3';
 export const BUILD_DATE = '2026-03-09';
 export const BUILD_DESCRIPTION = 'ENGINEERING AUTOMATION SYSTEM v1.0 — Full integrated engineering module: (1) /lib/engineering/ core module derives all data from design engine. (2) Auto-generates engineering report when layout is saved. (3) System Summary, Electrical Engineering (NEC 690), Structural Engineering (ASCE 7-22), Equipment Schedule, Panel Layout, Permit Package. (4) Engineering tab in project dashboard. (5) /api/engineering/generate + /api/engineering/report endpoints. (6) engineering_reports DB table with design_version_id for change detection. (7) Auto-regeneration when design changes. PRIMARY PATH 0-panel fix: filter against original boundary polygon only (v34.4).';
 export const BUILD_FEATURES = [
