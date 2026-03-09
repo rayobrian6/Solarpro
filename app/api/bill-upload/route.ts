@@ -3,6 +3,7 @@ import { parseBillText, parseBillTextWithLLM, validateBillData } from '@/lib/bil
 import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
+import { extractPdfTextPure } from '@/lib/pdfExtract';
 
 // Top-level reference so webpack marks pdf-parse as external (not bundled)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -164,15 +165,25 @@ export async function POST(req: NextRequest) {
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
   const openaiKey = process.env.OPENAI_API_KEY;
 
-  // Method 1: pdfjs-dist legacy build (pure JS, no canvas needed, works on Vercel)
-  // NOTE: Do NOT use pdf-parse v2 - it requires @mapi-rs/canvas which needs DOMMatrix/ImageData
-  // pdfjs-dist legacy build extracts text without any canvas/DOM dependencies
+  // Method 1: Pure Node.js PDF extractor (zero external deps, guaranteed to work on Vercel)
+  // Uses built-in zlib to decompress PDF streams + regex to extract text operators
+  // No canvas, no DOMMatrix, no workers, no native modules needed
+  console.log('[bill-upload] Trying pure Node.js PDF extractor...');
+  try {
+    const text = extractPdfTextPure(buffer);
+    console.log('[bill-upload] Pure extractor got', text.length, 'chars');
+    if (text.length > 50) return { text, method: 'pure-extract' };
+    console.warn('[bill-upload] Pure extractor returned too little text:', text.length, 'chars');
+  } catch (err: unknown) {
+    console.warn('[bill-upload] Pure extractor failed:', err instanceof Error ? err.message : err);
+  }
+
+  // Method 1b: pdfjs-dist legacy (fallback - may fail on Vercel due to missing canvas globals)
   console.log('[bill-upload] Trying pdfjs-dist legacy...');
   try {
     const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
     const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
     if (!getDocument) throw new Error('getDocument not found in pdfjs-dist');
-    
     const uint8 = new Uint8Array(buffer);
     const doc = await getDocument({
       data: uint8,
@@ -181,20 +192,15 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
       useSystemFonts: true,
       disableFontFace: true,
     }).promise;
-    
     let text = '';
     for (let i = 1; i <= doc.numPages; i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items
-        .map((item: any) => ('str' in item ? item.str : ''))
-        .join(' ');
-      text += pageText + '\n';
+      text += content.items.map((item: any) => ('str' in item ? item.str : '')).join(' ') + '\n';
     }
     text = text.trim();
     console.log('[bill-upload] pdfjs-dist extracted', text.length, 'chars');
     if (text.length > 50) return { text, method: 'pdfjs-dist' };
-    console.warn('[bill-upload] pdfjs-dist returned too little text:', text.length, 'chars');
   } catch (err: unknown) {
     console.warn('[bill-upload] pdfjs-dist failed:', err instanceof Error ? err.message : err);
   }
