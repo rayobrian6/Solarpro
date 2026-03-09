@@ -114,6 +114,18 @@ export async function POST(req: NextRequest) {
         count: freePassUsers.length,
         users: freePassUsers,
       });
+    } else if (action === 'search') {
+      // Search users by email pattern or name
+      const query = email || body.query || '';
+      if (!query) return NextResponse.json({ success: false, error: 'Provide email or query to search' }, { status: 400 });
+      const results = await sql`
+        SELECT id, name, email, company, plan, subscription_status, is_free_pass, trial_ends_at, created_at
+        FROM users
+        WHERE email ILIKE ${'%' + query + '%'} OR name ILIKE ${'%' + query + '%'} OR company ILIKE ${'%' + query + '%'}
+        ORDER BY created_at DESC
+        LIMIT 20
+      `;
+      return NextResponse.json({ success: true, count: results.length, users: results });
     } else {
       return NextResponse.json({ success: false, error: `Unknown action: ${action}. Use 'grant', 'revoke', or 'list'.` }, { status: 400 });
     }

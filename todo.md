@@ -17,14 +17,12 @@
 - [x] Fix rate validation minimum (0.04 → 0.01)
 - [x] Push v37.7 with all OCR fixes
 - [x] Grant free pass to sarah@solfence.solar (DB confirmed correct)
-
-## In Progress 🔄
-- [ ] Fix Sarah's free pass not showing in UI
-  - Root cause: useSubscription defaults to plan='starter'/isFreePass=false while loading
-  - proposals/page.tsx: isPreviewOnly=true during load → shows upgrade wall
-  - projects/page.tsx: atProjectLimit may trigger during load if 2+ projects
-  - Fix: guard all plan-gating with subLoading check
-- [ ] Fix project creation failing for new clients (can't open 3D design)
+- [x] Add Quick Launch 3D design (v37.8) - bypass project requirement
+- [x] Fix subscription loading flash (v38.0)
+  - proposals/page.tsx: canGenerate=true while subLoading (no preview-only flash)
+  - projects/page.tsx: maxProjects=null while subLoading (no project limit flash)
+  - clients/page.tsx: maxClients=null while subLoading (no client limit flash)
+  - engineering/page.tsx: canSLD/canPermit/canBOM=true while subLoading
 
 ## Pending 📋
 - [ ] Engineering report auto-generation on bill upload (original request)

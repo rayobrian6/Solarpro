@@ -1,0 +1,149 @@
+
+> solar-platform@1.0.0 build
+> next build
+
+ ⚠ Invalid next.config.js options detected: 
+ ⚠     Unrecognized key(s) in object: 'turbopack'
+ ⚠ See more info here: https://nextjs.org/docs/messages/invalid-next-config
+  ▲ Next.js 14.2.3
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+   Generating static pages (0/54) ...
+   Generating static pages (13/54) 
+Settings branding GET error: q [Error]: Dynamic server usage: Route /api/settings/branding couldn't be rendered statically because it accessed `request.headers`. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
+    at Object.get (/workspace/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js:6:37835)
+    at m (/workspace/.next/server/app/api/admin/free-pass/route.js:43:1293)
+    at p (/workspace/.next/server/app/api/settings/branding/route.js:13:250)
+    at /workspace/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js:6:34672
+    at /workspace/node_modules/next/dist/server/lib/trace/tracer.js:140:36
+    at NoopContextManager.with (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:7062)
+    at ContextAPI.with (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:518)
+    at NoopTracer.startActiveSpan (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:18093)
+    at ProxyTracer.startActiveSpan (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:18854)
+    at /workspace/node_modules/next/dist/server/lib/trace/tracer.js:122:103 {
+  description: "Route /api/settings/branding couldn't be rendered statically because it accessed `request.headers`. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
+  digest: 'DYNAMIC_SERVER_USAGE'
+}
+   Generating static pages (26/54) 
+[GET /api/stats] q [Error]: Dynamic server usage: Route /api/stats couldn't be rendered statically because it accessed `request.headers`. See more info here: https://nextjs.org/docs/messages/dynamic-server-error
+    at Object.get (/workspace/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js:6:37835)
+    at m (/workspace/.next/server/app/api/admin/free-pass/route.js:43:1293)
+    at c (/workspace/.next/server/app/api/stats/route.js:1:705)
+    at /workspace/node_modules/next/dist/compiled/next-server/app-route.runtime.prod.js:6:34672
+    at /workspace/node_modules/next/dist/server/lib/trace/tracer.js:140:36
+    at NoopContextManager.with (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:7062)
+    at ContextAPI.with (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:518)
+    at NoopTracer.startActiveSpan (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:18093)
+    at ProxyTracer.startActiveSpan (/workspace/node_modules/next/dist/compiled/@opentelemetry/api/index.js:1:18854)
+    at /workspace/node_modules/next/dist/server/lib/trace/tracer.js:122:103 {
+  description: "Route /api/stats couldn't be rendered statically because it accessed `request.headers`. See more info here: https://nextjs.org/docs/messages/dynamic-server-error",
+  digest: 'DYNAMIC_SERVER_USAGE'
+}
+   Generating static pages (40/54) 
+ ✓ Generating static pages (54/54)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                  Size     First Load JS
+┌ ○ /                                        9.87 kB         105 kB
+├ ○ /_not-found                              879 B          88.4 kB
+├ ○ /account/billing                         3.75 kB         171 kB
+├ ○ /admin/hardware                          5.24 kB         173 kB
+├ ○ /admin/pricing                           6.12 kB         174 kB
+├ ○ /analytics                               8.46 kB         285 kB
+├ ƒ /api/admin/free-pass                     0 B                0 B
+├ ƒ /api/auth/login                          0 B                0 B
+├ ƒ /api/auth/logout                         0 B                0 B
+├ ƒ /api/auth/me                             0 B                0 B
+├ ƒ /api/auth/register                       0 B                0 B
+├ ƒ /api/auto-design                         0 B                0 B
+├ ƒ /api/auto-size                           0 B                0 B
+├ ƒ /api/bill-upload                         0 B                0 B
+├ ƒ /api/bill-upload/test                    0 B                0 B
+├ ƒ /api/clients                             0 B                0 B
+├ ƒ /api/clients/[id]                        0 B                0 B
+├ ƒ /api/dsm                                 0 B                0 B
+├ ƒ /api/elevation                           0 B                0 B
+├ ƒ /api/engineering/assist                  0 B                0 B
+├ ƒ /api/engineering/auto-configure          0 B                0 B
+├ ƒ /api/engineering/bom                     0 B                0 B
+├ ƒ /api/engineering/bom-v2                  0 B                0 B
+├ ƒ /api/engineering/calculate               0 B                0 B
+├ ƒ /api/engineering/enphase                 0 B                0 B
+├ ƒ /api/engineering/equipment               0 B                0 B
+├ ƒ /api/engineering/generate                0 B                0 B
+├ ƒ /api/engineering/ironridge               0 B                0 B
+├ ƒ /api/engineering/override                0 B                0 B
+├ ƒ /api/engineering/permit                  0 B                0 B
+├ ƒ /api/engineering/pvwatts                 0 B                0 B
+├ ƒ /api/engineering/report                  0 B                0 B
+├ ƒ /api/engineering/rules                   0 B                0 B
+├ ƒ /api/engineering/sld                     0 B                0 B
+├ ƒ /api/engineering/sld/pdf                 0 B                0 B
+├ ƒ /api/engineering/slg/generate            0 B                0 B
+├ ƒ /api/engineering/structural              0 B                0 B
+├ ƒ /api/engineering/structural-v2           0 B                0 B
+├ ƒ /api/engineering/topology                0 B                0 B
+├ ƒ /api/enterprise/contact                  0 B                0 B
+├ ƒ /api/equipment                           0 B                0 B
+├ ƒ /api/equipment/save                      0 B                0 B
+├ ƒ /api/geocode                             0 B                0 B
+├ ƒ /api/hardware                            0 B                0 B
+├ ƒ /api/incentives                          0 B                0 B
+├ ƒ /api/maps-session                        0 B                0 B
+├ ƒ /api/migrate                             0 B                0 B
+├ ƒ /api/pricing                             0 B                0 B
+├ ƒ /api/production                          0 B                0 B
+├ ƒ /api/projects                            0 B                0 B
+├ ƒ /api/projects/[id]                       0 B                0 B
+├ ƒ /api/projects/[id]/layout                0 B                0 B
+├ ƒ /api/projects/[id]/site-conditions       0 B                0 B
+├ ƒ /api/projects/[id]/versions              0 B                0 B
+├ ƒ /api/projects/[id]/versions/[versionId]  0 B                0 B
+├ ƒ /api/proposals                           0 B                0 B
+├ ƒ /api/proposals/[id]                      0 B                0 B
+├ ƒ /api/proposals/[id]/share                0 B                0 B
+├ ƒ /api/settings/branding                   0 B                0 B
+├ ƒ /api/settings/logo                       0 B                0 B
+├ ƒ /api/settings/profile                    0 B                0 B
+├ ƒ /api/solar                               0 B                0 B
+├ ƒ /api/stats                               0 B                0 B
+├ ƒ /api/stripe/checkout                     0 B                0 B
+├ ƒ /api/stripe/portal                       0 B                0 B
+├ ƒ /api/stripe/webhook                      0 B                0 B
+├ ƒ /api/tile                                0 B                0 B
+├ ƒ /api/utility-detect                      0 B                0 B
+├ ƒ /api/utility-rates                       0 B                0 B
+├ ƒ /api/version                             0 B                0 B
+├ ○ /auth/login                              2.84 kB        97.7 kB
+├ ○ /auth/register                           4.22 kB        99.1 kB
+├ ○ /auth/subscribe                          4.85 kB        99.7 kB
+├ ○ /clients                                 5.54 kB         176 kB
+├ ƒ /clients/[id]                            3.55 kB         272 kB
+├ ƒ /clients/[id]/edit                       2.35 kB         171 kB
+├ ○ /clients/new                             7.12 kB         177 kB
+├ ○ /dashboard                               12.5 kB         291 kB
+├ ○ /design                                  50.5 kB         221 kB
+├ ○ /engineering                             119 kB          287 kB
+├ ○ /engineering/assist                      504 B            88 kB
+├ ○ /enterprise                              3.93 kB        98.8 kB
+├ ○ /projects                                4.61 kB         174 kB
+├ ƒ /projects/[id]                           15.4 kB         284 kB
+├ ○ /projects/new                            10.7 kB         181 kB
+├ ○ /proposals                               25.5 kB         193 kB
+├ ○ /settings                                5.36 kB         173 kB
+└ ○ /subscribe                               4.74 kB        99.6 kB
++ First Load JS shared by all                87.5 kB
+  ├ chunks/7023-31f2c7c848117733.js          31.6 kB
+  ├ chunks/fd9d1056-5c009e0f6f1fd5dc.js      53.6 kB
+  └ other shared chunks (total)              2.23 kB
+
+
+ƒ Middleware                                 27.5 kB
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
