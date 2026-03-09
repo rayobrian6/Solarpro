@@ -2384,35 +2384,47 @@ function SolarEngine3D({
     // ── Solar placement rules ──────────────────────────────────────────────
     // Rule 1: No north-facing segments (az 315-360 or 0-45) — minimal sun in N hemisphere
     // Rule 2: No steep pitch on unfavorable faces (>45° always skip; >35° on E/W skip)
-    // Rule 3: Target building only — segment center must be within 25m of clicked point
+    // Rule 3: Target building only — segment center must be within MAX_BUILDING_RADIUS_M of twin center
     // Rule 4: Minimum sunshine (50% of best segment)
     // Rule 5: Minimum area (must fit at least one panel)
-    const MAX_BUILDING_RADIUS_M = 25;
-    const cosLatRad = Math.cos(lat * Math.PI / 180);
+    //
+    // CRITICAL FIX v33.4: Use twinData.lat/lng as reference — NOT component props lat/lng.
+    // Component props may be stale (original project location) while twinData.lat/lng
+    // always reflects the actual building the Solar API was called for (e.g. after Pick House).
+    const MAX_BUILDING_RADIUS_M = 40; // increased from 25m — Google Solar API spreads segments
+    // Use twin center as reference (always matches the Solar API response)
+    const refLat = twinData.lat;
+    const refLng = twinData.lng;
+    const cosLatRad = Math.cos(refLat * Math.PI / 180);
     const mLatPx = 111320;
     const mLngPx = 111320 * cosLatRad;
 
+    addLog('AUTO', `distToRef reference: twinData=(${refLat.toFixed(5)},${refLng.toFixed(5)}) props=(${lat.toFixed(5)},${lng.toFixed(5)})`);
+
     function isNorthFacing(azDeg: number): boolean {
       const az = ((azDeg % 360) + 360) % 360;
-      return az >= 315 || az <= 45;
+      // North-facing: 315°-360° or 0°-45° (NW through N through NE)
+      return az >= 315 || az < 45;
     }
     function isTooSteep(pitchDeg: number, azDeg: number): boolean {
-      if (pitchDeg > 45) return true;
+      if (pitchDeg > 45) return true; // always skip very steep roofs
       const az = ((azDeg % 360) + 360) % 360;
-      const isEW = (az > 45 && az < 135) || (az > 225 && az < 315);
+      // East/West facing: skip if pitch > 35° (poor production + structural risk)
+      const isEW = (az >= 45 && az <= 135) || (az >= 225 && az <= 315);
       if (isEW && pitchDeg > 35) return true;
       return false;
     }
-    function distToTarget(segLat: number, segLng: number): number {
-      const dN = (segLat - lat) * mLatPx;
-      const dE = (segLng - lng) * mLngPx;
+    function distToRef(segLat: number, segLng: number): number {
+      const dN = (segLat - refLat) * mLatPx;
+      const dE = (segLng - refLng) * mLngPx;
       return Math.sqrt(dN * dN + dE * dE);
     }
 
-    const eligibleSegs = sortedSegs.filter((seg: any) => {
+    // First pass: apply all solar rules
+    let eligibleSegs = sortedSegs.filter((seg: any) => {
       const azDeg = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
       const pitchDeg = isFinite(seg.pitchDegrees) ? seg.pitchDegrees : 20;
-      const dist = distToTarget(seg.center?.lat ?? lat, seg.center?.lng ?? lng);
+      const dist = distToRef(seg.center?.lat ?? refLat, seg.center?.lng ?? refLng);
       if (isNorthFacing(azDeg)) {
         addLog('AUTO', `seg ${seg.id}: SKIP north-facing az=${azDeg.toFixed(0)}`); return false;
       }
@@ -2431,6 +2443,30 @@ function SolarEngine3D({
       addLog('AUTO', `seg ${seg.id}: OK az=${azDeg.toFixed(0)} pitch=${pitchDeg.toFixed(0)} dist=${dist.toFixed(0)}m area=${seg.areaM2.toFixed(0)}m2`);
       return true;
     });
+
+    // Fallback: if ALL segments were filtered by distance (e.g. stale props), relax distance constraint
+    // and use the closest cluster of segments (the target building)
+    if (eligibleSegs.length === 0 && sortedSegs.length > 0) {
+      addLog('AUTO', 'FALLBACK: all segs filtered — relaxing distance constraint, using closest segments');
+      // Find the minimum distance among all segments
+      const minDist = Math.min(...sortedSegs.map((seg: any) =>
+        distToRef(seg.center?.lat ?? refLat, seg.center?.lng ?? refLng)
+      ));
+      // Use segments within 15m of the closest segment's distance (same building cluster)
+      const relaxedRadius = minDist + 15;
+      addLog('AUTO', `FALLBACK: minDist=${minDist.toFixed(0)}m, relaxedRadius=${relaxedRadius.toFixed(0)}m`);
+      eligibleSegs = sortedSegs.filter((seg: any) => {
+        const azDeg = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
+        const pitchDeg = isFinite(seg.pitchDegrees) ? seg.pitchDegrees : 20;
+        const dist = distToRef(seg.center?.lat ?? refLat, seg.center?.lng ?? refLng);
+        if (isNorthFacing(azDeg)) return false;
+        if (isTooSteep(pitchDeg, azDeg)) return false;
+        if (dist > relaxedRadius) return false;
+        if (seg.areaM2 < (PW * PH)) return false;
+        addLog('AUTO', `seg ${seg.id}: FALLBACK-OK dist=${dist.toFixed(0)}m az=${azDeg.toFixed(0)}`);
+        return true;
+      });
+    }
 
     addLog('AUTO', `eligible: ${eligibleSegs.length}/${sortedSegs.length} segs after solar rules`);
 

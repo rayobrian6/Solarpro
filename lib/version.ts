@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v33.3';
+export const BUILD_VERSION = 'v33.5';
 export const BUILD_DATE = '2026-03-09';
-export const BUILD_DESCRIPTION = 'AUTO FILL RENDERING FIX v3 — clampToHeightMostDetailed: handleAutoRoof now uses scene.clampToHeightMostDetailed to get ACTUAL Google 3D Tile surface heights (same source as Row tool pickPosition). Fixes 30m+ height mismatch caused by EllipsoidTerrainProvider + geoid undulation fallback. Panels placed at real tile surface + PANEL_OFFSET. Falls back to computed heights if API unavailable.';
+export const BUILD_DESCRIPTION = 'AUTO FILL FIX v4 — distToRef: handleAutoRoof now uses twinData.lat/lng (Solar API center) as reference for distance filtering instead of stale component props. MAX_BUILDING_RADIUS_M increased 25m→40m. Fallback: if all segs filtered by distance, relax constraint to closest building cluster. North-facing threshold fixed (az<45 not az<=45). Panels now correctly placed on picked house after Pick House workflow.';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
