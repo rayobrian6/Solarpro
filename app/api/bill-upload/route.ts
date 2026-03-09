@@ -134,21 +134,15 @@ export async function POST(req: NextRequest) {
 async function extractPdfText(buffer: Buffer): Promise<string> {
   let text = '';
 
-  // Step 1: Try pdf-parse (handles text-based PDFs — works on Vercel)
+  // Step 1: Try pdf-parse v2 (PDFParse class: new PDFParse({data}) -> load() -> getText())
   try {
-    const pdfParseModule = await import('pdf-parse');
-    const PDFParseClass = (pdfParseModule as any).PDFParse;
-    if (PDFParseClass) {
-      const parser = new PDFParseClass();
-      const data = await parser.parse(buffer);
-      text = data.text || '';
-    } else {
-      const pdfParseFn = (pdfParseModule as any).default || pdfParseModule;
-      if (typeof pdfParseFn === 'function') {
-        const data = await pdfParseFn(buffer, { max: 0 });
-        text = data.text || '';
-      }
-    }
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { PDFParse } = require('pdf-parse');
+    const parser = new PDFParse({ data: buffer });
+    await parser.load();
+    const result = await parser.getText();
+    text = result.text || '';
+    console.log('[bill-upload] pdf-parse extracted', text.length, 'chars');
   } catch (err: any) {
     // Detect password-protected PDF
     if (err.message?.toLowerCase().includes('password') || err.message?.toLowerCase().includes('encrypt')) {
