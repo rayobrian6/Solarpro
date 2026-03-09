@@ -250,7 +250,7 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
       // No pdf2pic — try OpenAI Files API to parse PDF directly
       try {
         const fd = new FormData();
-        fd.append('file', new Blob([buffer], { type: 'application/pdf' }), 'bill.pdf');
+        fd.append('file', new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }), 'bill.pdf');
         fd.append('purpose', 'assistants');
 
         const uploadRes = await fetch('https://api.openai.com/v1/files', {
