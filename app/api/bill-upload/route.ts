@@ -138,14 +138,13 @@ export async function POST(req: NextRequest) {
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
   const openaiKey = process.env.OPENAI_API_KEY;
 
-  // Method 1: OpenAI — upload PDF as file, use gpt-4o to extract text
-  // This is the most reliable method on Vercel (no native deps)
+  // Method 1: OpenAI Files API + Responses API (supports PDF natively)
   if (openaiKey) {
-    console.log('[bill-upload] Trying OpenAI Files API...');
+    console.log('[bill-upload] Trying OpenAI Files API + Responses API...');
     try {
       const fd = new FormData();
       fd.append('file', new Blob([new Uint8Array(buffer)], { type: 'application/pdf' }), 'bill.pdf');
-      fd.append('purpose', 'assistants');
+      fd.append('purpose', 'user_data');
 
       const uploadRes = await fetch('https://api.openai.com/v1/files', {
         method: 'POST',
@@ -157,10 +156,9 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
       if (uploadRes.ok) {
         const uploadData = await uploadRes.json();
         const fileId = uploadData.id;
-        console.log('[bill-upload] OpenAI file uploaded:', fileId);
+        console.log('[bill-upload] OpenAI file uploaded:', fileId, 'purpose:', uploadData.purpose);
 
-        // Use responses API with input_file
-        const chatRes = await fetch('https://api.openai.com/v1/responses', {
+        const respRes = await fetch('https://api.openai.com/v1/responses', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -168,76 +166,99 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
           },
           body: JSON.stringify({
             model: 'gpt-4o',
-            input: [{
-              role: 'user',
-              content: [
-                { type: 'input_text', text: 'Extract ALL text from this utility bill PDF exactly as it appears. Preserve all numbers, addresses, dates, kWh values, and dollar amounts. Output only the raw extracted text.' },
-                { type: 'input_file', file_id: fileId },
-              ],
-            }],
+            input: [
+              {
+                role: 'user',
+                content: [
+                  {
+                    type: 'input_file',
+                    file_id: fileId,
+                  },
+                  {
+                    type: 'input_text',
+                    text: 'Extract ALL text from this utility bill PDF exactly as it appears. Preserve all numbers, addresses, dates, kWh values, and dollar amounts. Output only the raw extracted text, nothing else.',
+                  },
+                ],
+              },
+            ],
           }),
           signal: AbortSignal.timeout(30000),
         });
 
-        // Cleanup file async
+        // Cleanup file async (don't await)
         fetch(`https://api.openai.com/v1/files/${fileId}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${openaiKey}` },
         }).catch(() => {});
 
-        if (chatRes.ok) {
-          const chatData = await chatRes.json();
-          const text = chatData?.output?.[0]?.content?.[0]?.text?.trim()
-            ?? chatData?.choices?.[0]?.message?.content?.trim();
+        if (respRes.ok) {
+          const respData = await respRes.json();
+          console.log('[bill-upload] Responses API response keys:', Object.keys(respData).join(', '));
+          const text = respData?.output?.[0]?.content?.[0]?.text?.trim()
+            ?? respData?.output?.[0]?.content?.trim()
+            ?? respData?.choices?.[0]?.message?.content?.trim();
           if (text && text.length > 50) {
-            console.log('[bill-upload] OpenAI Files API extracted', text.length, 'chars');
-            return { text, method: 'openai-files' };
+            console.log('[bill-upload] Responses API extracted', text.length, 'chars');
+            return { text, method: 'openai-responses' };
           }
-          console.warn('[bill-upload] OpenAI Files API returned short text:', text?.length, 'chars');
-          console.warn('[bill-upload] Response keys:', Object.keys(chatData).join(', '));
+          console.warn('[bill-upload] Responses API short/empty. Full response:', JSON.stringify(respData).slice(0, 500));
         } else {
-          const errText = await chatRes.text();
-          console.warn('[bill-upload] OpenAI responses API failed:', chatRes.status, errText.slice(0, 300));
-
-          // Fallback: try chat/completions with file attachment
-          console.log('[bill-upload] Trying chat/completions with file...');
-          const chatRes2 = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openaiKey}`,
-            },
-            body: JSON.stringify({
-              model: 'gpt-4o',
-              max_tokens: 2000,
-              messages: [{
-                role: 'user',
-                content: [
-                  { type: 'text', text: 'Extract ALL text from this utility bill PDF exactly as it appears. Output only the raw extracted text.' },
-                  { type: 'file', file: { file_id: uploadData.id } },
-                ],
-              }],
-            }),
-            signal: AbortSignal.timeout(30000),
-          });
-          if (chatRes2.ok) {
-            const chatData2 = await chatRes2.json();
-            const text2 = chatData2?.choices?.[0]?.message?.content?.trim();
-            if (text2 && text2.length > 50) {
-              console.log('[bill-upload] chat/completions file extracted', text2.length, 'chars');
-              return { text: text2, method: 'openai-chat-file' };
-            }
-          } else {
-            const err2 = await chatRes2.text();
-            console.warn('[bill-upload] chat/completions file failed:', chatRes2.status, err2.slice(0, 200));
-          }
+          const errText = await respRes.text();
+          console.warn('[bill-upload] Responses API failed:', respRes.status, errText.slice(0, 400));
         }
       } else {
         const errText = await uploadRes.text();
-        console.warn('[bill-upload] OpenAI file upload failed:', uploadRes.status, errText.slice(0, 200));
+        console.warn('[bill-upload] OpenAI file upload failed:', uploadRes.status, errText.slice(0, 300));
       }
     } catch (err: unknown) {
-      console.warn('[bill-upload] OpenAI Files API error:', err instanceof Error ? err.message : err);
+      console.warn('[bill-upload] OpenAI Files+Responses error:', err instanceof Error ? err.message : err);
+    }
+
+    // Method 1b: Extract readable strings from PDF buffer, send to GPT-4o as text
+    console.log('[bill-upload] Trying GPT-4o with raw PDF text extraction...');
+    try {
+      const rawText = buffer.toString('latin1');
+      const readable = rawText.match(/[\x20-\x7E]{4,}/g) || [];
+      const hint = readable.join(' ').replace(/\s+/g, ' ').slice(0, 8000);
+
+      if (hint.length > 200) {
+        const chatRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            max_tokens: 2000,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are a utility bill parser. The user will provide raw text extracted from a PDF utility bill. Reconstruct the bill information as clearly as possible, preserving all numbers, addresses, kWh values, dollar amounts, and dates.',
+              },
+              {
+                role: 'user',
+                content: `Here is raw text extracted from a utility bill PDF. Please reconstruct and output all the bill information:\n\n${hint}`,
+              },
+            ],
+          }),
+          signal: AbortSignal.timeout(25000),
+        });
+
+        if (chatRes.ok) {
+          const chatData = await chatRes.json();
+          const text = chatData?.choices?.[0]?.message?.content?.trim();
+          if (text && text.length > 50) {
+            console.log('[bill-upload] GPT-4o text hint extracted', text.length, 'chars');
+            return { text, method: 'openai-text-hint' };
+          }
+        } else {
+          const errBody = await chatRes.text();
+          console.warn('[bill-upload] GPT-4o text hint failed:', chatRes.status, errBody.slice(0, 200));
+        }
+      }
+    } catch (err: unknown) {
+      console.warn('[bill-upload] GPT-4o text hint error:', err instanceof Error ? err.message : err);
     }
   } else {
     console.warn('[bill-upload] No OPENAI_API_KEY — skipping OpenAI extraction');
