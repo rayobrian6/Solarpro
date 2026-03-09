@@ -50,7 +50,7 @@ function panelDims(orientation: PanelOrientation): { pw: number; ph: number } {
     : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
 }
 
-export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array';
+export type PlacementMode = 'select' | 'roof' | 'ground' | 'fence' | 'auto_roof' | 'plane' | 'row' | 'measure' | 'ground_array' | 'pick_house';
 export type PanelOrientation = 'portrait' | 'landscape';
 export type SystemType = 'roof' | 'ground' | 'fence';
 export type LoadStage = 'idle' | 'cesium' | 'viewer' | 'tiles' | 'solar' | 'done' | 'error';
@@ -71,6 +71,7 @@ interface Props {
   selectedPanel?: any;
   onTwinLoaded?: (twin: DigitalTwinData) => void;
   onError?: (msg: string) => void;
+  onLocationPick?: (lat: number, lng: number, address: string) => void;
 }
 
 function log(tag: string, msg: string, data?: any) {
@@ -176,7 +177,7 @@ function SolarEngine3D({
   placementMode, onPlacementModeChange,
   systemType, tilt, azimuth, fenceHeight,
   showShade, selectedPanel,
-  onTwinLoaded, onError,
+  onTwinLoaded, onError, onLocationPick,
 }: Props) {
   const cesiumRef   = useRef<HTMLDivElement>(null);
   const viewerRef   = useRef<any>(null);
@@ -310,6 +311,9 @@ function SolarEngine3D({
     }
     // Auto Fill: only trigger when mode CHANGES TO 'auto_roof' (not on every re-render)
     // This is inside prevMode !== placementMode guard to prevent duplicate runs.
+    if (placementMode === 'pick_house' && prevMode !== 'pick_house') {
+      setStatusMsg('🏡 Click any house on the map to select it as the target property');
+    }
     if (placementMode === 'auto_roof' && prevMode !== 'auto_roof') {
       const viewer = viewerRef.current;
       const C = (window as any).Cesium;
@@ -1233,6 +1237,35 @@ function SolarEngine3D({
         else if (mode === 'row')    handleRowClick(viewer, C, screenPos);
         else if (mode === 'measure') handleMeasureClick(viewer, C, screenPos);
         // auto_roof: fires once via placementMode useEffect — NOT on canvas click
+
+        // pick_house: user clicked a house — get lat/lng and reverse-geocode
+        if (mode === 'pick_house') {
+          try {
+            const pickedPos = viewer.scene.pickPosition(screenPos);
+            if (pickedPos && isFinite(pickedPos.x)) {
+              const carto = C.Cartographic.fromCartesian(pickedPos);
+              const pickedLat = C.Math.toDegrees(carto.latitude);
+              const pickedLng = C.Math.toDegrees(carto.longitude);
+              if (isValidCoord(pickedLat, pickedLng)) {
+                addLog('PICK', `House picked at ${pickedLat.toFixed(5)}, ${pickedLng.toFixed(5)}`);
+                setStatusMsg('House selected — loading solar data...');
+                onPlacementModeChange('select');
+                // Reverse geocode in background
+                fetch(`/api/geocode?lat=${pickedLat}&lng=${pickedLng}`)
+                  .then(r => r.json())
+                  .then(data => {
+                    const address = data?.data?.short_name || `${pickedLat.toFixed(5)}, ${pickedLng.toFixed(5)}`;
+                    if (onLocationPick) onLocationPick(pickedLat, pickedLng, address);
+                  })
+                  .catch(() => {
+                    if (onLocationPick) onLocationPick(pickedLat, pickedLng, `${pickedLat.toFixed(5)}, ${pickedLng.toFixed(5)}`);
+                  });
+              }
+            }
+          } catch (e: any) {
+            addLog('ERROR', `pick_house: ${e.message}`);
+          }
+        }
       } catch (err: any) {
         addLog('ERROR', `Click handler: ${err.message}`);
       }
@@ -2983,6 +3016,7 @@ function SolarEngine3D({
             { mode: 'row' as PlacementMode, icon: '➡', label: 'Row' },
             { mode: 'measure' as PlacementMode, icon: '📏', label: 'Measure' },
             { mode: 'auto_roof' as PlacementMode, icon: '✨', label: 'Auto' },
+            { mode: 'pick_house' as PlacementMode, icon: '🏡', label: 'Pick House' },
           ] as { mode: PlacementMode; icon: string; label: string }[]).map(({ mode, icon, label }) => (
             <button
               key={mode}
@@ -3034,7 +3068,8 @@ function SolarEngine3D({
                placementMode === 'plane' ? '📐 Plane' :
                placementMode === 'row' ? '➡ Row' :
                placementMode === 'measure' ? '📏 Measure' :
-               placementMode === 'auto_roof' ? '✨ Auto Fill' : placementMode}
+               placementMode === 'auto_roof' ? '✨ Auto Fill' :
+               placementMode === 'pick_house' ? '🏡 Pick House' : placementMode}
             </span>
           </div>
 

@@ -717,6 +717,39 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   }, []);
 
+  // ── Handle house pick from 3D view ──────────────────────────────────
+  // Called when user clicks a house in Pick House mode.
+  // Updates the map center, fetches new Solar API data, and updates the address bar.
+  const handleLocationPick = useCallback(async (pickedLat: number, pickedLng: number, pickedAddress: string) => {
+    // Clear existing panels — new house, fresh start
+    setPanels([]);
+    lastSavedPanelsRef.current = '[]';
+    setProduction(null);
+    setCostEstimate(null);
+    setCalcMessage('');
+    setSolarApiData(null);
+    setRoofSegments([]);
+
+    // Update map center and address bar
+    setMapCenter({ lat: pickedLat, lng: pickedLng });
+    setAddressSearch(pickedAddress);
+    setLocationStatus('found');
+
+    // Show toast
+    toast.info('🏡 House selected', `Loading solar data for ${pickedAddress}`);
+
+    // Fetch Solar API data for the new location
+    fetchSolarData(pickedLat, pickedLng);
+
+    // Save resolved coords back to project (non-fatal)
+    if (project.id) {
+      fetch(`/api/projects/${project.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: pickedLat, lng: pickedLng, address: pickedAddress }),
+      }).catch(() => {});
+    }
+  }, [fetchSolarData, project.id, toast]);
 
   // ── Resolve location on load ─────────────────────────────────────────
   // Phase 3-6: Priority chain:
@@ -2000,6 +2033,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                 console.error('3D engine error:', error);
                 setShow3D(false);
               }}
+              onLocationPick={handleLocationPick}
             />
           ) : (
             <>

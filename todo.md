@@ -1,29 +1,36 @@
-# SolarPro Auto Fill Audit - COMPLETE
+# SolarPro - House Picker Feature
 
-## Phase 1: Understand the Symptom
-- [x] Screenshot shows 45 panels placed, 18kW, correct count
-- [x] Mode switches to Select correctly
-- [x] BUT panels are invisible in 3D view
-- [x] This is a RENDERING bug not a placement bug
+## Goal
+Allow user to navigate to any area (e.g. Edwardsville IL), then click on a 
+specific house in the 3D Cesium view to SELECT it as the target property.
+Clicking a house: reverse-geocodes the lat/lng → updates address → reloads
+Solar API data for that exact building → re-runs Auto Fill on the new roof.
 
-## Phase 2: Deep Audit of Rendering Pipeline
-- [x] Read renderAllPanels / addPanelEntity functions
-- [x] Check panels useEffect - does it fire after Auto Fill?
-- [x] Check panelsRef vs panels prop timing
-- [x] Check if onPanelsChange triggers re-render with new panels
-- [x] Check if renderAllPanels is called with correct panel list
-- [x] Root cause: fillRoofSegmentWithPanels called addPanelEntity directly
-      then renderAllPanels full-rebuild removed+re-added them via React cycle
-      with potential timing issues
+## Phase 1: Understand current flow
+- [x] SolarEngine3D receives lat/lng/projectAddress as props
+- [x] DesignStudio manages mapCenter state, fetchSolarData, geocodeAddress
+- [x] SolarEngine3D has no "pick house" callback to parent
+- [x] Need: onLocationPick(lat, lng, address) callback prop
 
-## Phase 3: Apply Fix
-- [x] handleAutoRoof calls renderAllPanels() directly (synchronous, bypasses React cycle)
-- [x] fillRoofSegmentWithPanels PRIMARY PATH: removed direct addPanelEntity call
-- [x] fillRoofSegmentWithPanels FALLBACK PATH: removed direct addPanelEntity call
-- [x] renderAllPanels is now single source of truth
+## Phase 2: Add onLocationPick to SolarEngine3D
+- [ ] Add onLocationPick?: (lat: number, lng: number, address: string) => void to Props
+- [ ] Add "Pick House" mode to PlacementMode type (or use a separate state)
+- [ ] In handleCanvasClick: when mode === 'pick_house', use scene.pickPosition
+      to get lat/lng, reverse-geocode, call onLocationPick
+- [ ] Add "Pick House" toolbar button with house icon
+- [ ] Show crosshair cursor + status message when pick_house mode active
 
-## Phase 4: Build & Package
-- [x] Build project (zero errors, zero warnings)
-- [x] Committed as v32.6
-- [x] Pushed to GitHub
-- [x] ZIP created (1.1MB)
+## Phase 3: Handle pick in DesignStudio
+- [ ] Add onLocationPick handler: updates mapCenter, calls fetchSolarData,
+      reverse-geocodes to get address string, updates addressSearch display
+- [ ] Clear existing panels when new house is picked
+- [ ] Show toast: "House selected - loading solar data..."
+
+## Phase 4: Reverse geocoding
+- [ ] Use existing /api/geocode endpoint with mode=reverse (lat/lng → address)
+- [ ] Check if reverse geocode mode exists, add if needed
+
+## Phase 5: Build & Package
+- [ ] Build (zero errors)
+- [ ] Commit + push v33.1
+- [ ] Create ZIP
