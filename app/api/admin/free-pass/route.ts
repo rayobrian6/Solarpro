@@ -114,6 +114,11 @@ export async function POST(req: NextRequest) {
         count: freePassUsers.length,
         users: freePassUsers,
       });
+    } else if (action === 'delete') {
+      // Permanently delete a user account (admin only)
+      if (!validSecret) return NextResponse.json({ success: false, error: 'Admin secret required to delete users' }, { status: 403 });
+      await sql`DELETE FROM users WHERE email = ${email.toLowerCase()} AND email != 'raymond.obrian@yahoo.com'`;
+      return NextResponse.json({ success: true, action: 'deleted', email, message: `🗑️ User deleted: ${email}` });
     } else if (action === 'search') {
       // Search users by email pattern or name
       const query = email || body.query || '';
