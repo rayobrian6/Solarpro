@@ -1,6 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    // Optional server-only packages — skip webpack bundling, resolved at runtime
+    serverComponentsExternalPackages: ['pdf2pic', 'openai', 'pdf-parse'],
+  },
   images: {
     remotePatterns: [
       { hostname: 'api.mapbox.com' },
@@ -8,7 +12,13 @@ const nextConfig = {
     ],
   },
   webpack: (config) => {
-    config.externals = [...(config.externals || []), { canvas: 'canvas' }];
+    config.externals = [
+      ...(config.externals || []),
+      { canvas: 'canvas' },
+      // Optional runtime deps — not bundled by webpack
+      'pdf2pic',
+      'openai',
+    ];
     return config;
   },
   // Add empty turbopack config to allow webpack config to work with Next.js 16

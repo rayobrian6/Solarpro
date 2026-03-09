@@ -126,6 +126,7 @@ function rowToProject(row: Record<string, unknown>): Project {
     lat: row.lat as number | undefined,
     lng: row.lng as number | undefined,
     systemSizeKw: row.system_size_kw as number | undefined,
+    billData: row.bill_data as Record<string, unknown> | undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -349,14 +350,16 @@ export async function createProject(data: {
   utilityName?: string;
   utilityRatePerKwh?: number;
   systemSizeKw?: number;
+  billData?: Record<string, unknown>;
 }): Promise<Project> {
   assertUUID(data.userId, 'userId');
   // clientId must be a valid UUID or null — never pass a non-UUID string
   const clientId = isValidUUID(data.clientId) ? data.clientId : null;
+  const billDataJson = data.billData ? JSON.stringify(data.billData) : null;
   const sql = getDb();
   const rows = await sql`
     INSERT INTO projects (
-      user_id, client_id, name, status, system_type, notes, address, lat, lng, system_size_kw
+      user_id, client_id, name, status, system_type, notes, address, lat, lng, system_size_kw, bill_data
     ) VALUES (
       ${data.userId},
       ${clientId},
@@ -367,7 +370,8 @@ export async function createProject(data: {
       ${data.address || ''},
       ${data.lat ?? null},
       ${data.lng ?? null},
-      ${data.systemSizeKw ?? null}
+      ${data.systemSizeKw ?? null},
+      ${billDataJson}::jsonb
     )
     RETURNING *
   `;

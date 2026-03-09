@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   Upload, FileText, Zap, MapPin, DollarSign, CheckCircle,
   AlertCircle, ArrowRight, RefreshCw, Building2, Loader2,
-  TrendingUp, Sun, X, ChevronRight, Info,
+  TrendingUp, Sun, X, Info, BarChart2, Flame,
 } from 'lucide-react';
 
 interface BillData {
@@ -18,6 +18,17 @@ interface BillData {
   totalAmount?: number;
   estimatedAnnualKwh?: number;
   estimatedMonthlyBill?: number;
+  billType?: 'electric' | 'gas' | 'combined' | 'unknown';
+  monthlyUsageHistory?: number[];
+  tier1Kwh?: number;
+  tier2Kwh?: number;
+  tier1Rate?: number;
+  tier2Rate?: number;
+  demandCharge?: number;
+  demandKw?: number;
+  gasUsageTherm?: number;
+  fixedCharges?: number;
+  usedLlmFallback?: boolean;
   confidence: 'high' | 'medium' | 'low';
   extractedFields: string[];
 }
@@ -62,47 +73,137 @@ interface BillUploadFlowProps {
 
 type Step = 'upload' | 'review' | 'sizing' | 'complete';
 
+// Processing stages shown during upload
+type ProcessingStage = 'uploading' | 'extracting' | 'parsing' | 'geocoding' | 'sizing' | 'done';
+
+const STAGE_LABELS: Record<ProcessingStage, string> = {
+  uploading:  'Uploading file...',
+  extracting: 'Extracting text from bill...',
+  parsing:    'Parsing usage data...',
+  geocoding:  'Detecting location...',
+  sizing:     'Calculating system size...',
+  done:       'Complete!',
+};
+
+const STAGE_ORDER: ProcessingStage[] = ['uploading', 'extracting', 'parsing', 'geocoding', 'sizing', 'done'];
+
+const MAX_FILE_SIZE_MB = 10;
+const ACCEPTED_TYPES = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+const ACCEPTED_EXTS = ['.pdf', '.jpg', '.jpeg', '.png'];
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function validateFile(file: File): string | null {
+  if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+    return `File is too large (${formatFileSize(file.size)}). Maximum size is ${MAX_FILE_SIZE_MB} MB.`;
+  }
+  const ext = '.' + file.name.split('.').pop()?.toLowerCase();
+  const typeOk = ACCEPTED_TYPES.includes(file.type) || ACCEPTED_EXTS.includes(ext);
+  if (!typeOk) {
+    return `Unsupported file type. Please upload a PDF, JPG, or PNG.`;
+  }
+  return null;
+}
+
 export default function BillUploadFlow({ onComplete, onClose, className = '' }: BillUploadFlowProps) {
   const [step, setStep] = useState<Step>('upload');
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [processingStage, setProcessingStage] = useState<ProcessingStage>('uploading');
   const [result, setResult] = useState<UploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [systemKw, setSystemKw] = useState<number>(0);
   const [offsetPercent, setOffsetPercent] = useState(100);
   const [manualKwh, setManualKwh] = useState('');
   const [manualAddress, setManualAddress] = useState('');
+  const [selectedFile, setSelectedFile] = useState<{ name: string; size: number; type: string } | null>(null);
+  const [lastFile, setLastFile] = useState<File | null>(null); // for retry
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── File upload handler ───────────────────────────────────────────────────
+  // ── Simulate stage progression during upload ──────────────────────────────
+  const runStageSimulation = useCallback(() => {
+    // Stages advance on a rough timer; actual completion resets to 'done'
+    const delays: [ProcessingStage, number][] = [
+      ['uploading',  300],
+      ['extracting', 1800],
+      ['parsing',    3500],
+      ['geocoding',  5200],
+      ['sizing',     6800],
+    ];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    delays.forEach(([stage, ms]) => {
+      timers.push(setTimeout(() => setProcessingStage(stage), ms));
+    });
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // ── File upload handler ────────────────────────────────────────────────────
   const handleFile = useCallback(async (file: File) => {
+    // Client-side validation
+    const validationError = validateFile(file);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
     setError(null);
     setUploading(true);
+    setProcessingStage('uploading');
+    setSelectedFile({ name: file.name, size: file.size, type: file.type });
+    setLastFile(file);
+
+    const cancelSimulation = runStageSimulation();
 
     try {
       const formData = new FormData();
       formData.append('file', file);
 
       const res = await fetch('/api/bill-upload', { method: 'POST', body: formData });
+      cancelSimulation();
+
       const data = await res.json();
 
       if (!data.success) {
-        setError(data.error || 'Failed to process bill');
+        // Map HTTP status codes to friendly messages
+        let msg = data.error || 'Failed to process bill';
+        if (res.status === 413) msg = `File too large. Please upload a file under ${MAX_FILE_SIZE_MB} MB.`;
+        if (res.status === 415) msg = 'Unsupported file type. Please upload a PDF, JPG, or PNG.';
+        if (res.status === 422) msg = data.error || 'Could not extract data from this bill.';
+        setError(msg);
         setUploading(false);
+        setProcessingStage('uploading');
         return;
       }
 
+      setProcessingStage('done');
       setResult(data);
       setSystemKw(data.systemSizing?.recommendedKw || 0);
-      setStep('review');
-    } catch (err: any) {
-      setError(err.message || 'Upload failed');
+      setTimeout(() => setStep('review'), 400);
+    } catch (err: unknown) {
+      cancelSimulation();
+      const msg = err instanceof Error ? err.message : 'Upload failed. Please check your connection and try again.';
+      setError(msg);
+      setProcessingStage('uploading');
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [runStageSimulation]);
 
-  // ── Manual entry handler ──────────────────────────────────────────────────
+  // ── Retry handler ─────────────────────────────────────────────────────────
+  const handleRetry = useCallback(() => {
+    setError(null);
+    if (lastFile) {
+      handleFile(lastFile);
+    } else {
+      fileInputRef.current?.click();
+    }
+  }, [lastFile, handleFile]);
+
+  // ── Manual entry handler ───────────────────────────────────────────────────
   const handleManualEntry = useCallback(async () => {
     if (!manualKwh || !manualAddress) {
       setError('Please enter your monthly kWh usage and service address');
@@ -110,6 +211,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     }
     setError(null);
     setUploading(true);
+    setProcessingStage('geocoding');
 
     try {
       const formData = new FormData();
@@ -123,7 +225,6 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       const data = await res.json();
 
       if (data.success) {
-        // Override with manual values
         if (data.billData) {
           data.billData.monthlyKwh = parseFloat(manualKwh);
           data.billData.estimatedAnnualKwh = parseFloat(manualKwh) * 12;
@@ -134,14 +235,15 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       } else {
         setError(data.error || 'Could not process address');
       }
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Request failed');
     } finally {
       setUploading(false);
+      setProcessingStage('uploading');
     }
   }, [manualKwh, manualAddress]);
 
-  // ── Drag & drop ───────────────────────────────────────────────────────────
+  // ── Drag & drop ────────────────────────────────────────────────────────────
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
@@ -149,7 +251,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     if (file) handleFile(file);
   }, [handleFile]);
 
-  // ── Recalculate system size ───────────────────────────────────────────────
+  // ── Recalculate system size ────────────────────────────────────────────────
   const recalcSize = useCallback(async () => {
     if (!result?.billData?.estimatedAnnualKwh || !result?.locationData) return;
     setUploading(true);
@@ -178,6 +280,45 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     c === 'high' ? 'bg-emerald-500/10 border-emerald-500/20' :
     c === 'medium' ? 'bg-amber-500/10 border-amber-500/20' :
     'bg-red-500/10 border-red-500/20';
+
+  // ── Processing stage indicator ─────────────────────────────────────────────
+  const ProcessingIndicator = () => {
+    const currentIdx = STAGE_ORDER.indexOf(processingStage);
+    return (
+      <div className="flex flex-col items-center gap-4 py-2">
+        <Loader2 size={36} className="text-amber-400 animate-spin" />
+        <div className="w-full space-y-2">
+          {STAGE_ORDER.filter(s => s !== 'done').map((stage, i) => {
+            const isActive = i === currentIdx;
+            const isDone = i < currentIdx;
+            return (
+              <div key={stage} className="flex items-center gap-3">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
+                  isDone ? 'bg-emerald-500/20 border border-emerald-500/40' :
+                  isActive ? 'bg-amber-500/20 border border-amber-500/40' :
+                  'bg-slate-700/50 border border-slate-600/40'
+                }`}>
+                  {isDone
+                    ? <CheckCircle size={11} className="text-emerald-400" />
+                    : isActive
+                      ? <Loader2 size={11} className="text-amber-400 animate-spin" />
+                      : <div className="w-1.5 h-1.5 rounded-full bg-slate-600" />
+                  }
+                </div>
+                <span className={`text-xs transition-all ${
+                  isDone ? 'text-emerald-400' :
+                  isActive ? 'text-amber-300 font-medium' :
+                  'text-slate-600'
+                }`}>
+                  {STAGE_LABELS[stage]}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className={`bg-slate-900 rounded-2xl border border-slate-700/50 overflow-hidden ${className}`}>
@@ -222,11 +363,13 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               onDragOver={e => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-                dragging
-                  ? 'border-amber-400 bg-amber-500/5'
-                  : 'border-slate-600 hover:border-slate-500 hover:bg-slate-800/50'
+              onClick={() => !uploading && fileInputRef.current?.click()}
+              className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
+                uploading
+                  ? 'border-amber-500/40 bg-amber-500/5 cursor-default'
+                  : dragging
+                    ? 'border-amber-400 bg-amber-500/5 cursor-copy'
+                    : 'border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 cursor-pointer'
               }`}
             >
               <input
@@ -236,11 +379,20 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                 className="hidden"
                 onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
               />
+
               {uploading ? (
+                <ProcessingIndicator />
+              ) : selectedFile && !error ? (
+                /* File preview after selection (while not uploading) */
                 <div className="flex flex-col items-center gap-3">
-                  <Loader2 size={32} className="text-amber-400 animate-spin" />
-                  <p className="text-white font-medium">Processing your bill...</p>
-                  <p className="text-slate-400 text-sm">Extracting usage data and detecting utility</p>
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                    <FileText size={22} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <p className="text-white font-semibold text-sm truncate max-w-xs">{selectedFile.name}</p>
+                    <p className="text-slate-400 text-xs mt-0.5">{formatFileSize(selectedFile.size)}</p>
+                  </div>
+                  <p className="text-slate-500 text-xs">Click to choose a different file</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-3">
@@ -255,6 +407,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                     <span className="flex items-center gap-1"><FileText size={12} /> PDF</span>
                     <span className="flex items-center gap-1"><FileText size={12} /> JPG</span>
                     <span className="flex items-center gap-1"><FileText size={12} /> PNG</span>
+                    <span className="flex items-center gap-1 text-slate-600">max {MAX_FILE_SIZE_MB} MB</span>
                   </div>
                 </div>
               )}
@@ -273,6 +426,24 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                 </div>
               ))}
             </div>
+
+            {/* Error with retry */}
+            {error && (
+              <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                <AlertCircle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-red-300 text-sm">{error}</p>
+                  {lastFile && (
+                    <button
+                      onClick={e => { e.stopPropagation(); handleRetry(); }}
+                      className="mt-2 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+                    >
+                      <RefreshCw size={11} /> Try again
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Divider */}
             <div className="flex items-center gap-3">
@@ -314,39 +485,62 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                 Continue with Manual Entry
               </button>
             </div>
-
-            {error && (
-              <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                <AlertCircle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-red-300 text-sm">{error}</p>
-              </div>
-            )}
           </div>
         )}
 
         {/* ── STEP 2: Review extracted data ── */}
         {step === 'review' && result && (
           <div className="space-y-4">
+            {/* File info banner */}
+            {selectedFile && (
+              <div className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2 border border-slate-700/50">
+                <FileText size={13} className="text-slate-400 flex-shrink-0" />
+                <span className="text-slate-300 text-xs truncate flex-1">{selectedFile.name}</span>
+                <span className="text-slate-500 text-xs flex-shrink-0">{formatFileSize(selectedFile.size)}</span>
+              </div>
+            )}
+
             {/* Confidence badge */}
             <div className={`flex items-center gap-2 rounded-lg px-3 py-2 border text-sm ${confidenceBg(result.billData.confidence)}`}>
               <Info size={14} className={confidenceColor(result.billData.confidence)} />
               <span className={confidenceColor(result.billData.confidence)}>
                 Extraction confidence: <strong>{result.billData.confidence}</strong>
                 {' '}— {result.billData.extractedFields.length} fields extracted
+                {result.billData.usedLlmFallback && (
+                  <span className="ml-1 text-xs opacity-75">(AI-assisted)</span>
+                )}
               </span>
             </div>
+
+            {/* Bill type badge */}
+            {result.billData.billType && result.billData.billType !== 'unknown' && (
+              <div className="flex items-center gap-2">
+                {result.billData.billType === 'gas' || result.billData.billType === 'combined' ? (
+                  <span className="flex items-center gap-1.5 bg-orange-500/10 border border-orange-500/20 rounded-full px-3 py-1 text-xs text-orange-300">
+                    <Flame size={11} /> {result.billData.billType === 'combined' ? 'Combined Electric + Gas Bill' : 'Gas Bill'}
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 rounded-full px-3 py-1 text-xs text-amber-300">
+                    <Zap size={11} /> Electric Bill
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* Extracted data grid */}
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: 'Customer Name', value: result.billData.customerName, icon: <Building2 size={13} className="text-slate-400" /> },
-                { label: 'Service Address', value: result.billData.serviceAddress || result.locationData?.city + ', ' + result.locationData?.stateCode, icon: <MapPin size={13} className="text-slate-400" /> },
+                { label: 'Service Address', value: result.billData.serviceAddress || (result.locationData ? `${result.locationData.city}, ${result.locationData.stateCode}` : null), icon: <MapPin size={13} className="text-slate-400" /> },
                 { label: 'Utility Provider', value: result.billData.utilityProvider || result.utilityData?.utilityName, icon: <Zap size={13} className="text-amber-400" /> },
                 { label: 'Monthly kWh', value: result.billData.monthlyKwh ? `${result.billData.monthlyKwh.toLocaleString()} kWh` : null, icon: <TrendingUp size={13} className="text-blue-400" /> },
                 { label: 'Annual kWh', value: result.billData.estimatedAnnualKwh ? `${result.billData.estimatedAnnualKwh.toLocaleString()} kWh` : null, icon: <Sun size={13} className="text-amber-400" /> },
                 { label: 'Electricity Rate', value: result.billData.electricityRate ? `$${result.billData.electricityRate.toFixed(3)}/kWh` : result.utilityData?.avgRatePerKwh ? `$${result.utilityData.avgRatePerKwh.toFixed(3)}/kWh (avg)` : null, icon: <DollarSign size={13} className="text-emerald-400" /> },
-                { label: 'Monthly Bill', value: result.billData.estimatedMonthlyBill ? `$${result.billData.estimatedMonthlyBill.toFixed(0)}` : null, icon: <DollarSign size={13} className="text-red-400" /> },
+                { label: 'Monthly Bill', value: result.billData.estimatedMonthlyBill ? `$${result.billData.estimatedMonthlyBill.toFixed(0)}` : result.billData.totalAmount ? `$${result.billData.totalAmount.toFixed(0)}` : null, icon: <DollarSign size={13} className="text-red-400" /> },
                 { label: 'Net Metering', value: result.utilityData?.netMeteringEligible ? '✓ Eligible' : result.utilityData ? '✗ Check utility' : null, icon: <CheckCircle size={13} className="text-emerald-400" /> },
+                // Advanced fields
+                { label: 'Demand Charge', value: result.billData.demandCharge ? `$${result.billData.demandCharge.toFixed(2)}${result.billData.demandKw ? ` (${result.billData.demandKw} kW)` : ''}` : null, icon: <BarChart2 size={13} className="text-purple-400" /> },
+                { label: 'Gas Usage', value: result.billData.gasUsageTherm ? `${result.billData.gasUsageTherm.toLocaleString()} therms` : null, icon: <Flame size={13} className="text-orange-400" /> },
               ].filter(f => f.value).map(field => (
                 <div key={field.label} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
                   <div className="flex items-center gap-1.5 mb-1">{field.icon}<span className="text-slate-400 text-xs">{field.label}</span></div>
@@ -354,6 +548,54 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
                 </div>
               ))}
             </div>
+
+            {/* Tiered usage (if present) */}
+            {(result.billData.tier1Kwh || result.billData.tier2Kwh) && (
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                <p className="text-slate-400 text-xs mb-2 font-medium">Tiered Usage Breakdown</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {result.billData.tier1Kwh && (
+                    <div>
+                      <p className="text-white text-sm font-medium">{result.billData.tier1Kwh.toLocaleString()} kWh</p>
+                      <p className="text-slate-500 text-xs">Tier 1{result.billData.tier1Rate ? ` @ $${result.billData.tier1Rate.toFixed(4)}/kWh` : ''}</p>
+                    </div>
+                  )}
+                  {result.billData.tier2Kwh && (
+                    <div>
+                      <p className="text-white text-sm font-medium">{result.billData.tier2Kwh.toLocaleString()} kWh</p>
+                      <p className="text-slate-500 text-xs">Tier 2{result.billData.tier2Rate ? ` @ $${result.billData.tier2Rate.toFixed(4)}/kWh` : ''}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Monthly usage history sparkline */}
+            {result.billData.monthlyUsageHistory && result.billData.monthlyUsageHistory.length >= 3 && (
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                <p className="text-slate-400 text-xs mb-2 font-medium flex items-center gap-1.5">
+                  <BarChart2 size={12} /> Monthly Usage History ({result.billData.monthlyUsageHistory.length} months)
+                </p>
+                <div className="flex items-end gap-1 h-10">
+                  {result.billData.monthlyUsageHistory.map((kwh, i) => {
+                    const max = Math.max(...result.billData.monthlyUsageHistory!);
+                    const pct = max > 0 ? (kwh / max) * 100 : 0;
+                    return (
+                      <div
+                        key={i}
+                        title={`${kwh.toLocaleString()} kWh`}
+                        className="flex-1 bg-amber-500/40 hover:bg-amber-500/60 rounded-sm transition-colors cursor-default"
+                        style={{ height: `${Math.max(pct, 8)}%` }}
+                      />
+                    );
+                  })}
+                </div>
+                <div className="flex justify-between text-xs text-slate-600 mt-1">
+                  <span>min: {Math.min(...result.billData.monthlyUsageHistory).toLocaleString()} kWh</span>
+                  <span>max: {Math.max(...result.billData.monthlyUsageHistory).toLocaleString()} kWh</span>
+                </div>
+              </div>
+            )}
 
             {/* Location data */}
             {result.locationData && (
@@ -383,11 +625,30 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               </div>
             )}
 
+            {/* Errors */}
+            {result.validation.errors.length > 0 && (
+              <div className="space-y-1">
+                {result.validation.errors.map((e, i) => (
+                  <div key={i} className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+                    <AlertCircle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-red-300 text-xs">{e}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="flex gap-3">
-              <button onClick={() => setStep('upload')} className="btn-secondary flex-1 py-2 text-sm">
+              <button
+                onClick={() => { setStep('upload'); setSelectedFile(null); setError(null); }}
+                className="btn-secondary flex-1 py-2 text-sm"
+              >
                 ← Re-upload
               </button>
-              <button onClick={() => setStep('sizing')} className="btn-primary flex-1 py-2 text-sm">
+              <button
+                onClick={() => setStep('sizing')}
+                disabled={result.validation.errors.length > 0}
+                className="btn-primary flex-1 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
                 Continue to Sizing <ArrowRight size={14} className="inline ml-1" />
               </button>
             </div>

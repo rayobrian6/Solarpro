@@ -170,6 +170,24 @@ export async function POST(req: NextRequest) {
     }
 
     // ============================================================
+    // Migration 007b: bill_data column on projects
+    // ============================================================
+    try {
+      const billDataExists = await sql`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'projects' AND column_name = 'bill_data'
+      `;
+      if (billDataExists.length === 0) {
+        await sql`ALTER TABLE projects ADD COLUMN bill_data JSONB`;
+        results.push('✅ Added bill_data column to projects');
+      } else {
+        results.push('⏭ projects.bill_data already exists');
+      }
+    } catch (e: any) {
+      results.push(`⚠️ projects.bill_data: ${e.message}`);
+    }
+
+    // ============================================================
     // Migration 007: Enterprise leads table
     // ============================================================
     try {

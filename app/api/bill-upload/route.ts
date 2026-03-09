@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { parseBillText, validateBillData } from '@/lib/billOcr';
+import { parseBillText, parseBillTextWithLLM, validateBillData } from '@/lib/billOcr';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
+
+// Vercel: allow up to 30s for OCR + geocoding on large files
+export const maxDuration = 30;
 
 // POST /api/bill-upload — upload utility bill PDF/JPG/PNG and extract data
 export async function POST(req: NextRequest) {
@@ -21,13 +24,24 @@ export async function POST(req: NextRequest) {
     }
 
     let extractedText = rawText || '';
+    let extractionStage = 'text';
 
     if (file) {
+      // ── Client-side size guard (server-side enforcement) ──
+      const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+      if (file.size > MAX_SIZE) {
+        return NextResponse.json({
+          success: false,
+          error: 'File too large. Maximum size is 10MB. Please compress or re-scan your bill.',
+        }, { status: 413 });
+      }
+
       const fileType = file.type;
       const fileName = file.name.toLowerCase();
       const buffer = Buffer.from(await file.arrayBuffer());
 
       if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
+        extractionStage = 'pdf';
         extractedText = await extractPdfText(buffer);
       } else if (
         fileType.startsWith('image/') ||
@@ -35,6 +49,7 @@ export async function POST(req: NextRequest) {
         fileName.endsWith('.png') || fileName.endsWith('.jfif') ||
         fileName.endsWith('.webp')
       ) {
+        extractionStage = 'image';
         extractedText = await extractImageText(buffer, fileType || 'image/jpeg');
       } else {
         return NextResponse.json({
@@ -48,37 +63,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: false,
         error: 'Could not extract text from file. Please ensure the file is a clear, readable utility bill.',
-        hint: 'For best results: use a text-based PDF, or a clear photo of your bill with good lighting.',
+        hint: extractionStage === 'image'
+          ? 'For best results: take a clear photo in good lighting, or use a PDF from your utility portal.'
+          : 'For best results: use a text-based PDF downloaded from your utility portal, not a scanned copy.',
+        stage: extractionStage,
       }, { status: 422 });
     }
 
-    // Parse the extracted text
-    const billData = parseBillText(extractedText);
+    // ── Parse the extracted text (with LLM fallback) ──
+    const billData = await parseBillTextWithLLM(extractedText);
     const validation = validateBillData(billData);
 
-    // Geocode service address and detect utility
+    // ── Geocode service address and detect utility ──
     let locationData = null;
     let utilityData = null;
 
     if (billData.serviceAddress) {
-      const geoResult = await geocodeAddress(billData.serviceAddress);
-      if (geoResult.success && geoResult.location) {
-        locationData = geoResult.location;
-        const utilityResult = await detectUtility(
-          geoResult.location.lat,
-          geoResult.location.lng,
-          geoResult.location.stateCode,
-          geoResult.location.city,
-        );
-        if (utilityResult.success) {
-          utilityData = utilityResult.utility;
-          if (!billData.utilityProvider && utilityData?.utilityName) {
-            billData.utilityProvider = utilityData.utilityName;
-          }
-          if (!billData.electricityRate && utilityData?.avgRatePerKwh) {
-            billData.electricityRate = utilityData.avgRatePerKwh;
+      try {
+        const geoResult = await geocodeAddress(billData.serviceAddress);
+        if (geoResult.success && geoResult.location) {
+          locationData = geoResult.location;
+          const utilityResult = await detectUtility(
+            geoResult.location.lat,
+            geoResult.location.lng,
+            geoResult.location.stateCode,
+            geoResult.location.city,
+          );
+          if (utilityResult.success) {
+            utilityData = utilityResult.utility;
+            if (!billData.utilityProvider && utilityData?.utilityName) {
+              billData.utilityProvider = utilityData.utilityName;
+            }
+            if (!billData.electricityRate && utilityData?.avgRatePerKwh) {
+              billData.electricityRate = utilityData.avgRatePerKwh;
+            }
           }
         }
+      } catch (geoErr: any) {
+        console.warn('[bill-upload] Geocoding failed:', geoErr.message);
+        // Non-fatal — continue without location data
       }
     }
 
@@ -107,31 +130,107 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ── PDF text extraction using pdf-parse (pure JS, works on Vercel) ───────────
+// ── PDF text extraction ──────────────────────────────────────────────────────
 async function extractPdfText(buffer: Buffer): Promise<string> {
+  let text = '';
+
+  // Step 1: Try pdf-parse (handles text-based PDFs — works on Vercel)
   try {
-    // Dynamic import to avoid issues with Next.js bundling
-    // pdf-parse v2 exports PDFParse class (not a default function)
     const pdfParseModule = await import('pdf-parse');
-    // Try v2 class-based API first, fall back to v1 default export
     const PDFParseClass = (pdfParseModule as any).PDFParse;
     if (PDFParseClass) {
       const parser = new PDFParseClass();
       const data = await parser.parse(buffer);
-      return data.text || '';
+      text = data.text || '';
+    } else {
+      const pdfParseFn = (pdfParseModule as any).default || pdfParseModule;
+      if (typeof pdfParseFn === 'function') {
+        const data = await pdfParseFn(buffer, { max: 0 });
+        text = data.text || '';
+      }
     }
-    // v1 fallback: default export is a function
-    const pdfParseFn = (pdfParseModule as any).default || pdfParseModule;
-    if (typeof pdfParseFn === 'function') {
-      const data = await pdfParseFn(buffer, { max: 0 });
-      return data.text || '';
-    }
-    throw new Error('pdf-parse: no usable export found');
   } catch (err: any) {
-    console.error('[pdf-parse]', err.message);
-    // Fallback: try pdftotext CLI (works in local/sandbox env)
-    return extractPdfTextCli(buffer);
+    // Detect password-protected PDF
+    if (err.message?.toLowerCase().includes('password') || err.message?.toLowerCase().includes('encrypt')) {
+      throw new Error('PDF is password-protected. Please remove the password and re-upload.');
+    }
+    console.warn('[pdf-parse] Error:', err.message);
   }
+
+  // Step 2: If text is sparse (<50 meaningful chars), it's likely a scanned PDF
+  // Route through Google Vision for OCR
+  if (text.trim().length < 50) {
+    console.log('[bill-upload] Sparse PDF text detected — attempting Vision OCR on PDF');
+    const visionText = await extractScannedPdfViaVision(buffer);
+    if (visionText.trim().length > text.trim().length) {
+      text = visionText;
+    }
+  }
+
+  // Step 3: Local CLI fallback (sandbox/dev only — not available on Vercel)
+  if (!text.trim()) {
+    text = await extractPdfTextCli(buffer);
+  }
+
+  return text;
+}
+
+// ── Scanned PDF → Vision API (convert first page to image via base64 embed) ──
+async function extractScannedPdfViaVision(buffer: Buffer): Promise<string> {
+  // Try pdf2pic if installed (optional dependency)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const pdf2picModule = require('pdf2pic');
+    const fromBuffer = pdf2picModule.fromBuffer || pdf2picModule.default?.fromBuffer;
+    if (!fromBuffer) throw new Error('pdf2pic not available');
+    const converter = fromBuffer(buffer, {
+      density: 200,
+      format: 'png',
+      width: 1700,
+      height: 2200,
+    });
+    const page = await converter(1, { responseType: 'buffer' });
+    if (page && (page as any).buffer) {
+      return await extractImageText((page as any).buffer as Buffer, 'image/png');
+    }
+  } catch {
+    // pdf2pic not installed — fall through
+  }
+
+  // Fallback: send raw PDF bytes to Vision (Vision can handle PDF directly)
+  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!googleKey) return '';
+
+  try {
+    const base64 = buffer.toString('base64');
+    const body = {
+      requests: [{
+        image: { content: base64 },
+        features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+        imageContext: { languageHints: ['en'] },
+      }],
+    };
+    const res = await fetch(
+      `https://vision.googleapis.com/v1/images:annotate?key=${googleKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(25000),
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      const text = data?.responses?.[0]?.fullTextAnnotation?.text;
+      if (text?.trim().length > 20) {
+        console.log('[bill-upload] Vision OCR on PDF extracted', text.length, 'chars');
+        return text;
+      }
+    }
+  } catch (err: any) {
+    console.warn('[bill-upload] Vision PDF OCR failed:', err.message);
+  }
+  return '';
 }
 
 // ── PDF CLI fallback (local/sandbox only) ────────────────────────────────────
@@ -165,6 +264,7 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
         requests: [{
           image: { content: base64 },
           features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+          imageContext: { languageHints: ['en'] },
         }],
       };
       const res = await fetch(
@@ -183,7 +283,6 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
           console.log('[bill-upload] Google Vision extracted', text.length, 'chars');
           return text;
         }
-        // Check for API errors
         const error = data?.responses?.[0]?.error;
         if (error) {
           console.warn('[bill-upload] Google Vision error:', error.message);

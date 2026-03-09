@@ -306,6 +306,7 @@ export interface Project {
   selectedBatteries?: Battery[];
   batteryCount?: number;
   billAnalysis?: BillAnalysis;
+  billData?: Record<string, unknown>;  // raw extracted bill data from BillUploadFlow
   notes?: string;
   createdAt: string;
   updatedAt: string;
