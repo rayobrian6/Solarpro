@@ -3,7 +3,7 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     // Optional server-only packages — skip webpack bundling, resolved at runtime
-    serverComponentsExternalPackages: ['pdf2pic', 'openai', 'pdf-parse'],
+    serverComponentsExternalPackages: ['pdf2pic', 'openai', 'pdf-parse', 'pdfjs-dist'],
   },
   images: {
     remotePatterns: [
@@ -19,6 +19,7 @@ const nextConfig = {
       'pdf2pic',
       'openai',
       'pdf-parse',
+      'pdfjs-dist',
     ];
     return config;
   },

@@ -144,7 +144,39 @@ export async function POST(req: NextRequest) {
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
   const openaiKey = process.env.OPENAI_API_KEY;
 
-  // Method 1: OpenAI Files API + Responses API (supports PDF natively)
+  // Method 1: pdfjs-dist (pure JS, works on Vercel, no native deps)
+  // This is the PRIMARY method - extracts text from PDF streams directly
+  console.log('[bill-upload] Trying pdfjs-dist...');
+  try {
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
+    const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
+    if (getDocument) {
+      const uint8 = new Uint8Array(buffer);
+      const doc = await getDocument({
+        data: uint8,
+        useWorkerFetch: false,
+        isEvalSupported: false,
+        useSystemFonts: true,
+        disableFontFace: true,
+      }).promise;
+      let text = '';
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items
+          .map((item: any) => ('str' in item ? item.str : ''))
+          .join(' ');
+        text += pageText + '\n';
+      }
+      text = text.trim();
+      console.log('[bill-upload] pdfjs-dist extracted', text.length, 'chars');
+      if (text.length > 50) return { text, method: 'pdfjs-dist' };
+    }
+  } catch (err: unknown) {
+    console.warn('[bill-upload] pdfjs-dist failed:', err instanceof Error ? err.message : err);
+  }
+
+  // Method 2: OpenAI Files API + Responses API
   if (openaiKey) {
     console.log('[bill-upload] Trying OpenAI Files API + Responses API...');
     try {
@@ -162,36 +194,24 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
       if (uploadRes.ok) {
         const uploadData = await uploadRes.json();
         const fileId = uploadData.id;
-        console.log('[bill-upload] OpenAI file uploaded:', fileId, 'purpose:', uploadData.purpose);
+        console.log('[bill-upload] OpenAI file uploaded:', fileId);
 
         const respRes = await fetch('https://api.openai.com/v1/responses', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openaiKey}`,
-          },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
           body: JSON.stringify({
             model: 'gpt-4o',
-            input: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'input_file',
-                    file_id: fileId,
-                  },
-                  {
-                    type: 'input_text',
-                    text: 'Extract ALL text from this utility bill PDF exactly as it appears. Preserve all numbers, addresses, dates, kWh values, and dollar amounts. Output only the raw extracted text, nothing else.',
-                  },
-                ],
-              },
-            ],
+            input: [{
+              role: 'user',
+              content: [
+                { type: 'input_file', file_id: fileId },
+                { type: 'input_text', text: 'Extract ALL text from this utility bill PDF. Output only the raw extracted text.' },
+              ],
+            }],
           }),
           signal: AbortSignal.timeout(30000),
         });
 
-        // Cleanup file async (don't await)
         fetch(`https://api.openai.com/v1/files/${fileId}`, {
           method: 'DELETE',
           headers: { 'Authorization': `Bearer ${openaiKey}` },
@@ -199,72 +219,23 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
 
         if (respRes.ok) {
           const respData = await respRes.json();
-          console.log('[bill-upload] Responses API response keys:', Object.keys(respData).join(', '));
           const text = respData?.output?.[0]?.content?.[0]?.text?.trim()
-            ?? respData?.output?.[0]?.content?.trim()
-            ?? respData?.choices?.[0]?.message?.content?.trim();
+            ?? respData?.output?.[0]?.content?.trim();
           if (text && text.length > 50) {
             console.log('[bill-upload] Responses API extracted', text.length, 'chars');
             return { text, method: 'openai-responses' };
           }
-          console.warn('[bill-upload] Responses API short/empty. Full response:', JSON.stringify(respData).slice(0, 500));
+          console.warn('[bill-upload] Responses API empty. Keys:', Object.keys(respData).join(', '));
         } else {
           const errText = await respRes.text();
-          console.warn('[bill-upload] Responses API failed:', respRes.status, errText.slice(0, 400));
+          console.warn('[bill-upload] Responses API failed:', respRes.status, errText.slice(0, 300));
         }
       } else {
         const errText = await uploadRes.text();
-        console.warn('[bill-upload] OpenAI file upload failed:', uploadRes.status, errText.slice(0, 300));
+        console.warn('[bill-upload] OpenAI upload failed:', uploadRes.status, errText.slice(0, 200));
       }
     } catch (err: unknown) {
       console.warn('[bill-upload] OpenAI Files+Responses error:', err instanceof Error ? err.message : err);
-    }
-
-    // Method 1b: Extract readable strings from PDF buffer, send to GPT-4o as text
-    console.log('[bill-upload] Trying GPT-4o with raw PDF text extraction...');
-    try {
-      const rawText = buffer.toString('latin1');
-      const readable = rawText.match(/[\x20-\x7E]{4,}/g) || [];
-      const hint = readable.join(' ').replace(/\s+/g, ' ').slice(0, 8000);
-
-      if (hint.length > 200) {
-        const chatRes = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openaiKey}`,
-          },
-          body: JSON.stringify({
-            model: 'gpt-4o',
-            max_tokens: 2000,
-            messages: [
-              {
-                role: 'system',
-                content: 'You are a utility bill parser. The user will provide raw text extracted from a PDF utility bill. Reconstruct the bill information as clearly as possible, preserving all numbers, addresses, kWh values, dollar amounts, and dates.',
-              },
-              {
-                role: 'user',
-                content: `Here is raw text extracted from a utility bill PDF. Please reconstruct and output all the bill information:\n\n${hint}`,
-              },
-            ],
-          }),
-          signal: AbortSignal.timeout(25000),
-        });
-
-        if (chatRes.ok) {
-          const chatData = await chatRes.json();
-          const text = chatData?.choices?.[0]?.message?.content?.trim();
-          if (text && text.length > 50) {
-            console.log('[bill-upload] GPT-4o text hint extracted', text.length, 'chars');
-            return { text, method: 'openai-text-hint' };
-          }
-        } else {
-          const errBody = await chatRes.text();
-          console.warn('[bill-upload] GPT-4o text hint failed:', chatRes.status, errBody.slice(0, 200));
-        }
-      }
-    } catch (err: unknown) {
-      console.warn('[bill-upload] GPT-4o text hint error:', err instanceof Error ? err.message : err);
     }
   } else {
     console.warn('[bill-upload] No OPENAI_API_KEY — skipping OpenAI extraction');
