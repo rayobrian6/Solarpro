@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v33.5';
+export const BUILD_VERSION = 'v33.7';
 export const BUILD_DATE = '2026-03-09';
-export const BUILD_DESCRIPTION = 'AUTO FILL FIX v4 — distToRef: handleAutoRoof now uses twinData.lat/lng (Solar API center) as reference for distance filtering instead of stale component props. MAX_BUILDING_RADIUS_M increased 25m→40m. Fallback: if all segs filtered by distance, relax constraint to closest building cluster. North-facing threshold fixed (az<45 not az<=45). Panels now correctly placed on picked house after Pick House workflow.';
+export const BUILD_DESCRIPTION = 'AUTO FILL FIX v5 — CRITICAL: isNorthFacing() now exempts flat roofs (pitch < 5°). Google Solar API reports flat/near-flat roofs with az=0 (north) but they receive sun from all directions. This was filtering out the 3 largest segments (385m², 337m², 153m² all pitch=0-1°) causing 0 panels placed. Fix: if pitchDeg < 5, skip north-facing check entirely.';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',

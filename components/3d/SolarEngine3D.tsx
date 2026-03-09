@@ -2401,7 +2401,11 @@ function SolarEngine3D({
 
     addLog('AUTO', `distToRef reference: twinData=(${refLat.toFixed(5)},${refLng.toFixed(5)}) props=(${lat.toFixed(5)},${lng.toFixed(5)})`);
 
-    function isNorthFacing(azDeg: number): boolean {
+    function isNorthFacing(azDeg: number, pitchDeg: number): boolean {
+      // CRITICAL FIX v33.6: Flat roofs (pitch < 5°) are NOT north-facing.
+      // Google Solar API reports flat/near-flat roofs with az=0 (north) but they
+      // receive sun from all directions equally — they must NOT be filtered out.
+      if (pitchDeg < 5) return false;
       const az = ((azDeg % 360) + 360) % 360;
       // North-facing: 315°-360° or 0°-45° (NW through N through NE)
       return az >= 315 || az < 45;
@@ -2425,8 +2429,8 @@ function SolarEngine3D({
       const azDeg = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
       const pitchDeg = isFinite(seg.pitchDegrees) ? seg.pitchDegrees : 20;
       const dist = distToRef(seg.center?.lat ?? refLat, seg.center?.lng ?? refLng);
-      if (isNorthFacing(azDeg)) {
-        addLog('AUTO', `seg ${seg.id}: SKIP north-facing az=${azDeg.toFixed(0)}`); return false;
+      if (isNorthFacing(azDeg, pitchDeg)) {
+        addLog('AUTO', `seg ${seg.id}: SKIP north-facing az=${azDeg.toFixed(0)} pitch=${pitchDeg.toFixed(0)}`); return false;
       }
       if (isTooSteep(pitchDeg, azDeg)) {
         addLog('AUTO', `seg ${seg.id}: SKIP steep pitch=${pitchDeg.toFixed(0)} az=${azDeg.toFixed(0)}`); return false;
@@ -2459,7 +2463,7 @@ function SolarEngine3D({
         const azDeg = isFinite(seg.azimuthDegrees) ? seg.azimuthDegrees : 180;
         const pitchDeg = isFinite(seg.pitchDegrees) ? seg.pitchDegrees : 20;
         const dist = distToRef(seg.center?.lat ?? refLat, seg.center?.lng ?? refLng);
-        if (isNorthFacing(azDeg)) return false;
+        if (isNorthFacing(azDeg, pitchDeg)) return false;
         if (isTooSteep(pitchDeg, azDeg)) return false;
         if (dist > relaxedRadius) return false;
         if (seg.areaM2 < (PW * PH)) return false;
