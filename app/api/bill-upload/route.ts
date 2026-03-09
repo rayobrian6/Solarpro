@@ -87,17 +87,24 @@ export async function POST(req: NextRequest) {
 
     console.log(`[bill-upload] Extracted ${extractedText.length} chars via ${extractionMethod}`);
 
+    console.log('[bill-upload] Parsing bill text...');
     const billData = await parseBillTextWithLLM(extractedText);
+    console.log('[bill-upload] Bill parsed. Fields:', billData.extractedFields?.join(', ') || 'none');
+    console.log('[bill-upload] Confidence:', billData.confidence, '| monthlyKwh:', billData.monthlyKwh, '| address:', billData.serviceAddress);
+
     const validation = validateBillData(billData);
+    console.log('[bill-upload] Validation:', validation.valid, validation.errors?.join(', ') || 'ok');
 
     let locationData = null;
     let utilityData = null;
 
     if (billData.serviceAddress) {
+      console.log('[bill-upload] Geocoding address:', billData.serviceAddress);
       try {
         const geoResult = await geocodeAddress(billData.serviceAddress);
         if (geoResult.success && geoResult.location) {
           locationData = geoResult.location;
+          console.log('[bill-upload] Geocoded:', locationData.city, locationData.stateCode);
           const utilityResult = await detectUtility(
             geoResult.location.lat,
             geoResult.location.lng,
@@ -109,15 +116,22 @@ export async function POST(req: NextRequest) {
             if (!billData.utilityProvider && utilityData?.utilityName) billData.utilityProvider = utilityData.utilityName;
             if (!billData.electricityRate && utilityData?.avgRatePerKwh) billData.electricityRate = utilityData.avgRatePerKwh;
           }
+        } else {
+          console.warn('[bill-upload] Geocoding failed:', geoResult.error);
         }
       } catch (geoErr: unknown) {
-        console.warn('[bill-upload] Geocoding failed:', geoErr instanceof Error ? geoErr.message : geoErr);
+        console.warn('[bill-upload] Geocoding threw:', geoErr instanceof Error ? geoErr.message : geoErr);
       }
+    } else {
+      console.warn('[bill-upload] No service address found in bill data');
     }
 
+    console.log('[bill-upload] Calculating system size...');
     const annualKwh = billData.estimatedAnnualKwh || 0;
     const systemSizeKw = annualKwh > 0 ? calculateRecommendedSystemSize(annualKwh, locationData?.lat || 35) : null;
+    console.log('[bill-upload] System size:', systemSizeKw, 'kW for', annualKwh, 'kWh/yr');
 
+    console.log('[bill-upload] Returning success response');
     return NextResponse.json({
       success: true,
       billData,
@@ -135,8 +149,14 @@ export async function POST(req: NextRequest) {
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
+    const stack = err instanceof Error ? err.stack?.split('\n').slice(0, 5).join(' | ') : '';
     console.error('[bill-upload] Fatal error:', msg);
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+    console.error('[bill-upload] Stack:', stack);
+    return NextResponse.json({ 
+      success: false, 
+      error: msg,
+      stack: stack?.slice(0, 300),
+    }, { status: 500 });
   }
 }
 
