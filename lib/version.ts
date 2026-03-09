@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v33.9';
+export const BUILD_VERSION = 'v34.0';
 export const BUILD_DATE = '2026-03-09';
 export const BUILD_DESCRIPTION = 'AUTO FILL FIX v6 — CRITICAL: Removed pointInPolygon clip from PRIMARY PATH (Google pre-computed panels). Google panels are already correctly placed on the roof — clipping against our derived convexHull (which may be from DSM, different coordinate system) was rejecting ALL valid Google panels. Also: isNorthFacing() exempts flat roofs (pitch < 5°).';
 export const BUILD_FEATURES = [

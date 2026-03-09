@@ -2542,7 +2542,8 @@ function SolarEngine3D({
 
     // Use clampToHeightMostDetailed to get actual 3D tile surface heights.
     // This samples the Google Photorealistic 3D Tile mesh - same source as Row tool pickPosition.
-    // If tiles aren't loaded yet at this position, retry after tiles load via postRender.
+    // CRITICAL FIX v33.10: Wrap with a 5-second timeout to prevent hanging when tiles
+    // aren't loaded at the panel positions. Falls back to computed heights on timeout.
     const tryClamp = (attempt: number) => {
       if (typeof viewer.scene.clampToHeightMostDetailed !== 'function') {
         addLog('AUTO', 'clampToHeightMostDetailed not available - using computed heights');
@@ -2552,8 +2553,25 @@ function SolarEngine3D({
       addLog('AUTO', `clampToHeightMostDetailed attempt ${attempt}`);
       // Request render to ensure tiles load at this position
       viewer.scene.requestRender();
+
+      // Wrap clampToHeightMostDetailed with a timeout - it can hang indefinitely
+      // when 3D tiles aren't loaded at the queried positions.
+      let settled = false;
+      const timeoutMs = 5000;
+      const timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          addLog('AUTO', `clampToHeightMostDetailed timed out after ${timeoutMs}ms (attempt ${attempt}) - using computed heights`);
+          doRender(newPanels);
+        }
+      }, timeoutMs);
+
       viewer.scene.clampToHeightMostDetailed(cartesianPositions)
         .then((clampedPositions: any[]) => {
+          if (settled) return; // timeout already fired
+          settled = true;
+          clearTimeout(timeoutId);
+
           // Check how many positions were successfully clamped
           const validCount = clampedPositions.filter(
             (c: any) => c && isFinite(c.x) && isFinite(c.y) && isFinite(c.z)
@@ -2584,6 +2602,9 @@ function SolarEngine3D({
           doRender(adjustedPanels);
         })
         .catch((err: any) => {
+          if (settled) return; // timeout already fired
+          settled = true;
+          clearTimeout(timeoutId);
           addLog('AUTO', `clampToHeightMostDetailed error: ${err?.message}`);
           if (attempt < 3) {
             setTimeout(() => tryClamp(attempt + 1), 1500);
