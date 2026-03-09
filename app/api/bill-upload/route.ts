@@ -4,9 +4,17 @@ import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
 
-// Top-level import so webpack externalizes pdf-parse properly on Vercel
+// Top-level reference so webpack marks pdf-parse as external (not bundled)
+// Wrapped in try/catch so a missing native dep doesn't crash the module on cold start
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { PDFParse } = require('pdf-parse');
+let PDFParse: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const pdfParseModule = require('pdf-parse');
+  PDFParse = pdfParseModule.PDFParse ?? pdfParseModule.default?.PDFParse ?? null;
+} catch (e) {
+  console.warn('[bill-upload] pdf-parse not available at module load:', e instanceof Error ? e.message : e);
+}
 
 // Vercel: allow up to 30s for OCR + geocoding on large files
 export const maxDuration = 30;
@@ -185,9 +193,6 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
   // Method 4: Return whatever sparse text we got rather than nothing
   // Re-run pdf-parse and return even sparse results
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pdfParseModule = require('pdf-parse');
-    const PDFParse = pdfParseModule.PDFParse;
     if (PDFParse) {
       const parser = new PDFParse({ data: buffer });
       await parser.load();
