@@ -63,7 +63,7 @@ export function useSubscription(): SubscriptionState {
   });
 
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/auth/me', { cache: 'no-store' })
       .then(r => r.json())
       .then(json => {
         // API returns { success: true, data: { id, plan, ... } }

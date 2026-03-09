@@ -175,7 +175,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     async function fetchUser() {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
         if (!res.ok) {
           // Not authenticated — middleware should handle redirect, but just in case
           router.push('/auth/login');

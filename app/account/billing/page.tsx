@@ -52,7 +52,7 @@ export default function BillingPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/auth/me')
+    fetch('/api/auth/me', { cache: 'no-store' })
       .then(r => r.json())
       .then(json => {
         // API returns { success: true, data: { id, plan, ... } }

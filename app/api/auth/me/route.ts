@@ -79,6 +79,11 @@ export async function GET(req: NextRequest) {
         brandSecondaryColor: dbUser.brand_secondary_color || '#0f172a',
         proposalFooterText: dbUser.proposal_footer_text || null,
       }
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+      }
     });
 
   } catch (error: any) {
