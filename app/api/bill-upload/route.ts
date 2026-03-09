@@ -4,6 +4,10 @@ import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
 
+// Top-level import so webpack externalizes pdf-parse properly on Vercel
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { PDFParse } = require('pdf-parse');
+
 // Vercel: allow up to 30s for OCR + geocoding on large files
 export const maxDuration = 30;
 
@@ -137,29 +141,26 @@ export async function POST(req: NextRequest) {
 
 // ── PDF text extraction ──────────────────────────────────────────────────────
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
-  // Method 1: pdf-parse v2 (works on Vercel — pure JS, no native deps)
+  // Method 1: pdf-parse v2 (top-level import — properly externalized by webpack on Vercel)
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pdfParseModule = require('pdf-parse');
-    const PDFParse = pdfParseModule.PDFParse;
     if (PDFParse) {
       const parser = new PDFParse({ data: buffer });
       await parser.load();
       const result = await parser.getText();
       const text = (result.text || '').trim();
-      // Only accept if we got meaningful content (>100 chars of real text)
-      if (text.length > 100) {
-        console.log('[bill-upload] pdf-parse v2 extracted', text.length, 'chars');
+      console.log('[bill-upload] pdf-parse extracted', text.length, 'chars');
+      // Accept any meaningful content (>50 chars)
+      if (text.length > 50) {
         return { text, method: 'pdf-parse' };
       }
-      console.log('[bill-upload] pdf-parse v2 got sparse text:', text.length, 'chars — trying fallbacks');
+      console.log('[bill-upload] pdf-parse got sparse text — trying fallbacks');
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('encrypt')) {
       throw new Error('PDF is password-protected. Please remove the password and re-upload.');
     }
-    console.warn('[bill-upload] pdf-parse v2 failed:', msg);
+    console.warn('[bill-upload] pdf-parse failed:', msg);
   }
 
   // Method 2: pdftotext CLI (available in sandbox/dev, NOT on Vercel)

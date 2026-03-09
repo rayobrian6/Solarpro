@@ -18,6 +18,7 @@ const nextConfig = {
       // Optional runtime deps — not bundled by webpack
       'pdf2pic',
       'openai',
+      'pdf-parse',
     ];
     return config;
   },
