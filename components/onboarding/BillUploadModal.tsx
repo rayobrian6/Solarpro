@@ -112,6 +112,32 @@ function validateFile(file: File): string | null {
   return null;
 }
 
+/**
+ * Sanitize an object for safe JSON serialization to PostgreSQL JSONB.
+ * Removes null bytes and unsupported Unicode escape sequences that cause
+ * "unsupported Unicode escape sequence" errors in Postgres.
+ */
+function sanitizeForJson(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'string') {
+    // Remove null bytes and other problematic control characters
+    return obj
+      .replace(/\u0000/g, '')
+      .replace(/\\u0000/g, '')
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  }
+  if (typeof obj === 'number' || typeof obj === 'boolean') return obj;
+  if (Array.isArray(obj)) return obj.map(sanitizeForJson);
+  if (typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      result[k] = sanitizeForJson(v);
+    }
+    return result;
+  }
+  return obj;
+}
+
 export default function BillUploadModal({ onClose, onComplete }: BillUploadModalProps) {
   const [step, setStep] = useState<Step>('upload');
   const [dragging, setDragging] = useState(false);
@@ -303,7 +329,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
             `Utility: ${result.billData.utilityProvider || result.utilityData?.utilityName || 'Unknown'}`,
             `System size: ${systemKw.toFixed(1)} kW (${offsetPercent}% offset)`,
           ].join('\n'),
-          billData: result.billData,
+          billData: sanitizeForJson(result.billData),
         }),
       });
       const projectData = await projectRes.json();

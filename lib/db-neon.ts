@@ -355,7 +355,20 @@ export async function createProject(data: {
   assertUUID(data.userId, 'userId');
   // clientId must be a valid UUID or null — never pass a non-UUID string
   const clientId = isValidUUID(data.clientId) ? data.clientId : null;
-  const billDataJson = data.billData ? JSON.stringify(data.billData) : null;
+  // Sanitize billData to remove null bytes / invalid Unicode that breaks PostgreSQL JSONB
+  const sanitizeBillData = (obj: unknown): unknown => {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj === 'string') return obj.replace(/\u0000/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    if (typeof obj === 'number' || typeof obj === 'boolean') return obj;
+    if (Array.isArray(obj)) return obj.map(sanitizeBillData);
+    if (typeof obj === 'object') {
+      const r: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) r[k] = sanitizeBillData(v);
+      return r;
+    }
+    return obj;
+  };
+  const billDataJson = data.billData ? JSON.stringify(sanitizeBillData(data.billData)) : null;
   const sql = getDb();
   const rows = await sql`
     INSERT INTO projects (
