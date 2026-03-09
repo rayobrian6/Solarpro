@@ -16,8 +16,8 @@ try {
   console.warn('[bill-upload] pdf-parse not available at module load:', e instanceof Error ? e.message : e);
 }
 
-// Vercel: allow up to 30s for OCR + geocoding on large files
-export const maxDuration = 30;
+// Vercel: allow up to 60s for OCR + geocoding on large files
+export const maxDuration = 60;
 
 // POST /api/bill-upload — upload utility bill PDF/JPG/PNG and extract data
 export async function POST(req: NextRequest) {
@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
         fileName.endsWith('.png') || fileName.endsWith('.jfif') ||
         fileName.endsWith('.webp')
       ) {
-        extractedText = await extractImageText(buffer, fileType || 'image/jpeg');
+        const safeMime = fileType.startsWith('image/') ? fileType : 'image/jpeg';
+        extractedText = await extractImageText(buffer, safeMime);
         extractionMethod = 'image-vision';
       } else {
         return NextResponse.json({
@@ -149,7 +150,8 @@ export async function POST(req: NextRequest) {
 
 // ── PDF text extraction ──────────────────────────────────────────────────────
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
-  // Method 1: pdf-parse v2 (top-level import — properly externalized by webpack on Vercel)
+
+  // Method 1: pdf-parse (works locally; may fail on Vercel due to native deps)
   try {
     if (PDFParse) {
       const parser = new PDFParse({ data: buffer });
@@ -157,7 +159,6 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
       const result = await parser.getText();
       const text = (result.text || '').trim();
       console.log('[bill-upload] pdf-parse extracted', text.length, 'chars');
-      // Accept any meaningful content (>50 chars)
       if (text.length > 50) {
         return { text, method: 'pdf-parse' };
       }
@@ -171,7 +172,7 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
     console.warn('[bill-upload] pdf-parse failed:', msg);
   }
 
-  // Method 2: pdftotext CLI (available in sandbox/dev, NOT on Vercel)
+  // Method 2: pdftotext CLI (local/sandbox only — not on Vercel)
   try {
     const cliText = await extractPdfTextCli(buffer);
     if (cliText.trim().length > 100) {
@@ -179,30 +180,182 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
       return { text: cliText, method: 'pdftotext' };
     }
   } catch {
-    // not available
+    // not available on Vercel
   }
 
-  // Method 3: Google Vision API — convert PDF to image first via base64
-  // Vision can handle PDF pages when sent as application/pdf
-  const visionText = await extractPdfViaVision(buffer);
-  if (visionText.trim().length > 50) {
-    console.log('[bill-upload] Vision OCR extracted', visionText.length, 'chars from PDF');
-    return { text: visionText, method: 'vision-pdf' };
-  }
+  // Method 3: OpenAI Vision — convert PDF to PNG image first, then send as image_url
+  // GPT-4o does NOT support application/pdf data URLs — must be an image
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    // Try pdf2pic to render page 1 as PNG
+    let imageBuffer: Buffer | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const pdf2picModule = require('pdf2pic');
+      const fromBuffer = pdf2picModule.fromBuffer || pdf2picModule.default?.fromBuffer;
+      if (fromBuffer) {
+        const converter = fromBuffer(buffer, { density: 200, format: 'png', width: 1700, height: 2200 });
+        const page = await converter(1, { responseType: 'buffer' });
+        if (page && (page as { buffer?: Buffer }).buffer) {
+          imageBuffer = (page as { buffer: Buffer }).buffer;
+          console.log('[bill-upload] pdf2pic converted PDF to PNG:', imageBuffer.length, 'bytes');
+        }
+      }
+    } catch (e) {
+      console.warn('[bill-upload] pdf2pic not available:', e instanceof Error ? e.message : e);
+    }
 
-  // Method 4: Return whatever sparse text we got rather than nothing
-  // Re-run pdf-parse and return even sparse results
-  try {
-    if (PDFParse) {
-      const parser = new PDFParse({ data: buffer });
-      await parser.load();
-      const result = await parser.getText();
-      const text = (result.text || '').trim();
-      if (text.length > 0) {
-        return { text, method: 'pdf-parse-sparse' };
+    // Only call OpenAI Vision if we have an image (not raw PDF bytes)
+    if (imageBuffer) {
+      try {
+        const base64 = imageBuffer.toString('base64');
+        const dataUrl = `data:image/png;base64,${base64}`;
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openaiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            max_tokens: 2000,
+            messages: [{
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'This is a utility bill. Extract ALL text exactly as it appears — preserve all numbers, addresses, dates, kWh values, and dollar amounts. Output only the raw extracted text, no commentary.',
+                },
+                { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+              ],
+            }],
+          }),
+          signal: AbortSignal.timeout(25000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const text = data?.choices?.[0]?.message?.content?.trim();
+          if (text && text.length > 50) {
+            console.log('[bill-upload] OpenAI Vision (PDF→PNG) extracted', text.length, 'chars');
+            return { text, method: 'openai-vision-pdf' };
+          }
+        } else {
+          const errText = await res.text();
+          console.warn('[bill-upload] OpenAI Vision PDF failed:', res.status, errText.slice(0, 200));
+        }
+      } catch (err: unknown) {
+        console.warn('[bill-upload] OpenAI Vision PDF error:', err instanceof Error ? err.message : err);
+      }
+    } else {
+      // No pdf2pic — try OpenAI Files API to parse PDF directly
+      try {
+        const fd = new FormData();
+        fd.append('file', new Blob([buffer], { type: 'application/pdf' }), 'bill.pdf');
+        fd.append('purpose', 'assistants');
+
+        const uploadRes = await fetch('https://api.openai.com/v1/files', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${openaiKey}` },
+          body: fd,
+          signal: AbortSignal.timeout(20000),
+        });
+
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          const fileId = uploadData.id;
+          console.log('[bill-upload] Uploaded PDF to OpenAI files:', fileId);
+
+          const chatRes = await fetch('https://api.openai.com/v1/responses', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openaiKey}`,
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o',
+              input: [
+                {
+                  role: 'user',
+                  content: [
+                    {
+                      type: 'input_text',
+                      text: 'This is a utility bill PDF. Extract ALL text exactly as it appears — preserve all numbers, addresses, dates, kWh values, and dollar amounts. Output only the raw extracted text, no commentary.',
+                    },
+                    {
+                      type: 'input_file',
+                      file_id: fileId,
+                    },
+                  ],
+                },
+              ],
+            }),
+            signal: AbortSignal.timeout(30000),
+          });
+
+          // Clean up file async
+          fetch(`https://api.openai.com/v1/files/${fileId}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${openaiKey}` },
+          }).catch(() => {});
+
+          if (chatRes.ok) {
+            const chatData = await chatRes.json();
+            // Responses API returns output array
+            const text = chatData?.output?.[0]?.content?.[0]?.text?.trim()
+              ?? chatData?.choices?.[0]?.message?.content?.trim();
+            if (text && text.length > 50) {
+              console.log('[bill-upload] OpenAI Files API extracted', text.length, 'chars from PDF');
+              return { text, method: 'openai-files-api' };
+            }
+          } else {
+            const errText = await chatRes.text();
+            console.warn('[bill-upload] OpenAI Files API chat failed:', chatRes.status, errText.slice(0, 300));
+          }
+        } else {
+          const errText = await uploadRes.text();
+          console.warn('[bill-upload] OpenAI file upload failed:', uploadRes.status, errText.slice(0, 200));
+        }
+      } catch (err: unknown) {
+        console.warn('[bill-upload] OpenAI Files API error:', err instanceof Error ? err.message : err);
       }
     }
-  } catch { /* ignore */ }
+  }
+
+  // Method 4: Google Vision fallback (if Vision API is enabled on the Maps key)
+  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (googleKey) {
+    try {
+      const base64 = buffer.toString('base64');
+      const body = {
+        requests: [{
+          image: { content: base64 },
+          features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+          imageContext: { languageHints: ['en'] },
+        }],
+      };
+      const res = await fetch(
+        `https://vision.googleapis.com/v1/images:annotate?key=${googleKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(20000),
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const text = data?.responses?.[0]?.fullTextAnnotation?.text;
+        if (text?.trim().length > 50) {
+          console.log('[bill-upload] Google Vision extracted', text.length, 'chars from PDF');
+          return { text, method: 'google-vision-pdf' };
+        }
+        const error = data?.responses?.[0]?.error;
+        if (error) console.warn('[bill-upload] Google Vision error:', error.message);
+      }
+    } catch (err: unknown) {
+      console.warn('[bill-upload] Google Vision PDF failed:', err instanceof Error ? err.message : err);
+    }
+  }
 
   return { text: '', method: 'failed' };
 }
@@ -223,108 +376,11 @@ async function extractPdfTextCli(buffer: Buffer): Promise<string> {
   return text;
 }
 
-// ── PDF → Vision API (sends raw PDF bytes, Vision handles first page) ────────
-async function extractPdfViaVision(buffer: Buffer): Promise<string> {
-  // Try pdf2pic to convert PDF page to image first
-  let imageBuffer: Buffer | null = null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const pdf2picModule = require('pdf2pic');
-    const fromBuffer = pdf2picModule.fromBuffer || pdf2picModule.default?.fromBuffer;
-    if (fromBuffer) {
-      const converter = fromBuffer(buffer, { density: 200, format: 'png', width: 1700, height: 2200 });
-      const page = await converter(1, { responseType: 'buffer' });
-      if (page && (page as { buffer?: Buffer }).buffer) {
-        imageBuffer = (page as { buffer: Buffer }).buffer;
-      }
-    }
-  } catch { /* pdf2pic not available on Vercel */ }
-
-  // 1. OpenAI Vision — primary (works with both image/png and application/pdf)
-  const openaiKey = process.env.OPENAI_API_KEY;
-  if (openaiKey) {
-    try {
-      const base64 = (imageBuffer || buffer).toString('base64');
-      const mimeType = imageBuffer ? 'image/png' : 'application/pdf';
-      const dataUrl = `data:${mimeType};base64,${base64}`;
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          max_tokens: 2000,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'This is a utility bill. Please extract ALL text from it exactly as it appears, preserving numbers, addresses, dates, and dollar amounts. Output only the raw extracted text, no commentary.',
-              },
-              { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
-            ],
-          }],
-        }),
-        signal: AbortSignal.timeout(25000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const text = data?.choices?.[0]?.message?.content?.trim();
-        if (text && text.length > 20) {
-          console.log('[bill-upload] OpenAI Vision (PDF) extracted', text.length, 'chars');
-          return text;
-        }
-      }
-    } catch (err: unknown) {
-      console.warn('[bill-upload] OpenAI Vision PDF failed:', err instanceof Error ? err.message : err);
-    }
-  }
-
-  // 2. Google Vision fallback
-  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (googleKey) {
-    try {
-      const base64 = (imageBuffer || buffer).toString('base64');
-      const mimeType = imageBuffer ? 'image/png' : 'application/pdf';
-      const body = {
-        requests: [{
-          image: { content: base64 },
-          features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
-          imageContext: { languageHints: ['en'] },
-        }],
-      };
-      const res = await fetch(
-        `https://vision.googleapis.com/v1/images:annotate?key=${googleKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(25000),
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const text = data?.responses?.[0]?.fullTextAnnotation?.text;
-        if (text?.trim().length > 20) return text;
-        const error = data?.responses?.[0]?.error;
-        if (error) console.warn('[bill-upload] Google Vision error:', error.message, 'mime:', mimeType);
-      }
-    } catch (err: unknown) {
-      console.warn('[bill-upload] Google Vision PDF OCR failed:', err instanceof Error ? err.message : err);
-    }
-  }
-
-  return '';
-}
-
-// ── Image text extraction: Google Vision API → Tesseract CLI fallback ────────
+// ── Image text extraction (JPG/PNG) ─────────────────────────────────────────
 async function extractImageText(buffer: Buffer, mimeType: string): Promise<string> {
-  // Normalize mime type for base64 data URL
   const safeMime = mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
 
-  // 1. OpenAI Vision (GPT-4o) — most reliable for utility bills
+  // 1. OpenAI Vision (GPT-4o) — most reliable for utility bill images
   const openaiKey = process.env.OPENAI_API_KEY;
   if (openaiKey) {
     try {
@@ -344,7 +400,7 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
             content: [
               {
                 type: 'text',
-                text: 'This is a utility bill image. Please extract ALL text from it exactly as it appears, preserving numbers, addresses, dates, and dollar amounts. Output only the raw extracted text, no commentary.',
+                text: 'This is a utility bill image. Extract ALL text exactly as it appears — preserve all numbers, addresses, dates, kWh values, and dollar amounts. Output only the raw extracted text, no commentary.',
               },
               { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
             ],
@@ -356,7 +412,7 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
         const data = await res.json();
         const text = data?.choices?.[0]?.message?.content?.trim();
         if (text && text.length > 20) {
-          console.log('[bill-upload] OpenAI Vision extracted', text.length, 'chars');
+          console.log('[bill-upload] OpenAI Vision extracted', text.length, 'chars from image');
           return text;
         }
       } else {
@@ -368,7 +424,7 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
     }
   }
 
-  // 2. Google Cloud Vision API fallback (requires Vision API enabled on the key)
+  // 2. Google Cloud Vision API fallback
   const googleKey = process.env.GOOGLE_MAPS_API_KEY;
   if (googleKey) {
     try {
@@ -393,7 +449,7 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
         const data = await res.json();
         const text = data?.responses?.[0]?.fullTextAnnotation?.text;
         if (text && text.trim().length > 20) {
-          console.log('[bill-upload] Google Vision extracted', text.length, 'chars');
+          console.log('[bill-upload] Google Vision extracted', text.length, 'chars from image');
           return text;
         }
         const error = data?.responses?.[0]?.error;
@@ -404,7 +460,7 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
     }
   }
 
-  // 3. Tesseract CLI fallback (local/sandbox only — not available on Vercel)
+  // 3. Tesseract CLI fallback (local/sandbox only)
   try {
     const { execSync } = await import('child_process');
     const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
@@ -424,7 +480,7 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
   return '';
 }
 
-// ── System size recommendation ────────────────────────────────────────────────
+// ── System size recommendation ───────────────────────────────────────────────
 function calculateRecommendedSystemSize(annualKwh: number, lat: number): number {
   const sunHours = lat < 25 ? 5.5 : lat < 30 ? 5.2 : lat < 35 ? 4.8 :
                    lat < 40 ? 4.4 : lat < 45 ? 4.0 : 3.6;
