@@ -2730,10 +2730,11 @@ function SolarEngine3D({
         const gpOrient: PanelOrientation =
           gp.orientation?.toUpperCase() === 'PORTRAIT' ? 'portrait' : 'landscape';
 
-        // Apply setback: skip panels outside the shrunk clip polygon
-        if (clipPoly.length >= 3 && !pointInPolygon(gp.lat, gp.lng, clipPoly)) {
-          skipped++; continue;
-        }
+        // CRITICAL FIX v33.7: Do NOT clip Google pre-computed panel positions against
+        // our derived convex hull. Google already placed these panels correctly on the
+        // roof surface. Our convexHull may come from DSM (different coordinate system)
+        // and clipping against it incorrectly rejects all valid Google panels.
+        // The clip polygon is only needed for the FALLBACK grid path below.
 
         const panel = createPanel({
           lat: gp.lat, lng: gp.lng, height: pHeight,

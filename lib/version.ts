@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v33.7';
+export const BUILD_VERSION = 'v33.9';
 export const BUILD_DATE = '2026-03-09';
-export const BUILD_DESCRIPTION = 'AUTO FILL FIX v5 — CRITICAL: isNorthFacing() now exempts flat roofs (pitch < 5°). Google Solar API reports flat/near-flat roofs with az=0 (north) but they receive sun from all directions. This was filtering out the 3 largest segments (385m², 337m², 153m² all pitch=0-1°) causing 0 panels placed. Fix: if pitchDeg < 5, skip north-facing check entirely.';
+export const BUILD_DESCRIPTION = 'AUTO FILL FIX v6 — CRITICAL: Removed pointInPolygon clip from PRIMARY PATH (Google pre-computed panels). Google panels are already correctly placed on the roof — clipping against our derived convexHull (which may be from DSM, different coordinate system) was rejecting ALL valid Google panels. Also: isNorthFacing() exempts flat roofs (pitch < 5°).';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
