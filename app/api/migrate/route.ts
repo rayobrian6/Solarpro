@@ -170,7 +170,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ============================================================
-    // Migration 007b: bill_data column on projects
+    // Migration 007b: bill_data + system_size_kw columns on projects
     // ============================================================
     try {
       const billDataExists = await sql`
@@ -185,6 +185,23 @@ export async function POST(req: NextRequest) {
       }
     } catch (e: any) {
       results.push(`⚠️ projects.bill_data: ${e.message}`);
+    }
+
+    // Migration 007c: system_size_kw column on projects
+    // ============================================================
+    try {
+      const sizeKwExists = await sql`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'projects' AND column_name = 'system_size_kw'
+      `;
+      if (sizeKwExists.length === 0) {
+        await sql`ALTER TABLE projects ADD COLUMN system_size_kw NUMERIC(10,3)`;
+        results.push('✅ Added system_size_kw column to projects');
+      } else {
+        results.push('⏭ projects.system_size_kw already exists');
+      }
+    } catch (e: any) {
+      results.push(`⚠️ projects.system_size_kw: ${e.message}`);
     }
 
     // ============================================================
