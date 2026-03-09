@@ -1,36 +1,36 @@
-# SolarPro - House Picker Feature
-
-## Goal
-Allow user to navigate to any area (e.g. Edwardsville IL), then click on a 
-specific house in the 3D Cesium view to SELECT it as the target property.
-Clicking a house: reverse-geocodes the lat/lng → updates address → reloads
-Solar API data for that exact building → re-runs Auto Fill on the new roof.
+# SolarPro - House Picker Feature - COMPLETE
 
 ## Phase 1: Understand current flow
 - [x] SolarEngine3D receives lat/lng/projectAddress as props
 - [x] DesignStudio manages mapCenter state, fetchSolarData, geocodeAddress
-- [x] SolarEngine3D has no "pick house" callback to parent
+- [x] SolarEngine3D had no "pick house" callback to parent
 - [x] Need: onLocationPick(lat, lng, address) callback prop
 
 ## Phase 2: Add onLocationPick to SolarEngine3D
-- [ ] Add onLocationPick?: (lat: number, lng: number, address: string) => void to Props
-- [ ] Add "Pick House" mode to PlacementMode type (or use a separate state)
-- [ ] In handleCanvasClick: when mode === 'pick_house', use scene.pickPosition
-      to get lat/lng, reverse-geocode, call onLocationPick
-- [ ] Add "Pick House" toolbar button with house icon
-- [ ] Show crosshair cursor + status message when pick_house mode active
+- [x] Added pick_house to PlacementMode type
+- [x] Added onLocationPick prop to Props interface
+- [x] Click handler: when mode === 'pick_house', uses scene.pickPosition
+      to get lat/lng, reverse-geocodes, calls onLocationPick
+- [x] Added 'Pick House' toolbar button with house emoji
+- [x] Status message shown when pick_house mode active
+- [x] Tool indicator updated to show 'Pick House'
 
 ## Phase 3: Handle pick in DesignStudio
-- [ ] Add onLocationPick handler: updates mapCenter, calls fetchSolarData,
-      reverse-geocodes to get address string, updates addressSearch display
-- [ ] Clear existing panels when new house is picked
-- [ ] Show toast: "House selected - loading solar data..."
+- [x] Added handleLocationPick callback
+- [x] Clears existing panels when new house is picked
+- [x] Updates mapCenter, addressSearch, locationStatus
+- [x] Calls fetchSolarData for new location
+- [x] Shows toast notification
+- [x] Saves new coords to project
 
 ## Phase 4: Reverse geocoding
-- [ ] Use existing /api/geocode endpoint with mode=reverse (lat/lng → address)
-- [ ] Check if reverse geocode mode exists, add if needed
+- [x] /api/geocode/route.ts fully rewritten with 3 modes:
+      ?lat=...&lng=... -> reverse geocode (Nominatim)
+      ?q=...&mode=autocomplete -> suggestions
+      ?q=...&mode=search -> forward geocode
 
 ## Phase 5: Build & Package
-- [ ] Build (zero errors)
-- [ ] Commit + push v33.1
-- [ ] Create ZIP
+- [x] Build (zero TypeScript errors)
+- [x] Committed as v33.1 (auto-bumped from v33.0)
+- [x] Pushed to GitHub (rayobrian6/Solarpro)
+- [x] ZIP created: solarpro_v33.1_pick_house.zip (993KB)

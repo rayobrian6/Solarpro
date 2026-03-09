@@ -322,13 +322,17 @@ function SolarEngine3D({
         // terrainReadyRef is set true at the end of boot() after sampleTerrainMostDetailed.
         // If terrain is already ready, run immediately. Otherwise poll every 200ms (max 5s).
         const runAutoFill = () => handleAutoRoof(viewer, C);
-        if (terrainReadyRef.current) {
-          setTimeout(runAutoFill, 50);
+        // Run immediately if twin data is available (don't wait for terrainReady
+        // since EllipsoidTerrainProvider never gives valid heights anyway -
+        // clampToHeightMostDetailed handles height correction at render time)
+        if (twinRef.current && twinRef.current.roofSegments.length > 0) {
+          setTimeout(runAutoFill, 100);
         } else {
+          // Twin not loaded yet - poll for it (max 8s)
           let waited = 0;
           const poll = setInterval(() => {
             waited += 200;
-            if (terrainReadyRef.current || waited >= 5000) {
+            if ((twinRef.current && twinRef.current.roofSegments.length > 0) || waited >= 8000) {
               clearInterval(poll);
               runAutoFill();
             }
@@ -415,6 +419,38 @@ function SolarEngine3D({
     } catch (e: any) {
       addLog('WARN', `flyTo failed: ${e.message}`);
     }
+
+    // Reload digital twin for new location (Pick House / address change)
+    // Clear old overlays and reload Solar API data for the new lat/lng
+    addLog('FLY', `Reloading digital twin for new location: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+    setStatusMsg('🏡 Loading solar data for new location...');
+    // Clear old roof segment overlays
+    overlayRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+    overlayRef.current = [];
+    // Reset twin ref so Auto Fill doesn't use stale data
+    twinRef.current = null;
+    terrainReadyRef.current = false;
+    setTerrainReady(false);
+    // Reload twin data for new location
+    buildDigitalTwin(lat, lng, projectAddress ?? '').then(newTwin => {
+      twinRef.current = newTwin;
+      onTwinLoaded?.(newTwin);
+      addLog('FLY', `Twin reloaded: ${newTwin.roofSegments.length} segments`);
+      setStatusMsg(`✅ Solar data loaded: ${newTwin.roofSegments.length} roof segments`);
+      // Re-sample elevation for new location
+      const OHIO_GEOID_UNDULATION = -33.5;
+      const googleGroundElev = newTwin.elevation ?? 0;
+      cesiumGroundElevRef.current = googleGroundElev + OHIO_GEOID_UNDULATION;
+      terrainReadyRef.current = true;
+      setTerrainReady(true);
+      // Redraw overlays for new location
+      drawOverlays(viewer, C, newTwin);
+      viewer.scene.requestRender();
+    }).catch(err => {
+      addLog('WARN', `Twin reload failed: ${err.message}`);
+      terrainReadyRef.current = true; // unblock Auto Fill even on error
+      setTerrainReady(true);
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lat, lng]);
 
@@ -611,6 +647,7 @@ function SolarEngine3D({
       cesiumGroundElevRef.current = cesiumGroundElev;
       terrainReadyRef.current = true;
       setTerrainReady(true);
+      addLog('BOOT', `cesiumGroundElev set: ${cesiumGroundElev.toFixed(1)}m, terrainReady=true`);
       // NOW set twin state - cesiumGroundElevRef is ready, so drawOverlays will use correct elevation
       if (twinData) setTwin(twinData);
 
@@ -2395,37 +2432,79 @@ function SolarEngine3D({
         setTimeout(() => { try { viewer.scene.requestRender(); } catch {} }, t)
       );
 
+      // Fly camera to look at panels from above (so user can see them)
+      try {
+        if (panels.length > 0) {
+          const firstPanel = panels[0];
+          const panelH = firstPanel.height ?? cesiumGroundElevRef.current;
+          // Look straight down at the roof from 80m above panels
+          viewer.camera.flyTo({
+            destination: C.Cartesian3.fromDegrees(firstPanel.lng, firstPanel.lat, panelH + 80),
+            orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-75), roll: 0 },
+            duration: 1.5,
+          });
+        }
+      } catch {}
+
       setTimeout(() => {
         autoFillRunningRef.current = false;
         onPlacementModeChange('select');
       }, 400);
     };
 
-    // Try clampToHeightMostDetailed for accurate surface heights
-    if (typeof viewer.scene.clampToHeightMostDetailed === 'function') {
-      addLog('AUTO', 'using clampToHeightMostDetailed for surface heights');
+    // Use clampToHeightMostDetailed to get actual 3D tile surface heights.
+    // This samples the Google Photorealistic 3D Tile mesh - same source as Row tool pickPosition.
+    // If tiles aren't loaded yet at this position, retry after tiles load via postRender.
+    const tryClamp = (attempt: number) => {
+      if (typeof viewer.scene.clampToHeightMostDetailed !== 'function') {
+        addLog('AUTO', 'clampToHeightMostDetailed not available - using computed heights');
+        doRender(newPanels);
+        return;
+      }
+      addLog('AUTO', `clampToHeightMostDetailed attempt ${attempt}`);
+      // Request render to ensure tiles load at this position
+      viewer.scene.requestRender();
       viewer.scene.clampToHeightMostDetailed(cartesianPositions)
         .then((clampedPositions: any[]) => {
+          // Check how many positions were successfully clamped
+          const validCount = clampedPositions.filter(
+            (c: any) => c && isFinite(c.x) && isFinite(c.y) && isFinite(c.z)
+          ).length;
+          addLog('AUTO', `clamped ${validCount}/${clampedPositions.length} positions (attempt ${attempt})`);
+
+          if (validCount === 0 && attempt < 4) {
+            // No tiles loaded yet - wait for tiles then retry
+            addLog('AUTO', `no tiles loaded yet, retrying in ${attempt * 1000}ms`);
+            setTimeout(() => {
+              viewer.scene.requestRender();
+              tryClamp(attempt + 1);
+            }, attempt * 1000);
+            return;
+          }
+
           const adjustedPanels = newPanels.map((panel, i) => {
             const clamped = clampedPositions[i];
             if (clamped && isFinite(clamped.x) && isFinite(clamped.y) && isFinite(clamped.z)) {
               const carto = C.Cartographic.fromCartesian(clamped);
               const surfaceHeight = carto ? carto.height : panel.height;
-              addLog('AUTO', `panel[${i}] clamped height: ${surfaceHeight?.toFixed(1)}m (was ${panel.height?.toFixed(1)}m)`);
               return { ...panel, height: (surfaceHeight ?? panel.height) + PANEL_OFFSET };
             }
+            // Fallback: use googleGroundElev from twin + heightAboveGround
             return panel;
           });
+          addLog('AUTO', `rendering ${adjustedPanels.length} panels with clamped heights`);
           doRender(adjustedPanels);
         })
         .catch((err: any) => {
-          addLog('AUTO', `clampToHeightMostDetailed failed: ${err?.message} - using computed heights`);
-          doRender(newPanels);
+          addLog('AUTO', `clampToHeightMostDetailed error: ${err?.message}`);
+          if (attempt < 3) {
+            setTimeout(() => tryClamp(attempt + 1), 1500);
+          } else {
+            doRender(newPanels);
+          }
         });
-    } else {
-      addLog('AUTO', 'clampToHeightMostDetailed not available - using computed heights');
-      doRender(newPanels);
-    }
+    };
+    tryClamp(1);
   }
 
   // ── Fill roof segment with panels ──────────────────────────────────────────────────────────────
