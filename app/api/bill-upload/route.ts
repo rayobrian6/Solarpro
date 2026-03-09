@@ -164,67 +164,39 @@ export async function POST(req: NextRequest) {
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
   const openaiKey = process.env.OPENAI_API_KEY;
 
-  // Method 1: pdf-parse (PDFParse class API - v2)
-  // Uses pdfjs-dist internally but handles worker setup correctly
-  console.log('[bill-upload] Trying pdf-parse PDFParse class...');
-  if (PDFParse) {
-    try {
-      const parser = new PDFParse({ data: buffer });
-      await parser.load();
-      const result = await parser.getText();
-      const text = (result.text || '').trim();
-      console.log('[bill-upload] pdf-parse extracted', text.length, 'chars');
-      if (text.length > 50) return { text, method: 'pdf-parse' };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('encrypt')) {
-        throw new Error('PDF is password-protected. Please remove the password and re-upload.');
-      }
-      console.warn('[bill-upload] pdf-parse failed:', msg);
-    }
-  } else {
-    console.warn('[bill-upload] PDFParse class not loaded, skipping');
-  }
-
-  // Method 1b: pdfjs-dist direct (fallback if pdf-parse not available)
-  console.log('[bill-upload] Trying pdfjs-dist direct...');
+  // Method 1: pdfjs-dist legacy build (pure JS, no canvas needed, works on Vercel)
+  // NOTE: Do NOT use pdf-parse v2 - it requires @mapi-rs/canvas which needs DOMMatrix/ImageData
+  // pdfjs-dist legacy build extracts text without any canvas/DOM dependencies
+  console.log('[bill-upload] Trying pdfjs-dist legacy...');
   try {
-    let pdfjsLib: any = null;
-    try {
-      pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
-    } catch {
-      try {
-        pdfjsLib = await import('pdfjs-dist' as any);
-      } catch {
-        pdfjsLib = null;
-      }
-    }
-    if (!pdfjsLib) throw new Error('pdfjs-dist not available');
+    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs' as any);
     const getDocument = pdfjsLib.getDocument ?? pdfjsLib.default?.getDocument;
-    if (getDocument) {
-      const uint8 = new Uint8Array(buffer);
-      const doc = await getDocument({
-        data: uint8,
-        useWorkerFetch: false,
-        isEvalSupported: false,
-        useSystemFonts: true,
-        disableFontFace: true,
-      }).promise;
-      let text = '';
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items
-          .map((item: any) => ('str' in item ? item.str : ''))
-          .join(' ');
-        text += pageText + '\n';
-      }
-      text = text.trim();
-      console.log('[bill-upload] pdfjs-dist direct extracted', text.length, 'chars');
-      if (text.length > 50) return { text, method: 'pdfjs-dist' };
+    if (!getDocument) throw new Error('getDocument not found in pdfjs-dist');
+    
+    const uint8 = new Uint8Array(buffer);
+    const doc = await getDocument({
+      data: uint8,
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      useSystemFonts: true,
+      disableFontFace: true,
+    }).promise;
+    
+    let text = '';
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item: any) => ('str' in item ? item.str : ''))
+        .join(' ');
+      text += pageText + '\n';
     }
+    text = text.trim();
+    console.log('[bill-upload] pdfjs-dist extracted', text.length, 'chars');
+    if (text.length > 50) return { text, method: 'pdfjs-dist' };
+    console.warn('[bill-upload] pdfjs-dist returned too little text:', text.length, 'chars');
   } catch (err: unknown) {
-    console.warn('[bill-upload] pdfjs-dist direct failed:', err instanceof Error ? err.message : err);
+    console.warn('[bill-upload] pdfjs-dist failed:', err instanceof Error ? err.message : err);
   }
 
   // Method 2: OpenAI Files API + Responses API
@@ -292,26 +264,7 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
     console.warn('[bill-upload] No OPENAI_API_KEY — skipping OpenAI extraction');
   }
 
-  // Method 2: pdf-parse (works locally, may fail on Vercel)
-  console.log('[bill-upload] Trying pdf-parse, PDFParse loaded:', !!PDFParse);
-  try {
-    if (PDFParse) {
-      const parser = new PDFParse({ data: buffer });
-      await parser.load();
-      const result = await parser.getText();
-      const text = (result.text || '').trim();
-      console.log('[bill-upload] pdf-parse extracted', text.length, 'chars');
-      if (text.length > 50) return { text, method: 'pdf-parse' };
-    }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.toLowerCase().includes('password') || msg.toLowerCase().includes('encrypt')) {
-      throw new Error('PDF is password-protected. Please remove the password and re-upload.');
-    }
-    console.warn('[bill-upload] pdf-parse failed:', msg);
-  }
-
-  // Method 3: pdftotext CLI (local only)
+  // Method 2: pdftotext CLI (local only)
   try {
     const cliText = await extractPdfTextCli(buffer);
     if (cliText.trim().length > 100) {
