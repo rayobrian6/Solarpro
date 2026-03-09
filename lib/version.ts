@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v34.0';
+export const BUILD_VERSION = 'v34.2';
 export const BUILD_DATE = '2026-03-09';
-export const BUILD_DESCRIPTION = 'AUTO FILL FIX v6 — CRITICAL: Removed pointInPolygon clip from PRIMARY PATH (Google pre-computed panels). Google panels are already correctly placed on the roof — clipping against our derived convexHull (which may be from DSM, different coordinate system) was rejecting ALL valid Google panels. Also: isNorthFacing() exempts flat roofs (pitch < 5°).';
+export const BUILD_DESCRIPTION = 'AUTO FILL FIX v8 — Fire Setbacks + Clean Row Alignment: (1) fireSetbacks prop now passed from DesignStudio to SolarEngine3D. (2) PRIMARY PATH now applies actual edge/ridge setback filter (was hardcoded 0.5m, now reads UI values). (3) PRIMARY PATH re-sorts Google panels into clean aligned rows by slope/ridge projection (same clean appearance as manual Row tool). (4) Setback boundary visualization updated to use actual UI setback values.';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',

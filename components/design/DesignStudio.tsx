@@ -2025,6 +2025,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               placementMode={placementMode3D}
               onPlacementModeChange={setPlacementMode3D}
               showShade={showShade3D}
+              fireSetbacks={fireSetbacks}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
                 if (twin.roofSegments) setRoofSegments(twin.roofSegments);
