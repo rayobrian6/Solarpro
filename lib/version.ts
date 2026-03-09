@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v34.4';
+export const BUILD_VERSION = 'v35.1';
 export const BUILD_DATE = '2026-03-09';
-export const BUILD_DESCRIPTION = 'AUTO FILL FIX v9 — PRIMARY PATH Boundary Fix: Google Solar API panels already have fire setbacks applied by Google. PRIMARY PATH now filters against original roof boundary polygon only (not shrunk polygon). Safety fallback: if boundary filter removes all panels, trust Google positions entirely. FALLBACK PATH unchanged (still uses shrunk polygon for our own Cartesian3 grid). Fixes 0-panel regression introduced in v34.2.';
+export const BUILD_DESCRIPTION = 'ENGINEERING AUTOMATION SYSTEM v1.0 — Full integrated engineering module: (1) /lib/engineering/ core module derives all data from design engine. (2) Auto-generates engineering report when layout is saved. (3) System Summary, Electrical Engineering (NEC 690), Structural Engineering (ASCE 7-22), Equipment Schedule, Panel Layout, Permit Package. (4) Engineering tab in project dashboard. (5) /api/engineering/generate + /api/engineering/report endpoints. (6) engineering_reports DB table with design_version_id for change detection. (7) Auto-regeneration when design changes. PRIMARY PATH 0-panel fix: filter against original boundary polygon only (v34.4).';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',

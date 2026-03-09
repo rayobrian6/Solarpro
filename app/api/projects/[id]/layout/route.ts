@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion } from '@/lib/db-neon';
+import { buildDesignSnapshot } from '@/lib/engineering/designSnapshot';
+import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
+import { upsertEngineeringReport, generateReportId, isEngineeringReportStale } from '@/lib/engineering/db-engineering';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -67,6 +70,25 @@ export async function POST(req: NextRequest, context: RouteContext) {
       systemSizeKw,
       changeSummary: changeSummary || `Saved ${totalPanels} panels (${systemSizeKw} kW)`,
     }).catch(err => console.error('[version snapshot]', err));
+
+    // Auto-trigger engineering report generation (async, non-blocking)
+    // Engineering derives all data from the design engine — no manual entry needed
+    if (totalPanels > 0) {
+      (async () => {
+        try {
+          const snapshot = buildDesignSnapshot(project, savedLayout);
+          const stale = await isEngineeringReportStale(projectId, snapshot.designVersionId);
+          if (stale) {
+            const reportId = generateReportId();
+            const report = generateEngineeringReport(snapshot, reportId);
+            await upsertEngineeringReport(report, projectId);
+            console.log(`[engineering] Auto-generated report for project ${projectId}: ${totalPanels} panels, ${systemSizeKw}kW`);
+          }
+        } catch (engErr) {
+          console.error('[engineering] Auto-generation failed (non-critical):', engErr);
+        }
+      })();
+    }
 
     return NextResponse.json({
       success: true,
