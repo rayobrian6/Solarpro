@@ -90,13 +90,219 @@ export default function EngineeringTab({ projectId, projectName }: EngineeringTa
 
   const handleDownload = () => {
     if (!report) return;
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const ss = report.systemSummary;
+    const el = report.electrical;
+    const st = report.structural;
+    const eq = report.equipmentSchedule;
+    const pp = report.permitPackage;
+    const now = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Engineering Report — ${projectName || projectId}</title>
+<style>
+  @page { size: letter; margin: 0.75in; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10pt; color: #1e293b; background: #fff; }
+  .cover { text-align: center; padding: 60px 0 40px; border-bottom: 3px solid #f59e0b; margin-bottom: 32px; }
+  .cover h1 { font-size: 24pt; font-weight: 900; color: #0f172a; }
+  .cover h2 { font-size: 14pt; color: #64748b; margin-top: 8px; }
+  .cover .meta { margin-top: 20px; font-size: 9pt; color: #94a3b8; }
+  .cover .badge { display: inline-block; background: #f59e0b; color: #fff; font-weight: 700; font-size: 9pt; padding: 4px 12px; border-radius: 20px; margin-top: 12px; }
+  h2.section { font-size: 13pt; font-weight: 800; color: #0f172a; border-bottom: 2px solid #f59e0b; padding-bottom: 6px; margin: 28px 0 14px; page-break-after: avoid; }
+  h3.sub { font-size: 10pt; font-weight: 700; color: #334155; margin: 16px 0 8px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 9.5pt; }
+  th { background: #1e293b; color: #fff; padding: 7px 10px; text-align: left; font-weight: 700; font-size: 9pt; }
+  td { padding: 6px 10px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) td { background: #f8fafc; }
+  .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; margin-bottom: 16px; }
+  .kv { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #e2e8f0; font-size: 9.5pt; }
+  .kv .label { color: #64748b; }
+  .kv .value { font-weight: 600; color: #0f172a; }
+  .pass { color: #16a34a; font-weight: 700; }
+  .warn { color: #d97706; font-weight: 700; }
+  .fail { color: #dc2626; font-weight: 700; }
+  .badge-pass { background: #dcfce7; color: #16a34a; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 8.5pt; }
+  .badge-warn { background: #fef3c7; color: #d97706; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 8.5pt; }
+  .badge-fail { background: #fee2e2; color: #dc2626; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 8.5pt; }
+  .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8; text-align: center; }
+  .page-break { page-break-before: always; }
+  .highlight-box { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }
+  .highlight-box .title { font-weight: 700; color: #92400e; font-size: 9pt; margin-bottom: 6px; }
+  @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+
+<!-- COVER -->
+<div class="cover">
+  <div class="badge">⚡ ENGINEERING REPORT</div>
+  <h1>${projectName || 'Solar PV System'}</h1>
+  <h2>${ss?.address || ''}</h2>
+  <div class="meta">
+    Generated: ${now} &nbsp;|&nbsp; 
+    System: ${ss?.systemSizeKw?.toFixed(2) || '—'} kW DC &nbsp;|&nbsp; 
+    ${ss?.panelCount || '—'} Panels &nbsp;|&nbsp;
+    ${ss?.mountType || 'Roof Mount'}
+  </div>
+</div>
+
+<!-- SYSTEM SUMMARY -->
+<h2 class="section">1. System Summary</h2>
+<div class="kv-grid">
+  <div>
+    <div class="kv"><span class="label">System Size (DC)</span><span class="value">${ss?.systemSizeKw?.toFixed(2) || '—'} kW</span></div>
+    <div class="kv"><span class="label">Panel Count</span><span class="value">${ss?.panelCount || '—'} panels</span></div>
+    <div class="kv"><span class="label">Panel Model</span><span class="value">${ss?.panelModel || '—'}</span></div>
+    <div class="kv"><span class="label">Inverter</span><span class="value">${ss?.inverterModel || '—'}</span></div>
+    <div class="kv"><span class="label">Mount Type</span><span class="value">${ss?.mountType || '—'}</span></div>
+  </div>
+  <div>
+    <div class="kv"><span class="label">Address</span><span class="value">${ss?.address || '—'}</span></div>
+    <div class="kv"><span class="label">AHJ</span><span class="value">${ss?.ahj || '—'}</span></div>
+    <div class="kv"><span class="label">Utility</span><span class="value">${ss?.utilityName || '—'}</span></div>
+    <div class="kv"><span class="label">Annual Production</span><span class="value">${ss?.estimatedAnnualKwh?.toLocaleString() || '—'} kWh/yr</span></div>
+    <div class="kv"><span class="label">Report Version</span><span class="value">${report.version || '1.0'}</span></div>
+  </div>
+</div>
+
+<!-- ELECTRICAL -->
+<h2 class="section">2. Electrical Engineering (NEC 690)</h2>
+<h3 class="sub">DC System</h3>
+<div class="kv-grid">
+  <div>
+    <div class="kv"><span class="label">String Configuration</span><span class="value">${el?.stringCount || '—'} strings × ${el?.panelsPerString || '—'} panels</span></div>
+    <div class="kv"><span class="label">DC System Size</span><span class="value">${el?.dcSystemSizeKw || '—'} kW</span></div>
+    <div class="kv"><span class="label">DC Voltage (Vmp)</span><span class="value">${el?.dcVoltage || '—'} V</span></div>
+  </div>
+  <div>
+    <div class="kv"><span class="label">DC Wire Size</span><span class="value">${el?.dcWireGauge || '—'}</span></div>
+    <div class="kv"><span class="label">DC Conduit</span><span class="value">${el?.dcConduitSize || '—'}</span></div>
+    <div class="kv"><span class="label">DC Disconnect</span><span class="value">${el?.dcDisconnectAmps || '—'} A</span></div>
+  </div>
+</div>
+<h3 class="sub">AC System</h3>
+<div class="kv-grid">
+  <div>
+    <div class="kv"><span class="label">AC System Size</span><span class="value">${el?.acSystemSizeKw || '—'} kW</span></div>
+    <div class="kv"><span class="label">AC Wire Size</span><span class="value">${el?.acWireGauge || '—'}</span></div>
+    <div class="kv"><span class="label">AC Conduit</span><span class="value">${el?.acConduitSize || '—'}</span></div>
+  </div>
+  <div>
+    <div class="kv"><span class="label">AC Breaker</span><span class="value">${el?.acBreakerAmps || '—'} A</span></div>
+    <div class="kv"><span class="label">Backfeed Breaker</span><span class="value">${el?.backfeedBreakerAmps || '—'} A</span></div>
+    <div class="kv"><span class="label">Interconnection</span><span class="value">${el?.interconnectionMethod || '—'}</span></div>
+  </div>
+</div>
+<h3 class="sub">Interconnection — NEC 705.12</h3>
+<div class="kv-grid">
+  <div>
+    <div class="kv"><span class="label">Method</span><span class="value">${el?.interconnectionType || '—'}</span></div>
+    <div class="kv"><span class="label">Main Panel Rating</span><span class="value">${el?.mainPanelBusAmps || '—'} A</span></div>
+    <div class="kv"><span class="label">String Fuse</span><span class="value">${el?.stringFuseAmps || '—'} A</span></div>
+  </div>
+  <div>
+    <div class="kv"><span class="label">Backfeed Breaker</span><span class="value">${el?.backfeedBreakerAmps || '—'} A</span></div>
+    <div class="kv"><span class="label">Rapid Shutdown</span><span class="value">${el?.rapidShutdownRequired ? 'Required' : 'Not Required'}</span></div>
+    <div class="kv"><span class="label">NEC Version</span><span class="value">${el?.necVersion || '—'}</span></div>
+  </div>
+</div>
+
+<!-- STRUCTURAL -->
+<h2 class="section page-break">3. Structural Engineering (ASCE 7-22)</h2>
+<div class="kv-grid">
+  <div>
+    <div class="kv"><span class="label">Wind Speed (Vult)</span><span class="value">${st?.windSpeedMph || '—'} mph</span></div>
+    <div class="kv"><span class="label">Ground Snow Load (Pg)</span><span class="value">${st?.groundSnowLoadPsf || '—'} psf</span></div>
+    <div class="kv"><span class="label">Seismic Zone</span><span class="value">${st?.seismicZone || '—'}</span></div>
+    <div class="kv"><span class="label">Dead Load</span><span class="value">${st?.deadLoadPsf || '—'} psf</span></div>
+  </div>
+  <div>
+    <div class="kv"><span class="label">Roof Type</span><span class="value">${st?.roofType || '—'}</span></div>
+    <div class="kv"><span class="label">Roof Pitch</span><span class="value">${st?.roofPitch || '—'}°</span></div>
+    <div class="kv"><span class="label">Rafter Size</span><span class="value">${st?.rafterSize || '—'} @ ${st?.rafterSpacingIn || '—'}" o.c.</span></div>
+    <div class="kv"><span class="label">Total Array Weight</span><span class="value">${st?.totalArrayWeightLbs || '—'} lbs</span></div>
+  </div>
+</div>
+<h3 class="sub">Attachment Design</h3>
+<div class="kv-grid">
+  <div>
+    <div class="kv"><span class="label">Attachment Type</span><span class="value">${st?.attachmentType || '—'}</span></div>
+    <div class="kv"><span class="label">Attachment Spacing</span><span class="value">${st?.attachmentSpacingFt || '—'} ft</span></div>
+    <div class="kv"><span class="label">Mounting System</span><span class="value">${st?.mountingSystem || '—'}</span></div>
+  </div>
+  <div>
+    <div class="kv"><span class="label">Rail Spacing</span><span class="value">${st?.railSpacingIn || '—'}"</span></div>
+    <div class="kv"><span class="label">IBC Version</span><span class="value">${st?.ibc || '—'}</span></div>
+    <div class="kv"><span class="label">ASCE Version</span><span class="value">${st?.asce || '—'}</span></div>
+  </div>
+</div>
+
+<!-- EQUIPMENT SCHEDULE -->
+<h2 class="section">4. Equipment Schedule</h2>
+<table>
+  <thead><tr><th>Tag</th><th>Description</th><th>Manufacturer / Model</th><th>Qty</th><th>Specs</th></tr></thead>
+  <tbody>
+    ${[...(eq?.panels || []), ...(eq?.inverters || []), ...(eq?.mounting || []), ...(eq?.electrical || []), ...(eq?.batteries || []), ...(eq?.other || [])].map((item: any) => `
+    <tr>
+      <td>${item.tag || '—'}</td>
+      <td>${item.description || '—'}</td>
+      <td>${item.manufacturer || ''} ${item.model || '—'}</td>
+      <td>${item.quantity || '—'} ${item.unit || ''}</td>
+      <td>${item.specs || '—'}</td>
+    </tr>`).join('')}
+  </tbody>
+</table>
+
+<!-- PERMIT PACKAGE -->
+<h2 class="section page-break">5. Permit Package Summary</h2>
+<div class="highlight-box">
+  <div class="title">📋 Required Permit Documents</div>
+  <p style="font-size:9pt;color:#78350f;">The following documents are required for permit submission. Verify requirements with your local AHJ.</p>
+</div>
+<table>
+  <thead><tr><th>Document</th><th>Status</th></tr></thead>
+  <tbody>
+    ${(pp?.requiredDocuments || []).map((doc: string) => `
+    <tr>
+      <td>${doc}</td>
+      <td><span class="badge-pass">Required</span></td>
+    </tr>`).join('')}
+  </tbody>
+</table>
+${(pp?.specialConditions?.length) ? `
+<h3 class="sub">Special Conditions</h3>
+<table>
+  <thead><tr><th>Condition</th></tr></thead>
+  <tbody>
+    ${(pp?.specialConditions || []).map((cond: string) => `
+    <tr><td>${cond}</td></tr>`).join('')}
+  </tbody>
+</table>` : ''}
+
+<div class="footer">
+  Engineering Report generated by SolarPro &nbsp;|&nbsp; ${now} &nbsp;|&nbsp; 
+  For permit submission — verify all calculations with licensed engineer &nbsp;|&nbsp;
+  NEC 2023 / ASCE 7-22
+</div>
+
+<script>window.onload = function() { window.print(); }</script>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `engineering-report-${projectId}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const win = window.open(url, '_blank');
+    if (!win) {
+      // Fallback: direct download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `engineering-report-${projectId}.html`;
+      a.click();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
   // ── Loading State ──────────────────────────────────────────────────────────
@@ -163,7 +369,7 @@ export default function EngineeringTab({ projectId, projectName }: EngineeringTa
             {generating ? 'Generating...' : 'Regenerate'}
           </button>
           <button onClick={handleDownload} className="btn-secondary text-xs flex items-center gap-1.5">
-            <Download className="w-3.5 h-3.5" /> Download
+            <Download className="w-3.5 h-3.5" /> Download PDF
           </button>
         </div>
       </div>

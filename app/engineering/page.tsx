@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import AppShell from '@/components/ui/AppShell';
 import PlanGate from '@/components/ui/PlanGate';
@@ -342,8 +343,81 @@ function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: any; ex
 
 
 // ── Main Component ─────────────────────────────────────────────────────────
-export default function EngineeringPage() {
+function EngineeringPageInner() {
+  const searchParams = useSearchParams();
   const [config, setConfig] = useState<ProjectConfig>(defaultProject);
+  const [projectAutoLoaded, setProjectAutoLoaded] = useState(false);
+  const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
+
+  // Auto-load project data when ?projectId= is in the URL
+  useEffect(() => {
+    const projectId = searchParams?.get('projectId');
+    if (!projectId || projectAutoLoaded) return;
+    setProjectAutoLoaded(true);
+
+    fetch(`/api/projects/${projectId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.success || !data.project) return;
+        const p = data.project;
+        const layout = p.layout;
+
+        // Build panel count and system size from layout
+        const panelCount = layout?.totalPanels || 0;
+        const systemKw = layout?.systemSizeKw || 0;
+
+        // Determine inverter type from selected inverter
+        const invType = p.selectedInverter?.type === 'micro' ? 'micro'
+                      : p.selectedInverter?.type === 'optimizer' ? 'optimizer'
+                      : 'string';
+
+        // Build string configs from panel count
+        const panelsPerString = invType === 'micro' ? 1 : Math.min(panelCount, 12);
+        const stringCount = invType === 'micro' ? panelCount : Math.max(1, Math.ceil(panelCount / panelsPerString));
+        const strings = Array.from({ length: stringCount }, (_, i) => ({
+          id: `str-auto-${i}`,
+          label: `String ${i + 1}`,
+          panelCount: i === stringCount - 1 ? panelCount - (panelsPerString * (stringCount - 1)) || panelsPerString : panelsPerString,
+          panelId: p.selectedPanel?.id || 'qcells-peak-duo-400',
+          tilt: layout?.groundTilt || 20,
+          azimuth: layout?.groundAzimuth || 180,
+          roofType: 'shingle' as const,
+          mountingSystem: p.selectedMounting?.id || 'ironridge-xr100',
+          wireGauge: '#10 AWG',
+          wireLength: 50,
+        }));
+
+        // Parse state from address
+        const stateMatch = (p.address || '').match(/,\s*([A-Z]{2})(?:\s+\d{5})?(?:\s*,|\s*$)/);
+        const stateCode = p.stateCode || (stateMatch ? stateMatch[1] : '');
+        const cityParts = (p.address || '').split(',');
+        const city = p.city || (cityParts.length >= 2 ? cityParts[cityParts.length - 2].trim() : '');
+
+        setConfig(prev => ({
+          ...prev,
+          projectName: p.name || prev.projectName,
+          clientName: p.client?.name || prev.clientName,
+          address: p.address || prev.address,
+          state: stateCode || prev.state,
+          city: city || prev.city,
+          county: p.county || prev.county || '',
+          systemType: p.systemType || prev.systemType,
+          inverters: [{
+            id: `inv-auto-0`,
+            inverterId: p.selectedInverter?.id || prev.inverters[0]?.inverterId || '',
+            type: invType,
+            strings,
+          }],
+          batteryId: p.selectedBatteries?.[0]?.id || prev.batteryId,
+          batteryCount: p.batteryCount || prev.batteryCount,
+          mountingId: p.selectedMounting?.id || prev.mountingId,
+          utilityId: p.utilityId || prev.utilityId,
+        }));
+
+        setAutoLoadBanner(`Loaded from project: ${p.name}${panelCount ? ` (${panelCount} panels, ${systemKw.toFixed(1)} kW)` : ''}`);
+      })
+      .catch(err => console.warn('[engineering] auto-load failed:', err));
+  }, [searchParams, projectAutoLoaded]);
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
   const [compliance, setCompliance] = useState<ComplianceResult>({ overallStatus: null });
@@ -7119,5 +7193,14 @@ export default function EngineeringPage() {
       </div>
       </PlanGate>
     </AppShell>
+  );
+}
+
+// Wrap with Suspense to satisfy Next.js useSearchParams() requirement
+export default function EngineeringPage() {
+  return (
+    <React.Suspense fallback={<div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400">Loading…</div>}>
+      <EngineeringPageInner />
+    </React.Suspense>
   );
 }
