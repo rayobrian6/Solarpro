@@ -9,9 +9,19 @@ import {
   Zap, FileText, Download, RefreshCw, CheckCircle, AlertTriangle,
   Clock, ChevronDown, ChevronRight, Shield, Wind, Snowflake,
   Cpu, Package, Ruler, Home, Sun, Activity, ClipboardList,
-  ExternalLink, Info, BarChart2, Layers, Grid
+  ExternalLink, Info, BarChart2, Layers, Grid, FolderOpen, Eye
 } from 'lucide-react';
 import type { EngineeringReport } from '@/lib/engineering/types';
+
+interface ProjectFile {
+  id: string;
+  file_name: string;
+  file_type: string;
+  file_size: number | null;
+  mime_type: string | null;
+  upload_date: string;
+  notes: string | null;
+}
 
 interface EngineeringTabProps {
   projectId: string;
@@ -27,13 +37,30 @@ export default function EngineeringTab({ projectId, projectName }: EngineeringTa
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isStale, setIsStale] = useState(false);
+  const [needsDesign, setNeedsDesign] = useState(false);
+  const [preliminaryFiles, setPreliminaryFiles] = useState<ProjectFile[]>([]);
   const [expandedSections, setExpandedSections] = useState<Set<SectionKey>>(
     new Set(['summary', 'electrical'])
   );
 
+  const fetchPreliminaryFiles = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/project-files?projectId=${projectId}`);
+      const data = await res.json();
+      if (data.success) {
+        // Show engineering + utility_bill files as preliminary packet
+        const relevant = (data.data || []).filter((f: ProjectFile) =>
+          f.file_type === 'engineering' || f.file_type === 'utility_bill'
+        );
+        setPreliminaryFiles(relevant);
+      }
+    } catch { /* ignore */ }
+  }, [projectId]);
+
   const fetchReport = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setNeedsDesign(false);
     try {
       const res = await fetch(`/api/engineering/report?projectId=${projectId}`);
       const data = await res.json();
@@ -41,7 +68,10 @@ export default function EngineeringTab({ projectId, projectName }: EngineeringTa
         setReport(data.data.report);
         setIsStale(data.data.isStale || false);
       } else if (data.needsDesign) {
+        setNeedsDesign(true);
         setError('No panel layout found. Please place panels in the Design Studio first.');
+        // Load any preliminary files saved during bill upload
+        await fetchPreliminaryFiles();
       } else {
         setError(data.error || 'Failed to load engineering report');
       }
@@ -50,7 +80,7 @@ export default function EngineeringTab({ projectId, projectName }: EngineeringTa
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, fetchPreliminaryFiles]);
 
   useEffect(() => {
     fetchReport();
@@ -320,7 +350,43 @@ ${(pp?.specialConditions?.length) ? `
   // ── Error State ────────────────────────────────────────────────────────────
   if (error) {
     return (
-      <div className="p-6">
+      <div className="p-6 space-y-4">
+        {/* Preliminary packet files — shown when no design exists yet */}
+        {needsDesign && preliminaryFiles.length > 0 && (
+          <div className="bg-slate-800/60 border border-amber-500/30 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <FolderOpen className="w-4 h-4 text-amber-400" />
+              <span className="text-amber-300 font-medium text-sm">Preliminary Engineering Packet</span>
+              <span className="text-xs text-slate-400 ml-1">— generated from bill upload</span>
+            </div>
+            <div className="space-y-2">
+              {preliminaryFiles.map(f => (
+                <div key={f.id} className="flex items-center justify-between bg-slate-700/40 rounded-lg px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                      f.file_type === 'engineering' ? 'bg-green-500/20 text-green-300' : 'bg-blue-500/20 text-blue-300'
+                    }`}>
+                      {f.file_type === 'engineering' ? 'Engineering' : 'Utility Bill'}
+                    </span>
+                    <span className="text-sm text-white truncate">{f.file_name}</span>
+                  </div>
+                  <a
+                    href={`/api/project-files/download?id=${f.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 flex-shrink-0 ml-2"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> View
+                  </a>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500 mt-3">
+              Place panels in Design Studio to generate a full permit-grade engineering report.
+            </p>
+          </div>
+        )}
+
         <div className="bg-slate-800/60 border border-red-500/30 rounded-xl p-6 text-center">
           <AlertTriangle className="w-10 h-10 text-red-400 mx-auto mb-3" />
           <p className="text-red-300 font-medium mb-2">Engineering Report Unavailable</p>

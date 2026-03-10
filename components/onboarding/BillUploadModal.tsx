@@ -376,18 +376,30 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
       // 4. Auto-generate preliminary engineering packet + save as project file
       log('Generating preliminary engineering packet...');
       try {
-        const annualKwhForPacket = result.billData.estimatedAnnualKwh || 0;
+        // Ensure we have a usable kWh value — fall back to monthlyKwh * 12
+        const annualKwhForPacket =
+          (result.billData.estimatedAnnualKwh && result.billData.estimatedAnnualKwh > 0)
+            ? result.billData.estimatedAnnualKwh
+            : (result.billData.monthlyKwh && result.billData.monthlyKwh > 0)
+              ? result.billData.monthlyKwh * 12
+              : 0;
+
+        if (annualKwhForPacket === 0) {
+          log('⚠ No kWh data — skipping engineering packet');
+          throw new Error('No kWh data available for preliminary estimate');
+        }
+
         const prelimRes = await fetch('/api/engineering/preliminary', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            annualKwh:      annualKwhForPacket,
-            monthlyKwh:     result.billData.monthlyKwh,
-            utilityName:    result.billData.utilityProvider || result.utilityData?.utilityName,
-            serviceAddress: safeAddress,
+            annualKwh:       annualKwhForPacket,
+            monthlyKwh:      result.billData.monthlyKwh,
+            utilityName:     result.billData.utilityProvider || result.utilityData?.utilityName,
+            serviceAddress:  safeAddress,
             clientName,
             projectName,
-            stateCode:      result.locationData?.stateCode,
+            stateCode:       result.locationData?.stateCode,
             electricityRate: result.billData.electricityRate || result.utilityData?.avgRatePerKwh,
             projectId,
             clientId,
@@ -429,10 +441,12 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
           }
           log('✓ Preliminary engineering packet saved to project files');
         } else {
-          log('⚠ Engineering packet will be available from the Engineering tab');
+          const errMsg = (prelimData as any)?.error || 'Unknown error';
+          log(`⚠ Engineering packet skipped: ${errMsg}`);
         }
       } catch (pkgErr: unknown) {
-        log('⚠ Engineering packet will be available from the Engineering tab');
+        const msg = pkgErr instanceof Error ? pkgErr.message : String(pkgErr);
+        log(`⚠ Engineering packet skipped: ${msg}`);
       }
 
       // 5. Save the original utility bill as a project file
