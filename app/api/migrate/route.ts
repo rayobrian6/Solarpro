@@ -87,6 +87,22 @@ export async function POST(req: NextRequest) {
     // Migration 006: Subscription + free-pass + white-label columns
     // ============================================================
 
+    // ============================================================
+    // Fix users_role_check constraint to allow 'super_admin'
+    // ============================================================
+    try {
+      await sql`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`;
+      results.push('✅ Dropped old users_role_check constraint');
+    } catch (e: any) {
+      results.push(`⚠️ Drop users_role_check: ${e.message}`);
+    }
+    try {
+      await sql`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin', 'super_admin'))`;
+      results.push('✅ Added new users_role_check constraint (user, admin, super_admin)');
+    } catch (e: any) {
+      results.push(`⚠️ Add users_role_check: ${e.message}`);
+    }
+
     // Add each column individually using static DDL (Neon doesn't support .unsafe())
     const colMigrations: Array<{ name: string; ddl: () => Promise<unknown> }> = [
       { name: 'plan',                   ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'starter'` },
