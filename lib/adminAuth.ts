@@ -10,77 +10,81 @@ export type AdminUser = {
   role: 'admin' | 'super_admin';
 };
 
-/**
- * Check if a role string is an admin role.
- */
 export function isAdminRole(role?: string | null): role is 'admin' | 'super_admin' {
   return role === 'admin' || role === 'super_admin';
 }
 
 /**
- * Fetch the current user's role from the database.
- * Returns null if user not found or DB error.
- */
-async function fetchDbUser(userId: string): Promise<{ id: string; name: string; email: string; role: string } | null> {
-  try {
-    const sql = getDb();
-    const rows = await sql`
-      SELECT id, name, email, role
-      FROM users
-      WHERE id = ${userId}
-      LIMIT 1
-    `;
-    if (rows.length === 0) return null;
-    return rows[0] as { id: string; name: string; email: string; role: string };
-  } catch {
-    return null;
-  }
-}
-
-/**
  * SERVER COMPONENT admin guard (Next.js 14 — cookies() is synchronous).
- *
- * Flow:
- *   1. Read JWT from cookie → extract user.id (identity only, no role)
- *   2. Query DB for current role
- *   3. Redirect if not admin/super_admin
- *
- * Role is NEVER read from the JWT.
+ * Role is NEVER read from JWT — always fetched from DB.
  */
 export async function requireAdmin(): Promise<AdminUser> {
   // Next.js 14: cookies() is synchronous — no await
   const cookieStore = cookies();
   const token = cookieStore.get('solarpro_session')?.value;
-  if (!token) redirect('/auth/login');
+
+  if (!token) {
+    console.log('[requireAdmin] No session cookie — redirecting to login');
+    redirect('/auth/login');
+  }
 
   const jwtUser = verifyToken(token);
-  if (!jwtUser?.id) redirect('/auth/login');
+  if (!jwtUser?.id) {
+    console.log('[requireAdmin] Invalid/expired JWT — redirecting to login');
+    redirect('/auth/login');
+  }
 
-  // Always fetch role from DB — never trust JWT for role
-  const dbUser = await fetchDbUser(jwtUser.id);
-  if (!dbUser) redirect('/auth/login');
+  console.log('[requireAdmin] JWT identity:', { id: jwtUser.id, email: jwtUser.email });
 
-  if (!isAdminRole(dbUser.role)) {
+  // Fetch role from DB — this is the ONLY source of truth for role
+  let dbUser: { id: string; name: string; email: string; role: string } | null = null;
+  let dbError: string | null = null;
+
+  try {
+    const sql = getDb();
+    const rows = await sql`
+      SELECT id, name, email, role
+      FROM users
+      WHERE id = ${jwtUser.id}
+      LIMIT 1
+    `;
+    if (rows.length > 0) {
+      dbUser = rows[0] as { id: string; name: string; email: string; role: string };
+    } else {
+      dbError = 'User not found in DB';
+    }
+  } catch (e: any) {
+    dbError = `DB error: ${e.message}`;
+  }
+
+  console.log('[requireAdmin] DB lookup result:', { dbUser: dbUser ? { id: dbUser.id, email: dbUser.email, role: dbUser.role } : null, dbError });
+
+  if (!dbUser) {
+    console.log('[requireAdmin] DB user not found — redirecting to login. Error:', dbError);
+    redirect('/auth/login');
+  }
+
+  const role = dbUser.role;
+  console.log('[requireAdmin] DB role:', role, '| isAdmin:', isAdminRole(role));
+
+  if (!isAdminRole(role)) {
+    console.log('[requireAdmin] Role not admin/super_admin — redirecting to dashboard. Role was:', role);
     redirect('/dashboard');
   }
+
+  console.log('[requireAdmin] ✅ Access granted for', dbUser.email, 'role:', role);
 
   return {
     id:    dbUser.id,
     name:  dbUser.name,
     email: dbUser.email,
-    role:  dbUser.role as 'admin' | 'super_admin',
+    role:  role as 'admin' | 'super_admin',
   };
 }
 
 /**
  * API ROUTE admin guard.
- *
- * Flow:
- *   1. Read JWT from cookie header → extract user.id (identity only, no role)
- *   2. Query DB for current role
- *   3. Return null if not admin/super_admin (caller returns 403)
- *
- * Role is NEVER read from the JWT.
+ * Role is NEVER read from JWT — always fetched from DB.
  */
 export async function requireAdminApi(req: NextRequest): Promise<AdminUser | null> {
   const cookieHeader = req.headers.get('cookie') || '';
@@ -90,16 +94,26 @@ export async function requireAdminApi(req: NextRequest): Promise<AdminUser | nul
   const jwtUser = verifyToken(match[1]);
   if (!jwtUser?.id) return null;
 
-  // Always fetch role from DB — never trust JWT for role
-  const dbUser = await fetchDbUser(jwtUser.id);
-  if (!dbUser) return null;
+  try {
+    const sql = getDb();
+    const rows = await sql`
+      SELECT id, name, email, role
+      FROM users
+      WHERE id = ${jwtUser.id}
+      LIMIT 1
+    `;
+    if (rows.length === 0) return null;
 
-  if (!isAdminRole(dbUser.role)) return null;
+    const dbUser = rows[0] as { id: string; name: string; email: string; role: string };
+    if (!isAdminRole(dbUser.role)) return null;
 
-  return {
-    id:    dbUser.id,
-    name:  dbUser.name,
-    email: dbUser.email,
-    role:  dbUser.role as 'admin' | 'super_admin',
-  };
+    return {
+      id:    dbUser.id,
+      name:  dbUser.name,
+      email: dbUser.email,
+      role:  dbUser.role as 'admin' | 'super_admin',
+    };
+  } catch {
+    return null;
+  }
 }
