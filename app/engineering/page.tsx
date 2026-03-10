@@ -1185,7 +1185,7 @@ function EngineeringPageInner() {
         panelModel:          panelData ? `${panelData.manufacturer ?? ''} ${panelData.model ?? ''} ${panelData.watts ?? ''}W`.trim() : 'Generic 400W Monocrystalline',
         inverterType:        firstInv?.type ?? 'string',
         inverterModel:       invData ? `${invData.manufacturer ?? ''} ${invData.model ?? ''}`.trim() : 'TBD',
-        annualProductionKwh: calcData?.summary?.annualProductionKwh ?? null,
+        annualProductionKwh: pvwattsData?.annualKwh ?? calcData?.summary?.annualProductionKwh ?? null,
         mountType:           config.systemType === 'ground' ? 'Ground Mount' : config.systemType === 'fence' ? 'Fence Mount' : 'Roof Mount',
         stateCode:           config.state ?? null,
         electrical:          elec,
@@ -1227,7 +1227,7 @@ function EngineeringPageInner() {
     } catch (e: any) {
       console.warn('[Engineering] saveEngineeringOutputs error:', e.message);
     }
-  }, [currentProjectId, config, totalKw, totalInverterKw, totalPanels, computedSystem, bom, sldSvg, activeTab]);
+  }, [currentProjectId, config, totalKw, totalInverterKw, totalPanels, computedSystem, bom, sldSvg, activeTab, pvwattsData]);
 
 
   // Auto-recalculate 800ms after config changes
@@ -7201,6 +7201,26 @@ function EngineeringPageInner() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
+                    onClick={async () => {
+                      if (!currentProjectId) return;
+                      setFilesLoading(true);
+                      try {
+                        await saveEngineeringOutputs(computedSystem);
+                        const res = await fetch(`/api/project-files?projectId=${currentProjectId}`);
+                        const d = await res.json();
+                        if (d.success) setProjectFiles(d.data || []);
+                      } finally {
+                        setFilesLoading(false);
+                      }
+                    }}
+                    disabled={filesLoading || !currentProjectId}
+                    className="btn-primary btn-sm"
+                    title="Re-generate all engineering files from current calc state"
+                  >
+                    <Zap size={13} />
+                    Generate Files
+                  </button>
+                  <button
                     onClick={fetchProjectFiles}
                     disabled={filesLoading}
                     className="btn-secondary btn-sm"
@@ -7250,10 +7270,38 @@ function EngineeringPageInner() {
                   <FolderOpen size={40} className="mx-auto mb-4 text-slate-600" />
                   <div className="text-sm font-bold text-white mb-1">No workspace files yet</div>
                   <div className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
-                    Upload a utility bill from the dashboard to automatically generate the client engineering workspace.
-                    Files are created automatically — no manual upload required.
+                    Files are auto-generated after running calculations. Click below to generate them now, or run a calculation first.
                   </div>
-                  <p className="text-xs text-amber-400/70">
+                  <div className="flex items-center justify-center gap-3 flex-wrap">
+                    <button
+                      onClick={async () => {
+                        if (!currentProjectId) return;
+                        setFilesLoading(true);
+                        try {
+                          await saveEngineeringOutputs(computedSystem);
+                          const res = await fetch(`/api/project-files?projectId=${currentProjectId}`);
+                          const d = await res.json();
+                          if (d.success) setProjectFiles(d.data || []);
+                        } finally {
+                          setFilesLoading(false);
+                        }
+                      }}
+                      disabled={filesLoading || !currentProjectId}
+                      className="btn-primary btn-sm"
+                    >
+                      <Zap size={13} />
+                      Generate Files Now
+                    </button>
+                    <button
+                      onClick={fetchProjectFiles}
+                      disabled={filesLoading}
+                      className="btn-secondary btn-sm"
+                    >
+                      <RefreshCw size={13} className={filesLoading ? 'animate-spin' : ''} />
+                      Refresh
+                    </button>
+                  </div>
+                  <p className="text-xs text-amber-400/70 mt-4">
                     Bill Data · System Estimate · Engineering Packet · SLD · BOM
                   </p>
                 </div>

@@ -2,7 +2,10 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { neon } from '@neondatabase/serverless';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'solarpro-secret-key-change-in-production-2024';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is not set. Set it in your .env.local or Vercel environment variables.');
+}
 export const COOKIE_NAME = 'solarpro_session';
 export const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 

@@ -29,13 +29,7 @@ async function upsertFile(sql: any, params: {
 }) {
   try {
     const b = buf(params.content);
-    // Delete existing file with same name for this project, then insert fresh
-    await sql`
-      DELETE FROM project_files
-      WHERE project_id = ${params.projectId}
-        AND user_id    = ${params.userId}
-        AND file_name  = ${params.fileName}
-    `;
+    // Atomic upsert — unique on (project_id, user_id, file_name)
     await sql`
       INSERT INTO project_files
         (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
@@ -43,11 +37,40 @@ async function upsertFile(sql: any, params: {
         (${params.projectId}, ${params.clientId}, ${params.userId},
          ${params.fileName}, ${params.fileType}, ${b.length},
          ${params.mimeType}, ${b}, ${params.notes})
+      ON CONFLICT (project_id, user_id, file_name)
+      DO UPDATE SET
+        client_id   = EXCLUDED.client_id,
+        file_type   = EXCLUDED.file_type,
+        file_size   = EXCLUDED.file_size,
+        mime_type   = EXCLUDED.mime_type,
+        file_data   = EXCLUDED.file_data,
+        notes       = EXCLUDED.notes,
+        upload_date = NOW()
     `;
     return true;
   } catch (e: any) {
-    console.warn('[save-outputs] upsertFile failed:', params.fileName, e.message);
-    return false;
+    // Fallback: if unique constraint does not exist yet, use DELETE+INSERT
+    try {
+      const b2 = buf(params.content);
+      await sql`
+        DELETE FROM project_files
+        WHERE project_id = ${params.projectId}
+          AND user_id    = ${params.userId}
+          AND file_name  = ${params.fileName}
+      `;
+      await sql`
+        INSERT INTO project_files
+          (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+        VALUES
+          (${params.projectId}, ${params.clientId}, ${params.userId},
+           ${params.fileName}, ${params.fileType}, ${b2.length},
+           ${params.mimeType}, ${b2}, ${params.notes})
+      `;
+      return true;
+    } catch (e2: any) {
+      console.warn('[save-outputs] upsertFile failed:', params.fileName, e2.message);
+      return false;
+    }
   }
 }
 

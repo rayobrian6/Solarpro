@@ -19,7 +19,8 @@ export async function POST(req: NextRequest) {
 
     // Auth: either logged-in user or valid admin secret
     const sessionUser = getUserFromRequest(req);
-    const validSecret = secret === (process.env.ADMIN_SECRET || 'solarpro-admin-2024');
+    const adminSecret = process.env.ADMIN_SECRET;
+    const validSecret = adminSecret ? secret === adminSecret : false;
 
     if (!sessionUser && !validSecret) {
       return NextResponse.json({ success: false, error: 'Authentication required. Provide admin secret or be logged in.' }, { status: 401 });
@@ -147,7 +148,8 @@ export async function POST(req: NextRequest) {
  */
 export async function GET(req: NextRequest) {
   const secret = req.nextUrl.searchParams.get('secret');
-  const validSecret = secret === (process.env.ADMIN_SECRET || 'solarpro-admin-2024');
+  const adminSecret = process.env.ADMIN_SECRET;
+  const validSecret = adminSecret ? secret === adminSecret : false;
   const sessionUser = getUserFromRequest(req);
 
   if (!sessionUser && !validSecret) {

@@ -182,6 +182,28 @@ ON CONFLICT (email) DO UPDATE SET
   free_pass_note = 'Marketing partner — free pass granted by owner',
   trial_ends_at = '2099-12-31 23:59:59+00',
   updated_at = NOW();
+-- 6. sarah (Solfence Solar partner)
+INSERT INTO users (id, name, email, password_hash, company, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
+VALUES (
+  gen_random_uuid(),
+  'Sarah',
+  'sarah@solfence.solar',
+  '$2a$12$placeholder_hash_change_on_first_login',
+  'Solfence Solar',
+  'user',
+  'contractor',
+  'free_pass',
+  true,
+  'Partner — free pass granted by owner',
+  '2099-12-31 23:59:59+00'
+)
+ON CONFLICT (email) DO UPDATE SET
+  plan = 'contractor',
+  subscription_status = 'free_pass',
+  is_free_pass = true,
+  free_pass_note = 'Partner — free pass granted by owner',
+  trial_ends_at = '2099-12-31 23:59:59+00',
+  updated_at = NOW();
 
 -- ============================================================
 -- HELPER: Update all existing users to 3-day trial

@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v39.3';
+export const BUILD_VERSION = 'v39.4';
 export const BUILD_DATE = '2026-03-10';
-export const BUILD_DESCRIPTION = 'INCENTIVE ENGINE FIX: CASH VS NON-CASH SEPARATION';
+export const BUILD_DESCRIPTION = 'SECURITY + SARAH FREE PASS + WORKSPACE GENERATE FILES BUTTON';
 export const BUILD_FEATURES = [
   // Phase 1: National Location Engine
   'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',

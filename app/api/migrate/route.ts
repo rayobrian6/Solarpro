@@ -5,8 +5,10 @@ import { getDb } from '@/lib/db-neon';
 export async function GET(req: NextRequest) {
   // Allow GET with secret param for easy browser access
   const secret = req.nextUrl.searchParams.get('secret');
-  const validSecret = secret === (process.env.MIGRATE_SECRET || 'solarpro-migrate-2024');
-  if (!validSecret) return NextResponse.json({ success: false, error: 'Provide ?secret=solarpro-migrate-2024' }, { status: 401 });
+  const migrateSecret = process.env.MIGRATE_SECRET;
+  if (!migrateSecret) return NextResponse.json({ success: false, error: 'MIGRATE_SECRET env var not configured' }, { status: 500 });
+  const validSecret = secret === migrateSecret;
+  if (!validSecret) return NextResponse.json({ success: false, error: 'Invalid secret' }, { status: 401 });
   return POST(req);
 }
 
@@ -16,7 +18,9 @@ export async function POST(req: NextRequest) {
     const user = getUserFromRequest(req);
     const body = await req.json().catch(() => ({}));
     const secret = body?.secret || req.nextUrl.searchParams.get('secret');
-    const validSecret = secret === (process.env.MIGRATE_SECRET || 'solarpro-migrate-2024');
+    const migrateSecret = process.env.MIGRATE_SECRET;
+  if (!migrateSecret) return NextResponse.json({ success: false, error: 'MIGRATE_SECRET env var not configured' }, { status: 500 });
+  const validSecret = secret === migrateSecret;
     if (!user && !validSecret) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
     const sql = getDb();
@@ -100,6 +104,7 @@ export async function POST(req: NextRequest) {
       { name: 'brand_primary_color',    ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS brand_primary_color TEXT DEFAULT '#f59e0b'` },
       { name: 'brand_secondary_color',  ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS brand_secondary_color TEXT DEFAULT '#0f172a'` },
       { name: 'proposal_footer_text',   ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS proposal_footer_text TEXT` },
+      { name: 'updated_at',             ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` },
     ];
 
     for (const { name, ddl } of colMigrations) {
@@ -126,6 +131,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Grant free pass to specified users (upsert by email)
+    // IMPORTANT: updated_at column is added above in colMigrations — safe to use here
     const freePassUsers = [
       { name: "Raymond O'Brian", email: 'raymond.obrian@yahoo.com',      company: 'SolarPro',            role: 'user',  note: 'Owner / Founder' },
       { name: 'James Carpenter',  email: 'carpenterjames88@gmail.com',    company: 'SolarPro',            role: 'user',  note: 'Team member — free pass granted by owner' },
@@ -137,34 +143,25 @@ export async function POST(req: NextRequest) {
 
     for (const u of freePassUsers) {
       try {
-        const existing = await sql`SELECT id FROM users WHERE email = ${u.email} LIMIT 1`;
-        if (existing.length > 0) {
-          await sql`
-            UPDATE users SET
-              plan = 'contractor',
-              subscription_status = 'free_pass',
-              is_free_pass = true,
-              free_pass_note = ${u.note},
-              trial_ends_at = '2099-12-31 23:59:59+00',
-              role = ${u.role},
-              updated_at = NOW()
-            WHERE email = ${u.email}
-          `;
-          results.push(`✅ Free pass granted (updated): ${u.email}`);
-        } else {
-          // User hasn't registered yet — create placeholder row
-          const bcrypt = await import('bcryptjs');
-          const placeholderHash = await bcrypt.hash('ChangeMe123!', 10);
-          await sql`
-            INSERT INTO users (name, email, password_hash, company, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
-            VALUES (
-              ${u.name}, ${u.email}, ${placeholderHash}, ${u.company},
-              ${u.role}, 'contractor', 'free_pass', true, ${u.note},
-              '2099-12-31 23:59:59+00'
-            )
-          `;
-          results.push(`✅ Free pass granted (created): ${u.email}`);
-        }
+        const bcrypt = await import('bcryptjs');
+        const placeholderHash = await bcrypt.hash('ChangeMe123!', 10);
+        // Use full UPSERT — handles both existing and new users atomically
+        await sql`
+          INSERT INTO users (name, email, password_hash, company, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
+          VALUES (
+            ${u.name}, ${u.email}, ${placeholderHash}, ${u.company},
+            ${u.role}, 'contractor', 'free_pass', true, ${u.note},
+            '2099-12-31 23:59:59+00'
+          )
+          ON CONFLICT (email) DO UPDATE SET
+            plan                = 'contractor',
+            subscription_status = 'free_pass',
+            is_free_pass        = true,
+            free_pass_note      = ${u.note},
+            trial_ends_at       = '2099-12-31 23:59:59+00',
+            role                = EXCLUDED.role
+        `;
+        results.push(`✅ Free pass upserted: ${u.email}`);
       } catch (e: any) {
         results.push(`⚠️ free pass ${u.email}: ${e.message}`);
       }
@@ -259,6 +256,26 @@ export async function POST(req: NextRequest) {
       results.push('✅ project_files index ready');
     } catch (e: any) {
       results.push(`⚠️ project_files index: ${e.message}`);
+    }
+
+    // Unique constraint on project_files (project_id, user_id, file_name) for atomic upsert
+    try {
+      const constraintExists = await sql`
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'project_files_project_user_name_unique'
+      `;
+      if (constraintExists.length === 0) {
+        await sql`
+          ALTER TABLE project_files
+          ADD CONSTRAINT project_files_project_user_name_unique
+          UNIQUE (project_id, user_id, file_name)
+        `;
+        results.push('✅ project_files unique constraint added');
+      } else {
+        results.push('⏭ project_files unique constraint already exists');
+      }
+    } catch (e: any) {
+      results.push(`⚠️ project_files unique constraint: ${e.message}`);
     }
 
 
