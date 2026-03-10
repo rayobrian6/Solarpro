@@ -267,6 +267,32 @@ export interface CostEstimate {
 }
 
 // ─── Project ──────────────────────────────────────────────────
+export interface EngineeringSeed {
+  // Bill-derived usage data
+  annual_kwh: number;
+  monthly_kwh: number;
+  electricity_rate: number | null;
+  utility: string;
+  // System sizing
+  system_kw: number;
+  panel_watt: number;
+  panel_count: number;
+  // Equipment defaults
+  inverter_type: 'micro' | 'string' | 'optimizer';
+  inverter_model: string;
+  system_type: 'roof' | 'ground' | 'fence';
+  // Production estimate
+  production_factor: number;
+  annual_production_kwh: number;
+  // Pricing estimate
+  cost_low: number;
+  cost_high: number;
+  // Location context
+  state_code: string | null;
+  // Metadata
+  generated_at: string;
+}
+
 export interface Project {
   id: string;
   userId: string;
@@ -288,6 +314,7 @@ export interface Project {
   selectedBatteries?: Battery[];
   batteryCount?: number;
   billAnalysis?: BillAnalysis;
+  engineeringSeed?: EngineeringSeed;  // structured seed from bill upload
   notes?: string;
   createdAt: string;
   updatedAt: string;

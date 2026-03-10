@@ -179,6 +179,19 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
   const production = proj?.production;
   const cost = proj?.costEstimate as any;
   const layout = proj?.layout;
+  // Engineering seed — tertiary fallback when no layout/production records exist
+  const seed = (proj as any)?.engineeringSeed as {
+    system_kw: number;
+    panel_count: number;
+    annual_production_kwh: number;
+    annual_kwh: number;
+    electricity_rate: number | null;
+    cost_low: number;
+    cost_high: number;
+    production_factor: number;
+    state_code: string | null;
+    utility: string;
+  } | undefined;
 
   // Pricing config from DB (fetched on mount)
   const [pricingCfg, setPricingCfg] = useState<any>(null);
@@ -196,7 +209,10 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
   const [overrideFinal, setOverrideFinal]     = useState<string>('');
 
   // Compute effective pricing — priority: sales override > stored costEstimate > live calc
-  const systemSizeKw = layout?.systemSizeKw ?? 0;
+  // System size: layout → seed → 0
+  const systemSizeKw = (layout?.systemSizeKw && layout.systemSizeKw > 0)
+    ? layout.systemSizeKw
+    : (seed?.system_kw ?? 0);
   const systemSizeW  = systemSizeKw * 1000;
   const storedCashPrice = cost?.cashPrice ?? cost?.grossCost ?? 0;
   const systemType = proj?.systemType ?? 'roof';
@@ -212,7 +228,13 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
     : 3.10;
 
   const liveCalculatedPrice = systemSizeW > 0 ? Math.round(systemSizeW * livePpw) : 0;
-  const baseCashPrice = storedCashPrice > 0 ? storedCashPrice : liveCalculatedPrice;
+  // Base price: stored → live calc → seed estimate
+  const seedMidPrice = seed ? Math.round((seed.cost_low + seed.cost_high) / 2) : 0;
+  const baseCashPrice = storedCashPrice > 0
+    ? storedCashPrice
+    : liveCalculatedPrice > 0
+      ? liveCalculatedPrice
+      : seedMidPrice;
 
   const effectiveFinal = overrideFinal ? parseFloat(overrideFinal) : baseCashPrice;
 
@@ -239,7 +261,10 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
 
 
   // ── Energy offset ────────────────────────────────────────────────────────────────────────
-  const annualProduction = production?.annualProductionKwh ?? 0;
+  // Annual production: production record → seed estimate → 0
+  const annualProduction = (production?.annualProductionKwh && production.annualProductionKwh > 0)
+    ? production.annualProductionKwh
+    : (seed?.annual_production_kwh ?? 0);
   const annualUsage      = client?.annualKwh ?? 0;
   const energyOffset     = annualUsage > 0
     ? Math.min(Math.round((annualProduction / annualUsage) * 100), 100)
@@ -324,8 +349,8 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                   { label: 'System Type', value: systemTypeLabel, icon: systemTypeIcon, color: 'border-amber-500/30 bg-amber-500/10' },
-                  { label: 'System Size', value: layout ? `${layout.systemSizeKw.toFixed(1)} kW` : '—', icon: <Zap size={16} />, color: 'border-blue-500/30 bg-blue-500/10' },
-                  { label: 'Annual Production', value: production ? `${(production.annualProductionKwh / 1000).toFixed(1)} MWh` : '—', icon: <Sun size={16} />, color: 'border-emerald-500/30 bg-emerald-500/10' },
+                  { label: 'System Size', value: systemSizeKw > 0 ? `${systemSizeKw.toFixed(1)} kW` : '—', icon: <Zap size={16} />, color: 'border-blue-500/30 bg-blue-500/10' },
+                  { label: 'Annual Production', value: annualProduction > 0 ? `${(annualProduction / 1000).toFixed(1)} MWh` : '—', icon: <Sun size={16} />, color: 'border-emerald-500/30 bg-emerald-500/10' },
                   { label: 'Cash Price', value: effectiveFinal > 0 ? `$${effectiveFinal.toLocaleString()}` : '—', icon: <DollarSign size={16} />, color: 'border-purple-500/30 bg-purple-500/10' },
                 ].map(item => (
                   <div key={item.label} className={`rounded-xl p-4 border ${item.color} backdrop-blur-sm`}>
@@ -393,9 +418,9 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               {[
                 { icon: systemTypeIcon, label: 'System Type', value: systemTypeLabel, color: 'bg-amber-50 text-amber-700 border-amber-200' },
-                { icon: <Zap size={18} />, label: 'System Size', value: layout ? `${layout.systemSizeKw.toFixed(2)} kW` : '—', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-                { icon: <Sun size={18} />, label: 'Panel Count', value: layout ? `${layout.totalPanels} panels` : '—', color: 'bg-orange-50 text-orange-700 border-orange-200' },
-                { icon: <TrendingUp size={18} />, label: 'Annual Production', value: production ? `${production.annualProductionKwh.toLocaleString()} kWh` : '—', color: 'bg-green-50 text-green-700 border-green-200' },
+                { icon: <Zap size={18} />, label: 'System Size', value: systemSizeKw > 0 ? `${systemSizeKw.toFixed(2)} kW` : '—', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                { icon: <Sun size={18} />, label: 'Panel Count', value: (layout?.totalPanels ?? seed?.panel_count ?? 0) > 0 ? `${layout?.totalPanels ?? seed?.panel_count} panels` : '—', color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                { icon: <TrendingUp size={18} />, label: 'Annual Production', value: annualProduction > 0 ? `${annualProduction.toLocaleString()} kWh` : '—', color: 'bg-green-50 text-green-700 border-green-200' },
               ].map(item => (
                 <div key={item.label} className={`rounded-xl p-4 border ${item.color}`}>
                   <div className="mb-2 opacity-70">{item.icon}</div>
@@ -751,6 +776,11 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
                   <div className="text-xs font-bold text-blue-600 uppercase tracking-wide mb-1">Price Per Watt</div>
                   <div className="text-3xl font-black text-blue-700">${effectivePpw.toFixed(2)}/W</div>
                   <div className="text-xs text-blue-500 mt-1">{systemSizeKw.toFixed(1)} kW system</div>
+                  {seed && !storedCashPrice && (
+                    <div className="text-xs text-slate-400 mt-1">
+                      Est. range: ${seed.cost_low.toLocaleString()} – ${seed.cost_high.toLocaleString()}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -789,7 +819,7 @@ function ProposalPreview({ proposal, onBack, onDownload }: {
                           <span className="font-medium text-slate-900">${effectiveFinal.toLocaleString()}</span>
                         </div>
                         <div className="text-xs text-slate-400 mt-0.5">
-                          {layout?.totalPanels ?? 0} panels · {systemSizeKw.toFixed(1)} kW
+                          {layout?.totalPanels ?? seed?.panel_count ?? 0} panels · {systemSizeKw.toFixed(1)} kW
                         </div>
                       </div>
                     )}

@@ -126,6 +126,11 @@ function rowToProject(row: Record<string, unknown>): Project {
     lat: row.lat as number | undefined,
     lng: row.lng as number | undefined,
     systemSizeKw: row.system_size_kw as number | undefined,
+    engineeringSeed: row.engineering_seed
+      ? (typeof row.engineering_seed === 'string'
+          ? JSON.parse(row.engineering_seed)
+          : row.engineering_seed) as import('@/types').EngineeringSeed
+      : undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -885,6 +890,11 @@ export async function getProjectWithDetails(
     costEstimate,
     selectedPanel,
     selectedInverter,
+    engineeringSeed: row.engineering_seed
+      ? (typeof row.engineering_seed === 'string'
+          ? JSON.parse(row.engineering_seed)
+          : row.engineering_seed) as import('@/types').EngineeringSeed
+      : undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };

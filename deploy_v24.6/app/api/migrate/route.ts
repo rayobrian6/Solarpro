@@ -67,6 +67,43 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ proposals.data_json: ${e.message}`);
     }
 
+    // Migration 009: engineering_seed JSONB column on projects
+    try {
+      const exists = await sql`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'projects' AND column_name = 'engineering_seed'
+      `;
+      if (exists.length === 0) {
+        await sql`ALTER TABLE projects ADD COLUMN engineering_seed JSONB`;
+        results.push('✅ Added engineering_seed column to projects');
+      } else {
+        results.push('⏭ projects.engineering_seed already exists');
+      }
+    } catch (e: any) {
+      results.push(`⚠️ projects.engineering_seed: ${e.message}`);
+    }
+
+    // Migration 010: project_files table (BYTEA storage for workspace files)
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS project_files (
+          id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          project_id  UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          user_id     UUID NOT NULL,
+          file_name   TEXT NOT NULL,
+          file_type   TEXT NOT NULL DEFAULT 'application/octet-stream',
+          file_size   INTEGER NOT NULL DEFAULT 0,
+          file_data   BYTEA NOT NULL,
+          category    TEXT NOT NULL DEFAULT 'engineering',
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ project_files table ready');
+    } catch (e: any) {
+      results.push(`⚠️ project_files table: ${e.message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     console.error('[POST /api/migrate]', error);

@@ -1,5 +1,6 @@
 'use client';
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { computeSystem, type ComputedSystem, type ComputedSystemInput } from '@/lib/computed-system';
 import AppShell from '@/components/ui/AppShell';
 import {
@@ -212,7 +213,7 @@ function IssueRow({ issue }: { issue: any }) {
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
-export default function EngineeringPage() {
+function EngineeringPageInner() {
   const [config, setConfig] = useState<ProjectConfig>(defaultProject);
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
@@ -259,6 +260,107 @@ export default function EngineeringPage() {
   const [aiLoading, setAiLoading] = useState(false);
   const [decisionLog, setDecisionLog] = useState<Array<{ ts: string; action: string; detail: string; type: 'auto' | 'manual' | 'info' }>>([]);
   const [showDecisionLog, setShowDecisionLog] = useState(false);
+
+  // ── Engineering Seed auto-load ─────────────────────────────────────────────
+  const searchParams = useSearchParams();
+  const [seedLoaded, setSeedLoaded] = useState(false);
+  const [seedBanner, setSeedBanner] = useState<string | null>(null);
+
+  useEffect(() => {
+    const projectId = searchParams.get('projectId');
+    if (!projectId || seedLoaded) return;
+
+    const loadSeed = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}`);
+        const data = await res.json();
+        if (!data.success || !data.data) return;
+
+        const proj = data.data;
+        const seed = proj.engineeringSeed;
+
+        // Build config patches from seed
+        const patches: Partial<ProjectConfig> = {};
+
+        if (proj.name) patches.projectName = proj.name;
+        if (proj.address) patches.address = proj.address;
+        if (proj.client?.name) patches.clientName = proj.client.name;
+        if (proj.systemType) patches.systemType = proj.systemType as SystemType;
+
+        if (seed) {
+          // State code → utility lookup
+          if (seed.state_code) patches.state = seed.state_code;
+
+          // Inverter type
+          const invType = seed.inverter_type as InverterType;
+          const defaultInvId = invType === 'micro'
+            ? (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus')
+            : (STRING_INVERTERS[0]?.id ?? 'se-7600h');
+
+          // Panel count: distribute across strings
+          // For micro: 1 string per inverter, all panels in one string
+          const panelCount = seed.panel_count;
+          const panelsPerString = invType === 'micro' ? panelCount : Math.min(panelCount, 13);
+          const stringCount = invType === 'micro' ? 1 : Math.ceil(panelCount / panelsPerString);
+
+          // Find best matching panel by wattage
+          const targetWatt = seed.panel_watt;
+          const bestPanel = SOLAR_PANELS.reduce((best, p) => {
+            return Math.abs(p.watts - targetWatt) < Math.abs(best.watts - targetWatt) ? p : best;
+          }, SOLAR_PANELS[0]);
+
+          // Build strings
+          const strings = Array.from({ length: stringCount }, (_, i) => ({
+            id: `str-seed-${i}`,
+            label: `String ${i + 1}`,
+            panelCount: i === stringCount - 1
+              ? panelCount - panelsPerString * (stringCount - 1)
+              : panelsPerString,
+            panelId: bestPanel?.id ?? 'rec-400aa',
+            tilt: 20,
+            azimuth: 180,
+            roofType: 'shingle' as RoofType,
+            mountingSystem: 'ironridge-xr100',
+            wireGauge: '#10 AWG THWN-2',
+            wireLength: 50,
+          }));
+
+          patches.inverters = [{
+            id: `inv-seed-0`,
+            inverterId: defaultInvId,
+            type: invType,
+            strings,
+          }];
+
+          // Utility: try to match by name
+          if (seed.utility && seed.state_code) {
+            const utils = getUtilitiesByState(seed.state_code);
+            const matched = utils.find(u =>
+              u.name.toLowerCase().includes(seed.utility.toLowerCase()) ||
+              seed.utility.toLowerCase().includes(u.name.toLowerCase())
+            );
+            if (matched) patches.utilityId = matched.id;
+          }
+
+          setSeedBanner(
+            `✅ Auto-loaded from bill: ${seed.system_kw} kW · ${seed.panel_count} panels · ${seed.annual_kwh.toLocaleString()} kWh/yr usage`
+          );
+        } else if (proj.layout) {
+          // Fallback: use layout data if no seed
+          setSeedBanner(`✅ Loaded project: ${proj.name}`);
+        }
+
+        if (Object.keys(patches).length > 0) {
+          setConfig(prev => ({ ...prev, ...patches }));
+        }
+        setSeedLoaded(true);
+      } catch (err) {
+        console.warn('[EngineeringPage] Seed load failed:', err);
+      }
+    };
+
+    loadSeed();
+  }, [searchParams, seedLoaded]);
 
   // toSystemState: convert ProjectConfig to SystemState for API calls
   const toSystemState = useCallback(() => {
@@ -1715,6 +1817,16 @@ export default function EngineeringPage() {
 
   return (
     <AppShell>
+      {/* Engineering Seed Banner */}
+      {seedBanner && (
+        <div className="mx-4 mt-3 px-4 py-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between">
+          <span className="text-sm text-emerald-400 font-medium">{seedBanner}</span>
+          <button
+            onClick={() => setSeedBanner(null)}
+            className="text-emerald-500/60 hover:text-emerald-400 text-xs ml-4"
+          >✕</button>
+        </div>
+      )}
       <div className="flex flex-col h-full">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/50 bg-slate-900/50 flex-shrink-0">
@@ -5426,5 +5538,13 @@ export default function EngineeringPage() {
         </div>{/* end content + panel row */}
       </div>
     </AppShell>
+  );
+}
+
+export default function EngineeringPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-64"><div className="spinner w-8 h-8" /></div>}>
+      <EngineeringPageInner />
+    </Suspense>
   );
 }
