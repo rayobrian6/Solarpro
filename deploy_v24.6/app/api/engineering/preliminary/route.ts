@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb, upsertLayout, upsertProduction, getProjectById } from '@/lib/db-neon';
+import { getDb, upsertLayout, upsertProduction, getProjectWithDetails } from '@/lib/db-neon';
 import type { EngineeringSeed, PlacedPanel } from '@/types';
 
 // ─── State-based production factors (kWh/kW/year) ────────────────────────────
@@ -190,8 +190,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'projectId is required' }, { status: 400 });
     }
 
-    // Verify project belongs to user
-    const project = await getProjectById(projectId, user.id);
+    // Verify project belongs to user (use getProjectWithDetails to get client name)
+    const project = await getProjectWithDetails(projectId, user.id);
     if (!project) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }
@@ -248,11 +248,18 @@ export async function POST(req: NextRequest) {
       inverter_type: DEFAULTS.inverterType,
       inverter_model: DEFAULTS.inverterModel,
       system_type: DEFAULTS.systemType,
+      tilt: LAYOUT.tilt,
+      azimuth: LAYOUT.azimuth,
       production_factor: productionFactor,
       annual_production_kwh: annualProductionKwh,
       cost_low: costLow,
       cost_high: costHigh,
       state_code: stateCode,
+      client_name: project.client?.name ?? undefined,
+      service_address: address || project.address || undefined,
+      // Synthetic layout + eng config — consumed directly by engineering engine
+      synthetic_layout: syntheticPanels,
+      synthetic_eng_config: syntheticEngConfig,
       generated_at: new Date().toISOString(),
     };
 

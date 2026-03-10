@@ -281,6 +281,9 @@ export interface EngineeringSeed {
   inverter_type: 'micro' | 'string' | 'optimizer';
   inverter_model: string;
   system_type: 'roof' | 'ground' | 'fence';
+  // Layout defaults
+  tilt: number;
+  azimuth: number;
   // Production estimate
   production_factor: number;
   annual_production_kwh: number;
@@ -289,6 +292,41 @@ export interface EngineeringSeed {
   cost_high: number;
   // Location context
   state_code: string | null;
+  // Client / project context
+  client_name?: string;
+  service_address?: string;
+  // Synthetic layout + eng config (saved by preliminary endpoint)
+  synthetic_layout?: PlacedPanel[];
+  synthetic_eng_config?: {
+    inverterType: 'micro' | 'string' | 'optimizer';
+    inverterId: string;
+    panelId: string;
+    panelCount: number;
+    panelWatts: number;
+    panelVoc: number;
+    panelVmp: number;
+    panelIsc: number;
+    panelImp: number;
+    panelTempCoeffVoc: number;
+    panelTempCoeffIsc: number;
+    panelMaxSeriesFuse: number;
+    microAcOutputW?: number;
+    microAcOutputCurrentMax?: number;
+    microMaxDcVoltage?: number;
+    microMpptVoltageMin?: number;
+    microMpptVoltageMax?: number;
+    stateCode: string | null;
+    systemType: string;
+    mainPanelAmps: number;
+    wireGauge: string;
+    wireLength: number;
+    conduitType: string;
+    rapidShutdown: boolean;
+    acDisconnect: boolean;
+    dcDisconnect: boolean;
+    interconnectionMethod: string;
+    panelBusRating: number;
+  };
   // Metadata
   generated_at: string;
 }

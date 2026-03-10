@@ -274,85 +274,166 @@ function EngineeringPageInner() {
       try {
         const res = await fetch(`/api/projects/${projectId}`);
         const data = await res.json();
-        if (!data.success || !data.data) return;
+        if (!data.success || !data.data) {
+          console.warn('[EngineeringPage] Project fetch failed or empty for projectId:', projectId);
+          return;
+        }
 
         const proj = data.data;
         const seed = proj.engineeringSeed;
 
-        // Build config patches from seed
+        console.log('[EngineeringPage] Loaded project engineering_seed:', seed);
+
+        // Build config patches
         const patches: Partial<ProjectConfig> = {};
 
-        if (proj.name) patches.projectName = proj.name;
-        if (proj.address) patches.address = proj.address;
-        if (proj.client?.name) patches.clientName = proj.client.name;
-        if (proj.systemType) patches.systemType = proj.systemType as SystemType;
+        // Always apply project-level fields
+        if (proj.name)            patches.projectName = proj.name;
+        if (proj.address)         patches.address = proj.address;
+        if (proj.client?.name)    patches.clientName = proj.client.name;
+        if (proj.systemType)      patches.systemType = proj.systemType as SystemType;
 
         if (seed) {
-          // State code → utility lookup
-          if (seed.state_code) patches.state = seed.state_code;
+          // Location / address / system type
+          if (seed.state_code)      patches.state = seed.state_code;
+          if (seed.service_address) patches.address = seed.service_address;
+          if (seed.client_name)     patches.clientName = seed.client_name;
+          if (seed.system_type)     patches.systemType = seed.system_type as SystemType;
 
-          // Inverter type
-          const invType = seed.inverter_type as InverterType;
-          const defaultInvId = invType === 'micro'
-            ? (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus')
-            : (STRING_INVERTERS[0]?.id ?? 'se-7600h');
+          // Utility match
+          if (seed.utility && seed.state_code) {
+            const utils = getUtilitiesByState(seed.state_code);
+            const matched = utils.find((u: any) =>
+              u.name.toLowerCase().includes(seed.utility.toLowerCase()) ||
+              seed.utility.toLowerCase().includes(u.name.toLowerCase())
+            );
+            if (matched) {
+              patches.utilityId = matched.id;
+              console.log('[EngineeringPage] Matched utility:', matched.id, matched.name);
+            }
+          }
 
-          // Panel count: distribute across strings
-          // For micro: 1 string per inverter, all panels in one string
-          const panelCount = seed.panel_count;
+          // Inverter + panel config
+          // Priority: use synthetic_eng_config if present (exact specs from preliminary endpoint)
+          // Fallback: reconstruct from seed summary fields
+          const engCfg = seed.synthetic_eng_config;
+          console.log('[EngineeringPage] Loaded synthetic eng config:', engCfg);
+
+          const invType: InverterType = (engCfg?.inverterType ?? seed.inverter_type) as InverterType;
+          const panelCount: number = engCfg?.panelCount ?? seed.panel_count;
+          const tilt: number = seed.tilt ?? 20;
+          const azimuth: number = seed.azimuth ?? 180;
+
+          // Resolve inverterId
+          let inverterId: string;
+          if (engCfg?.inverterId) {
+            inverterId = engCfg.inverterId;
+          } else if (invType === 'micro') {
+            inverterId = MICROINVERTERS[0]?.id ?? 'enphase-iq8plus';
+          } else {
+            inverterId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
+          }
+
+          // Resolve panelId: use engCfg.panelId if present, else find best match by wattage
+          let panelId: string;
+          if (engCfg?.panelId) {
+            const found = SOLAR_PANELS.find((p: any) => p.id === engCfg.panelId);
+            if (found) {
+              panelId = found.id;
+            } else {
+              const targetWatt = engCfg.panelWatts ?? seed.panel_watt;
+              const best = SOLAR_PANELS.reduce((b: any, p: any) =>
+                Math.abs(p.watts - targetWatt) < Math.abs(b.watts - targetWatt) ? p : b,
+                SOLAR_PANELS[0]);
+              panelId = best?.id ?? 'sp-maxeon7-440';
+            }
+          } else {
+            const targetWatt = seed.panel_watt;
+            const best = SOLAR_PANELS.reduce((b: any, p: any) =>
+              Math.abs(p.watts - targetWatt) < Math.abs(b.watts - targetWatt) ? p : b,
+              SOLAR_PANELS[0]);
+            panelId = best?.id ?? 'sp-maxeon7-440';
+          }
+
+          // Build strings: micro = all panels in one string; string = distribute up to 13/string
           const panelsPerString = invType === 'micro' ? panelCount : Math.min(panelCount, 13);
           const stringCount = invType === 'micro' ? 1 : Math.ceil(panelCount / panelsPerString);
 
-          // Find best matching panel by wattage
-          const targetWatt = seed.panel_watt;
-          const bestPanel = SOLAR_PANELS.reduce((best, p) => {
-            return Math.abs(p.watts - targetWatt) < Math.abs(best.watts - targetWatt) ? p : best;
-          }, SOLAR_PANELS[0]);
-
-          // Build strings
-          const strings = Array.from({ length: stringCount }, (_, i) => ({
-            id: `str-seed-${i}`,
-            label: `String ${i + 1}`,
-            panelCount: i === stringCount - 1
+          const strings: StringConfig[] = Array.from({ length: stringCount }, (_, i) => {
+            const cnt = i === stringCount - 1
               ? panelCount - panelsPerString * (stringCount - 1)
-              : panelsPerString,
-            panelId: bestPanel?.id ?? 'rec-400aa',
-            tilt: 20,
-            azimuth: 180,
-            roofType: 'shingle' as RoofType,
-            mountingSystem: 'ironridge-xr100',
-            wireGauge: '#10 AWG THWN-2',
-            wireLength: 50,
-          }));
+              : panelsPerString;
+            return {
+              id: `str-seed-${i}`,
+              label: `String ${i + 1}`,
+              panelCount: cnt,
+              panelId,
+              tilt,
+              azimuth,
+              roofType: 'shingle' as RoofType,
+              mountingSystem: 'ironridge-xr100',
+              wireGauge: engCfg?.wireGauge ?? '#10 AWG THWN-2',
+              wireLength: engCfg?.wireLength ?? 50,
+            };
+          });
 
           patches.inverters = [{
-            id: `inv-seed-0`,
-            inverterId: defaultInvId,
+            id: 'inv-seed-0',
+            inverterId,
             type: invType,
             strings,
           }];
 
-          // Utility: try to match by name
-          if (seed.utility && seed.state_code) {
-            const utils = getUtilitiesByState(seed.state_code);
-            const matched = utils.find(u =>
-              u.name.toLowerCase().includes(seed.utility.toLowerCase()) ||
-              seed.utility.toLowerCase().includes(u.name.toLowerCase())
-            );
-            if (matched) patches.utilityId = matched.id;
+          // Electrical / structural defaults from engCfg
+          if (engCfg) {
+            patches.mainPanelAmps         = engCfg.mainPanelAmps;
+            patches.wireGauge             = engCfg.wireGauge;
+            patches.wireLength            = engCfg.wireLength;
+            patches.conduitType           = engCfg.conduitType;
+            patches.rapidShutdown         = engCfg.rapidShutdown;
+            patches.acDisconnect          = engCfg.acDisconnect;
+            patches.dcDisconnect          = engCfg.dcDisconnect;
+            patches.interconnectionMethod = engCfg.interconnectionMethod as ProjectConfig['interconnectionMethod'];
+            patches.panelBusRating        = engCfg.panelBusRating;
           }
 
+          // Structural defaults
+          patches.roofPitch = tilt;
+
+          console.log('[EngineeringPage] Loaded synthetic layout:', seed.synthetic_layout);
+          console.log('[EngineeringPage] Engineering state initialized from seed for project:', projectId);
+          console.log('[EngineeringPage] Patches applied:', {
+            invType, inverterId, panelId, panelCount, stringCount, tilt, azimuth,
+            state: patches.state, utilityId: patches.utilityId,
+          });
+
+          // Banner: only show after real engine state is initialized
+          const utilityLabel = seed.utility ? ` · ${seed.utility}` : '';
+          const priceLabel = seed.cost_low && seed.cost_high
+            ? ` · $${Math.round(seed.cost_low / 1000)}k–$${Math.round(seed.cost_high / 1000)}k estimate`
+            : '';
           setSeedBanner(
-            `✅ Auto-loaded from bill: ${seed.system_kw} kW · ${seed.panel_count} panels · ${seed.annual_kwh.toLocaleString()} kWh/yr usage`
+            `✅ Preliminary system loaded from bill upload: ${seed.system_kw} kW · ${seed.panel_count} panels${utilityLabel}${priceLabel}`
           );
-        } else if (proj.layout) {
-          // Fallback: use layout data if no seed
-          setSeedBanner(`✅ Loaded project: ${proj.name}`);
+
+        } else {
+          // No seed - log fallback to empty/default state
+          console.log('[EngineeringPage] No engineering_seed found for project:', projectId, '-- falling back to empty/default state');
+          if (proj.layout) {
+            setSeedBanner(`✅ Loaded project: ${proj.name}`);
+          }
         }
 
         if (Object.keys(patches).length > 0) {
           setConfig(prev => ({ ...prev, ...patches }));
+          // Trigger compliance calculation after config is hydrated from seed
+          // setTimeout ensures React state has settled before running calc
+          setTimeout(() => {
+            console.log('[EngineeringPage] Auto-triggering compliance calc after seed hydration');
+            runCalc();
+          }, 300);
         }
+
         setSeedLoaded(true);
       } catch (err) {
         console.warn('[EngineeringPage] Seed load failed:', err);
@@ -360,6 +441,8 @@ function EngineeringPageInner() {
     };
 
     loadSeed();
+  // runCalc is stable (useCallback) - safe to include
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, seedLoaded]);
 
   // toSystemState: convert ProjectConfig to SystemState for API calls
