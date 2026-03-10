@@ -1,63 +1,78 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { requireAdminApi } from '@/lib/adminAuth';
 import { getDb } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
-function isAdmin(role?: string) { return role === 'admin' || role === 'super_admin'; }
-
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const sql = getDb();
-  const rows = await sql`SELECT * FROM utility_policies ORDER BY country, state, utility_name`;
-  return NextResponse.json({ success: true, data: rows });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const rows = await sql`SELECT * FROM utility_policies ORDER BY state, utility_name`;
+    return NextResponse.json({ success: true, utilities: rows });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const body = await req.json();
-  const { utility_name, state, country='US', net_metering=true, interconnection_limit_kw, buyback_rate, rate_structure, notes } = body;
-  if (!utility_name || !state) return NextResponse.json({ success: false, error: 'utility_name and state required' }, { status: 400 });
-
-  const sql = getDb();
-  const rows = await sql`
-    INSERT INTO utility_policies (utility_name, state, country, net_metering, interconnection_limit_kw, buyback_rate, rate_structure, notes)
-    VALUES (${utility_name}, ${state}, ${country}, ${net_metering}, ${interconnection_limit_kw||null}, ${buyback_rate||null}, ${rate_structure||null}, ${notes||null})
-    RETURNING *
-  `;
-  return NextResponse.json({ success: true, data: rows[0] });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const b = await req.json();
+    const rows = await sql`
+      INSERT INTO utility_policies
+        (utility_name, state, country, net_metering, interconnection_limit_kw, buyback_rate, rate_structure, notes)
+      VALUES
+        (${b.utility_name}, ${b.state}, ${b.country ?? 'US'},
+         ${b.net_metering ?? true}, ${b.interconnection_limit_kw ?? null},
+         ${b.buyback_rate ?? null}, ${b.rate_structure ?? null}, ${b.notes ?? null})
+      RETURNING *
+    `;
+    return NextResponse.json({ success: true, utility: rows[0] });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const body = await req.json();
-  const { id, ...f } = body;
-  if (!id) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
-
-  const sql = getDb();
-  await sql`UPDATE utility_policies SET
-    utility_name=${f.utility_name}, state=${f.state}, net_metering=${f.net_metering},
-    interconnection_limit_kw=${f.interconnection_limit_kw||null}, buyback_rate=${f.buyback_rate||null},
-    rate_structure=${f.rate_structure||null}, notes=${f.notes||null}, updated_at=NOW()
-    WHERE id=${id}`;
-  return NextResponse.json({ success: true });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const b = await req.json();
+    if (!b.id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
+    await sql`
+      UPDATE utility_policies SET
+        utility_name             = COALESCE(${b.utility_name             ?? null}, utility_name),
+        state                    = COALESCE(${b.state                    ?? null}, state),
+        country                  = COALESCE(${b.country                  ?? null}, country),
+        net_metering             = COALESCE(${b.net_metering             ?? null}, net_metering),
+        interconnection_limit_kw = COALESCE(${b.interconnection_limit_kw ?? null}, interconnection_limit_kw),
+        buyback_rate             = COALESCE(${b.buyback_rate             ?? null}, buyback_rate),
+        rate_structure           = COALESCE(${b.rate_structure           ?? null}, rate_structure),
+        notes                    = COALESCE(${b.notes                    ?? null}, notes),
+        updated_at               = NOW()
+      WHERE id = ${b.id}
+    `;
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get('id');
-  if (!id) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
-
-  const sql = getDb();
-  await sql`DELETE FROM utility_policies WHERE id=${id}`;
-  return NextResponse.json({ success: true });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const { id } = await req.json();
+    if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
+    await sql`DELETE FROM utility_policies WHERE id = ${id}`;
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }

@@ -1,14 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { requireAdminApi } from '@/lib/adminAuth';
 import { getDb } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
-    return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-  }
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
     const sql = getDb();
@@ -18,65 +16,53 @@ export async function GET(req: NextRequest) {
       userStats, projectStats, proposalStats,
       layoutStats, fileStats, planStats,
     ] = await Promise.all([
-      sql`SELECT
-            COUNT(*)::int                                                          AS total,
-            COUNT(*) FILTER (WHERE subscription_status NOT IN ('suspended','cancelled'))::int AS active,
-            COUNT(*) FILTER (WHERE created_at::date = ${today}::date)::int        AS today,
-            COUNT(*) FILTER (WHERE role = 'admin' OR role = 'super_admin')::int   AS admins,
-            COUNT(*) FILTER (WHERE is_free_pass = true)::int                      AS free_pass,
-            COUNT(*) FILTER (WHERE subscription_status = 'trialing')::int         AS trialing,
-            COUNT(*) FILTER (WHERE subscription_status = 'active')::int           AS paid
+      sql`SELECT COUNT(*) AS total,
+               SUM(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS last30
           FROM users`,
-      sql`SELECT
-            COUNT(*)::int                                                          AS total,
-            COUNT(*) FILTER (WHERE created_at::date = ${today}::date)::int        AS today,
-            COUNT(*) FILTER (WHERE status = 'active')::int                        AS active,
-            COUNT(*) FILTER (WHERE status = 'completed')::int                     AS completed
-          FROM projects WHERE deleted_at IS NULL`,
-      sql`SELECT COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE created_at::date = ${today}::date)::int AS today
+      sql`SELECT COUNT(*) AS total,
+               SUM(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS last30
+          FROM projects`,
+      sql`SELECT COUNT(*) AS total,
+               SUM(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 ELSE 0 END) AS last30
           FROM proposals`,
-      sql`SELECT COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE created_at::date = ${today}::date)::int AS today
+      sql`SELECT COUNT(*) AS total
           FROM layouts`,
-      sql`SELECT COUNT(*)::int AS total,
-            COALESCE(SUM(file_size),0)::bigint AS total_bytes
+      sql`SELECT COUNT(*) AS total,
+               COALESCE(SUM(file_size), 0) AS total_bytes
           FROM project_files`,
-      sql`SELECT plan, COUNT(*)::int AS cnt FROM users GROUP BY plan ORDER BY cnt DESC`,
+      sql`SELECT plan, COUNT(*) AS cnt FROM users GROUP BY plan ORDER BY cnt DESC`,
     ]);
 
-    // 30-day trend: projects per day
-    const trend = await sql`
-      SELECT created_at::date AS day, COUNT(*)::int AS cnt
-      FROM projects
-      WHERE created_at >= NOW() - INTERVAL '30 days' AND deleted_at IS NULL
+    // 30-day daily trend for new users
+    const userTrend = await sql`
+      SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+      FROM users
+      WHERE created_at >= NOW() - INTERVAL '30 days'
       GROUP BY day ORDER BY day
     `;
 
-    // 30-day proposals trend
-    const proposalTrend = await sql`
-      SELECT created_at::date AS day, COUNT(*)::int AS cnt
-      FROM proposals
+    // 30-day daily trend for new projects
+    const projectTrend = await sql`
+      SELECT DATE(created_at) AS day, COUNT(*) AS cnt
+      FROM projects
       WHERE created_at >= NOW() - INTERVAL '30 days'
       GROUP BY day ORDER BY day
     `;
 
     return NextResponse.json({
       success: true,
-      data: {
-        users:       userStats[0],
-        projects:    projectStats[0],
-        proposals:   proposalStats[0],
-        layouts:     layoutStats[0],
-        files:       fileStats[0],
-        planBreakdown: planStats,
-        trends: {
-          projects:  trend,
-          proposals: proposalTrend,
-        },
+      stats: {
+        users:     { total: Number(userStats[0]?.total ?? 0),     last30: Number(userStats[0]?.last30 ?? 0) },
+        projects:  { total: Number(projectStats[0]?.total ?? 0),  last30: Number(projectStats[0]?.last30 ?? 0) },
+        proposals: { total: Number(proposalStats[0]?.total ?? 0), last30: Number(proposalStats[0]?.last30 ?? 0) },
+        layouts:   { total: Number(layoutStats[0]?.total ?? 0) },
+        files:     { total: Number(fileStats[0]?.total ?? 0), totalBytes: Number(fileStats[0]?.total_bytes ?? 0) },
+        plans:     planStats.map(r => ({ plan: r.plan, count: Number(r.cnt) })),
+        userTrend: userTrend.map(r => ({ day: r.day, count: Number(r.cnt) })),
+        projectTrend: projectTrend.map(r => ({ day: r.day, count: Number(r.cnt) })),
       },
     });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
 }

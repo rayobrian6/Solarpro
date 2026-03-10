@@ -1,63 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { requireAdminApi } from '@/lib/adminAuth';
 import { getDb } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
-function isAdmin(role?: string) { return role === 'admin' || role === 'super_admin'; }
-
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const sql = getDb();
-  const rows = await sql`SELECT * FROM incentive_overrides ORDER BY country, state, program_name`;
-  return NextResponse.json({ success: true, data: rows });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const rows = await sql`SELECT * FROM incentive_overrides ORDER BY created_at DESC`;
+    return NextResponse.json({ success: true, incentives: rows });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const body = await req.json();
-  const { country='US', state, utility, program_name, type, value, value_type='percent', start_date, end_date, active=true, notes } = body;
-  if (!program_name || !type || value == null) return NextResponse.json({ success: false, error: 'program_name, type, value required' }, { status: 400 });
-
-  const sql = getDb();
-  const rows = await sql`
-    INSERT INTO incentive_overrides (country, state, utility, program_name, type, value, value_type, start_date, end_date, active, notes, created_by)
-    VALUES (${country}, ${state||null}, ${utility||null}, ${program_name}, ${type}, ${value}, ${value_type}, ${start_date||null}, ${end_date||null}, ${active}, ${notes||null}, ${user.email})
-    RETURNING *
-  `;
-  return NextResponse.json({ success: true, data: rows[0] });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const b = await req.json();
+    const rows = await sql`
+      INSERT INTO incentive_overrides
+        (country, state, utility, program_name, type, value, value_type, start_date, end_date, active, notes, created_by)
+      VALUES
+        (${b.country ?? 'US'}, ${b.state ?? null}, ${b.utility ?? null},
+         ${b.program_name}, ${b.type}, ${b.value}, ${b.value_type ?? 'percent'},
+         ${b.start_date ?? null}, ${b.end_date ?? null}, ${b.active ?? true},
+         ${b.notes ?? null}, ${admin.email})
+      RETURNING *
+    `;
+    return NextResponse.json({ success: true, incentive: rows[0] });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const body = await req.json();
-  const { id, ...fields } = body;
-  if (!id) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
-
-  const sql = getDb();
-  await sql`UPDATE incentive_overrides SET
-    program_name=${fields.program_name}, type=${fields.type}, value=${fields.value},
-    value_type=${fields.value_type}, state=${fields.state||null}, utility=${fields.utility||null},
-    active=${fields.active}, notes=${fields.notes||null}, updated_at=NOW()
-    WHERE id=${id}`;
-  return NextResponse.json({ success: true });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const b = await req.json();
+    if (!b.id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
+    await sql`
+      UPDATE incentive_overrides SET
+        country      = COALESCE(${b.country      ?? null}, country),
+        state        = COALESCE(${b.state        ?? null}, state),
+        utility      = COALESCE(${b.utility      ?? null}, utility),
+        program_name = COALESCE(${b.program_name ?? null}, program_name),
+        type         = COALESCE(${b.type         ?? null}, type),
+        value        = COALESCE(${b.value        ?? null}, value),
+        value_type   = COALESCE(${b.value_type   ?? null}, value_type),
+        start_date   = COALESCE(${b.start_date   ?? null}, start_date),
+        end_date     = COALESCE(${b.end_date     ?? null}, end_date),
+        active       = COALESCE(${b.active       ?? null}, active),
+        notes        = COALESCE(${b.notes        ?? null}, notes),
+        updated_at   = NOW()
+      WHERE id = ${b.id}
+    `;
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }
 
 export async function DELETE(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || !isAdmin(user.role)) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get('id');
-  if (!id) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
-
-  const sql = getDb();
-  await sql`DELETE FROM incentive_overrides WHERE id=${id}`;
-  return NextResponse.json({ success: true });
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  try {
+    const sql = getDb();
+    const { id } = await req.json();
+    if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
+    await sql`DELETE FROM incentive_overrides WHERE id = ${id}`;
+    return NextResponse.json({ success: true });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }

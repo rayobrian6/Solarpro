@@ -1,67 +1,68 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { requireAdminApi } from '@/lib/adminAuth';
 import { getDb } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const user = getUserFromRequest(req);
-  if (!user || (user.role !== 'admin' && user.role !== 'super_admin')) {
-    return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-  }
+  const admin = await requireAdminApi(req);
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
-  const sql = getDb();
-  const checks: Record<string, any> = {};
-
-  // DB latency
-  const dbStart = Date.now();
   try {
+    const sql = getDb();
+    const start = Date.now();
+
+    // DB latency ping
     await sql`SELECT 1`;
-    checks.database = { status: 'ok', latencyMs: Date.now() - dbStart };
-  } catch (e: any) {
-    checks.database = { status: 'error', error: e.message };
-  }
+    const dbLatencyMs = Date.now() - start;
 
-  // Table counts
-  try {
-    const tables = await sql`
-      SELECT schemaname, tablename,
-             pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
-      FROM pg_tables
-      WHERE schemaname = 'public'
-      ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+    // Table row counts
+    const [
+      userCount, projectCount, proposalCount,
+      layoutCount, fileCount, clientCount,
+    ] = await Promise.all([
+      sql`SELECT COUNT(*) AS cnt FROM users`,
+      sql`SELECT COUNT(*) AS cnt FROM projects`,
+      sql`SELECT COUNT(*) AS cnt FROM proposals`,
+      sql`SELECT COUNT(*) AS cnt FROM layouts`,
+      sql`SELECT COUNT(*) AS cnt FROM project_files`,
+      sql`SELECT COUNT(*) AS cnt FROM clients`,
+    ]);
+
+    // Table sizes
+    const tableSizes = await sql`
+      SELECT relname AS table_name,
+             pg_size_pretty(pg_total_relation_size(relid)) AS size,
+             pg_total_relation_size(relid) AS size_bytes
+      FROM pg_catalog.pg_statio_user_tables
+      ORDER BY pg_total_relation_size(relid) DESC
+      LIMIT 15
     `;
-    checks.tables = tables;
-  } catch (e: any) {
-    checks.tables = { error: e.message };
-  }
 
-  // DB size
-  try {
-    const dbSize = await sql`SELECT pg_size_pretty(pg_database_size(current_database())) AS size`;
-    checks.dbSize = dbSize[0].size;
-  } catch {}
-
-  // Row counts
-  try {
-    const counts = await sql`
-      SELECT
-        (SELECT COUNT(*) FROM users)::int         AS users,
-        (SELECT COUNT(*) FROM projects)::int      AS projects,
-        (SELECT COUNT(*) FROM clients)::int       AS clients,
-        (SELECT COUNT(*) FROM proposals)::int     AS proposals,
-        (SELECT COUNT(*) FROM layouts)::int       AS layouts,
-        (SELECT COUNT(*) FROM productions)::int   AS productions,
-        (SELECT COUNT(*) FROM project_files)::int AS project_files
+    // DB total size
+    const dbSize = await sql`
+      SELECT pg_size_pretty(pg_database_size(current_database())) AS size
     `;
-    checks.rowCounts = counts[0];
-  } catch (e: any) {
-    checks.rowCounts = { error: e.message };
-  }
 
-  return NextResponse.json({
-    success: true,
-    timestamp: new Date().toISOString(),
-    checks,
-  });
+    return NextResponse.json({
+      success: true,
+      dbLatencyMs,
+      dbSizeHuman: dbSize[0]?.size ?? 'unknown',
+      rowCounts: {
+        users:         Number(userCount[0]?.cnt ?? 0),
+        projects:      Number(projectCount[0]?.cnt ?? 0),
+        proposals:     Number(proposalCount[0]?.cnt ?? 0),
+        layouts:       Number(layoutCount[0]?.cnt ?? 0),
+        project_files: Number(fileCount[0]?.cnt ?? 0),
+        clients:       Number(clientCount[0]?.cnt ?? 0),
+      },
+      tableSizes: tableSizes.map(r => ({
+        table:     r.table_name,
+        size:      r.size,
+        sizeBytes: Number(r.size_bytes),
+      })),
+    });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  }
 }

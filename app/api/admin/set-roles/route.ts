@@ -3,71 +3,76 @@ import { getDb } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
-// GET with secret param — easy to use from browser address bar
-// Usage: /api/admin/set-roles?secret=YOUR_MIGRATE_SECRET
+// GET /api/admin/set-roles?secret=YOUR_SECRET
+// Emergency endpoint to set admin roles — bypasses JWT auth, uses migrate secret
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const secret = searchParams.get('secret');
-
-  // If no secret, just show current roles
-  if (!secret) {
-    try {
-      const sql = getDb();
-      const rows = await sql`
-        SELECT email, role FROM users
-        WHERE email IN ('raymond.obrian@yahoo.com', 'carpenterjames88@gmail.com', 'cody@underthesun.solutions')
-        ORDER BY email
-      `;
-      return NextResponse.json({ 
-        success: true, 
-        roles: rows,
-        usage: 'Add ?secret=YOUR_MIGRATE_SECRET to this URL to update roles'
-      });
-    } catch (err: any) {
-      return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-    }
-  }
-
-  // Verify secret
+  const secret = req.nextUrl.searchParams.get('secret');
   const migrateSecret = process.env.MIGRATE_SECRET;
-  if (!migrateSecret || secret !== migrateSecret) {
-    return NextResponse.json({ success: false, error: 'Invalid secret' }, { status: 403 });
+
+  if (!migrateSecret) {
+    return NextResponse.json({ success: false, error: 'MIGRATE_SECRET not configured' }, { status: 500 });
+  }
+  if (secret !== migrateSecret) {
+    return NextResponse.json({ success: false, error: 'Invalid secret' }, { status: 401 });
   }
 
   try {
     const sql = getDb();
+    const results: string[] = [];
 
-    const r1 = await sql`
-      UPDATE users SET role = 'super_admin'
-      WHERE email = 'raymond.obrian@yahoo.com'
-      RETURNING id, email, role
-    `;
-    const r2 = await sql`
-      UPDATE users SET role = 'admin'
-      WHERE email = 'carpenterjames88@gmail.com'
-      RETURNING id, email, role
-    `;
-    const r3 = await sql`
-      UPDATE users SET role = 'admin'
-      WHERE email = 'cody@underthesun.solutions'
-      RETURNING id, email, role
-    `;
+    // Step 1: Drop old constraint
+    try {
+      await sql`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`;
+      results.push('✅ Dropped old users_role_check constraint');
+    } catch (e: any) {
+      results.push(`⚠️ Drop constraint: ${e.message}`);
+    }
 
-    return NextResponse.json({
-      success: true,
-      updated: {
-        raymond: r1[0] ?? 'not found',
-        james:   r2[0] ?? 'not found',
-        cody:    r3[0] ?? 'not found',
-      },
-      nextStep: 'Log out and log back in, then go to /admin',
-    });
+    // Step 2: Normalize invalid roles
+    try {
+      await sql`UPDATE users SET role = 'user' WHERE role NOT IN ('user', 'admin', 'super_admin')`;
+      results.push('✅ Normalized invalid role values to user');
+    } catch (e: any) {
+      results.push(`⚠️ Normalize roles: ${e.message}`);
+    }
 
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    // Step 3: Add new constraint
+    try {
+      await sql`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin', 'super_admin'))`;
+      results.push('✅ Added new users_role_check constraint');
+    } catch (e: any) {
+      results.push(`⚠️ Add constraint: ${e.message}`);
+    }
+
+    // Step 4: Set roles
+    const roleUpdates = [
+      { email: 'raymond.obrian@yahoo.com',   role: 'super_admin' },
+      { email: 'carpenterjames88@gmail.com',  role: 'admin' },
+      { email: 'cody@underthesun.solutions',  role: 'admin' },
+    ];
+
+    for (const { email, role } of roleUpdates) {
+      try {
+        const result = await sql`UPDATE users SET role = ${role}, updated_at = NOW() WHERE email = ${email} RETURNING email, role`;
+        if (result.length > 0) {
+          results.push(`✅ ${email} → role = ${role}`);
+        } else {
+          results.push(`⚠️ ${email} — user not found in DB`);
+        }
+      } catch (e: any) {
+        results.push(`❌ ${email}: ${e.message}`);
+      }
+    }
+
+    // Step 5: Verify
+    const verify = await sql`SELECT email, role FROM users WHERE email IN ('raymond.obrian@yahoo.com','carpenterjames88@gmail.com','cody@underthesun.solutions') ORDER BY email`;
+    results.push('--- Verification ---');
+    for (const row of verify) {
+      results.push(`  ${row.email}: role = ${row.role}`);
+    }
+
+    return NextResponse.json({ success: true, results });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
-}
-
-export async function POST(req: NextRequest) {
-  return GET(req);
 }

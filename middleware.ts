@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const COOKIE_NAME = 'solarpro_session';
-const JWT_SECRET = process.env.JWT_SECRET || 'solarpro-secret-key-change-in-production-2024';
 
 // Public paths that never require auth
 const PUBLIC_PATHS = [
@@ -22,17 +21,17 @@ const PUBLIC_PATHS = [
   '/api/stripe/webhook',
   '/api/migrate',
   '/api/admin/free-pass',
+  '/api/admin/set-roles',
+  '/api/admin/debug',
 ];
 
-// Simple JWT decode without verification (verification happens in API routes)
-// For middleware we just check if a token exists and is structurally valid
-function decodeJwtPayload(token: string): any | null {
+// Simple JWT decode without verification (verification happens in API routes / server components)
+// For middleware we just check if a token exists, is structurally valid, and not expired
+function decodeJwtPayload(token: string): Record<string, any> | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
-    const payload = parts[1];
-    // Base64url decode
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const json = atob(base64);
     const data = JSON.parse(json);
     // Check expiry
@@ -48,7 +47,7 @@ function decodeJwtPayload(token: string): any | null {
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Allow public auth paths
+  // Allow public paths
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
     return NextResponse.next();
   }
@@ -65,23 +64,41 @@ export function middleware(req: NextRequest) {
 
   // Check for session cookie
   const token = req.cookies.get(COOKIE_NAME)?.value;
-  const user = token ? decodeJwtPayload(token) : null;
+  const user  = token ? decodeJwtPayload(token) : null;
 
+  // Not authenticated
   if (!user) {
-    // API routes → return 401 JSON
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
         { success: false, error: 'Authentication required' },
         { status: 401 }
       );
     }
-
-    // Page routes → redirect to login
     const loginUrl = new URL('/auth/login', req.url);
     if (pathname !== '/' && !pathname.startsWith('/auth')) {
       loginUrl.searchParams.set('redirect', pathname);
     }
     return NextResponse.redirect(loginUrl);
+  }
+
+  // /admin routes — middleware does a quick JWT role check as first gate.
+  // The server component layout (requireAdmin) does the authoritative DB check.
+  // NOTE: JWT role may be stale — requireAdmin() always re-fetches from DB.
+  // We allow through here if JWT has admin/super_admin OR if JWT has no role
+  // (stale token) — requireAdmin() will do the real check.
+  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
+    const role = user.role ?? '';
+    // If JWT explicitly has a non-admin role, block early
+    if (role && role !== 'admin' && role !== 'super_admin') {
+      if (pathname.startsWith('/api/admin')) {
+        return NextResponse.json(
+          { success: false, error: 'Forbidden — admin access required' },
+          { status: 403 }
+        );
+      }
+      return NextResponse.redirect(new URL('/dashboard', req.url));
+    }
+    // Otherwise let through — requireAdmin() / requireAdminApi() will do DB check
   }
 
   // Authenticated — pass through

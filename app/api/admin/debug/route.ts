@@ -1,18 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { verifyToken } from '@/lib/auth';
 import { getDb } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
-// Temporary debug endpoint — remove after fixing admin access
+// Debug endpoint — check session state and DB role
 export async function GET(req: NextRequest) {
-  const jwtUser = getUserFromRequest(req);
+  const cookieHeader = req.headers.get('cookie') || '';
+  const match = cookieHeader.match(/solarpro_session=([^;]+)/);
 
-  if (!jwtUser) {
+  if (!match) {
     return NextResponse.json({
       status: 'no_session',
-      message: 'No valid session cookie found',
-      cookie: req.headers.get('cookie')?.includes('solarpro_session') ? 'cookie_present_but_invalid' : 'no_cookie',
+      message: 'No solarpro_session cookie found',
+    });
+  }
+
+  const jwtUser = verifyToken(match[1]);
+  if (!jwtUser) {
+    return NextResponse.json({
+      status: 'invalid_token',
+      message: 'Cookie present but token is invalid or expired',
     });
   }
 
@@ -30,19 +38,21 @@ export async function GET(req: NextRequest) {
     dbRole = `db_error: ${e.message}`;
   }
 
+  const isAdmin = dbRole === 'admin' || dbRole === 'super_admin';
+
   return NextResponse.json({
     status: 'ok',
     jwtUser: {
-      id: jwtUser.id,
+      id:    jwtUser.id,
       email: jwtUser.email,
-      name: jwtUser.name,
-      role: jwtUser.role ?? 'not_in_jwt',
+      name:  jwtUser.name,
+      role:  jwtUser.role ?? 'not_in_jwt',
     },
     dbRole,
     dbFound,
-    isAdmin: dbRole === 'admin' || dbRole === 'super_admin',
-    message: dbRole === 'admin' || dbRole === 'super_admin'
-      ? '✅ You should have admin access'
+    isAdmin,
+    message: isAdmin
+      ? `✅ DB role is "${dbRole}" — admin access granted`
       : `❌ DB role is "${dbRole}" — not admin/super_admin`,
   });
 }
