@@ -313,8 +313,11 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   const [overrideFinal, setOverrideFinal]     = useState<string>('');
 
   // Compute effective pricing — priority: sales override > stored costEstimate > live calc
-  const systemSizeKw = layout?.systemSizeKw ?? 0;
-  const systemSizeW  = systemSizeKw * 1000;
+  // Fall back to project.systemSizeKw if layout not yet placed (preliminary mode)
+  const systemSizeKw = (layout?.systemSizeKw && layout.systemSizeKw > 0)
+    ? layout.systemSizeKw
+    : ((proj as any)?.systemSizeKw ?? 0);
+  const systemSizeW = systemSizeKw * 1000;
   const storedCashPrice = cost?.cashPrice ?? cost?.grossCost ?? 0;
   const systemType = proj?.systemType ?? 'roof';
 
@@ -526,8 +529,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
                   { label: 'System Type', value: systemTypeLabel, icon: systemTypeIcon, color: 'border-amber-500/30 bg-amber-500/10' },
-                  { label: 'System Size', value: layout ? `${layout.systemSizeKw.toFixed(1)} kW` : '—', icon: <Zap size={16} />, color: 'border-blue-500/30 bg-blue-500/10' },
-                  { label: 'Annual Production', value: production ? `${(production.annualProductionKwh / 1000).toFixed(1)} MWh` : '—', icon: <Sun size={16} />, color: 'border-emerald-500/30 bg-emerald-500/10' },
+                  { label: 'System Size', value: systemSizeKw > 0 ? `${systemSizeKw.toFixed(1)} kW` : '—', icon: <Zap size={16} />, color: 'border-blue-500/30 bg-blue-500/10' },
+                  { label: 'Annual Production', value: production ? `${(production.annualProductionKwh / 1000).toFixed(1)} MWh` : (systemSizeKw > 0 ? `${(systemSizeKw * 1.25).toFixed(1)} MWh est.` : '—'), icon: <Sun size={16} />, color: 'border-emerald-500/30 bg-emerald-500/10' },
                   { label: 'Cash Price', value: effectiveFinal > 0 ? `$${effectiveFinal.toLocaleString()}` : '—', icon: <DollarSign size={16} />, color: 'border-purple-500/30 bg-purple-500/10' },
                 ].map(item => (
                   <div key={item.label} className={`rounded-xl p-4 border ${item.color} backdrop-blur-sm`}>
@@ -595,9 +598,9 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               {[
                 { icon: systemTypeIcon, label: 'System Type', value: systemTypeLabel, color: 'bg-amber-50 text-amber-700 border-amber-200' },
-                { icon: <Zap size={18} />, label: 'System Size', value: layout ? `${layout.systemSizeKw.toFixed(2)} kW` : '—', color: 'bg-blue-50 text-blue-700 border-blue-200' },
-                { icon: <Sun size={18} />, label: 'Panel Count', value: layout ? `${layout.totalPanels} panels` : '—', color: 'bg-orange-50 text-orange-700 border-orange-200' },
-                { icon: <TrendingUp size={18} />, label: 'Annual Production', value: production ? `${production.annualProductionKwh.toLocaleString()} kWh` : '—', color: 'bg-green-50 text-green-700 border-green-200' },
+                { icon: <Zap size={18} />, label: 'System Size', value: systemSizeKw > 0 ? `${systemSizeKw.toFixed(2)} kW` : '—', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                { icon: <Sun size={18} />, label: 'Panel Count', value: (layout?.totalPanels && layout.totalPanels > 0) ? `${layout.totalPanels} panels` : (systemSizeKw > 0 ? `${Math.ceil(systemSizeKw / 0.44)} panels` : '—'), color: 'bg-orange-50 text-orange-700 border-orange-200' },
+                { icon: <TrendingUp size={18} />, label: 'Annual Production', value: production ? `${production.annualProductionKwh.toLocaleString()} kWh` : (systemSizeKw > 0 ? `${Math.round(systemSizeKw * 1250).toLocaleString()} kWh est.` : '—'), color: 'bg-green-50 text-green-700 border-green-200' },
               ].map(item => (
                 <div key={item.label} className={`rounded-xl p-4 border ${item.color}`}>
                   <div className="mb-2 opacity-70">{item.icon}</div>

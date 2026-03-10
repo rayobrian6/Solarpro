@@ -373,10 +373,9 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         log('⚠ Proposal will be created from the project page');
       }
 
-      // 4. Auto-generate preliminary engineering packet + save as project file
-      log('Generating preliminary engineering packet...');
+      // 4. Auto-generate full engineering workspace (layout + production + files)
+      log('Building engineering workspace...');
       try {
-        // Ensure we have a usable kWh value — fall back to monthlyKwh * 12
         const annualKwhForPacket =
           (result.billData.estimatedAnnualKwh && result.billData.estimatedAnnualKwh > 0)
             ? result.billData.estimatedAnnualKwh
@@ -385,82 +384,49 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
               : 0;
 
         if (annualKwhForPacket === 0) {
-          log('⚠ No kWh data — skipping engineering packet');
-          throw new Error('No kWh data available for preliminary estimate');
-        }
-
-        const prelimRes = await fetch('/api/engineering/preliminary', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            annualKwh:       annualKwhForPacket,
-            monthlyKwh:      result.billData.monthlyKwh,
-            utilityName:     result.billData.utilityProvider || result.utilityData?.utilityName,
-            serviceAddress:  safeAddress,
-            clientName,
-            projectName,
-            stateCode:       result.locationData?.stateCode,
-            electricityRate: result.billData.electricityRate || result.utilityData?.avgRatePerKwh,
-            projectId,
-            clientId,
-          }),
-        });
-        const prelimData = await prelimRes.json();
-        if (prelimData.success && prelimData.data?.reportText) {
-          // Save the report text as a project file
-          const reportBlob = btoa(unescape(encodeURIComponent(prelimData.data.reportText)));
-          await fetch('/api/project-files', {
+          log('⚠ No kWh data — skipping engineering workspace');
+        } else {
+          const prelimRes = await fetch('/api/engineering/preliminary', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              annualKwh:       annualKwhForPacket,
+              monthlyKwh:      result.billData.monthlyKwh,
+              utilityName:     result.billData.utilityProvider || result.utilityData?.utilityName,
+              serviceAddress:  safeAddress,
+              clientName,
+              projectName,
+              stateCode:       result.locationData?.stateCode,
+              electricityRate: result.billData.electricityRate || result.utilityData?.avgRatePerKwh,
               projectId,
               clientId,
-              fileName:  `Preliminary_Engineering_${clientName.replace(/[^a-z0-9]/gi, '_')}_${new Date().getFullYear()}.txt`,
-              fileType:  'engineering',
-              mimeType:  'text/plain',
-              fileData:  reportBlob,
-              notes:     'Auto-generated preliminary engineering estimate from bill upload',
             }),
           });
-          // Save SLD SVG if generated
-          if (prelimData.data.sldSvg) {
-            const sldBlob = btoa(unescape(encodeURIComponent(prelimData.data.sldSvg)));
-            await fetch('/api/project-files', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                projectId,
-                clientId,
-                fileName:  `Preliminary_SLD_${clientName.replace(/[^a-z0-9]/gi, '_')}.svg`,
-                fileType:  'engineering',
-                mimeType:  'image/svg+xml',
-                fileData:  sldBlob,
-                notes:     'Auto-generated preliminary single-line diagram',
-              }),
-            });
+          const prelimData = await prelimRes.json();
+          if (prelimData.success) {
+            const saved = prelimData.data?.savedFiles || [];
+            log(`✓ Engineering workspace created (${saved.length} files: ${saved.join(', ')})`);
+          } else {
+            log(`⚠ Engineering workspace: ${prelimData.error || 'partial failure — check Engineering tab'}`);
           }
-          log('✓ Preliminary engineering packet saved to project files');
-        } else {
-          const errMsg = (prelimData as any)?.error || 'Unknown error';
-          log(`⚠ Engineering packet skipped: ${errMsg}`);
         }
       } catch (pkgErr: unknown) {
         const msg = pkgErr instanceof Error ? pkgErr.message : String(pkgErr);
-        log(`⚠ Engineering packet skipped: ${msg}`);
+        log(`⚠ Engineering workspace skipped: ${msg}`);
       }
 
-      // 5. Save the original utility bill as a project file
+      // 5. Save the original utility bill PDF/image as a project file
       if (lastFile) {
         try {
           const billFormData = new FormData();
           billFormData.append('file', lastFile);
           billFormData.append('projectId', projectId);
           billFormData.append('clientId', clientId);
-          billFormData.append('notes', 'Original utility bill uploaded during onboarding');
+          billFormData.append('notes', 'Original utility bill — uploaded during onboarding');
           await fetch('/api/project-files', { method: 'POST', body: billFormData });
-          log('✓ Utility bill saved to project files');
+          log('✓ Original utility bill saved');
         } catch {
-          // Non-fatal — bill upload already succeeded
+          // Non-fatal
         }
       }
 

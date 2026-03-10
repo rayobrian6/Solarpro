@@ -6970,10 +6970,10 @@ function EngineeringPageInner() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <FolderOpen size={14} className="text-amber-400" /> Client Files
+                    <FolderOpen size={14} className="text-amber-400" /> Client Engineering Workspace
                   </h3>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Utility bills · Engineering packets · Proposals · Site photos · Permits
+                    Auto-generated from bill upload · Bill Data · System Estimate · Engineering Packet · SLD · BOM
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -6985,25 +6985,6 @@ function EngineeringPageInner() {
                     <RefreshCw size={13} className={filesLoading ? 'animate-spin' : ''} />
                     Refresh
                   </button>
-                  <button
-                    onClick={() => filesInputRef.current?.click()}
-                    disabled={fileUploading}
-                    className="btn-primary btn-sm"
-                  >
-                    <Upload size={13} />
-                    {fileUploading ? 'Uploading…' : 'Upload File'}
-                  </button>
-                  <input
-                    ref={filesInputRef}
-                    type="file"
-                    className="hidden"
-                    accept=".pdf,.jpg,.jpeg,.png,.webp,.svg,.doc,.docx,.txt"
-                    onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileUpload(file);
-                      e.target.value = '';
-                    }}
-                  />
                 </div>
               </div>
 
@@ -7044,112 +7025,74 @@ function EngineeringPageInner() {
               ) : projectFiles.length === 0 ? (
                 <div className="card p-12 text-center">
                   <FolderOpen size={40} className="mx-auto mb-4 text-slate-600" />
-                  <div className="text-sm font-bold text-white mb-1">No files yet</div>
+                  <div className="text-sm font-bold text-white mb-1">No workspace files yet</div>
                   <div className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
-                    Upload utility bills, engineering packets, proposals, site photos, or permits.
-                    Files are stored securely in SolarPro and linked to this project.
+                    Upload a utility bill from the dashboard to automatically generate the client engineering workspace.
+                    Files are created automatically — no manual upload required.
                   </div>
-                  <button
-                    onClick={() => filesInputRef.current?.click()}
-                    className="btn-primary btn-sm mx-auto"
-                  >
-                    <Upload size={13} /> Upload First File
-                  </button>
+                  <p className="text-xs text-amber-400/70">
+                    Bill Data · System Estimate · Engineering Packet · SLD · BOM
+                  </p>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {projectFiles.map((file: any) => {
-                    const typeColors: Record<string, string> = {
-                      utility_bill:  'text-amber-400  bg-amber-500/10  border-amber-500/20',
-                      engineering:   'text-blue-400   bg-blue-500/10   border-blue-500/20',
-                      proposal:      'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-                      permit:        'text-purple-400 bg-purple-500/10 border-purple-500/20',
-                      site_photo:    'text-sky-400    bg-sky-500/10    border-sky-500/20',
-                      document:      'text-slate-400  bg-slate-700/40  border-slate-600/40',
-                      other:         'text-slate-400  bg-slate-700/40  border-slate-600/40',
-                    };
-                    const typeLabels: Record<string, string> = {
-                      utility_bill: 'Utility Bill', engineering: 'Engineering',
-                      proposal: 'Proposal', permit: 'Permit',
-                      site_photo: 'Site Photo', document: 'Document', other: 'File',
-                    };
-                    const colorClass = typeColors[file.file_type] || typeColors.other;
-                    const typeLabel  = typeLabels[file.file_type] || 'File';
-                    const isImage    = file.mime_type?.startsWith('image/');
-                    const isSvg      = file.mime_type === 'image/svg+xml';
-                    const isPdf      = file.mime_type === 'application/pdf';
-                    const fileSizeKb = file.file_size ? `${(file.file_size / 1024).toFixed(1)} KB` : '';
-                    const uploadDate = file.upload_date
-                      ? new Date(file.upload_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-                      : '';
-
+                <div className="space-y-3">
+                  {/* Workspace folder structure */}
+                  {[
+                    { label: 'Bill Data',          icon: <File size={13} />,     color: 'text-blue-300',   bg: 'bg-blue-500/10',   border: 'border-blue-500/20',   match: (f: any) => f.file_type === 'utility_bill' && f.file_name.startsWith('Bill_Data_') },
+                    { label: 'System Estimate',     icon: <FileText size={13} />, color: 'text-green-300',  bg: 'bg-green-500/10',  border: 'border-green-500/20',  match: (f: any) => f.file_name.includes('Estimate') },
+                    { label: 'Engineering Packet',  icon: <FileBadge size={13}/>, color: 'text-amber-300',  bg: 'bg-amber-500/10',  border: 'border-amber-500/20',  match: (f: any) => f.file_name.includes('Engineering_Packet') },
+                    { label: 'Single-Line Diagram', icon: <FileBadge size={13}/>, color: 'text-purple-300', bg: 'bg-purple-500/10', border: 'border-purple-500/20', match: (f: any) => f.file_name.includes('SLD') },
+                    { label: 'Bill of Materials',   icon: <FileText size={13} />, color: 'text-cyan-300',   bg: 'bg-cyan-500/10',   border: 'border-cyan-500/20',   match: (f: any) => f.file_name.includes('BOM') },
+                    { label: 'Original Utility Bill',icon: <File size={13} />,    color: 'text-slate-300',  bg: 'bg-slate-700/40',  border: 'border-slate-600/40',  match: (f: any) => f.file_type === 'utility_bill' && !f.file_name.startsWith('Bill_Data_') },
+                    { label: 'Other Files',         icon: <File size={13} />,     color: 'text-slate-400',  bg: 'bg-slate-700/30',  border: 'border-slate-600/30',  match: (f: any) => f.file_type !== 'utility_bill' && !f.file_name.includes('Estimate') && !f.file_name.includes('Engineering_Packet') && !f.file_name.includes('SLD') && !f.file_name.includes('BOM') },
+                  ].map(folder => {
+                    const files = projectFiles.filter(folder.match);
+                    if (files.length === 0) return null;
                     return (
-                      <div key={file.id} className="card p-4 flex items-center gap-3 hover:border-slate-600/60 transition-colors">
-                        {/* File type icon */}
-                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 border ${colorClass}`}>
-                          {isImage && !isSvg ? <Image size={16} /> :
-                           isSvg            ? <FileBadge size={16} /> :
-                           isPdf            ? <FileText size={16} /> :
-                                              <File size={16} />}
+                      <div key={folder.label} className={`rounded-xl border ${folder.border} overflow-hidden`}>
+                        <div className={`flex items-center gap-2 px-4 py-2.5 ${folder.bg} border-b ${folder.border}`}>
+                          <FolderOpen size={13} className={folder.color} />
+                          <span className={`text-xs font-semibold ${folder.color}`}>{folder.label}</span>
+                          <span className="text-xs text-slate-500 ml-auto">{files.length} file{files.length > 1 ? 's' : ''}</span>
                         </div>
-
-                        {/* File info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-white text-sm font-medium truncate">{file.file_name}</span>
-                            <span className={`text-xs px-1.5 py-0.5 rounded-full border flex-shrink-0 ${colorClass}`}>
-                              {typeLabel}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs text-slate-500">
-                            {fileSizeKb && <span>{fileSizeKb}</span>}
-                            {uploadDate && <span>{uploadDate}</span>}
-                            {file.notes && <span className="truncate italic">{file.notes}</span>}
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex items-center gap-1 flex-shrink-0">
-                          <a
-                            href={`/api/project-files/download?id=${file.id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors"
-                            title="View / Download"
-                          >
-                            <ExternalLink size={14} />
-                          </a>
-                          <button
-                            onClick={() => handleFileDelete(file.id)}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                            title="Delete file"
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                        <div className="divide-y divide-slate-700/30">
+                          {files.map((file: any) => {
+                            const fileSizeKb = file.file_size ? (file.file_size < 1024 ? `${file.file_size}B` : `${(file.file_size / 1024).toFixed(1)}KB`) : '';
+                            const uploadDate = file.upload_date ? new Date(file.upload_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+                            return (
+                              <div key={file.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-700/20 transition-colors">
+                                <span className={`flex-shrink-0 ${folder.color}`}>{folder.icon}</span>
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm text-white truncate block">{file.file_name}</span>
+                                  <span className="text-xs text-slate-500">{[fileSizeKb, uploadDate].filter(Boolean).join(' · ')}</span>
+                                </div>
+                                <div className="flex items-center gap-1 flex-shrink-0">
+                                  <a
+                                    href={`/api/project-files/download?id=${file.id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className={`p-1.5 rounded-lg ${folder.color} hover:bg-slate-700/60 transition-colors`}
+                                    title="View / Download"
+                                  >
+                                    <ExternalLink size={13} />
+                                  </a>
+                                  <button
+                                    onClick={() => handleFileDelete(file.id)}
+                                    className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                                    title="Delete"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
                   })}
                 </div>
               )}
-
-              {/* Drag-and-drop zone */}
-              <div
-                className="border-2 border-dashed border-slate-700/60 rounded-xl p-8 text-center hover:border-amber-500/40 transition-colors cursor-pointer"
-                onClick={() => filesInputRef.current?.click()}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => {
-                  e.preventDefault();
-                  const file = e.dataTransfer.files[0];
-                  if (file) handleFileUpload(file);
-                }}
-              >
-                <Upload size={24} className="mx-auto mb-2 text-slate-600" />
-                <p className="text-xs text-slate-500">
-                  Drag &amp; drop files here, or <span className="text-amber-400 underline">click to browse</span>
-                </p>
-                <p className="text-xs text-slate-600 mt-1">PDF, JPG, PNG, SVG, DOC · Max 10MB</p>
-              </div>
             </div>
           )}
 

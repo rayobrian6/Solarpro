@@ -48,11 +48,8 @@ export default function EngineeringTab({ projectId, projectName }: EngineeringTa
       const res = await fetch(`/api/project-files?projectId=${projectId}`);
       const data = await res.json();
       if (data.success) {
-        // Show engineering + utility_bill files as preliminary packet
-        const relevant = (data.data || []).filter((f: ProjectFile) =>
-          f.file_type === 'engineering' || f.file_type === 'utility_bill'
-        );
-        setPreliminaryFiles(relevant);
+        // Show all auto-generated files in the workspace
+        setPreliminaryFiles(data.data || []);
       }
     } catch { /* ignore */ }
   }, [projectId]);
@@ -351,39 +348,90 @@ ${(pp?.specialConditions?.length) ? `
   if (error) {
     return (
       <div className="p-6 space-y-4">
-        {/* Preliminary packet files — shown when no design exists yet */}
+        {/* Client Engineering Workspace — shown when no full design exists yet */}
         {needsDesign && preliminaryFiles.length > 0 && (
-          <div className="bg-slate-800/60 border border-amber-500/30 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <FolderOpen className="w-4 h-4 text-amber-400" />
-              <span className="text-amber-300 font-medium text-sm">Preliminary Engineering Packet</span>
-              <span className="text-xs text-slate-400 ml-1">— generated from bill upload</span>
-            </div>
-            <div className="space-y-2">
-              {preliminaryFiles.map(f => (
-                <div key={f.id} className="flex items-center justify-between bg-slate-700/40 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
-                      f.file_type === 'engineering' ? 'bg-green-500/20 text-green-300' : 'bg-blue-500/20 text-blue-300'
-                    }`}>
-                      {f.file_type === 'engineering' ? 'Engineering' : 'Utility Bill'}
-                    </span>
-                    <span className="text-sm text-white truncate">{f.file_name}</span>
-                  </div>
-                  <a
-                    href={`/api/project-files/download?id=${f.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 flex-shrink-0 ml-2"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> View
-                  </a>
+          <div className="space-y-3">
+            {/* Workspace header */}
+            <div className="bg-slate-800/60 border border-amber-500/30 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <FolderOpen className="w-5 h-5 text-amber-400" />
+                  <span className="text-amber-300 font-semibold text-sm">Client Engineering Workspace</span>
+                  <span className="text-xs bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full">Preliminary</span>
                 </div>
-              ))}
+                <span className="text-xs text-slate-500">{preliminaryFiles.length} files auto-generated</span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Auto-generated from utility bill upload. Contractors can open and modify before final submission.
+              </p>
             </div>
-            <p className="text-xs text-slate-500 mt-3">
-              Place panels in Design Studio to generate a full permit-grade engineering report.
-            </p>
+
+            {/* Folder groups */}
+            {[
+              { label: 'Bill Data',           type: 'utility_bill', color: 'text-blue-300',   bg: 'bg-blue-500/20',   border: 'border-blue-500/20'   },
+              { label: 'System Estimate',      type: 'engineering',  color: 'text-green-300',  bg: 'bg-green-500/20',  border: 'border-green-500/20',  nameMatch: 'Estimate' },
+              { label: 'Engineering Packet',   type: 'engineering',  color: 'text-amber-300',  bg: 'bg-amber-500/20',  border: 'border-amber-500/20',  nameMatch: 'Engineering_Packet' },
+              { label: 'Single-Line Diagram',  type: 'engineering',  color: 'text-purple-300', bg: 'bg-purple-500/20', border: 'border-purple-500/20', nameMatch: 'SLD' },
+              { label: 'Bill of Materials',    type: 'engineering',  color: 'text-cyan-300',   bg: 'bg-cyan-500/20',   border: 'border-cyan-500/20',   nameMatch: 'BOM' },
+              { label: 'Original Bill',        type: 'utility_bill', color: 'text-slate-300',  bg: 'bg-slate-500/20',  border: 'border-slate-500/20',  nameMatch: undefined, originalOnly: true },
+            ].map(folder => {
+              const files = preliminaryFiles.filter(f => {
+                if (folder.originalOnly) {
+                  // Original uploaded bill (PDF/image, not the text summary)
+                  return f.file_type === 'utility_bill' && !f.file_name.startsWith('Bill_Data_');
+                }
+                if (folder.nameMatch) {
+                  return f.file_type === folder.type && f.file_name.includes(folder.nameMatch);
+                }
+                return f.file_type === folder.type && f.file_name.startsWith('Bill_Data_');
+              });
+              if (files.length === 0) return null;
+              return (
+                <div key={folder.label} className={`bg-slate-800/40 border ${folder.border} rounded-xl overflow-hidden`}>
+                  <div className="flex items-center gap-2 px-4 py-2.5 border-b border-slate-700/50">
+                    <FolderOpen className={`w-3.5 h-3.5 ${folder.color}`} />
+                    <span className={`text-xs font-semibold ${folder.color}`}>{folder.label}</span>
+                    <span className="text-xs text-slate-500 ml-auto">{files.length} file{files.length > 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="divide-y divide-slate-700/30">
+                    {files.map(f => (
+                      <div key={f.id} className="flex items-center justify-between px-4 py-2.5 hover:bg-slate-700/20">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-xs text-slate-300 truncate">{f.file_name}</span>
+                          {f.file_size && (
+                            <span className="text-xs text-slate-600 flex-shrink-0">
+                              {f.file_size < 1024 ? `${f.file_size}B` : `${Math.round(f.file_size / 1024)}KB`}
+                            </span>
+                          )}
+                        </div>
+                        <a
+                          href={`/api/project-files/download?id=${f.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`flex items-center gap-1 text-xs ${folder.color} hover:opacity-80 flex-shrink-0 ml-3`}
+                        >
+                          <Eye className="w-3 h-3" /> View
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* CTA to upgrade to full design */}
+            <div className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-white">Ready for full permit-grade engineering?</p>
+                <p className="text-xs text-slate-400 mt-0.5">Place panels in Design Studio to generate NEC 690 / ASCE 7-22 report</p>
+              </div>
+              <a
+                href={`/design?projectId=${projectId}`}
+                className="btn-primary text-xs flex items-center gap-1.5 flex-shrink-0 ml-4"
+              >
+                <Layers className="w-3.5 h-3.5" /> Open Design Studio
+              </a>
+            </div>
           </div>
         )}
 
