@@ -105,6 +105,38 @@ export async function POST(req: NextRequest) {
       { name: 'brand_secondary_color',  ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS brand_secondary_color TEXT DEFAULT '#0f172a'` },
       { name: 'proposal_footer_text',   ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS proposal_footer_text TEXT` },
       { name: 'updated_at',             ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` },
+      { name: 'role',                   ddl: () => sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'` },
+      // Admin tables
+      { name: 'incentive_overrides',    ddl: () => sql`CREATE TABLE IF NOT EXISTS incentive_overrides (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        country TEXT NOT NULL DEFAULT 'US',
+        state TEXT,
+        utility TEXT,
+        program_name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        value NUMERIC NOT NULL,
+        value_type TEXT NOT NULL DEFAULT 'percent',
+        start_date DATE,
+        end_date DATE,
+        active BOOLEAN NOT NULL DEFAULT true,
+        notes TEXT,
+        created_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )` },
+      { name: 'utility_policies',       ddl: () => sql`CREATE TABLE IF NOT EXISTS utility_policies (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        utility_name TEXT NOT NULL,
+        state TEXT NOT NULL,
+        country TEXT NOT NULL DEFAULT 'US',
+        net_metering BOOLEAN NOT NULL DEFAULT true,
+        interconnection_limit_kw NUMERIC,
+        buyback_rate NUMERIC,
+        rate_structure TEXT,
+        notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )` },
     ];
 
     for (const { name, ddl } of colMigrations) {
@@ -133,9 +165,9 @@ export async function POST(req: NextRequest) {
     // Grant free pass to specified users (upsert by email)
     // IMPORTANT: updated_at column is added above in colMigrations — safe to use here
     const freePassUsers = [
-      { name: "Raymond O'Brian", email: 'raymond.obrian@yahoo.com',      company: 'SolarPro',            role: 'user',  note: 'Owner / Founder' },
-      { name: 'James Carpenter',  email: 'carpenterjames88@gmail.com',    company: 'SolarPro',            role: 'user',  note: 'Team member — free pass granted by owner' },
-      { name: 'Cody',             email: 'cody@underthesun.solutions',    company: 'Under The Sun',       role: 'user',  note: 'Team member — free pass granted by owner' },
+      { name: "Raymond O'Brian", email: 'raymond.obrian@yahoo.com',      company: 'SolarPro',            role: 'super_admin',  note: 'Owner / Founder' },
+      { name: 'James Carpenter',  email: 'carpenterjames88@gmail.com',    company: 'SolarPro',            role: 'admin',  note: 'Team member — free pass granted by owner' },
+      { name: 'Cody',             email: 'cody@underthesun.solutions',    company: 'Under The Sun',       role: 'admin',  note: 'Team member — free pass granted by owner' },
       { name: 'Angelique',        email: 'angelique@lmdsolarllc.com',     company: 'LMD Solar LLC',       role: 'user',  note: 'LMD Solar partner — free pass granted by owner' },
       { name: 'UTS Marketing',    email: 'utsmarketing25@gmail.com',      company: 'UTS Marketing',       role: 'user',  note: 'Marketing partner — free pass granted by owner' },
       { name: 'Sarah',            email: 'sarah@solfence.solar',          company: 'Solfence Solar',      role: 'user',  note: 'Partner — free pass granted by owner' },

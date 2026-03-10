@@ -2,145 +2,33 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v39.5';
+export const BUILD_VERSION = 'v39.6';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'SECURITY + SARAH FREE PASS + BILL UPLOAD CLIENT FILES PIPELINE FIX';
+export const BUILD_DESCRIPTION = 'FULL ADMIN PORTAL — Dashboard, Users, Companies, Projects, Engineering, Incentives, Utilities, DB, Files, Health';
 export const BUILD_FEATURES = [
-  // Phase 1: National Location Engine
-  'NEW: lib/locationEngine.ts — Census Bureau + Google Maps + Nominatim geocoding (all 50 states)',
-  'NEW: app/api/geocode/route.ts — national geocoding endpoint with full location metadata',
-  // Phase 2: Utility Detection System
-  'NEW: lib/utilityDetector.ts — URDB API + state-level fallback rates for all 50 states',
-  'NEW: app/api/utility-detect/route.ts — auto-detect utility from address or lat/lng',
-  // Phase 3: National Engineering Jurisdiction System
-  'NEW: lib/jurisdictions/necVersions.ts — NEC version by state/county/city (all 50 states)',
-  'NEW: lib/jurisdictions/ahj.ts — AHJ lookup with permit fees, setbacks, rapid shutdown rules',
-  'NEW: Engineering — City/County fields with live AHJ auto-detection panel',
-  'NEW: Engineering — lookupAhj() wired into config panel (NEC version, permit days, setbacks)',
-  // Phase 4: Utility Bill Upload + OCR System
-  'NEW: lib/billOcr.ts — OCR parser for 35+ major utility bill formats (PDF + image)',
-  'NEW: app/api/bill-upload/route.ts — PDF/JPG/PNG upload with pdftotext + Tesseract OCR',
-  'NEW: components/onboarding/BillUploadFlow.tsx — 4-step bill upload → sizing → proposal flow',
-  // Phase 5: Auto System Sizing
-  'NEW: lib/autoSizing.ts — PVWatts API v8 + state sun hours → optimal system size',
-  'NEW: app/api/auto-size/route.ts — auto-sizing endpoint from kWh consumption',
-  // Phase 6: Auto Design Generation
-  'NEW: lib/autoDesign.ts — roof plane detection + panel placement for 5 roof types',
-  'NEW: app/api/auto-design/route.ts — generate initial layout from system size + location',
-  // Phase 7: State Incentive Database
-  'NEW: lib/incentives/stateIncentives.ts — all 50 states: ITC, credits, rebates, SRECs, TRECs',
-  'NEW: lib/incentives/incentiveEngine.ts — full financial model with incentives (NPV, IRR, payback)',
-  'NEW: app/api/incentives/route.ts — incentives by state/utility with system-specific calculation',
-  // Phase 8: Enhanced Financial Modeling
-  'NEW: Proposals — State-specific incentives section (auto-detected by project location)',
-  'NEW: Proposals — Dynamic incentive breakdown: tax credits, rebates, SRECs, exemptions',
-  // Phase 9: Auto Proposal Generation
-  'NEW: Proposals — calculateIncentives() wired into proposal preview (all 50 states)',
-  // Phase 10: UI — National Workflow
-  'NEW: Projects/New — Upload Electric Bill button with BillUploadFlow integration',
-  'NEW: Projects/New — Address field with auto-geocoding on blur + location tags',
-  'NEW: Projects/New — Utility auto-detection display (name, rate, net metering status)',
-  // Phase 11: National Scalability
-  'UPGRADE: types/index.ts — Project type extended with stateCode, city, county, zip, utilityName, utilityRatePerKwh',
-  // Phase 12: Co-op Expansion + Address Auto-Detection
-  'UPGRADE: lib/utilityDetector.ts — All 50 states now include electric co-ops, REMCs, EMCs, REAs, PUDs, municipal utilities',
-  'NEW: Engineering — Address onBlur auto-detects state + city + auto-selects first utility',
-  'NEW: Engineering — State dropdown auto-selects first utility when state changes',
-  'NEW: Engineering — Auto-detected badge shown when state matches address',
-  'DATA: IL — 25 utilities including all major co-ops (Adams, Coles-Moultrie, Corn Belt, Eastern Illini, Egyptian, etc.)',
-  'DATA: TX — 55+ utilities including all major co-ops (Pedernales, Bluebonnet, CoServ, Guadalupe Valley, etc.)',
-  'DATA: IA — 30+ utilities including all major co-ops (Allamakee-Clayton, Boone Valley, Eastern Iowa, etc.)',
-  'DATA: IN — 35+ utilities including all REMCs (Bartholomew, Boone, Carroll White, Daviess-Martin, etc.)',
-  'DATA: GA — 30+ utilities including all EMCs (Cobb, Sawnee, Jackson, Walton, Snapping Shoals, etc.)',
-  // Phase 13: Compliance Engine Fixes
-  'FIX: Battery Backfeed NEC 705.12(B) — correct formula: Solar+Battery ≤ (Bus×1.2)−Main [was wrongly adding Main to load]',
-  'FIX: Default rafterSpan 16ft → 12ft — 2×6 at 16ft always failed with snow load; 12ft is typical residential',
-  'FIX: Busbar violation message — now shows full formula + remediation options (supply-side tap, derate, upgrade)',
-  // Phase 14: BOM Wire Gauge Fix
-  'FIX: BOM line items now generate ONE wire line item per gauge (#10/#8/#6/#4 AWG) matching summary card quantities',
-  'FIX: BOM DC wire (ROOF_RUN #10 AWG) now appears as separate line item for microinverter systems',
-  'FIX: BOM conduit now grouped by type+size — one line item per conduit type/size combination',
-  'FIX: BOM wire quantities derived from ComputedSystem.runs (conductorCount × length × 1.15) — matches wire-in-conduit sizing section',
-  // Phase 15: Generator Wire Run + 3D Performance + Ground Mount
-  'NEW: Engineering — Generator to ATS Wire Length input (conditional, only shown when generator selected)',
-  'NEW: Engineering — Live wire gauge/conduit/OCPD display from GENERATOR_TO_ATS_RUN when generator configured',
-  'PERF: 3D — Incremental panel rendering (diff old vs new, only add/remove changed entities)',
-  'PERF: 3D — Debounced panel useEffect (16ms batching prevents redundant rebuilds during auto-fill)',
-  'PERF: 3D — clearPanels() resets incremental diff state for correct full rebuild on next render',
-  'FIX: 3D — Row tool now inherits systemType from last active mode (roof/ground/fence) instead of hardcoded roof',
-  'FIX: 3D — Ground row placement: switch to Ground mode then Row mode to place ground-type panel rows',
-  // Phase 16: v30.7 — 3D Performance v2 + Ground Array Mode + AI Support Bot
-  'PERF: 3D — React.memo with custom prop comparison (prevents re-renders on unrelated parent state changes)',
-  'PERF: 3D — Dynamic shadow map resolution: 512px >800m, 1024px 300-800m, 2048px close-up (GPU load reduction)',
-  'PERF: 3D — Camera-based tile LOD: maximumScreenSpaceError 32/16/4 based on camera height',
-  'PERF: 3D — In-place entity position update (updates entity.position/orientation directly, eliminates flicker)',
-  'PERF: 3D — Dynamic debounce window: 16ms single panel, 32ms 5+ panels, 50ms 20+ panels',
-  'NEW: 3D — Ground Array mode (🌱 G-Array): chained row placement with auto-calculated inter-row spacing',
-  'NEW: 3D — calcMinRowSpacing(): winter solstice shadow formula (tilt + latitude → minimum row spacing)',
-  'NEW: 3D — Ground array keyboard shortcuts: Enter to finalize, Escape to cancel',
-  'NEW: 3D — Ground array status UI: row count, panel count, kW, Confirm/Cancel buttons',
-  'NEW: components/support/SolarAIBot.tsx — Free built-in AI chat widget (zero cost, no API keys)',
-  'NEW: SolarAIBot — Rule-based pattern matching engine with 20+ solar knowledge base entries',
-  'NEW: SolarAIBot — Covers: NEC wire sizing, panel placement, battery/generator wiring, BOM, SLD, proposals, incentives',
-  'NEW: SolarAIBot — Quick replies, typing indicator, markdown formatting, floating button with unread badge',
-  'NEW: app/layout.tsx — SolarAIBot integrated as global floating widget on all pages',
-  // Phase 17: v30.9 — Panel Placement Engine v2
-  'NEW: lib/placementEngine.ts — Grid snapping, orientation-aware layout, fire setback zones, multi-row placement',
-  'NEW: PanelOrientation — portrait/landscape toggle swaps panel width/height for all layout calculations',
-  'NEW: FireSetbackConfig — AHJ-configurable edge (18″), ridge (18″), pathway (36″) setbacks with per-AHJ override',
-  'NEW: generateSetbackZones() — red restricted / green buildable polygon overlays on canvas',
-  'NEW: generateAlignedGrid() — azimuth-rotated grid engine (ENU local frame + rotation + PIP test)',
-  'NEW: generateMultipleRows() — multi-row placement from start/end line with auto row spacing',
-  'NEW: calcMinRowSpacing() — winter solstice shadow formula (same as SolarEngine3D)',
-  'NEW: snapToGrid() — invisible grid snapping anchored to first panel of array',
-  'UPGRADE: panelLayoutOptimized.ts — orientation + fireSetbackM params, cache key uses panelW/panelH',
-  'UPGRADE: DesignStudio — Portrait/Landscape toggle in Configuration sidebar',
-  'UPGRADE: DesignStudio — Fire setback controls (edge/ridge sliders + pathway toggle) in sidebar',
-  'UPGRADE: DesignStudio — Multi-row placement tool (⊞ toolbar button + row count selector)',
-  'UPGRADE: DesignStudio — Setback zone overlay rendering (red/green zones on canvas)',
-  'UPGRADE: DesignStudio — Multi-row guide line with cursor tracking on canvas',
-  'UPGRADE: DesignStudio — Multi-row hint banner (top-center overlay when tool active)',
-  'SAFE: All new features are additive — panel classification, BOM, proposals, engineering unchanged',
-  // Phase 18: v31.1 — Interaction Audit & Repair
-  'AUDIT: DIAGNOSTIC_REPORT.md — 9 bugs identified across 2D canvas + 3D Cesium engine',
-  'FIX: 3D — drillPick replaces scene.pick() for panel selection (panels selectable through terrain/tile mesh)',
-  'FIX: 2D — Per-panel orientation-aware hit detection (landscape panels now selectable)',
-  'FIX: 2D — Per-panel systemType color (mixed roof+ground designs show correct colors)',
-  'FIX: 2D — multiRowMode cleared when switching tools (Select tool no longer blocked)',
-  'FIX: 2D — Keyboard shortcuts: V=Select, R=Roof, G=Ground, F=Fence, M=Measure, Del=Delete, Esc=Cancel',
-  'FIX: 2D — Delete/Backspace key deletes selected panels (updates panel count + system size)',
-  'FIX: 2D — Escape key cancels drawing / deactivates multi-row mode',
-  'NEW: 2D — Active tool indicator (bottom-center canvas overlay with tool name + selection count)',
-  'NEW: 3D — Active tool indicator badge in 3D toolbar (shows current PlacementMode)',
-  'FIX: UI — 3D placement mode labels clarified (Place Roof / Place Ground vs ambiguous Roof/Ground)',
-  'FIX: UI — Placement safety guard comment in handleCanvasClick (Select never places panels)',
-  'SAFE: panel counting, systemType classification, engineering, BOM, proposals all unchanged',
-  // Phase 19: v31.3 — Auto Fill Fix
-  'FIX: 3D — fillRoofSegmentWithPanels() primary path: uses seg.googlePanels (Google pre-computed positions)',
-  'FIX: 3D — fillRoofSegmentWithPanels() elevation: OHIO_GEOID_UNDULATION fallback when cesiumGroundElevRef not yet set (race condition fix)',
-  'FIX: 3D — fillRoofSegmentWithPanels() fallback path: azimuth-rotated grid (not axis-aligned BB) with point-in-polygon clipping against seg.convexHull',
-  'FIX: 3D — fillRoofSegmentWithPanels() orientation: respects panelOrientationRef in both primary and fallback paths',
-  'FIX: 3D — Auto Fill panel count: residential roof now generates 15-30 panels (was 1801 due to unclipped BB grid)',
-  'FIX: 3D — Auto Fill visibility: panels now render above roof surface (was 30m underground due to missing geoid offset)',
-  'FIX: 3D — Google panel orientation: maps PORTRAIT/LANDSCAPE string to PanelOrientation type',
-  'SAFE: onPanelsChange(), setPanelCount(), systemType=roof, engineering pipeline, BOM, proposals all unchanged',
-  // Phase 20: v31.5 — Auto Fill Repair v2
-  'FIX: 3D — fillRoofSegmentWithPanels() complete rewrite aligned with Row tool Cartesian3 approach',
-  'FIX: 3D — FALLBACK PATH: uses C.Cartesian3.fromDegrees origin + ENU ridge/slope direction vectors (mirrors finalizeRow())',
-  'FIX: 3D — FALLBACK PATH: panel positions converted via C.Cartographic.fromCartesian (same as Row tool)',
-  'FIX: 3D — maxPanels enforcement: each segment capped at seg.maxPanels (area-based realistic limit, default 60)',
-  'FIX: 3D — PRIMARY PATH: googlePanels still used first; falls back to Cartesian3 grid only when empty',
-  'FIX: 3D — Polygon clipping: panels outside seg.convexHull discarded via ray-casting point-in-polygon',
-  'FIX: 3D — Duplicate comment block removed from fillRoofSegmentWithPanels',
-  'SAFE: handleAutoRoof() still fills all eligible segments (sunshineHours >= 50% of best)',
-  'SAFE: systemType=roof, onPanelsChange(), setPanelCount(), engineering, BOM, proposals unchanged',
-  // Phase 21: v31.7 — Auto Fill Rendering & Placement Fix
-  'FIX: 3D — Auto Fill now waits for cesiumGroundElevRef > 0 before running (terrain-ready poll, max 5s)',
-  'FIX: 3D — fillRoofSegmentWithPanels elevation: uses cesiumGroundElevRef + seg.heightAboveGround (bypasses geoid undulation)',
-  'FIX: 3D — addPanelEntity box: disableDepthTestDistance=POSITIVE_INFINITY (panels always visible, no 3D tile clipping)',
-  'FIX: 3D — setTerrainReady(true) called after terrain sampling completes (debug panel now shows correct state)',
-  'FIX: 3D — setRenderMode(TILES) called after Google 3D Tiles load (debug panel now shows correct state)',
-  'SAFE: Row tool, manual placement, panel counting, engineering, BOM, proposals all unchanged',
+  // Admin Portal v39.6
+  'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
+  'NEW: lib/adminAuth.ts — requireAdmin() server-side JWT auth with role check + redirect',
+  'NEW: app/admin/layout.tsx — Admin shell layout with requireAdmin() gate',
+  'NEW: app/admin/AdminShell.tsx — Dark sidebar nav (10 sections), role badge, back-to-app link',
+  'NEW: app/admin/page.tsx — Dashboard: stat cards, 30-day trends, plan breakdown, quick links',
+  'NEW: app/admin/users/page.tsx — User management: search, pagination, grant free pass, suspend, reset trial, set role, edit, delete',
+  'NEW: app/admin/companies/page.tsx — Company overview: grouped by company field, user count, plans, free pass status',
+  'NEW: app/admin/projects/page.tsx — Project management: search, pagination, soft-delete/restore, open-in-engineering',
+  'NEW: app/admin/engineering/page.tsx — Engineering monitor: file type breakdown, 30-day trend chart',
+  'NEW: app/admin/incentives/page.tsx — Incentives CRUD: full add/edit/delete for incentive_overrides table, seed defaults',
+  'NEW: app/admin/utilities/page.tsx — Utility policies CRUD: net metering, interconnection limits, buyback rates',
+  'NEW: app/admin/database/page.tsx — DB maintenance: health stats, row counts, table sizes, run migration button',
+  'NEW: app/admin/files/page.tsx — File storage manager: storage stats, file type filter, paginated table, delete files',
+  'NEW: app/admin/health/page.tsx — System health monitor: service status grid, DB/API latency, row counts, table sizes',
+  'NEW: app/api/admin/stats/route.ts — Aggregated stats: users, projects, proposals, layouts, files + 30-day trends',
+  'NEW: app/api/admin/users/route.ts — User CRUD API with actions: grant_free_pass, suspend, unsuspend, reset_trial, set_role, set_plan, update, delete',
+  'NEW: app/api/admin/projects/route.ts — Project management API with JOINs to users and clients',
+  'NEW: app/api/admin/files/route.ts — File storage API: paginated list with fileType filter, storage stats, delete',
+  'NEW: app/api/admin/health/route.ts — DB health: latency check, table sizes, DB size, row counts',
+  'NEW: app/api/admin/incentives/route.ts — Full CRUD for incentive_overrides table',
+  'NEW: app/api/admin/utilities/route.ts — Full CRUD for utility_policies table',
+  'UPGRADE: app/api/migrate/route.ts — Add role column, incentive_overrides table, utility_policies table; set raymond=super_admin, james+cody=admin',
 ] as const;
 
 export function getBuildBadge(): string {
