@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.1';
+export const BUILD_VERSION = 'v40.2';
 export const BUILD_DATE = '2025-03-10';
 export const BUILD_DESCRIPTION = 'STABLE: Role stripped from JWT - DB is sole source of truth for RBAC';
 export const BUILD_FEATURES = [
