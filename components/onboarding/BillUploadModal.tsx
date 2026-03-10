@@ -57,6 +57,14 @@ interface SystemSizing {
   offsetPercent: number;
 }
 
+interface RateValidation {
+  corrected: boolean;
+  originalRate: number | null;
+  correctedRate: number;
+  source: string;
+  message: string;
+}
+
 interface UploadResult {
   billData: BillData;
   locationData?: LocationData;
@@ -64,6 +72,7 @@ interface UploadResult {
   systemSizing?: SystemSizing;
   validation: { valid: boolean; warnings: string[]; errors: string[] };
   extractionMethod?: string;
+  rateValidation?: RateValidation | null;
 }
 
 interface CreatedEntities {
@@ -636,6 +645,20 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     <span className="text-blue-300 text-xs font-medium">Location Detected</span>
                   </div>
                   <p className="text-white text-sm">{result.locationData.city}, {result.locationData.county ? `${result.locationData.county} County, ` : ''}{result.locationData.state} {result.locationData.zip}</p>
+                </div>
+              )}
+
+              {/* Rate correction warning */}
+              {result.rateValidation?.corrected && (
+                <div className="flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                  <AlertCircle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-amber-300 text-xs font-semibold">Rate Auto-Corrected</p>
+                    <p className="text-amber-200/80 text-xs mt-0.5">
+                      Extracted rate ${result.rateValidation.originalRate?.toFixed(3)}/kWh appears to be an avoided cost rate, not retail.
+                      Using utility retail rate: <strong>${result.rateValidation.correctedRate.toFixed(3)}/kWh</strong>
+                    </p>
+                  </div>
                 </div>
               )}
 

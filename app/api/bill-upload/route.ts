@@ -4,6 +4,7 @@ import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
 import { extractPdfTextPure } from '@/lib/pdfExtract';
+import { validateAndCorrectUtilityRate, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
 
 // Top-level reference so webpack marks pdf-parse as external (not bundled)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -127,10 +128,37 @@ export async function POST(req: NextRequest) {
       console.warn('[bill-upload] No service address found in bill data');
     }
 
+    // ── Rate Validation ──────────────────────────────────────────────────────
+    // If extracted rate looks like avoided cost (< $0.07/kWh), replace with
+    // the utility's known retail rate from the rules database.
+    const utilityNameForRate = billData.utilityProvider || utilityData?.utilityName || null;
+    const rateValidation = validateAndCorrectUtilityRate(billData.electricityRate ?? null, utilityNameForRate);
+    if (rateValidation.corrected) {
+      console.log(`[bill-upload] Rate corrected: $${rateValidation.originalRate?.toFixed(3) ?? 'null'} → $${rateValidation.rate.toFixed(3)}/kWh (source: ${rateValidation.source})`);
+      billData.electricityRate = rateValidation.rate;
+    } else {
+      console.log(`[bill-upload] Rate valid: $${billData.electricityRate?.toFixed(3)}/kWh`);
+    }
+
+    // ── System Size Calculation ───────────────────────────────────────────────
     console.log('[bill-upload] Calculating system size...');
     const annualKwh = billData.estimatedAnnualKwh || 0;
-    const systemSizeKw = annualKwh > 0 ? calculateRecommendedSystemSize(annualKwh, locationData?.lat || 35) : null;
-    console.log('[bill-upload] System size:', systemSizeKw, 'kW for', annualKwh, 'kWh/yr');
+    // Use utility-aware production factor for accurate sizing
+    const productionFactor = getProductionFactor(utilityNameForRate);
+    const systemSizeKw = annualKwh > 0
+      ? Math.round((annualKwh / productionFactor) * 10) / 10
+      : null;
+    console.log(`[bill-upload] System size: ${systemSizeKw} kW for ${annualKwh} kWh/yr (factor: ${productionFactor})`);
+
+    // ── Net Metering Guardrail ────────────────────────────────────────────────
+    const netMeteringWarning = systemSizeKw
+      ? checkNetMeteringLimit(systemSizeKw, utilityNameForRate)
+      : null;
+    if (netMeteringWarning) {
+      console.warn(`[bill-upload] Net metering warning: ${netMeteringWarning}`);
+      if (!validation.warnings) (validation as any).warnings = [];
+      (validation as any).warnings.push(netMeteringWarning);
+    }
 
     console.log('[bill-upload] Returning success response');
     return NextResponse.json({
@@ -140,11 +168,18 @@ export async function POST(req: NextRequest) {
       locationData,
       utilityData,
       extractionMethod,
+      rateValidation: rateValidation.corrected ? {
+        corrected: true,
+        originalRate: rateValidation.originalRate,
+        correctedRate: rateValidation.rate,
+        source: rateValidation.source,
+        message: `Rate corrected from $${rateValidation.originalRate?.toFixed(3) ?? 'null'}/kWh (likely avoided cost) to $${rateValidation.rate.toFixed(3)}/kWh (retail rate)`,
+      } : null,
       systemSizing: systemSizeKw ? {
         recommendedKw: systemSizeKw,
         annualKwh,
         offsetPercent: 100,
-        note: 'Based on 100% offset.',
+        note: `Based on 100% offset. Production factor: ${productionFactor} kWh/kW/yr.`,
       } : null,
     });
 

@@ -132,6 +132,7 @@ export async function POST(req: NextRequest) {
       { name: 'Cody',             email: 'cody@underthesun.solutions',    company: 'Under The Sun',       role: 'user',  note: 'Team member — free pass granted by owner' },
       { name: 'Angelique',        email: 'angelique@lmdsolarllc.com',     company: 'LMD Solar LLC',       role: 'user',  note: 'LMD Solar partner — free pass granted by owner' },
       { name: 'UTS Marketing',    email: 'utsmarketing25@gmail.com',      company: 'UTS Marketing',       role: 'user',  note: 'Marketing partner — free pass granted by owner' },
+      { name: 'Sarah',            email: 'sarah@solfence.solar',          company: 'Solfence Solar',      role: 'user',  note: 'Partner — free pass granted by owner' },
     ];
 
     for (const u of freePassUsers) {

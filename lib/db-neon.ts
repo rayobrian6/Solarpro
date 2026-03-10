@@ -370,24 +370,55 @@ export async function createProject(data: {
   };
   const billDataJson = data.billData ? JSON.stringify(sanitizeBillData(data.billData)) : null;
   const sql = getDb();
-  const rows = await sql`
-    INSERT INTO projects (
-      user_id, client_id, name, status, system_type, notes, address, lat, lng, system_size_kw, bill_data
-    ) VALUES (
-      ${data.userId},
-      ${clientId},
-      ${data.name},
-      ${data.status || 'lead'},
-      ${data.systemType || 'roof'},
-      ${data.notes || ''},
-      ${data.address || ''},
-      ${data.lat ?? null},
-      ${data.lng ?? null},
-      ${data.systemSizeKw ?? null},
-      ${billDataJson}::jsonb
-    )
-    RETURNING *
-  `;
+
+  // Try INSERT with bill_data + system_size_kw columns first.
+  // If those columns don't exist yet (migration not run on live DB), fall back to base INSERT.
+  let rows: any[];
+  try {
+    rows = await sql`
+      INSERT INTO projects (
+        user_id, client_id, name, status, system_type, notes, address, lat, lng, system_size_kw, bill_data
+      ) VALUES (
+        ${data.userId},
+        ${clientId},
+        ${data.name},
+        ${data.status || 'lead'},
+        ${data.systemType || 'roof'},
+        ${data.notes || ''},
+        ${data.address || ''},
+        ${data.lat ?? null},
+        ${data.lng ?? null},
+        ${data.systemSizeKw ?? null},
+        ${billDataJson}::jsonb
+      )
+      RETURNING *
+    `;
+  } catch (insertErr: any) {
+    // If the error is about missing columns, fall back to base INSERT without them
+    const msg = (insertErr?.message || '').toLowerCase();
+    if (msg.includes('column') && (msg.includes('bill_data') || msg.includes('system_size_kw'))) {
+      console.warn('[createProject] bill_data/system_size_kw columns missing — using base INSERT. Run /api/migrate to add them.');
+      rows = await sql`
+        INSERT INTO projects (
+          user_id, client_id, name, status, system_type, notes, address, lat, lng
+        ) VALUES (
+          ${data.userId},
+          ${clientId},
+          ${data.name},
+          ${data.status || 'lead'},
+          ${data.systemType || 'roof'},
+          ${data.notes || ''},
+          ${data.address || ''},
+          ${data.lat ?? null},
+          ${data.lng ?? null}
+        )
+        RETURNING *
+      `;
+    } else {
+      throw insertErr;
+    }
+  }
+
   const project = rowToProject(rows[0]);
   // Store extended location fields in notes metadata (JSON suffix) if DB columns not yet migrated
   // These are passed through to the returned project object for immediate use
