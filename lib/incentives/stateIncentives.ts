@@ -1273,6 +1273,8 @@ export function calculateIncentives(
   federal: IncentiveCalculation;
   state: IncentiveCalculation[];
   total: number;
+  cashTotal: number;
+  nonCashStateTotal: number;
   netSystemCost: number;
   summary: string;
 } {
@@ -1342,15 +1344,35 @@ export function calculateIncentives(
     }
   }
 
-  const stateTotal = stateCalcs.reduce((s, i) => s + i.calculatedValue, 0);
+  // ── Separate CASH incentives (reduce net cost) from NON-CASH benefits ──────
+  // Property tax exemptions and sales tax exemptions do NOT reduce the purchase
+  // price — they are ongoing benefits, not upfront cash. SRECs are future income.
+  // Only federal ITC, state tax credits, rebates, and utility rebates are cash.
+  const CASH_TYPES: IncentiveType[] = [
+    'federal_itc', 'state_tax_credit', 'state_rebate', 'utility_rebate', 'performance_payment',
+  ];
+  const NON_CASH_TYPES: IncentiveType[] = [
+    'property_tax_exemption', 'sales_tax_exemption', 'srec', 'trec', 'net_metering', 'loan_program',
+  ];
+
+  const cashStateTotal    = stateCalcs.filter(i => CASH_TYPES.includes(i.type)).reduce((s, i) => s + i.calculatedValue, 0);
+  const nonCashStateTotal = stateCalcs.filter(i => NON_CASH_TYPES.includes(i.type)).reduce((s, i) => s + i.calculatedValue, 0);
+  const stateTotal        = stateCalcs.reduce((s, i) => s + i.calculatedValue, 0);
+
+  // Net system cost = only subtract CASH incentives (ITC + cash rebates/credits)
+  const cashTotal      = federalValue + cashStateTotal;
+  const netSystemCost  = Math.max(0, systemCost - cashTotal);
+
+  // total = all incentives (for display purposes — clearly labeled in UI)
   const total = federalValue + stateTotal;
-  const netSystemCost = Math.max(0, systemCost - total);
 
   return {
     federal,
     state: stateCalcs,
     total,
+    cashTotal,
+    nonCashStateTotal,
     netSystemCost,
-    summary: `Federal ITC: $${federalValue.toLocaleString()} + State/Local: $${stateTotal.toLocaleString()} = Total: $${total.toLocaleString()}`,
+    summary: `Federal ITC: $${federalValue.toLocaleString()} + Cash Rebates/Credits: $${cashStateTotal.toLocaleString()} = Net Cost: $${netSystemCost.toLocaleString()} (+ $${nonCashStateTotal.toLocaleString()} in non-cash benefits)`,
   };
 }

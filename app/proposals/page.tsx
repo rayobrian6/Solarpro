@@ -363,6 +363,10 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     ? calculateIncentives(projectStateCode, effectiveFinal, systemSizeKw, production?.annualProductionKwh ?? 0, !isCommercial)
     : null;
   // Normalize to a consistent shape for the UI
+  // IMPORTANT: Only CASH incentives (ITC, tax credits, rebates) reduce net cost.
+  // Property/sales tax exemptions and SRECs are non-cash benefits shown separately.
+  const CASH_INCENTIVE_TYPES = ['federal_itc', 'state_tax_credit', 'state_rebate', 'utility_rebate', 'performance_payment'];
+  const NON_CASH_INCENTIVE_TYPES = ['property_tax_exemption', 'sales_tax_exemption', 'srec', 'trec', 'net_metering', 'loan_program'];
   const stateIncentives = incentiveCalc ? {
     stateIncentives: incentiveCalc.state.map((s: any) => ({
       ...s,
@@ -370,10 +374,14 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
       type: s.type,
       description: s.notes || s.description,
       calculatedValue: s.calculatedValue,
+      isCash: CASH_INCENTIVE_TYPES.includes(s.type),
+      isNonCash: NON_CASH_INCENTIVE_TYPES.includes(s.type),
       stackable: true,
     })),
+    cashStateValue: incentiveCalc.cashTotal - incentiveCalc.federal.calculatedValue,
     totalStateValue: incentiveCalc.state.reduce((sum: number, s: any) => sum + s.calculatedValue, 0),
     federalValue: incentiveCalc.federal.calculatedValue,
+    cashTotal: incentiveCalc.cashTotal,
     totalCombinedValue: incentiveCalc.total,
     netSystemCost: incentiveCalc.netSystemCost,
     solarFriendlyRating: 3,
@@ -1184,40 +1192,39 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 </div>
               </div>
 
-              {/* Total state savings summary */}
+              {/* Total state savings summary — only CASH incentives reduce net cost */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-                  <div className="text-2xl font-black text-emerald-700">
-                    ${(stateIncentives.totalStateValue || 0).toLocaleString()}
-                  </div>
-                  <div className="text-xs text-emerald-600 font-medium">Total State Value</div>
-                </div>
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
                   <div className="text-2xl font-black text-blue-700">
                     ${(stateIncentives.federalValue || 0).toLocaleString()}
                   </div>
-                  <div className="text-xs text-blue-600 font-medium">Federal ITC Value</div>
+                  <div className="text-xs text-blue-600 font-medium">Federal ITC (30%)</div>
+                </div>
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                  <div className="text-2xl font-black text-emerald-700">
+                    ${(stateIncentives.cashStateValue || 0).toLocaleString()}
+                  </div>
+                  <div className="text-xs text-emerald-600 font-medium">State Cash Incentives</div>
                 </div>
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center">
                   <div className="text-2xl font-black text-amber-700">
-                    ${(stateIncentives.totalCombinedValue || 0).toLocaleString()}
+                    ${(stateIncentives.cashTotal || 0).toLocaleString()}
                   </div>
-                  <div className="text-xs text-amber-600 font-medium">Total Combined</div>
+                  <div className="text-xs text-amber-600 font-medium">Total Cash Savings</div>
                 </div>
                 <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 text-center">
                   <div className="text-2xl font-black text-purple-700">
-                    ${((effectiveFinal - (stateIncentives.totalCombinedValue || 0)) > 0
-                      ? effectiveFinal - (stateIncentives.totalCombinedValue || 0)
-                      : 0).toLocaleString()}
+                    ${(stateIncentives.netSystemCost || 0).toLocaleString()}
                   </div>
                   <div className="text-xs text-purple-600 font-medium">Net System Cost</div>
                 </div>
               </div>
+              <p className="text-xs text-slate-400 mb-4 italic">* Net cost reflects Federal ITC + cash rebates/credits only. Property tax exemptions, sales tax exemptions, and SRECs are additional ongoing benefits shown below.</p>
 
               {/* Individual incentives */}
               <div className="space-y-3">
                 {stateIncentives.stateIncentives.map((inc: any, i: number) => (
-                  <div key={i} className="bg-white border border-slate-200 rounded-xl p-4 flex items-start justify-between gap-4">
+                  <div key={i} className={`bg-white border rounded-xl p-4 flex items-start justify-between gap-4 ${inc.isNonCash ? 'border-slate-200 opacity-90' : 'border-emerald-200'}`}>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
@@ -1230,6 +1237,11 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                         }`}>
                           {inc.type.replace(/_/g, ' ').toUpperCase()}
                         </span>
+                        {inc.isNonCash && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">
+                            Additional Benefit
+                          </span>
+                        )}
                         {inc.stackable && (
                           <span className="text-xs text-slate-400">Stackable</span>
                         )}
@@ -1241,13 +1253,34 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                       )}
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <div className="text-lg font-black text-emerald-700">
-                        ${(inc.calculatedValue || 0).toLocaleString()}
-                      </div>
-                      <div className="text-xs text-slate-400">estimated value</div>
+                      {inc.isCash ? (
+                        <>
+                          <div className="text-lg font-black text-emerald-700">
+                            ${(inc.calculatedValue || 0).toLocaleString()}
+                          </div>
+                          <div className="text-xs text-slate-400">cash savings</div>
+                        </>
+                      ) : inc.type === 'srec' || inc.type === 'trec' ? (
+                        <>
+                          <div className="text-lg font-black text-amber-600">
+                            ${(inc.calculatedValue || 0).toLocaleString()}
+                          </div>
+                          <div className="text-xs text-slate-400">est. 15-yr income*</div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-lg font-black text-purple-600">
+                            Ongoing
+                          </div>
+                          <div className="text-xs text-slate-400">tax benefit</div>
+                        </>
+                      )}
                     </div>
                   </div>
                 ))}
+                {stateIncentives.stateIncentives.some((inc: any) => inc.type === 'srec' || inc.type === 'trec') && (
+                  <p className="text-xs text-slate-400 mt-2 italic">* SREC/TREC values are market-dependent and not guaranteed. Actual income may vary.</p>
+                )}
               </div>
 
               {stateIncentives.notes && (
