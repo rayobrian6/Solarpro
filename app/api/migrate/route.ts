@@ -96,6 +96,13 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       results.push(`⚠️ Drop users_role_check: ${e.message}`);
     }
+    // Normalize any invalid role values to 'user' before adding constraint
+    try {
+      await sql`UPDATE users SET role = 'user' WHERE role NOT IN ('user', 'admin', 'super_admin')`;
+      results.push('✅ Normalized invalid role values to user');
+    } catch (e: any) {
+      results.push(`⚠️ Normalize roles: ${e.message}`);
+    }
     try {
       await sql`ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user', 'admin', 'super_admin'))`;
       results.push('✅ Added new users_role_check constraint (user, admin, super_admin)');
