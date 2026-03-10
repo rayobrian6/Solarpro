@@ -352,6 +352,8 @@ function EngineeringPageInner() {
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
   // Auto-load project data when ?projectId= is in the URL
+  // Full seed hydration: reads engineeringSeed.synthetic_eng_config to populate
+  // the exact inverter/panel/string config the engineering engine needs.
   useEffect(() => {
     const projectId = searchParams?.get('projectId');
     if (!projectId || projectAutoLoaded) return;
@@ -361,63 +363,189 @@ function EngineeringPageInner() {
     fetch(`/api/projects/${projectId}`)
       .then(r => r.json())
       .then(data => {
-        if (!data.success || !data.project) return;
-        const p = data.project;
+        if (!data.success || !data.data) {
+          console.warn('[EngineeringPage] Project fetch failed for projectId:', projectId);
+          return;
+        }
+        const p = data.data;
+        const seed = p.engineeringSeed;
         const layout = p.layout;
 
-        // Build panel count and system size from layout
-        const panelCount = layout?.totalPanels || 0;
-        const systemKw = layout?.systemSizeKw || 0;
+        console.log('[EngineeringPage] Loaded project engineering_seed:', seed);
 
-        // Determine inverter type from selected inverter
-        const invType = p.selectedInverter?.type === 'micro' ? 'micro'
-                      : p.selectedInverter?.type === 'optimizer' ? 'optimizer'
-                      : 'string';
+        // Build config patches
+        const patches: Partial<ProjectConfig> = {};
 
-        // Build string configs from panel count
-        const panelsPerString = invType === 'micro' ? 1 : Math.min(panelCount, 12);
-        const stringCount = invType === 'micro' ? panelCount : Math.max(1, Math.ceil(panelCount / panelsPerString));
-        const strings = Array.from({ length: stringCount }, (_, i) => ({
-          id: `str-auto-${i}`,
-          label: `String ${i + 1}`,
-          panelCount: i === stringCount - 1 ? panelCount - (panelsPerString * (stringCount - 1)) || panelsPerString : panelsPerString,
-          panelId: p.selectedPanel?.id || 'qcells-peak-duo-400',
-          tilt: layout?.groundTilt || 20,
-          azimuth: layout?.groundAzimuth || 180,
-          roofType: 'shingle' as const,
-          mountingSystem: p.selectedMounting?.id || 'ironridge-xr100',
-          wireGauge: '#10 AWG',
-          wireLength: 50,
-        }));
+        // Always apply project-level fields
+        if (p.name)         patches.projectName = p.name;
+        if (p.address)      patches.address = p.address;
+        if (p.client?.name) patches.clientName = p.client.name;
+        if (p.systemType)   patches.systemType = p.systemType as SystemType;
 
-        // Parse state from address
+        // Parse state from address as fallback
         const stateMatch = (p.address || '').match(/,\s*([A-Z]{2})(?:\s+\d{5})?(?:\s*,|\s*$)/);
         const stateCode = p.stateCode || (stateMatch ? stateMatch[1] : '');
-        const cityParts = (p.address || '').split(',');
-        const city = p.city || (cityParts.length >= 2 ? cityParts[cityParts.length - 2].trim() : '');
+        if (stateCode) patches.state = stateCode;
 
-        setConfig(prev => ({
-          ...prev,
-          projectName: p.name || prev.projectName,
-          clientName: p.client?.name || prev.clientName,
-          address: p.address || prev.address,
-          state: stateCode || prev.state,
-          city: city || prev.city,
-          county: p.county || prev.county || '',
-          systemType: p.systemType || prev.systemType,
-          inverters: [{
-            id: `inv-auto-0`,
-            inverterId: p.selectedInverter?.id || prev.inverters[0]?.inverterId || '',
+        if (seed) {
+          // ── Location / address / system type ──────────────────────────────
+          if (seed.state_code)      patches.state = seed.state_code;
+          if (seed.service_address) patches.address = seed.service_address;
+          if (seed.client_name)     patches.clientName = seed.client_name;
+          if (seed.system_type)     patches.systemType = seed.system_type as SystemType;
+
+          // ── Utility match ─────────────────────────────────────────────────
+          if (seed.utility && seed.state_code) {
+            const utils = getUtilitiesByState(seed.state_code);
+            const matched = utils.find((u: any) =>
+              u.name.toLowerCase().includes(seed.utility.toLowerCase()) ||
+              seed.utility.toLowerCase().includes(u.name.toLowerCase())
+            );
+            if (matched) {
+              patches.utilityId = matched.id;
+              console.log('[EngineeringPage] Matched utility:', matched.id, matched.name);
+            }
+          }
+
+          // ── Inverter + panel config ───────────────────────────────────────
+          // Priority: use synthetic_eng_config (exact specs from preliminary endpoint)
+          // Fallback: reconstruct from seed summary fields
+          const engCfg = seed.synthetic_eng_config;
+          console.log('[EngineeringPage] Loaded synthetic eng config:', engCfg);
+
+          const invType: InverterType = (engCfg?.inverterType ?? seed.inverter_type) as InverterType;
+          const panelCount: number = engCfg?.panelCount ?? seed.panel_count;
+          const tilt: number = seed.tilt ?? 20;
+          const azimuth: number = seed.azimuth ?? 180;
+
+          // Resolve inverterId
+          let inverterId: string;
+          if (engCfg?.inverterId) {
+            inverterId = engCfg.inverterId;
+          } else if (invType === 'micro') {
+            inverterId = MICROINVERTERS[0]?.id ?? 'enphase-iq8plus';
+          } else {
+            inverterId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
+          }
+
+          // Resolve panelId: use engCfg.panelId if present, else find best match by wattage
+          let panelId: string;
+          if (engCfg?.panelId) {
+            const found = SOLAR_PANELS.find((p: any) => p.id === engCfg.panelId);
+            panelId = found ? found.id : (SOLAR_PANELS.find((p: any) =>
+              Math.abs(p.watts - (engCfg.panelWatts ?? seed.panel_watt)) ===
+              Math.min(...SOLAR_PANELS.map((pp: any) => Math.abs(pp.watts - (engCfg.panelWatts ?? seed.panel_watt))))
+            )?.id ?? SOLAR_PANELS[0]?.id ?? 'qcells-peak-duo-400');
+          } else {
+            const targetWatt = seed.panel_watt;
+            panelId = SOLAR_PANELS.reduce((b: any, pp: any) =>
+              Math.abs(pp.watts - targetWatt) < Math.abs(b.watts - targetWatt) ? pp : b,
+              SOLAR_PANELS[0])?.id ?? 'qcells-peak-duo-400';
+          }
+
+          // Build strings: micro = all panels in one string; string = distribute up to 13/string
+          const panelsPerString = invType === 'micro' ? panelCount : Math.min(panelCount, 13);
+          const stringCount = invType === 'micro' ? 1 : Math.ceil(panelCount / panelsPerString);
+
+          const strings: StringConfig[] = Array.from({ length: stringCount }, (_, i) => {
+            const cnt = i === stringCount - 1
+              ? panelCount - panelsPerString * (stringCount - 1)
+              : panelsPerString;
+            return {
+              id: `str-seed-${i}`,
+              label: `String ${i + 1}`,
+              panelCount: cnt,
+              panelId,
+              tilt,
+              azimuth,
+              roofType: 'shingle' as RoofType,
+              mountingSystem: engCfg ? 'ironridge-xr100' : (p.selectedMounting?.id || 'ironridge-xr100'),
+              wireGauge: engCfg?.wireGauge ?? '#10 AWG THWN-2',
+              wireLength: engCfg?.wireLength ?? 50,
+            };
+          });
+
+          patches.inverters = [{
+            id: 'inv-seed-0',
+            inverterId,
             type: invType,
             strings,
-          }],
-          batteryId: p.selectedBatteries?.[0]?.id || prev.batteryId,
-          batteryCount: p.batteryCount || prev.batteryCount,
-          mountingId: p.selectedMounting?.id || prev.mountingId,
-          utilityId: p.utilityId || prev.utilityId,
-        }));
+          }];
 
-        setAutoLoadBanner(`Loaded from project: ${p.name}${panelCount ? ` (${panelCount} panels, ${systemKw.toFixed(1)} kW)` : ''}`);
+          // ── Electrical / structural defaults from engCfg ──────────────────
+          if (engCfg) {
+            patches.mainPanelAmps         = engCfg.mainPanelAmps;
+            patches.wireGauge             = engCfg.wireGauge;
+            patches.wireLength            = engCfg.wireLength;
+            patches.conduitType           = engCfg.conduitType;
+            patches.rapidShutdown         = engCfg.rapidShutdown;
+            patches.acDisconnect          = engCfg.acDisconnect;
+            patches.dcDisconnect          = engCfg.dcDisconnect;
+            patches.interconnectionMethod = engCfg.interconnectionMethod as ProjectConfig['interconnectionMethod'];
+            patches.panelBusRating        = engCfg.panelBusRating;
+          }
+
+          patches.roofPitch = tilt;
+
+          console.log('[EngineeringPage] Loaded synthetic layout (panel count):', seed.panel_count);
+          console.log('[EngineeringPage] Engineering state initialized from seed for project:', projectId);
+          console.log('[EngineeringPage] Patches applied:', {
+            invType, inverterId, panelId, panelCount, stringCount, tilt, azimuth,
+            state: patches.state, utilityId: patches.utilityId,
+          });
+
+          // Banner: only show after real engine state is initialized
+          const utilityLabel = seed.utility ? ` · ${seed.utility}` : '';
+          const priceLabel = seed.cost_low && seed.cost_high
+            ? ` · $${Math.round(seed.cost_low / 1000)}k–$${Math.round(seed.cost_high / 1000)}k estimate`
+            : '';
+          setAutoLoadBanner(
+            `✅ Preliminary system loaded from bill upload: ${seed.system_kw} kW · ${seed.panel_count} panels${utilityLabel}${priceLabel}`
+          );
+
+        } else {
+          // No seed — use layout data if available
+          console.log('[EngineeringPage] No engineering_seed found for project:', projectId, '— falling back to layout/selected equipment');
+          const panelCount = layout?.totalPanels || 0;
+          const systemKw = layout?.systemSizeKw || 0;
+          const invType = p.selectedInverter?.type === 'micro' ? 'micro'
+                        : p.selectedInverter?.type === 'optimizer' ? 'optimizer'
+                        : 'string';
+          const panelsPerString = invType === 'micro' ? 1 : Math.min(panelCount, 12);
+          const stringCount = invType === 'micro' ? panelCount : Math.max(1, Math.ceil(panelCount / panelsPerString));
+          const strings = Array.from({ length: stringCount }, (_, i) => ({
+            id: `str-auto-${i}`,
+            label: `String ${i + 1}`,
+            panelCount: i === stringCount - 1 ? panelCount - (panelsPerString * (stringCount - 1)) || panelsPerString : panelsPerString,
+            panelId: p.selectedPanel?.id || 'qcells-peak-duo-400',
+            tilt: layout?.groundTilt || 20,
+            azimuth: layout?.groundAzimuth || 180,
+            roofType: 'shingle' as const,
+            mountingSystem: p.selectedMounting?.id || 'ironridge-xr100',
+            wireGauge: '#10 AWG',
+            wireLength: 50,
+          }));
+          patches.inverters = [{
+            id: 'inv-auto-0',
+            inverterId: p.selectedInverter?.id || (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus'),
+            type: invType,
+            strings,
+          }];
+          patches.mountingId = p.selectedMounting?.id || patches.mountingId;
+          patches.utilityId = p.utilityId || patches.utilityId;
+          if (panelCount > 0) {
+            setAutoLoadBanner(`Loaded from project: ${p.name}${panelCount ? ` (${panelCount} panels, ${systemKw.toFixed(1)} kW)` : ''}`);
+          }
+        }
+
+        if (Object.keys(patches).length > 0) {
+          setConfig(prev => ({ ...prev, ...patches }));
+          // Trigger compliance calculation after config is hydrated
+          setTimeout(() => {
+            console.log('[EngineeringPage] Auto-triggering compliance calc after seed hydration');
+            runCalc();
+          }, 300);
+        }
       })
       .catch(err => console.warn('[engineering] auto-load failed:', err));
   }, [searchParams, projectAutoLoaded]);

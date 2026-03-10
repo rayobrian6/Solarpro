@@ -24,7 +24,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { generateBOMV4, bomToMarkdown } from '@/lib/bom-engine-v4';
 import { renderSLDProfessional } from '@/lib/sld-professional-renderer';
-import { upsertLayout, upsertProduction, getDb } from '@/lib/db-neon';
+import { upsertLayout, upsertProduction, getDb, getProjectWithDetails } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +50,91 @@ const DEFAULTS = {
 
 const COST_LOW  = 2.75;  // $/W
 const COST_HIGH = 3.50;  // $/W
+
+// ─── Synthetic layout constants ────────────────────────────────────────────────
+const LAYOUT = {
+  panelsPerRow: 21,
+  tilt: 20,
+  azimuth: 180,
+};
+
+// ─── Default panel specs (matches DEFAULTS.panelId = qcells-peak-duo-400) ──────
+const DEFAULT_PANEL_SPECS = {
+  voc: 41.6,
+  vmp: 34.5,
+  isc: 12.26,
+  imp: 11.59,
+  tempCoeffVoc: -0.26,
+  tempCoeffIsc: 0.05,
+  maxSeriesFuseRating: 20,
+};
+
+// ─── Default microinverter specs (Enphase IQ8+) ─────────────────────────────────
+const DEFAULT_MICRO_SPECS = {
+  acOutputW: 295,
+  acOutputCurrentMax: 1.21,
+  maxDcVoltage: 60,
+  mpptVoltageMin: 16,
+  mpptVoltageMax: 60,
+};
+
+// Generate synthetic PlacedPanel[] grid for engineering engine
+function generateSyntheticPanels(panelCount: number, layoutId: string): any[] {
+  const panels: any[] = [];
+  for (let i = 0; i < panelCount; i++) {
+    const row = Math.floor(i / LAYOUT.panelsPerRow);
+    const col = i % LAYOUT.panelsPerRow;
+    panels.push({
+      id: `prelim-panel-${i}`,
+      layoutId,
+      lat: 0, lng: 0,
+      x: col * 50, y: row * 90,
+      tilt: LAYOUT.tilt,
+      azimuth: LAYOUT.azimuth,
+      wattage: DEFAULTS.panelWatts,
+      bifacialGain: 0,
+      row, col,
+      systemType: 'roof',
+      arrayId: 'prelim-array-0',
+    });
+  }
+  return panels;
+}
+
+// Build synthetic engineering config — exact specs consumed by engineering engine
+function buildSyntheticEngConfig(panelCount: number, stateCode?: string | null) {
+  return {
+    inverterType: 'micro' as const,
+    inverterId: DEFAULTS.inverterId,
+    panelId: DEFAULTS.panelId,
+    panelCount,
+    panelWatts: DEFAULTS.panelWatts,
+    panelVoc: DEFAULT_PANEL_SPECS.voc,
+    panelVmp: DEFAULT_PANEL_SPECS.vmp,
+    panelIsc: DEFAULT_PANEL_SPECS.isc,
+    panelImp: DEFAULT_PANEL_SPECS.imp,
+    panelTempCoeffVoc: DEFAULT_PANEL_SPECS.tempCoeffVoc,
+    panelTempCoeffIsc: DEFAULT_PANEL_SPECS.tempCoeffIsc,
+    panelMaxSeriesFuse: DEFAULT_PANEL_SPECS.maxSeriesFuseRating,
+    microAcOutputW: DEFAULT_MICRO_SPECS.acOutputW,
+    microAcOutputCurrentMax: DEFAULT_MICRO_SPECS.acOutputCurrentMax,
+    microMaxDcVoltage: DEFAULT_MICRO_SPECS.maxDcVoltage,
+    microMpptVoltageMin: DEFAULT_MICRO_SPECS.mpptVoltageMin,
+    microMpptVoltageMax: DEFAULT_MICRO_SPECS.mpptVoltageMax,
+    stateCode: stateCode ?? null,
+    systemType: 'roof',
+    mainPanelAmps: DEFAULTS.mainPanelAmps,
+    wireGauge: DEFAULTS.acWireGauge,
+    wireLength: DEFAULTS.acWireLength,
+    conduitType: DEFAULTS.conduitType,
+    rapidShutdown: true,
+    acDisconnect: true,
+    dcDisconnect: false,
+    interconnectionMethod: 'LOAD_SIDE',
+    panelBusRating: DEFAULTS.mainPanelAmps,
+  };
+}
+
 
 // ── Production factor by state (kWh/kW/year) ─────────────────────────────────
 function getProductionFactor(stateCode?: string | null): number {
@@ -309,16 +394,19 @@ export async function POST(req: NextRequest) {
 
     if (projectId && user.id) {
       try {
-        // Save synthetic layout (no actual panel coordinates — just sizing)
-        await upsertLayout({
+        // Save synthetic layout with actual PlacedPanel[] grid
+        // Engineering engine reads these panels for SLD, BOM, compliance
+        const tempLayoutId = `prelim-layout-${projectId}`;
+        const syntheticPanels = generateSyntheticPanels(panelCount, tempLayoutId);
+        const savedLayout = await upsertLayout({
           projectId,
           userId:        user.id,
           systemType:    'roof',
-          panels:        [],          // no placed panels yet
+          panels:        syntheticPanels,
           totalPanels:   panelCount,
           systemSizeKw:  systemKw,
-          groundTilt:    20,
-          groundAzimuth: 180,
+          groundTilt:    LAYOUT.tilt,
+          groundAzimuth: LAYOUT.azimuth,
           rowSpacing:    1.5,
           groundHeight:  0.6,
           bifacialOptimized: false,
@@ -366,6 +454,48 @@ export async function POST(req: NextRequest) {
         savedFiles.push('production');
       } catch (e: any) {
         console.warn('[preliminary] production save failed:', e.message);
+      }
+
+
+      // Save engineering_seed to project record
+      // This is the single source of truth for engineering engine hydration
+      const syntheticEngConfig = buildSyntheticEngConfig(panelCount, stateCode);
+      const engineeringSeed = {
+        annual_kwh: annualUsage,
+        monthly_kwh: monthlyKwh || Math.round(annualUsage / 12),
+        electricity_rate: electricityRate ?? null,
+        utility: utilityName || '',
+        system_kw: systemKw,
+        panel_watt: DEFAULTS.panelWatts,
+        panel_count: panelCount,
+        inverter_type: 'micro' as const,
+        inverter_model: `${DEFAULTS.inverterManufacturer} ${DEFAULTS.inverterModel}`,
+        system_type: 'roof' as const,
+        tilt: LAYOUT.tilt,
+        azimuth: LAYOUT.azimuth,
+        production_factor: productionFactor,
+        annual_production_kwh: annualUsage,
+        cost_low: costLow,
+        cost_high: costHigh,
+        state_code: stateCode || null,
+        client_name: clientName || undefined,
+        service_address: serviceAddress || undefined,
+        synthetic_eng_config: syntheticEngConfig,
+        generated_at: new Date().toISOString(),
+      };
+      try {
+        const sqlDb = getDb();
+        await sqlDb`
+          UPDATE projects
+          SET engineering_seed = ${JSON.stringify(engineeringSeed)}::jsonb,
+              updated_at = NOW()
+          WHERE id = ${projectId}
+            AND user_id = ${user.id}
+        `;
+        savedFiles.push('engineering_seed');
+        console.log('[preliminary] Saved engineering_seed for project:', projectId);
+      } catch (seedErr: any) {
+        console.warn('[preliminary] Could not save engineering_seed (run /api/migrate):', seedErr.message);
       }
 
       // ── Step 10: Save engineering workspace files ─────────────────────────

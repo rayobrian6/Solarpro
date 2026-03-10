@@ -261,7 +261,24 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ project_files index: ${e.message}`);
     }
 
-    return NextResponse.json({ success: true, results });
+
+    // Migration: engineering_seed JSONB column on projects
+    try {
+      const hasSeedCol = await sql`
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'projects' AND column_name = 'engineering_seed'
+      `;
+      if (hasSeedCol.length === 0) {
+        await sql`ALTER TABLE projects ADD COLUMN engineering_seed JSONB`;
+        results.push('✅ Added engineering_seed column to projects');
+      } else {
+        results.push('⏭ projects.engineering_seed already exists');
+      }
+    } catch (e: any) {
+      results.push(`⚠️ projects.engineering_seed: ${e.message}`);
+    }
+
+        return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     console.error('[POST /api/migrate]', error);
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
