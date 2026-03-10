@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v39.9';
+export const BUILD_VERSION = 'v39.10';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Normalize invalid role values before adding users_role_check constraint';
+export const BUILD_DESCRIPTION = 'FIX: JWT_SECRET module-level throw — move to lazy getter so build does not crash';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
