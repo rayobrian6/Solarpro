@@ -2,7 +2,7 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v39.6';
+export const BUILD_VERSION = 'v39.7';
 export const BUILD_DATE = '2025-03-10';
 export const BUILD_DESCRIPTION = 'FULL ADMIN PORTAL — Dashboard, Users, Companies, Projects, Engineering, Incentives, Utilities, DB, Files, Health';
 export const BUILD_FEATURES = [
