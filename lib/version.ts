@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.0';
+export const BUILD_VERSION = 'v40.1';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'STABLE: Admin portal RBAC fully operational - DB role checks, constraint fix, clean build';
+export const BUILD_DESCRIPTION = 'STABLE: Role stripped from JWT - DB is sole source of truth for RBAC';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',

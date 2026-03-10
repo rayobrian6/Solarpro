@@ -22,21 +22,24 @@ const PUBLIC_PATHS = [
   '/api/migrate',
   '/api/admin/free-pass',
   '/api/admin/set-roles',
-  '/api/admin/debug',
+  '/api/admin/debug-role',
 ];
 
-// Simple JWT decode without verification (verification happens in API routes / server components)
-// For middleware we just check if a token exists, is structurally valid, and not expired
-function decodeJwtPayload(token: string): Record<string, any> | null {
+/**
+ * Decode JWT payload without verification.
+ * Middleware only checks: is the token structurally valid and not expired?
+ * Role is NOT checked here — that is handled by requireAdmin() in server components
+ * and requireAdminApi() in API routes, both of which query the DB.
+ */
+function decodeJwtPayload(token: string): { id: string; email: string; exp?: number } | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const json = atob(base64);
-    const data = JSON.parse(json);
+    const data = JSON.parse(atob(base64));
     // Check expiry
     if (data.exp && data.exp < Math.floor(Date.now() / 1000)) return null;
-    // Check required fields
+    // Must have id and email (identity fields)
     if (!data.id || !data.email) return null;
     return data;
   } catch {
@@ -62,18 +65,19 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check for session cookie
+  // Check for valid session cookie (authentication only — no role check)
   const token = req.cookies.get(COOKIE_NAME)?.value;
   const user  = token ? decodeJwtPayload(token) : null;
 
-  // Not authenticated
   if (!user) {
+    // API routes → 401 JSON
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
         { success: false, error: 'Authentication required' },
         { status: 401 }
       );
     }
+    // Page routes → redirect to login
     const loginUrl = new URL('/auth/login', req.url);
     if (pathname !== '/' && !pathname.startsWith('/auth')) {
       loginUrl.searchParams.set('redirect', pathname);
@@ -81,27 +85,11 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // /admin routes — middleware does a quick JWT role check as first gate.
-  // The server component layout (requireAdmin) does the authoritative DB check.
-  // NOTE: JWT role may be stale — requireAdmin() always re-fetches from DB.
-  // We allow through here if JWT has admin/super_admin OR if JWT has no role
-  // (stale token) — requireAdmin() will do the real check.
-  if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-    const role = user.role ?? '';
-    // If JWT explicitly has a non-admin role, block early
-    if (role && role !== 'admin' && role !== 'super_admin') {
-      if (pathname.startsWith('/api/admin')) {
-        return NextResponse.json(
-          { success: false, error: 'Forbidden — admin access required' },
-          { status: 403 }
-        );
-      }
-      return NextResponse.redirect(new URL('/dashboard', req.url));
-    }
-    // Otherwise let through — requireAdmin() / requireAdminApi() will do DB check
-  }
-
-  // Authenticated — pass through
+  // Authenticated — pass through.
+  // /admin role authorization is handled by:
+  //   - app/admin/layout.tsx → requireAdmin() → queries DB for role
+  //   - /api/admin/* routes  → requireAdminApi() → queries DB for role
+  // Middleware does NOT check role — DB is the single source of truth.
   return NextResponse.next();
 }
 

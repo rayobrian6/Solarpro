@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
     const sql = getDb();
 
-    // Find user by email
+    // Fetch user — role is fetched but NOT put in JWT
     const rows = await sql`
       SELECT id, name, email, password_hash, company, phone, role
       FROM users
@@ -34,7 +34,6 @@ export async function POST(req: NextRequest) {
 
     const user = rows[0];
 
-    // Verify password
     const valid = await verifyPassword(password, user.password_hash);
     if (!valid) {
       return NextResponse.json(
@@ -43,20 +42,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Create session token
+    // JWT contains ONLY identity — role is NOT included
     const sessionUser: SessionUser = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
+      id:      user.id,
+      name:    user.name,
+      email:   user.email,
       company: user.company || undefined,
-      role: user.role || 'user',
     };
 
     const token = signToken(sessionUser);
     const cookieHeader = makeSessionCookie(token);
 
+    // Return role in response body for client UI use, but NOT in JWT
     return NextResponse.json(
-      { success: true, data: { user: sessionUser } },
+      { success: true, data: { user: { ...sessionUser, role: user.role || 'user' } } },
       {
         status: 200,
         headers: { 'Set-Cookie': cookieHeader },

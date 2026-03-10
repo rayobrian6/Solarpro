@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { verifyToken, getDb } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-// Debug endpoint — check session state and DB role
+// Legacy debug endpoint — redirects to debug-role
 export async function GET(req: NextRequest) {
   const cookieHeader = req.headers.get('cookie') || '';
   const match = cookieHeader.match(/solarpro_session=([^;]+)/);
@@ -31,7 +30,7 @@ export async function GET(req: NextRequest) {
     const sql = getDb();
     const rows = await sql`SELECT id, email, role FROM users WHERE id = ${jwtUser.id} LIMIT 1`;
     if (rows.length > 0) {
-      dbRole = rows[0].role ?? 'null';
+      dbRole = rows[0].role ?? 'user';
       dbFound = true;
     }
   } catch (e: any) {
@@ -46,7 +45,7 @@ export async function GET(req: NextRequest) {
       id:    jwtUser.id,
       email: jwtUser.email,
       name:  jwtUser.name,
-      role:  jwtUser.role ?? 'not_in_jwt',
+      note:  'role is no longer stored in JWT — DB is source of truth',
     },
     dbRole,
     dbFound,

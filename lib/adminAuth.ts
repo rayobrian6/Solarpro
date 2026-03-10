@@ -1,24 +1,51 @@
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
-import { verifyToken } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { verifyToken, getDb } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 
 export type AdminUser = {
   id: string;
   name: string;
   email: string;
-  role: string;
+  role: 'admin' | 'super_admin';
 };
 
-export function isAdminRole(role?: string | null): boolean {
+/**
+ * Check if a role string is an admin role.
+ */
+export function isAdminRole(role?: string | null): role is 'admin' | 'super_admin' {
   return role === 'admin' || role === 'super_admin';
 }
 
 /**
- * SERVER COMPONENT auth guard (Next.js 14 — cookies() is synchronous).
- * Always re-fetches role from DB so stale JWTs work after role migration.
- * Redirects to /auth/login or /dashboard if not authorized.
+ * Fetch the current user's role from the database.
+ * Returns null if user not found or DB error.
+ */
+async function fetchDbUser(userId: string): Promise<{ id: string; name: string; email: string; role: string } | null> {
+  try {
+    const sql = getDb();
+    const rows = await sql`
+      SELECT id, name, email, role
+      FROM users
+      WHERE id = ${userId}
+      LIMIT 1
+    `;
+    if (rows.length === 0) return null;
+    return rows[0] as { id: string; name: string; email: string; role: string };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * SERVER COMPONENT admin guard (Next.js 14 — cookies() is synchronous).
+ *
+ * Flow:
+ *   1. Read JWT from cookie → extract user.id (identity only, no role)
+ *   2. Query DB for current role
+ *   3. Redirect if not admin/super_admin
+ *
+ * Role is NEVER read from the JWT.
  */
 export async function requireAdmin(): Promise<AdminUser> {
   // Next.js 14: cookies() is synchronous — no await
@@ -26,89 +53,53 @@ export async function requireAdmin(): Promise<AdminUser> {
   const token = cookieStore.get('solarpro_session')?.value;
   if (!token) redirect('/auth/login');
 
-  const user = verifyToken(token);
-  if (!user) redirect('/auth/login');
+  const jwtUser = verifyToken(token);
+  if (!jwtUser?.id) redirect('/auth/login');
 
-  // Always re-fetch role from DB — JWT may be stale (pre-migration)
-  try {
-    const sql = getDb();
-    const rows = await sql`
-      SELECT id, name, email, role
-      FROM users
-      WHERE id = ${user.id}
-      LIMIT 1
-    `;
+  // Always fetch role from DB — never trust JWT for role
+  const dbUser = await fetchDbUser(jwtUser.id);
+  if (!dbUser) redirect('/auth/login');
 
-    if (rows.length === 0) redirect('/auth/login');
-
-    const dbUser = rows[0];
-    const role = dbUser.role ?? 'user';
-
-    if (!isAdminRole(role)) redirect('/dashboard');
-
-    return {
-      id:    dbUser.id,
-      name:  dbUser.name,
-      email: dbUser.email,
-      role,
-    };
-  } catch {
-    // Fallback to JWT role if DB is unreachable
-    const role = user.role ?? 'user';
-    if (!isAdminRole(role)) redirect('/dashboard');
-    return {
-      id:    user.id,
-      name:  user.name,
-      email: user.email,
-      role,
-    };
+  if (!isAdminRole(dbUser.role)) {
+    redirect('/dashboard');
   }
+
+  return {
+    id:    dbUser.id,
+    name:  dbUser.name,
+    email: dbUser.email,
+    role:  dbUser.role as 'admin' | 'super_admin',
+  };
 }
 
 /**
- * API ROUTE auth guard.
- * Re-fetches role from DB so stale JWTs work after role migration.
- * Returns AdminUser or null (caller handles the 403 response).
+ * API ROUTE admin guard.
+ *
+ * Flow:
+ *   1. Read JWT from cookie header → extract user.id (identity only, no role)
+ *   2. Query DB for current role
+ *   3. Return null if not admin/super_admin (caller returns 403)
+ *
+ * Role is NEVER read from the JWT.
  */
 export async function requireAdminApi(req: NextRequest): Promise<AdminUser | null> {
-  // Parse JWT from cookie header
   const cookieHeader = req.headers.get('cookie') || '';
   const match = cookieHeader.match(/solarpro_session=([^;]+)/);
   if (!match) return null;
 
-  const user = verifyToken(match[1]);
-  if (!user) return null;
+  const jwtUser = verifyToken(match[1]);
+  if (!jwtUser?.id) return null;
 
-  // Re-fetch role from DB — JWT may be stale
-  try {
-    const sql = getDb();
-    const rows = await sql`
-      SELECT id, name, email, role
-      FROM users
-      WHERE id = ${user.id}
-      LIMIT 1
-    `;
-    if (rows.length === 0) return null;
+  // Always fetch role from DB — never trust JWT for role
+  const dbUser = await fetchDbUser(jwtUser.id);
+  if (!dbUser) return null;
 
-    const dbUser = rows[0];
-    const role = dbUser.role ?? 'user';
-    if (!isAdminRole(role)) return null;
+  if (!isAdminRole(dbUser.role)) return null;
 
-    return {
-      id:    dbUser.id,
-      name:  dbUser.name,
-      email: dbUser.email,
-      role,
-    };
-  } catch {
-    // Fallback to JWT role
-    const role = user.role ?? 'user';
-    if (!isAdminRole(role)) return null;
-    return {
-      id:    user.id,
-      name:  user.name,
-      email: user.email,
-      role,
-    };
-  }
+  return {
+    id:    dbUser.id,
+    name:  dbUser.name,
+    email: dbUser.email,
+    role:  dbUser.role as 'admin' | 'super_admin',
+  };
 }

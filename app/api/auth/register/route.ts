@@ -9,7 +9,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { name, email, password, company, phone } = body;
 
-    // Validate
     if (!name?.trim()) {
       return NextResponse.json({ success: false, error: 'Full name is required.' }, { status: 400 });
     }
@@ -22,7 +21,6 @@ export async function POST(req: NextRequest) {
 
     const sql = getDb();
 
-    // Check if email already exists
     const existing = await sql`
       SELECT id FROM users WHERE email = ${email.toLowerCase().trim()} LIMIT 1
     `;
@@ -33,7 +31,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Hash password and create user
     const hashedPassword = await hashPassword(password);
     const userId = uuidv4();
 
@@ -51,20 +48,19 @@ export async function POST(req: NextRequest) {
       )
     `;
 
-    // Create session token
+    // JWT contains ONLY identity — role is NOT included
     const sessionUser: SessionUser = {
-      id: userId,
-      name: name.trim(),
-      email: email.toLowerCase().trim(),
+      id:      userId,
+      name:    name.trim(),
+      email:   email.toLowerCase().trim(),
       company: company?.trim() || undefined,
-      role: 'user',
     };
 
     const token = signToken(sessionUser);
     const cookieHeader = makeSessionCookie(token);
 
     return NextResponse.json(
-      { success: true, data: { user: sessionUser } },
+      { success: true, data: { user: { ...sessionUser, role: 'user' } } },
       {
         status: 201,
         headers: { 'Set-Cookie': cookieHeader },

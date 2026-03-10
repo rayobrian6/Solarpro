@@ -6,7 +6,7 @@ import { neon } from '@neondatabase/serverless';
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) {
-    throw new Error('JWT_SECRET environment variable is not set. Set it in your .env.local or Vercel environment variables.');
+    throw new Error('JWT_SECRET environment variable is not set.');
   }
   return secret;
 }
@@ -29,16 +29,25 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 // ── JWT / Session ─────────────────────────────────────────────────────────────
+// JWT contains ONLY identity — id, name, email, company.
+// Role is NEVER stored in the JWT. Always fetch from DB.
 export interface SessionUser {
   id: string;
   name: string;
   email: string;
   company?: string;
-  role?: string;
+  // role intentionally omitted — always read from DB
 }
 
 export function signToken(user: SessionUser): string {
-  return jwt.sign(user, getJwtSecret(), { expiresIn: '30d' });
+  // Only sign identity fields — no role
+  const payload: SessionUser = {
+    id:      user.id,
+    name:    user.name,
+    email:   user.email,
+    company: user.company,
+  };
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: '30d' });
 }
 
 export function verifyToken(token: string): SessionUser | null {
