@@ -1315,12 +1315,111 @@ function EngineeringPageInner() {
       const rulesData = await rulesRes.json();
       if (rulesData.success) setRulesResult(rulesData.data);
 
+      // ── Auto-save outputs to project_files after successful calc ──
+      if (calcData.success && currentProjectId) {
+        // Fire-and-forget via ref to avoid forward-reference TS error
+        setTimeout(() => saveEngineeringOutputsRef.current(calcData), 500);
+      }
+
     } catch (e: any) {
       setCalcError(e.message);
     } finally {
       setCalculating(false);
     }
   }, [buildCalcPayload, engineeringMode, overrides, config, totalPanels, updateConfig]);
+
+  // ── saveEngineeringOutputs: persist live engine state to project_files ──────
+  // Ref allows runCalc (above) to call this without a forward-reference TS error
+  const saveEngineeringOutputsRef = useRef<(calcData: any) => Promise<void>>(async () => {});
+  const saveEngineeringOutputs = useCallback(async (calcData: any) => {
+    if (!currentProjectId) return;
+    try {
+      const firstInv    = config.inverters[0];
+      const firstStr    = firstInv?.strings[0];
+      const panelData   = firstStr?.panelId
+        ? (SOLAR_PANELS as any[]).find((p: any) => p.id === firstStr.panelId)
+        : null;
+      const invData     = firstInv?.inverterId
+        ? getInvById(firstInv.inverterId, firstInv.type) as any
+        : null;
+
+      const elec = calcData?.electrical || calcData?.acSizing
+        ? {
+            dcSystemKw:      Number(totalKw),
+            acSystemKw:      calcData?.summary?.totalAcKw ?? Number(totalInverterKw),
+            stringCount:     calcData?.stringConfig?.stringCount ?? computedSystem.strings?.length ?? 1,
+            panelsPerString: calcData?.stringConfig?.panelsPerString ?? (firstStr?.panelCount ?? 0),
+            stringVoc:       calcData?.stringConfig?.stringVoc ?? null,
+            stringIsc:       calcData?.stringConfig?.stringIsc ?? null,
+            dcWireGauge:     computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.wireGauge ?? '#10 AWG',
+            dcConduitSize:   computedSystem.runs?.find((r: any) => r.id === 'DC_STRING_RUN')?.conduitSize ?? '3/4" EMT',
+            dcDisconnect:    `${calcData?.acSizing?.ocpdAmps ?? 15}A, 600VDC`,
+            acWireGauge:     computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.wireGauge ?? '#8 AWG',
+            acConduitSize:   computedSystem.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN')?.conduitSize ?? '1" EMT',
+            acBreaker:       calcData?.acSizing?.ocpdAmps ?? null,
+            mainPanelBus:    config.panelBusRating ?? 200,
+            backfeedBreaker: calcData?.interconnection?.backfeedAmps ?? calcData?.acSizing?.ocpdAmps ?? null,
+            interconnection: config.interconnectionMethod ?? 'SUPPLY_SIDE_TAP',
+          }
+        : {};
+
+      const payload = {
+        projectId:           currentProjectId,
+        clientId:            null,
+        clientName:          config.projectName || 'Client',
+        systemKw:            Number(totalKw),
+        panelCount:          totalPanels,
+        panelModel:          panelData ? `${panelData.manufacturer ?? ''} ${panelData.model ?? ''} ${panelData.watts ?? ''}W`.trim() : 'Generic 400W Monocrystalline',
+        inverterType:        firstInv?.type ?? 'string',
+        inverterModel:       invData ? `${invData.manufacturer ?? ''} ${invData.model ?? ''}`.trim() : 'TBD',
+        annualProductionKwh: calcData?.summary?.annualProductionKwh ?? null,
+        mountType:           config.systemType === 'ground' ? 'Ground Mount' : config.systemType === 'fence' ? 'Fence Mount' : 'Roof Mount',
+        stateCode:           config.state ?? null,
+        electrical:          elec,
+        structural:          calcData?.structural ?? null,
+        compliance: {
+          necVersion:        calcData?.jurisdiction?.necVersion ?? 'NEC 2020',
+          electricalStatus:  calcData?.electrical?.status ?? null,
+          structuralStatus:  calcData?.structural?.status ?? null,
+          rapidShutdown:     config.rapidShutdown ? 'Required — NEC 690.12' : 'Not Required',
+        },
+        bomItems:            bom,
+        sldSvg:              sldSvg,
+        permit: {
+          ahj:               calcData?.jurisdiction?.ahj ?? null,
+          utility:           config.utilityId ?? null,
+          estimatedFee:      calcData?.jurisdiction?.estimatedPermitFee ?? null,
+        },
+        runs:                computedSystem.runs ?? [],
+      };
+
+      const res = await fetch('/api/engineering/save-outputs', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        console.log('[Engineering] Saved', data.saved?.length, 'workspace files:', data.saved?.join(', '));
+        // Refresh files list if user is on the files tab (inline fetch to avoid forward-ref)
+        if (activeTab === 'files' && currentProjectId) {
+          fetch(`/api/project-files?projectId=${currentProjectId}`)
+            .then(r => r.json())
+            .then(d => { if (d.success) setProjectFiles(d.data || []); })
+            .catch(() => {});
+        }
+      } else {
+        console.warn('[Engineering] save-outputs failed:', data.error);
+      }
+    } catch (e: any) {
+      console.warn('[Engineering] saveEngineeringOutputs error:', e.message);
+    }
+  }, [currentProjectId, config, totalKw, totalInverterKw, totalPanels, computedSystem, bom, sldSvg, activeTab]);
+
+  // Keep ref in sync so runCalc can call latest version without stale closure
+  useEffect(() => {
+    saveEngineeringOutputsRef.current = saveEngineeringOutputs;
+  }, [saveEngineeringOutputs]);
 
   // Auto-recalculate 800ms after config changes
   useEffect(() => {
