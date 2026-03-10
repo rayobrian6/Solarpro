@@ -11,12 +11,13 @@ export type AdminUser = {
 };
 
 /**
- * Server-side admin auth check.
+ * Server-side admin auth check (Next.js 14 compatible).
  * Always re-fetches role from DB so stale JWTs (pre-migration) still work.
  * Redirects to /dashboard if not admin/super_admin.
  */
 export async function requireAdmin(): Promise<AdminUser> {
-  const cookieStore = await cookies();
+  // Next.js 14: cookies() is synchronous (no await)
+  const cookieStore = cookies();
   const token = cookieStore.get('solarpro_session')?.value;
   if (!token) redirect('/auth/login');
 
