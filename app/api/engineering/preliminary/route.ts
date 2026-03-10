@@ -178,6 +178,7 @@ async function saveProjectFile(sql: any, params: {
 }) {
   try {
     const buf = Buffer.from(params.content, 'utf8');
+    // Atomic upsert — unique on (project_id, user_id, file_name)
     await sql`
       INSERT INTO project_files
         (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
@@ -185,11 +186,40 @@ async function saveProjectFile(sql: any, params: {
         (${params.projectId}, ${params.clientId}, ${params.userId},
          ${params.fileName}, ${params.fileType}, ${buf.length},
          ${params.mimeType}, ${buf}, ${params.notes})
+      ON CONFLICT (project_id, user_id, file_name)
+      DO UPDATE SET
+        client_id   = EXCLUDED.client_id,
+        file_type   = EXCLUDED.file_type,
+        file_size   = EXCLUDED.file_size,
+        mime_type   = EXCLUDED.mime_type,
+        file_data   = EXCLUDED.file_data,
+        notes       = EXCLUDED.notes,
+        upload_date = NOW()
     `;
     return true;
   } catch (e: any) {
-    console.warn('[preliminary] saveProjectFile failed:', e.message);
-    return false;
+    // Fallback: plain INSERT if unique constraint not yet applied
+    try {
+      const buf2 = Buffer.from(params.content, 'utf8');
+      await sql`
+        DELETE FROM project_files
+        WHERE project_id = ${params.projectId}
+          AND user_id    = ${params.userId}
+          AND file_name  = ${params.fileName}
+      `;
+      await sql`
+        INSERT INTO project_files
+          (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+        VALUES
+          (${params.projectId}, ${params.clientId}, ${params.userId},
+           ${params.fileName}, ${params.fileType}, ${buf2.length},
+           ${params.mimeType}, ${buf2}, ${params.notes})
+      `;
+      return true;
+    } catch (e2: any) {
+      console.warn('[preliminary] saveProjectFile failed:', e2.message);
+      return false;
+    }
   }
 }
 
@@ -204,6 +234,7 @@ async function saveSvgFile(sql: any, params: {
 }) {
   try {
     const buf = Buffer.from(params.svg, 'utf8');
+    // Atomic upsert — unique on (project_id, user_id, file_name)
     await sql`
       INSERT INTO project_files
         (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
@@ -211,11 +242,38 @@ async function saveSvgFile(sql: any, params: {
         (${params.projectId}, ${params.clientId}, ${params.userId},
          ${params.fileName}, 'engineering', ${buf.length},
          'image/svg+xml', ${buf}, ${params.notes})
+      ON CONFLICT (project_id, user_id, file_name)
+      DO UPDATE SET
+        client_id   = EXCLUDED.client_id,
+        file_size   = EXCLUDED.file_size,
+        file_data   = EXCLUDED.file_data,
+        notes       = EXCLUDED.notes,
+        upload_date = NOW()
     `;
     return true;
   } catch (e: any) {
-    console.warn('[preliminary] saveSvgFile failed:', e.message);
-    return false;
+    // Fallback: plain INSERT if unique constraint not yet applied
+    try {
+      const buf2 = Buffer.from(params.svg, 'utf8');
+      await sql`
+        DELETE FROM project_files
+        WHERE project_id = ${params.projectId}
+          AND user_id    = ${params.userId}
+          AND file_name  = ${params.fileName}
+      `;
+      await sql`
+        INSERT INTO project_files
+          (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+        VALUES
+          (${params.projectId}, ${params.clientId}, ${params.userId},
+           ${params.fileName}, 'engineering', ${buf2.length},
+           'image/svg+xml', ${buf2}, ${params.notes})
+      `;
+      return true;
+    } catch (e2: any) {
+      console.warn('[preliminary] saveSvgFile failed:', e2.message);
+      return false;
+    }
   }
 }
 

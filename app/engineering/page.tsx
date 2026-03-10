@@ -350,6 +350,7 @@ function EngineeringPageInner() {
   const [projectAutoLoaded, setProjectAutoLoaded] = useState(false);
   const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [currentClientId,  setCurrentClientId]  = useState<string | null>(null);
 
   // Auto-load project data when ?projectId= is in the URL
   // Full seed hydration: reads engineeringSeed.synthetic_eng_config to populate
@@ -380,6 +381,7 @@ function EngineeringPageInner() {
         if (p.name)         patches.projectName = p.name;
         if (p.address)      patches.address = p.address;
         if (p.client?.name) patches.clientName = p.client.name;
+        if (p.clientId)     setCurrentClientId(p.clientId);
         if (p.systemType)   patches.systemType = p.systemType as SystemType;
 
         // Parse state from address as fallback
@@ -1178,8 +1180,8 @@ function EngineeringPageInner() {
 
       const payload = {
         projectId:           currentProjectId,
-        clientId:            null,
-        clientName:          config.projectName || 'Client',
+        clientId:            currentClientId,
+        clientName:          config.clientName || config.projectName || 'Client',
         systemKw:            Number(totalKw),
         panelCount:          totalPanels,
         panelModel:          panelData ? `${panelData.manufacturer ?? ''} ${panelData.model ?? ''} ${panelData.watts ?? ''}W`.trim() : 'Generic 400W Monocrystalline',
@@ -1227,7 +1229,7 @@ function EngineeringPageInner() {
     } catch (e: any) {
       console.warn('[Engineering] saveEngineeringOutputs error:', e.message);
     }
-  }, [currentProjectId, config, totalKw, totalInverterKw, totalPanels, computedSystem, bom, sldSvg, activeTab, pvwattsData]);
+  }, [currentProjectId, currentClientId, config, totalKw, totalInverterKw, totalPanels, computedSystem, bom, sldSvg, activeTab, pvwattsData]);
 
 
   // Auto-recalculate 800ms after config changes
