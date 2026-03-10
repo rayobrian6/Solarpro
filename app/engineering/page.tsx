@@ -12,7 +12,8 @@ import {
   MapPin, Activity, BarChart2, Wrench, RefreshCw,
   XCircle, AlertCircle, TrendingUp, Book, Cpu,
   Wind, Snowflake, Weight, Ruler, ClipboardCheck,
-  ChevronUp, Eye, EyeOff, Lock, Stamp, Package, Cpu as CpuIcon
+  ChevronUp, Eye, EyeOff, Lock, Stamp, Package, Cpu as CpuIcon,
+  FolderOpen, Upload, File, Image, FileBadge, ExternalLink
 } from 'lucide-react';
 import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from '@/lib/equipment-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
@@ -100,7 +101,7 @@ function parseCityFromAddress(address: string): string | null {
 type InverterType = 'string' | 'micro' | 'optimizer';
 type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' | 'flat_tpo' | 'flat_epdm' | 'flat_gravel';
 type SystemType = 'roof' | 'ground' | 'fence';
-type TabId = 'config' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom';
+type TabId = 'config' | 'compliance' | 'electrical' | 'diagram' | 'schedule' | 'structural' | 'mounting' | 'permit' | 'bom' | 'files';
 
 interface StringConfig {
   id: string;
@@ -348,12 +349,14 @@ function EngineeringPageInner() {
   const [config, setConfig] = useState<ProjectConfig>(defaultProject);
   const [projectAutoLoaded, setProjectAutoLoaded] = useState(false);
   const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
 
   // Auto-load project data when ?projectId= is in the URL
   useEffect(() => {
     const projectId = searchParams?.get('projectId');
     if (!projectId || projectAutoLoaded) return;
     setProjectAutoLoaded(true);
+    setCurrentProjectId(projectId);
 
     fetch(`/api/projects/${projectId}`)
       .then(r => r.json())
@@ -450,6 +453,14 @@ function EngineeringPageInner() {
   const [bom, setBom] = useState<any[]>([]);
   const [bomLoading, setBomLoading] = useState(false);
   const [bomError, setBomError] = useState<string | null>(null);
+
+  // ── Client Files tab state ──────────────────────────────────────────────────
+  const [projectFiles, setProjectFiles] = useState<any[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
+  const [fileUploading, setFileUploading] = useState(false);
+  const [fileUploadError, setFileUploadError] = useState<string | null>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
   const [structuralOptions, setStructuralOptions] = useState<any[]>([]);
   const [ecosystemLog, setEcosystemLog] = useState<any[]>([]);
   const [ecosystemComponents, setEcosystemComponents] = useState<any[]>([]);
@@ -1415,6 +1426,66 @@ function EngineeringPageInner() {
   };
 
   // ── V4 BOM fetch (uses /api/engineering/bom — registry-driven engine) ─────────
+  // ── Client Files: fetch, upload, delete ────────────────────────────────────
+  const fetchProjectFiles = useCallback(async () => {
+    if (!currentProjectId) return;
+    setFilesLoading(true);
+    setFilesError(null);
+    try {
+      const res = await fetch(`/api/project-files?projectId=${currentProjectId}`);
+      const data = await res.json();
+      if (data.success) {
+        setProjectFiles(data.data || []);
+      } else {
+        setFilesError(data.error || 'Failed to load files');
+      }
+    } catch (err: any) {
+      setFilesError(err.message || 'Failed to load files');
+    } finally {
+      setFilesLoading(false);
+    }
+  }, [currentProjectId]);
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!currentProjectId) return;
+    setFileUploading(true);
+    setFileUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('projectId', currentProjectId);
+      const res = await fetch('/api/project-files', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        await fetchProjectFiles();
+      } else {
+        setFileUploadError(data.error || 'Upload failed');
+      }
+    } catch (err: any) {
+      setFileUploadError(err.message || 'Upload failed');
+    } finally {
+      setFileUploading(false);
+    }
+  }, [currentProjectId, fetchProjectFiles]);
+
+  const handleFileDelete = useCallback(async (fileId: string) => {
+    if (!confirm('Delete this file?')) return;
+    try {
+      const res = await fetch(`/api/project-files?id=${fileId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        setProjectFiles(prev => prev.filter(f => f.id !== fileId));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Load files when switching to files tab
+  useEffect(() => {
+    if (activeTab === 'files' && currentProjectId) {
+      fetchProjectFiles();
+    }
+  }, [activeTab, currentProjectId, fetchProjectFiles]);
+
   const fetchBOM = useCallback(async () => {
     setBomLoading(true);
     setBomError(null);
@@ -2031,6 +2102,7 @@ function EngineeringPageInner() {
     { id: 'mounting',   label: 'Mounting Details',    icon: <Home size={14} /> },
     { id: 'permit',     label: 'Permit Package',      icon: <Stamp size={14} /> },
     { id: 'bom',        label: 'Bill of Materials',    icon: <Grid size={14} /> },
+    { id: 'files',      label: 'Client Files',          icon: <FolderOpen size={14} /> },
   ];
 
   const ComplianceSummaryBar = () => (
@@ -6891,6 +6963,195 @@ function EngineeringPageInner() {
               )}
             </div>
           ))}
+
+        {/* ── CLIENT FILES TAB ── */}
+          {activeTab === 'files' && (
+            <div className="max-w-4xl space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <FolderOpen size={14} className="text-amber-400" /> Client Files
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Utility bills · Engineering packets · Proposals · Site photos · Permits
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchProjectFiles}
+                    disabled={filesLoading}
+                    className="btn-secondary btn-sm"
+                  >
+                    <RefreshCw size={13} className={filesLoading ? 'animate-spin' : ''} />
+                    Refresh
+                  </button>
+                  <button
+                    onClick={() => filesInputRef.current?.click()}
+                    disabled={fileUploading}
+                    className="btn-primary btn-sm"
+                  >
+                    <Upload size={13} />
+                    {fileUploading ? 'Uploading…' : 'Upload File'}
+                  </button>
+                  <input
+                    ref={filesInputRef}
+                    type="file"
+                    className="hidden"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp,.svg,.doc,.docx,.txt"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileUpload(file);
+                      e.target.value = '';
+                    }}
+                  />
+                </div>
+              </div>
+
+              {fileUploadError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
+                  <XCircle size={13} /> {fileUploadError}
+                </div>
+              )}
+
+              {filesError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
+                  <XCircle size={13} /> {filesError}
+                </div>
+              )}
+
+              {/* File type legend */}
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { type: 'utility_bill',  label: 'Utility Bill',    color: 'text-amber-400  bg-amber-500/10  border-amber-500/20'  },
+                  { type: 'engineering',   label: 'Engineering',     color: 'text-blue-400   bg-blue-500/10   border-blue-500/20'   },
+                  { type: 'proposal',      label: 'Proposal',        color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
+                  { type: 'permit',        label: 'Permit',          color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
+                  { type: 'site_photo',    label: 'Site Photo',      color: 'text-sky-400    bg-sky-500/10    border-sky-500/20'    },
+                  { type: 'document',      label: 'Document',        color: 'text-slate-400  bg-slate-700/40  border-slate-600/40'  },
+                ].map(ft => (
+                  <span key={ft.type} className={`text-xs px-2 py-0.5 rounded-full border ${ft.color}`}>
+                    {ft.label}
+                  </span>
+                ))}
+              </div>
+
+              {/* Files list */}
+              {filesLoading ? (
+                <div className="card p-12 text-center">
+                  <RefreshCw size={28} className="mx-auto mb-3 text-amber-400 animate-spin" />
+                  <div className="text-sm text-slate-400">Loading files…</div>
+                </div>
+              ) : projectFiles.length === 0 ? (
+                <div className="card p-12 text-center">
+                  <FolderOpen size={40} className="mx-auto mb-4 text-slate-600" />
+                  <div className="text-sm font-bold text-white mb-1">No files yet</div>
+                  <div className="text-xs text-slate-500 mb-4 max-w-sm mx-auto">
+                    Upload utility bills, engineering packets, proposals, site photos, or permits.
+                    Files are stored securely in SolarPro and linked to this project.
+                  </div>
+                  <button
+                    onClick={() => filesInputRef.current?.click()}
+                    className="btn-primary btn-sm mx-auto"
+                  >
+                    <Upload size={13} /> Upload First File
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {projectFiles.map((file: any) => {
+                    const typeColors: Record<string, string> = {
+                      utility_bill:  'text-amber-400  bg-amber-500/10  border-amber-500/20',
+                      engineering:   'text-blue-400   bg-blue-500/10   border-blue-500/20',
+                      proposal:      'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+                      permit:        'text-purple-400 bg-purple-500/10 border-purple-500/20',
+                      site_photo:    'text-sky-400    bg-sky-500/10    border-sky-500/20',
+                      document:      'text-slate-400  bg-slate-700/40  border-slate-600/40',
+                      other:         'text-slate-400  bg-slate-700/40  border-slate-600/40',
+                    };
+                    const typeLabels: Record<string, string> = {
+                      utility_bill: 'Utility Bill', engineering: 'Engineering',
+                      proposal: 'Proposal', permit: 'Permit',
+                      site_photo: 'Site Photo', document: 'Document', other: 'File',
+                    };
+                    const colorClass = typeColors[file.file_type] || typeColors.other;
+                    const typeLabel  = typeLabels[file.file_type] || 'File';
+                    const isImage    = file.mime_type?.startsWith('image/');
+                    const isSvg      = file.mime_type === 'image/svg+xml';
+                    const isPdf      = file.mime_type === 'application/pdf';
+                    const fileSizeKb = file.file_size ? `${(file.file_size / 1024).toFixed(1)} KB` : '';
+                    const uploadDate = file.upload_date
+                      ? new Date(file.upload_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                      : '';
+
+                    return (
+                      <div key={file.id} className="card p-4 flex items-center gap-3 hover:border-slate-600/60 transition-colors">
+                        {/* File type icon */}
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 border ${colorClass}`}>
+                          {isImage && !isSvg ? <Image size={16} /> :
+                           isSvg            ? <FileBadge size={16} /> :
+                           isPdf            ? <FileText size={16} /> :
+                                              <File size={16} />}
+                        </div>
+
+                        {/* File info */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-white text-sm font-medium truncate">{file.file_name}</span>
+                            <span className={`text-xs px-1.5 py-0.5 rounded-full border flex-shrink-0 ${colorClass}`}>
+                              {typeLabel}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-slate-500">
+                            {fileSizeKb && <span>{fileSizeKb}</span>}
+                            {uploadDate && <span>{uploadDate}</span>}
+                            {file.notes && <span className="truncate italic">{file.notes}</span>}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <a
+                            href={`/api/project-files/download?id=${file.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors"
+                            title="View / Download"
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                          <button
+                            onClick={() => handleFileDelete(file.id)}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                            title="Delete file"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Drag-and-drop zone */}
+              <div
+                className="border-2 border-dashed border-slate-700/60 rounded-xl p-8 text-center hover:border-amber-500/40 transition-colors cursor-pointer"
+                onClick={() => filesInputRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file) handleFileUpload(file);
+                }}
+              >
+                <Upload size={24} className="mx-auto mb-2 text-slate-600" />
+                <p className="text-xs text-slate-500">
+                  Drag &amp; drop files here, or <span className="text-amber-400 underline">click to browse</span>
+                </p>
+                <p className="text-xs text-slate-600 mt-1">PDF, JPG, PNG, SVG, DOC · Max 10MB</p>
+              </div>
+            </div>
+          )}
 
         </div>{/* end main tab content */}
 

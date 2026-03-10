@@ -162,6 +162,9 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
   const [manualAddress, setManualAddress] = useState('');
   const [creatingStatus, setCreatingStatus] = useState<string[]>([]);
   const [created, setCreated] = useState<CreatedEntities | null>(null);
+  const [generatingPacket, setGeneratingPacket] = useState(false);
+  const [packetGenerated, setPacketGenerated] = useState(false);
+  const [packetError, setPacketError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Stage simulation ──────────────────────────────────────────────────────
@@ -368,6 +371,83 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         log(`✓ Proposal created`);
       } else {
         log('⚠ Proposal will be created from the project page');
+      }
+
+      // 4. Auto-generate preliminary engineering packet + save as project file
+      log('Generating preliminary engineering packet...');
+      try {
+        const annualKwhForPacket = result.billData.estimatedAnnualKwh || 0;
+        const prelimRes = await fetch('/api/engineering/preliminary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            annualKwh:      annualKwhForPacket,
+            monthlyKwh:     result.billData.monthlyKwh,
+            utilityName:    result.billData.utilityProvider || result.utilityData?.utilityName,
+            serviceAddress: safeAddress,
+            clientName,
+            projectName,
+            stateCode:      result.locationData?.stateCode,
+            electricityRate: result.billData.electricityRate || result.utilityData?.avgRatePerKwh,
+            projectId,
+            clientId,
+          }),
+        });
+        const prelimData = await prelimRes.json();
+        if (prelimData.success && prelimData.data?.reportText) {
+          // Save the report text as a project file
+          const reportBlob = btoa(unescape(encodeURIComponent(prelimData.data.reportText)));
+          await fetch('/api/project-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId,
+              clientId,
+              fileName:  `Preliminary_Engineering_${clientName.replace(/[^a-z0-9]/gi, '_')}_${new Date().getFullYear()}.txt`,
+              fileType:  'engineering',
+              mimeType:  'text/plain',
+              fileData:  reportBlob,
+              notes:     'Auto-generated preliminary engineering estimate from bill upload',
+            }),
+          });
+          // Save SLD SVG if generated
+          if (prelimData.data.sldSvg) {
+            const sldBlob = btoa(unescape(encodeURIComponent(prelimData.data.sldSvg)));
+            await fetch('/api/project-files', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                projectId,
+                clientId,
+                fileName:  `Preliminary_SLD_${clientName.replace(/[^a-z0-9]/gi, '_')}.svg`,
+                fileType:  'engineering',
+                mimeType:  'image/svg+xml',
+                fileData:  sldBlob,
+                notes:     'Auto-generated preliminary single-line diagram',
+              }),
+            });
+          }
+          log('✓ Preliminary engineering packet saved to project files');
+        } else {
+          log('⚠ Engineering packet will be available from the Engineering tab');
+        }
+      } catch (pkgErr: unknown) {
+        log('⚠ Engineering packet will be available from the Engineering tab');
+      }
+
+      // 5. Save the original utility bill as a project file
+      if (lastFile) {
+        try {
+          const billFormData = new FormData();
+          billFormData.append('file', lastFile);
+          billFormData.append('projectId', projectId);
+          billFormData.append('clientId', clientId);
+          billFormData.append('notes', 'Original utility bill uploaded during onboarding');
+          await fetch('/api/project-files', { method: 'POST', body: billFormData });
+          log('✓ Utility bill saved to project files');
+        } catch {
+          // Non-fatal — bill upload already succeeded
+        }
       }
 
       log('✓ All done! Redirecting to project...');
@@ -693,9 +773,9 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 </div>
                 <div className="grid grid-cols-3 gap-2 mt-3">
                   {[
-                    { label: 'Panels', value: `${Math.ceil(systemKw * 1000 / 430)}`, color: 'text-blue-400' },
-                    { label: 'Annual kWh', value: `${Math.round(systemKw * 1400).toLocaleString()}`, color: 'text-amber-400' },
-                    { label: 'Est. Cost', value: `$${Math.round(systemKw * 2850).toLocaleString()}`, color: 'text-emerald-400' },
+                    { label: 'Panels (440W)', value: `${Math.ceil(systemKw * 1000 / 440)}`, color: 'text-blue-400' },
+                    { label: 'Annual kWh', value: `${Math.round(systemKw * 1250).toLocaleString()}`, color: 'text-amber-400' },
+                    { label: 'Est. Range', value: `$${Math.round(systemKw * 2750 / 1000).toLocaleString()}k–$${Math.round(systemKw * 3500 / 1000).toLocaleString()}k`, color: 'text-emerald-400' },
                   ].map(item => (
                     <div key={item.label} className="text-center bg-slate-700/30 rounded-lg p-2">
                       <p className={`text-sm font-bold ${item.color}`}>{item.value}</p>
@@ -703,6 +783,9 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                     </div>
                   ))}
                 </div>
+                <p className="text-xs text-slate-500 mt-2 text-center">
+                  Cost range: $2.75–$3.50/W installed · 30% ITC not included
+                </p>
               </div>
 
               <div className="flex gap-3">
@@ -767,7 +850,12 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 <div className="flex items-center gap-2">
                   <Sun size={13} className="text-amber-400" />
                   <span className="text-slate-400 text-xs">System:</span>
-                  <span className="text-white text-sm font-medium">{systemKw.toFixed(1)} kW · {Math.ceil(systemKw * 1000 / 430)} panels</span>
+                  <span className="text-white text-sm font-medium">{systemKw.toFixed(1)} kW · {Math.ceil(systemKw * 1000 / 440)} panels (440W)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <FileText size={13} className="text-emerald-400" />
+                  <span className="text-slate-400 text-xs">Files:</span>
+                  <span className="text-white text-sm font-medium">Engineering packet + bill saved to project</span>
                 </div>
               </div>
               <div className="flex gap-3">
@@ -776,6 +864,12 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                   Open Project <ArrowRight size={14} className="inline ml-1" />
                 </a>
               </div>
+              <a
+                href={`/engineering?projectId=${created.projectId}`}
+                className="w-full text-center text-xs text-amber-400 hover:text-amber-300 underline underline-offset-2 mt-1 block"
+              >
+                View Engineering Tab → Client Files &amp; Preliminary Packet
+              </a>
             </div>
           )}
 

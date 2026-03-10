@@ -227,6 +227,40 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ enterprise_leads: ${e.message}`);
     }
 
+    // ============================================================
+    // Migration 008: project_files table (Client Files in Engineering)
+    // ============================================================
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS project_files (
+          id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          project_id    UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          client_id     UUID REFERENCES clients(id) ON DELETE SET NULL,
+          user_id       UUID NOT NULL,
+          file_name     TEXT NOT NULL,
+          file_type     TEXT NOT NULL DEFAULT 'other',
+          file_size     INTEGER,
+          mime_type     TEXT,
+          file_data     BYTEA,
+          file_url      TEXT,
+          notes         TEXT,
+          upload_date   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ project_files table ready');
+    } catch (e: any) {
+      results.push(`⚠️ project_files: ${e.message}`);
+    }
+
+    // Index for fast project lookups
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_project_files_project_id ON project_files(project_id)`;
+      results.push('✅ project_files index ready');
+    } catch (e: any) {
+      results.push(`⚠️ project_files index: ${e.message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     console.error('[POST /api/migrate]', error);
