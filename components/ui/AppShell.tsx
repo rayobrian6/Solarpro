@@ -12,7 +12,7 @@ import {
   Shield
 } from 'lucide-react';
 import SubscriptionBanner from './SubscriptionBanner';
-import { checkAccess } from '@/lib/permissions';
+import { hasPlatformAccess } from '@/lib/permissions';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
 import { useUser, getAccountBadge, isAdminRole } from '@/contexts/UserContext';
 
@@ -179,13 +179,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const allowedPaths = ['/subscribe', '/auth', '/enterprise', '/account/billing'];
     if (allowedPaths.some(p => pathname?.startsWith(p))) return;
 
-    const access = checkAccess(
-      user.subscriptionStatus || 'trialing',
-      user.trialEndsAt || null,
-      false,
-      user.role
-    );
-    if (!access.allowed) {
+    // Use hasPlatformAccess — single source of truth for all access decisions
+    const access = hasPlatformAccess(user);
+    if (!access) {
       router.push('/subscribe?expired=1');
     }
   }, [user, pathname, router]);

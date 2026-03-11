@@ -42,12 +42,16 @@ export async function GET(req: NextRequest) {
 
     const dbUser = rows[0];
 
-    // Determine if user has active access
+    // Determine if user has active access — mirrors hasPlatformAccess() from lib/permissions.ts
+    // Admin roles always have access regardless of subscription state
     const now = new Date();
     const trialEnd = !useFallback && dbUser.trial_ends_at ? new Date(dbUser.trial_ends_at) : null;
+    const role = (dbUser.role || '').toLowerCase();
     const hasAccess = useFallback
       ? true  // if migration hasn't run yet, allow access so users aren't locked out
-      : (dbUser.is_free_pass ||
+      : (role === 'super_admin' ||
+         role === 'admin' ||
+         dbUser.is_free_pass === true ||
          dbUser.subscription_status === 'active' ||
          (dbUser.subscription_status === 'trialing' && trialEnd && trialEnd > now));
 

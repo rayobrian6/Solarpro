@@ -57,20 +57,34 @@ async function fetchUserFromDb(): Promise<AppUser | null> {
     // isFreePass MUST come from DB boolean is_free_pass only
     // Never infer from subscriptionStatus string
     const isFP = u.isFreePass === true;
+    const role = u.role || 'user';
+    const status = u.subscriptionStatus || 'trialing';
+    const trialEndsAt = u.trialEndsAt || null;
+
+    // Compute hasAccess using the same logic as hasPlatformAccess()
+    // This ensures UserContext.hasAccess is always consistent with lib/permissions.ts
+    const roleLower = role.toLowerCase();
+    const trialEnd = trialEndsAt ? new Date(trialEndsAt) : null;
+    const hasAccess =
+      roleLower === 'super_admin' ||
+      roleLower === 'admin' ||
+      isFP ||
+      status === 'active' ||
+      (status === 'trialing' && trialEnd !== null && trialEnd > new Date());
 
     return {
       id: u.id,
       name: u.name || u.email,
       email: u.email,
-      role: u.role || 'user',
+      role,
       company: u.company,
       phone: u.phone,
       plan: u.plan || 'starter',
-      subscriptionStatus: u.subscriptionStatus || 'trialing',
-      trialEndsAt: u.trialEndsAt || null,
+      subscriptionStatus: status,
+      trialEndsAt,
       isFreePass: isFP,
       freePassNote: u.freePassNote || null,
-      hasAccess: u.hasAccess !== false,
+      hasAccess,
       companyLogoUrl: u.companyLogoUrl || null,
       brandPrimaryColor: u.brandPrimaryColor || '#f59e0b',
       brandSecondaryColor: u.brandSecondaryColor || '#0f172a',

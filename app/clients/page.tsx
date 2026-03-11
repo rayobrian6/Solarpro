@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import type { Client } from '@/types';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useUser } from '@/contexts/UserContext';
+import { hasPlatformAccess } from '@/lib/permissions';
 import UpgradeModal from '@/components/ui/UpgradeModal';
 
 export default function ClientsPage() {
@@ -26,9 +28,10 @@ export default function ClientsPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Plan gating — Starter: max 5 clients
-  // Admin, super_admin, and free_pass users have no client limit regardless of plan
-  const { plan, loading: subLoading, isFreePass, role } = useSubscription();
-  const isUnlimited = isFreePass || role === 'admin' || role === 'super_admin';
+  // hasPlatformAccess() is the single source of truth: admin/free_pass/active users have no limit
+  const { plan, loading: subLoading } = useSubscription();
+  const { user } = useUser();
+  const isUnlimited = hasPlatformAccess(user);
   // While loading, never enforce limits (avoids flash upgrade wall for paid/free-pass users)
   const maxClients = (!subLoading && plan === 'starter' && !isUnlimited) ? 5 : null;
   const atClientLimit = maxClients !== null && clients.length >= maxClients;

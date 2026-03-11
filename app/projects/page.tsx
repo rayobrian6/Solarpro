@@ -10,6 +10,8 @@ import {
 import type { Project } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useUser } from '@/contexts/UserContext';
+import { hasPlatformAccess } from '@/lib/permissions';
 import UpgradeModal from '@/components/ui/UpgradeModal';
 
 const STATUS_STEPS = ['lead', 'design', 'proposal', 'approved', 'installed'];
@@ -39,9 +41,10 @@ export default function ProjectsPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Plan gating — Starter: max 2 projects
-  // Admin, super_admin, and free_pass users have no project limit regardless of plan
-  const { plan, loading: subLoading, isFreePass, role } = useSubscription();
-  const isUnlimited = isFreePass || role === 'admin' || role === 'super_admin';
+  // hasPlatformAccess() is the single source of truth: admin/free_pass/active users have no limit
+  const { plan, loading: subLoading } = useSubscription();
+  const { user } = useUser();
+  const isUnlimited = hasPlatformAccess(user);
   // While loading, never enforce limits (avoids flash upgrade wall for paid/free-pass users)
   const maxProjects = (!subLoading && plan === 'starter' && !isUnlimited) ? 2 : null;
   const atProjectLimit = maxProjects !== null && projects.length >= maxProjects;

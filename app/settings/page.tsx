@@ -8,6 +8,7 @@ import {
   Sun, RefreshCw, X
 } from 'lucide-react';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
+import { hasPlatformAccess } from '@/lib/permissions';
 
 type Tab = 'profile' | 'branding' | 'subscription';
 

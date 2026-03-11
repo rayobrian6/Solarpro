@@ -4,7 +4,7 @@
  */
 export const BUILD_VERSION = 'v40.8';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Permission propagation — hasPlatformAccess(); admin/free_pass bypass project/client limits; settings uses UserContext';
+export const BUILD_DESCRIPTION = 'FIX: Unified hasPlatformAccess() — single permission source; admin actions immediately propagate to all feature gates';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -59,12 +59,17 @@ export const BUILD_FEATURES = [
   'FIX: next.config.js — injects NEXT_PUBLIC_BUILD_VERSION env var so client knows its build version',
   'FIX: app/api/version/route.ts — returns version + ts fields with no-cache headers',
   'FIX: app/account/billing/page.tsx — full rewrite: role+plan shown independently; admin bypass; no free_pass status inference',
-  // v40.8 — Permission propagation fix
-  'NEW: lib/permissions.ts — hasPlatformAccess(user) unified helper; admin/super_admin/free_pass always return true',
-  'FIX: app/projects/page.tsx — maxProjects limit now respects isFreePass + admin role (isUnlimited guard)',
-  'FIX: app/clients/page.tsx — maxClients limit now respects isFreePass + admin role (isUnlimited guard)',
+  // v40.8 — Unified permission propagation
+  'NEW: lib/permissions.ts — hasPlatformAccess(user) is now the SINGLE source of truth for all access decisions',
+  'FIX: lib/permissions.ts — hasPlatformAccess() supports both snake_case (DB) and camelCase (frontend) field names',
+  'FIX: hooks/useSubscription.ts — hasAccess and can() now use hasPlatformAccess() instead of manual role/status checks',
+  'FIX: components/ui/AppShell.tsx — trial expiration redirect uses hasPlatformAccess() (was passing false for isFreePass)',
+  'FIX: app/api/auth/me/route.ts — hasAccess calculation now includes role check (admin always has access)',
+  'FIX: contexts/UserContext.tsx — hasAccess computed consistently with hasPlatformAccess() logic',
+  'FIX: app/projects/page.tsx — maxProjects uses hasPlatformAccess(); admin/free_pass users have no project limit',
+  'FIX: app/clients/page.tsx — maxClients uses hasPlatformAccess(); admin/free_pass users have no client limit',
   'FIX: app/settings/page.tsx — migrated to UserContext; removed own /api/auth/me fetch; isFreePass from DB boolean only',
-  'FIX: app/settings/page.tsx — branding plan gate hidden for admin/free_pass; billing section hidden for admin/free_pass',
+  'FIX: app/settings/page.tsx — branding plan gate and billing section hidden for admin/free_pass users',
   // v40.7 — Global UserContext + refreshUser()
   'NEW: contexts/UserContext.tsx — global AppUser state; UserProvider wraps entire app; refreshUser() re-fetches DB',
   'FIX: app/layout.tsx — UserProvider added wrapping entire app tree',

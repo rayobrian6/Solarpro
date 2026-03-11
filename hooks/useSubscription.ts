@@ -6,10 +6,12 @@
  * Reads from the global UserContext (single source of truth).
  * No longer fetches /api/auth/me independently — avoids duplicate requests
  * and ensures all components see the same user state simultaneously.
+ *
+ * All access decisions flow through hasPlatformAccess() from lib/permissions.ts.
  */
 
 import { useUser, isAdminRole } from '@/contexts/UserContext';
-import { canAccess, checkAccess, FeatureKey } from '@/lib/permissions';
+import { hasPlatformAccess, canAccess, checkAccess, FeatureKey } from '@/lib/permissions';
 import type { PlanId } from '@/lib/stripe';
 
 export interface SubscriptionState {
@@ -66,12 +68,15 @@ export function useSubscription(): SubscriptionState {
   const trialEndsAt = user?.trialEndsAt || null;
   const isAdmin = isAdminRole(role);
 
-  // Admin/super_admin bypass all subscription checks
-  const access = isAdmin
+  // Use hasPlatformAccess as the single source of truth for access decisions
+  const hasAccess = hasPlatformAccess(user);
+
+  // For trial days remaining, still use checkAccess for the daysRemaining calculation
+  const accessDetail = isAdmin
     ? { allowed: true, reason: 'active' as const, daysRemaining: undefined }
     : checkAccess(status, trialEndsAt, isFreePassUser, role);
 
-  const trialDaysRemaining = access.daysRemaining ?? 0;
+  const trialDaysRemaining = accessDetail.daysRemaining ?? 0;
   const isEffectivelyActive = isAdmin || isFreePassUser;
 
   const isTrialing = !isEffectivelyActive && status === 'trialing' && trialDaysRemaining > 0;
@@ -89,7 +94,7 @@ export function useSubscription(): SubscriptionState {
     status,
     role,
     isFreePass: isFreePassUser,
-    hasAccess: access.allowed,
+    hasAccess,
     trialDaysRemaining,
     isTrialing,
     isActive,
@@ -100,9 +105,10 @@ export function useSubscription(): SubscriptionState {
     planPrice: PLAN_PRICES[plan] || '$79/mo',
     planColor: PLAN_COLORS[plan] || 'text-slate-300',
     can: (feature: FeatureKey) => {
+      // hasPlatformAccess covers admin + free_pass + active subscription
+      if (!hasAccess) return false;
       if (isAdmin) return true;
       if (isFreePassUser) return true;
-      if (!access.allowed) return false;
       return canAccess(plan, feature);
     },
   };

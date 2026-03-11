@@ -1,6 +1,9 @@
 /**
  * lib/permissions.ts
  * Plan-based feature gating for SolarPro.
+ *
+ * SINGLE SOURCE OF TRUTH for all permission checks.
+ * All access decisions must flow through hasPlatformAccess().
  */
 
 import { PlanId, getPlanPermissions } from './stripe';
@@ -25,8 +28,59 @@ export interface AccessResult {
 }
 
 /**
+ * hasPlatformAccess — UNIFIED permission helper.
+ *
+ * This is the single function that determines whether a user has access
+ * to the platform. All feature gates, resource limits, and UI checks
+ * must use this function.
+ *
+ * Priority: super_admin > admin > is_free_pass > active > trialing > false
+ *
+ * Admin actions (free pass, role upgrades, subscription changes) propagate
+ * immediately because this reads directly from the user object returned by
+ * /api/auth/me (which always reads from DB).
+ */
+export function hasPlatformAccess(user: {
+  role?: string;
+  is_free_pass?: boolean;
+  isFreePass?: boolean;
+  subscription_status?: string;
+  subscriptionStatus?: string;
+  trial_ends_at?: string | null;
+  trialEndsAt?: string | null;
+} | null | undefined): boolean {
+  if (!user) return false;
+
+  const role = (user.role || '').toLowerCase();
+
+  // Admin roles always have full access — bypass all subscription checks
+  if (role === 'super_admin') return true;
+  if (role === 'admin') return true;
+
+  // Free pass — always has full access, no expiry
+  // Support both snake_case (DB) and camelCase (frontend) field names
+  if (user.is_free_pass === true) return true;
+  if (user.isFreePass === true) return true;
+
+  // Active subscription
+  const status = (user.subscription_status || user.subscriptionStatus || '').toLowerCase();
+  if (status === 'active') return true;
+
+  // Active trial
+  if (status === 'trialing') {
+    const trialEnd = user.trial_ends_at || user.trialEndsAt;
+    if (!trialEnd) return true; // no end date set — allow
+    return new Date(trialEnd) > new Date();
+  }
+
+  return false;
+}
+
+/**
  * Check if a user has active access to the platform at all.
  * Admin and super_admin roles always have full access regardless of subscription state.
+ *
+ * @deprecated Use hasPlatformAccess() instead for new code.
  */
 export function checkAccess(
   subscriptionStatus: string,
@@ -57,35 +111,6 @@ export function checkAccess(
 
   // Default: allow with no_subscription (new accounts)
   return { allowed: true, reason: 'no_subscription' };
-}
-
-/**
- * Unified platform access helper.
- *
- * Returns true if the user should have FULL platform access with no plan-based limits.
- * Use this for any per-user resource caps (max projects, max clients, etc.)
- *
- * Priority: super_admin > admin > free_pass > subscription state
- *
- * @param user - Partial user object with role, isFreePass, subscriptionStatus, trialEndsAt
- */
-export function hasPlatformAccess(user: {
-  role?: string;
-  isFreePass?: boolean;
-  subscriptionStatus?: string;
-  trialEndsAt?: string | null;
-} | null | undefined): boolean {
-  if (!user) return false;
-  const role = (user.role || '').toLowerCase();
-  if (role === 'super_admin' || role === 'admin') return true;
-  if (user.isFreePass === true) return true;
-  const result = checkAccess(
-    user.subscriptionStatus || 'trialing',
-    user.trialEndsAt ?? null,
-    false,
-    role
-  );
-  return result.allowed && result.reason !== 'no_subscription';
 }
 
 /**
