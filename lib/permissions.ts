@@ -60,6 +60,35 @@ export function checkAccess(
 }
 
 /**
+ * Unified platform access helper.
+ *
+ * Returns true if the user should have FULL platform access with no plan-based limits.
+ * Use this for any per-user resource caps (max projects, max clients, etc.)
+ *
+ * Priority: super_admin > admin > free_pass > subscription state
+ *
+ * @param user - Partial user object with role, isFreePass, subscriptionStatus, trialEndsAt
+ */
+export function hasPlatformAccess(user: {
+  role?: string;
+  isFreePass?: boolean;
+  subscriptionStatus?: string;
+  trialEndsAt?: string | null;
+} | null | undefined): boolean {
+  if (!user) return false;
+  const role = (user.role || '').toLowerCase();
+  if (role === 'super_admin' || role === 'admin') return true;
+  if (user.isFreePass === true) return true;
+  const result = checkAccess(
+    user.subscriptionStatus || 'trialing',
+    user.trialEndsAt ?? null,
+    false,
+    role
+  );
+  return result.allowed && result.reason !== 'no_subscription';
+}
+
+/**
  * Check if a plan can access a specific feature.
  */
 export function canAccess(plan: PlanId, feature: FeatureKey): boolean {

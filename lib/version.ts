@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.7';
+export const BUILD_VERSION = 'v40.8';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Global UserContext — single source of truth; refreshUser() after admin actions; role always shown first';
+export const BUILD_DESCRIPTION = 'FIX: Permission propagation — hasPlatformAccess(); admin/free_pass bypass project/client limits; settings uses UserContext';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -59,6 +59,12 @@ export const BUILD_FEATURES = [
   'FIX: next.config.js — injects NEXT_PUBLIC_BUILD_VERSION env var so client knows its build version',
   'FIX: app/api/version/route.ts — returns version + ts fields with no-cache headers',
   'FIX: app/account/billing/page.tsx — full rewrite: role+plan shown independently; admin bypass; no free_pass status inference',
+  // v40.8 — Permission propagation fix
+  'NEW: lib/permissions.ts — hasPlatformAccess(user) unified helper; admin/super_admin/free_pass always return true',
+  'FIX: app/projects/page.tsx — maxProjects limit now respects isFreePass + admin role (isUnlimited guard)',
+  'FIX: app/clients/page.tsx — maxClients limit now respects isFreePass + admin role (isUnlimited guard)',
+  'FIX: app/settings/page.tsx — migrated to UserContext; removed own /api/auth/me fetch; isFreePass from DB boolean only',
+  'FIX: app/settings/page.tsx — branding plan gate hidden for admin/free_pass; billing section hidden for admin/free_pass',
   // v40.7 — Global UserContext + refreshUser()
   'NEW: contexts/UserContext.tsx — global AppUser state; UserProvider wraps entire app; refreshUser() re-fetches DB',
   'FIX: app/layout.tsx — UserProvider added wrapping entire app tree',

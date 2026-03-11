@@ -39,9 +39,11 @@ export default function ProjectsPage() {
   const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   // Plan gating — Starter: max 2 projects
-  const { plan, loading: subLoading, isFreePass } = useSubscription();
+  // Admin, super_admin, and free_pass users have no project limit regardless of plan
+  const { plan, loading: subLoading, isFreePass, role } = useSubscription();
+  const isUnlimited = isFreePass || role === 'admin' || role === 'super_admin';
   // While loading, never enforce limits (avoids flash upgrade wall for paid/free-pass users)
-  const maxProjects = (!subLoading && plan === 'starter') ? 2 : null;
+  const maxProjects = (!subLoading && plan === 'starter' && !isUnlimited) ? 2 : null;
   const atProjectLimit = maxProjects !== null && projects.length >= maxProjects;
 
   // ✅ Phase 6: Force-refresh from server on every page visit

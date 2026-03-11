@@ -7,6 +7,7 @@ import {
   User, Lock, Bell, CreditCard, Trash2, Eye, EyeOff,
   Sun, RefreshCw, X
 } from 'lucide-react';
+import { useUser, isAdminRole } from '@/contexts/UserContext';
 
 type Tab = 'profile' | 'branding' | 'subscription';
 
@@ -55,46 +56,38 @@ export default function SettingsPage() {
     proposalFooterText: '',
   });
 
-  const [currentPlan, setCurrentPlan] = useState<string>('professional');
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string>('active');
-  const [isFreePass, setIsFreePass] = useState(false);
+  // ✅ v40.8: Read from global UserContext — no independent /api/auth/me fetch
+  const { user, loading: userLoading } = useUser();
 
-  // Load user data on mount
+  // Derived values from UserContext — always in sync with DB
+  const currentPlan = user?.plan || 'professional';
+  const subscriptionStatus = user?.subscriptionStatus || 'active';
+  // isFreePass MUST come from DB boolean only — never inferred from status string
+  const isFreePass = user?.isFreePass === true;
+  const isAdmin = isAdminRole(user?.role);
+
+  // Populate form fields when UserContext loads
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch('/api/auth/me');
-        const data = await res.json();
-        if (data.success && data.data) {
-          const u = data.data;
-          setProfile({
-            name: u.name || '',
-            email: u.email || '',
-            company: u.company || '',
-            phone: u.phone || '',
-          });
-          setBranding(prev => ({
-            ...prev,
-            companyName: u.company || '',
-            companyLogoUrl: u.companyLogoUrl || '',
-            companyWebsite: u.companyWebsite || '',
-            companyAddress: u.companyAddress || '',
-            companyPhone: u.companyPhone || u.phone || '',
-            brandPrimaryColor: u.brandPrimaryColor || '#f59e0b',
-            brandSecondaryColor: u.brandSecondaryColor || '#0f172a',
-            proposalFooterText: u.proposalFooterText || '',
-          }));
-          if (u.companyLogoUrl) setLogoPreview(u.companyLogoUrl);
-          setCurrentPlan(u.plan || 'professional');
-          setSubscriptionStatus(u.subscriptionStatus || 'active');
-          setIsFreePass(u.isFreePass || false);
-        }
-      } catch (e) {
-        console.error('Failed to load user settings', e);
-      }
-    };
-    load();
-  }, []);
+    if (!user) return;
+    setProfile({
+      name: user.name || '',
+      email: user.email || '',
+      company: user.company || '',
+      phone: user.phone || '',
+    });
+    setBranding(prev => ({
+      ...prev,
+      companyName: user.company || '',
+      companyLogoUrl: user.companyLogoUrl || '',
+      companyWebsite: (user as any).companyWebsite || '',
+      companyAddress: (user as any).companyAddress || '',
+      companyPhone: (user as any).companyPhone || user.phone || '',
+      brandPrimaryColor: user.brandPrimaryColor || '#f59e0b',
+      brandSecondaryColor: user.brandSecondaryColor || '#0f172a',
+      proposalFooterText: (user as any).proposalFooterText || '',
+    }));
+    if (user.companyLogoUrl) setLogoPreview(user.companyLogoUrl);
+  }, [user]);
 
   const showSaveStatus = (status: 'success' | 'error', message: string) => {
     setSaveStatus(status);
@@ -346,8 +339,8 @@ export default function SettingsPage() {
         {activeTab === 'branding' && (
           <div className="space-y-5">
 
-            {/* Plan gate notice */}
-            {currentPlan === 'starter' && !isFreePass && (
+            {/* Plan gate notice — hidden for admin/free_pass users */}
+            {currentPlan === 'starter' && !isFreePass && !isAdmin && (
               <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm">
                 <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
                 <div>
@@ -560,13 +553,20 @@ export default function SettingsPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-white font-black text-lg">{planInfo.label}</span>
                       <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${planInfo.color}`}>
-                        {isFreePass ? 'Free Pass' : subscriptionStatus}
+                        {isFreePass ? 'Free Pass' : isAdmin ? 'Admin' : subscriptionStatus}
                       </span>
                     </div>
-                    <div className="text-slate-400 text-sm">{isFreePass ? 'Complimentary access — no billing' : planInfo.price}</div>
+                    <div className="text-slate-400 text-sm">
+                      {isFreePass
+                        ? 'Complimentary access — no billing'
+                        : isAdmin
+                        ? 'Admin access — full platform access'
+                        : planInfo.price}
+                    </div>
                   </div>
                 </div>
-                {!isFreePass && (
+                {/* Hide upgrade button for admin/free_pass users */}
+                {!isFreePass && !isAdmin && (
                   <a href="/auth/subscribe" className="btn-primary text-sm">
                     Upgrade Plan
                   </a>
@@ -622,12 +622,13 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {!isFreePass && (
+            {/* Billing section — hidden for admin/free_pass users */}
+            {!isFreePass && !isAdmin && (
               <div className="card p-6">
                 <h2 className="text-lg font-bold text-white mb-2">Billing</h2>
                 <p className="text-slate-400 text-sm mb-4">Manage your subscription and billing through our secure payment portal.</p>
                 <div className="flex gap-3">
-                  <button 
+                  <button
                     onClick={handleManageBilling}
                     className="btn-primary text-sm flex items-center gap-2"
                   >
