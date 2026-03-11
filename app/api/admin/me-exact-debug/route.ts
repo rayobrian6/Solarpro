@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest } from '@/lib/auth';
+import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * This endpoint is an EXACT copy of /api/auth/me but returns debug info
  * to diagnose why /api/auth/me returns role: "user"
+ * 
+ * v2: Uses fresh neon() instance each time to bypass any caching
  */
 export async function GET(req: NextRequest) {
   try {
@@ -15,6 +18,9 @@ export async function GET(req: NextRequest) {
     }
 
     const userId = session.id;
+    
+    // Test 1: Using getDb() (cached neon instance) - same as /api/auth/me
+    const { getDb } = await import('@/lib/auth');
     const sql = getDb();
 
     let rows: any[] = [];
@@ -40,26 +46,65 @@ export async function GET(req: NextRequest) {
       `;
     }
 
-    if (rows.length === 0) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const db = rows[0];
+    const cachedResult = {
+      useFallback,
+      primaryError,
+      rawRole: db?.role,
+      name: db?.name,
+      email: db?.email,
+    };
+
+    // Test 2: Using a FRESH neon() instance (not cached)
+    const freshSql = neon(process.env.DATABASE_URL!);
+    let freshRows: any[] = [];
+    let freshError: string | null = null;
+    try {
+      freshRows = await freshSql`
+        SELECT
+          id, name, email, company, phone, role, email_verified, created_at,
+          plan, subscription_status, trial_starts_at, trial_ends_at,
+          is_free_pass, free_pass_note,
+          company_logo_url, company_website, company_address, company_phone,
+          brand_primary_color, brand_secondary_color, proposal_footer_text
+        FROM users WHERE id = ${userId} LIMIT 1
+      `;
+    } catch (e: any) {
+      freshError = e.message;
+    }
+    const freshDb = freshRows[0];
+    const freshResult = {
+      rawRole: freshDb?.role,
+      name: freshDb?.name,
+      error: freshError,
+    };
+
+    // Test 3: Simple SELECT role only
+    let simpleRole: string | null = null;
+    try {
+      const simpleRows = await sql`SELECT role FROM users WHERE id = ${userId} LIMIT 1`;
+      simpleRole = simpleRows[0]?.role;
+    } catch (e: any) {
+      simpleRole = `ERROR: ${e.message}`;
     }
 
-    const db = rows[0];
+    // Test 4: SELECT * 
+    let starRole: string | null = null;
+    try {
+      const starRows = await sql`SELECT * FROM users WHERE id = ${userId} LIMIT 1`;
+      starRole = starRows[0]?.role;
+    } catch (e: any) {
+      starRole = `ERROR: ${e.message}`;
+    }
 
     return NextResponse.json({
-      debug: {
-        userId,
-        useFallback,
-        primaryError,
-        allKeys: Object.keys(db),
-        rawRole: db.role,
-        rawRoleType: typeof db.role,
-        rawRoleLength: db.role?.length,
-        name: db.name,
-        email: db.email,
-      },
-      // This is what /api/auth/me would return
-      finalRole: db.role || 'user',
+      userId,
+      cachedNeonResult: cachedResult,
+      freshNeonResult: freshResult,
+      simpleSelectRole: simpleRole,
+      starSelectRole: starRole,
+      // What /api/auth/me would return
+      finalRole: db?.role || 'user',
     }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
