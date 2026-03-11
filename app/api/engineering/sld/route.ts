@@ -1,14 +1,22 @@
 // ============================================================
 // POST /api/engineering/sld
-// Professional SLD generation — BUILD v24 — NEC Conductor Sizing Engine
-// Last updated: 2026-03-06 — battery/gen/ATS segments, IQ SC3 routing fix
+// Professional SLD generation — BUILD v25 — Single Source of Truth
+// Last updated: 2026-03-11 — computeSystem() → PermitSystemModel → renderer
+//
+// ARCHITECTURE (v25 — Single Source of Truth):
+//   computeSystem() → PermitSystemModel → renderSLDProfessional()
+//
+//   computeSystem() is called ONCE. All electrical values (OCPD,
+//   wire gauges, backfeed breaker, EGC) come from the engine via
+//   PermitSystemModel. No duplicate NEC calculations in this file.
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
-import { computeSystem, type ComputedSystemInput } from '@/lib/computed-system';
+import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
+import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import {
   generateStringConfig,
   moduleSpecsFromRegistry,
@@ -47,12 +55,6 @@ export async function POST(req: NextRequest) {
 
     // Derive AC output amps if not provided
     const acOutputAmps = Number(body.acOutputAmps) || Math.round(acOutputKw * 1000 / 240);
-
-    // OCPD: use explicit or derive (125% of output amps, rounded to next 5A)
-    const acOCPD = Number(body.acOCPD) || Math.ceil(acOutputAmps * 1.25 / 5) * 5;
-
-    // Backfeed breaker: use explicit or same as acOCPD
-    const backfeedAmps = Number(body.backfeedAmps || body.acOCPD) || acOCPD;
 
     // Wire length
     const acWireLength = Number(body.acWireLength || body.wireLength) || 60;
@@ -115,13 +117,13 @@ export async function POST(req: NextRequest) {
       lastStringPanels = stringResult.strings[stringResult.strings.length - 1]?.panelsInString ?? panelsPerString;
     }
 
-        // ── Compute RunSegments via computeSystem() ─────────────────────────────
-    // This is the single source of truth for conductor bundles, conduit sizing,
-    // fill percentages, and all electrical data shown on the SLD.
-    let computedRuns: ReturnType<typeof computeSystem>['runs'] | undefined;
+    // ─────────────────────────────────────────────────────────────────────────
+    // SINGLE SOURCE OF TRUTH: computeSystem() → PermitSystemModel
+    // All NEC electrical values (OCPD, wire gauges, backfeed, EGC) come from
+    // the engine. No duplicate calculations below this point.
+    // ─────────────────────────────────────────────────────────────────────────
 
     // BUILD v24: Look up equipment specs for battery/gen/ATS conductor sizing
-    // These are used to populate the new csInput fields for NEC-based segment sizing.
     const _buiId = body.backupInterfaceId ? String(body.backupInterfaceId) : undefined;
     const _buiSpec = _buiId ? getBackupInterfaceById(_buiId) : undefined;
     const _batId = body.batteryId ? String(body.batteryId) : undefined;
@@ -129,9 +131,7 @@ export async function POST(req: NextRequest) {
     const _genId = body.generatorId ? String(body.generatorId) : undefined;
     const _genSpec = _genId ? getGeneratorById(_genId) : undefined;
 
-    // Derive hasEnphaseIQSC3: true if BUI/ATS is the Enphase IQ System Controller 3
-    // Equipment-db IDs: 'enphase-iq-system-controller-3' (BUI) or 'enphase-iq-sc3-ats' (ATS)
-    // The IQ SC3 IS the ATS — no separate standalone ATS needed when this device is present.
+    // Derive hasEnphaseIQSC3
     const _buiModel = String(body.backupInterfaceModel ?? _buiSpec?.model ?? '');
     const _buiIdStr = String(body.backupInterfaceId ?? '').toLowerCase();
     const _atsIdStr = String(body.atsId ?? body.atsModel ?? '').toLowerCase();
@@ -143,26 +143,27 @@ export async function POST(req: NextRequest) {
       _buiModel.toUpperCase().includes('IQ SYSTEM CONTROLLER 3') ||
       _buiModel.toUpperCase().includes('IQ SC3');
 
-    // Derive backupInterfaceMaxA: from spec or body override
     const _buiMaxA = _buiSpec?.maxContinuousOutputA ??
       (body.backupInterfaceMaxA ? Number(body.backupInterfaceMaxA) : undefined);
 
-    // Derive batteryBackfeedA and batteryContinuousOutputA: from spec or body
     const _batBackfeedA = _batSpec?.backfeedBreakerA ??
       (body.batteryBackfeedA ? Number(body.batteryBackfeedA) : undefined);
     const _batContinuousA = _batSpec?.maxContinuousOutputA ??
       (body.batteryContinuousOutputA ? Number(body.batteryContinuousOutputA) : undefined);
 
-    // Derive generatorOutputBreakerA: from spec or body override
-    // Fallback: estimate from kW (kW / 0.24 for 240V single-phase, rounded up to std OCPD)
     const _genKw = body.generatorKw ? Number(body.generatorKw) : (_genSpec?.ratedOutputKw ?? 0);
+    // Generator breaker sizing comes from spec; fallback only if no spec exists
     const _genOutputBreakerA = _genSpec?.outputBreakerA ??
       (body.generatorOutputBreakerA ? Number(body.generatorOutputBreakerA) :
         (_genKw > 0 ? Math.ceil((_genKw * 1000 / 240) * 1.25 / 5) * 5 : undefined));
 
-    // Derive atsAmpRating: from body or default to mainPanelAmps
     const _atsAmpRating = body.atsAmpRating ? Number(body.atsAmpRating) :
       (body.mainPanelAmps ? Number(body.mainPanelAmps) : undefined);
+
+    // ── Run computeSystem() — single call, all electrical values derived here ──
+    let cs: ComputedSystem | null = null;
+    let systemModel: PermitSystemModel | null = null;
+    let computedRuns: ReturnType<typeof computeSystem>['runs'] | undefined;
 
     try {
       const csInput: ComputedSystemInput = {
@@ -180,12 +181,9 @@ export async function POST(req: NextRequest) {
         panelManufacturer:             String(body.panelManufacturer ?? 'Q CELLS'),
         inverterManufacturer:          inverterManufacturer,
         inverterModel:                 inverterModel,
-        // For micro: inverterAcKw must be PER-DEVICE kW, not total system kW
-        // For string: inverterAcKw is the single inverter rated kW (= total system kW)
         inverterAcKw:                  isMicro
           ? (Number(body.inverterAcKwPerDevice ?? body.perMicroKw) || (acOutputKw / Math.max(deviceCount, 1)))
           : acOutputKw,
-        // For micro: inverterAcCurrentMax is PER-DEVICE amps, not total system amps
         inverterAcCurrentMax:          isMicro
           ? (Number(body.inverterAcCurrentMax ?? body.perMicroAmps) || (acOutputAmps / Math.max(deviceCount, 1)))
           : acOutputAmps,
@@ -211,7 +209,7 @@ export async function POST(req: NextRequest) {
         maxACVoltageDropPct:           Number(body.maxACVoltageDropPct ?? 2),
         maxDCVoltageDropPct:           Number(body.maxDCVoltageDropPct ?? 3),
 
-        // BUILD v24: Battery/BUI/Generator/ATS segment sizing inputs
+        // Battery/BUI/Generator/ATS segment sizing inputs
         batteryBackfeedA:              _batBackfeedA,
         batteryContinuousOutputA:      _batContinuousA,
         batteryIds:                    _batId ? [_batId] : (body.batteryIds ?? undefined),
@@ -222,15 +220,41 @@ export async function POST(req: NextRequest) {
         hasEnphaseIQSC3:               _hasEnphaseIQSC3 || undefined,
         runLengthsBatteryGen:          body.runLengthsBatteryGen ?? undefined,
       };
-      const cs = computeSystem(csInput);
+
+      cs = computeSystem(csInput);
       computedRuns = cs.runs;
+
+      // Build PermitSystemModel — single source of truth for all display values
+      systemModel = buildPermitSystemModel(cs, {
+        mainPanelBusAmps:      Number(body.panelBusRating ?? body.mainPanelAmps ?? 200),
+        mainPanelBreakerAmps:  Number(body.mainPanelAmps ?? 200),
+        interconnectionMethod: (() => {
+          const raw = String(body.interconnection ?? body.interconnectionType ?? body.interconnectionMethod ?? 'LOAD_SIDE');
+          return (raw === 'SUPPLY_SIDE_TAP' || raw.toLowerCase().includes('supply')) ? 'supply-side' : 'load-side';
+        })(),
+        dcConduitType: String(body.dcConduitType ?? body.conduitType ?? '3/4" EMT'),
+        acConduitType: String(body.acConduitType ?? body.conduitType ?? '1" EMT'),
+      });
     } catch (csErr) {
-      // Non-fatal: fall back to body.runs or undefined
-      console.warn('[SLD] computeSystem failed, falling back to body.runs:', csErr);
+      // Non-fatal: fall back to body values
+      console.warn('[SLD] computeSystem failed, using body fallback values:', csErr);
+      cs = null;
+      systemModel = null;
       computedRuns = body.runs ?? undefined;
     }
 
-        const input: SLDProfessionalInput = {
+    // ── Resolve all electrical display values from PermitSystemModel (engine) ──
+    // These replace all independent OCPD/wire calculations that previously existed here.
+    const resolvedAcOCPD       = systemModel?.acOcpdAmps      ?? (Math.ceil(acOutputAmps * 1.25 / 5) * 5);
+    const resolvedBackfeedAmps = systemModel?.backfeedBreakerAmps ?? resolvedAcOCPD;
+    const resolvedDcWireGauge  = systemModel?.dcWireGauge     ?? String(body.dcWireGauge ?? '#10 AWG');
+    const resolvedAcWireGauge  = systemModel?.acWireGauge     ?? String(body.acWireGauge ?? body.wireGauge ?? '#8 AWG');
+    const resolvedEgcGauge     = systemModel?.egcGauge        ?? '#8 AWG';
+    const resolvedDcOCPD       = isMicro ? 0 : (systemModel?.stringOcpdAmps ?? stringResult?.ocpdPerString ?? (Number(body.dcOCPD) || 20));
+    const resolvedStringVoc    = systemModel?.stringVoc       ?? stringResult?.strings[0]?.stringVoc ?? (stringResult?.vocCorrected ? stringResult.vocCorrected * panelsPerString : undefined);
+    const resolvedStringIsc    = systemModel?.stringIsc       ?? stringResult?.strings[0]?.stringIsc ?? panelIsc;
+
+    const input: SLDProfessionalInput = {
       projectName:             String(body.projectName             ?? 'Solar PV System'),
       clientName:              String(body.clientName              ?? 'Homeowner'),
       address:                 String(body.address                 ?? '123 Main St'),
@@ -240,28 +264,29 @@ export async function POST(req: NextRequest) {
       revision:                String(body.revision                ?? 'A'),
       topologyType:            String(body.topologyType            ?? 'STRING_INVERTER'),
       totalModules,
-      // For micro: totalStrings = 0 (no DC strings); for string/optimizer: use generated count
       totalStrings:            isMicro ? 0 : (stringResult?.totalStrings ?? 1),
       panelModel:              String(body.panelModel              ?? 'Q.PEAK DUO BLK ML-G10+ 400W'),
       panelWatts,
       panelVoc,
       panelIsc,
-      dcWireGauge:             String(body.dcWireGauge             ?? '#10 AWG'),
+
+      // ── Engine-sourced electrical values (single source of truth) ──
+      dcWireGauge:             resolvedDcWireGauge,
       dcConduitType:           String(body.dcConduitType ?? body.conduitType ?? 'EMT'),
-      dcOCPD:                  isMicro ? 0 : (stringResult?.ocpdPerString ?? (Number(body.dcOCPD) || 20)),
+      dcOCPD:                  resolvedDcOCPD,
       inverterModel,
       inverterManufacturer,
       acOutputKw,
       acOutputAmps,
-      acWireGauge:             String(body.acWireGauge ?? body.wireGauge ?? '#8 AWG'),
+      acWireGauge:             resolvedAcWireGauge,
       acConduitType:           String(body.acConduitType ?? body.conduitType ?? 'EMT'),
-      acOCPD,
+      acOCPD:                  resolvedAcOCPD,
       acWireLength,
-      backfeedAmps,
+      backfeedAmps:            resolvedBackfeedAmps,
+      // ──────────────────────────────────────────────────────────────────
+
       mainPanelAmps:           Number(body.mainPanelAmps)          || 200,
       utilityName:             String(body.utilityName ?? body.utilityCompany ?? body.utility ?? 'Local Utility'),
-      // Map interconnection method to renderer-friendly string
-      // Renderer checks .includes('load'), .includes('supply'), .includes('line')
       interconnection:         (() => {
         const raw = String(body.interconnection ?? body.interconnectionType ?? 'LOAD_SIDE');
         if (raw === 'LOAD_SIDE' || raw.toLowerCase().includes('load')) return 'Load Side Tap';
@@ -269,7 +294,7 @@ export async function POST(req: NextRequest) {
         if (raw === 'MAIN_BREAKER_DERATE' || raw.toLowerCase().includes('derate')) return 'Load Side Tap';
         if (raw === 'PANEL_UPGRADE' || raw.toLowerCase().includes('upgrade')) return 'Load Side Tap';
         if (raw.toLowerCase().includes('line')) return 'Line Side Tap';
-        return raw; // pass through (e.g. 'Backfeed Breaker')
+        return raw;
       })(),
       rapidShutdownIntegrated: !!(body.rapidShutdownIntegrated || body.rapidShutdown),
       hasProductionMeter:      body.hasProductionMeter !== false,
@@ -290,9 +315,9 @@ export async function POST(req: NextRequest) {
       backupInterfaceBrand:    body.backupInterfaceBrand ? String(body.backupInterfaceBrand) : undefined,
       backupInterfaceModel:    body.backupInterfaceModel ? String(body.backupInterfaceModel) : undefined,
       backupInterfaceIsATS:    body.backupInterfaceIsATS ? !!(body.backupInterfaceIsATS)    : undefined,
-      // BUILD v24: Pass IQ SC3 flag to renderer for correct generator routing
       hasEnphaseIQSC3:         _hasEnphaseIQSC3 || undefined,
       scale:                   String(body.scale                   ?? 'NOT TO SCALE'),
+
       // Micro-specific
       deviceCount:             isMicro ? deviceCount : undefined,
       microBranches:           isMicro ? (body.microBranches ?? undefined) : undefined,
@@ -304,38 +329,45 @@ export async function POST(req: NextRequest) {
       stringDetails:           !isMicro ? (body.stringDetails ?? undefined) : undefined,
 
       // ComputedSystem.runs — single source of truth for conduit schedule
-      // computedRuns is populated by computeSystem() above with full conductorBundle[] data
-      runs:                   computedRuns,
+      runs:                    computedRuns,
 
-      // Auto string generation results (null for micro topology)
+      // Auto string generation results
       panelsPerString:         isMicro ? 1 : panelsPerString,
       lastStringPanels:        isMicro ? 1 : lastStringPanels,
       designTempMin,
       vocCorrected:            stringResult?.vocCorrected,
       vmpCorrected:            stringResult?.vmpCorrected,
-      stringVoc:               stringResult ? (stringResult.strings[0]?.stringVoc ?? (stringResult.vocCorrected * panelsPerString)) : undefined,
-      stringVmp:               stringResult ? (stringResult.strings[0]?.stringVmp ?? (stringResult.vmpCorrected * panelsPerString)) : undefined,
-      stringIsc:               stringResult ? (stringResult.strings[0]?.stringIsc ?? panelIsc) : undefined,
+      stringVoc:               resolvedStringVoc,
+      stringVmp:               stringResult ? (stringResult.strings[0]?.stringVmp ?? (stringResult.vmpCorrected ? stringResult.vmpCorrected * panelsPerString : undefined)) : undefined,
+      stringIsc:               resolvedStringIsc,
       maxPanelsPerString:      stringResult?.maxPanelsPerString,
       minPanelsPerString:      stringResult?.minPanelsPerString,
       mpptChannels:            isMicro ? deviceCount : (stringResult?.mpptChannels.length ?? mpptChannels),
       mpptAllocation:          isMicro ? `${deviceCount} microinverters` : mpptAllocation,
       combinerType:            isMicro ? 'DIRECT' : stringResult?.combinerType,
       combinerLabel:           isMicro ? 'AC Trunk Cable' : stringResult?.combinerLabel,
-      ocpdPerString:           isMicro ? 0 : stringResult?.ocpdPerString,
+      ocpdPerString:           isMicro ? 0 : (systemModel?.stringOcpdAmps ?? stringResult?.ocpdPerString),
       dcAcRatio:               isMicro ? undefined : (stringResult ? stringResult.totalDcPower / (acOutputKw * 1000) : undefined),
       stringConfigWarnings:    stringResult?.warnings,
+
+      // Engine system model — passed to renderer for enhanced display
+      systemModel:             systemModel ?? undefined,
+
+      // EGC gauge from engine (NEC 250.122)
+      egcGauge:                resolvedEgcGauge,
     };
 
     const svg = renderSLDProfessional(input);
 
+    // Response includes X-System-Model header to confirm engine usage
     const format = (body.format ?? 'svg') as string;
 
     if (format === 'svg') {
       return new NextResponse(svg, {
         headers: {
-          'Content-Type': 'image/svg+xml',
+          'Content-Type':        'image/svg+xml',
           'Content-Disposition': 'inline; filename="sld.svg"',
+          'X-System-Model':      systemModel ? 'computed' : 'fallback',
         },
       });
     }
@@ -343,6 +375,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       svg,
+      systemModelUsed: systemModel ? 'computed' : 'fallback',
       topology: input.topologyType,
       stringConfig: isMicro ? null : (stringResult ? {
         totalStrings:         stringResult.totalStrings,
@@ -355,7 +388,7 @@ export async function POST(req: NextRequest) {
         combinerType:         stringResult.combinerType,
         combinerLabel:        stringResult.combinerLabel,
         mpptAllocation,
-        ocpdPerString:        stringResult.ocpdPerString,
+        ocpdPerString:        resolvedDcOCPD,
         dcAcRatio:            stringResult.totalDcPower / (acOutputKw * 1000),
         warnings:             stringResult.warnings,
         errors:               stringResult.errors,
@@ -367,6 +400,15 @@ export async function POST(req: NextRequest) {
         acBranchCircuits: Math.ceil(deviceCount / 16),
         note: 'Microinverters convert DC to AC at each panel. No DC strings.',
       } : null,
+      // Resolved electrical values (from engine)
+      resolvedValues: {
+        acOCPD:         resolvedAcOCPD,
+        backfeedAmps:   resolvedBackfeedAmps,
+        dcWireGauge:    resolvedDcWireGauge,
+        acWireGauge:    resolvedAcWireGauge,
+        egcGauge:       resolvedEgcGauge,
+        dcOCPD:         resolvedDcOCPD,
+      },
       dimensions: { width: 2304, height: 1728, format: 'ANSI C 24×18"' },
       generatedAt: new Date().toISOString(),
     });

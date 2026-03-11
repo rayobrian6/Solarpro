@@ -161,6 +161,10 @@ export interface SLDProfessionalInput {
   branchOcpdAmps?:         number;
   stringDetails?:          { stringIndex: number; panelCount: number; ocpdAmps: number; wireGauge: string; voc: number; isc: number }[];
   runs?:                   RunSegment[];
+  // v25 — Single Source of Truth: pre-computed values from computeSystem() engine
+  systemModel?:            import('./plan-set/permit-system-model').PermitSystemModel;
+  // EGC gauge from computeSystem() NEC 250.122 table
+  egcGauge?:               string;
 }
 
 // ── SVG Primitives ───────────────────────────────────────────────────────────
@@ -1071,6 +1075,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const resolvedAcConduit   = acFeederRun?.conduitSize ?? '3/4"';
   const resolvedAcCondType  = acFeederRun?.conduitType ?? input.acConduitType ?? 'EMT';
   const resolvedDcWire      = dcStringRun?.wireGauge   ?? input.dcWireGauge   ?? '#10 AWG';
+  // EGC gauge: from engine (NEC 250.122) → input.egcGauge → run data → '#10 AWG' fallback
+  const resolvedEgcGauge    = input.egcGauge
+    ?? dcStringRun?.egcGauge
+    ?? acFeederRun?.egcGauge
+    ?? '#10 AWG';
+  // Strip '#' and ' AWG' for inline display (e.g. '#10 AWG' → '10')
+  const egcNum = resolvedEgcGauge.replace('#', '').replace(' AWG', '').trim();
 
   const intercon     = String(input.interconnection ?? '').toLowerCase();
   const isLoadSide   = intercon.includes('load');
@@ -1173,8 +1184,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   {
     const run = isMicro ? roofRun : dcStringRun;
     const fb = isMicro
-      ? [`${input.branchWireGauge??'#10 AWG'} THWN-2`, '1×#10 GRN EGC', 'OPEN AIR — NEC 690.31']
-      : [`${resolvedDcWire} USE-2/PV Wire`, '1×#10 GRN EGC', 'OPEN AIR — NEC 690.31'];
+      ? [`${input.branchWireGauge??'#10 AWG'} THWN-2`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31']
+      : [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
     parts.push(wireSeg(pvOutX, jbCX-jbW/2, resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y), lines, {openAir:true, bundleCount:cnt}));
   }
@@ -1195,7 +1206,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // SEGMENT 2: J-Box → Combiner
     {
       const run = branchRun;
-      const fb = [`${input.branchWireGauge??'#10 AWG'} THWN-2`, '1×#10 GRN EGC', `IN ${input.branchConduitSize??'3/4"'} EMT`];
+      const fb = [`${input.branchWireGauge??'#10 AWG'} THWN-2`, `1×#${egcNum} GRN EGC`, `IN ${input.branchConduitSize??'3/4"'} EMT`];
       const {lines, cnt} = runLines(run, fb);
       parts.push(wireSeg(jbCX+jbW/2, cr.lx, resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y), lines, {bundleCount:cnt}));
     }
@@ -1231,7 +1242,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // SEGMENT 2: J-Box → DC Disco
     {
       const run = dcStringRun;
-      const fb = [`${resolvedDcWire} USE-2/PV Wire`, '1×#10 GRN EGC', `IN ${input.dcConduitType??'EMT'}`];
+      const fb = [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
       parts.push(wireSeg(jbCX+jbW/2, dcX-dW/2, resolveSegY(jbCX+jbW/2, dcX-dW/2, BUS_Y), lines, {bundleCount:cnt}));
     }
@@ -1256,7 +1267,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // SEGMENT 3: DC Disco LOAD terminal → Inverter DC_IN terminal
     {
       const run = dcDiscoInvRun ?? dcStringRun;
-      const fb = [`${resolvedDcWire} USE-2/PV Wire`, '1×#10 GRN EGC', `IN ${input.dcConduitType??'EMT'}`];
+      const fb = [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
       // Use inverter dcInX/Y terminal for precise routing
       const segY = invBox.dcInY;
@@ -1844,14 +1855,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     });
   } else {
     sRows = isMicro ? [
-      {id:'BR-1',from:'ROOF J-BOX',to:'AC COMBINER',conductors:`${resolvedAcWire} THWN-2 + 1×#10 GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.2,len:50,pass:true},
-      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#10 GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.4,len:20,pass:true},
-      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#10 GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.4,len:15,pass:true},
+      {id:'BR-1',from:'ROOF J-BOX',to:'AC COMBINER',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.2,len:50,pass:true},
+      {id:'A-1',from:'AC COMBINER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.4,len:20,pass:true},
+      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.4,len:15,pass:true},
     ] : [
-      {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#10 GRN`,conduit:'OPEN AIR',fill:0,amp:30,ocpd:input.dcOCPD,vdrop:1.2,len:50,pass:true},
-      {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#10 GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:28,amp:30,ocpd:input.dcOCPD,vdrop:1.2,len:20,pass:true},
-      {id:'A-1',from:'INVERTER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#10 GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.8,len:20,pass:true},
-      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#10 GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.8,len:15,pass:true},
+      {id:'D-1',from:'PV ARRAY',to:'ROOF J-BOX',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:'OPEN AIR',fill:0,amp:30,ocpd:input.dcOCPD,vdrop:1.2,len:50,pass:true},
+      {id:'D-2',from:'ROOF J-BOX',to:'DC DISCO',conductors:`${resolvedDcWire} USE-2 + 1×#${egcNum} GRN`,conduit:`${input.dcConduitType??'EMT'} 3/4"`,fill:28,amp:30,ocpd:input.dcOCPD,vdrop:1.2,len:20,pass:true},
+      {id:'A-1',from:'INVERTER',to:'AC DISCO',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.8,len:20,pass:true},
+      {id:'A-2',from:'AC DISCO',to:'MSP',conductors:`${resolvedAcWire} THWN-2 + 1×#${egcNum} GRN`,conduit:`${resolvedAcCondType} ${resolvedAcConduit}`,fill:32,amp:input.acOutputAmps,ocpd:resolvedAcOCPD,vdrop:1.8,len:15,pass:true},
     ];
   }
 
