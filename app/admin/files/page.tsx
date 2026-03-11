@@ -35,7 +35,7 @@ export default function AdminFiles() {
     try {
       const res = await fetch(`/api/admin/files?page=${page}&limit=${LIMIT}&fileType=${fileType}`);
       const d = await res.json();
-      if (d.success) { setFiles(d.data); setTotal(d.total); setStorage(d.storage); }
+      if (d.success) { setFiles(d.files); setTotal(d.total); setStorage(d.storage); }
     } finally { setLoading(false); }
   }, [page, fileType]);
 
@@ -68,15 +68,15 @@ export default function AdminFiles() {
         <div className="grid grid-cols-3 gap-4">
           <div className="rounded-xl border border-blue-500/20 bg-blue-500/10 p-5">
             <div className="text-xs text-blue-400 opacity-70 uppercase tracking-wider mb-2">Total Files</div>
-            <div className="text-3xl font-black text-blue-400">{storage.total_files?.toLocaleString()}</div>
+            <div className="text-3xl font-black text-blue-400">{(storage.totalFiles ?? storage.total_files ?? 0).toLocaleString()}</div>
           </div>
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-5">
             <div className="text-xs text-amber-400 opacity-70 uppercase tracking-wider mb-2">Storage Used</div>
-            <div className="text-3xl font-black text-amber-400">{fmtBytes(storage.total_bytes || 0)}</div>
+            <div className="text-3xl font-black text-amber-400">{fmtBytes(storage.totalBytes ?? storage.total_bytes ?? 0)}</div>
           </div>
           <div className="rounded-xl border border-green-500/20 bg-green-500/10 p-5">
             <div className="text-xs text-green-400 opacity-70 uppercase tracking-wider mb-2">Projects w/ Files</div>
-            <div className="text-3xl font-black text-green-400">{storage.projects_with_files?.toLocaleString()}</div>
+            <div className="text-3xl font-black text-green-400">{(storage.projectsWithFiles ?? storage.projects_with_files ?? 0).toLocaleString()}</div>
           </div>
         </div>
       )}

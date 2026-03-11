@@ -14,7 +14,7 @@ export default function AdminCompanies() {
       const d = await res.json();
       if (d.success) {
         const map: Record<string, any> = {};
-        for (const u of d.data) {
+        for (const u of d.users) {
           const co = u.company || 'Unknown';
           if (!map[co]) map[co] = { name: co, users: [], plans: new Set() };
           map[co].users.push(u);

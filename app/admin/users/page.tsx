@@ -46,7 +46,7 @@ export default function AdminUsers() {
     try {
       const res = await fetch(`/api/admin/users?search=${encodeURIComponent(search)}&page=${page}&limit=${LIMIT}`);
       const d = await res.json();
-      if (d.success) { setUsers(d.data); setTotal(d.total); }
+      if (d.success) { setUsers(d.users); setTotal(d.total); }
     } finally { setLoading(false); }
   }, [search, page]);
 

@@ -80,7 +80,7 @@ export default function AdminIncentives() {
     try {
       const res = await fetch('/api/admin/incentives');
       const d = await res.json();
-      if (d.success) setItems(d.data);
+      if (d.success) setItems(d.incentives);
     } finally { setLoading(false); }
   };
 

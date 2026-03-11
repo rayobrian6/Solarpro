@@ -11,7 +11,7 @@ export default function AdminEngineering() {
     try {
       const res = await fetch('/api/admin/stats');
       const d = await res.json();
-      if (d.success) setStats(d.data);
+      if (d.success) setStats(d.stats);
     } finally { setLoading(false); }
   };
 
@@ -46,10 +46,10 @@ export default function AdminEngineering() {
           {/* Stats */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: 'Layouts Generated', value: l.total ?? 0,       sub: `${l.today ?? 0} today`,  color: 'border-blue-500/20   bg-blue-500/10   text-blue-400' },
-              { label: 'Files Generated',   value: f.total_files ?? 0, sub: `${((f.total_bytes ?? 0)/1024/1024).toFixed(1)} MB`, color: 'border-amber-500/20  bg-amber-500/10  text-amber-400' },
-              { label: 'Projects Total',    value: stats?.projects?.total ?? 0, sub: `${stats?.projects?.today ?? 0} today`, color: 'border-green-500/20  bg-green-500/10  text-green-400' },
-              { label: 'Proposals',         value: stats?.proposals?.total ?? 0, sub: `${stats?.proposals?.today ?? 0} today`, color: 'border-purple-500/20 bg-purple-500/10 text-purple-400' },
+              { label: 'Layouts Generated', value: l.total ?? 0,       sub: `${l.total ?? 0} all time`,  color: 'border-blue-500/20   bg-blue-500/10   text-blue-400' },
+              { label: 'Files Generated',   value: f.total ?? 0, sub: `${((f.totalBytes ?? 0)/1024/1024).toFixed(1)} MB`, color: 'border-amber-500/20  bg-amber-500/10  text-amber-400' },
+              { label: 'Projects Total',    value: stats?.projects?.total ?? 0, sub: `${stats?.projects?.last30 ?? 0} last 30d`, color: 'border-green-500/20  bg-green-500/10  text-green-400' },
+              { label: 'Proposals',         value: stats?.proposals?.total ?? 0, sub: `${stats?.proposals?.last30 ?? 0} last 30d`, color: 'border-purple-500/20 bg-purple-500/10 text-purple-400' },
             ].map(s => (
               <div key={s.label} className={`rounded-xl border p-5 ${s.color}`}>
                 <div className="text-xs font-medium opacity-70 uppercase tracking-wider mb-2">{s.label}</div>
@@ -83,14 +83,14 @@ export default function AdminEngineering() {
             <div className="text-sm font-semibold text-white mb-2">Projects — 30 Day Trend</div>
             <div className="text-xs text-slate-500 mb-4">Each bar = 1 day of project creation activity</div>
             <div className="flex items-end gap-0.5 h-20">
-              {(stats?.trends?.projects || []).map((d: any, i: number) => {
-                const max = Math.max(...(stats?.trends?.projects || []).map((x: any) => x.cnt), 1);
+              {(stats?.projectTrend || []).map((d: any, i: number) => {
+                const max = Math.max(...(stats?.projectTrend || []).map((x: any) => x.count), 1);
                 return (
                   <div key={i} className="flex-1 group relative">
                     <div className="w-full rounded-sm bg-blue-500/60 transition-all"
-                      style={{ height: `${Math.max(4, (d.cnt / max) * 72)}px` }} />
+                      style={{ height: `${Math.max(4, (d.count / max) * 72)}px` }} />
                     <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-black text-white text-[9px] px-1 py-0.5 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-10">
-                      {d.day?.slice(5)}: {d.cnt}
+                      {String(d.day)?.slice(5)}: {d.count}
                     </div>
                   </div>
                 );

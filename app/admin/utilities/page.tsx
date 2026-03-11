@@ -51,7 +51,7 @@ export default function AdminUtilities() {
     try {
       const res = await fetch('/api/admin/utilities');
       const d = await res.json();
-      if (d.success) setItems(d.data);
+      if (d.success) setItems(d.utilities);
     } finally { setLoading(false); }
   };
 

@@ -25,7 +25,7 @@ export default function AdminProjects() {
     try {
       const res = await fetch(`/api/admin/projects?search=${encodeURIComponent(search)}&page=${page}&limit=${LIMIT}`);
       const d = await res.json();
-      if (d.success) { setProjects(d.data); setTotal(d.total); }
+      if (d.success) { setProjects(d.projects); setTotal(d.total); }
     } finally { setLoading(false); }
   }, [search, page]);
 

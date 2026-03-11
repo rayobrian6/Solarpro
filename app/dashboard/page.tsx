@@ -6,7 +6,7 @@ import {
   Sun, Zap, Users, FolderOpen, FileText, TrendingUp,
   ArrowUpRight, ArrowRight, Plus, Leaf,
   DollarSign, BarChart2, ChevronRight, Activity,
-  Home, Sprout, Fence, Clock, CheckCircle, AlertCircle, Upload
+  Home, Sprout, Fence, Clock, CheckCircle, AlertCircle, Upload, Shield
 } from 'lucide-react';
 import Link from 'next/link';
 import BillUploadModal from '@/components/onboarding/BillUploadModal';
@@ -76,6 +76,22 @@ function MiniSparkline({ data, color }: { data: number[]; color: string }) {
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [showBillUpload, setShowBillUpload] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
+
+  // Fetch user role for admin button visibility
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => {
+        if (json) {
+          const userData = json.data || json.user || json;
+          setUserRole(userData.role || null);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
 
   // ✅ Phase 6: Read from global store — single source of truth
   const projects = useAppStore(s => s.projects);
@@ -188,6 +204,14 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex gap-3">
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="btn-sm flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/50 transition-all duration-200 rounded-lg px-3 py-1.5 text-xs font-semibold"
+              >
+                <Shield size={14} /> Admin Portal
+              </Link>
+            )}
             <button
               onClick={() => setShowBillUpload(true)}
               className="btn-secondary btn-sm flex items-center gap-1.5"

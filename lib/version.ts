@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.3';
+export const BUILD_VERSION = 'v40.4';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Migrate resets password_hash so admin login works after role migration';
+export const BUILD_DESCRIPTION = 'FIX: Admin portal UI audit — fix all data mapping bugs + add Admin Portal button to dashboard';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -29,6 +29,17 @@ export const BUILD_FEATURES = [
   'NEW: app/api/admin/incentives/route.ts — Full CRUD for incentive_overrides table',
   'NEW: app/api/admin/utilities/route.ts — Full CRUD for utility_policies table',
   'UPGRADE: app/api/migrate/route.ts — Add role column, incentive_overrides table, utility_policies table; set raymond=super_admin, james+cody=admin',
+  // Admin Portal UI Audit v40.4
+  'FIX: app/admin/page.tsx — Fix data mapping: d.stats, stats.files.total, stats.plans[].count, stats.projectTrend',
+  'FIX: app/admin/users/page.tsx — Fix data mapping: d.users instead of d.data',
+  'FIX: app/admin/projects/page.tsx — Fix data mapping: d.projects instead of d.data',
+  'FIX: app/admin/companies/page.tsx — Fix data mapping: d.users instead of d.data',
+  'FIX: app/admin/engineering/page.tsx — Fix data mapping: d.stats, f.total, f.totalBytes, d.count in charts',
+  'FIX: app/admin/incentives/page.tsx — Fix data mapping: d.incentives instead of d.data',
+  'FIX: app/admin/utilities/page.tsx — Fix data mapping: d.utilities instead of d.data',
+  'FIX: app/admin/files/page.tsx — Fix data mapping: d.files, storage.totalFiles, storage.totalBytes',
+  'FIX: app/admin/health/page.tsx — Full rewrite: match actual API shape (dbLatencyMs, rowCounts, tableSizes)',
+  'NEW: app/dashboard/page.tsx — Admin Portal button (amber, Shield icon) visible only to admin/super_admin users',
 ] as const;
 
 export function getBuildBadge(): string {

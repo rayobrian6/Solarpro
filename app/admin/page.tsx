@@ -1,9 +1,10 @@
 'use client';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import {
   Users, FolderOpen, FileText, Cpu, HardDrive,
   TrendingUp, AlertCircle, CheckCircle, Clock,
-  Zap, Database, RefreshCw,
+  Zap, Database, RefreshCw, Shield,
 } from 'lucide-react';
 
 function StatCard({
@@ -26,25 +27,25 @@ function StatCard({
         <div className="text-xs font-medium opacity-70 uppercase tracking-wider">{label}</div>
         <Icon size={16} className="opacity-60" />
       </div>
-      <div className="text-3xl font-black">{value?.toLocaleString?.() ?? value}</div>
+      <div className="text-3xl font-black">{typeof value === 'number' ? value.toLocaleString() : value}</div>
       {sub && <div className="text-xs mt-1 opacity-60">{sub}</div>}
     </div>
   );
 }
 
-function MiniBar({ data, color = '#f59e0b' }: { data: { day: string; cnt: number }[]; color?: string }) {
+function MiniBar({ data, color = '#f59e0b' }: { data: { day: string; count: number }[]; color?: string }) {
   if (!data?.length) return <div className="text-xs text-slate-500 py-4 text-center">No data</div>;
-  const max = Math.max(...data.map(d => d.cnt), 1);
+  const max = Math.max(...data.map(d => d.count), 1);
   return (
     <div className="flex items-end gap-0.5 h-16">
       {data.map((d, i) => (
         <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group relative">
           <div
             className="w-full rounded-sm transition-all"
-            style={{ height: `${Math.max(4, (d.cnt / max) * 56)}px`, background: color, opacity: 0.7 }}
+            style={{ height: `${Math.max(4, (d.count / max) * 56)}px`, background: color, opacity: 0.7 }}
           />
           <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-black text-white text-[9px] px-1 py-0.5 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none z-10">
-            {d.day?.slice(5)}: {d.cnt}
+            {String(d.day)?.slice(5)}: {d.count}
           </div>
         </div>
       ))}
@@ -59,10 +60,11 @@ export default function AdminDashboard() {
 
   const load = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch('/api/admin/stats');
       const d = await res.json();
-      if (d.success) setStats(d.data);
+      if (d.success) setStats(d.stats);  // API returns d.stats
       else setError(d.error);
     } catch (e: any) {
       setError(e.message);
@@ -89,11 +91,11 @@ export default function AdminDashboard() {
     </div>
   );
 
-  const u = stats?.users || {};
-  const p = stats?.projects || {};
+  const u  = stats?.users     || {};
+  const p  = stats?.projects  || {};
   const pr = stats?.proposals || {};
-  const l = stats?.layouts || {};
-  const f = stats?.files || {};
+  const l  = stats?.layouts   || {};
+  const f  = stats?.files     || {};
 
   return (
     <div className="space-y-8">
@@ -103,22 +105,31 @@ export default function AdminDashboard() {
           <h1 className="text-2xl font-black text-white">System Overview</h1>
           <p className="text-sm text-slate-400 mt-1">Real-time platform health and activity</p>
         </div>
-        <button onClick={load} className="flex items-center gap-2 text-xs text-slate-400 hover:text-white border border-white/10 rounded-lg px-3 py-2 transition-all hover:border-white/20">
-          <RefreshCw size={12} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/admin"
+            className="flex items-center gap-2 text-xs bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-lg px-3 py-2 transition-all hover:bg-amber-500/25"
+          >
+            <Shield size={12} />
+            Admin Portal
+          </Link>
+          <button onClick={load} className="flex items-center gap-2 text-xs text-slate-400 hover:text-white border border-white/10 rounded-lg px-3 py-2 transition-all hover:border-white/20">
+            <RefreshCw size={12} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Users"       value={u.total ?? 0}    sub={`${u.today ?? 0} joined today`}     icon={Users}     color="amber" />
-        <StatCard label="Active Installers" value={u.active ?? 0}   sub={`${u.paid ?? 0} paid · ${u.trialing ?? 0} trialing`} icon={CheckCircle} color="green" />
-        <StatCard label="Total Projects"    value={p.total ?? 0}    sub={`${p.today ?? 0} created today`}    icon={FolderOpen} color="blue" />
-        <StatCard label="Proposals"         value={pr.total ?? 0}   sub={`${pr.today ?? 0} today`}           icon={FileText}  color="purple" />
-        <StatCard label="Engineering Runs"  value={l.total ?? 0}    sub={`${l.today ?? 0} today`}            icon={Cpu}       color="amber" />
-        <StatCard label="Files Stored"      value={f.total_files ?? 0} sub={`${((f.total_bytes ?? 0) / 1024 / 1024).toFixed(1)} MB`} icon={HardDrive} color="slate" />
-        <StatCard label="Free Pass Users"   value={u.free_pass ?? 0} sub="Lifetime access"                  icon={Zap}       color="green" />
-        <StatCard label="Admin Users"       value={u.admins ?? 0}   sub="admin + super_admin"               icon={Database}  color="red" />
+        <StatCard label="Total Users"       value={u.total ?? 0}    sub={`${u.last30 ?? 0} in last 30 days`}   icon={Users}       color="amber" />
+        <StatCard label="Total Projects"    value={p.total ?? 0}    sub={`${p.last30 ?? 0} in last 30 days`}   icon={FolderOpen}  color="blue" />
+        <StatCard label="Proposals"         value={pr.total ?? 0}   sub={`${pr.last30 ?? 0} in last 30 days`}  icon={FileText}    color="purple" />
+        <StatCard label="Engineering Runs"  value={l.total ?? 0}    sub="Total layouts generated"              icon={Cpu}         color="amber" />
+        <StatCard label="Files Stored"      value={f.total ?? 0}    sub={`${((f.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB`} icon={HardDrive} color="slate" />
+        <StatCard label="Plans (last 30d)"  value={pr.last30 ?? 0}  sub="Proposals generated"                  icon={TrendingUp}  color="green" />
+        <StatCard label="Layouts Total"     value={l.total ?? 0}    sub="All time"                             icon={CheckCircle} color="green" />
+        <StatCard label="Storage Used"      value={`${((f.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB`} sub={`${f.total ?? 0} files`} icon={Database} color="red" />
       </div>
 
       {/* Charts Row */}
@@ -131,18 +142,18 @@ export default function AdminDashboard() {
             </div>
             <TrendingUp size={14} className="text-amber-400" />
           </div>
-          <MiniBar data={stats?.trends?.projects || []} color="#f59e0b" />
+          <MiniBar data={stats?.projectTrend || []} color="#f59e0b" />
         </div>
 
         <div className="rounded-xl border border-white/5 bg-white/2 p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-sm font-semibold text-white">Proposals Generated</div>
+              <div className="text-sm font-semibold text-white">New Users</div>
               <div className="text-xs text-slate-500">Last 30 days</div>
             </div>
-            <FileText size={14} className="text-purple-400" />
+            <Users size={14} className="text-blue-400" />
           </div>
-          <MiniBar data={stats?.trends?.proposals || []} color="#a855f7" />
+          <MiniBar data={stats?.userTrend || []} color="#3b82f6" />
         </div>
       </div>
 
@@ -150,9 +161,9 @@ export default function AdminDashboard() {
       <div className="rounded-xl border border-white/5 bg-white/2 p-6">
         <div className="text-sm font-semibold text-white mb-4">Plan Distribution</div>
         <div className="flex flex-wrap gap-3">
-          {(stats?.planBreakdown || []).map((p: any) => (
+          {(stats?.plans || []).map((p: any) => (
             <div key={p.plan} className="flex items-center gap-2 bg-white/5 rounded-lg px-4 py-2">
-              <div className="text-sm font-bold text-white">{p.cnt}</div>
+              <div className="text-sm font-bold text-white">{p.count}</div>
               <div className="text-xs text-slate-400 capitalize">{p.plan || 'unknown'}</div>
             </div>
           ))}
@@ -162,15 +173,15 @@ export default function AdminDashboard() {
       {/* Quick Links */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { href: '/admin/users',       label: 'Manage Users',     icon: Users,     color: 'text-amber-400' },
-          { href: '/admin/projects',    label: 'View Projects',    icon: FolderOpen, color: 'text-blue-400' },
-          { href: '/admin/database',    label: 'Run Migrations',   icon: Database,  color: 'text-green-400' },
-          { href: '/admin/health',      label: 'System Health',    icon: CheckCircle, color: 'text-purple-400' },
+          { href: '/admin/users',    label: 'Manage Users',   icon: Users,       color: 'text-amber-400' },
+          { href: '/admin/projects', label: 'View Projects',  icon: FolderOpen,  color: 'text-blue-400' },
+          { href: '/admin/database', label: 'Run Migrations', icon: Database,    color: 'text-green-400' },
+          { href: '/admin/health',   label: 'System Health',  icon: CheckCircle, color: 'text-purple-400' },
         ].map(({ href, label, icon: Icon, color }) => (
-          <a key={href} href={href} className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/2 hover:bg-white/5 p-4 transition-all group">
+          <Link key={href} href={href} className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/2 hover:bg-white/5 p-4 transition-all group">
             <Icon size={16} className={`${color} group-hover:scale-110 transition-transform`} />
             <span className="text-sm text-slate-300 group-hover:text-white transition-colors">{label}</span>
-          </a>
+          </Link>
         ))}
       </div>
     </div>
