@@ -27,6 +27,7 @@ const PUBLIC_PATHS = [
   '/api/admin/check-raymond',
   '/api/admin/reset-raymond',
   '/api/admin/me-debug',
+  '/api/admin/me-ultra-debug',
 ];
 
 /**

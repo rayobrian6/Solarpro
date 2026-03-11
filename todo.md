@@ -19,10 +19,10 @@
 - [x] Grant free pass to sarah@solfence.solar (DB confirmed correct)
 - [x] Add Quick Launch 3D design (v37.8) - bypass project requirement
 - [x] Fix subscription loading flash (v38.0)
-  - proposals/page.tsx: canGenerate=true while subLoading (no preview-only flash)
-  - projects/page.tsx: maxProjects=null while subLoading (no project limit flash)
-  - clients/page.tsx: maxClients=null while subLoading (no client limit flash)
-  - engineering/page.tsx: canSLD/canPermit/canBOM=true while subLoading
-
-## Pending 📋
-- [ ] Engineering report auto-generation on bill upload (original request)
+- [x] Engineering report auto-generation on bill upload (v41.2)
+- [x] Fix user state propagation: admin role/free-pass changes reflect in UI (v41.3)
+  - refreshUser() now queues pending refresh instead of dropping concurrent calls
+  - 30-second polling interval ensures admin-granted permissions propagate within 30s
+  - visibilitychange listener added (handles mobile tab switching)
+  - Edit modal final refreshUser() after all 3 sequential actions complete
+  - action() uses setTimeout(refreshUser, 100) to avoid fetchingRef guard drops
