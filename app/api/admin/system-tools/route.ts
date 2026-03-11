@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDb } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
+import { neon } from '@neondatabase/serverless';
 import fs from 'fs';
 import path from 'path';
 
@@ -39,8 +40,31 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ success: false, error: `Migration file not found: ${migrationFile}` }, { status: 404 });
         }
 
-        // Execute the migration SQL
-        await sql.unsafe(sqlContent);
+        // Execute the migration SQL by splitting into individual statements
+        // neon tagged template does not support .unsafe(); use neon().query() directly
+        const rawSql = neon(process.env.DATABASE_URL!);
+        const statements = sqlContent
+          .split(';')
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0 && !s.startsWith('--'));
+
+        const errors: string[] = [];
+        for (const stmt of statements) {
+          try {
+            // neon() supports ordinary function call: sql(queryString, params?)
+            await rawSql(stmt, []);
+          } catch (stmtErr: any) {
+            // Ignore "already exists" errors (idempotent migrations)
+            if (!stmtErr.message?.includes('already exists')) {
+              errors.push(stmtErr.message);
+            }
+          }
+        }
+
+        if (errors.length > 0) {
+          return NextResponse.json({ success: false, error: errors.join('; ') }, { status: 500 });
+        }
+
         await logAdminAction({ adminId: admin.id, action: 'run_migration', metadata: { file: migrationFile } });
         return NextResponse.json({ success: true, message: `Migration ${migrationFile} executed successfully` });
       }
