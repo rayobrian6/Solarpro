@@ -2659,6 +2659,9 @@ function EngineeringPageInner() {
         electricalLicense: config.electricalLicense || undefined,
         ownerContact: config.ownerPhone || config.ownerEmail || undefined,
         stringCount: planStrings.length,
+        // Pass pre-rendered SLD SVG so E-1 uses the same diagram already reviewed
+        // in Design Studio — avoids generating a different SLD from scratch.
+        sldSvg: sldSvg || undefined,
         // Structural
         windSpeedMph: config.windSpeed || 90,
         groundSnowPsf: config.groundSnowLoad || 0,

@@ -199,6 +199,8 @@ export async function POST(req: NextRequest) {
       annualKwh,
       // Array config
       stringCount,
+      // Pre-rendered SLD SVG from Design Studio (single source of truth for E-1)
+      sldSvg: existingSldSvg,
     } = body;
 
     // ── Validate required fields ──────────────────────────────────────────
@@ -488,6 +490,8 @@ export async function POST(req: NextRequest) {
       tb:                    { ...tb, sheetTitle: 'Electrical / SLD', sheetNumber: 'E-1' },
       // ← SINGLE SOURCE OF TRUTH: pre-computed system model
       systemModel:           systemModel ?? undefined,
+      // ← Use pre-rendered SLD from Design Studio if available
+      existingSvg:           existingSldSvg ?? undefined,
       // Module specs (for display/fallback)
       moduleVoc,
       moduleIsc,
