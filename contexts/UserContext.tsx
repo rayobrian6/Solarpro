@@ -118,6 +118,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     refreshUser();
   }, [refreshUser]);
 
+  // Re-fetch when window regains focus — ensures stale state is cleared
+  // after admin actions, tab switches, or long idle periods
+  useEffect(() => {
+    const onFocus = () => {
+      // Only refresh if we already have a user (i.e. logged in)
+      // Avoids unnecessary fetches on login page
+      refreshUser();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshUser]);
+
   return (
     <UserContext.Provider value={{ user, loading, refreshUser }}>
       {children}

@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v41.0';
+export const BUILD_VERSION = 'v41.1';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: JWT role isolation — verifyToken strips role from old tokens; /api/auth/me role always from DB only';
+export const BUILD_DESCRIPTION = 'FIX: UserContext refreshUser on window focus — stale state cleared on tab switch; confirmed json.data mapping correct';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -59,6 +59,9 @@ export const BUILD_FEATURES = [
   'FIX: next.config.js — injects NEXT_PUBLIC_BUILD_VERSION env var so client knows its build version',
   'FIX: app/api/version/route.ts — returns version + ts fields with no-cache headers',
   'FIX: app/account/billing/page.tsx — full rewrite: role+plan shown independently; admin bypass; no free_pass status inference',
+  // v41.1 — UserContext window focus refresh
+  'FIX: contexts/UserContext.tsx — refreshUser() now fires on window focus event (tab switch, return from admin portal)',
+  'FIX: contexts/UserContext.tsx — confirmed json?.data mapping is correct (json.data.role, not json.role)',
   // v41.0 — JWT role isolation + /api/auth/me hardened
   'FIX: lib/auth.ts — verifyToken() now explicitly extracts only id/name/email/company; discards any role field from old JWTs',
   'FIX: app/api/auth/me/route.ts — full rewrite: JWT used for userId only; ALL data (role, plan, is_free_pass) from DB',
