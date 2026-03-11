@@ -2448,6 +2448,9 @@ function EngineeringPageInner() {
 
   // ── Generate Full Permit Package ──────────────────────────────────────────────
   const [permitLoading, setPermitLoading] = useState(false);
+  const [planSetLoading, setPlanSetLoading] = useState(false);
+  const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
+  const [planSetError, setPlanSetError] = useState<string | null>(null);
 
   const handleGeneratePermitPackage = async () => {
     setPermitLoading(true);
@@ -2465,6 +2468,138 @@ function EngineeringPageInner() {
       logDecision('Permit Package', `Error: ${e.message}`, 'manual');
     } finally {
       setPermitLoading(false);
+    }
+  };
+
+  // ── Generate Permit-Grade Plan Set (v43.0) ─────────────────────────────────
+  const handleGeneratePlanSet = async () => {
+    setPlanSetLoading(true);
+    setPlanSetError(null);
+    setPlanSetResult(null);
+    try {
+      // Gather all system data
+      const firstInv = config.inverters[0];
+      const firstStr = firstInv?.strings[0];
+      const invData  = getInvById(firstInv?.inverterId || '', firstInv?.type || 'string') as any;
+      const panelData= getPanelById(firstStr?.panelId || '') as any;
+
+      // Build strings array for plan set
+      const planStrings = config.inverters.flatMap(inv =>
+        inv.strings.map(str => {
+          const pd = getPanelById(str.panelId) as any;
+          const sc = compliance.stringConfig;
+          return {
+            id: str.id, label: str.label,
+            panelCount: str.panelCount,
+            panelWatts: pd?.watts || 400,
+            wireGauge: str.wireGauge || config.wireGauge || '#10 AWG',
+            conduitType: config.conduitType || '3/4" EMT',
+            wireLength: str.wireLength || config.wireLength || 50,
+            ocpdAmps: sc?.ocpdPerString || 15,
+            stringVoc: sc?.stringVoc || (pd?.voc || 41.6) * str.panelCount,
+            stringVmp: sc?.stringVmp || (pd?.vmp || 34.5) * str.panelCount,
+            stringIsc: sc?.stringIsc || (pd?.isc || 12.26),
+            stringImp: pd?.imp || 11.5,
+          };
+        })
+      );
+
+      const payload = {
+        projectId: searchParams.get('projectId') || '',
+        clientId: null,
+        // Project
+        projectName: config.projectName,
+        clientName: config.clientName,
+        address: config.address,
+        city: config.city,
+        state: config.state,
+        zip: '',
+        county: config.county,
+        // System
+        systemKw: parseFloat(totalKw),
+        panelCount: totalPanels,
+        panelModel: panelData?.model || 'Solar Panel',
+        panelWatts: panelData?.watts || 400,
+        panelWeightLbs: panelData?.weightLbs || 40,
+        panelLengthIn: panelData?.lengthIn || 65,
+        panelWidthIn: panelData?.widthIn || 39,
+        inverterType: firstInv?.type || 'string',
+        inverterModel: invData?.model || 'Inverter',
+        inverterManufacturer: invData?.manufacturer || '',
+        inverterCount: config.inverters.length,
+        inverterKw: parseFloat(totalInverterKw),
+        inverterVacOut: invData?.acVoltage || 240,
+        inverterMaxDcV: invData?.maxDcVoltage || 600,
+        inverterMaxAcA: invData?.maxAcOutputA || (parseFloat(totalInverterKw) * 1000 / 240),
+        mountType: config.mountingId || 'Roof Mount',
+        roofType: config.roofType,
+        roofPitchDeg: config.roofPitch,
+        roofPitchRatio: `${Math.round(config.roofPitch * 12 / 90 * 12)}:12`,
+        rafterSize: config.rafterSize,
+        rafterSpacingIn: config.rafterSpacing,
+        rafterSpanFt: config.rafterSpan,
+        // Electrical
+        strings: planStrings,
+        dcWireGauge: config.wireGauge || '#10 AWG',
+        dcConduitType: config.conduitType || '3/4" EMT',
+        acWireGauge: compliance.electrical?.acWireGauge || '#8 AWG',
+        acConduitType: config.conduitType || '1" EMT',
+        dcDisconnectAmps: compliance.stringConfig?.ocpdPerString || 15,
+        dcDisconnectVoltage: invData?.maxDcVoltage || 600,
+        acDisconnectAmps: Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5 || 30,
+        acBreakerAmps: compliance.electrical?.busbar?.backfeedBreakerAmps || Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5 || 20,
+        backfeedBreakerAmps: compliance.electrical?.busbar?.backfeedBreakerAmps || 20,
+        mainPanelBusAmps: config.panelBusRating || config.mainPanelAmps || 200,
+        mainPanelBreakerAmps: config.mainPanelAmps || 200,
+        interconnectionType: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'supply-side' : 'load-side',
+        interconnectionMethod: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'Supply-Side Tap' : 'Backfeed Breaker',
+        rapidShutdownRequired: config.rapidShutdown,
+        rapidShutdownDevice: config.inverters[0]?.type === 'micro' ? 'Enphase IQ RSD (integrated)' : 'Tigo RSS / SolarEdge SafeDC',
+        groundWireGauge: '#8 AWG',
+        // Battery
+        hasBattery: config.batteryCount > 0 && !!config.batteryId,
+        batteryModel: config.batteryModel || undefined,
+        batteryManufacturer: config.batteryBrand || undefined,
+        batteryCount: config.batteryCount || undefined,
+        batteryKwh: config.batteryKwh || undefined,
+        batteryBreakerAmps: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) || undefined,
+        // Structural
+        windSpeedMph: config.windSpeed || 90,
+        groundSnowPsf: config.groundSnowLoad || 0,
+        seismicCategory: compliance.structural?.seismicCategory || 'C',
+        // AHJ
+        ahj: compliance.jurisdiction?.ahjName || `${config.city}, ${config.state} Building Dept.`,
+        utilityName: compliance.jurisdiction?.utility || config.utilityId || 'Local Utility',
+        necVersion: compliance.jurisdiction?.necVersion || 'NEC 2020',
+        // Contractor
+        contractorName: config.projectName || 'SolarPro Contractor',
+        designerName: config.designer || 'SolarPro',
+        annualKwh: compliance.electrical?.annualKwh || undefined,
+      };
+
+      const res = await fetch('/api/engineering/plan-set', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Plan set generation failed');
+
+      setPlanSetResult({
+        fileName: data.fileName,
+        fileId: data.fileId,
+        sheets: data.sheets,
+        structuralStatus: data.structuralStatus,
+        message: data.message,
+      });
+
+      logDecision('Plan Set', `Generated ${data.sheets}-sheet plan set: ${data.fileName}`, 'auto');
+    } catch (e: any) {
+      setPlanSetError(e.message);
+      logDecision('Plan Set', `Error: ${e.message}`, 'manual');
+    } finally {
+      setPlanSetLoading(false);
     }
   };
 
@@ -6982,6 +7117,85 @@ function EngineeringPageInner() {
                   <Eye size={16} /> Preview in Browser
                 </button>
               </div>
+
+              {/* ── Plan Set Generator (v43.0) ── */}
+              <div className="card p-5 border border-amber-500/30 bg-amber-500/5">
+                <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
+                  <FileText size={14} className="text-amber-400" />
+                  Permit-Grade Plan Set Generator
+                  <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">v43.0 NEW</span>
+                </h3>
+                <p className="text-slate-400 text-xs mb-4">
+                  Generates a full 5-sheet permit plan set (G-1 Cover · E-1 SLD · E-2 Equipment · S-1 Structural · C-1 Compliance) with NEC 690/705 callouts, ASCE 7-22 structural analysis, fire setbacks, and AHJ data.
+                </p>
+
+                {/* Sheet list */}
+                <div className="grid grid-cols-5 gap-2 mb-4">
+                  {[
+                    { id: 'G-1', label: 'Cover Sheet', desc: 'AHJ · Codes · Scope' },
+                    { id: 'E-1', label: 'SLD', desc: 'NEC 690 · Wire Schedule' },
+                    { id: 'E-2', label: 'Equipment', desc: 'BOM · UL Listings' },
+                    { id: 'S-1', label: 'Structural', desc: 'ASCE 7-22 · Setbacks' },
+                    { id: 'C-1', label: 'Compliance', desc: 'NEC · Fire · Labels' },
+                  ].map(s => (
+                    <div key={s.id} className="bg-slate-800/60 border border-slate-700/50 rounded-lg p-2.5 text-center">
+                      <div className="text-amber-400 font-bold text-xs">{s.id}</div>
+                      <div className="text-white text-xs font-semibold mt-0.5">{s.label}</div>
+                      <div className="text-slate-500 text-xs mt-0.5">{s.desc}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Result banner */}
+                {planSetResult && (
+                  <div className="mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm mb-1">
+                      <CheckCircle size={14} /> Plan Set Generated Successfully
+                    </div>
+                    <div className="text-xs text-slate-300">{planSetResult.fileName}</div>
+                    <div className="text-xs text-slate-400 mt-1">{planSetResult.message}</div>
+                    <div className="flex gap-2 mt-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${planSetResult.structuralStatus === 'PASS' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'}`}>
+                        Structural: {planSetResult.structuralStatus}
+                      </span>
+                      <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-500/10 text-blue-400 border-blue-500/30">
+                        {planSetResult.sheets} Sheets
+                      </span>
+                    </div>
+                    {planSetResult.fileId && (
+                      <button
+                        onClick={() => setActiveTab('files')}
+                        className="mt-2 text-xs text-amber-400 underline hover:text-amber-300"
+                      >
+                        View in Files Tab →
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Error banner */}
+                {planSetError && (
+                  <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
+                    <XCircle size={14} /> {planSetError}
+                  </div>
+                )}
+
+                <button
+                  onClick={handleGeneratePlanSet}
+                  disabled={planSetLoading || !totalPanels}
+                  className="btn-primary w-full flex items-center justify-center gap-2"
+                >
+                  {planSetLoading ? (
+                    <><RefreshCw size={16} className="animate-spin" /> Generating Plan Set…</>
+                  ) : (
+                    <><FileText size={16} /> Generate Permit Plan Set (5 Sheets)</>
+                  )}
+                </button>
+                {!totalPanels && (
+                  <p className="text-xs text-slate-500 text-center mt-2">Configure system panels first to generate plan set</p>
+                )}
+              </div>
+
               <div className="card p-5">
                 <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Lock size={14} className="text-amber-400" /> Engineer Certification Block</h3>
                 <div className="bg-white rounded-xl p-6 text-slate-900 border-2 border-slate-300">
