@@ -29,13 +29,18 @@ export async function GET(req: NextRequest) {
     let useFallback = false;
 
     try {
+      // NOTE: Query formatting intentionally differs from other routes to avoid
+      // Neon prepared statement cache collisions (different template = different PS key)
       rows = await sql`
-        SELECT
-          id, name, email, company, phone, role, email_verified, created_at,
-          plan, subscription_status, trial_starts_at, trial_ends_at,
+        SELECT id, name, email, company, phone,
+          role, email_verified, created_at,
+          plan, subscription_status,
+          trial_starts_at, trial_ends_at,
           is_free_pass, free_pass_note,
-          company_logo_url, company_website, company_address, company_phone,
-          brand_primary_color, brand_secondary_color, proposal_footer_text
+          company_logo_url, company_website,
+          company_address, company_phone,
+          brand_primary_color, brand_secondary_color,
+          proposal_footer_text
         FROM users WHERE id = ${userId} LIMIT 1
       `;
     } catch (colErr: any) {
@@ -43,7 +48,9 @@ export async function GET(req: NextRequest) {
       console.warn('Auth me: falling back to base columns:', colErr.message);
       useFallback = true;
       rows = await sql`
-        SELECT id, name, email, company, phone, role, email_verified, created_at
+        SELECT id, name, email,
+          company, phone, role,
+          email_verified, created_at
         FROM users WHERE id = ${userId} LIMIT 1
       `;
     }
