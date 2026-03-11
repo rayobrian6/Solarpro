@@ -16,7 +16,7 @@
 
 import { useEffect, useRef } from 'react';
 
-const POLL_INTERVAL_MS = 60_000; // check every 60 seconds
+const POLL_INTERVAL_MS = 30_000; // check every 30 seconds (was 60)
 const CLIENT_VERSION = process.env.NEXT_PUBLIC_BUILD_VERSION || '';
 
 function hardReload() {
@@ -27,7 +27,6 @@ function hardReload() {
 }
 
 export function useVersionCheck() {
-  const lastKnownVersion = useRef<string>(CLIENT_VERSION);
   const hasReloaded = useRef(false);
 
   useEffect(() => {
@@ -44,20 +43,20 @@ export function useVersionCheck() {
         const data = await res.json();
         const serverVersion: string = data.version || '';
 
-        // First call — store the server version as baseline
-        if (!lastKnownVersion.current) {
-          lastKnownVersion.current = serverVersion;
+        if (!serverVersion) return;
+
+        // If we know our client version and it differs from server → reload
+        if (CLIENT_VERSION && serverVersion !== CLIENT_VERSION && !hasReloaded.current) {
+          console.log(`[VersionCheck] New version detected: ${CLIENT_VERSION} → ${serverVersion}. Reloading...`);
+          hasReloaded.current = true;
+          hardReload();
           return;
         }
 
-        // If server version differs from what we loaded with, reload
-        if (
-          serverVersion &&
-          lastKnownVersion.current &&
-          serverVersion !== lastKnownVersion.current &&
-          !hasReloaded.current
-        ) {
-          console.log(`[VersionCheck] New version detected: ${lastKnownVersion.current} → ${serverVersion}. Reloading...`);
+        // If client version is unknown (old frozen deployment), always reload
+        // when server reports any version — this breaks the freeze
+        if (!CLIENT_VERSION && serverVersion && !hasReloaded.current) {
+          console.log(`[VersionCheck] Client has no version (stale build). Server is ${serverVersion}. Reloading...`);
           hasReloaded.current = true;
           hardReload();
         }
@@ -69,7 +68,7 @@ export function useVersionCheck() {
     // Check immediately on mount
     checkVersion();
 
-    // Then poll every 60 seconds
+    // Then poll every 30 seconds
     const interval = setInterval(checkVersion, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
