@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db-neon';
+import { getDb } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
