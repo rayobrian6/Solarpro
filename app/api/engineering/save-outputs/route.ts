@@ -3,6 +3,7 @@
 // Called after runCalc() completes in the engineering page.
 // Saves live engine outputs to project_files table so they
 // appear in the Client Engineering Workspace (Client Files tab).
+// Also creates an engineering_run record for reverse hydration.
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -238,9 +239,119 @@ export async function POST(req: NextRequest) {
     });
     if (r5) saved.push('system_estimate');
 
-    console.log('[save-outputs] Saved', saved.length, 'files for project', projectId, ':', saved.join(', '));
+    // ── Create engineering_run record for reverse hydration ──────────────────
+    let engineeringRunId: string | null = null;
+    try {
+      // Ensure engineering_runs table exists
+      await sql`
+        CREATE TABLE IF NOT EXISTS engineering_runs (
+          id                    VARCHAR(36)   PRIMARY KEY DEFAULT gen_random_uuid()::text,
+          project_id            VARCHAR(36)   NOT NULL,
+          user_id               VARCHAR(36)   NOT NULL,
+          client_id             VARCHAR(36),
+          system_size_kw        DECIMAL(8,2)  NOT NULL DEFAULT 0,
+          panel_count           INTEGER       NOT NULL DEFAULT 0,
+          annual_production_kwh INTEGER,
+          panel_id              VARCHAR(100),
+          panel_model           VARCHAR(200),
+          panel_wattage         INTEGER,
+          inverter_id           VARCHAR(100),
+          inverter_model        VARCHAR(200),
+          inverter_type         VARCHAR(20),
+          inverter_qty          INTEGER       DEFAULT 1,
+          mounting_id           VARCHAR(100),
+          mount_type            VARCHAR(50),
+          main_panel_rating     INTEGER,
+          backfeed_breaker      INTEGER,
+          interconnection_method VARCHAR(50),
+          wire_gauge            VARCHAR(30),
+          conduit_type          VARCHAR(30),
+          rapid_shutdown        BOOLEAN       DEFAULT true,
+          ac_disconnect         BOOLEAN       DEFAULT true,
+          dc_disconnect         BOOLEAN       DEFAULT true,
+          utility_name          VARCHAR(200),
+          utility_id            VARCHAR(100),
+          state_code            VARCHAR(2),
+          address               TEXT,
+          ahj                   VARCHAR(200),
+          roof_pitch            INTEGER,
+          system_type           VARCHAR(20),
+          string_config         JSONB         NOT NULL DEFAULT '[]',
+          config_snapshot       JSONB         NOT NULL DEFAULT '{}',
+          calc_outputs          JSONB         NOT NULL DEFAULT '{}',
+          generated_at          TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+          created_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS idx_eng_runs_project_id ON engineering_runs(project_id)`;
 
-    return NextResponse.json({ success: true, saved });
+      // Ensure project_files has engineering_run_id column
+      await sql`ALTER TABLE project_files ADD COLUMN IF NOT EXISTS engineering_run_id VARCHAR(36)`;
+
+      // Build config snapshot from payload
+      const configSnapshot = {
+        systemKw, panelCount, panelModel, inverterType, inverterModel,
+        annualProductionKwh, mountType, stateCode,
+        electrical, structural, compliance, permit, runs,
+      };
+
+      // Extract structured fields
+      const elec = electrical || {};
+      const firstInv = body.configSnapshot?.inverters?.[0] || null;
+
+      const runRows = await sql`
+        INSERT INTO engineering_runs (
+          project_id, user_id, client_id,
+          system_size_kw, panel_count, annual_production_kwh,
+          panel_model, inverter_model, inverter_type,
+          mount_type, state_code, address, ahj,
+          main_panel_rating, backfeed_breaker, interconnection_method,
+          wire_gauge, conduit_type,
+          utility_name, utility_id,
+          string_config, config_snapshot, calc_outputs
+        ) VALUES (
+          ${projectId}, ${user.id}, ${resolvedClientId},
+          ${systemKw || 0}, ${panelCount || 0}, ${annualProductionKwh || null},
+          ${panelModel || null}, ${inverterModel || null}, ${inverterType || null},
+          ${mountType || null}, ${stateCode || null},
+          ${body.address || null}, ${permit?.ahj || null},
+          ${elec.mainPanelBus || null}, ${elec.backfeedBreaker || null},
+          ${elec.interconnection || null},
+          ${elec.dcWireGauge || null}, ${body.conduitType || null},
+          ${permit?.utility || null}, ${body.utilityId || null},
+          ${JSON.stringify(body.strings || [])}::jsonb,
+          ${JSON.stringify(configSnapshot)}::jsonb,
+          ${JSON.stringify({ electrical: elec, structural, compliance, runs })}::jsonb
+        )
+        RETURNING id
+      `;
+      engineeringRunId = runRows[0]?.id || null;
+
+      // Attach run_id to all files saved in this run
+      if (engineeringRunId) {
+        await sql`
+          UPDATE project_files
+          SET engineering_run_id = ${engineeringRunId}
+          WHERE project_id = ${projectId}
+            AND user_id = ${user.id}
+            AND file_name IN (
+              ${`Engineering_Report_${name}.txt`},
+              ${`SLD_${name}.svg`},
+              ${`BOM_${name}.csv`},
+              ${`Permit_Packet_${name}.txt`},
+              ${`System_Estimate_${name}.txt`}
+            )
+        `;
+      }
+    } catch (runErr: any) {
+      // Non-fatal — files are already saved, just log the run creation failure
+      console.warn('[save-outputs] engineering_run creation failed (non-fatal):', runErr.message);
+    }
+
+    console.log('[save-outputs] Saved', saved.length, 'files for project', projectId, ':', saved.join(', '));
+    if (engineeringRunId) console.log('[save-outputs] Engineering run ID:', engineeringRunId);
+
+    return NextResponse.json({ success: true, saved, engineeringRunId });
   } catch (err: any) {
     console.error('[save-outputs] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

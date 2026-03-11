@@ -351,6 +351,10 @@ function EngineeringPageInner() {
   const [autoLoadBanner, setAutoLoadBanner] = useState<string | null>(null);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [currentClientId,  setCurrentClientId]  = useState<string | null>(null);
+  // Reverse hydration state
+  const [fileHydrated, setFileHydrated]         = useState(false);
+  const [fileHydrationBanner, setFileHydrationBanner] = useState<string | null>(null);
+  const [restoredRunId, setRestoredRunId]        = useState<string | null>(null);
 
   // Auto-load project data when ?projectId= is in the URL
   // Full seed hydration: reads engineeringSeed.synthetic_eng_config to populate
@@ -551,6 +555,168 @@ function EngineeringPageInner() {
       })
       .catch(err => console.warn('[engineering] auto-load failed:', err));
   }, [searchParams, projectAutoLoaded]);
+
+  // ── Reverse hydration: ?fileId= ──────────────────────────────────────────
+  // When a user opens a generated engineering file, load the associated
+  // engineering_run config and restore the full system configuration.
+  useEffect(() => {
+    const fileId = searchParams?.get('fileId');
+    if (!fileId || fileHydrated) return;
+    setFileHydrated(true);
+
+    console.log('[EngineeringPage] Reverse hydration triggered for fileId:', fileId);
+
+    fetch(`/api/engineering/run-from-file?fileId=${fileId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.success || !data.run) {
+          console.warn('[EngineeringPage] run-from-file failed:', data.error);
+          setFileHydrationBanner(`⚠️ Could not restore engineering configuration: ${data.error || 'Unknown error'}`);
+          return;
+        }
+
+        const run = data.run;
+        console.log('[EngineeringPage] Reverse hydration run:', run);
+
+        // Set project context
+        if (data.projectId) {
+          setCurrentProjectId(data.projectId);
+          setProjectAutoLoaded(true); // prevent projectId useEffect from overwriting
+        }
+        setRestoredRunId(run.id);
+
+        // Build patches from the stored config_snapshot + structured fields
+        const snap = run.configSnapshot || {};
+        const patches: Partial<ProjectConfig> = {};
+
+        // Location / project fields
+        if (run.address)    patches.address    = run.address;
+        if (run.stateCode)  patches.state      = run.stateCode;
+        if (run.systemType) patches.systemType = run.systemType as SystemType;
+        if (run.utilityId)  patches.utilityId  = run.utilityId;
+        if (run.roofPitch)  patches.roofPitch  = run.roofPitch;
+
+        // Electrical fields
+        if (run.mainPanelRating)       patches.mainPanelAmps         = run.mainPanelRating;
+        if (run.wireGauge)             patches.wireGauge             = run.wireGauge;
+        if (run.conduitType)           patches.conduitType           = run.conduitType;
+        if (run.interconnectionMethod) patches.interconnectionMethod = run.interconnectionMethod as ProjectConfig['interconnectionMethod'];
+        if (run.rapidShutdown  !== undefined) patches.rapidShutdown  = run.rapidShutdown;
+        if (run.acDisconnect   !== undefined) patches.acDisconnect   = run.acDisconnect;
+        if (run.dcDisconnect   !== undefined) patches.dcDisconnect   = run.dcDisconnect;
+        if (run.mountingId)            patches.mountingId            = run.mountingId;
+
+        // Restore from configSnapshot if available (more complete)
+        if (snap.mainPanelAmps)         patches.mainPanelAmps         = snap.mainPanelAmps;
+        if (snap.panelBusRating)        patches.panelBusRating        = snap.panelBusRating;
+        if (snap.wireGauge)             patches.wireGauge             = snap.wireGauge;
+        if (snap.wireLength)            patches.wireLength            = snap.wireLength;
+        if (snap.conduitType)           patches.conduitType           = snap.conduitType;
+        if (snap.interconnectionMethod) patches.interconnectionMethod = snap.interconnectionMethod as ProjectConfig['interconnectionMethod'];
+        if (snap.rapidShutdown  !== undefined) patches.rapidShutdown  = snap.rapidShutdown;
+        if (snap.acDisconnect   !== undefined) patches.acDisconnect   = snap.acDisconnect;
+        if (snap.dcDisconnect   !== undefined) patches.dcDisconnect   = snap.dcDisconnect;
+        if (snap.systemType)            patches.systemType            = snap.systemType as SystemType;
+        if (snap.state)                 patches.state                 = snap.state;
+        if (snap.utilityId)             patches.utilityId             = snap.utilityId;
+        if (snap.mountingId)            patches.mountingId            = snap.mountingId;
+
+        // Rebuild inverter/string config
+        const invType: InverterType = (run.inverterType || snap.inverterType || 'string') as InverterType;
+        const panelCount: number = run.panelCount || 0;
+        const roofPitch: number = run.roofPitch || snap.roofPitch || 20;
+
+        // Resolve inverterId: use stored id, fallback to first of type
+        let inverterId: string = run.inverterId || '';
+        if (!inverterId) {
+          inverterId = invType === 'micro'
+            ? (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus')
+            : (STRING_INVERTERS[0]?.id ?? 'se-7600h');
+        }
+
+        // Resolve panelId: use stored id, fallback to wattage match
+        let panelId: string = run.panelId || '';
+        if (!panelId && run.panelWattage) {
+          const targetWatt = run.panelWattage;
+          panelId = SOLAR_PANELS.reduce((b: any, pp: any) =>
+            Math.abs(pp.watts - targetWatt) < Math.abs(b.watts - targetWatt) ? pp : b,
+            SOLAR_PANELS[0])?.id ?? 'qcells-peak-duo-400';
+        }
+        if (!panelId) panelId = 'qcells-peak-duo-400';
+
+        // Rebuild strings from stored string_config if available
+        let strings: StringConfig[];
+        const storedStrings: any[] = run.stringConfig || [];
+
+        if (storedStrings.length > 0) {
+          // Restore from stored string config (most accurate)
+          strings = storedStrings.map((s: any, i: number) => ({
+            id:            s.id || `str-restored-${i}`,
+            label:         s.label || `String ${i + 1}`,
+            panelCount:    s.panelCount || s.panel_count || 1,
+            panelId:       s.panelId || s.panel_id || panelId,
+            tilt:          s.tilt ?? roofPitch,
+            azimuth:       s.azimuth ?? 180,
+            roofType:      (s.roofType || s.roof_type || 'shingle') as RoofType,
+            mountingSystem: s.mountingSystem || s.mounting_system || run.mountingId || 'ironridge-xr100',
+            wireGauge:     s.wireGauge || s.wire_gauge || run.wireGauge || '#10 AWG THWN-2',
+            wireLength:    s.wireLength || s.wire_length || 50,
+          }));
+        } else {
+          // Reconstruct from panel count
+          const panelsPerString = invType === 'micro' ? panelCount : Math.min(panelCount, 13);
+          const stringCount = invType === 'micro' ? 1 : Math.max(1, Math.ceil(panelCount / panelsPerString));
+          strings = Array.from({ length: stringCount }, (_, i) => {
+            const cnt = i === stringCount - 1
+              ? panelCount - panelsPerString * (stringCount - 1)
+              : panelsPerString;
+            return {
+              id:            `str-restored-${i}`,
+              label:         `String ${i + 1}`,
+              panelCount:    cnt,
+              panelId,
+              tilt:          roofPitch,
+              azimuth:       180,
+              roofType:      'shingle' as RoofType,
+              mountingSystem: run.mountingId || 'ironridge-xr100',
+              wireGauge:     run.wireGauge || '#10 AWG THWN-2',
+              wireLength:    50,
+            };
+          });
+        }
+
+        patches.inverters = [{
+          id:        'inv-restored-0',
+          inverterId,
+          type:      invType,
+          strings,
+        }];
+
+        // Apply all patches
+        if (Object.keys(patches).length > 0) {
+          setConfig(prev => ({ ...prev, ...patches }));
+        }
+
+        // Set the restoration banner
+        const genDate = run.generatedAt
+          ? new Date(run.generatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          : 'previously';
+        setFileHydrationBanner(
+          `🔄 Engineering configuration restored from "${data.fileName}" (generated ${genDate}). You can edit and re-run the engineering engine.`
+        );
+
+        // Auto-trigger calc after hydration
+        setTimeout(() => {
+          console.log('[EngineeringPage] Auto-triggering calc after reverse hydration');
+          runCalc();
+        }, 400);
+      })
+      .catch(err => {
+        console.warn('[engineering] reverse hydration failed:', err);
+        setFileHydrationBanner('⚠️ Could not restore engineering configuration from file.');
+      });
+  }, [searchParams, fileHydrated]);
+
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
   const [compliance, setCompliance] = useState<ComplianceResult>({ overallStatus: null });
@@ -1206,6 +1372,37 @@ function EngineeringPageInner() {
           estimatedFee:      calcData?.jurisdiction?.estimatedPermitFee ?? null,
         },
         runs:                computedSystem.runs ?? [],
+        // ── Reverse hydration fields ──────────────────────────────────────────
+        address:             config.address ?? null,
+        utilityId:           config.utilityId ?? null,
+        conduitType:         config.conduitType ?? null,
+        strings:             config.inverters.flatMap(inv => inv.strings.map(s => ({
+          panelId:       s.panelId,
+          panelCount:    s.panelCount,
+          tilt:          s.tilt,
+          azimuth:       s.azimuth,
+          roofType:      s.roofType,
+          mountingSystem:s.mountingSystem,
+          wireGauge:     s.wireGauge,
+          wireLength:    s.wireLength,
+        }))),
+        configSnapshot: {
+          inverters:            config.inverters,
+          mainPanelAmps:        config.mainPanelAmps,
+          panelBusRating:       config.panelBusRating,
+          interconnectionMethod:config.interconnectionMethod,
+          rapidShutdown:        config.rapidShutdown,
+          acDisconnect:         config.acDisconnect,
+          dcDisconnect:         config.dcDisconnect,
+          wireGauge:            config.wireGauge,
+          wireLength:           config.wireLength,
+          conduitType:          config.conduitType,
+          systemType:           config.systemType,
+          roofPitch:            config.roofPitch,
+          state:                config.state,
+          utilityId:            config.utilityId,
+          mountingId:           config.mountingId,
+        },
       };
 
       const res = await fetch('/api/engineering/save-outputs', {
@@ -1216,6 +1413,10 @@ function EngineeringPageInner() {
       const data = await res.json();
       if (data.success) {
         console.log('[Engineering] Saved', data.saved?.length, 'workspace files:', data.saved?.join(', '));
+        // Track the newly created run ID so files show "Active config" badge
+        if (data.engineeringRunId) {
+          setRestoredRunId(data.engineeringRunId);
+        }
         // Refresh files list if user is on the files tab (inline fetch to avoid forward-ref)
         if (activeTab === 'files' && currentProjectId) {
           fetch(`/api/project-files?projectId=${currentProjectId}`)
@@ -2430,6 +2631,38 @@ function EngineeringPageInner() {
         </div>
 
         <ComplianceSummaryBar />
+
+        {/* ── Reverse hydration banner (file restore) ── */}
+        {fileHydrationBanner && (
+          <div className={`flex items-start gap-3 px-6 py-3 text-sm flex-shrink-0 border-b ${
+            fileHydrationBanner.startsWith('⚠️')
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+          }`}>
+            <span className="flex-1">{fileHydrationBanner}</span>
+            <button
+              onClick={() => setFileHydrationBanner(null)}
+              className="text-slate-400 hover:text-white ml-2 flex-shrink-0"
+              title="Dismiss"
+            >
+              <XCircle size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* ── Auto-load banner (project seed) ── */}
+        {autoLoadBanner && !fileHydrationBanner && (
+          <div className="flex items-start gap-3 px-6 py-3 text-sm bg-blue-500/10 border-b border-blue-500/30 text-blue-300 flex-shrink-0">
+            <span className="flex-1">{autoLoadBanner}</span>
+            <button
+              onClick={() => setAutoLoadBanner(null)}
+              className="text-slate-400 hover:text-white ml-2 flex-shrink-0"
+              title="Dismiss"
+            >
+              <XCircle size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 px-6 pt-3 border-b border-slate-700/50 flex-shrink-0 overflow-x-auto">
@@ -7332,14 +7565,42 @@ function EngineeringPageInner() {
                           {files.map((file: any) => {
                             const fileSizeKb = file.file_size ? (file.file_size < 1024 ? `${file.file_size}B` : `${(file.file_size / 1024).toFixed(1)}KB`) : '';
                             const uploadDate = file.upload_date ? new Date(file.upload_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+                            // Show "Open in Engineering" for engineering files that have a run attached
+                            const hasRun = !!file.engineering_run_id;
+                            const isCurrentRun = file.engineering_run_id === restoredRunId;
                             return (
                               <div key={file.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-slate-700/20 transition-colors">
                                 <span className={`flex-shrink-0 ${folder.color}`}>{folder.icon}</span>
                                 <div className="flex-1 min-w-0">
                                   <span className="text-sm text-white truncate block">{file.file_name}</span>
-                                  <span className="text-xs text-slate-500">{[fileSizeKb, uploadDate].filter(Boolean).join(' · ')}</span>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-xs text-slate-500">{[fileSizeKb, uploadDate].filter(Boolean).join(' · ')}</span>
+                                    {hasRun && (
+                                      <span className={`text-xs px-1.5 py-0.5 rounded-full border ${
+                                        isCurrentRun
+                                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                          : 'bg-amber-500/10 text-amber-400/70 border-amber-500/20'
+                                      }`}>
+                                        {isCurrentRun ? '✓ Active config' : '⚙ Has config'}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="flex items-center gap-1 flex-shrink-0">
+                                  {/* Open in Engineering — restore config from this file */}
+                                  {hasRun && !isCurrentRun && (
+                                    <button
+                                      onClick={() => {
+                                        const url = `/engineering?projectId=${currentProjectId}&fileId=${file.id}`;
+                                        window.location.href = url;
+                                      }}
+                                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-colors"
+                                      title="Restore engineering configuration from this file"
+                                    >
+                                      <RefreshCw size={11} />
+                                      Restore Config
+                                    </button>
+                                  )}
                                   <a
                                     href={`/api/project-files/download?id=${file.id}`}
                                     target="_blank"
