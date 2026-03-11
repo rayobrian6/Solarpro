@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import SubscriptionBanner from './SubscriptionBanner';
 import { checkAccess } from '@/lib/permissions';
+import { useVersionCheck } from '@/hooks/useVersionCheck';
 
 interface NavItem {
   label: string;
@@ -72,15 +73,20 @@ function getInitials(name: string): string {
  */
 function getAccountBadge(user: AuthUser | null): { label: string; color: string } {
   if (!user) return { label: '…', color: 'text-slate-500' };
+  // Role takes ABSOLUTE priority — platform authority always shown first
   const role = user.role?.toLowerCase();
   if (role === 'super_admin') return { label: 'Super Admin', color: 'text-purple-400' };
   if (role === 'admin')       return { label: 'Admin',       color: 'text-amber-400' };
+  // Free pass — DB boolean is_free_pass (never inferred from subscriptionStatus)
   if (user.isFreePass)        return { label: 'Free Pass',   color: 'text-emerald-400' };
+  // Subscription state
   const status = user.subscriptionStatus || 'trialing';
   if (status === 'active')    return { label: `${capitalize(user.plan || 'Pro')} Plan`, color: 'text-emerald-400' };
   if (status === 'trialing')  return { label: 'Trial',       color: 'text-amber-400' };
   if (status === 'past_due')  return { label: 'Past Due',    color: 'text-red-400' };
   if (status === 'canceled')  return { label: 'Canceled',    color: 'text-red-400' };
+  // free_pass status string (legacy — DB boolean is_free_pass is the canonical field)
+  if (status === 'free_pass') return { label: 'Free Pass',   color: 'text-emerald-400' };
   return { label: 'Free',     color: 'text-slate-400' };
 }
 
@@ -197,6 +203,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [searchVal, setSearchVal] = useState('');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [userLoading, setUserLoading] = useState(true);
+
+  // Auto-reload when a new deployment is detected — fixes Vercel alias caching
+  useVersionCheck();
 
   const isActive = (href: string) => pathname?.startsWith(href);
 

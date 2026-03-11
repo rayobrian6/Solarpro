@@ -1,6 +1,16 @@
 /** @type {import('next').NextConfig} */
+
+// Read build version directly — lib/version.ts is TypeScript so we parse it manually
+const fs = require('fs');
+const versionFile = fs.readFileSync('./lib/version.ts', 'utf8');
+const versionMatch = versionFile.match(/BUILD_VERSION\s*=\s*'([^']+)'/);
+const BUILD_VERSION = versionMatch ? versionMatch[1] : 'unknown';
+
 const nextConfig = {
   reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_BUILD_VERSION: BUILD_VERSION,
+  },
   experimental: {
     // Optional server-only packages — skip webpack bundling, resolved at runtime
     serverComponentsExternalPackages: ['pdf2pic', 'openai', 'pdf-parse', 'pdfjs-dist'],

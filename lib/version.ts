@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.5';
+export const BUILD_VERSION = 'v40.6';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: DB is single source of truth — role/plan/free-pass always from DB, admin bypasses subscription gating';
+export const BUILD_DESCRIPTION = 'FIX: Role takes priority over free-pass in badge; auto-reload on stale deployment; vercel.json alias lock';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -51,6 +51,14 @@ export const BUILD_FEATURES = [
   'FIX: lib/permissions.ts — checkAccess() accepts optional role param; admin/super_admin always return allowed=true',
   'FIX: components/ui/SubscriptionBanner.tsx — hidden for admin/super_admin roles',
   'FIX: app/dashboard/page.tsx — uses useSubscription() for role instead of separate /api/auth/me fetch',
+  // v40.6 — Vercel alias cache fix + role priority
+  'FIX: components/ui/AppShell.tsx — getAccountBadge() handles free_pass status string as fallback (safety net)',
+  'FIX: components/ui/AppShell.tsx — useVersionCheck() auto-reloads page when new deployment detected',
+  'NEW: hooks/useVersionCheck.ts — polls /api/version every 60s; hard-reloads if server version differs from client build',
+  'NEW: vercel.json — locks alias to solarpro-v31.vercel.app; disables autoAlias; aggressive no-cache headers on HTML/API',
+  'FIX: next.config.js — injects NEXT_PUBLIC_BUILD_VERSION env var so client knows its build version',
+  'FIX: app/api/version/route.ts — returns version + ts fields with no-cache headers',
+  'FIX: app/account/billing/page.tsx — full rewrite: role+plan shown independently; admin bypass; no free_pass status inference',
 ] as const;
 
 export function getBuildBadge(): string {
