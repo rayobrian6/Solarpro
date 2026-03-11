@@ -24,6 +24,7 @@ const PUBLIC_PATHS = [
   '/api/admin/set-roles',
   '/api/admin/debug-role',
   '/api/admin/fix-raymond',
+  '/api/admin/check-raymond',
 ];
 
 /**
