@@ -1,13 +1,6 @@
 # ============================================================
 # promote-production.yml — Promote Vercel Production Alias
 # Runs after every push to master.
-#
-# Strategy:
-#   1. Query latest deployment (any state)
-#   2. If READY already → assign alias immediately
-#   3. If BUILDING/QUEUED → poll until READY, then assign
-#   4. If ERROR/CANCELED → fail the workflow
-#   5. not_modified response = alias already correct = success
 # ============================================================
 
 name: Promote Production Alias
@@ -27,7 +20,6 @@ jobs:
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
-          ALIAS: solarpro-v31.vercel.app
         run: |
           echo "Checking latest Vercel deployment..."
           MAX_ATTEMPTS=30
@@ -37,8 +29,8 @@ jobs:
 
           for i in $(seq 1 $MAX_ATTEMPTS); do
             RESPONSE=$(curl -s \
-              "https://api.vercel.com/v6/deployments?projectId=$PROJECT_ID&limit=1" \
-              -H "Authorization: Bearer $VERCEL_TOKEN")
+              "https://api.vercel.com/v6/deployments?projectId=${PROJECT_ID}&limit=1" \
+              -H "Authorization: Bearer ${VERCEL_TOKEN}")
 
             STATE=$(echo "$RESPONSE" | jq -r '.deployments[0].state')
             DUID=$(echo "$RESPONSE" | jq -r '.deployments[0].uid')
@@ -50,7 +42,7 @@ jobs:
               echo "Deployment READY: $DUID ($URL)"
               break
             elif [ "$STATE" = "ERROR" ] || [ "$STATE" = "CANCELED" ]; then
-              echo "ERROR: Deployment in state $STATE — cannot promote."
+              echo "ERROR: Deployment failed with state: $STATE"
               exit 1
             fi
 
@@ -58,33 +50,36 @@ jobs:
           done
 
           if [ "$STATE" != "READY" ]; then
-            echo "ERROR: No READY deployment found after $MAX_ATTEMPTS attempts."
+            echo "ERROR: No READY deployment after $MAX_ATTEMPTS attempts."
             exit 1
           fi
 
-          echo "Assigning $ALIAS → $DUID ..."
+          echo "Assigning solarpro-v31.vercel.app → $DUID ..."
+
+          # Write JSON to a temp file to avoid shell quoting issues
+          echo '{"alias":"solarpro-v31.vercel.app"}' > /tmp/alias_payload.json
+
           RESULT=$(curl -s -X POST \
-            "https://api.vercel.com/v10/deployments/$DUID/aliases" \
-            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v10/deployments/${DUID}/aliases" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d "{&quot;alias&quot;: &quot;$ALIAS&quot;}")
+            --data-binary @/tmp/alias_payload.json)
 
           echo "Vercel response: $RESULT"
 
           ERR_CODE=$(echo "$RESULT" | jq -r '.error.code // empty')
           if [ -n "$ERR_CODE" ] && [ "$ERR_CODE" != "not_modified" ]; then
-            echo "ERROR: $ERR_CODE"
+            echo "ERROR assigning alias: $ERR_CODE"
             exit 1
           fi
 
-          echo "SUCCESS: $ALIAS → $DUID"
+          echo "SUCCESS: solarpro-v31.vercel.app → $DUID"
 
       - name: Health check
         run: |
           sleep 5
           HEALTH=$(curl -s https://solarpro-v31.vercel.app/api/health)
-          echo "Health: $HEALTH"
-          VERSION=$(curl -s https://solarpro-v31.vercel.app/api/version | jq -r '.version')
+          VERSION=$(curl -s https://solarpro-v31.vercel.app/api/version | jq -r '.version // "unknown"')
           echo "Live version: $VERSION"
           DB_OK=$(echo "$HEALTH" | jq -r '.db.ok // false')
           if [ "$DB_OK" = "true" ]; then
