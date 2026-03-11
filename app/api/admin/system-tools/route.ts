@@ -45,8 +45,12 @@ export async function POST(req: NextRequest) {
         const rawSql = neon(process.env.DATABASE_URL!);
         const statements = sqlContent
           .split(';')
-          .map((s: string) => s.trim())
-          .filter((s: string) => s.length > 0 && !s.startsWith('--'));
+          .map((s: string) => {
+            // Strip comment lines from each statement block, then trim
+            const lines = s.split('\n').filter((l: string) => !l.trim().startsWith('--'));
+            return lines.join('\n').trim();
+          })
+          .filter((s: string) => s.length > 0);
 
         const errors: string[] = [];
         for (const stmt of statements) {
