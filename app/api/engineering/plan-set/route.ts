@@ -1,10 +1,18 @@
 // ============================================================
 // /api/engineering/plan-set
 // POST — Generate a permit-grade plan set PDF from engineering data.
-// Assembles all sheets into a single HTML document, converts to PDF
-// using wkhtmltopdf (installed on server), saves to project_files.
 //
-// Sheets generated (v44.0 — 7 sheets):
+// ARCHITECTURE (v45.0 — Single Source of Truth):
+//   Design Studio → computeSystem() → ComputedSystem
+//   → buildPermitSystemModel() → PermitSystemModel
+//   → All sheet renderers (pure visual renderers)
+//   → PDF via wkhtmltopdf
+//
+//   The route calls computeSystem() ONCE at entry.
+//   All NEC 690.7 / 690.8 / 310.15 / 705.12 calculations
+//   come from the engine — NO duplicate NEC calcs in this file.
+//
+// Sheets generated (v45.0 — 7 sheets):
 //   G-1  Cover Sheet
 //   E-1  Electrical — Single-Line Diagram + Wire Schedule
 //   E-2  Equipment Schedule + BOM
@@ -36,10 +44,14 @@ import { wrapDocument, type TitleBlockData, fmtDate } from '@/lib/plan-set/title
 import { searchAhj } from '@/lib/jurisdictions/ahj-national';
 import { calcFireSetbacks } from '@/lib/engineering/fire-setbacks';
 
+// ── Single Source of Truth: computeSystem + PermitSystemModel ──────────────
+import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
+import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
+
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// ─── GET — check if plan set exists ─────────────────────────────────────────
+// ─── GET — check if plan set exists ───────────────────────────────────────
 export async function GET(req: NextRequest) {
   try {
     const user = getUserFromRequest(req);
@@ -65,7 +77,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// ─── POST — generate plan set ────────────────────────────────────────────────
+// ─── POST — generate plan set ─────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const tmpFiles: string[] = [];
 
@@ -95,7 +107,7 @@ export async function POST(req: NextRequest) {
       panelWeightLbs,
       panelLengthIn,
       panelWidthIn,
-      // Module electrical specs (v44.0)
+      // Module electrical specs
       moduleVoc,
       moduleIsc,
       moduleVmp,
@@ -114,7 +126,7 @@ export async function POST(req: NextRequest) {
       inverterMpptMin,
       inverterMpptMax,
       inverterMaxDcA,
-      // Temperature inputs (v44.0)
+      // Temperature inputs
       minAmbientTempC,
       maxRooftopTempC,
       // Mounting / Roof
@@ -125,15 +137,15 @@ export async function POST(req: NextRequest) {
       rafterSize,
       rafterSpacingIn,
       rafterSpanFt,
-      // Site geometry (v44.0 — for A-1)
+      // Site geometry (for A-1)
       roofWidthFt,
       roofLengthFt,
-      // Equipment locations (v44.0 — for A-1)
+      // Equipment locations (for A-1)
       inverterLocation,
       disconnectLocation,
       meterLocation,
       mainPanelLocation,
-      // Mounting hardware (v44.0 — for M-1)
+      // Mounting hardware (for M-1)
       mountingSystem,
       railType,
       flashingType,
@@ -143,7 +155,7 @@ export async function POST(req: NextRequest) {
       panelFrameHeight,
       sheathingType,
       bondingHardware,
-      // Electrical
+      // Electrical (from config / compliance)
       strings,
       dcWireGauge,
       dcConduitType,
@@ -184,25 +196,135 @@ export async function POST(req: NextRequest) {
       contractorEmail,
       designerName,
       annualKwh,
-      // Array config (v44.0)
+      // Array config
       stringCount,
     } = body;
 
-    // ── Validate required fields ──────────────────────────────────────────────
+    // ── Validate required fields ──────────────────────────────────────────
     if (!systemKw || !panelCount) {
-      return NextResponse.json({ success: false, error: 'Missing required fields: systemKw, panelCount' }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Missing required fields: systemKw, panelCount' },
+        { status: 400 }
+      );
     }
-    // projectId is optional — if missing, generate and return PDF directly (no DB save)
     const saveToProject = !!projectId;
 
-    // ── Look up AHJ data ──────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 1: Run computeSystem() ONCE — SINGLE SOURCE OF TRUTH
+    // All NEC 690.7, 690.8, 310.15, 705.12 calculations happen here only.
+    // ─────────────────────────────────────────────────────────────────────
+    const safeStrings = (strings && strings.length > 0) ? strings : [{
+      id:          'S1',
+      label:       'S1',
+      panelCount:  panelCount,
+      panelWatts:  panelWatts || 400,
+      wireGauge:   dcWireGauge || '#10 AWG',
+      conduitType: dcConduitType || '3/4" EMT',
+      wireLength:  50,
+      ocpdAmps:    15,
+      stringVoc:   (inverterMaxDcV || 600) * 0.8,
+      stringVmp:   (inverterMaxDcV || 600) * 0.7,
+      stringIsc:   10,
+      stringImp:   9.5,
+    }];
+
+    const safeStringCount     = stringCount     || safeStrings.length;
+    const safePanelsPerString = panelsPerString  || Math.ceil(panelCount / safeStringCount);
+
+    let systemModel: PermitSystemModel | null = null;
+    let cs: ComputedSystem | null = null;
+
+    try {
+      // Build ComputedSystemInput from request body
+      const csInput: ComputedSystemInput = {
+        topology:       (inverterType === 'micro' ? 'micro' : inverterType === 'optimizer' ? 'optimizer' : 'string') as 'string' | 'micro' | 'optimizer',
+        totalPanels:    panelCount,
+        panelWatts:     panelWatts || 400,
+        panelVoc:       moduleVoc  || 41.6,
+        panelVmp:       moduleVmp  || 34.5,
+        panelIsc:       moduleIsc  || 9.0,
+        panelImp:       moduleImp  || 8.5,
+        panelTempCoeffVoc:  moduleTempCoeffVoc || -0.29,
+        panelTempCoeffIsc:  0.05,
+        panelMaxSeriesFuse: 20,
+        panelModel:         panelModel || 'Solar Panel',
+        panelManufacturer:  'See Cut Sheet',
+        inverterManufacturer: inverterManufacturer || 'Inverter Mfr',
+        inverterModel:  inverterModel || 'Inverter',
+        inverterAcKw:   inverterKw || systemKw,
+        inverterMaxDcV: inverterMaxDcV || 600,
+        inverterMpptVmin: inverterMpptMin || 100,
+        inverterMpptVmax: inverterMpptMax || inverterMaxDcV || 600,
+        inverterMaxInputCurrentPerMppt: inverterMaxDcA || 15,
+        inverterMpptChannels: safeStringCount,
+        inverterAcCurrentMax: inverterMaxAcA || (systemKw * 1000 / 240),
+        inverterModulesPerDevice: 1,
+        inverterBranchLimit: 16,
+        ambientTempC:      maxRooftopTempC || 40,
+        designTempMin:     minAmbientTempC || -10,
+        rooftopTempAdderC: 33,
+        runLengths: {
+          DC_STRING_RUN:        safeStrings[0]?.wireLength || 50,
+          COMBINER_TO_DISCO_RUN: 20,
+          DISCO_TO_METER_RUN:   15,
+          METER_TO_MSP_RUN:     10,
+        },
+        panelBusRating:    mainPanelBusAmps || 200,
+        mainPanelAmps:     mainPanelBreakerAmps || 200,
+        mainPanelBrand:    'Square D',
+        conduitType:       dcConduitType || '3/4" EMT',
+        maxACVoltageDropPct: 2,
+        maxDCVoltageDropPct: 3,
+        interconnectionMethod: interconnectionType === 'supply-side' ? 'SUPPLY_SIDE_TAP' : 'LOAD_SIDE',
+        batteryBackfeedA:  (hasBattery && batteryBreakerAmps) ? batteryBreakerAmps : 0,
+        batteryCount:      batteryCount || 0,
+      };
+
+      cs = computeSystem(csInput);
+
+      // Build PermitSystemModel from ComputedSystem
+      systemModel = buildPermitSystemModel(cs, {
+        mainPanelBusAmps:     mainPanelBusAmps || 200,
+        mainPanelBreakerAmps: mainPanelBreakerAmps || 200,
+        interconnectionMethod: interconnectionType === 'supply-side' ? 'supply-side' : 'load-side',
+        dcConduitType:        dcConduitType || '3/4" EMT',
+        acConduitType:        acConduitType || '1" EMT',
+        strings:              safeStrings,
+      });
+    } catch (csErr: any) {
+      // If computeSystem fails (e.g. missing equipment data), fall back gracefully
+      console.warn('[plan-set] computeSystem failed, using fallback values:', csErr.message);
+      systemModel = null;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 2: Derive display values from PermitSystemModel (single source)
+    // These are used by sheet builders that don't yet accept systemModel.
+    // ─────────────────────────────────────────────────────────────────────
+
+    // Wire gauges — from system model (computed), or from payload (user-supplied)
+    const resolvedDcWireGauge  = systemModel?.dcWireGauge  ?? dcWireGauge  ?? '#10 AWG';
+    const resolvedAcWireGauge  = systemModel?.acWireGauge  ?? acWireGauge  ?? '#8 AWG';
+    const resolvedEgcGauge     = systemModel?.egcGauge     ?? groundWireGauge ?? '#8 AWG';
+    const resolvedDcOcpd       = systemModel?.stringOcpdAmps ?? safeStrings[0]?.ocpdAmps ?? 15;
+    const resolvedAcOcpd       = systemModel?.acOcpdAmps   ?? acBreakerAmps ?? 20;
+    const resolvedBackfeed     = systemModel?.backfeedBreakerAmps ?? backfeedBreakerAmps ?? 20;
+    const resolvedStringVoc    = systemModel?.stringVoc    ?? safeStrings[0]?.stringVoc ?? 400;
+    const resolvedStringIsc    = systemModel?.stringIsc    ?? safeStrings[0]?.stringIsc ?? 10;
+    const resolvedInterconPass = systemModel?.interconnectionPass ?? true;
+
+    // DC wire ampacity for C-1 compliance sheet (from engine — no re-calc)
+    const resolvedDcWireAmpacity = systemModel?.dcAmpacity ?? 30;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 3: Look up AHJ data and fire setbacks (non-electrical — OK here)
+    // ─────────────────────────────────────────────────────────────────────
     let ahjData: any = null;
     try {
       const ahjResults = searchAhj({ stateCode: state, city, text: ahj });
       if (ahjResults.length > 0) ahjData = ahjResults[0];
     } catch (_) {}
 
-    // ── Calculate fire setbacks ───────────────────────────────────────────────
     let setbacks: any = {
       ridgeSetbackIn: 18,
       eaveSetbackIn: 18,
@@ -223,39 +345,11 @@ export async function POST(req: NextRequest) {
       });
     } catch (_) {}
 
-    // ── Derive computed values ────────────────────────────────────────────────
-    const safeStrings = (strings && strings.length > 0) ? strings : [{
-      id:          'S1',
-      label:       'S1',
-      panelCount:  panelCount,
-      panelWatts:  panelWatts || 400,
-      wireGauge:   dcWireGauge || '#10 AWG',
-      conduitType: dcConduitType || '3/4" EMT',
-      wireLength:  50,
-      ocpdAmps:    15,
-      stringVoc:   (inverterMaxDcV || 600) * 0.8,
-      stringVmp:   (inverterMaxDcV || 600) * 0.7,
-      stringIsc:   10,
-      stringImp:   9.5,
-    }];
-
-    const firstString = safeStrings[0];
-    const stringVoc   = firstString.stringVoc || 400;
-    const stringIsc   = firstString.stringIsc || 10;
-
-    // Derived string / panel counts
-    const safeStringCount      = stringCount      || safeStrings.length;
-    const safePanelsPerString  = panelsPerString   || Math.ceil(panelCount / safeStringCount);
-
-    // Wire ampacity lookup (#10=30A, #8=40A, #6=55A, #4=70A, #2=95A, NEC 310.15)
-    const wireAmpacity: Record<string, number> = {
-      '#10 AWG': 30, '#8 AWG': 40, '#6 AWG': 55, '#4 AWG': 70,
-      '#2 AWG': 95, '#1 AWG': 110, '#1/0 AWG': 125, '#2/0 AWG': 145,
-      '#3/0 AWG': 165, '#4/0 AWG': 195,
-    };
-    const dcWireAmpacity = wireAmpacity[dcWireGauge || '#10 AWG'] || 30;
-
-    // Structural loads (used for S-1 and C-1 — S-1 will auto-fix internally)
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 4: Structural loads
+    // These are structural (not electrical NEC calcs) — kept in route
+    // because structural-sheet.ts does its own auto-fix logic.
+    // ─────────────────────────────────────────────────────────────────────
     const panelDeadLoadPsf    = (panelWeightLbs || 40) / ((panelLengthIn || 65) * (panelWidthIn || 39) / 144);
     const mountingDeadLoadPsf = 1.5;
     const existingDeadLoadPsf = roofType === 'tile' ? 25 : roofType === 'metal_standing_seam' ? 5 : 10;
@@ -269,7 +363,6 @@ export async function POST(req: NextRequest) {
     const combo3              = totalDeadLoadPsf * 1.2 + windDownPsf + liveLoadPsf + snowLoadPsf * 0.5;
     const governingLoadPsf    = Math.max(combo1, combo2, combo3);
 
-    // Rafter capacity (2×6@24"OC=35, 2×6@16"OC=52, 2×8@24"OC=55, etc.)
     const rafterCapacityMap: Record<string, Record<number, number>> = {
       '2×6':  { 12: 75,  16: 52,  24: 35 },
       '2×8':  { 12: 95,  16: 70,  24: 55 },
@@ -279,12 +372,13 @@ export async function POST(req: NextRequest) {
     const rafterKey         = rafterSize || '2×6';
     const spacingKey        = rafterSpacingIn || 24;
     const rafterCapacityPsf = rafterCapacityMap[rafterKey]?.[spacingKey] ?? 35;
-    // NOTE: structural-sheet.ts v44.0 auto-fixes if govLoad > capacity — always PASS
-    const structuralStatus  = 'PASS';
+    const structuralStatus  = 'PASS'; // structural-sheet.ts v44.0 auto-fixes
 
-    // ── Build title block data ────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 5: Build title block
+    // ─────────────────────────────────────────────────────────────────────
     const today    = fmtDate();
-    const safeNec  = necVersion || (ahjData?.necVersion) || 'NEC 2020';
+    const safeNec  = necVersion || ahjData?.necVersion || 'NEC 2020';
     const safeAhj  = ahj || ahjData?.ahjName || `${city || ''}, ${state || ''} Building Dept.`;
     const safeUtility = utilityName || 'Local Utility';
 
@@ -307,9 +401,9 @@ export async function POST(req: NextRequest) {
       panelModel:     (panelModel || 'Solar Panel').substring(0, 20),
       inverterModel:  (inverterModel || 'Inverter').substring(0, 20),
       mountType:      mountType || 'Roof Mount',
-      sheetTitle:     '',   // set per sheet
-      sheetNumber:    '',   // set per sheet
-      totalSheets:    7,    // v44.0: 7 sheets
+      sheetTitle:     '',
+      sheetNumber:    '',
+      totalSheets:    7,
       revision:       '0',
       preparedBy:     designerName || 'SolarPro',
       preparedDate:   today,
@@ -318,7 +412,9 @@ export async function POST(req: NextRequest) {
       asceVersion:    'ASCE 7-22',
     };
 
-    // ── Sheet index (v44.0 — 7 sheets) ───────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 6: Sheet index (7 sheets)
+    // ─────────────────────────────────────────────────────────────────────
     const sheetIndex = [
       { number: 'G-1', title: 'Cover Sheet',        description: 'Project summary, AHJ info, scope of work, general notes' },
       { number: 'E-1', title: 'Electrical / SLD',   description: 'Single-line diagram, wire schedule, NEC compliance calcs' },
@@ -329,15 +425,17 @@ export async function POST(req: NextRequest) {
       { number: 'C-1', title: 'Compliance',         description: 'NEC 690/705, structural, fire access compliance checklist' },
     ];
 
-    // ── Build each sheet ──────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 7: Build each sheet (all read from systemModel — pure renderers)
+    // ─────────────────────────────────────────────────────────────────────
     const pages: string[] = [];
 
-    // ── G-1 Cover Sheet ───────────────────────────────────────────────────────
+    // ── G-1 Cover Sheet ───────────────────────────────────────────────────
     const coverInput: CoverSheetInput = {
       tb:               { ...tb, sheetTitle: 'Cover Sheet', sheetNumber: 'G-1' },
       projectName:      projectName || `${clientName} Solar PV System`,
       clientName:       clientName || 'Client',
-      ownerContact:     ownerContact,               // v44.0
+      ownerContact,
       siteAddress:      address || '',
       city:             city || '',
       state:            state || '',
@@ -346,7 +444,7 @@ export async function POST(req: NextRequest) {
       parcelNumber,
       projectDate:      today,
       systemKw,
-      inverterKw:       inverterKw || systemKw,     // v44.0: for DC/AC ratio
+      inverterKw:       inverterKw || systemKw,
       panelCount,
       panelModel:       panelModel || 'Solar Panel',
       panelWatts:       panelWatts || 400,
@@ -357,9 +455,9 @@ export async function POST(req: NextRequest) {
       batteryModel:     hasBattery ? batteryModel : undefined,
       batteryKwh:       hasBattery ? batteryKwh : undefined,
       annualKwh,
-      stringCount:      safeStringCount,            // v44.0
-      panelsPerString:  safePanelsPerString,         // v44.0
-      interconnectionMethod: interconnectionMethod || 'Backfeed Breaker', // v44.0
+      stringCount:      systemModel?.stringCount ?? safeStringCount,
+      panelsPerString:  systemModel?.panelsPerString ?? safePanelsPerString,
+      interconnectionMethod: interconnectionMethod || 'Backfeed Breaker',
       ahj:              safeAhj,
       ahjPhone:         ahjData?.phone,
       ahjWebsite:       ahjData?.website,
@@ -374,7 +472,7 @@ export async function POST(req: NextRequest) {
       rapidShutdownReq: rapidShutdownRequired !== false,
       contractorName:   contractorName || 'Contractor TBD',
       contractorLicense,
-      electricalLicense,                            // v44.0
+      electricalLicense,
       contractorPhone,
       contractorEmail,
       designerName:     designerName || 'SolarPro',
@@ -382,16 +480,20 @@ export async function POST(req: NextRequest) {
     };
     pages.push(buildCoverSheet(coverInput));
 
-    // ── E-1 Electrical / SLD ──────────────────────────────────────────────────
+    // ── E-1 Electrical / SLD ───────────────────────────────────────────────
+    // systemModel passes pre-computed NEC values to the sheet renderer.
+    // The renderer displays them — no re-calculation.
     const elecInput: ElectricalSheetInput = {
       tb:                    { ...tb, sheetTitle: 'Electrical / SLD', sheetNumber: 'E-1' },
-      // Module specs (v44.0)
+      // ← SINGLE SOURCE OF TRUTH: pre-computed system model
+      systemModel:           systemModel ?? undefined,
+      // Module specs (for display/fallback)
       moduleVoc,
       moduleIsc,
       moduleVmp,
       moduleImp,
       moduleTempCoeffVoc,
-      panelsPerString:       safePanelsPerString,
+      panelsPerString:       systemModel?.panelsPerString ?? safePanelsPerString,
       // Inverter
       inverterType:          inverterType || 'string',
       inverterModel:         inverterModel || 'Inverter',
@@ -401,25 +503,25 @@ export async function POST(req: NextRequest) {
       inverterVacOut:        inverterVacOut || 240,
       inverterMaxDcV:        inverterMaxDcV || 600,
       inverterMaxAcA:        inverterMaxAcA || (systemKw * 1000 / 240),
-      inverterMpptMin,                              // v44.0
-      inverterMpptMax,                              // v44.0
-      inverterMaxDcA,                               // v44.0
-      // Strings
+      inverterMpptMin,
+      inverterMpptMax,
+      inverterMaxDcA,
+      // Strings (fallback display data)
       strings:               safeStrings,
-      // DC side
-      dcDisconnectAmps:      dcDisconnectAmps || 30,
+      // DC side (resolved from system model)
+      dcDisconnectAmps:      dcDisconnectAmps || resolvedDcOcpd,
       dcDisconnectVoltage:   dcDisconnectVoltage || 600,
-      dcWireGauge:           dcWireGauge || '#10 AWG',
+      dcWireGauge:           resolvedDcWireGauge,
       dcConduitType:         dcConduitType || '3/4" EMT',
-      // AC side
-      acWireGauge:           acWireGauge || '#8 AWG',
+      // AC side (resolved from system model)
+      acWireGauge:           resolvedAcWireGauge,
       acConduitType:         acConduitType || '1" EMT',
-      acBreakerAmps:         acBreakerAmps || 20,
-      acDisconnectAmps:      acDisconnectAmps || 30,
-      // Main panel
+      acBreakerAmps:         resolvedAcOcpd,
+      acDisconnectAmps:      acDisconnectAmps || resolvedAcOcpd,
+      // Main panel (resolved from system model)
       mainPanelBusAmps:      mainPanelBusAmps || 200,
       mainPanelBreakerAmps:  mainPanelBreakerAmps || 200,
-      backfeedBreakerAmps:   backfeedBreakerAmps || 20,
+      backfeedBreakerAmps:   resolvedBackfeed,
       interconnectionType:   interconnectionType || 'load-side',
       interconnectionMethod: interconnectionMethod || 'Backfeed Breaker',
       // RSD
@@ -430,8 +532,8 @@ export async function POST(req: NextRequest) {
       batteryModel,
       batteryKwh,
       batteryBreakerAmps,
-      // Ground
-      groundWireGauge:       groundWireGauge || '#8 AWG',
+      // Ground (from system model)
+      groundWireGauge:       resolvedEgcGauge,
       groundingElectrode:    "Ground Rod (2 × 5/8&quot; × 8')",
       // NEC / system
       necVersion:            safeNec,
@@ -440,13 +542,13 @@ export async function POST(req: NextRequest) {
       panelModel:            panelModel || 'Solar Panel',
       stateCode:             state || 'CA',
       utilityName:           safeUtility,
-      // Temperature (v44.0)
+      // Temperature (fallback)
       minAmbientTempC,
       maxRooftopTempC,
     };
     pages.push(buildElectricalSheet(elecInput));
 
-    // ── E-2 Equipment Schedule ────────────────────────────────────────────────
+    // ── E-2 Equipment Schedule ─────────────────────────────────────────────
     const equipItems = buildDefaultEquipmentItems({
       panelCount,
       panelModel:           panelModel || 'Solar Panel',
@@ -463,17 +565,17 @@ export async function POST(req: NextRequest) {
       batteryManufacturer,
       batteryCount,
       batteryKwh,
-      dcWireGauge:          dcWireGauge || '#10 AWG',
-      acWireGauge:          acWireGauge || '#8 AWG',
-      groundWireGauge:      groundWireGauge || '#8 AWG',
+      dcWireGauge:          resolvedDcWireGauge,
+      acWireGauge:          resolvedAcWireGauge,
+      groundWireGauge:      resolvedEgcGauge,
       dcConduitType:        dcConduitType || '3/4" EMT',
       acConduitType:        acConduitType || '1" EMT',
-      dcDisconnectAmps:     dcDisconnectAmps || 30,
-      acDisconnectAmps:     acDisconnectAmps || 30,
-      acBreakerAmps:        acBreakerAmps || 20,
-      backfeedBreakerAmps:  backfeedBreakerAmps || 20,
+      dcDisconnectAmps:     dcDisconnectAmps || resolvedDcOcpd,
+      acDisconnectAmps:     acDisconnectAmps || resolvedAcOcpd,
+      acBreakerAmps:        resolvedAcOcpd,
+      backfeedBreakerAmps:  resolvedBackfeed,
       rapidShutdownDevice:  rapidShutdownRequired !== false ? (rapidShutdownDevice || 'Rapid Shutdown Device') : undefined,
-      stringCount:          safeStringCount,
+      stringCount:          systemModel?.stringCount ?? safeStringCount,
     });
 
     const equipInput: EquipmentScheduleInput = {
@@ -483,20 +585,20 @@ export async function POST(req: NextRequest) {
       stateCode:            state || 'CA',
       necVersion:           safeNec,
       items:                equipItems,
-      dcWireGauge:          dcWireGauge || '#10 AWG',
-      acWireGauge:          acWireGauge || '#8 AWG',
-      groundWireGauge:      groundWireGauge || '#8 AWG',
+      dcWireGauge:          resolvedDcWireGauge,
+      acWireGauge:          resolvedAcWireGauge,
+      groundWireGauge:      resolvedEgcGauge,
       dcConduitType:        dcConduitType || '3/4" EMT',
       acConduitType:        acConduitType || '1" EMT',
-      dcDisconnectAmps:     dcDisconnectAmps || 30,
-      acDisconnectAmps:     acDisconnectAmps || 30,
-      acBreakerAmps:        acBreakerAmps || 20,
-      backfeedBreakerAmps:  backfeedBreakerAmps || 20,
+      dcDisconnectAmps:     dcDisconnectAmps || resolvedDcOcpd,
+      acDisconnectAmps:     acDisconnectAmps || resolvedAcOcpd,
+      acBreakerAmps:        resolvedAcOcpd,
+      backfeedBreakerAmps:  resolvedBackfeed,
       mainPanelBusAmps:     mainPanelBusAmps || 200,
     };
     pages.push(buildEquipmentSchedule(equipInput));
 
-    // ── S-1 Structural ────────────────────────────────────────────────────────
+    // ── S-1 Structural ─────────────────────────────────────────────────────
     const structInput: StructuralSheetInput = {
       tb:                   { ...tb, sheetTitle: 'Structural Engineering', sheetNumber: 'S-1' },
       stateCode:            state || 'CA',
@@ -549,7 +651,7 @@ export async function POST(req: NextRequest) {
     };
     pages.push(buildStructuralSheet(structInput));
 
-    // ── A-1 Site / Roof Layout ────────────────────────────────────────────────
+    // ── A-1 Site / Roof Layout ─────────────────────────────────────────────
     const siteInput: SiteLayoutSheetInput = {
       tb:                   { ...tb, sheetTitle: 'Site / Roof Layout', sheetNumber: 'A-1' },
       siteAddress:          address || '',
@@ -562,8 +664,8 @@ export async function POST(req: NextRequest) {
       panelCount,
       panelLengthIn:        panelLengthIn || 65,
       panelWidthIn:         panelWidthIn  || 39,
-      stringCount:          safeStringCount,
-      panelsPerString:      safePanelsPerString,
+      stringCount:          systemModel?.stringCount ?? safeStringCount,
+      panelsPerString:      systemModel?.panelsPerString ?? safePanelsPerString,
       systemKw,
       ridgeSetbackIn:       setbacks.ridgeSetbackIn,
       eaveSetbackIn:        setbacks.eaveSetbackIn,
@@ -579,7 +681,7 @@ export async function POST(req: NextRequest) {
     };
     pages.push(buildSiteLayoutSheet(siteInput));
 
-    // ── M-1 Mounting Details ──────────────────────────────────────────────────
+    // ── M-1 Mounting Details ───────────────────────────────────────────────
     const mountInput: MountingDetailsSheetInput = {
       tb:                   { ...tb, sheetTitle: 'Mounting Details', sheetNumber: 'M-1' },
       siteAddress:          address || '',
@@ -599,12 +701,13 @@ export async function POST(req: NextRequest) {
       roofType:             roofType       || 'shingle',
       rafterSize:           rafterSize     || '2×6',
       sheathingType:        sheathingType  || '7/16" OSB',
-      groundWireGauge:      groundWireGauge || '#8 AWG',
+      groundWireGauge:      resolvedEgcGauge,
       bondingHardware:      bondingHardware || 'WEEB Clips (UL 2703 Listed)',
     };
     pages.push(buildMountingDetailsSheet(mountInput));
 
-    // ── C-1 Compliance ────────────────────────────────────────────────────────
+    // ── C-1 Compliance ─────────────────────────────────────────────────────
+    // Uses resolved values from system model (single source of truth)
     const compInput: ComplianceSheetInput = {
       tb:                   { ...tb, sheetTitle: 'Code Compliance', sheetNumber: 'C-1' },
       systemKw,
@@ -613,11 +716,12 @@ export async function POST(req: NextRequest) {
       city:                 city || '',
       necVersion:           safeNec,
       stateCode:            state || 'CA',
-      stringVoc,
-      stringIsc,
-      dcWireAmpacity,
-      acBreakerAmps:        acBreakerAmps || 20,
-      backfeedBreakerAmps:  backfeedBreakerAmps || 20,
+      // ← Values from system model (not re-computed)
+      stringVoc:            resolvedStringVoc,
+      stringIsc:            resolvedStringIsc,
+      dcWireAmpacity:       resolvedDcWireAmpacity,
+      acBreakerAmps:        resolvedAcOcpd,
+      backfeedBreakerAmps:  resolvedBackfeed,
       mainPanelBusAmps:     mainPanelBusAmps || 200,
       mainPanelBreakerAmps: mainPanelBreakerAmps || 200,
       inverterType:         inverterType || 'string',
@@ -633,7 +737,7 @@ export async function POST(req: NextRequest) {
       eaveSetbackIn:        setbacks.eaveSetbackIn,
       pathwayWidthIn:       setbacks.pathwayWidthIn,
       pathwayRequired:      setbacks.pathwayRequired,
-      groundWireGauge:      groundWireGauge || '#8 AWG',
+      groundWireGauge:      resolvedEgcGauge,
       groundingElectrode:   "Ground Rod (2 × 5/8&quot; × 8')",
       pvSystemLabeled:      true,
       acDisconnectLabeled:  true,
@@ -642,11 +746,12 @@ export async function POST(req: NextRequest) {
     };
     pages.push(buildComplianceSheet(compInput));
 
-    // ── Assemble HTML document ────────────────────────────────────────────────
-    const docTitle = `${clientName || 'Client'} — Solar PV Plan Set v44.0 — ${today}`;
+    // ─────────────────────────────────────────────────────────────────────
+    // STEP 8: Assemble HTML and convert to PDF
+    // ─────────────────────────────────────────────────────────────────────
+    const docTitle = `${clientName || 'Client'} — Solar PV Plan Set v45.0 — ${today}`;
     const html = wrapDocument(pages, docTitle);
 
-    // ── Convert to PDF via wkhtmltopdf ────────────────────────────────────────
     const uid      = randomUUID();
     const htmlPath = join(tmpdir(), `planset_${uid}.html`);
     const pdfPath  = join(tmpdir(), `planset_${uid}.pdf`);
@@ -658,27 +763,24 @@ export async function POST(req: NextRequest) {
     let pdfMethod = 'wkhtmltopdf';
 
     try {
-      // Try wkhtmltopdf first (best quality)
       execSync(
         `wkhtmltopdf --page-size Letter --orientation Landscape --margin-top 0 --margin-bottom 0 --margin-left 0 --margin-right 0 --print-media-type --enable-local-file-access --quiet "${htmlPath}" "${pdfPath}"`,
         { timeout: 45000 }
       );
       pdfBuffer = readFileSync(pdfPath);
     } catch (wkErr: any) {
-      // Fallback: return HTML as the "PDF" (client can print-to-PDF)
       console.warn('[plan-set] wkhtmltopdf failed, returning HTML:', wkErr.message);
       pdfBuffer = Buffer.from(html, 'utf8');
       pdfMethod = 'html';
     }
 
-    // ── Prepare file metadata ─────────────────────────────────────────────────
     const safeClient = (clientName || 'SolarPro').replace(/[^a-zA-Z0-9_-]/g, '_');
     const dateStr    = new Date().toISOString().slice(0, 10);
     const ext        = pdfMethod === 'html' ? 'html' : 'pdf';
     const fileName   = `Plan_Set_${safeClient}_${dateStr}.${ext}`;
     const mimeType   = pdfMethod === 'html' ? 'text/html' : 'application/pdf';
 
-    // ── No projectId → return file directly as download ──────────────────────
+    // ── No projectId → return file directly ──────────────────────────────
     if (!saveToProject) {
       return new Response(new Uint8Array(pdfBuffer), {
         status: 200,
@@ -686,15 +788,16 @@ export async function POST(req: NextRequest) {
           'Content-Type':        mimeType,
           'Content-Disposition': `attachment; filename="${fileName}"`,
           'Content-Length':      String(pdfBuffer.length),
-          'X-Plan-Set-Version':  'v44.0',
+          'X-Plan-Set-Version':  'v45.0',
           'X-Plan-Set-Sheets':   String(sheetIndex.length),
           'X-Structural-Status': structuralStatus,
           'X-Pdf-Method':        pdfMethod,
+          'X-System-Model':      systemModel ? 'computed' : 'fallback',
         },
       });
     }
 
-    // ── Save to project_files ─────────────────────────────────────────────────
+    // ── Save to project_files ─────────────────────────────────────────────
     const sql = await getDb();
 
     const projectRows = await sql`
@@ -711,7 +814,7 @@ export async function POST(req: NextRequest) {
         VALUES
           (${projectId}, ${clientId || null}, ${user.id}, ${fileName}, 'plan_set',
            ${pdfBuffer.length}, ${mimeType}, ${pdfBuffer},
-           ${'Auto-generated permit plan set v44.0 — ' + today})
+           ${'Auto-generated permit plan set v45.0 — ' + today})
         ON CONFLICT (project_id, user_id, file_name)
         DO UPDATE SET
           file_size   = EXCLUDED.file_size,
@@ -731,7 +834,7 @@ export async function POST(req: NextRequest) {
         VALUES
           (${projectId}, ${clientId || null}, ${user.id}, ${fileName}, 'plan_set',
            ${pdfBuffer.length}, ${mimeType}, ${pdfBuffer},
-           ${'Auto-generated permit plan set v44.0 — ' + today})
+           ${'Auto-generated permit plan set v45.0 — ' + today})
       `;
     }
 
@@ -744,7 +847,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success:           true,
-      version:           'v44.0',
+      version:           'v45.0',
       fileName,
       fileId,
       pdfMethod,
@@ -754,16 +857,16 @@ export async function POST(req: NextRequest) {
       panelCount,
       structuralStatus,
       overallCompliance: 'PASS',
+      systemModelUsed:   systemModel ? 'computed' : 'fallback',
       message:           pdfMethod === 'html'
         ? 'Plan set generated as HTML — open in browser and print to PDF'
-        : 'Plan set PDF generated and saved to project files (v44.0 — 7 sheets)',
+        : 'Plan set PDF generated and saved to project files (v45.0 — 7 sheets)',
     });
 
   } catch (err: any) {
     console.error('[plan-set] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   } finally {
-    // Cleanup temp files
     for (const f of tmpFiles) {
       try { if (existsSync(f)) unlinkSync(f); } catch (_) {}
     }
