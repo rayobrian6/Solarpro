@@ -185,6 +185,21 @@ interface ProjectConfig {
   // Utility + AHJ (persisted to project, used by interconnection + compliance)
   utilityId: string;             // e.g. 'ameren', 'comed', 'pge' — '' = auto/unknown
   ahjId: string;                 // e.g. 'il-icc', 'manual' — '' = auto
+  // v44.0 optional fields — site geometry, equipment locations, mounting hardware, contractor
+  roofWidth?: number;            // approximate roof width (ft) — for A-1 site layout
+  roofLength?: number;           // approximate roof length ridge-to-eave (ft) — for A-1
+  inverterLocation?: string;     // e.g. 'Garage wall, south side'
+  disconnectLocation?: string;   // e.g. 'Adjacent to inverter'
+  meterLocation?: string;        // e.g. 'North exterior wall'
+  mainPanelLocation?: string;    // e.g. 'Garage, east wall'
+  railType?: string;             // e.g. 'IronRidge XR-100'
+  flashingType?: string;         // e.g. 'Flashed L-Foot'
+  lagBoltSize?: string;          // e.g. '5/16" × 3"'
+  sheathingType?: string;        // e.g. '7/16" OSB'
+  contractorLicense?: string;    // contractor license number
+  electricalLicense?: string;    // electrical contractor license number
+  ownerPhone?: string;           // owner contact phone
+  ownerEmail?: string;           // owner contact email
 }
 
 interface ComplianceResult {
@@ -2564,6 +2579,43 @@ function EngineeringPageInner() {
         batteryCount: config.batteryCount || undefined,
         batteryKwh: config.batteryKwh || undefined,
         batteryBreakerAmps: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) || undefined,
+        // Module electrical specs (v44.0 — NEC 690.7 temp correction)
+        moduleVoc: panelData?.voc || undefined,
+        moduleIsc: panelData?.isc || undefined,
+        moduleVmp: panelData?.vmp || undefined,
+        moduleImp: panelData?.imp || undefined,
+        moduleTempCoeffVoc: panelData?.tempCoeffVoc || undefined,
+        panelsPerString: firstStr?.panelCount || undefined,
+        // Inverter MPPT / max DC (v44.0)
+        inverterMpptMin: invData?.mpptMin || undefined,
+        inverterMpptMax: invData?.mpptMax || undefined,
+        inverterMaxDcA: invData?.maxDcInputA || undefined,
+        // Temperature inputs (v44.0 — NEC 310.15 rooftop derating)
+        minAmbientTempC: compliance.electrical?.minAmbientTempC || -10,
+        maxRooftopTempC: compliance.electrical?.maxRooftopTempC || 60,
+        // Site geometry (v44.0 — for A-1 site layout)
+        roofWidthFt: config.roofWidth || 30,
+        roofLengthFt: config.roofLength || 20,
+        // Equipment locations (v44.0 — for A-1)
+        inverterLocation: config.inverterLocation || 'Garage wall — see site plan',
+        disconnectLocation: config.disconnectLocation || 'Adjacent to inverter',
+        meterLocation: config.meterLocation || 'Exterior wall — utility meter',
+        mainPanelLocation: config.mainPanelLocation || 'Main panel — see site plan',
+        // Mounting hardware (v44.0 — for M-1)
+        mountingSystem: config.mountingId || 'Roof Mount Racking',
+        railType: config.railType || 'IronRidge XR-100',
+        flashingType: config.flashingType || 'Flashed L-Foot',
+        lagBoltSize: config.lagBoltSize || '5/16" × 3"',
+        lagBoltSpacingFt: config.attachmentSpacing ? config.attachmentSpacing / 12 : 4,
+        panelThicknessIn: panelData?.thicknessIn || 1.5,
+        panelFrameHeight: panelData?.frameHeightMm || 35,
+        sheathingType: config.sheathingType || '7/16" OSB',
+        bondingHardware: 'WEEB Clips (UL 2703 Listed)',
+        // Contractor (v44.0)
+        contractorLicense: config.contractorLicense || undefined,
+        electricalLicense: config.electricalLicense || undefined,
+        ownerContact: config.ownerPhone || config.ownerEmail || undefined,
+        stringCount: planStrings.length,
         // Structural
         windSpeedMph: config.windSpeed || 90,
         groundSnowPsf: config.groundSnowLoad || 0,
@@ -7325,12 +7377,14 @@ function EngineeringPageInner() {
                     <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Plan Sheets</span>
                     <span className="text-xs text-slate-500">Click to preview</span>
                   </div>
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-7 gap-2">
                     {[
                       { id: 'G-1', label: 'Cover Sheet',  desc: 'AHJ · Codes · Scope',         icon: '📋', color: 'text-blue-400   border-blue-500/30   bg-blue-500/5'   },
                       { id: 'E-1', label: 'SLD',          desc: 'NEC 690 · Wire Schedule',      icon: '⚡', color: 'text-amber-400  border-amber-500/30  bg-amber-500/5'  },
                       { id: 'E-2', label: 'Equipment',    desc: 'BOM · UL Listings',            icon: '🔧', color: 'text-purple-400 border-purple-500/30 bg-purple-500/5' },
                       { id: 'S-1', label: 'Structural',   desc: 'ASCE 7-22 · Setbacks',        icon: '🏗', color: 'text-orange-400 border-orange-500/30 bg-orange-500/5' },
+                      { id: 'A-1', label: 'Site Layout',  desc: 'Roof Plan · Setbacks',         icon: '🗺', color: 'text-teal-400   border-teal-500/30   bg-teal-500/5'   },
+                      { id: 'M-1', label: 'Mounting',     desc: 'Rail · Flashing · Bond',       icon: '🔩', color: 'text-cyan-400   border-cyan-500/30   bg-cyan-500/5'   },
                       { id: 'C-1', label: 'Compliance',   desc: 'NEC · Fire · Labels',          icon: '✅', color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5' },
                     ].map(s => (
                       <button
@@ -7394,7 +7448,7 @@ function EngineeringPageInner() {
                   {planSetLoading ? (
                     <><RefreshCw size={16} className="animate-spin" /> Generating Plan Set…</>
                   ) : permitIsReady ? (
-                    <><FileText size={16} /> Generate &amp; Download Permit Plan Set (5 Sheets)</>
+                    <><FileText size={16} /> Generate &amp; Download Permit Plan Set (7 Sheets)</>
                   ) : (
                     <><Lock size={16} /> Complete {permitTotalCount - permitReadyCount} field{permitTotalCount - permitReadyCount !== 1 ? 's' : ''} above to unlock</>
                   )}
@@ -7445,7 +7499,7 @@ function EngineeringPageInner() {
                         <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
                           <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Sheet Index</div>
                           <div className="space-y-1">
-                            {[['G-1','Cover Sheet'],['E-1','Single Line Diagram'],['E-2','Equipment Schedule'],['S-1','Structural Analysis'],['C-1','Compliance Checklist']].map(([id,lbl]) => (
+                            {[['G-1','Cover Sheet'],['E-1','Single Line Diagram'],['E-2','Equipment Schedule'],['S-1','Structural Analysis'],['A-1','Site / Roof Layout'],['M-1','Mounting Details'],['C-1','Compliance Checklist']].map(([id,lbl]) => (
                               <div key={id} className="flex gap-3"><span className="text-amber-400 font-mono w-8">{id}</span><span className="text-slate-300">{lbl}</span></div>
                             ))}
                           </div>
@@ -7562,6 +7616,75 @@ function EngineeringPageInner() {
                           </div>
                           <div className="text-slate-400 mt-1">
                             Roof type: {config.roofType || 'Comp shingle'} · Pitch: {config.roofPitch ? `${Math.round(config.roofPitch * 12 / 90 * 12)}:12` : '—'}
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  'A-1': {
+                    label: 'A-1 Site / Roof Layout',
+                    desc: 'Roof plan with panel placement, fire setbacks, equipment locations, north arrow',
+                    content: (
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Roof Plan</div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between"><span className="text-slate-400">Array Size:</span><span className="text-white">{totalPanels} panels · {totalKw} kW DC</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Roof Type:</span><span className="text-white">{config.roofType || '—'}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Pitch:</span><span className="text-white">{config.roofPitch ? `${Math.round(config.roofPitch * 12 / 90 * 12)}:12 (${config.roofPitch}°)` : '—'}</span></div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Fire Setbacks (IRC R324.4)</div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between"><span className="text-slate-400">Ridge setback:</span><span className="text-white">18 in minimum</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Eave setback:</span><span className="text-white">18 in minimum</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Pathway width:</span><span className="text-white">36 in (3 ft)</span></div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Equipment Locations</div>
+                          <div className="space-y-1 text-slate-400">
+                            <div>• Inverter: {config.inverterLocation || 'See site plan'}</div>
+                            <div>• AC/DC Disconnects: Adjacent to inverter</div>
+                            <div>• Utility Meter: Exterior wall</div>
+                            <div>• RSD Initiator: At service entrance</div>
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  'M-1': {
+                    label: 'M-1 Mounting Details',
+                    desc: 'Rail cross-section, flashing detail, splice, module clamp, bonding, wire management',
+                    content: (
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Mounting System</div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between"><span className="text-slate-400">System:</span><span className="text-white">{config.mountingId || 'Roof Mount Racking'}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Rail Type:</span><span className="text-white">IronRidge XR-100</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Attachment:</span><span className="text-white">L-Foot w/ Flashing · 5/16″ × 3″ Lag</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Spacing:</span><span className="text-white">{config.attachmentSpacing ? `${config.attachmentSpacing}" O.C.` : '4 ft O.C.'}</span></div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Detail Diagrams Included</div>
+                          <div className="space-y-1 text-slate-400">
+                            <div>• Detail 1 — Rail cross-section (hat/C-channel profile)</div>
+                            <div>• Detail 2 — Flashing &amp; L-Foot w/ lag bolt &amp; sealant</div>
+                            <div>• Detail 3 — Rail splice (overlap, expansion gap)</div>
+                            <div>• Detail 4 — Module clamp (end &amp; mid clamps, torque spec)</div>
+                            <div>• Detail 5 — Bonding clip / WEEB + grounding lug (NEC 250.97)</div>
+                            <div>• Detail 6 — Wire management (3″ clearance, NEC 690.31)</div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">NEC References</div>
+                          <div className="flex flex-wrap gap-2">
+                            {['NEC 690.31', 'NEC 690.43', 'NEC 250.97', 'NEC 110.14', 'UL 2703'].map(c => (
+                              <span key={c} className="bg-teal-500/10 text-teal-400 border border-teal-500/20 px-2 py-0.5 rounded text-xs">{c}</span>
+                            ))}
                           </div>
                         </div>
                       </div>
