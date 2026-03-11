@@ -5,52 +5,64 @@ export async function GET(req: NextRequest) {
   const results: Record<string, any> = {};
 
   try {
-    // Step 1: DB connection
-    const url = process.env.DATABASE_URL;
-    results.step1_db_url = url ? 'set' : 'MISSING';
-    if (!url) return NextResponse.json(results);
+    // Dump all relevant env var keys (not values)
+    const allKeys = Object.keys(process.env);
+    results.env_keys_db = allKeys.filter(k =>
+      k.includes('DATABASE') || k.includes('NEON') || k.includes('POSTGRES') || k.includes('PG')
+    );
+    results.env_keys_jwt = allKeys.filter(k => k.includes('JWT') || k.includes('SECRET'));
+    results.total_env_vars = allKeys.length;
 
-    const sql = neon(url);
+    // Try each possible DB URL key
+    const dbUrl = process.env.DATABASE_URL
+      || process.env.POSTGRES_URL
+      || process.env.NEON_DATABASE_URL
+      || process.env.POSTGRES_PRISMA_URL;
+
+    results.db_url_found = !!dbUrl;
+    results.db_url_key_used = process.env.DATABASE_URL ? 'DATABASE_URL'
+      : process.env.POSTGRES_URL ? 'POSTGRES_URL'
+      : process.env.NEON_DATABASE_URL ? 'NEON_DATABASE_URL'
+      : 'NONE';
+
+    if (!dbUrl) {
+      return NextResponse.json(results);
+    }
+
+    // Test DB connection
+    const sql = neon(dbUrl);
     const ping = await sql`SELECT 1 as ok`;
-    results.step2_ping = ping[0];
+    results.ping = ping[0];
 
-    // Step 2: Fetch user (exactly as login route does)
+    // Test password verification
     const rows = await sql`
-      SELECT id, name, email, password_hash, company, phone, role
+      SELECT id, name, email, password_hash, company, role
       FROM users
       WHERE email = ${'raymond.obrian@yahoo.com'}
       LIMIT 1
     `;
-    results.step3_user_found = rows.length > 0;
-    results.step3_hash_len = rows[0]?.password_hash?.length;
+    results.user_found = rows.length > 0;
 
-    // Step 3: Verify password
-    const bcrypt = await import('bcryptjs');
-    const valid = await bcrypt.compare('ChangeMe123!', rows[0]?.password_hash || '');
-    results.step4_password_valid = valid;
+    if (rows[0]) {
+      const bcrypt = await import('bcryptjs');
+      const valid = await bcrypt.compare('ChangeMe123!', rows[0].password_hash);
+      results.password_valid = valid;
 
-    // Step 4: Sign JWT (exactly as login route does)
-    const jwt = await import('jsonwebtoken');
-    const secret = process.env.JWT_SECRET;
-    results.step5_jwt_secret = secret ? `set (${secret.length} chars)` : 'MISSING';
+      // Test JWT signing
+      const jwt = await import('jsonwebtoken');
+      const secret = process.env.JWT_SECRET;
+      results.jwt_secret_set = !!secret;
 
-    if (!secret) return NextResponse.json(results);
-
-    const payload = { id: rows[0].id, name: rows[0].name, email: rows[0].email };
-    const token = jwt.sign(payload, secret, { expiresIn: '30d' });
-    results.step6_token_len = token.length;
-    results.step6_token_prefix = token.substring(0, 20);
-
-    // Step 5: Make cookie
-    const expires = new Date(Date.now() + 60 * 60 * 24 * 30 * 1000).toUTCString();
-    const cookie = `solarpro_session=${token}; Path=/; HttpOnly; SameSite=Lax; Expires=${expires}`;
-    results.step7_cookie_len = cookie.length;
-
-    results.ALL_STEPS_PASSED = true;
+      if (secret) {
+        const token = jwt.sign({ id: rows[0].id, email: rows[0].email }, secret, { expiresIn: '30d' });
+        results.token_generated = token.length > 0;
+        results.ALL_STEPS_PASSED = true;
+      }
+    }
 
   } catch (err: any) {
     results.ERROR = err.message;
-    results.STACK = err.stack?.split('\n').slice(0, 8);
+    results.STACK = err.stack?.split('\n').slice(0, 6);
   }
 
   return NextResponse.json(results);
@@ -59,10 +71,10 @@ export async function GET(req: NextRequest) {
 // POST to reset password
 export async function POST(req: NextRequest) {
   try {
-    const url = process.env.DATABASE_URL;
-    if (!url) return NextResponse.json({ error: 'No DATABASE_URL' }, { status: 500 });
+    const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+    if (!dbUrl) return NextResponse.json({ error: 'No DB URL found' }, { status: 500 });
 
-    const sql = neon(url);
+    const sql = neon(dbUrl);
     const bcrypt = await import('bcryptjs');
     const newHash = await bcrypt.hash('ChangeMe123!', 10);
 
