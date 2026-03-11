@@ -29,6 +29,7 @@ const PUBLIC_PATHS = [
   '/api/admin/me-debug',
   '/api/admin/me-ultra-debug',
   '/api/admin/me-exact-debug',
+  '/api/auth/debug-login',
 ];
 
 /**
