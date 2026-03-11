@@ -2,10 +2,13 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v41.1';
+export const BUILD_VERSION = 'v41.2';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: UserContext refreshUser on window focus — stale state cleared on tab switch; confirmed json.data mapping correct';
+export const BUILD_DESCRIPTION = 'NEW: Engineering report auto-generated on bill upload — Engineering tab populated immediately after onboarding (no manual visit required)';
 export const BUILD_FEATURES = [
+  // v41.2 — Engineering report auto-generation on bill upload
+  'NEW: app/api/engineering/preliminary/route.ts — Step 9b auto-generates formal EngineeringReport in DB after synthetic layout save; Engineering tab populated immediately after bill upload',
+  'FIX: components/onboarding/BillUploadModal.tsx — Step 4 now logs explicit \&quot;Engineering report auto-generated\&quot; status; fallback fires /api/engineering/generate if preliminary skips it',
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
   'NEW: lib/adminAuth.ts — requireAdmin() server-side JWT auth with role check + redirect',

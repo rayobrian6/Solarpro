@@ -373,7 +373,8 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         log('⚠ Proposal will be created from the project page');
       }
 
-      // 4. Auto-generate full engineering workspace (layout + production + files)
+
+      // 4. Auto-generate full engineering workspace (layout + production + files + engineering report)
       log('Building engineering workspace...');
       try {
         const annualKwhForPacket =
@@ -405,7 +406,34 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
           const prelimData = await prelimRes.json();
           if (prelimData.success) {
             const saved = prelimData.data?.savedFiles || [];
-            log(`✓ Engineering workspace created (${saved.length} files: ${saved.join(', ')})`);
+            const hasEngReport = saved.includes('engineering_report');
+            const fileList = saved.filter((f: string) => f !== 'engineering_report');
+            if (fileList.length > 0) {
+              log(`✓ Engineering workspace created (${fileList.length} files: ${fileList.join(', ')})`);
+            }
+            if (hasEngReport) {
+              log('✓ Engineering report auto-generated — view in Engineering tab');
+            } else {
+              // Fallback: trigger engineering report generation separately
+              log('Generating engineering report...');
+              try {
+                const engRes = await fetch('/api/engineering/generate', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ projectId, force: true }),
+                });
+                const engData = await engRes.json();
+                if (engData.success && engData.data?.regenerated) {
+                  log('✓ Engineering report generated — view in Engineering tab');
+                } else if (engData.success) {
+                  log('✓ Engineering report is ready');
+                } else {
+                  log(`⚠ Engineering report: ${engData.error || 'will generate on first Engineering tab visit'}`);
+                }
+              } catch {
+                log('⚠ Engineering report will generate on first Engineering tab visit');
+              }
+            }
           } else {
             log(`⚠ Engineering workspace: ${prelimData.error || 'partial failure — check Engineering tab'}`);
           }
@@ -835,7 +863,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
                 <div className="flex items-center gap-2">
                   <FileText size={13} className="text-emerald-400" />
                   <span className="text-slate-400 text-xs">Files:</span>
-                  <span className="text-white text-sm font-medium">Engineering packet + bill saved to project</span>
+                  <span className="text-white text-sm font-medium">Engineering report + packet + bill saved</span>
                 </div>
               </div>
               <div className="flex gap-3">
