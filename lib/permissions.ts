@@ -26,14 +26,19 @@ export interface AccessResult {
 
 /**
  * Check if a user has active access to the platform at all.
+ * Admin and super_admin roles always have full access regardless of subscription state.
  */
 export function checkAccess(
   subscriptionStatus: string,
   trialEndsAt: string | null,
-  isFreePass: boolean
+  isFreePass: boolean,
+  role?: string
 ): AccessResult {
+  // Admin/super_admin — always allowed, bypass all subscription checks
+  if (role === 'admin' || role === 'super_admin') return { allowed: true, reason: 'active' };
+
   // Free pass — always allowed, no expiry, no feature gates
-  if (isFreePass || subscriptionStatus === 'free_pass') return { allowed: true, reason: 'free_pass' };
+  if (isFreePass) return { allowed: true, reason: 'free_pass' };
 
   if (subscriptionStatus === 'active') return { allowed: true, reason: 'active' };
 

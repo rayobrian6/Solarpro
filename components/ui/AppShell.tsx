@@ -8,7 +8,8 @@ import {
   Bell, Search, Menu, X,
   Cpu, BarChart3, Map, Home, Sprout, Fence,
   LogOut, HelpCircle, ExternalLink, Wrench,
-  CreditCard, ArrowRight, Clock, AlertTriangle, Star, ChevronDown
+  CreditCard, ArrowRight, Clock, AlertTriangle, Star, ChevronDown,
+  Shield
 } from 'lucide-react';
 import SubscriptionBanner from './SubscriptionBanner';
 import { checkAccess } from '@/lib/permissions';
@@ -65,10 +66,35 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-function UserDropdown({ initials, displayName, displayRole, userLoading, user, onLogout }: {
+/**
+ * Returns a human-readable account status label and color class.
+ * Priority: super_admin > admin > free_pass > active > trialing > else
+ */
+function getAccountBadge(user: AuthUser | null): { label: string; color: string } {
+  if (!user) return { label: '…', color: 'text-slate-500' };
+  const role = user.role?.toLowerCase();
+  if (role === 'super_admin') return { label: 'Super Admin', color: 'text-purple-400' };
+  if (role === 'admin')       return { label: 'Admin',       color: 'text-amber-400' };
+  if (user.isFreePass)        return { label: 'Free Pass',   color: 'text-emerald-400' };
+  const status = user.subscriptionStatus || 'trialing';
+  if (status === 'active')    return { label: `${capitalize(user.plan || 'Pro')} Plan`, color: 'text-emerald-400' };
+  if (status === 'trialing')  return { label: 'Trial',       color: 'text-amber-400' };
+  if (status === 'past_due')  return { label: 'Past Due',    color: 'text-red-400' };
+  if (status === 'canceled')  return { label: 'Canceled',    color: 'text-red-400' };
+  return { label: 'Free',     color: 'text-slate-400' };
+}
+
+function capitalize(s: string) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function isAdminRole(role?: string) {
+  return role === 'admin' || role === 'super_admin';
+}
+
+function UserDropdown({ initials, displayName, userLoading, user, onLogout }: {
   initials: string;
   displayName: string;
-  displayRole: string;
   userLoading: boolean;
   user: AuthUser | null;
   onLogout: () => void;
@@ -76,14 +102,9 @@ function UserDropdown({ initials, displayName, displayRole, userLoading, user, o
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
-  const planColors: Record<string, string> = {
-    starter: 'text-slate-400',
-    professional: 'text-amber-400',
-    contractor: 'text-blue-400',
-    enterprise: 'text-purple-400',
-    free_pass: 'text-emerald-400',
-  };
-  const planColor = planColors[user?.plan || 'starter'] || 'text-slate-400';
+  const badge = getAccountBadge(user);
+  const showAdminPortal = isAdminRole(user?.role);
+  const showUpgrade = !isAdminRole(user?.role) && !user?.isFreePass && user?.subscriptionStatus !== 'active';
 
   return (
     <div className="relative">
@@ -98,8 +119,8 @@ function UserDropdown({ initials, displayName, displayRole, userLoading, user, o
           <div className="text-sm font-semibold text-white truncate">
             {userLoading ? 'Loading...' : displayName}
           </div>
-          <div className={`text-xs truncate capitalize font-medium ${planColor}`}>
-            {userLoading ? '…' : (user?.isFreePass ? 'Free Pass' : (user?.plan || 'starter'))}
+          <div className={`text-xs truncate font-medium ${badge.color}`}>
+            {userLoading ? '…' : badge.label}
           </div>
         </div>
         <ChevronDown size={13} className={`text-slate-500 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -113,10 +134,20 @@ function UserDropdown({ initials, displayName, displayRole, userLoading, user, o
             <div className="px-3 py-3 border-b border-slate-700/50">
               <div className="text-white font-semibold text-sm truncate">{displayName}</div>
               <div className="text-slate-500 text-xs truncate">{user?.email}</div>
+              <div className={`text-xs font-medium mt-0.5 ${badge.color}`}>{badge.label}</div>
             </div>
 
             {/* Menu items */}
             <div className="py-1">
+              {showAdminPortal && (
+                <Link
+                  href="/admin"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors"
+                >
+                  <Shield size={14} /> Admin Portal
+                </Link>
+              )}
               <Link
                 href="/account/billing"
                 onClick={() => setOpen(false)}
@@ -124,13 +155,15 @@ function UserDropdown({ initials, displayName, displayRole, userLoading, user, o
               >
                 <CreditCard size={14} className="text-slate-500" /> Billing
               </Link>
-              <Link
-                href="/subscribe"
-                onClick={() => setOpen(false)}
-                className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-slate-700/50 transition-colors"
-              >
-                <ArrowRight size={14} /> Upgrade Plan
-              </Link>
+              {showUpgrade && (
+                <Link
+                  href="/subscribe"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-slate-700/50 transition-colors"
+                >
+                  <ArrowRight size={14} /> Upgrade Plan
+                </Link>
+              )}
               <Link
                 href="/settings"
                 onClick={() => setOpen(false)}
@@ -170,27 +203,28 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Close mobile menu on route change
   useEffect(() => { setMobileOpen(false); }, [pathname]);
 
-  // Fetch real authenticated user from session
+  // Fetch real authenticated user from DB via /api/auth/me
+  // DB is the single source of truth for role, plan, and free pass status
   useEffect(() => {
     let cancelled = false;
     async function fetchUser() {
       try {
         const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
         if (!res.ok) {
-          // Not authenticated — middleware should handle redirect, but just in case
           router.push('/auth/login');
           return;
         }
         const json = await res.json();
         if (!cancelled) {
-          // Handle both { data: user } and { user } response shapes
+          // API returns { success: true, data: { ... } }
           const userData = json.data || json.user || json;
-          const isFP = userData.isFreePass === true || userData.subscriptionStatus === 'free_pass';
+          // isFreePass comes from DB boolean is_free_pass — never infer from subscriptionStatus
+          const isFP = userData.isFreePass === true;
           setUser({
             id: userData.id,
             name: userData.name || userData.email,
             email: userData.email,
-            role: userData.role || 'Solar Designer',
+            role: userData.role || 'user',
             company: userData.company,
             plan: userData.plan || 'starter',
             subscriptionStatus: userData.subscriptionStatus || 'trialing',
@@ -209,13 +243,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   // Trial expiration redirect — push expired users to /subscribe
-  // Free pass users are NEVER redirected regardless of status
+  // Admin, super_admin, and free pass users are NEVER redirected
   useEffect(() => {
     if (!user) return;
 
+    // Admins always have full access — never redirect
+    if (isAdminRole(user.role)) return;
+
     // Free pass users always have full access — never redirect
-    const isFreePassUser = user.isFreePass || user.subscriptionStatus === 'free_pass';
-    if (isFreePassUser) return;
+    if (user.isFreePass) return;
 
     // Don't redirect on subscribe/auth/enterprise/billing pages
     const allowedPaths = ['/subscribe', '/auth', '/enterprise', '/account/billing'];
@@ -224,7 +260,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     const access = checkAccess(
       user.subscriptionStatus || 'trialing',
       user.trialEndsAt || null,
-      false // already handled free_pass above
+      false // free_pass already handled above
     );
     if (!access.allowed) {
       router.push('/subscribe?expired=1');
@@ -240,7 +276,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const initials = user ? getInitials(user.name) : '…';
   const displayName = user?.name || '…';
-  const displayRole = user?.role || '…';
+
+  // Derived flags used throughout sidebar
+  const isAdmin = isAdminRole(user?.role);
+  const isFreePassUser = user?.isFreePass === true;
+  // Show subscription CTA only for non-admin, non-free-pass users
+  const showSubscriptionCTA = !isAdmin && !isFreePassUser;
 
   const SidebarContent = () => (
     <div className="flex flex-col h-full">
@@ -331,6 +372,34 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           );
         })}
+
+        {/* Admin Portal link — only for admin/super_admin */}
+        {isAdmin && (
+          <>
+            <div className={`${collapsed ? 'border-t border-slate-700/50 my-3' : 'mt-3 mb-2'}`}>
+              {!collapsed && (
+                <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">
+                  System
+                </div>
+              )}
+            </div>
+            <Link
+              href="/admin"
+              className={`
+                flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
+                ${collapsed ? 'justify-center px-2' : ''}
+                ${isActive('/admin')
+                  ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
+                  : 'text-amber-400/70 hover:text-amber-400 hover:bg-amber-500/10 border border-transparent hover:border-amber-500/20'
+                }
+              `}
+              title={collapsed ? 'Admin Portal' : undefined}
+            >
+              <span className="flex-shrink-0"><Shield size={17} /></span>
+              {!collapsed && <span>Admin Portal</span>}
+            </Link>
+          </>
+        )}
       </nav>
 
       {/* System Type Legend */}
@@ -347,8 +416,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Subscription CTA */}
-      {!collapsed && user && !user.isFreePass && (
+      {/* Subscription CTA — hidden for admins and free pass users */}
+      {!collapsed && showSubscriptionCTA && user && (
         <div className="px-3 pb-2">
           {user.subscriptionStatus === 'active' ? (
             <Link href="/account/billing" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 transition-colors">
@@ -378,6 +447,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
+      {/* Free Pass badge in sidebar — shown instead of subscription CTA */}
+      {!collapsed && isFreePassUser && !isAdmin && user && (
+        <div className="px-3 pb-2">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+            <div className="w-6 h-6 rounded-lg bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+              <Star size={11} className="text-emerald-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-emerald-400">Free Pass</div>
+              <div className="text-xs text-slate-500">Full access granted</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin badge in sidebar — shown for admin/super_admin */}
+      {!collapsed && isAdmin && user && (
+        <div className="px-3 pb-2">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20">
+            <div className="w-6 h-6 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+              <Shield size={11} className="text-purple-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-purple-400">
+                {user.role === 'super_admin' ? 'Super Admin' : 'Admin'}
+              </div>
+              <div className="text-xs text-slate-500">Full system access</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* User Profile — dynamic from /api/auth/me */}
       <div className={`px-3 py-3 border-t border-slate-700/50 flex-shrink-0 ${collapsed ? 'flex justify-center' : ''}`}>
         {collapsed ? (
@@ -392,7 +493,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <UserDropdown
             initials={initials}
             displayName={displayName}
-            displayRole={displayRole}
             userLoading={userLoading}
             user={user}
             onLogout={handleLogout}

@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import { useAppStore } from '@/store/appStore';
+import { useSubscription } from '@/hooks/useSubscription';
 import {
   Sun, Zap, Users, FolderOpen, FileText, TrendingUp,
   ArrowUpRight, ArrowRight, Plus, Leaf,
@@ -76,21 +77,9 @@ function MiniSparkline({ data, color }: { data: number[]; color: string }) {
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [showBillUpload, setShowBillUpload] = useState(false);
-  const [userRole, setUserRole] = useState<string | null>(null);
 
-  // Fetch user role for admin button visibility
-  useEffect(() => {
-    fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
-      .then(json => {
-        if (json) {
-          const userData = json.data || json.user || json;
-          setUserRole(userData.role || null);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
+  // Use subscription hook — DB is single source of truth for role, plan, free pass
+  const { role: userRole } = useSubscription();
   const isAdmin = userRole === 'admin' || userRole === 'super_admin';
 
   // ✅ Phase 6: Read from global store — single source of truth

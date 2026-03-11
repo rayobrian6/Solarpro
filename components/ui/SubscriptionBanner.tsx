@@ -7,10 +7,12 @@ import { useSubscription } from '@/hooks/useSubscription';
 
 export default function SubscriptionBanner() {
   const router = useRouter();
-  const { loading, isTrialing, isExpired, isPastDue, isFreePass, isActive, trialDaysRemaining, planLabel } = useSubscription();
+  const { loading, isTrialing, isExpired, isPastDue, isFreePass, isActive, trialDaysRemaining, planLabel, role } = useSubscription();
   const [dismissed, setDismissed] = React.useState(false);
 
-  if (loading || isFreePass || dismissed) return null;
+  // Admins, super_admins, and free pass users never see subscription banners
+  const isAdmin = role === 'admin' || role === 'super_admin';
+  if (loading || isFreePass || isAdmin || dismissed) return null;
 
   // Active subscription — no banner needed
   if (isActive && !isTrialing) return null;

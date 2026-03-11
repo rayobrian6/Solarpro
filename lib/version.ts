@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.4';
+export const BUILD_VERSION = 'v40.5';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Admin portal UI audit — fix all data mapping bugs + add Admin Portal button to dashboard';
+export const BUILD_DESCRIPTION = 'FIX: DB is single source of truth — role/plan/free-pass always from DB, admin bypasses subscription gating';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -40,6 +40,17 @@ export const BUILD_FEATURES = [
   'FIX: app/admin/files/page.tsx — Fix data mapping: d.files, storage.totalFiles, storage.totalBytes',
   'FIX: app/admin/health/page.tsx — Full rewrite: match actual API shape (dbLatencyMs, rowCounts, tableSizes)',
   'NEW: app/dashboard/page.tsx — Admin Portal button (amber, Shield icon) visible only to admin/super_admin users',
+  // v40.5 — DB as single source of truth for account state
+  'FIX: components/ui/AppShell.tsx — isFreePass from DB boolean only (not subscriptionStatus string); admin/super_admin bypass trial redirect',
+  'FIX: components/ui/AppShell.tsx — getAccountBadge(): Super Admin/Admin/Free Pass/Trial/Pro/Free labels based on role+status',
+  'FIX: components/ui/AppShell.tsx — Admin Portal link in sidebar (Shield icon, System section) for admin/super_admin only',
+  'FIX: components/ui/AppShell.tsx — Subscription CTA hidden for admin/super_admin; Free Pass badge shown for free_pass users; Admin badge for admins',
+  'FIX: components/ui/AppShell.tsx — UserDropdown shows Admin Portal link for admins; hides Upgrade Plan for admins/free_pass',
+  'FIX: hooks/useSubscription.ts — role field added; admin/super_admin bypass all subscription checks and feature gates',
+  'FIX: hooks/useSubscription.ts — isFreePass from DB boolean only; isExpired/isPastDue never true for admins',
+  'FIX: lib/permissions.ts — checkAccess() accepts optional role param; admin/super_admin always return allowed=true',
+  'FIX: components/ui/SubscriptionBanner.tsx — hidden for admin/super_admin roles',
+  'FIX: app/dashboard/page.tsx — uses useSubscription() for role instead of separate /api/auth/me fetch',
 ] as const;
 
 export function getBuildBadge(): string {
