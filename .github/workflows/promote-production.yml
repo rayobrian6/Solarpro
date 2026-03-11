@@ -1,0 +1,133 @@
+# ============================================================
+# promote-production.yml
+# Runs after every push to master.
+# Waits for the Vercel deployment to finish, then forcefully
+# assigns solarpro-v31.vercel.app to the latest deployment.
+# This guarantees the production URL never points to a stale
+# or broken deployment — regardless of Vercel's auto-alias behavior.
+# ============================================================
+
+name: Promote Production Alias
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Wait for Vercel deployment to finish
+        id: wait_deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
+        run: |
+          echo "Waiting for latest production deployment to reach READY state..."
+          MAX_ATTEMPTS=30
+          SLEEP_SECONDS=10
+          DUID=""
+          STATE=""
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            RESPONSE=$(curl -s \
+              "https://api.vercel.com/v6/deployments?projectId=$PROJECT_ID&target=production&limit=1" \
+              -H "Authorization: Bearer $VERCEL_TOKEN")
+
+            STATE=$(echo "$RESPONSE" | jq -r '.deployments[0].state')
+            DUID=$(echo "$RESPONSE" | jq -r '.deployments[0].uid')
+            URL=$(echo "$RESPONSE" | jq -r '.deployments[0].url')
+
+            echo "Attempt $i/$MAX_ATTEMPTS — Deployment $DUID — State: $STATE"
+
+            if [ "$STATE" = "READY" ]; then
+              echo "Deployment is READY: $DUID ($URL)"
+              echo "deployment_uid=$DUID" >> $GITHUB_OUTPUT
+              echo "deployment_url=$URL" >> $GITHUB_OUTPUT
+              break
+            elif [ "$STATE" = "ERROR" ] || [ "$STATE" = "CANCELED" ]; then
+              echo "ERROR: Deployment failed with state: $STATE"
+              exit 1
+            fi
+
+            sleep $SLEEP_SECONDS
+          done
+
+          # Final check
+          if [ -z "$DUID" ] || [ "$STATE" != "READY" ]; then
+            echo "ERROR: Deployment did not reach READY state in time"
+            exit 1
+          fi
+
+      - name: Assign production alias to latest deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          DEPLOYMENT_UID="${{ steps.wait_deploy.outputs.deployment_uid }}"
+          ALIAS="solarpro-v31.vercel.app"
+
+          echo "Assigning $ALIAS → $DEPLOYMENT_UID ..."
+
+          RESULT=$(curl -s -X POST \
+            "https://api.vercel.com/v10/deployments/$DEPLOYMENT_UID/aliases" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{&quot;alias&quot;: &quot;$ALIAS&quot;}")
+
+          echo "Vercel response: $RESULT"
+
+          # Check for error
+          ERROR=$(echo "$RESULT" | jq -r '.error // empty')
+          if [ -n "$ERROR" ]; then
+            echo "ERROR assigning alias: $ERROR"
+            exit 1
+          fi
+
+          echo "SUCCESS: $ALIAS now points to $DEPLOYMENT_UID"
+
+      - name: Verify login endpoint is healthy
+        run: |
+          echo "Waiting 5s for DNS/edge to propagate..."
+          sleep 5
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST https://solarpro-v31.vercel.app/api/auth/login \
+            -H "Content-Type: application/json" \
+            -d '{"email":"healthcheck@solarpro.app","password":"__healthcheck__"}')
+
+          echo "Login endpoint HTTP status: $STATUS"
+
+          # 401 = endpoint reachable and DB connected (wrong password = correct behavior)
+          # 400 = endpoint reachable (validation working)
+          # 500 = BROKEN (DB or JWT missing)
+          if [ "$STATUS" = "500" ]; then
+            echo "CRITICAL: Login endpoint returned 500 — env vars may be missing!"
+            exit 1
+          elif [ "$STATUS" = "401" ] || [ "$STATUS" = "400" ]; then
+            echo "HEALTHY: Login endpoint responding correctly (HTTP $STATUS)"
+          else
+            echo "WARNING: Unexpected status $STATUS — check deployment"
+          fi
+
+      - name: Health check summary
+        run: |
+          HEALTH=$(curl -s https://solarpro-v31.vercel.app/api/health)
+          echo "Health check: $HEALTH"
+
+          DB_OK=$(echo "$HEALTH" | jq -r '.db.ok // false')
+          JWT_OK=$(echo "$HEALTH" | jq -r '.env.JWT_SECRET // false')
+          DB_URL_OK=$(echo "$HEALTH" | jq -r '.env.DATABASE_URL // false')
+
+          echo "DATABASE_URL present: $DB_URL_OK"
+          echo "JWT_SECRET present: $JWT_OK"
+          echo "DB connected: $DB_OK"
+
+          if [ "$DB_OK" != "true" ]; then
+            echo "CRITICAL: Database not connected!"
+            exit 1
+          fi
+
+          echo "All systems healthy — production deployment complete."
