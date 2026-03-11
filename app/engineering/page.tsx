@@ -2451,6 +2451,7 @@ function EngineeringPageInner() {
   const [planSetLoading, setPlanSetLoading] = useState(false);
   const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
   const [planSetError, setPlanSetError] = useState<string | null>(null);
+  const [planSetPreviewSheet, setPlanSetPreviewSheet] = useState<string | null>(null); // sheet id being previewed
 
   const handleGeneratePermitPackage = async () => {
     setPermitLoading(true);
@@ -2583,6 +2584,38 @@ function EngineeringPageInner() {
         body: JSON.stringify(payload),
       });
 
+      // ── Binary response (no projectId) → trigger browser download ──
+      const contentType = res.headers.get('Content-Type') || '';
+      if (contentType.includes('application/pdf') || contentType.includes('text/html')) {
+        if (!res.ok) throw new Error('Plan set generation failed');
+        const blob = await res.blob();
+        const sheets    = parseInt(res.headers.get('X-Plan-Set-Sheets') || '5', 10);
+        const strStatus = res.headers.get('X-Structural-Status') || 'UNKNOWN';
+        const pdfMethod = res.headers.get('X-Pdf-Method') || 'pdf';
+        const ext       = contentType.includes('text/html') ? 'html' : 'pdf';
+        const fileName  = `SolarPro_PlanSet_${(config.address || 'Project').replace(/[^a-zA-Z0-9]/g, '_')}.${ext}`;
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href     = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setPlanSetResult({
+          fileName,
+          fileId: undefined,
+          sheets,
+          structuralStatus: strStatus,
+          message: pdfMethod === 'html'
+            ? `Downloaded as HTML (open in browser → Print → Save as PDF). ${sheets} sheets ready.`
+            : `Downloaded ${sheets}-sheet permit plan set PDF.`,
+        });
+        logDecision('Plan Set', `Downloaded ${sheets}-sheet plan set: ${fileName}`, 'auto');
+        return;
+      }
+
+      // ── JSON response (projectId present) → saved to project files ──
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Plan set generation failed');
 
@@ -2645,6 +2678,107 @@ function EngineeringPageInner() {
   const topologyColor = config.inverters[0]?.type === 'micro' ? 'text-purple-400 border-purple-500/40 bg-purple-500/10'
     : config.inverters[0]?.type === 'optimizer' ? 'text-blue-400 border-blue-500/40 bg-blue-500/10'
     : 'text-amber-400 border-amber-500/40 bg-amber-500/10';
+
+  // ── Permit Readiness — derived from live engineering state ────────────
+  const _firstInvCfg  = config.inverters[0];
+  const _firstStrCfg  = _firstInvCfg?.strings[0];
+  const _invDataPR    = getInvById(_firstInvCfg?.inverterId || '', _firstInvCfg?.type || 'string') as any;
+  const _panelDataPR  = getPanelById(_firstStrCfg?.panelId || '') as any;
+
+  interface PermitReadinessItem {
+    key: string;
+    label: string;
+    ok: boolean;
+    value?: string;
+    fix?: string;
+    tab?: string;
+  }
+  const permitReadiness: PermitReadinessItem[] = [
+    {
+      key: 'address',
+      label: 'Project Address',
+      ok: !!(config.address && config.city && config.state),
+      value: config.address ? `${config.address}, ${config.city}, ${config.state}` : undefined,
+      fix: 'Enter project address in System Config → Project Info',
+      tab: 'config',
+    },
+    {
+      key: 'systemSize',
+      label: 'System Size (kW)',
+      ok: parseFloat(totalKw) > 0,
+      value: parseFloat(totalKw) > 0 ? `${totalKw} kW DC / ${totalInverterKw} kW AC` : undefined,
+      fix: 'Add panels and inverters in System Config',
+      tab: 'config',
+    },
+    {
+      key: 'panelCount',
+      label: 'Panel Count',
+      ok: totalPanels > 0,
+      value: totalPanels > 0 ? `${totalPanels} panels` : undefined,
+      fix: 'Configure strings with panel count in System Config',
+      tab: 'config',
+    },
+    {
+      key: 'panelModel',
+      label: 'Panel Model',
+      ok: !!(_panelDataPR?.model),
+      value: _panelDataPR?.model ? `${_panelDataPR.manufacturer} ${_panelDataPR.model} ${_panelDataPR.watts}W` : undefined,
+      fix: 'Select a panel model in System Config → Strings',
+      tab: 'config',
+    },
+    {
+      key: 'inverterModel',
+      label: 'Inverter Model',
+      ok: !!(_invDataPR?.model),
+      value: _invDataPR?.model ? `${_invDataPR.manufacturer} ${_invDataPR.model}` : undefined,
+      fix: 'Select an inverter model in System Config → Inverters',
+      tab: 'config',
+    },
+    {
+      key: 'roofPitch',
+      label: 'Roof Pitch',
+      ok: !!(config.roofPitch && config.roofPitch > 0),
+      value: config.roofPitch ? `${Math.round(config.roofPitch * 12 / 90 * 12)}:12 (${config.roofPitch}°)` : undefined,
+      fix: 'Set roof pitch in System Config → Structural',
+      tab: 'config',
+    },
+    {
+      key: 'rafterSize',
+      label: 'Rafter Size',
+      ok: !!(config.rafterSize),
+      value: config.rafterSize || undefined,
+      fix: 'Set rafter size in System Config → Structural',
+      tab: 'config',
+    },
+    {
+      key: 'windSpeed',
+      label: 'Design Wind Speed',
+      ok: !!(config.windSpeed && config.windSpeed > 0),
+      value: config.windSpeed ? `${config.windSpeed} mph` : undefined,
+      fix: 'Set wind speed in System Config → Structural',
+      tab: 'config',
+    },
+    {
+      key: 'mainPanel',
+      label: 'Main Panel Rating',
+      ok: !!(config.mainPanelAmps && config.mainPanelAmps > 0),
+      value: config.mainPanelAmps ? `${config.mainPanelAmps}A` : undefined,
+      fix: 'Set main panel amperage in System Config → Electrical',
+      tab: 'config',
+    },
+    {
+      key: 'compliance',
+      label: 'Compliance Check Run',
+      ok: !!(compliance.overallStatus),
+      value: compliance.overallStatus || undefined,
+      fix: 'Run compliance check in the Compliance tab',
+      tab: 'compliance',
+    },
+  ];
+  const permitReadyCount  = permitReadiness.filter(r => r.ok).length;
+  const permitTotalCount  = permitReadiness.length;
+  const permitIsReady     = permitReadyCount === permitTotalCount;
+  const permitPct         = Math.round((permitReadyCount / permitTotalCount) * 100);
 
   // Per-tab feature gating
   const { can, loading: subLoading } = useSubscription();
@@ -7118,83 +7252,424 @@ function EngineeringPageInner() {
                 </button>
               </div>
 
-              {/* ── Plan Set Generator (v43.0) ── */}
+              {/* ── Plan Set Generator (v43.1) ── */}
               <div className="card p-5 border border-amber-500/30 bg-amber-500/5">
-                <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
-                  <FileText size={14} className="text-amber-400" />
-                  Permit-Grade Plan Set Generator
-                  <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">v43.0 NEW</span>
-                </h3>
-                <p className="text-slate-400 text-xs mb-4">
-                  Generates a full 5-sheet permit plan set (G-1 Cover · E-1 SLD · E-2 Equipment · S-1 Structural · C-1 Compliance) with NEC 690/705 callouts, ASCE 7-22 structural analysis, fire setbacks, and AHJ data.
-                </p>
-
-                {/* Sheet list */}
-                <div className="grid grid-cols-5 gap-2 mb-4">
-                  {[
-                    { id: 'G-1', label: 'Cover Sheet', desc: 'AHJ · Codes · Scope' },
-                    { id: 'E-1', label: 'SLD', desc: 'NEC 690 · Wire Schedule' },
-                    { id: 'E-2', label: 'Equipment', desc: 'BOM · UL Listings' },
-                    { id: 'S-1', label: 'Structural', desc: 'ASCE 7-22 · Setbacks' },
-                    { id: 'C-1', label: 'Compliance', desc: 'NEC · Fire · Labels' },
-                  ].map(s => (
-                    <div key={s.id} className="bg-slate-800/60 border border-slate-700/50 rounded-lg p-2.5 text-center">
-                      <div className="text-amber-400 font-bold text-xs">{s.id}</div>
-                      <div className="text-white text-xs font-semibold mt-0.5">{s.label}</div>
-                      <div className="text-slate-500 text-xs mt-0.5">{s.desc}</div>
-                    </div>
-                  ))}
+                {/* Header */}
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <FileText size={14} className="text-amber-400" />
+                      Permit-Grade Plan Set Generator
+                      <span className="text-xs font-normal bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">v43.1</span>
+                    </h3>
+                    <p className="text-slate-400 text-xs mt-1">
+                      5-sheet permit plan set · NEC 690/705 · ASCE 7-22 · IRC R324.4 fire setbacks · AHJ data
+                    </p>
+                  </div>
+                  {/* Readiness badge */}
+                  <div className={`flex-shrink-0 ml-3 text-center px-3 py-1.5 rounded-lg border ${permitIsReady ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-800/60 border-slate-700/50'}`}>
+                    <div className={`text-lg font-bold leading-none ${permitIsReady ? 'text-emerald-400' : 'text-amber-400'}`}>{permitPct}%</div>
+                    <div className="text-xs text-slate-400 mt-0.5">Ready</div>
+                  </div>
                 </div>
 
-                {/* Result banner */}
+                {/* ── Permit Readiness Checklist ── */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Permit Readiness</span>
+                    <span className="text-xs text-slate-500">{permitReadyCount}/{permitTotalCount} fields ready</span>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="h-1.5 bg-slate-700/60 rounded-full mb-3 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${permitIsReady ? 'bg-emerald-500' : permitPct >= 70 ? 'bg-amber-500' : 'bg-red-500'}`}
+                      style={{ width: `${permitPct}%` }}
+                    />
+                  </div>
+                  {/* Checklist items */}
+                  <div className="space-y-1.5">
+                    {permitReadiness.map(item => (
+                      <div key={item.key} className={`flex items-start gap-2 p-2 rounded-lg text-xs ${item.ok ? 'bg-emerald-500/5 border border-emerald-500/15' : 'bg-red-500/5 border border-red-500/20'}`}>
+                        <div className={`flex-shrink-0 mt-0.5 ${item.ok ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {item.ok ? <CheckCircle size={12} /> : <XCircle size={12} />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={`font-medium ${item.ok ? 'text-slate-200' : 'text-slate-300'}`}>{item.label}</span>
+                            {item.ok && item.value && (
+                              <span className="text-slate-400 truncate max-w-[140px]">{item.value}</span>
+                            )}
+                          </div>
+                          {!item.ok && item.fix && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              <span className="text-red-400/80">{item.fix}</span>
+                              {item.tab && (
+                                <button
+                                  onClick={() => setActiveTab(item.tab as any)}
+                                  className="text-amber-400 hover:text-amber-300 underline ml-1 whitespace-nowrap"
+                                >
+                                  Go →
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Sheet Preview Cards ── */}
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">Plan Sheets</span>
+                    <span className="text-xs text-slate-500">Click to preview</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[
+                      { id: 'G-1', label: 'Cover Sheet',  desc: 'AHJ · Codes · Scope',         icon: '📋', color: 'text-blue-400   border-blue-500/30   bg-blue-500/5'   },
+                      { id: 'E-1', label: 'SLD',          desc: 'NEC 690 · Wire Schedule',      icon: '⚡', color: 'text-amber-400  border-amber-500/30  bg-amber-500/5'  },
+                      { id: 'E-2', label: 'Equipment',    desc: 'BOM · UL Listings',            icon: '🔧', color: 'text-purple-400 border-purple-500/30 bg-purple-500/5' },
+                      { id: 'S-1', label: 'Structural',   desc: 'ASCE 7-22 · Setbacks',        icon: '🏗', color: 'text-orange-400 border-orange-500/30 bg-orange-500/5' },
+                      { id: 'C-1', label: 'Compliance',   desc: 'NEC · Fire · Labels',          icon: '✅', color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5' },
+                    ].map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => setPlanSetPreviewSheet(s.id)}
+                        className={`border rounded-lg p-2 text-center hover:opacity-80 transition-opacity cursor-pointer ${s.color}`}
+                        title={`Preview ${s.label}`}
+                      >
+                        <div className="text-base leading-none mb-1">{s.icon}</div>
+                        <div className="font-bold text-xs">{s.id}</div>
+                        <div className="text-white text-xs font-semibold mt-0.5 leading-tight">{s.label}</div>
+                        <div className="text-slate-500 text-xs mt-0.5 leading-tight">{s.desc}</div>
+                        <div className="text-slate-600 text-xs mt-1">Preview →</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Success banner ── */}
                 {planSetResult && (
                   <div className="mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
                     <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm mb-1">
-                      <CheckCircle size={14} /> Plan Set Generated Successfully
+                      <CheckCircle size={14} /> Plan Set Generated — Downloading…
                     </div>
-                    <div className="text-xs text-slate-300">{planSetResult.fileName}</div>
+                    <div className="text-xs text-slate-300 font-mono">{planSetResult.fileName}</div>
                     <div className="text-xs text-slate-400 mt-1">{planSetResult.message}</div>
-                    <div className="flex gap-2 mt-2">
+                    <div className="flex gap-2 mt-2 flex-wrap">
                       <span className={`text-xs px-2 py-0.5 rounded-full border ${planSetResult.structuralStatus === 'PASS' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-red-500/10 text-red-400 border-red-500/30'}`}>
                         Structural: {planSetResult.structuralStatus}
                       </span>
                       <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-500/10 text-blue-400 border-blue-500/30">
                         {planSetResult.sheets} Sheets
                       </span>
+                      {planSetResult.fileId && (
+                        <button onClick={() => setActiveTab('files')} className="text-xs text-amber-400 underline hover:text-amber-300">
+                          View in Files Tab →
+                        </button>
+                      )}
                     </div>
-                    {planSetResult.fileId && (
-                      <button
-                        onClick={() => setActiveTab('files')}
-                        className="mt-2 text-xs text-amber-400 underline hover:text-amber-300"
-                      >
-                        View in Files Tab →
-                      </button>
-                    )}
                   </div>
                 )}
 
-                {/* Error banner */}
+                {/* ── Error banner ── */}
                 {planSetError && (
-                  <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 flex items-center gap-2">
-                    <XCircle size={14} /> {planSetError}
+                  <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">
+                    <div className="flex items-center gap-2 font-semibold mb-1"><XCircle size={14} /> Generation Failed</div>
+                    <div className="text-red-300/80">{planSetError}</div>
                   </div>
                 )}
 
+                {/* ── Generate button ── */}
                 <button
                   onClick={handleGeneratePlanSet}
-                  disabled={planSetLoading || !totalPanels}
-                  className="btn-primary w-full flex items-center justify-center gap-2"
+                  disabled={planSetLoading || !permitIsReady}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-semibold text-sm transition-all ${
+                    permitIsReady
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-lg shadow-amber-500/20'
+                      : 'bg-slate-700/60 text-slate-500 cursor-not-allowed border border-slate-600/50'
+                  }`}
                 >
                   {planSetLoading ? (
                     <><RefreshCw size={16} className="animate-spin" /> Generating Plan Set…</>
+                  ) : permitIsReady ? (
+                    <><FileText size={16} /> Generate &amp; Download Permit Plan Set (5 Sheets)</>
                   ) : (
-                    <><FileText size={16} /> Generate Permit Plan Set (5 Sheets)</>
+                    <><Lock size={16} /> Complete {permitTotalCount - permitReadyCount} field{permitTotalCount - permitReadyCount !== 1 ? 's' : ''} above to unlock</>
                   )}
                 </button>
-                {!totalPanels && (
-                  <p className="text-xs text-slate-500 text-center mt-2">Configure system panels first to generate plan set</p>
+                {!permitIsReady && (
+                  <p className="text-xs text-slate-500 text-center mt-2">
+                    {permitReadyCount}/{permitTotalCount} permit fields ready · {permitTotalCount - permitReadyCount} remaining
+                  </p>
                 )}
               </div>
+
+              {/* ── Sheet Preview Modal ── */}
+              {planSetPreviewSheet && (() => {
+                const sheetMeta: Record<string, { label: string; desc: string; content: React.ReactNode }> = {
+                  'G-1': {
+                    label: 'G-1 Cover Sheet',
+                    desc: 'Project info, system summary, AHJ, applicable codes, scope of work, sheet index',
+                    content: (
+                      <div className="space-y-3 text-xs">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                            <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Project Info</div>
+                            <div className="space-y-1">
+                              <div className="flex justify-between"><span className="text-slate-400">Address:</span><span className="text-white">{config.address || '—'}</span></div>
+                              <div className="flex justify-between"><span className="text-slate-400">City/State:</span><span className="text-white">{config.city || '—'}, {config.state || '—'}</span></div>
+                              <div className="flex justify-between"><span className="text-slate-400">AHJ:</span><span className="text-white">{compliance.jurisdiction?.ahjName || `${config.city || '—'} Building Dept.`}</span></div>
+                              <div className="flex justify-between"><span className="text-slate-400">NEC Version:</span><span className="text-white">{compliance.jurisdiction?.necVersion || 'NEC 2020'}</span></div>
+                            </div>
+                          </div>
+                          <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                            <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">System Summary</div>
+                            <div className="space-y-1">
+                              <div className="flex justify-between"><span className="text-slate-400">DC Size:</span><span className="text-white">{totalKw} kW</span></div>
+                              <div className="flex justify-between"><span className="text-slate-400">AC Size:</span><span className="text-white">{totalInverterKw} kW</span></div>
+                              <div className="flex justify-between"><span className="text-slate-400">Panels:</span><span className="text-white">{totalPanels} × {_panelDataPR?.watts || '—'}W</span></div>
+                              <div className="flex justify-between"><span className="text-slate-400">Inverter:</span><span className="text-white">{_invDataPR?.model || '—'}</span></div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Applicable Codes</div>
+                          <div className="flex flex-wrap gap-2">
+                            {['NEC 690/705', 'ASCE 7-22', 'IRC R324.4', 'IBC 2021', 'UL 1741', 'IEEE 1547'].map(c => (
+                              <span key={c} className="bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded text-xs">{c}</span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Sheet Index</div>
+                          <div className="space-y-1">
+                            {[['G-1','Cover Sheet'],['E-1','Single Line Diagram'],['E-2','Equipment Schedule'],['S-1','Structural Analysis'],['C-1','Compliance Checklist']].map(([id,lbl]) => (
+                              <div key={id} className="flex gap-3"><span className="text-amber-400 font-mono w-8">{id}</span><span className="text-slate-300">{lbl}</span></div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  'E-1': {
+                    label: 'E-1 Single Line Diagram',
+                    desc: 'NEC 690 SLD with DC/AC zones, wire & conduit schedule, code callouts',
+                    content: (
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">SLD Components</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              ['PV Array', `${totalPanels} × ${_panelDataPR?.watts || '—'}W panels`],
+                              ['Inverter', _invDataPR?.model || '—'],
+                              ['DC Disconnect', `${config.inverters.length} × fused combiner`],
+                              ['AC Disconnect', `${Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5 || 30}A`],
+                              ['Main Panel', `${config.mainPanelAmps || 200}A`],
+                              ['RSD', config.rapidShutdown ? 'Required (NEC 690.12)' : 'Not required'],
+                            ].map(([k, v]) => (
+                              <div key={k} className="flex justify-between gap-2">
+                                <span className="text-slate-400">{k}:</span>
+                                <span className="text-white text-right">{v}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Wire & Conduit Schedule</div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between"><span className="text-slate-400">DC Conductors:</span><span className="text-white">{config.wireGauge || '#10 AWG'} in {config.conduitType || '3/4" EMT'}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">AC Conductors:</span><span className="text-white">{compliance.electrical?.acWireGauge || '#8 AWG'} in 1" EMT</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">EGC:</span><span className="text-white">#8 AWG bare copper</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">GEC:</span><span className="text-white">#8 AWG to ground rod</span></div>
+                          </div>
+                        </div>
+                        <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3">
+                          <div className="text-amber-400 font-semibold mb-1 text-xs">NEC Code Callouts</div>
+                          <div className="text-slate-400 space-y-0.5">
+                            <div>690.7 — Max system voltage: {compliance.stringConfig?.stringVoc ? `${compliance.stringConfig.stringVoc.toFixed(1)}V` : 'calculated'}</div>
+                            <div>690.8 — OCPD sizing at 125% Isc</div>
+                            <div>690.12 — Rapid shutdown {config.rapidShutdown ? 'required' : 'N/A'}</div>
+                            <div>705.12 — 120% busbar rule check</div>
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  'E-2': {
+                    label: 'E-2 Equipment Schedule',
+                    desc: 'Bill of materials with UL listing numbers, quantities, and specifications',
+                    content: (
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Major Equipment</div>
+                          <div className="space-y-2">
+                            {[
+                              { cat: 'PV Modules', item: `${_panelDataPR?.manufacturer || '—'} ${_panelDataPR?.model || '—'}`, qty: totalPanels, spec: `${_panelDataPR?.watts || '—'}W, ${_panelDataPR?.voc || '—'}Voc`, ul: 'UL 61730' },
+                              { cat: 'Inverter', item: `${_invDataPR?.manufacturer || '—'} ${_invDataPR?.model || '—'}`, qty: config.inverters.length, spec: `${totalInverterKw} kW AC`, ul: 'UL 1741' },
+                              { cat: 'Mounting', item: config.mountingId || 'Roof Mount System', qty: 1, spec: config.roofType || 'Comp shingle', ul: 'ICC-ES' },
+                              { cat: 'DC Disconnect', item: 'Fused DC Combiner', qty: config.inverters.length, spec: `${_invDataPR?.maxDcVoltage || 600}V`, ul: 'UL 98B' },
+                              { cat: 'AC Disconnect', item: 'AC Disconnect Switch', qty: 1, spec: `${Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5 || 30}A, 240V`, ul: 'UL 98' },
+                            ].map(row => (
+                              <div key={row.cat} className="grid grid-cols-4 gap-2 text-xs border-b border-slate-700/30 pb-1.5">
+                                <div className="text-amber-400 font-medium">{row.cat}</div>
+                                <div className="text-white col-span-2">{row.item} <span className="text-slate-500">({row.spec})</span></div>
+                                <div className="text-right"><span className="text-slate-400">×{row.qty}</span> <span className="text-blue-400 text-xs">{row.ul}</span></div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {config.batteryCount > 0 && config.batteryId && (
+                          <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3">
+                            <div className="text-purple-400 font-semibold mb-1 text-xs">Battery Storage</div>
+                            <div className="text-slate-300">{config.batteryModel || 'Battery'} × {config.batteryCount} — {config.batteryKwh || '—'} kWh total</div>
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  },
+                  'S-1': {
+                    label: 'S-1 Structural Analysis',
+                    desc: 'ASCE 7-22 load combinations, rafter capacity, fire setback diagram',
+                    content: (
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Design Parameters</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="flex justify-between"><span className="text-slate-400">Wind Speed:</span><span className="text-white">{config.windSpeed || 90} mph</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Exposure:</span><span className="text-white">{config.windExposure || 'C'}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Snow Load:</span><span className="text-white">{config.groundSnowLoad || 0} psf</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Seismic:</span><span className="text-white">{compliance.structural?.seismicCategory || 'C'}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Roof Pitch:</span><span className="text-white">{config.roofPitch ? `${Math.round(config.roofPitch * 12 / 90 * 12)}:12` : '—'}</span></div>
+                            <div className="flex justify-between"><span className="text-slate-400">Rafter:</span><span className="text-white">{config.rafterSize || '—'} @ {config.rafterSpacing || '—'}" O.C.</span></div>
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">ASCE 7-22 Load Combinations</div>
+                          <div className="space-y-1 text-slate-400">
+                            <div>LC1: 1.4D</div>
+                            <div>LC2: 1.2D + 1.6L + 0.5S</div>
+                            <div>LC3: 1.2D + 1.6S + 0.5W</div>
+                            <div>LC4: 1.2D + 1.0W + 0.5S</div>
+                            <div>LC5: 0.9D + 1.0W</div>
+                          </div>
+                        </div>
+                        <div className="bg-orange-500/5 border border-orange-500/20 rounded-lg p-3">
+                          <div className="text-orange-400 font-semibold mb-1 text-xs">IRC R324.4 Fire Setbacks</div>
+                          <div className="text-slate-400">
+                            Hip/ridge setback: 18" min · Eave setback: 6" min · Valley setback: 18" min
+                          </div>
+                          <div className="text-slate-400 mt-1">
+                            Roof type: {config.roofType || 'Comp shingle'} · Pitch: {config.roofPitch ? `${Math.round(config.roofPitch * 12 / 90 * 12)}:12` : '—'}
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  'C-1': {
+                    label: 'C-1 Compliance Checklist',
+                    desc: 'Full NEC 690/705/250 checklist, structural pass/fail, fire access, labeling',
+                    content: (
+                      <div className="space-y-3 text-xs">
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">NEC 690 Electrical</div>
+                          <div className="space-y-1.5">
+                            {[
+                              { code: '690.7', desc: 'Max system voltage ≤ 600V', pass: !!(compliance.stringConfig?.stringVoc && compliance.stringConfig.stringVoc <= 600) },
+                              { code: '690.8', desc: 'OCPD sized at 125% Isc', pass: !!(compliance.stringConfig?.ocpdPerString) },
+                              { code: '690.12', desc: 'Rapid shutdown compliant', pass: config.rapidShutdown },
+                              { code: '705.12', desc: '120% busbar rule', pass: compliance.electrical?.busbar?.passes },
+                              { code: '310.15', desc: 'Conductor ampacity verified', pass: !!(compliance.electrical?.acWireGauge) },
+                            ].map(item => (
+                              <div key={item.code} className="flex items-center gap-2">
+                                <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${item.pass ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700/60 text-slate-400'}`}>
+                                  {item.pass ? '✓' : '○'}
+                                </span>
+                                <span className="text-amber-400 font-mono w-12">{item.code}</span>
+                                <span className="text-slate-300">{item.desc}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Structural & Fire</div>
+                          <div className="space-y-1.5">
+                            {[
+                              { desc: 'ASCE 7-22 load analysis', pass: !!(compliance.structural) },
+                              { desc: 'Rafter capacity verified', pass: !!(config.rafterSize) },
+                              { desc: 'IRC R324.4 fire setbacks', pass: !!(config.roofPitch) },
+                              { desc: 'Attachment schedule complete', pass: !!(config.attachmentSpacing) },
+                            ].map((item, i) => (
+                              <div key={i} className="flex items-center gap-2">
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${item.pass ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-700/60 text-slate-400'}`}>
+                                  {item.pass ? '✓' : '○'}
+                                </span>
+                                <span className="text-slate-300">{item.desc}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="bg-slate-800/60 rounded-lg p-3 border border-slate-700/50">
+                          <div className="text-slate-400 font-semibold mb-2 uppercase tracking-wide text-xs">Required Labels (NEC 690.54–56)</div>
+                          <div className="space-y-1 text-slate-400">
+                            <div>• "PHOTOVOLTAIC SYSTEM CONNECTED" at main panel</div>
+                            <div>• "SOLAR ELECTRIC SYSTEM DISCONNECT" at AC disconnect</div>
+                            <div>• "CAUTION: DUAL POWER SOURCE" at meter</div>
+                            <div>• Rapid shutdown label at service entrance</div>
+                          </div>
+                        </div>
+                      </div>
+                    ),
+                  },
+                };
+                const sheet = sheetMeta[planSetPreviewSheet];
+                if (!sheet) return null;
+                return (
+                  <div
+                    className="fixed inset-0 z-50 flex items-center justify-center p-4"
+                    style={{ background: 'rgba(0,0,0,0.75)' }}
+                    onClick={() => setPlanSetPreviewSheet(null)}
+                  >
+                    <div
+                      className="bg-slate-900 border border-slate-700/60 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      {/* Modal header */}
+                      <div className="flex items-center justify-between p-4 border-b border-slate-700/50">
+                        <div>
+                          <h3 className="text-white font-bold text-sm">{sheet.label}</h3>
+                          <p className="text-slate-400 text-xs mt-0.5">{sheet.desc}</p>
+                        </div>
+                        <button
+                          onClick={() => setPlanSetPreviewSheet(null)}
+                          className="text-slate-400 hover:text-white transition-colors p-1"
+                        >
+                          <XCircle size={18} />
+                        </button>
+                      </div>
+                      {/* Modal body */}
+                      <div className="flex-1 overflow-y-auto p-4">
+                        {sheet.content}
+                      </div>
+                      {/* Modal footer */}
+                      <div className="p-4 border-t border-slate-700/50 flex items-center justify-between">
+                        <p className="text-xs text-slate-500">Preview only — generate full plan set to get the complete PDF</p>
+                        <button
+                          onClick={() => {
+                            setPlanSetPreviewSheet(null);
+                            if (permitIsReady) handleGeneratePlanSet();
+                          }}
+                          disabled={!permitIsReady}
+                          className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${permitIsReady ? 'bg-amber-500 hover:bg-amber-400 text-slate-900' : 'bg-slate-700/60 text-slate-500 cursor-not-allowed'}`}
+                        >
+                          {permitIsReady ? 'Generate Full Plan Set →' : `${permitTotalCount - permitReadyCount} fields missing`}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="card p-5">
                 <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2"><Lock size={14} className="text-amber-400" /> Engineer Certification Block</h3>

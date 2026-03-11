@@ -148,9 +148,11 @@ export async function POST(req: NextRequest) {
     } = body;
 
     // ── Validate required fields ──────────────────────────────────────────
-    if (!projectId || !systemKw || !panelCount) {
-      return NextResponse.json({ success: false, error: 'Missing required fields: projectId, systemKw, panelCount' }, { status: 400 });
+    if (!systemKw || !panelCount) {
+      return NextResponse.json({ success: false, error: 'Missing required fields: systemKw, panelCount' }, { status: 400 });
     }
+    // projectId is optional — if missing, we generate and return the PDF directly (no DB save)</thinking>
+    const saveToProject = !!projectId;
 
     // ── Look up AHJ data ──────────────────────────────────────────────────
     let ahjData: any = null;
@@ -526,12 +528,31 @@ export async function POST(req: NextRequest) {
       pdfMethod = 'html';
     }
 
+    // ── Prepare file metadata ─────────────────────────────────────────────
+    const safeClient = (clientName || 'SolarPro').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const dateStr    = new Date().toISOString().slice(0, 10);
+    const ext        = pdfMethod === 'html' ? 'html' : 'pdf';
+    const fileName   = `Plan_Set_${safeClient}_${dateStr}.${ext}`;
+    const mimeType   = pdfMethod === 'html' ? 'text/html' : 'application/pdf';
+
+    // ── No projectId → return file directly as download ────────────────────────
+    if (!saveToProject) {
+      return new Response(new Uint8Array(pdfBuffer), {
+        status: 200,
+        headers: {
+          'Content-Type':        mimeType,
+          'Content-Disposition': `attachment; filename="${fileName}"`,
+          'Content-Length':      String(pdfBuffer.length),
+          'X-Plan-Set-Sheets':   String(sheetIndex.length),
+          'X-Structural-Status': structuralStatus,
+          'X-Pdf-Method':        pdfMethod,
+        },
+      });
+    }
+
     // ── Save to project_files ─────────────────────────────────────────────
     const sql = await getDb();
-    const fileName = `Plan_Set_${(clientName || 'Client').replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.${pdfMethod === 'html' ? 'html' : 'pdf'}`;
-    const mimeType = pdfMethod === 'html' ? 'text/html' : 'application/pdf';
 
-    // Verify project ownership
     const projectRows = await sql`
       SELECT id FROM projects WHERE id = ${projectId} AND user_id = ${user.id}
     `;
@@ -539,7 +560,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Project not found or access denied' }, { status: 403 });
     }
 
-    // Upsert plan set file
     try {
       await sql`
         INSERT INTO project_files
@@ -557,7 +577,6 @@ export async function POST(req: NextRequest) {
           upload_date = NOW()
       `;
     } catch (dbErr: any) {
-      // Fallback without ON CONFLICT
       await sql`
         DELETE FROM project_files
         WHERE project_id = ${projectId} AND user_id = ${user.id} AND file_name = ${fileName}
@@ -572,7 +591,6 @@ export async function POST(req: NextRequest) {
       `;
     }
 
-    // Get the saved file ID
     const savedRows = await sql`
       SELECT id FROM project_files
       WHERE project_id = ${projectId} AND user_id = ${user.id} AND file_name = ${fileName}
@@ -581,18 +599,18 @@ export async function POST(req: NextRequest) {
     const fileId = savedRows[0]?.id;
 
     return NextResponse.json({
-      success: true,
+      success:           true,
       fileName,
       fileId,
       pdfMethod,
-      sheets: sheetIndex.length,
-      sheetList: sheetIndex,
+      sheets:            sheetIndex.length,
+      sheetList:         sheetIndex,
       systemKw,
       panelCount,
       structuralStatus,
       overallCompliance: compInput.rapidShutdownRequired ? 'REVIEW' : 'PASS',
-      message: pdfMethod === 'html'
-        ? 'Plan set generated as HTML (open in browser and print to PDF)'
+      message:           pdfMethod === 'html'
+        ? 'Plan set generated as HTML — open in browser and print to PDF'
         : 'Plan set PDF generated and saved to project files',
     });
 
