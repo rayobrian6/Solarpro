@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDb } from '@/lib/db-neon';
+import { logAdminAction } from '@/lib/adminActivityLog';
+import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +48,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// PATCH /api/admin/users — actions: grant_free_pass, suspend, unsuspend, reset_trial, set_role, set_plan, update
+// PATCH /api/admin/users — all user actions with activity logging
 export async function PATCH(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
@@ -57,28 +59,55 @@ export async function PATCH(req: NextRequest) {
     const { id, action } = body;
     if (!id || !action) return NextResponse.json({ success: false, error: 'Missing id or action' }, { status: 400 });
 
+    // Fetch target user info for logging
+    const targetRows = await sql`SELECT id, name, email, company, role FROM users WHERE id = ${id} LIMIT 1`;
+    const targetUser = targetRows[0] ?? null;
+
     if (action === 'grant_free_pass') {
       await sql`UPDATE users SET is_free_pass = true, plan = 'contractor', subscription_status = 'free_pass',
                 trial_ends_at = '2099-12-31 23:59:59+00', free_pass_note = ${body.note || 'Granted by admin'}, updated_at = NOW()
                 WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'grant_free_pass', targetUserId: id, targetCompany: targetUser?.company, metadata: { note: body.note || 'Granted by admin', targetEmail: targetUser?.email } });
+
     } else if (action === 'revoke_free_pass') {
       await sql`UPDATE users SET is_free_pass = false, subscription_status = 'trialing', updated_at = NOW() WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'revoke_free_pass', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
+
     } else if (action === 'suspend') {
       await sql`UPDATE users SET subscription_status = 'suspended', updated_at = NOW() WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'suspend_user', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
+
     } else if (action === 'unsuspend') {
       await sql`UPDATE users SET subscription_status = 'trialing', updated_at = NOW() WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'unsuspend_user', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
+
     } else if (action === 'reset_trial') {
-      await sql`UPDATE users SET subscription_status = 'trialing', trial_ends_at = NOW() + INTERVAL '3 days', updated_at = NOW() WHERE id = ${id}`;
+      await sql`UPDATE users SET subscription_status = 'trialing', trial_ends_at = NOW() + INTERVAL '14 days', updated_at = NOW() WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'reset_trial', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
+
+    } else if (action === 'reset_password') {
+      // Generate a temporary password and hash it
+      const tempPassword = 'TempPass' + Math.random().toString(36).slice(2, 10).toUpperCase() + '!';
+      const bcrypt = await import('bcryptjs');
+      const hash = await bcrypt.hash(tempPassword, 10);
+      await sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'reset_password', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
+      // Return the temp password so admin can share it
+      return NextResponse.json({ success: true, tempPassword, message: `Password reset. Temporary password: ${tempPassword}` });
+
     } else if (action === 'set_role') {
       const role = body.role;
       if (!['user', 'admin', 'super_admin'].includes(role))
         return NextResponse.json({ success: false, error: 'Invalid role' }, { status: 400 });
-      // Only super_admin can set roles
       if (admin.role !== 'super_admin')
         return NextResponse.json({ success: false, error: 'Only super_admin can set roles' }, { status: 403 });
       await sql`UPDATE users SET role = ${role}, updated_at = NOW() WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'set_role', targetUserId: id, targetCompany: targetUser?.company, metadata: { newRole: role, previousRole: targetUser?.role, targetEmail: targetUser?.email } });
+
     } else if (action === 'set_plan') {
       await sql`UPDATE users SET plan = ${body.plan}, updated_at = NOW() WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'set_plan', targetUserId: id, targetCompany: targetUser?.company, metadata: { newPlan: body.plan, targetEmail: targetUser?.email } });
+
     } else if (action === 'update') {
       const { name, company, role, plan } = body;
       if (role && !['user', 'admin', 'super_admin'].includes(role))
@@ -90,11 +119,29 @@ export async function PATCH(req: NextRequest) {
         plan    = COALESCE(${plan    ?? null}, plan),
         updated_at = NOW()
         WHERE id = ${id}`;
+      await logAdminAction({ adminId: admin.id, action: 'update_user', targetUserId: id, targetCompany: company ?? targetUser?.company, metadata: { changes: { name, company, role, plan }, targetEmail: targetUser?.email } });
+
+    } else if (action === 'impersonate') {
+      // Only super_admin can impersonate
+      if (admin.role !== 'super_admin')
+        return NextResponse.json({ success: false, error: 'Only super_admin can impersonate users' }, { status: 403 });
+      if (!targetUser)
+        return NextResponse.json({ success: false, error: 'Target user not found' }, { status: 404 });
+
+      // Generate a secure one-time token
+      const token = crypto.randomBytes(48).toString('hex');
+      await sql`
+        INSERT INTO admin_impersonation_tokens (admin_id, target_id, token, expires_at)
+        VALUES (${admin.id}, ${id}, ${token}, NOW() + INTERVAL '5 minutes')
+      `;
+      await logAdminAction({ adminId: admin.id, action: 'impersonate_user', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email, targetName: targetUser?.name } });
+      return NextResponse.json({ success: true, token, targetUser: { id: targetUser.id, name: targetUser.name, email: targetUser.email } });
+
     } else {
       return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
     }
 
-    // Return the updated user record — normalized to camelCase so frontend can use directly
+    // Return the updated user record
     const updated = await sql`
       SELECT id, name, email, company, role, plan, subscription_status, is_free_pass,
              free_pass_note, trial_ends_at, created_at
@@ -108,13 +155,11 @@ export async function PATCH(req: NextRequest) {
       company: raw.company,
       role: raw.role,
       plan: raw.plan,
-      // camelCase — used by frontend UserContext / hasPlatformAccess
       subscriptionStatus: raw.subscription_status,
       isFreePass: raw.is_free_pass,
       freePassNote: raw.free_pass_note,
       trialEndsAt: raw.trial_ends_at,
       createdAt: raw.created_at,
-      // snake_case — kept for admin UI tables that read raw DB fields
       subscription_status: raw.subscription_status,
       is_free_pass: raw.is_free_pass,
       free_pass_note: raw.free_pass_note,
@@ -134,14 +179,16 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const sql = getDb();
-    // Support both query param (?id=...) and JSON body ({ id: ... })
     const urlId = req.nextUrl.searchParams.get('id');
     let id = urlId;
     if (!id) {
       try { const body = await req.json(); id = body.id; } catch {}
     }
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
+
+    const targetRows = await sql`SELECT email, company FROM users WHERE id = ${id} LIMIT 1`;
     await sql`DELETE FROM users WHERE id = ${id}`;
+    await logAdminAction({ adminId: admin.id, action: 'delete_user', targetUserId: id, targetCompany: targetRows[0]?.company, metadata: { targetEmail: targetRows[0]?.email } });
     return NextResponse.json({ success: true });
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });

@@ -4,21 +4,48 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard, Users, Building2, FolderOpen,
   Cpu, Zap, Database, HardDrive, Activity,
-  Shield, ChevronRight, LogOut, Sun,
+  Shield, ChevronRight, LogOut, Sun, Wrench,
+  ScrollText, Terminal,
 } from 'lucide-react';
 
-const NAV = [
-  { href: '/admin',             label: 'Dashboard',      icon: LayoutDashboard },
-  { href: '/admin/users',       label: 'Users',          icon: Users },
-  { href: '/admin/companies',   label: 'Companies',      icon: Building2 },
-  { href: '/admin/projects',    label: 'Projects',       icon: FolderOpen },
-  { href: '/admin/engineering', label: 'Engineering',    icon: Cpu },
-  { href: '/admin/incentives',  label: 'Incentives',     icon: Zap },
-  { href: '/admin/utilities',   label: 'Utilities',      icon: Activity },
-  { href: '/admin/database',    label: 'Database',       icon: Database },
-  { href: '/admin/files',       label: 'File Storage',   icon: HardDrive },
-  { href: '/admin/health',      label: 'System Health',  icon: Activity },
+const NAV_SECTIONS = [
+  {
+    label: 'Overview',
+    items: [
+      { href: '/admin',           label: 'Dashboard',     icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: 'Platform Users',
+    items: [
+      { href: '/admin/users',     label: 'Users',         icon: Users },
+      { href: '/admin/companies', label: 'Companies',     icon: Building2 },
+      { href: '/admin/projects',  label: 'Projects',      icon: FolderOpen },
+    ],
+  },
+  {
+    label: 'Configuration',
+    items: [
+      { href: '/admin/engineering', label: 'Engineering', icon: Cpu },
+      { href: '/admin/incentives',  label: 'Incentives',  icon: Zap },
+      { href: '/admin/utilities',   label: 'Utilities',   icon: Activity },
+      { href: '/admin/hardware',    label: 'Hardware',    icon: Wrench },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { href: '/admin/system-tools',  label: 'System Tools',   icon: Terminal },
+      { href: '/admin/activity-log',  label: 'Activity Log',   icon: ScrollText },
+      { href: '/admin/database',      label: 'Database',       icon: Database },
+      { href: '/admin/files',         label: 'File Storage',   icon: HardDrive },
+      { href: '/admin/health',        label: 'System Health',  icon: Activity },
+    ],
+  },
 ];
+
+// Flat list for breadcrumb lookup
+const ALL_NAV = NAV_SECTIONS.flatMap(s => s.items);
 
 export default function AdminShell({
   admin,
@@ -28,6 +55,11 @@ export default function AdminShell({
   children: React.ReactNode;
 }) {
   const path = usePathname();
+
+  const isActive = (href: string) =>
+    href === '/admin' ? path === '/admin' : path.startsWith(href);
+
+  const currentPage = ALL_NAV.find(n => isActive(n.href))?.label ?? 'Admin';
 
   return (
     <div className="flex h-screen bg-[#0a0f1e] text-white overflow-hidden">
@@ -45,25 +77,34 @@ export default function AdminShell({
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 py-4 px-3 space-y-0.5 overflow-y-auto">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const active = href === '/admin' ? path === '/admin' : path.startsWith(href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
-                  active
-                    ? 'bg-amber-500/15 text-amber-400 font-medium'
-                    : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                <Icon size={15} />
-                {label}
-                {active && <ChevronRight size={12} className="ml-auto opacity-60" />}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 py-4 px-3 space-y-4 overflow-y-auto">
+          {NAV_SECTIONS.map(section => (
+            <div key={section.label}>
+              <div className="px-3 mb-1 text-[9px] font-bold text-slate-600 uppercase tracking-widest">
+                {section.label}
+              </div>
+              <div className="space-y-0.5">
+                {section.items.map(({ href, label, icon: Icon }) => {
+                  const active = isActive(href);
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
+                        active
+                          ? 'bg-amber-500/15 text-amber-400 font-medium'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <Icon size={15} />
+                      {label}
+                      {active && <ChevronRight size={12} className="ml-auto opacity-60" />}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* User */}
@@ -91,7 +132,7 @@ export default function AdminShell({
             <Shield size={12} className="text-amber-400" />
             <span className="text-amber-400 font-medium">Admin Portal</span>
             <span>/</span>
-            <span className="text-white">{NAV.find(n => n.href === '/admin' ? path === '/admin' : path.startsWith(n.href))?.label ?? 'Admin'}</span>
+            <span className="text-white">{currentPage}</span>
           </div>
           <div className="flex items-center gap-3">
             <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${

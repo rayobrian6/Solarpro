@@ -1,10 +1,12 @@
-// BUILD v40.6 — 2025-03-10
+// BUILD v41.8 — Admin Portal Upgrade
 import type { Metadata } from 'next';
 import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
 import { UserProvider } from '@/contexts/UserContext';
 import SolarAIBot from '@/components/support/SolarAIBot';
+import { Suspense } from 'react';
+import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
 
 export const metadata: Metadata = {
   title: 'SolarPro Design Platform',
@@ -28,6 +30,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <StoreProvider>
             {/* UserProvider wraps entire app — single source of truth for user state */}
             <UserProvider>
+              {/* Impersonation banner — only visible when admin is impersonating a user */}
+              <Suspense fallback={null}>
+                <ImpersonationBanner />
+              </Suspense>
               {children}
               {/* Free AI Support Bot — floating widget, visible on all pages */}
               <SolarAIBot />

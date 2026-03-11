@@ -3,7 +3,8 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Search, RefreshCw, Shield, Zap, Ban, RotateCcw,
   ChevronLeft, ChevronRight, Edit2, Trash2, CheckCircle,
-  AlertCircle, User, Crown,
+  AlertCircle, Crown, UserX, Key, Eye, ChevronDown,
+  UserCheck, Star, XCircle,
 } from 'lucide-react';
 import { useUser } from '@/contexts/UserContext';
 
@@ -26,21 +27,28 @@ const ROLE_COLORS: Record<string, string> = {
   user:        'bg-slate-500/20 text-slate-400',
 };
 
+type ToastState = { msg: string; ok: boolean } | null;
+
 export default function AdminUsers() {
-  const { refreshUser } = useUser(); // refresh logged-in user's own state after admin actions
-  const [users, setUsers]     = useState<any[]>([]);
-  const [total, setTotal]     = useState(0);
-  const [page, setPage]       = useState(1);
-  const [search, setSearch]   = useState('');
-  const [loading, setLoading] = useState(true);
-  const [acting, setActing]   = useState<string | null>(null);
-  const [toast, setToast]     = useState<{ msg: string; ok: boolean } | null>(null);
-  const [editUser, setEditUser] = useState<any | null>(null);
+  const { refreshUser, user: currentAdmin } = useUser();
+  const isSuperAdmin = currentAdmin?.role === 'super_admin';
+
+  const [users, setUsers]         = useState<any[]>([]);
+  const [total, setTotal]         = useState(0);
+  const [page, setPage]           = useState(1);
+  const [search, setSearch]       = useState('');
+  const [loading, setLoading]     = useState(true);
+  const [acting, setActing]       = useState<string | null>(null);
+  const [toast, setToast]         = useState<ToastState>(null);
+  const [editUser, setEditUser]   = useState<any | null>(null);
+  const [openMenu, setOpenMenu]   = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ userId: string; action: string; label: string; extra?: any } | null>(null);
+  const [tempPasswordModal, setTempPasswordModal] = useState<{ password: string; email: string } | null>(null);
   const LIMIT = 50;
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 4000);
   };
 
   const load = useCallback(async () => {
@@ -54,22 +62,35 @@ export default function AdminUsers() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handler = () => setOpenMenu(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
+
   const action = async (userId: string, actionName: string, extra: any = {}) => {
     setActing(userId + actionName);
+    setOpenMenu(null);
     try {
       const res = await fetch('/api/admin/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        // API expects 'id' not 'userId'
         body: JSON.stringify({ id: userId, action: actionName, ...extra }),
       });
       const d = await res.json();
       if (d.success) {
-        showToast(`✓ ${actionName.replace(/_/g, ' ')} applied`);
-        // Refresh the users list
+        if (actionName === 'reset_password' && d.tempPassword) {
+          const u = users.find(u => u.id === userId);
+          setTempPasswordModal({ password: d.tempPassword, email: u?.email || '' });
+        } else if (actionName === 'impersonate' && d.token) {
+          // Open impersonation in new tab
+          window.open(`/api/admin/impersonate?token=${d.token}`, '_blank');
+          showToast(`✓ Impersonating ${d.targetUser?.name || 'user'} — check new tab`);
+        } else {
+          showToast(`✓ ${actionName.replace(/_/g, ' ')} applied`);
+        }
         load();
-        // Refresh the logged-in admin's own user state in case they changed their own record
-        // Use a small delay to avoid the fetchingRef guard dropping rapid sequential calls
         setTimeout(() => refreshUser(), 100);
       } else {
         showToast(d.error || 'Failed', false);
@@ -83,6 +104,12 @@ export default function AdminUsers() {
     const d = await res.json();
     if (d.success) { showToast('User deleted'); load(); }
     else showToast(d.error || 'Failed', false);
+  };
+
+  const handleConfirm = () => {
+    if (!confirmModal) return;
+    action(confirmModal.userId, confirmModal.action, confirmModal.extra || {});
+    setConfirmModal(null);
   };
 
   const pages = Math.ceil(total / LIMIT);
@@ -169,46 +196,121 @@ export default function AdminUsers() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      {/* Grant Free Pass */}
+                      {/* Quick actions */}
                       <button
-                        onClick={() => action(u.id, 'grant_free_pass')}
+                        onClick={() => action(u.id, u.is_free_pass ? 'revoke_free_pass' : 'grant_free_pass')}
                         disabled={!!acting}
-                        title="Grant Free Pass"
-                        className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors disabled:opacity-40"
+                        title={u.is_free_pass ? 'Revoke Free Pass' : 'Grant Free Pass'}
+                        className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${u.is_free_pass ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-500 hover:bg-white/5'}`}
                       >
                         <Zap size={13} />
                       </button>
-                      {/* Suspend / Unsuspend */}
+
                       {u.subscription_status === 'suspended' ? (
                         <button onClick={() => action(u.id, 'unsuspend')} disabled={!!acting} title="Unsuspend" className="p-1.5 rounded-lg text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-40">
                           <CheckCircle size={13} />
                         </button>
                       ) : (
-                        <button onClick={() => action(u.id, 'suspend')} disabled={!!acting} title="Suspend" className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40">
+                        <button
+                          onClick={() => setConfirmModal({ userId: u.id, action: 'suspend', label: `Suspend ${u.name}?` })}
+                          disabled={!!acting} title="Suspend User"
+                          className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                        >
                           <Ban size={13} />
                         </button>
                       )}
-                      {/* Reset Trial */}
-                      <button onClick={() => action(u.id, 'reset_trial')} disabled={!!acting} title="Reset Trial" className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-40">
-                        <RotateCcw size={13} />
-                      </button>
-                      {/* Set Admin */}
-                      <button
-                        onClick={() => action(u.id, 'set_role', { role: u.role === 'admin' ? 'user' : 'admin' })}
-                        disabled={!!acting}
-                        title={u.role === 'admin' ? 'Remove Admin' : 'Make Admin'}
-                        className={`p-1.5 rounded-lg transition-colors disabled:opacity-40 ${u.role === 'admin' || u.role === 'super_admin' ? 'text-amber-400 hover:bg-amber-500/10' : 'text-slate-500 hover:bg-white/5'}`}
-                      >
-                        <Crown size={13} />
-                      </button>
+
                       {/* Edit */}
-                      <button onClick={() => setEditUser(u)} title="Edit" className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 transition-colors">
+                      <button onClick={() => setEditUser(u)} title="Edit User" className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 transition-colors">
                         <Edit2 size={13} />
                       </button>
-                      {/* Delete */}
-                      <button onClick={() => deleteUser(u.id, u.email)} title="Delete" className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
-                        <Trash2 size={13} />
-                      </button>
+
+                      {/* More actions dropdown */}
+                      <div className="relative" onClick={e => e.stopPropagation()}>
+                        <button
+                          onClick={() => setOpenMenu(openMenu === u.id ? null : u.id)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:bg-white/5 transition-colors flex items-center gap-0.5"
+                          title="More actions"
+                        >
+                          <ChevronDown size={13} />
+                        </button>
+
+                        {openMenu === u.id && (
+                          <div className="absolute right-0 top-8 z-50 w-52 bg-[#0d1424] border border-white/10 rounded-xl shadow-2xl py-1 overflow-hidden">
+                            <div className="px-3 py-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-b border-white/5">
+                              Role
+                            </div>
+                            {isSuperAdmin && (
+                              <>
+                                <button
+                                  onClick={() => { action(u.id, 'set_role', { role: 'user' }); }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                                >
+                                  <UserCheck size={12} className="text-slate-400" /> Set as User
+                                </button>
+                                <button
+                                  onClick={() => { action(u.id, 'set_role', { role: 'admin' }); }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                                >
+                                  <Shield size={12} className="text-blue-400" /> Promote to Admin
+                                </button>
+                                <button
+                                  onClick={() => setConfirmModal({ userId: u.id, action: 'set_role', label: `Promote ${u.name} to Super Admin?`, extra: { role: 'super_admin' } })}
+                                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                                >
+                                  <Star size={12} className="text-amber-400" /> Promote to Super Admin
+                                </button>
+                              </>
+                            )}
+
+                            <div className="px-3 py-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-b border-white/5 border-t border-white/5 mt-1">
+                              Access
+                            </div>
+                            <button
+                              onClick={() => { action(u.id, 'grant_free_pass'); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                            >
+                              <Zap size={12} className="text-amber-400" /> Grant Free Pass
+                            </button>
+                            <button
+                              onClick={() => { action(u.id, 'revoke_free_pass'); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                            >
+                              <XCircle size={12} className="text-red-400" /> Revoke Free Pass
+                            </button>
+                            <button
+                              onClick={() => { action(u.id, 'reset_trial'); }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                            >
+                              <RotateCcw size={12} className="text-blue-400" /> Reset Trial (14 days)
+                            </button>
+
+                            <div className="px-3 py-1.5 text-[10px] text-slate-500 font-semibold uppercase tracking-wider border-b border-white/5 border-t border-white/5 mt-1">
+                              Admin Tools
+                            </div>
+                            <button
+                              onClick={() => setConfirmModal({ userId: u.id, action: 'reset_password', label: `Reset password for ${u.email}? A temporary password will be generated.` })}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                            >
+                              <Key size={12} className="text-yellow-400" /> Reset Password
+                            </button>
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => setConfirmModal({ userId: u.id, action: 'impersonate', label: `Impersonate ${u.name} (${u.email})? You will be logged in as this user in a new tab.` })}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-300 hover:bg-white/5 hover:text-white transition-colors"
+                              >
+                                <Eye size={12} className="text-purple-400" /> Impersonate User
+                              </button>
+                            )}
+                            <button
+                              onClick={() => deleteUser(u.id, u.email)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+                            >
+                              <Trash2 size={12} /> Delete User
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -252,11 +354,13 @@ export default function AdminUsers() {
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Role</label>
                 <select value={editUser.role || 'user'} onChange={e => setEditUser({ ...editUser, role: e.target.value })}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50">
+                  disabled={!isSuperAdmin}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50 disabled:opacity-50">
                   <option value="user">user</option>
                   <option value="admin">admin</option>
                   <option value="super_admin">super_admin</option>
                 </select>
+                {!isSuperAdmin && <p className="text-[10px] text-slate-500 mt-1">Only super_admin can change roles</p>}
               </div>
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Plan</label>
@@ -273,14 +377,10 @@ export default function AdminUsers() {
               <button onClick={() => setEditUser(null)} className="flex-1 py-2 rounded-lg border border-white/10 text-sm text-slate-400 hover:text-white transition-colors">Cancel</button>
               <button
                 onClick={async () => {
-                  // Run all three updates sequentially, then refresh once at the end
-                  // (action() calls refreshUser() internally, but we also do a final
-                  //  explicit refresh after all three complete to ensure consistency)
                   await action(editUser.id, 'update', { name: editUser.name, company: editUser.company });
-                  await action(editUser.id, 'set_role', { role: editUser.role });
+                  if (isSuperAdmin) await action(editUser.id, 'set_role', { role: editUser.role });
                   await action(editUser.id, 'set_plan', { plan: editUser.plan });
                   setEditUser(null);
-                  // Final authoritative refresh after all actions complete
                   setTimeout(() => refreshUser(), 300);
                 }}
                 className="flex-1 py-2 rounded-lg bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 transition-colors"
@@ -288,6 +388,50 @@ export default function AdminUsers() {
                 Save Changes
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Modal */}
+      {confirmModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center">
+                <AlertCircle size={18} className="text-red-400" />
+              </div>
+              <h2 className="text-base font-bold text-white">Confirm Action</h2>
+            </div>
+            <p className="text-sm text-slate-300">{confirmModal.label}</p>
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => setConfirmModal(null)} className="flex-1 py-2 rounded-lg border border-white/10 text-sm text-slate-400 hover:text-white transition-colors">Cancel</button>
+              <button onClick={handleConfirm} className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-semibold hover:bg-red-400 transition-colors">Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Temp Password Modal */}
+      {tempPasswordModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-yellow-500/20 flex items-center justify-center">
+                <Key size={18} className="text-yellow-400" />
+              </div>
+              <h2 className="text-base font-bold text-white">Password Reset</h2>
+            </div>
+            <p className="text-sm text-slate-400">Temporary password for <span className="text-white font-medium">{tempPasswordModal.email}</span>:</p>
+            <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 font-mono text-amber-400 text-sm select-all">
+              {tempPasswordModal.password}
+            </div>
+            <p className="text-xs text-slate-500">Share this with the user. They should change it immediately after logging in.</p>
+            <button
+              onClick={() => { navigator.clipboard.writeText(tempPasswordModal.password); showToast('Copied to clipboard'); setTempPasswordModal(null); }}
+              className="w-full py-2 rounded-lg bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 transition-colors"
+            >
+              Copy & Close
+            </button>
           </div>
         </div>
       )}
