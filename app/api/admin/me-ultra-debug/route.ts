@@ -13,65 +13,60 @@ export async function GET(req: NextRequest) {
   const id = session.id;
   const results: any = { jwtId: id, tests: {} };
 
-  // Test A: base (works)
+  // Check if there's a VIEW named users
+  try {
+    const r = await sql`
+      SELECT table_name, table_type 
+      FROM information_schema.tables 
+      WHERE table_name = 'users' AND table_schema = 'public'
+    `;
+    results.usersTableType = r;
+  } catch (e: any) { results.usersTableType = { error: e.message }; }
+
+  // Check column order in users table
+  try {
+    const r = await sql`
+      SELECT column_name, ordinal_position, data_type, column_default
+      FROM information_schema.columns 
+      WHERE table_name = 'users' AND table_schema = 'public'
+      ORDER BY ordinal_position
+    `;
+    results.columns = r;
+  } catch (e: any) { results.columns = { error: e.message }; }
+
+  // Test: SELECT id, email, role - what does role actually contain?
   try {
     const r = await sql`SELECT id, email, role FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.A_base = { role: r[0]?.role };
-  } catch (e: any) { results.tests.A_base = { error: e.message }; }
+    results.tests = {
+      idEmailRole: { role: r[0]?.role, id: r[0]?.id, email: r[0]?.email },
+    };
+  } catch (e: any) { results.tests = { error: e.message }; }
 
-  // Test B: add name
+  // Test: SELECT * to see all columns
   try {
-    const r = await sql`SELECT id, name, email, role FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.B_addName = { role: r[0]?.role };
-  } catch (e: any) { results.tests.B_addName = { error: e.message }; }
+    const r = await sql`SELECT id, email, role, name FROM users WHERE id = ${id} LIMIT 1`;
+    results.idEmailRoleName = { role: r[0]?.role, name: r[0]?.name };
+  } catch (e: any) { results.idEmailRoleName = { error: e.message }; }
 
-  // Test C: add company
+  // Check if there are multiple schemas
   try {
-    const r = await sql`SELECT id, name, email, company, role FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.C_addCompany = { role: r[0]?.role };
-  } catch (e: any) { results.tests.C_addCompany = { error: e.message }; }
+    const r = await sql`
+      SELECT schemaname, tablename 
+      FROM pg_tables 
+      WHERE tablename = 'users'
+    `;
+    results.schemas = r;
+  } catch (e: any) { results.schemas = { error: e.message }; }
 
-  // Test D: add phone
+  // Check for views
   try {
-    const r = await sql`SELECT id, name, email, company, phone, role FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.D_addPhone = { role: r[0]?.role };
-  } catch (e: any) { results.tests.D_addPhone = { error: e.message }; }
-
-  // Test E: add email_verified
-  try {
-    const r = await sql`SELECT id, name, email, company, phone, role, email_verified FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.E_addEmailVerified = { role: r[0]?.role };
-  } catch (e: any) { results.tests.E_addEmailVerified = { error: e.message }; }
-
-  // Test F: add created_at (full fallback query)
-  try {
-    const r = await sql`SELECT id, name, email, company, phone, role, email_verified, created_at FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.F_fullFallback = { role: r[0]?.role };
-  } catch (e: any) { results.tests.F_fullFallback = { error: e.message }; }
-
-  // Test G: just role column
-  try {
-    const r = await sql`SELECT role FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.G_justRole = { role: r[0]?.role };
-  } catch (e: any) { results.tests.G_justRole = { error: e.message }; }
-
-  // Test H: role with email_verified
-  try {
-    const r = await sql`SELECT role, email_verified FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.H_roleEmailVerified = { role: r[0]?.role, email_verified: r[0]?.email_verified };
-  } catch (e: any) { results.tests.H_roleEmailVerified = { error: e.message }; }
-
-  // Test I: role with created_at
-  try {
-    const r = await sql`SELECT role, created_at FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.I_roleCreatedAt = { role: r[0]?.role };
-  } catch (e: any) { results.tests.I_roleCreatedAt = { error: e.message }; }
-
-  // Test J: role with company
-  try {
-    const r = await sql`SELECT role, company FROM users WHERE id = ${id} LIMIT 1`;
-    results.tests.J_roleCompany = { role: r[0]?.role };
-  } catch (e: any) { results.tests.J_roleCompany = { error: e.message }; }
+    const r = await sql`
+      SELECT table_name, view_definition 
+      FROM information_schema.views 
+      WHERE table_name = 'users'
+    `;
+    results.views = r;
+  } catch (e: any) { results.views = { error: e.message }; }
 
   return NextResponse.json(results, {
     headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
