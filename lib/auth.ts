@@ -15,7 +15,15 @@ export const COOKIE_NAME = 'solarpro_session';
 export const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export function getDb() {
-  const url = process.env.DATABASE_URL!;
+  const url = process.env.DATABASE_URL;
+  if (!url || url === 'YOUR_NEON_DATABASE_URL_HERE') {
+    console.error(
+      '\n[getDb] DATABASE_URL is not configured.\n' +
+      '  -> Open solarpro/.env.local and set DATABASE_URL to your Neon connection string.\n' +
+      '  -> Get it from: https://console.neon.tech -> your project -> Connection string\n'
+    );
+    throw new Error('DATABASE_URL is not set. Check .env.local — see console for instructions.');
+  }
   return neon(url);
 }
 

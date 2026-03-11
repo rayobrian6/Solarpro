@@ -55,11 +55,17 @@ export interface DbPricingConfig {
   updatedAt: string;
 }
 
-const DATABASE_URL = process.env.DATABASE_URL!;
-
 export function getDb() {
-  if (!DATABASE_URL) throw new Error('DATABASE_URL is not set');
-  return neon(DATABASE_URL);
+  const url = process.env.DATABASE_URL;
+  if (!url || url === 'YOUR_NEON_DATABASE_URL_HERE') {
+    console.error(
+      '\n[getDb] DATABASE_URL is not configured.\n' +
+      '  -> Open solarpro/.env.local and set DATABASE_URL to your Neon connection string.\n' +
+      '  -> Get it from: https://console.neon.tech -> your project -> Connection string\n'
+    );
+    throw new Error('DATABASE_URL is not set. Check .env.local — see console for instructions.');
+  }
+  return neon(url);
 }
 
 // ============================================================

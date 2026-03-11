@@ -63,7 +63,18 @@ export async function POST(req: NextRequest) {
     );
 
   } catch (error: any) {
-    console.error('Login error:', error);
+    const msg = error?.message || String(error);
+    // Surface DB config errors clearly in the terminal
+    if (msg.includes('DATABASE_URL') || msg.includes('database') || msg.includes('neon')) {
+      console.error('\n[/api/auth/login] DATABASE ERROR — auth will not work until fixed:');
+      console.error(' ', msg);
+      console.error('  -> Set DATABASE_URL in solarpro/.env.local and restart npm run dev\n');
+      return NextResponse.json(
+        { success: false, error: 'Database not configured. Check server console for instructions.' },
+        { status: 503 }
+      );
+    }
+    console.error('[/api/auth/login] Login error:', error);
     return NextResponse.json(
       { success: false, error: 'Login failed. Please try again.' },
       { status: 500 }
