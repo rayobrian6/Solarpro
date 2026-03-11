@@ -1,17 +1,17 @@
 // lib/version.ts — SolarPro Build Version
-export const BUILD_VERSION     = 'v45.0';
+export const BUILD_VERSION     = 'v45.1';
 export const BUILD_DATE        = '2025-01-12';
-export const BUILD_DESCRIPTION = 'Architecture Refactor — Single Source of Truth permit generator (computeSystem engine)';
+export const BUILD_DESCRIPTION = 'Architecture Refactor — Single Source of Truth extended to Design Studio SLD';
 export const BUILD_FEATURES    = [
-  'Permit generator is pure visual renderer — no duplicate NEC calculations',
+  'Design Studio SLD now reads all electrical values from computeSystem() engine',
+  'acOCPD, backfeedAmps, dcWireGauge, acWireGauge, egcGauge all from PermitSystemModel',
+  'Removed duplicate Math.ceil(acOutputAmps * 1.25) OCPD calc from sld/route.ts',
+  'EGC gauge on SLD wire segments from NEC 250.122 engine table (no more hardcoded #10)',
+  'X-System-Model: computed | fallback header on SLD responses',
+  'Permit plan set generator: pure visual renderer — no duplicate NEC calculations',
   'computeSystem() called once at route entry for all NEC 690.7/690.8/310.15/705.12 values',
   'PermitSystemModel bridge type routes pre-computed values to all sheet builders',
   '7-sheet permit plan set: G-1, E-1, E-2, S-1, A-1, M-1, C-1',
-  'A-1 Site/Roof Layout — roof SVG with panel placement and fire setbacks',
-  'M-1 Mounting Details — 6 detail diagrams (rail, flashing, splice, bonding)',
-  'E-1 SLD wire gauges from computeSystem runs (single source of truth)',
-  'Backfeed breaker from computeSystem.backfeedBreakerAmps',
-  'EGC gauge from computeSystem runs egcGauge (NEC 250.122)',
 ];
 
 export function getBuildBadge(): string {
@@ -19,6 +19,26 @@ export function getBuildBadge(): string {
 }
 
 export const VERSION_HISTORY = [
+  {
+    version: 'v45.1',
+    date:    '2025-01-12',
+    summary: 'Architecture Refactor — Single Source of Truth extended to Design Studio SLD',
+    changes: [
+      'AUDIT FIX: /api/engineering/sld was not using PermitSystemModel — now it does',
+      'REFACTOR: sld/route.ts imports buildPermitSystemModel(), calls it after computeSystem()',
+      'FIX: acOCPD on Design Studio SLD now from systemModel.acOcpdAmps (NEC engine)',
+      'FIX: backfeedAmps now from systemModel.backfeedBreakerAmps (NEC engine)',
+      'FIX: dcWireGauge now from systemModel.dcWireGauge (NEC engine)',
+      'FIX: acWireGauge now from systemModel.acWireGauge (NEC engine)',
+      'FIX: egcGauge now from systemModel.egcGauge — NEC 250.122 table (no more hardcoded #10)',
+      'FIX: dcOCPD now from systemModel.stringOcpdAmps (NEC engine)',
+      'CLEAN: Removed duplicate Math.ceil(acOutputAmps * 1.25 / 5) * 5 from sld/route.ts',
+      'NEW: SLDProfessionalInput accepts systemModel?: PermitSystemModel and egcGauge?: string',
+      'NEW: All EGC wire labels in renderer now use engine-computed gauge (egcNum)',
+      'TRACE: X-System-Model: computed | fallback header on all SLD responses',
+      'TRACE: resolvedValues block in SLD JSON response for debugging',
+    ],
+  },
   {
     version: 'v45.0',
     date:    '2025-01-12',
