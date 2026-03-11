@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, getDb } from '@/lib/auth';
+import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,6 +115,89 @@ export async function GET(req: NextRequest) {
     `;
     results.tableType = rows.map((r: any) => `${r.table_name}:${r.table_type}`);
   } catch (e: any) { results.tableType = { error: e.message }; }
+
+  // NEW: Check Row Level Security policies
+  try {
+    const rows = await sql`
+      SELECT schemaname, tablename, policyname, permissive, roles, cmd, qual
+      FROM pg_policies
+      WHERE tablename = 'users'
+    `;
+    results.rlsPolicies = rows.map((r: any) => ({
+      policy: r.policyname,
+      cmd: r.cmd,
+      roles: r.roles,
+      qual: r.qual,
+    }));
+  } catch (e: any) { results.rlsPolicies = { error: e.message }; }
+
+  // NEW: Check if RLS is enabled on users table
+  try {
+    const rows = await sql`
+      SELECT relname, relrowsecurity, relforcerowsecurity
+      FROM pg_class
+      WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+    `;
+    results.rlsEnabled = rows[0] ? {
+      relrowsecurity: rows[0].relrowsecurity,
+      relforcerowsecurity: rows[0].relforcerowsecurity,
+    } : null;
+  } catch (e: any) { results.rlsEnabled = { error: e.message }; }
+
+  // NEW: Use a FRESH neon() instance (not cached) to run the primary query
+  try {
+    const freshSql = neon(process.env.DATABASE_URL!);
+    const rows = await freshSql`
+      SELECT
+        id, name, email, company, phone, role, email_verified, created_at,
+        plan, subscription_status, trial_starts_at, trial_ends_at,
+        is_free_pass, free_pass_note,
+        company_logo_url, company_website, company_address, company_phone,
+        brand_primary_color, brand_secondary_color, proposal_footer_text
+      FROM users WHERE id = ${id} LIMIT 1
+    `;
+    results.freshNeonPrimaryQuery = {
+      role: rows[0]?.role,
+      name: rows[0]?.name,
+    };
+  } catch (e: any) { results.freshNeonPrimaryQuery = { error: e.message }; }
+
+  // NEW: Test with explicit role::text cast to bypass any type coercion
+  try {
+    const rows = await sql`
+      SELECT id, name, email, role::text AS role_cast
+      FROM users WHERE id = ${id} LIMIT 1
+    `;
+    results.roleCast = {
+      role_cast: rows[0]?.role_cast,
+      allKeys: rows[0] ? Object.keys(rows[0]) : [],
+    };
+  } catch (e: any) { results.roleCast = { error: e.message }; }
+
+  // NEW: Check if there are other users with role='user' that might be getting returned
+  try {
+    const rows = await sql`
+      SELECT id, email, role FROM users WHERE email = 'raymond.obrian@yahoo.com'
+    `;
+    results.raymondByEmail = rows.map((r: any) => ({
+      id: r.id?.substring(0, 8),
+      email: r.email,
+      role: r.role,
+    }));
+  } catch (e: any) { results.raymondByEmail = { error: e.message }; }
+
+  // NEW: Check what the DB returns for the EXACT user ID with explicit cast
+  try {
+    const rows = await sql`
+      SELECT id::text, email::text, role::text
+      FROM users WHERE id = ${id} LIMIT 1
+    `;
+    results.explicitCastQuery = {
+      id: rows[0]?.id,
+      email: rows[0]?.email,
+      role: rows[0]?.role,
+    };
+  } catch (e: any) { results.explicitCastQuery = { error: e.message }; }
 
   // CRITICAL: Check if /api/auth/me is hitting the fallback path
   // Simulate the try/catch from /api/auth/me
