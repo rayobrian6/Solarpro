@@ -10,108 +10,68 @@ export async function GET(req: NextRequest) {
   }
 
   const sql = getDb();
-  const results: any = {
-    jwtId: session.id,
-    jwtEmail: session.email,
-    queries: {}
-  };
+  const id = session.id;
+  const results: any = { jwtId: id, tests: {} };
 
-  // Query 1: Exact same as /api/auth/me primary query
+  // Test A: base (works)
   try {
-    const rows1 = await sql`
-      SELECT
-        id, name, email, company, phone, role, email_verified, created_at,
-        plan, subscription_status, trial_starts_at, trial_ends_at,
-        is_free_pass, free_pass_note,
-        company_logo_url, company_website, company_address, company_phone,
-        brand_primary_color, brand_secondary_color, proposal_footer_text
-      FROM users WHERE id = ${session.id} LIMIT 1
-    `;
-    results.queries.fullQuery = {
-      success: true,
-      rowCount: rows1.length,
-      role: rows1[0]?.role,
-      id: rows1[0]?.id,
-      email: rows1[0]?.email,
-    };
-  } catch (e: any) {
-    results.queries.fullQuery = { success: false, error: e.message };
-  }
+    const r = await sql`SELECT id, email, role FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.A_base = { role: r[0]?.role };
+  } catch (e: any) { results.tests.A_base = { error: e.message }; }
 
-  // Query 2: Fallback query (base columns only) - EXACT copy from /api/auth/me
+  // Test B: add name
   try {
-    const rows2 = await sql`
-      SELECT id, name, email, company, phone, role, email_verified, created_at
-      FROM users WHERE id = ${session.id} LIMIT 1
-    `;
-    results.queries.fallbackQuery = {
-      success: true,
-      rowCount: rows2.length,
-      role: rows2[0]?.role,
-      id: rows2[0]?.id,
-      email: rows2[0]?.email,
-      name: rows2[0]?.name,
-    };
-  } catch (e: any) {
-    results.queries.fallbackQuery = { success: false, error: e.message };
-  }
+    const r = await sql`SELECT id, name, email, role FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.B_addName = { role: r[0]?.role };
+  } catch (e: any) { results.tests.B_addName = { error: e.message }; }
 
-  // Query 3: Raw role check
+  // Test C: add company
   try {
-    const rows3 = await sql`SELECT id, email, role FROM users WHERE id = ${session.id}`;
-    results.queries.rawRole = {
-      success: true,
-      data: rows3[0] || null,
-    };
-  } catch (e: any) {
-    results.queries.rawRole = { success: false, error: e.message };
-  }
+    const r = await sql`SELECT id, name, email, company, role FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.C_addCompany = { role: r[0]?.role };
+  } catch (e: any) { results.tests.C_addCompany = { error: e.message }; }
 
-  // Query 4: Check ALL users with this ID (should be exactly 1)
+  // Test D: add phone
   try {
-    const rows4 = await sql`SELECT id, email, role FROM users WHERE id = ${session.id}`;
-    results.queries.allById = {
-      count: rows4.length,
-      rows: rows4.map((r: any) => ({ id: r.id, email: r.email, role: r.role })),
-    };
-  } catch (e: any) {
-    results.queries.allById = { success: false, error: e.message };
-  }
+    const r = await sql`SELECT id, name, email, company, phone, role FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.D_addPhone = { role: r[0]?.role };
+  } catch (e: any) { results.tests.D_addPhone = { error: e.message }; }
 
-  // Query 5: Check if there's a "phone" column that might be causing issues
+  // Test E: add email_verified
   try {
-    const rows5 = await sql`
-      SELECT id, email, role, phone 
-      FROM users WHERE id = ${session.id} LIMIT 1
-    `;
-    results.queries.withPhone = {
-      success: true,
-      role: rows5[0]?.role,
-      phone: rows5[0]?.phone,
-    };
-  } catch (e: any) {
-    results.queries.withPhone = { success: false, error: e.message };
-  }
+    const r = await sql`SELECT id, name, email, company, phone, role, email_verified FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.E_addEmailVerified = { role: r[0]?.role };
+  } catch (e: any) { results.tests.E_addEmailVerified = { error: e.message }; }
 
-  // Query 6: Check if the primary query actually fails
-  let primaryFailed = false;
-  let primaryError = null;
+  // Test F: add created_at (full fallback query)
   try {
-    await sql`
-      SELECT
-        id, name, email, company, phone, role, email_verified, created_at,
-        plan, subscription_status, trial_starts_at, trial_ends_at,
-        is_free_pass, free_pass_note,
-        company_logo_url, company_website, company_address, company_phone,
-        brand_primary_color, brand_secondary_color, proposal_footer_text
-      FROM users WHERE id = ${session.id} LIMIT 1
-    `;
-  } catch (e: any) {
-    primaryFailed = true;
-    primaryError = e.message;
-  }
-  results.primaryQueryFails = primaryFailed;
-  results.primaryQueryError = primaryError;
+    const r = await sql`SELECT id, name, email, company, phone, role, email_verified, created_at FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.F_fullFallback = { role: r[0]?.role };
+  } catch (e: any) { results.tests.F_fullFallback = { error: e.message }; }
+
+  // Test G: just role column
+  try {
+    const r = await sql`SELECT role FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.G_justRole = { role: r[0]?.role };
+  } catch (e: any) { results.tests.G_justRole = { error: e.message }; }
+
+  // Test H: role with email_verified
+  try {
+    const r = await sql`SELECT role, email_verified FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.H_roleEmailVerified = { role: r[0]?.role, email_verified: r[0]?.email_verified };
+  } catch (e: any) { results.tests.H_roleEmailVerified = { error: e.message }; }
+
+  // Test I: role with created_at
+  try {
+    const r = await sql`SELECT role, created_at FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.I_roleCreatedAt = { role: r[0]?.role };
+  } catch (e: any) { results.tests.I_roleCreatedAt = { error: e.message }; }
+
+  // Test J: role with company
+  try {
+    const r = await sql`SELECT role, company FROM users WHERE id = ${id} LIMIT 1`;
+    results.tests.J_roleCompany = { role: r[0]?.role };
+  } catch (e: any) { results.tests.J_roleCompany = { error: e.message }; }
 
   return NextResponse.json(results, {
     headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
