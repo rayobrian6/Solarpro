@@ -44,6 +44,13 @@ export interface ElectricalSheetInput {
   // values come from it. Individual fields below are fallbacks.
   systemModel?: PermitSystemModel;
 
+  // ── Pre-rendered SLD SVG (from /api/engineering/sld) ──────
+  // When provided, this SVG is used directly instead of
+  // rebuilding the diagram from scratch in buildSldSvg().
+  // This ensures the plan-set E-1 page shows the same SLD
+  // the user already reviewed in the Design Studio.
+  existingSvg?: string;
+
   // Module electrical specs (for display / fallback)
   moduleVoc?:           number;
   moduleIsc?:           number;
@@ -418,7 +425,9 @@ function buildNecNotes(inp: ElectricalSheetInput): string {
 // ─── Main Sheet Builder ────────────────────────────────────────────────────
 export function buildElectricalSheet(inp: ElectricalSheetInput): string {
   const sm        = inp.systemModel;
-  const sldSvg    = buildSldSvg(inp);
+  // Use pre-rendered SLD from Design Studio if available (single source of truth)
+  // Otherwise fall back to building a new one from the payload values.
+  const sldSvg    = inp.existingSvg || buildSldSvg(inp);
   const calcBlock = buildCalcBlock(inp);
   const invSpec   = buildInverterSpecBlock(inp);
   const wireTable = buildWireScheduleTable(inp);

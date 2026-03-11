@@ -47,6 +47,7 @@ import { calcFireSetbacks } from '@/lib/engineering/fire-setbacks';
 // ── Single Source of Truth: computeSystem + PermitSystemModel ──────────────
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
+import { BUILD_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -198,6 +199,8 @@ export async function POST(req: NextRequest) {
       annualKwh,
       // Array config
       stringCount,
+      // Pre-rendered SLD SVG from Design Studio (single source of truth for E-1)
+      sldSvg: existingSldSvg,
     } = body;
 
     // ── Validate required fields ──────────────────────────────────────────
@@ -487,6 +490,8 @@ export async function POST(req: NextRequest) {
       tb:                    { ...tb, sheetTitle: 'Electrical / SLD', sheetNumber: 'E-1' },
       // ← SINGLE SOURCE OF TRUTH: pre-computed system model
       systemModel:           systemModel ?? undefined,
+      // ← Use pre-rendered SLD from Design Studio if available
+      existingSvg:           existingSldSvg ?? undefined,
       // Module specs (for display/fallback)
       moduleVoc,
       moduleIsc,
@@ -749,7 +754,7 @@ export async function POST(req: NextRequest) {
     // ─────────────────────────────────────────────────────────────────────
     // STEP 8: Assemble HTML and convert to PDF
     // ─────────────────────────────────────────────────────────────────────
-    const docTitle = `${clientName || 'Client'} — Solar PV Plan Set v45.0 — ${today}`;
+    const docTitle = `${clientName || 'Client'} — Solar PV Plan Set ${BUILD_VERSION} — ${today}`;
     const html = wrapDocument(pages, docTitle);
 
     const uid      = randomUUID();
@@ -788,7 +793,7 @@ export async function POST(req: NextRequest) {
           'Content-Type':        mimeType,
           'Content-Disposition': `attachment; filename="${fileName}"`,
           'Content-Length':      String(pdfBuffer.length),
-          'X-Plan-Set-Version':  'v45.0',
+          'X-Plan-Set-Version':  BUILD_VERSION,
           'X-Plan-Set-Sheets':   String(sheetIndex.length),
           'X-Structural-Status': structuralStatus,
           'X-Pdf-Method':        pdfMethod,
@@ -814,7 +819,7 @@ export async function POST(req: NextRequest) {
         VALUES
           (${projectId}, ${clientId || null}, ${user.id}, ${fileName}, 'plan_set',
            ${pdfBuffer.length}, ${mimeType}, ${pdfBuffer},
-           ${'Auto-generated permit plan set v45.0 — ' + today})
+           ${`Auto-generated permit plan set ${BUILD_VERSION} — ${today}`})
         ON CONFLICT (project_id, user_id, file_name)
         DO UPDATE SET
           file_size   = EXCLUDED.file_size,
@@ -834,7 +839,7 @@ export async function POST(req: NextRequest) {
         VALUES
           (${projectId}, ${clientId || null}, ${user.id}, ${fileName}, 'plan_set',
            ${pdfBuffer.length}, ${mimeType}, ${pdfBuffer},
-           ${'Auto-generated permit plan set v45.0 — ' + today})
+           ${`Auto-generated permit plan set ${BUILD_VERSION} — ${today}`})
       `;
     }
 
@@ -847,7 +852,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success:           true,
-      version:           'v45.0',
+      version:           BUILD_VERSION,
       fileName,
       fileId,
       pdfMethod,
@@ -860,7 +865,7 @@ export async function POST(req: NextRequest) {
       systemModelUsed:   systemModel ? 'computed' : 'fallback',
       message:           pdfMethod === 'html'
         ? 'Plan set generated as HTML — open in browser and print to PDF'
-        : 'Plan set PDF generated and saved to project files (v45.0 — 7 sheets)',
+        : `Plan set PDF generated and saved to project files (${BUILD_VERSION} — 7 sheets)`,
     });
 
   } catch (err: any) {

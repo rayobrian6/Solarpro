@@ -1,20 +1,23 @@
-name: Promote Production Deployment
+# ============================================================
+# promote-production.yml — DISABLED
+#
+# This workflow has been consolidated into main.yml.
+# Kept as placeholder to avoid broken references.
+# All deployment logic is in main.yml.
+# ============================================================
+
+name: Promote Production (disabled)
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    # Manual trigger only — not automatic
+    # Use main.yml for all production deployments
 
 jobs:
-  promote:
+  noop:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Wait for Vercel deployment
-        run: sleep 30
-
-      - name: Promote deployment
+      - name: This workflow is disabled
         run: |
-          curl -X POST \
-          -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
-          https://api.vercel.com/v1/integrations/deploy/prj_Solarpro/alias
+          echo "Deployment is handled by main.yml on push to master."
+          echo "To deploy manually, use the Vercel dashboard or trigger main.yml."

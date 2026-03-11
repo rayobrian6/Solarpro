@@ -2499,26 +2499,42 @@ function EngineeringPageInner() {
       const invData  = getInvById(firstInv?.inverterId || '', firstInv?.type || 'string') as any;
       const panelData= getPanelById(firstStr?.panelId || '') as any;
 
-      // Build strings array for plan set
-      const planStrings = config.inverters.flatMap(inv =>
-        inv.strings.map(str => {
-          const pd = getPanelById(str.panelId) as any;
-          const sc = compliance.stringConfig;
-          return {
-            id: str.id, label: str.label,
-            panelCount: str.panelCount,
-            panelWatts: pd?.watts || 400,
-            wireGauge: str.wireGauge || config.wireGauge || '#10 AWG',
-            conduitType: config.conduitType || '3/4" EMT',
-            wireLength: str.wireLength || config.wireLength || 50,
-            ocpdAmps: sc?.ocpdPerString || 15,
-            stringVoc: sc?.stringVoc || (pd?.voc || 41.6) * str.panelCount,
-            stringVmp: sc?.stringVmp || (pd?.vmp || 34.5) * str.panelCount,
-            stringIsc: sc?.stringIsc || (pd?.isc || 12.26),
-            stringImp: pd?.imp || 11.5,
-          };
-        })
-      );
+      // Build strings array for plan set — use computedSystem.strings (engine output) when available
+      const csStrings = cs.strings ?? [];
+      const csDcRun   = cs.runMap?.['DC_STRING_RUN'] ?? cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN');
+      const planStrings = csStrings.length > 0
+        ? csStrings.map((s: any, i: number) => ({
+            id:          `S${i + 1}`,
+            label:       `S${i + 1}`,
+            panelCount:  s.panelCount,
+            panelWatts:  s.panelWatts ?? (panelData as any)?.watts ?? 400,
+            wireGauge:   s.wireGauge  ?? (csDcRun as any)?.wireGauge ?? '#10 AWG',
+            conduitType: s.conduitType ?? config.conduitType ?? '3/4" EMT',
+            wireLength:  config.inverters[0]?.strings[i]?.wireLength ?? config.wireLength ?? 50,
+            ocpdAmps:    s.ocpdAmps   ?? cs.acOcpdAmps ?? 15,
+            stringVoc:   s.stringVoc  ?? ((panelData as any)?.voc ?? 41.6) * s.panelCount,
+            stringVmp:   s.stringVmp  ?? ((panelData as any)?.vmp ?? 34.5) * s.panelCount,
+            stringIsc:   s.stringIsc  ?? (panelData as any)?.isc ?? 12.26,
+            stringImp:   s.stringImp  ?? (panelData as any)?.imp ?? 11.5,
+          }))
+        : config.inverters.flatMap(inv =>
+            inv.strings.map(str => {
+              const pd = getPanelById(str.panelId) as any;
+              return {
+                id: str.id, label: str.label,
+                panelCount:  str.panelCount,
+                panelWatts:  pd?.watts || 400,
+                wireGauge:   str.wireGauge || (csDcRun as any)?.wireGauge || config.wireGauge || '#10 AWG',
+                conduitType: config.conduitType || '3/4" EMT',
+                wireLength:  str.wireLength || config.wireLength || 50,
+                ocpdAmps:    (csStrings[0] as any)?.ocpdAmps ?? compliance.stringConfig?.ocpdPerString ?? 15,
+                stringVoc:   (csStrings[0] as any)?.stringVoc ?? (pd?.voc || 41.6) * str.panelCount,
+                stringVmp:   (csStrings[0] as any)?.stringVmp ?? (pd?.vmp || 34.5) * str.panelCount,
+                stringIsc:   (csStrings[0] as any)?.stringIsc ?? pd?.isc ?? 12.26,
+                stringImp:   pd?.imp || 11.5,
+              };
+            })
+          );
 
       const payload = {
         projectId: searchParams.get('projectId') || '',
@@ -2554,24 +2570,51 @@ function EngineeringPageInner() {
         rafterSize: config.rafterSize,
         rafterSpacingIn: config.rafterSpacing,
         rafterSpanFt: config.rafterSpan,
-        // Electrical
+        // ── Electrical ── Single Source of Truth: computedSystem (cs) ──────────
+        // cs = computedSystem from useMemo above — already called computeSystem()
+        // Use cs.runMap / cs.runs for wire gauges; cs.acOcpdAmps / cs.backfeedBreakerAmps for OCPDs.
         strings: planStrings,
-        dcWireGauge: config.wireGauge || '#10 AWG',
-        dcConduitType: config.conduitType || '3/4" EMT',
-        acWireGauge: compliance.electrical?.acWireGauge || '#8 AWG',
-        acConduitType: config.conduitType || '1" EMT',
-        dcDisconnectAmps: compliance.stringConfig?.ocpdPerString || 15,
-        dcDisconnectVoltage: invData?.maxDcVoltage || 600,
-        acDisconnectAmps: Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5 || 30,
-        acBreakerAmps: compliance.electrical?.busbar?.backfeedBreakerAmps || Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5 || 20,
-        backfeedBreakerAmps: compliance.electrical?.busbar?.backfeedBreakerAmps || 20,
-        mainPanelBusAmps: config.panelBusRating || config.mainPanelAmps || 200,
+        dcWireGauge:          (cs.runMap?.['DC_STRING_RUN'] as any)?.wireGauge
+                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.wireGauge
+                                ?? config.wireGauge
+                                ?? '#10 AWG',
+        dcConduitType:        (cs.runMap?.['DC_STRING_RUN'] as any)?.conduitSize
+                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.conduitSize
+                                ?? config.conduitType
+                                ?? '3/4" EMT',
+        acWireGauge:          (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.wireGauge
+                                ?? (cs.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN') as any)?.wireGauge
+                                ?? compliance.electrical?.acWireGauge
+                                ?? '#8 AWG',
+        acConduitType:        (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.conduitSize
+                                ?? (cs.runs?.find((r: any) => r.id === 'DISCO_TO_METER_RUN') as any)?.conduitSize
+                                ?? config.conduitType
+                                ?? '1" EMT',
+        dcDisconnectAmps:     (csStrings[0] as any)?.ocpdAmps
+                                ?? compliance.stringConfig?.ocpdPerString
+                                ?? 15,
+        dcDisconnectVoltage:  (invData as any)?.maxDcVoltage || 600,
+        acDisconnectAmps:     cs.acOcpdAmps
+                                || compliance.electrical?.busbar?.backfeedBreakerAmps
+                                || Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5
+                                || 30,
+        acBreakerAmps:        cs.acOcpdAmps
+                                || compliance.electrical?.busbar?.backfeedBreakerAmps
+                                || Math.ceil((parseFloat(totalInverterKw) * 1000 / 240) * 1.25 / 5) * 5
+                                || 20,
+        backfeedBreakerAmps:  cs.backfeedBreakerAmps
+                                || compliance.electrical?.busbar?.backfeedBreakerAmps
+                                || 20,
+        mainPanelBusAmps:     config.panelBusRating || config.mainPanelAmps || 200,
         mainPanelBreakerAmps: config.mainPanelAmps || 200,
-        interconnectionType: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'supply-side' : 'load-side',
+        interconnectionType:  config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'supply-side' : 'load-side',
         interconnectionMethod: config.interconnectionMethod === 'SUPPLY_SIDE_TAP' ? 'Supply-Side Tap' : 'Backfeed Breaker',
         rapidShutdownRequired: config.rapidShutdown,
-        rapidShutdownDevice: config.inverters[0]?.type === 'micro' ? 'Enphase IQ RSD (integrated)' : 'Tigo RSS / SolarEdge SafeDC',
-        groundWireGauge: '#8 AWG',
+        rapidShutdownDevice:  config.inverters[0]?.type === 'micro' ? 'Enphase IQ RSD (integrated)' : 'Tigo RSS / SolarEdge SafeDC',
+        groundWireGauge:      (cs.runMap?.['DC_STRING_RUN'] as any)?.egcGauge
+                                ?? (cs.runs?.find((r: any) => r.id === 'DC_STRING_RUN') as any)?.egcGauge
+                                ?? (cs.runMap?.['DISCO_TO_METER_RUN'] as any)?.egcGauge
+                                ?? '#10 AWG',
         // Battery
         hasBattery: config.batteryCount > 0 && !!config.batteryId,
         batteryModel: config.batteryModel || undefined,
@@ -2616,6 +2659,9 @@ function EngineeringPageInner() {
         electricalLicense: config.electricalLicense || undefined,
         ownerContact: config.ownerPhone || config.ownerEmail || undefined,
         stringCount: planStrings.length,
+        // Pass pre-rendered SLD SVG so E-1 uses the same diagram already reviewed
+        // in Design Studio — avoids generating a different SLD from scratch.
+        sldSvg: sldSvg || undefined,
         // Structural
         windSpeedMph: config.windSpeed || 90,
         groundSnowPsf: config.groundSnowLoad || 0,
