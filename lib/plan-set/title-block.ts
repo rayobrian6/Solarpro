@@ -63,18 +63,41 @@ export const PLAN_SET_CSS = `
     font-size: 8pt;
     color: #000;
     background: #fff;
-    width: 11in;
-    height: 8.5in;
-    overflow: hidden;
   }
-  .page {
-    width: 11in;
-    height: 8.5in;
-    position: relative;
-    padding: 0.25in 0.25in 1.1in 0.25in;
-    page-break-after: always;
+  /* Screen: allow vertical scrolling through pages */
+  @media screen {
+    body {
+      width: 11in;
+      margin: 0 auto;
+      background: #e5e7eb;
+      padding: 20px;
+    }
+    .page {
+      width: 11in;
+      height: 8.5in;
+      position: relative;
+      padding: 0.25in 0.25in 1.1in 0.25in;
+      margin-bottom: 20px;
+      background: #fff;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
   }
-  .page:last-child { page-break-after: avoid; }
+  /* Print: fixed pages with breaks */
+  @media print {
+    body {
+      width: 11in;
+      height: 8.5in;
+      overflow: hidden;
+    }
+    .page {
+      width: 11in;
+      height: 8.5in;
+      position: relative;
+      padding: 0.25in 0.25in 1.1in 0.25in;
+      page-break-after: always;
+    }
+    .page:last-child { page-break-after: avoid; }
+  }
 
   /* ── Title Block (bottom strip) ── */
   .title-block {

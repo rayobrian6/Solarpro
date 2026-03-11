@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v41.3';
-export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: User state propagation + Vercel alias fix — admin role/free-pass changes reflect in UI within 30s; refreshUser() queue; visibilitychange listener; Vercel alias auto-update';
+export const BUILD_VERSION = 'v43.1';
+export const BUILD_DATE = '2025-01-11';
+export const BUILD_DESCRIPTION = 'Permit Plan Set UX: readiness checklist (10 fields), sheet preview cards, binary download, locked generate button — NEC 690/705, ASCE 7-22, IRC R324.4 fire setbacks';
 export const BUILD_FEATURES = [
   // v41.3 — User state propagation fixes
   'FIX: contexts/UserContext.tsx — refreshUser() now queues pending refresh instead of dropping concurrent calls',
