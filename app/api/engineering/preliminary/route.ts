@@ -14,7 +14,8 @@
 //      - Engineering Packet (full text report)
 //      - SLD SVG
 //      - BOM
-//   7. Returns full structured data for the modal
+//   7. Auto-generates formal EngineeringReport in DB (Engineering tab ready immediately)
+//   8. Returns full structured data for the modal
 //
 // NO manual panel placement required.
 // Contractors open the workspace and modify before final submission.
@@ -25,6 +26,8 @@ import { getUserFromRequest } from '@/lib/auth';
 import { generateBOMV4, bomToMarkdown } from '@/lib/bom-engine-v4';
 import { renderSLDProfessional } from '@/lib/sld-professional-renderer';
 import { upsertLayout, upsertProduction, getDb, getProjectWithDetails } from '@/lib/db-neon';
+import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
+import { upsertEngineeringReport, generateReportId } from '@/lib/engineering/db-engineering';
 
 export const dynamic = 'force-dynamic';
 
@@ -554,6 +557,105 @@ export async function POST(req: NextRequest) {
         console.log('[preliminary] Saved engineering_seed for project:', projectId);
       } catch (seedErr: any) {
         console.warn('[preliminary] Could not save engineering_seed (run /api/migrate):', seedErr.message);
+      }
+
+      // ─── Step 9b: Auto-generate formal EngineeringReport ────────────────────
+      // This populates the Engineering tab immediately after bill upload onboarding.
+      // Uses the same synthetic layout/panels already saved in Step 9.
+      try {
+        const tempLayoutIdForReport = `prelim-layout-${projectId}`;
+        const syntheticPanelsForReport = generateSyntheticPanels(panelCount, tempLayoutIdForReport);
+
+        // Build a minimal DesignSnapshot compatible with generateEngineeringReport()
+        const prelimSnapshot = {
+          projectId,
+          layoutId: tempLayoutIdForReport,
+          designVersionId: `prelim-${projectId}-${Date.now()}`,
+          panels: syntheticPanelsForReport,
+          panelCount,
+          systemSizeKw: systemKw,
+          panel: {
+            id: DEFAULTS.panelId,
+            manufacturer: 'Q CELLS',
+            model: `${DEFAULTS.panelWatts}W Monocrystalline`,
+            wattage: DEFAULTS.panelWatts,
+            width: 1.134,
+            height: 1.762,
+            efficiency: 21.4,
+            bifacial: false,
+            bifacialFactor: 1.0,
+            temperatureCoeff: -0.35,
+            pricePerWatt: 0.35,
+            warranty: 25,
+            cellType: 'Mono PERC',
+            voc: DEFAULT_PANEL_SPECS.voc,
+            vmp: DEFAULT_PANEL_SPECS.vmp,
+            isc: DEFAULT_PANEL_SPECS.isc,
+            imp: DEFAULT_PANEL_SPECS.imp,
+          },
+          inverter: {
+            id: DEFAULTS.inverterId,
+            manufacturer: DEFAULTS.inverterManufacturer,
+            model: DEFAULTS.inverterModel,
+            capacity: DEFAULT_MICRO_SPECS.acOutputW / 1000,
+            efficiency: 97.0,
+            type: 'micro' as const,
+            pricePerUnit: 180,
+            warranty: 25,
+            mpptChannels: 1,
+            batteryCompatible: false,
+          },
+          mounting: {
+            id: DEFAULTS.rackingId,
+            manufacturer: 'IronRidge',
+            model: 'XR100',
+            type: 'flush' as const,
+            maxRoofPitch: 45,
+            windRating: 110,
+            snowRating: 40,
+          },
+          batteries: [],
+          batteryCount: 0,
+          systemType: 'roof' as const,
+          roofSegments: [{
+            segmentId: 'prelim-seg-0',
+            panelCount,
+            tilt: LAYOUT.tilt,
+            azimuth: LAYOUT.azimuth,
+            pitch: LAYOUT.tilt,
+            roofType: DEFAULTS.roofType,
+            panelIds: syntheticPanelsForReport.map((p: any) => p.id),
+          }],
+          groundArrays: [],
+          fenceArrays: [],
+          stateCode: stateCode ?? null,
+          city: null,
+          address: serviceAddress ?? null,
+          utilityProvider: utilityName ?? null,
+          ahj: null,
+          annualProductionKwh: annualUsage,
+          offsetPercentage: 100,
+          mainPanelAmps: DEFAULTS.mainPanelAmps,
+          hasRapidShutdown: true,
+          hasACDisconnect: true,
+          hasDCDisconnect: false,
+          interconnectionMethod: 'LOAD_SIDE' as const,
+          inverterType: 'micro' as const,
+          topologyType: DEFAULTS.topologyType,
+          stringsPerInverter: 1,
+          panelsPerString: 1,
+          dcWireGauge: DEFAULTS.dcWireGauge,
+          acWireGauge: DEFAULTS.acWireGauge,
+          conduitType: DEFAULTS.conduitType,
+        };
+
+        const engReportId = generateReportId();
+        const engReport = generateEngineeringReport(prelimSnapshot as any, engReportId);
+        await upsertEngineeringReport(engReport, projectId);
+        savedFiles.push('engineering_report');
+        console.log('[preliminary] Auto-generated engineering report:', engReportId);
+      } catch (engErr: any) {
+        console.warn('[preliminary] Engineering report auto-gen failed (non-fatal):', engErr.message);
       }
 
       // ── Step 10: Save engineering workspace files ─────────────────────────

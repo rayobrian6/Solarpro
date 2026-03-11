@@ -2,10 +2,17 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v41.2';
+export const BUILD_VERSION = 'v41.3';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Remove vercel.json autoAlias:false — new deployments now auto-update solarpro-v31.vercel.app alias';
+export const BUILD_DESCRIPTION = 'FIX: Remove vercel.json autoAlias:false — new deployments now auto-update solarpro-v31.vercel.app alias; useVersionCheck polls every 30s';
 export const BUILD_FEATURES = [
+  // v41.3 — Vercel alias freeze fix
+  'FIX: vercel.json — removed autoAlias:false; new deployments now automatically update solarpro-v31.vercel.app alias',
+  'FIX: vercel.json — alias was frozen on original deployment; every push now goes live immediately',
+  'FIX: hooks/useVersionCheck.ts — polls every 30s (was 60s); handles stale builds with no CLIENT_VERSION by force-reloading',
+  // v41.2 — Engineering report auto-generation on bill upload
+  'NEW: app/api/engineering/preliminary/route.ts — Step 9b auto-generates formal EngineeringReport in DB after synthetic layout save; Engineering tab populated immediately after bill upload',
+  'FIX: components/onboarding/BillUploadModal.tsx — Step 4 now logs explicit &quot;Engineering report auto-generated&quot; status; fallback fires /api/engineering/generate if preliminary skips it',
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
   'NEW: lib/adminAuth.ts — requireAdmin() server-side JWT auth with role check + redirect',
@@ -59,9 +66,6 @@ export const BUILD_FEATURES = [
   'FIX: next.config.js — injects NEXT_PUBLIC_BUILD_VERSION env var so client knows its build version',
   'FIX: app/api/version/route.ts — returns version + ts fields with no-cache headers',
   'FIX: app/account/billing/page.tsx — full rewrite: role+plan shown independently; admin bypass; no free_pass status inference',
-  // v41.2 — Vercel alias fix
-  'FIX: vercel.json — removed autoAlias:false; new deployments now automatically update solarpro-v31.vercel.app alias',
-  'FIX: vercel.json — alias was frozen on original deployment; every push now goes live immediately',
   // v41.1 — UserContext window focus refresh
   'FIX: contexts/UserContext.tsx — refreshUser() now fires on window focus event (tab switch, return from admin portal)',
   'FIX: contexts/UserContext.tsx — confirmed json?.data mapping is correct (json.data.role, not json.role)',
