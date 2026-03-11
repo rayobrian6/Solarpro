@@ -19,7 +19,7 @@ export function getDb() {
   return neon(url);
 }
 
-// ── Password helpers ──────────────────────────────────────────────────────────
+// ── Password helpers ────────────────────────────────────────────────────────
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
 }
@@ -28,7 +28,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
-// ── JWT / Session ─────────────────────────────────────────────────────────────
+// ── JWT / Session ────────────────────────────────────────────────────────────
 // JWT contains ONLY identity — id, name, email, company.
 // Role is NEVER stored in the JWT. Always fetch from DB.
 export interface SessionUser {
@@ -40,7 +40,7 @@ export interface SessionUser {
 }
 
 export function signToken(user: SessionUser): string {
-  // Only sign identity fields — no role
+  // Only sign identity fields — no role, no subscription data
   const payload: SessionUser = {
     id:      user.id,
     name:    user.name,
@@ -52,7 +52,17 @@ export function signToken(user: SessionUser): string {
 
 export function verifyToken(token: string): SessionUser | null {
   try {
-    return jwt.verify(token, getJwtSecret()) as SessionUser;
+    const decoded = jwt.verify(token, getJwtSecret()) as Record<string, any>;
+    // Explicitly extract ONLY identity fields — discard any role/subscription
+    // fields that may exist in old JWTs issued before this fix.
+    if (!decoded?.id || !decoded?.email) return null;
+    return {
+      id:      String(decoded.id),
+      name:    String(decoded.name || decoded.email),
+      email:   String(decoded.email),
+      company: decoded.company ? String(decoded.company) : undefined,
+      // role is intentionally NOT extracted — always read from DB
+    };
   } catch {
     return null;
   }
