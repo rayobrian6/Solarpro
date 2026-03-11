@@ -1,10 +1,12 @@
 # ============================================================
 # main.yml — Promote Vercel Production Alias
 # Runs after every push to master.
-# Waits for the Vercel deployment to finish (polling), then
-# forcefully assigns solarpro-v31.vercel.app to the latest
-# deployment. This guarantees the production URL never points
-# to a stale or broken deployment.
+#
+# Strategy:
+#   1. Wait up to 5 min for a BUILDING/QUEUED deployment to go READY
+#   2. If latest deployment is ALREADY READY (no new build triggered),
+#      assign the alias immediately — do not fail.
+#   3. Assign solarpro-v31.vercel.app to the latest READY deployment.
 # ============================================================
 
 name: Promote Vercel Production
@@ -20,13 +22,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Wait for Vercel deployment to reach READY state
-        id: wait_deploy
+      - name: Wait for READY deployment and assign alias
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
+          ALIAS: solarpro-v31.vercel.app
         run: |
-          echo "Polling for READY deployment..."
+          echo "Checking latest Vercel deployment..."
           MAX_ATTEMPTS=30
           SLEEP_SECONDS=10
           DUID=""
@@ -34,7 +36,7 @@ jobs:
 
           for i in $(seq 1 $MAX_ATTEMPTS); do
             RESPONSE=$(curl -s \
-              "https://api.vercel.com/v6/deployments?projectId=$PROJECT_ID&target=production&limit=1" \
+              "https://api.vercel.com/v6/deployments?projectId=$PROJECT_ID&limit=1" \
               -H "Authorization: Bearer $VERCEL_TOKEN")
 
             STATE=$(echo "$RESPONSE" | jq -r '.deployments[0].state')
@@ -44,56 +46,48 @@ jobs:
             echo "Attempt $i/$MAX_ATTEMPTS — $DUID — State: $STATE"
 
             if [ "$STATE" = "READY" ]; then
-              echo "READY: $DUID ($URL)"
-              echo "deployment_uid=$DUID" >> $GITHUB_OUTPUT
-              echo "deployment_url=$URL" >> $GITHUB_OUTPUT
+              echo "Deployment READY: $DUID ($URL)"
               break
             elif [ "$STATE" = "ERROR" ] || [ "$STATE" = "CANCELED" ]; then
-              echo "ERROR: Deployment failed with state: $STATE"
+              echo "ERROR: Deployment failed with state: $STATE — cannot promote."
               exit 1
             fi
 
+            # Still building — wait and retry
             sleep $SLEEP_SECONDS
           done
 
-          if [ -z "$DUID" ] || [ "$STATE" != "READY" ]; then
-            echo "ERROR: Deployment did not reach READY in time"
+          if [ "$STATE" != "READY" ]; then
+            echo "ERROR: No READY deployment found after $MAX_ATTEMPTS attempts."
             exit 1
           fi
 
-      - name: Assign production alias to latest deployment
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          DEPLOYMENT_UID="${{ steps.wait_deploy.outputs.deployment_uid }}"
-          ALIAS="solarpro-v31.vercel.app"
-
-          echo "Assigning $ALIAS → $DEPLOYMENT_UID ..."
-
+          echo "Assigning $ALIAS → $DUID ..."
           RESULT=$(curl -s -X POST \
-            "https://api.vercel.com/v10/deployments/$DEPLOYMENT_UID/aliases" \
+            "https://api.vercel.com/v10/deployments/$DUID/aliases" \
             -H "Authorization: Bearer $VERCEL_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{&quot;alias&quot;: &quot;$ALIAS&quot;}")
 
-          echo "Response: $RESULT"
+          echo "Vercel response: $RESULT"
 
-          ERROR=$(echo "$RESULT" | jq -r '.error.code // empty')
-          if [ -n "$ERROR" ] && [ "$ERROR" != "not_modified" ]; then
-            echo "ERROR assigning alias: $ERROR"
+          ERR_CODE=$(echo "$RESULT" | jq -r '.error.code // empty')
+          if [ -n "$ERR_CODE" ] && [ "$ERR_CODE" != "not_modified" ]; then
+            echo "ERROR assigning alias: $ERR_CODE"
             exit 1
           fi
 
-          echo "SUCCESS: $ALIAS → $DEPLOYMENT_UID"
+          echo "SUCCESS: $ALIAS → $DUID"
 
       - name: Health check
         run: |
           sleep 5
+          echo "Checking https://solarpro-v31.vercel.app/api/health ..."
           HEALTH=$(curl -s https://solarpro-v31.vercel.app/api/health)
-          echo "Health: $HEALTH"
+          echo "Health response: $HEALTH"
           DB_OK=$(echo "$HEALTH" | jq -r '.db.ok // false')
-          if [ "$DB_OK" != "true" ]; then
-            echo "WARNING: DB health check returned: $DB_OK"
-          else
+          if [ "$DB_OK" = "true" ]; then
             echo "All systems healthy."
+          else
+            echo "WARNING: DB health returned: $DB_OK — check env vars."
           fi
