@@ -1,21 +1,25 @@
 # SolarPro — Local Development Guide
 
-## Overview
+## Branch Strategy
 
-SolarPro is a Next.js 14 application. All development should happen **locally** with hot reload.
-Push to GitHub (`master`) only when the feature is stable and tested.
+| Branch | Purpose | Deploys to |
+|--------|---------|-----------|
+| `dev` | Active development — all day-to-day work | Vercel **preview** URL only |
+| `master` | Stable, production-ready code | **https://solarpro-v31.vercel.app** (production) |
 
-**Vercel deploys automatically on every push to `master`.** Do not push broken code.
+**Rule: Never commit directly to `master` during development.**
+Work on `dev`, test locally, then merge to `master` when stable.
 
 ---
 
 ## Quick Start
 
-### 1. Clone the repo
+### 1. Clone and switch to dev branch
 
 ```bash
 git clone https://github.com/rayobrian6/Solarpro.git
 cd Solarpro
+git checkout dev
 ```
 
 ### 2. Install dependencies
@@ -26,186 +30,166 @@ npm install
 
 ### 3. Configure environment variables
 
-Copy `.env.example` to `.env.local` and fill in your values:
-
 ```bash
 cp .env.example .env.local
 ```
 
-Edit `.env.local`:
+Edit `.env.local` — see the **Environment Variables** section below.
 
-| Variable | Where to get it | Required? |
-|---|---|---|
-| `DATABASE_URL` | [Neon Console](https://console.neon.tech) → your project → Connection string (pooled) | ✅ Yes |
-| `JWT_SECRET` | Any long random string. Run: `node -e "console.log(require('crypto').randomBytes(64).toString('base64'))"` | ✅ Yes |
-| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | [Google Cloud Console](https://console.cloud.google.com) → Maps JavaScript API | ✅ Yes (for map features) |
-| `GOOGLE_MAPS_API_KEY` | Same as above (server-side) | ✅ Yes (for geocoding) |
-| `NEXT_PUBLIC_CESIUM_ION_TOKEN` | [Cesium Ion](https://cesium.com/ion/tokens) | Optional |
-| `NREL_API_KEY` | [NREL Developer](https://developer.nrel.gov/signup/) — use `DEMO_KEY` for dev | Optional |
-| `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) | Optional (bill OCR) |
-| `STRIPE_SECRET_KEY` | [Stripe Dashboard](https://dashboard.stripe.com/apikeys) — use `sk_test_*` keys | Optional (billing) |
-
-### 4. Start the development server
+### 4. Start local development server
 
 ```bash
 npm run dev
 ```
 
-The app runs at **http://localhost:3000** with hot reload.
+App runs at **http://localhost:3000** with full hot reload.
+All APIs work locally: SLD generation, plan-set PDF, projects, auth.
 
 ---
 
-## Development Workflow
+## Daily Development Workflow
 
 ```
-Edit code locally
+git checkout dev              # Always work on dev branch
       ↓
-Test at http://localhost:3000
+npm run dev                   # Start local server at localhost:3000
       ↓
-All APIs work locally (SLD, plan-set, projects, auth)
+Edit code → hot reload        # Instant feedback, no deploys
       ↓
-Satisfied with the change?
+Test locally at localhost:3000
       ↓
-git add . && git commit -m "descriptive message"
+git add . && git commit -m "feat: description"
+git push origin dev           # Push to dev → Vercel preview URL only
       ↓
-git push origin master
+Feature complete + tested?
       ↓
-GitHub Actions triggers Vercel deployment automatically
+git checkout master
+git merge dev                 # Merge stable code to master
+git push origin master        # → GitHub Actions deploys to production
       ↓
 Live at https://solarpro-v31.vercel.app
 ```
 
-**Key rule: Never push to master for experimental changes.** Use local dev for all iteration.
+---
+
+## What Triggers a Vercel Build
+
+| Action | Result |
+|--------|--------|
+| Push to `dev` | Vercel preview URL (no production change) |
+| Push to `master` | **Production deployment** via GitHub Actions |
+| `npm run dev` locally | **Nothing** — 100% local, zero cloud builds |
+
+---
+
+## Merging dev → master (Production Release)
+
+When your feature is ready for production:
+
+```bash
+# Make sure dev is up to date
+git checkout dev
+git pull origin dev
+
+# Switch to master and merge
+git checkout master
+git pull origin master
+git merge dev
+
+# Push — this triggers production deployment
+git push origin master
+
+# Switch back to dev for next feature
+git checkout dev
+```
+
+Or use a **Pull Request** on GitHub:
+- Open PR: `dev → master`
+- Review changes
+- Merge → automatic production deployment
 
 ---
 
 ## Available Scripts
 
 | Command | Description |
-|---|---|
-| `npm run dev` | Start dev server at http://localhost:3000 (hot reload) |
-| `npm run dev:3008` | Start dev server at http://localhost:3008 (alternate port) |
-| `npm run build` | Production build (catches TypeScript errors) |
-| `npm run start` | Start production build locally |
-| `npm run type-check` | Run TypeScript compiler check without building |
-| `npm run lint` | Run ESLint |
-| `npm run dev:debug` | Start with Node.js inspector (for Chrome DevTools debugging) |
+|---------|-------------|
+| `npm run dev` | Local dev server at **http://localhost:3000** (hot reload) |
+| `npm run dev:3008` | Local dev server at http://localhost:3008 |
+| `npm run build` | Production build — catches TypeScript errors before pushing |
+| `npm run type-check` | TypeScript check only (fast) |
+| `npm run lint` | ESLint check |
+| `npm run dev:debug` | Dev server with Node.js inspector for Chrome DevTools |
+
+**Always run `npm run build` before merging to master** to catch TypeScript errors early.
+
+---
+
+## Environment Variables
+
+Copy `.env.example` to `.env.local` and fill in:
+
+| Variable | Where to get it | Required? |
+|----------|----------------|-----------|
+| `DATABASE_URL` | [Neon Console](https://console.neon.tech) → Connection string (pooled) | ✅ Yes |
+| `JWT_SECRET` | Run: `node -e "console.log(require('crypto').randomBytes(64).toString('base64'))"` | ✅ Yes |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | [Google Cloud Console](https://console.cloud.google.com) → Maps JS API | ✅ Maps |
+| `GOOGLE_MAPS_API_KEY` | Same as above (server-side geocoding) | ✅ Maps |
+| `NEXT_PUBLIC_CESIUM_ION_TOKEN` | [Cesium Ion](https://cesium.com/ion/tokens) | Optional |
+| `NREL_API_KEY` | [NREL Developer](https://developer.nrel.gov/signup/) — use `DEMO_KEY` for dev | Optional |
+| `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com/api-keys) | Optional (bill OCR) |
+| `STRIPE_SECRET_KEY` | [Stripe Dashboard](https://dashboard.stripe.com/apikeys) — `sk_test_*` for dev | Optional (billing) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe Dashboard → Webhooks | Optional (billing) |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | [Mapbox](https://account.mapbox.com/access-tokens/) | Optional (maps) |
+
+`.env.local` is **gitignored** — it never gets committed.
 
 ---
 
 ## API Routes (all work locally)
 
-All API routes run as local Node.js functions — no Vercel dependencies:
-
 | Endpoint | Description |
-|---|---|
+|----------|-------------|
 | `POST /api/engineering/sld` | Generate Single-Line Diagram SVG |
-| `POST /api/engineering/plan-set` | Generate full permit plan set PDF |
+| `POST /api/engineering/plan-set` | Generate permit plan set PDF |
 | `GET/POST /api/projects` | Project CRUD |
-| `GET /api/projects/:id` | Get single project |
-| `POST /api/auth/login` | User authentication |
-| `GET /api/health` | Health check (DB + version) |
-| `GET /api/version` | Build version info |
+| `POST /api/auth/login` | Authentication |
+| `GET /api/health` | Health check |
+| `GET /api/version` | Build version |
 
 ---
 
 ## PDF Generation (wkhtmltopdf)
 
-The permit plan set uses `wkhtmltopdf` for PDF rendering. Install it if not present:
+Required for permit plan set generation:
 
-**macOS:**
 ```bash
+# macOS
 brew install wkhtmltopdf
-```
 
-**Ubuntu/Debian:**
-```bash
+# Ubuntu/Debian
 sudo apt-get install wkhtmltopdf
-```
 
-**Windows:** Download from https://wkhtmltopdf.org/downloads.html
-
-Verify installation:
-```bash
+# Verify
 wkhtmltopdf --version
-# Should output: wkhtmltopdf 0.12.x
 ```
 
-If `wkhtmltopdf` is not available, the plan-set route automatically falls back to returning HTML instead of PDF.
+Falls back to HTML output if wkhtmltopdf is not installed.
 
 ---
 
-## Engineering Engine (computeSystem)
+## Preventing Accidental Production Deployments
 
-The core NEC calculation engine runs entirely locally — no external services:
+The GitHub Actions workflow (`main.yml`) **only triggers on push to `master`**.
 
-- **`lib/computed-system.ts`** — Single source of truth for all NEC 690/705 calculations
-- **`lib/plan-set/`** — Permit plan set sheet builders
-- **`lib/equipment-db.ts`** — Equipment registry (panels, inverters, racking)
+Pushing to `dev` never triggers a production deployment.
 
-To test the engine directly:
+To skip GitHub Actions even on master (e.g., for a hotfix you want to test first):
+
 ```bash
-# Run a quick engine test
-npx tsx scripts/test-computed-system.ts
+git commit -m "wip: testing something [skip ci]"
+git push origin master  # workflow skipped
 ```
-
----
-
-## Database
-
-The app uses **Neon PostgreSQL** (serverless). The same database is shared between local dev and production. If you need a separate dev database:
-
-1. Create a new project at [console.neon.tech](https://console.neon.tech)
-2. Run migrations: `node run_migration.js`
-3. Update `DATABASE_URL` in `.env.local`
-
----
-
-## GitHub Actions / Vercel Deployment
-
-**Automatic deployment** triggers on every push to `master` via `.github/workflows/main.yml`.
-
-The workflow:
-1. Triggers a Vercel production build via API
-2. Waits for the build to complete (READY state)
-3. Assigns the `solarpro-v31.vercel.app` alias
-4. Runs a health check
-
-**Required GitHub Secret:** `VERCEL_TOKEN` — set at https://github.com/rayobrian6/Solarpro/settings/secrets/actions
-
-**To disable automatic deployment** (e.g., for a long feature branch): add `[skip ci]` to your commit message:
-```bash
-git commit -m "wip: experimenting with new feature [skip ci]"
-```
-
----
-
-## Troubleshooting
-
-### Port already in use
-```bash
-# Kill whatever is on port 3000
-lsof -ti:3000 | xargs kill -9
-npm run dev
-```
-
-### TypeScript errors
-```bash
-npm run type-check 2>&1 | head -50
-```
-
-### Database connection errors
-- Verify `DATABASE_URL` in `.env.local` is the **pooled** Neon connection string
-- Check Neon console for connection limits
-- Neon free tier: 10 concurrent connections max
-
-### "JWT_SECRET is not set" error
-- Make sure `.env.local` exists and has `JWT_SECRET` set
-- Restart the dev server after editing `.env.local`
-
-### wkhtmltopdf not found
-- Install it (see PDF Generation section above)
-- The plan-set route falls back to HTML if wkhtmltopdf is missing
 
 ---
 
@@ -213,37 +197,34 @@ npm run type-check 2>&1 | head -50
 
 ```
 solarpro/
-├── app/                    # Next.js App Router pages + API routes
+├── app/
 │   ├── api/
 │   │   ├── engineering/
-│   │   │   ├── plan-set/   # Permit plan set generation
+│   │   │   ├── plan-set/   # Permit plan set PDF generation
 │   │   │   └── sld/        # Single-line diagram SVG
 │   │   ├── projects/       # Project CRUD
 │   │   └── auth/           # Authentication
-│   └── engineering/        # Design Studio UI (page.tsx)
+│   └── engineering/        # Design Studio (page.tsx)
 ├── lib/
-│   ├── computed-system.ts  # NEC calculation engine (single source of truth)
+│   ├── computed-system.ts  # NEC calculation engine
 │   ├── equipment-db.ts     # Equipment registry
-│   ├── version.ts          # Build version (bump on each release)
+│   ├── version.ts          # Build version
 │   └── plan-set/           # Plan set sheet builders
-├── components/             # Shared React components
-├── .env.local              # Local environment variables (NOT in git)
+├── .env.local              # Local env vars (gitignored — never commit)
 ├── .env.example            # Template for .env.local
 ├── DEVELOPMENT.md          # This file
 └── .github/workflows/
-    └── main.yml            # Auto-deploy to Vercel on master push
+    └── main.yml            # Auto-deploy to production on master push ONLY
 ```
 
 ---
 
 ## Versioning
 
-Bump `lib/version.ts` when making significant changes:
+Bump `lib/version.ts` before merging to master:
 
 ```typescript
-export const BUILD_VERSION = 'v45.4';   // ← increment this
+export const BUILD_VERSION = 'v45.4';
 export const BUILD_DATE    = '2026-03-11';
-export const BUILD_DESCRIPTION = 'Brief description of what changed';
+export const BUILD_DESCRIPTION = 'What changed in this release';
 ```
-
-Use semantic-style versioning: `v{major}.{minor}` — e.g., `v45.4`, `v46.0`.

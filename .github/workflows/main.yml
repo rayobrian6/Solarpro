@@ -1,10 +1,12 @@
 # ============================================================
 # main.yml — Deploy to Vercel Production
-# Runs ONLY on push to master branch.
-# Does NOT run on feature branches or PRs.
 #
-# LOCAL DEVELOPMENT: Do not push to master until code is stable.
-# Run locally with: npm run dev
+# TRIGGERS: push to master ONLY
+# dev branch pushes → NO deployment (preview only via Vercel GitHub integration)
+#
+# WORKFLOW:
+#   dev branch  → local development + preview URLs (no production deploy)
+#   master branch → this workflow runs → Vercel production deployment
 # ============================================================
 
 name: Deploy to Vercel Production
@@ -12,11 +14,13 @@ name: Deploy to Vercel Production
 on:
   push:
     branches:
-      - master
-    # Skip workflow for documentation-only changes
+      - master        # ONLY master triggers production deployment
     paths-ignore:
-      - '**.md'
+      - '**.md'       # Skip for documentation-only changes
       - 'docs/**'
+
+  # Allow manual trigger from GitHub Actions UI
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -24,12 +28,12 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Trigger Vercel deployment
+      - name: Trigger Vercel production deployment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
         run: |
-          echo "Triggering Vercel deployment for master branch..."
+          echo "Triggering Vercel production deployment for master..."
 
           RESPONSE=$(curl -s -X POST \
             "https://api.vercel.com/v13/deployments" \
@@ -47,21 +51,18 @@ jobs:
 
           echo "Vercel response: $RESPONSE"
           ERR=$(echo "$RESPONSE" | jq -r '.error.message // empty')
-
           if [ -n "$ERR" ]; then
             echo "ERROR triggering deployment: $ERR"
             exit 1
           fi
-
           DUID=$(echo "$RESPONSE" | jq -r '.uid // empty')
           echo "Deployment started: $DUID"
 
-      - name: Wait for deployment to be READY and assign alias
+      - name: Wait for READY and assign alias
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
         run: |
-          echo "Waiting for deployment to be READY..."
           MAX_ATTEMPTS=30
           SLEEP_SECONDS=15
           DUID=""
@@ -74,7 +75,7 @@ jobs:
 
             STATE=$(echo "$RESPONSE" | jq -r '.deployments[0].state')
             DUID=$(echo "$RESPONSE" | jq -r '.deployments[0].uid')
-            URL=$(echo "$RESPONSE" | jq -r '.deployments[0].url')
+            URL=$(echo "$RESPONSE"  | jq -r '.deployments[0].url')
 
             echo "Attempt $i/$MAX_ATTEMPTS — $DUID — State: $STATE"
 
@@ -85,18 +86,15 @@ jobs:
               echo "ERROR: Deployment failed with state: $STATE"
               exit 1
             fi
-
             sleep $SLEEP_SECONDS
           done
 
           if [ "$STATE" != "READY" ]; then
-            echo "ERROR: No READY deployment after $MAX_ATTEMPTS attempts."
+            echo "ERROR: Timed out waiting for READY deployment."
             exit 1
           fi
 
-          echo "Assigning alias solarpro-v31.vercel.app → $DUID ..."
           echo '{"alias":"solarpro-v31.vercel.app"}' > /tmp/alias_payload.json
-
           RESULT=$(curl -s -X POST \
             "https://api.vercel.com/v10/deployments/${DUID}/aliases" \
             -H "Authorization: Bearer ${VERCEL_TOKEN}" \
@@ -105,12 +103,10 @@ jobs:
 
           echo "Alias response: $RESULT"
           ERR_CODE=$(echo "$RESULT" | jq -r '.error.code // empty')
-
           if [ -n "$ERR_CODE" ] && [ "$ERR_CODE" != "not_modified" ]; then
             echo "ERROR assigning alias: $ERR_CODE"
             exit 1
           fi
-
           echo "SUCCESS: solarpro-v31.vercel.app → $DUID"
 
       - name: Health check
@@ -119,5 +115,4 @@ jobs:
           VERSION=$(curl -s https://solarpro-v31.vercel.app/api/version | jq -r '.version // "unknown"')
           echo "Live version: $VERSION"
           HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://solarpro-v31.vercel.app/api/health)
-          echo "Health check HTTP status: $HEALTH"
-          echo "Deployment complete!"
+          echo "Health HTTP status: $HEALTH"
