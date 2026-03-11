@@ -1,8 +1,9 @@
-// BUILD v30.7 — 2026-03-06
+// BUILD v40.6 — 2025-03-10
 import type { Metadata } from 'next';
 import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
+import { UserProvider } from '@/contexts/UserContext';
 import SolarAIBot from '@/components/support/SolarAIBot';
 
 export const metadata: Metadata = {
@@ -25,9 +26,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
         <ToastProvider>
           <StoreProvider>
-            {children}
-            {/* Free AI Support Bot — floating widget, visible on all pages */}
-            <SolarAIBot />
+            {/* UserProvider wraps entire app — single source of truth for user state */}
+            <UserProvider>
+              {children}
+              {/* Free AI Support Bot — floating widget, visible on all pages */}
+              <SolarAIBot />
+            </UserProvider>
           </StoreProvider>
         </ToastProvider>
       </body>

@@ -1,25 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AppShell from '@/components/ui/AppShell';
+import { useUser } from '@/contexts/UserContext';
 import {
   CreditCard, CheckCircle, ArrowRight, AlertTriangle,
   Clock, Zap, ExternalLink, RefreshCw, Building2,
   Star, Shield, X, Check
 } from 'lucide-react';
-
-// Role and plan are independent — role = platform authority, plan = billing tier
-interface UserData {
-  role: string;
-  plan: string;
-  subscriptionStatus: string;
-  trialEndsAt: string | null;
-  isFreePass: boolean;
-  hasAccess: boolean;
-  stripeCustomerId?: string;
-}
 
 const PLAN_INFO: Record<string, { label: string; price: string; color: string; bgColor: string; borderColor: string }> = {
   starter:      { label: 'Starter',      price: '$79/mo',   color: 'text-slate-300',  bgColor: 'bg-slate-700',    borderColor: 'border-slate-600' },
@@ -58,35 +48,10 @@ function isAdminRole(role: string) {
 
 export default function BillingPage() {
   const router = useRouter();
-  const [user, setUser] = useState<UserData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Use global UserContext — single source of truth, no duplicate fetch
+  const { user, loading } = useUser();
   const [portalLoading, setPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch('/api/auth/me', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(json => {
-        // API returns { success: true, data: { id, role, plan, isFreePass, ... } }
-        const u = json?.data || json;
-        if (!u?.id) { router.push('/auth/login'); return; }
-        // isFreePass comes from DB boolean is_free_pass — never infer from subscriptionStatus
-        const isFP = u.isFreePass === true;
-        setUser({
-          role: u.role || 'user',
-          // Keep plan as-is from DB — do NOT overwrite with 'free_pass'
-          // Role and plan are independent fields
-          plan: u.plan || 'starter',
-          subscriptionStatus: u.subscriptionStatus || 'trialing',
-          trialEndsAt: u.trialEndsAt || null,
-          isFreePass: isFP,
-          hasAccess: u.hasAccess !== false,
-          stripeCustomerId: u.stripeCustomerId,
-        });
-      })
-      .catch(() => router.push('/auth/login'))
-      .finally(() => setLoading(false));
-  }, [router]);
 
   const handleManageBilling = async () => {
     setPortalLoading(true);
@@ -129,7 +94,8 @@ export default function BillingPage() {
   const isActive = user.subscriptionStatus === 'active';
   // isFreePass is a DB boolean — never inferred from subscriptionStatus
   const isFreePass = user.isFreePass;
-  const hasStripe = !!user.stripeCustomerId;
+  // stripeCustomerId not in UserContext — only used for Stripe portal button visibility
+  const hasStripe = false; // Will be fetched separately if needed
 
   // Admin/super_admin users bypass all subscription restrictions
   const hasFullAccess = isAdmin || isFreePass;

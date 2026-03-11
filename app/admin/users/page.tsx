@@ -5,6 +5,7 @@ import {
   ChevronLeft, ChevronRight, Edit2, Trash2, CheckCircle,
   AlertCircle, User, Crown,
 } from 'lucide-react';
+import { useUser } from '@/contexts/UserContext';
 
 const PLAN_COLORS: Record<string, string> = {
   contractor: 'bg-amber-500/20 text-amber-400',
@@ -26,6 +27,7 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 export default function AdminUsers() {
+  const { refreshUser } = useUser(); // refresh logged-in user's own state after admin actions
   const [users, setUsers]     = useState<any[]>([]);
   const [total, setTotal]     = useState(0);
   const [page, setPage]       = useState(1);
@@ -52,18 +54,22 @@ export default function AdminUsers() {
 
   useEffect(() => { load(); }, [load]);
 
-  const action = async (userId: string, action: string, extra: any = {}) => {
-    setActing(userId + action);
+  const action = async (userId: string, actionName: string, extra: any = {}) => {
+    setActing(userId + actionName);
     try {
       const res = await fetch('/api/admin/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, action, ...extra }),
+        // API expects 'id' not 'userId'
+        body: JSON.stringify({ id: userId, action: actionName, ...extra }),
       });
       const d = await res.json();
       if (d.success) {
-        showToast(`✓ ${action.replace('_', ' ')} applied`);
+        showToast(`✓ ${actionName.replace(/_/g, ' ')} applied`);
+        // Refresh the users list
         load();
+        // Refresh the logged-in admin's own user state in case they changed their own record
+        await refreshUser();
       } else {
         showToast(d.error || 'Failed', false);
       }

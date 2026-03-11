@@ -1,6 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+/**
+ * useSubscription
+ *
+ * Reads from the global UserContext (single source of truth).
+ * No longer fetches /api/auth/me independently — avoids duplicate requests
+ * and ensures all components see the same user state simultaneously.
+ */
+
+import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { canAccess, checkAccess, FeatureKey } from '@/lib/permissions';
 import type { PlanId } from '@/lib/stripe';
 
@@ -47,79 +55,39 @@ const PLAN_COLORS: Record<string, string> = {
   free_pass:    'text-green-400',
 };
 
-function isAdminRole(role: string) {
-  return role === 'admin' || role === 'super_admin';
-}
-
 export function useSubscription(): SubscriptionState {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<{
-    plan: PlanId;
-    status: string;
-    role: string;
-    isFreePass: boolean;
-    trialEndsAt: string | null;
-    hasAccess: boolean;
-  }>({
-    plan: 'starter',
-    status: 'trialing',
-    role: 'user',
-    isFreePass: false,
-    trialEndsAt: null,
-    hasAccess: true,
-  });
+  // Read from global UserContext — no independent fetch
+  const { user, loading } = useUser();
 
-  useEffect(() => {
-    fetch('/api/auth/me', { cache: 'no-store' })
-      .then(r => r.json())
-      .then(json => {
-        // API returns { success: true, data: { id, plan, role, ... } }
-        const user = json?.data || json;
-        if (user?.id) {
-          // isFreePass comes from DB boolean — never infer from subscriptionStatus string
-          const isFP = user.isFreePass === true;
-          const role = user.role || 'user';
-          setData({
-            plan: (user.plan || 'starter') as PlanId,
-            status: user.subscriptionStatus || 'trialing',
-            role,
-            isFreePass: isFP,
-            trialEndsAt: user.trialEndsAt || null,
-            hasAccess: user.hasAccess !== false,
-          });
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const isAdmin = isAdminRole(data.role);
+  const role = user?.role || 'user';
+  const plan = (user?.plan || 'starter') as PlanId;
+  const status = user?.subscriptionStatus || 'trialing';
+  const isFreePassUser = user?.isFreePass === true;
+  const trialEndsAt = user?.trialEndsAt || null;
+  const isAdmin = isAdminRole(role);
 
   // Admin/super_admin bypass all subscription checks
   const access = isAdmin
     ? { allowed: true, reason: 'active' as const, daysRemaining: undefined }
-    : checkAccess(data.status, data.trialEndsAt, data.isFreePass, data.role);
+    : checkAccess(status, trialEndsAt, isFreePassUser, role);
 
   const trialDaysRemaining = access.daysRemaining ?? 0;
-
-  // Free pass users and admins are always active — never expired
-  const isFreePassUser = data.isFreePass;
   const isEffectivelyActive = isAdmin || isFreePassUser;
 
-  const isTrialing = !isEffectivelyActive && data.status === 'trialing' && trialDaysRemaining > 0;
+  const isTrialing = !isEffectivelyActive && status === 'trialing' && trialDaysRemaining > 0;
   const isExpired  = !isEffectivelyActive && (
-    data.status === 'trial_expired' ||
-    (data.status === 'trialing' && trialDaysRemaining === 0)
+    status === 'trial_expired' ||
+    (status === 'trialing' && trialDaysRemaining === 0)
   );
-  const isActive   = data.status === 'active' || isEffectivelyActive;
-  const isPastDue  = !isAdmin && data.status === 'past_due';
-  const isCanceled = !isAdmin && data.status === 'canceled';
+  const isActive   = status === 'active' || isEffectivelyActive;
+  const isPastDue  = !isAdmin && status === 'past_due';
+  const isCanceled = !isAdmin && status === 'canceled';
 
   return {
     loading,
-    plan: data.plan,
-    status: data.status,
-    role: data.role,
+    plan,
+    status,
+    role,
     isFreePass: isFreePassUser,
     hasAccess: access.allowed,
     trialDaysRemaining,
@@ -128,16 +96,14 @@ export function useSubscription(): SubscriptionState {
     isExpired,
     isPastDue,
     isCanceled,
-    planLabel: PLAN_LABELS[data.plan] || PLAN_LABELS[data.status] || 'Free Pass',
-    planPrice: PLAN_PRICES[data.plan] || PLAN_PRICES[data.status] || 'Free',
-    planColor: PLAN_COLORS[data.plan] || PLAN_COLORS[data.status] || 'text-green-400',
+    planLabel: PLAN_LABELS[plan] || 'Starter',
+    planPrice: PLAN_PRICES[plan] || '$79/mo',
+    planColor: PLAN_COLORS[plan] || 'text-slate-300',
     can: (feature: FeatureKey) => {
-      // Admin/super_admin bypass ALL feature gates — full access
       if (isAdmin) return true;
-      // Free pass users bypass ALL feature gates — full access
       if (isFreePassUser) return true;
       if (!access.allowed) return false;
-      return canAccess(data.plan, feature);
+      return canAccess(plan, feature);
     },
   };
 }

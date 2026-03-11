@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import { useAppStore } from '@/store/appStore';
-import { useSubscription } from '@/hooks/useSubscription';
+import { useUser, isAdminRole } from '@/contexts/UserContext';
 import {
   Sun, Zap, Users, FolderOpen, FileText, TrendingUp,
   ArrowUpRight, ArrowRight, Plus, Leaf,
@@ -78,9 +78,9 @@ export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
   const [showBillUpload, setShowBillUpload] = useState(false);
 
-  // Use subscription hook — DB is single source of truth for role, plan, free pass
-  const { role: userRole } = useSubscription();
-  const isAdmin = userRole === 'admin' || userRole === 'super_admin';
+  // Use global UserContext — single source of truth for role, plan, free pass
+  const { user: currentUser } = useUser();
+  const isAdmin = isAdminRole(currentUser?.role);
 
   // ✅ Phase 6: Read from global store — single source of truth
   const projects = useAppStore(s => s.projects);

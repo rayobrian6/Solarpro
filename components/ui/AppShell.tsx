@@ -14,6 +14,7 @@ import {
 import SubscriptionBanner from './SubscriptionBanner';
 import { checkAccess } from '@/lib/permissions';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
+import { useUser, getAccountBadge, isAdminRole } from '@/contexts/UserContext';
 
 interface NavItem {
   label: string;
@@ -23,92 +24,41 @@ interface NavItem {
   color?: string;
 }
 
-interface AuthUser {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  company?: string;
-  plan?: string;
-  subscriptionStatus?: string;
-  trialEndsAt?: string | null;
-  isFreePass?: boolean;
-}
-
 const navItems: NavItem[] = [
-  { label: 'Dashboard', href: '/dashboard', icon: <LayoutDashboard size={17} /> },
-  { label: 'Clients', href: '/clients', icon: <Users size={17} /> },
-  { label: 'Projects', href: '/projects', icon: <FolderOpen size={17} /> },
-  { label: 'Design Studio', href: '/design', icon: <Map size={17} />, color: 'text-amber-400' },
-  { label: 'Engineering', href: '/engineering', icon: <Wrench size={17} />, color: 'text-blue-400' },
-  { label: 'Proposals', href: '/proposals', icon: <FileText size={17} /> },
-  { label: 'Analytics', href: '/analytics', icon: <BarChart3 size={17} /> },
-  { label: 'Settings', href: '/settings', icon: <Settings size={17} /> },
+  { label: 'Dashboard',     href: '/dashboard',  icon: <LayoutDashboard size={17} /> },
+  { label: 'Clients',       href: '/clients',    icon: <Users size={17} /> },
+  { label: 'Projects',      href: '/projects',   icon: <FolderOpen size={17} /> },
+  { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
+  { label: 'Engineering',   href: '/engineering',icon: <Wrench size={17} />, color: 'text-blue-400' },
+  { label: 'Proposals',     href: '/proposals',  icon: <FileText size={17} /> },
+  { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
+  { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
 ];
 
 const adminItems: NavItem[] = [
   { label: 'Equipment Library', href: '/admin/hardware', icon: <Cpu size={17} /> },
-  { label: 'Pricing', href: '/admin/pricing', icon: <Settings size={17} /> },
+  { label: 'Pricing',           href: '/admin/pricing',  icon: <Settings size={17} /> },
 ];
 
 const systemTypes = [
-  { label: 'Roof', icon: <Home size={11} />, color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+  { label: 'Roof',   icon: <Home size={11} />,   color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
   { label: 'Ground', icon: <Sprout size={11} />, color: 'text-teal-400 bg-teal-500/10 border-teal-500/20' },
-  { label: 'Fence', icon: <Fence size={11} />, color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
+  { label: 'Fence',  icon: <Fence size={11} />,  color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
 ];
 
 function getInitials(name: string): string {
   if (!name) return '?';
-  return name
-    .split(' ')
-    .map(part => part[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2);
+  return name.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2);
 }
 
-/**
- * Returns a human-readable account status label and color class.
- * Priority: super_admin > admin > free_pass > active > trialing > else
- */
-function getAccountBadge(user: AuthUser | null): { label: string; color: string } {
-  if (!user) return { label: '…', color: 'text-slate-500' };
-  // Role takes ABSOLUTE priority — platform authority always shown first
-  const role = user.role?.toLowerCase();
-  if (role === 'super_admin') return { label: 'Super Admin', color: 'text-purple-400' };
-  if (role === 'admin')       return { label: 'Admin',       color: 'text-amber-400' };
-  // Free pass — DB boolean is_free_pass (never inferred from subscriptionStatus)
-  if (user.isFreePass)        return { label: 'Free Pass',   color: 'text-emerald-400' };
-  // Subscription state
-  const status = user.subscriptionStatus || 'trialing';
-  if (status === 'active')    return { label: `${capitalize(user.plan || 'Pro')} Plan`, color: 'text-emerald-400' };
-  if (status === 'trialing')  return { label: 'Trial',       color: 'text-amber-400' };
-  if (status === 'past_due')  return { label: 'Past Due',    color: 'text-red-400' };
-  if (status === 'canceled')  return { label: 'Canceled',    color: 'text-red-400' };
-  // free_pass status string (legacy — DB boolean is_free_pass is the canonical field)
-  if (status === 'free_pass') return { label: 'Free Pass',   color: 'text-emerald-400' };
-  return { label: 'Free',     color: 'text-slate-400' };
-}
-
-function capitalize(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function isAdminRole(role?: string) {
-  return role === 'admin' || role === 'super_admin';
-}
-
-function UserDropdown({ initials, displayName, userLoading, user, onLogout }: {
-  initials: string;
-  displayName: string;
-  userLoading: boolean;
-  user: AuthUser | null;
-  onLogout: () => void;
-}) {
+function UserDropdown({ onLogout }: { onLogout: () => void }) {
+  const { user, loading } = useUser();
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
   const badge = getAccountBadge(user);
+  const initials = user ? getInitials(user.name) : '…';
+  const displayName = user?.name || '…';
   const showAdminPortal = isAdminRole(user?.role);
   const showUpgrade = !isAdminRole(user?.role) && !user?.isFreePass && user?.subscriptionStatus !== 'active';
 
@@ -119,14 +69,14 @@ function UserDropdown({ initials, displayName, userLoading, user, onLogout }: {
         className="flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-slate-700/40 cursor-pointer transition-colors group"
       >
         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-xs flex-shrink-0">
-          {userLoading ? '…' : initials}
+          {loading ? '…' : initials}
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-white truncate">
-            {userLoading ? 'Loading...' : displayName}
+            {loading ? 'Loading...' : displayName}
           </div>
           <div className={`text-xs truncate font-medium ${badge.color}`}>
-            {userLoading ? '…' : badge.label}
+            {loading ? '…' : badge.label}
           </div>
         </div>
         <ChevronDown size={13} className={`text-slate-500 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
@@ -201,8 +151,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchVal, setSearchVal] = useState('');
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [userLoading, setUserLoading] = useState(true);
+
+  // Global user state from UserContext — single source of truth
+  const { user, loading: userLoading, refreshUser } = useUser();
 
   // Auto-reload when a new deployment is detected — fixes Vercel alias caching
   useVersionCheck();
@@ -212,64 +163,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Close mobile menu on route change
   useEffect(() => { setMobileOpen(false); }, [pathname]);
 
-  // Fetch real authenticated user from DB via /api/auth/me
-  // DB is the single source of truth for role, plan, and free pass status
+  // Redirect unauthenticated users
   useEffect(() => {
-    let cancelled = false;
-    async function fetchUser() {
-      try {
-        const res = await fetch('/api/auth/me', { credentials: 'include', cache: 'no-store' });
-        if (!res.ok) {
-          router.push('/auth/login');
-          return;
-        }
-        const json = await res.json();
-        if (!cancelled) {
-          // API returns { success: true, data: { ... } }
-          const userData = json.data || json.user || json;
-          // isFreePass comes from DB boolean is_free_pass — never infer from subscriptionStatus
-          const isFP = userData.isFreePass === true;
-          setUser({
-            id: userData.id,
-            name: userData.name || userData.email,
-            email: userData.email,
-            role: userData.role || 'user',
-            company: userData.company,
-            plan: userData.plan || 'starter',
-            subscriptionStatus: userData.subscriptionStatus || 'trialing',
-            trialEndsAt: userData.trialEndsAt || null,
-            isFreePass: isFP,
-          });
-        }
-      } catch (err) {
-        console.error('Failed to fetch user:', err);
-      } finally {
-        if (!cancelled) setUserLoading(false);
-      }
+    if (!userLoading && !user) {
+      router.push('/auth/login');
     }
-    fetchUser();
-    return () => { cancelled = true; };
-  }, [router]);
+  }, [user, userLoading, router]);
 
-  // Trial expiration redirect — push expired users to /subscribe
-  // Admin, super_admin, and free pass users are NEVER redirected
+  // Trial expiration redirect — admin and free pass users are NEVER redirected
   useEffect(() => {
     if (!user) return;
-
-    // Admins always have full access — never redirect
     if (isAdminRole(user.role)) return;
-
-    // Free pass users always have full access — never redirect
     if (user.isFreePass) return;
 
-    // Don't redirect on subscribe/auth/enterprise/billing pages
     const allowedPaths = ['/subscribe', '/auth', '/enterprise', '/account/billing'];
     if (allowedPaths.some(p => pathname?.startsWith(p))) return;
 
     const access = checkAccess(
       user.subscriptionStatus || 'trialing',
       user.trialEndsAt || null,
-      false // free_pass already handled above
+      false,
+      user.role
     );
     if (!access.allowed) {
       router.push('/subscribe?expired=1');
@@ -285,11 +199,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const initials = user ? getInitials(user.name) : '…';
   const displayName = user?.name || '…';
-
-  // Derived flags used throughout sidebar
+  const badge = getAccountBadge(user);
   const isAdmin = isAdminRole(user?.role);
   const isFreePassUser = user?.isFreePass === true;
-  // Show subscription CTA only for non-admin, non-free-pass users
   const showSubscriptionCTA = !isAdmin && !isFreePassUser;
 
   const SidebarContent = () => (
@@ -312,9 +224,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
         {!collapsed && (
-          <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">
-            Main
-          </div>
+          <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">Main</div>
         )}
         {navItems.map((item) => {
           const active = isActive(item.href);
@@ -354,9 +264,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className={`${collapsed ? 'border-t border-slate-700/50 my-3' : 'mt-5 mb-2'}`}>
           {!collapsed && (
-            <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">
-              Admin
-            </div>
+            <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">Admin</div>
           )}
         </div>
 
@@ -387,9 +295,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <>
             <div className={`${collapsed ? 'border-t border-slate-700/50 my-3' : 'mt-3 mb-2'}`}>
               {!collapsed && (
-                <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">
-                  System
-                </div>
+                <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">System</div>
               )}
             </div>
             <Link
@@ -456,7 +362,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Free Pass badge in sidebar — shown instead of subscription CTA */}
+      {/* Free Pass badge — shown for free pass non-admin users */}
       {!collapsed && isFreePassUser && !isAdmin && user && (
         <div className="px-3 pb-2">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
@@ -471,7 +377,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* Admin badge in sidebar — shown for admin/super_admin */}
+      {/* Admin badge — shown for admin/super_admin */}
       {!collapsed && isAdmin && user && (
         <div className="px-3 pb-2">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20">
@@ -488,7 +394,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
-      {/* User Profile — dynamic from /api/auth/me */}
+      {/* User Profile */}
       <div className={`px-3 py-3 border-t border-slate-700/50 flex-shrink-0 ${collapsed ? 'flex justify-center' : ''}`}>
         {collapsed ? (
           <div
@@ -499,13 +405,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {userLoading ? '…' : initials}
           </div>
         ) : (
-          <UserDropdown
-            initials={initials}
-            displayName={displayName}
-            userLoading={userLoading}
-            user={user}
-            onLogout={handleLogout}
-          />
+          <UserDropdown onLogout={handleLogout} />
         )}
       </div>
     </div>
@@ -546,9 +446,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Subscription Banner */}
         <SubscriptionBanner />
-        {/* Top Header */}
         <header className="h-14 bg-slate-900/90 border-b border-slate-700/50 flex items-center gap-3 px-4 lg:px-5 flex-shrink-0 backdrop-blur-sm">
           <button
             className="lg:hidden btn-ghost p-2 rounded-lg"
@@ -557,7 +455,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <Menu size={18} />
           </button>
 
-          {/* Search */}
           <div className="flex-1 max-w-sm">
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -592,7 +489,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               <HelpCircle size={16} />
             </button>
 
-            {/* User avatar in header — dynamic initials */}
             <div
               onClick={handleLogout}
               className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-xs cursor-pointer hover:scale-110 transition-transform"
@@ -603,7 +499,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Page Content */}
         <main className="flex-1 overflow-auto bg-slate-950">
           {children}
         </main>

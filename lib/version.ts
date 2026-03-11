@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.6';
+export const BUILD_VERSION = 'v40.7';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Role takes priority over free-pass in badge; auto-reload on stale deployment; vercel.json alias lock';
+export const BUILD_DESCRIPTION = 'FIX: Global UserContext — single source of truth; refreshUser() after admin actions; role always shown first';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -59,6 +59,15 @@ export const BUILD_FEATURES = [
   'FIX: next.config.js — injects NEXT_PUBLIC_BUILD_VERSION env var so client knows its build version',
   'FIX: app/api/version/route.ts — returns version + ts fields with no-cache headers',
   'FIX: app/account/billing/page.tsx — full rewrite: role+plan shown independently; admin bypass; no free_pass status inference',
+  // v40.7 — Global UserContext + refreshUser()
+  'NEW: contexts/UserContext.tsx — global AppUser state; UserProvider wraps entire app; refreshUser() re-fetches DB',
+  'FIX: app/layout.tsx — UserProvider added wrapping entire app tree',
+  'FIX: components/ui/AppShell.tsx — reads from UserContext; no independent /api/auth/me fetch',
+  'FIX: hooks/useSubscription.ts — reads from UserContext; no independent /api/auth/me fetch',
+  'FIX: app/dashboard/page.tsx — reads role from UserContext via useUser()',
+  'FIX: app/account/billing/page.tsx — reads user from UserContext; no independent fetch',
+  'FIX: app/api/admin/users/route.ts — PATCH returns updated user record after every action',
+  'FIX: app/admin/users/page.tsx — calls refreshUser() after every action; fixes userId→id body key bug',
 ] as const;
 
 export function getBuildBadge(): string {

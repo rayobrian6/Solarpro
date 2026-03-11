@@ -94,7 +94,13 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true });
+    // Return the updated user record so the frontend can refresh state immediately
+    const updated = await sql`
+      SELECT id, name, email, company, role, plan, subscription_status, is_free_pass,
+             free_pass_note, trial_ends_at, created_at
+      FROM users WHERE id = ${id} LIMIT 1
+    `;
+    return NextResponse.json({ success: true, user: updated[0] ?? null });
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
