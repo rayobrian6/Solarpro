@@ -13,108 +13,140 @@ export async function GET(req: NextRequest) {
   const id = session.id;
   const results: any = { jwtId: id };
 
-  // CONFIRMED: SELECT id, email, role → role="user" (WRONG)
-  // CONFIRMED: SELECT id, email, role AS user_role → user_role="super_admin" (CORRECT, no "role" key)
-  // CONFIRMED: SELECT id, name, email, role → role="super_admin" (CORRECT)
-  // CONFIRMED: SELECT id, email, role, name, company → role="super_admin" (CORRECT)
-  
-  // NEW HYPOTHESIS: There's a SECOND "role" column somewhere, or a JOIN/view issue
-  // When role is 3rd column, maybe it's getting a different "role" value from somewhere
-  
-  // Test A: What does password_hash look like? Is it "user"?
+  // Test the EXACT primary query from /api/auth/me
   try {
-    const r = await sql`SELECT id, email, password_hash FROM users WHERE id = ${id} LIMIT 1`;
-    results.A_passwordHash = {
-      allKeys: r[0] ? Object.keys(r[0]) : [],
-      password_hash_first30: r[0]?.password_hash?.substring(0, 30),
-      password_hash_length: r[0]?.password_hash?.length,
+    const rows = await sql`
+      SELECT
+        id, name, email, company, phone, role, email_verified, created_at,
+        plan, subscription_status, trial_starts_at, trial_ends_at,
+        is_free_pass, free_pass_note,
+        company_logo_url, company_website, company_address, company_phone,
+        brand_primary_color, brand_secondary_color, proposal_footer_text
+      FROM users WHERE id = ${id} LIMIT 1
+    `;
+    results.exactPrimaryQuery = {
+      allKeys: rows[0] ? Object.keys(rows[0]) : [],
+      role: rows[0]?.role,
+      name: rows[0]?.name,
+      error: null,
     };
-  } catch (e: any) { results.A_passwordHash = { error: e.message }; }
+  } catch (e: any) {
+    results.exactPrimaryQuery = { error: e.message, role: null };
+  }
 
-  // Test B: SELECT id, email, role - confirm it returns "user"
+  // Test the EXACT fallback query from /api/auth/me
   try {
-    const r = await sql`SELECT id, email, role FROM users WHERE id = ${id} LIMIT 1`;
-    results.B_idEmailRole = {
-      allKeys: r[0] ? Object.keys(r[0]) : [],
-      role: r[0]?.role,
-      roleLength: r[0]?.role?.length,
-      roleIsUser: r[0]?.role === 'user',
+    const rows = await sql`
+      SELECT id, name, email, company, phone, role, email_verified, created_at
+      FROM users WHERE id = ${id} LIMIT 1
+    `;
+    results.exactFallbackQuery = {
+      allKeys: rows[0] ? Object.keys(rows[0]) : [],
+      role: rows[0]?.role,
+      name: rows[0]?.name,
+      error: null,
     };
-  } catch (e: any) { results.B_idEmailRole = { error: e.message }; }
+  } catch (e: any) {
+    results.exactFallbackQuery = { error: e.message, role: null };
+  }
 
-  // Test C: SELECT id, email, password_hash, role - show both
+  // Test SELECT * to see all columns
   try {
-    const r = await sql`SELECT id, email, password_hash, role FROM users WHERE id = ${id} LIMIT 1`;
-    results.C_withPasswordHash = {
-      allKeys: r[0] ? Object.keys(r[0]) : [],
-      role: r[0]?.role,
-      password_hash_first30: r[0]?.password_hash?.substring(0, 30),
+    const rows = await sql`SELECT * FROM users WHERE id = ${id} LIMIT 1`;
+    results.starQuery = {
+      allKeys: rows[0] ? Object.keys(rows[0]) : [],
+      role: rows[0]?.role,
     };
-  } catch (e: any) { results.C_withPasswordHash = { error: e.message }; }
+  } catch (e: any) { results.starQuery = { error: e.message }; }
 
-  // Test D: SELECT role, email, id (reversed) - if Neon maps by position, role would be "id" value
+  // Test SELECT id, email, role (known to return "user")
   try {
-    const r = await sql`SELECT role, email, id FROM users WHERE id = ${id} LIMIT 1`;
-    results.D_reversedOrder = {
-      allKeys: r[0] ? Object.keys(r[0]) : [],
-      role: r[0]?.role,
-      id: r[0]?.id,
+    const rows = await sql`SELECT id, email, role FROM users WHERE id = ${id} LIMIT 1`;
+    results.idEmailRole = {
+      allKeys: rows[0] ? Object.keys(rows[0]) : [],
+      role: rows[0]?.role,
     };
-  } catch (e: any) { results.D_reversedOrder = { error: e.message }; }
+  } catch (e: any) { results.idEmailRole = { error: e.message }; }
 
-  // Test E: Check ALL columns of the users table to find if there's another "role" column
+  // Test SELECT id, name, email, role (known to return "super_admin")
   try {
-    const r = await sql`
-      SELECT column_name, ordinal_position, data_type
+    const rows = await sql`SELECT id, name, email, role FROM users WHERE id = ${id} LIMIT 1`;
+    results.idNameEmailRole = {
+      allKeys: rows[0] ? Object.keys(rows[0]) : [],
+      role: rows[0]?.role,
+    };
+  } catch (e: any) { results.idNameEmailRole = { error: e.message }; }
+
+  // Check ALL columns in the users table
+  try {
+    const rows = await sql`
+      SELECT column_name, ordinal_position, data_type, column_default
       FROM information_schema.columns 
       WHERE table_name = 'users' AND table_schema = 'public'
       ORDER BY ordinal_position
     `;
-    results.E_allColumns = r.map((row: any) => `${row.ordinal_position}:${row.column_name}(${row.data_type})`);
-  } catch (e: any) { results.E_allColumns = { error: e.message }; }
+    results.allColumns = rows.map((r: any) => `${r.ordinal_position}:${r.column_name}(${r.data_type})`);
+  } catch (e: any) { results.allColumns = { error: e.message }; }
 
-  // Test F: SELECT * FROM users - what keys does the full row have?
+  // Check if there are multiple rows for this user ID
   try {
-    const r = await sql`SELECT * FROM users WHERE id = ${id} LIMIT 1`;
-    results.F_starQuery = {
-      allKeys: r[0] ? Object.keys(r[0]) : [],
-      role: r[0]?.role,
-    };
-  } catch (e: any) { results.F_starQuery = { error: e.message }; }
+    const rows = await sql`SELECT id, email, role FROM users WHERE id = ${id}`;
+    results.rowCount = rows.length;
+    results.allRows = rows.map((r: any) => ({ id: r.id?.substring(0, 8), role: r.role }));
+  } catch (e: any) { results.rowCount = { error: e.message }; }
 
-  // Test G: Use explicit cast to text to force the actual value
+  // Check if there's a trigger or rule on the users table
   try {
-    const r = await sql`SELECT id, email, role::text AS role_text FROM users WHERE id = ${id} LIMIT 1`;
-    results.G_roleCast = {
-      allKeys: r[0] ? Object.keys(r[0]) : [],
-      role_text: r[0]?.role_text,
-    };
-  } catch (e: any) { results.G_roleCast = { error: e.message }; }
-
-  // Test H: Check if there's a DEFAULT value or constraint on role column
-  try {
-    const r = await sql`
-      SELECT column_default, is_nullable, character_maximum_length
-      FROM information_schema.columns 
-      WHERE table_name = 'users' AND column_name = 'role' AND table_schema = 'public'
+    const rows = await sql`
+      SELECT trigger_name, event_manipulation, action_timing
+      FROM information_schema.triggers
+      WHERE event_object_table = 'users' AND trigger_schema = 'public'
     `;
-    results.H_roleColumnInfo = r[0] || null;
-  } catch (e: any) { results.H_roleColumnInfo = { error: e.message }; }
+    results.triggers = rows.map((r: any) => `${r.trigger_name}:${r.event_manipulation}:${r.action_timing}`);
+  } catch (e: any) { results.triggers = { error: e.message }; }
 
-  // Test I: Direct raw value check - what is the ACTUAL stored value?
+  // Check if there's a view named "users" shadowing the table
   try {
-    const r = await sql`SELECT role FROM users WHERE id = ${id}`;
-    results.I_directRole = {
-      role: r[0]?.role,
-      count: r.length,
-    };
-  } catch (e: any) { results.I_directRole = { error: e.message }; }
+    const rows = await sql`
+      SELECT table_name, table_type
+      FROM information_schema.tables
+      WHERE table_name = 'users' AND table_schema = 'public'
+    `;
+    results.tableType = rows.map((r: any) => `${r.table_name}:${r.table_type}`);
+  } catch (e: any) { results.tableType = { error: e.message }; }
 
-  // Test J: Check if there are multiple rows for this user
+  // CRITICAL: Check if /api/auth/me is hitting the fallback path
+  // Simulate the try/catch from /api/auth/me
+  let useFallback = false;
+  let meRows: any[] = [];
   try {
-    const r = await sql`SELECT id, email, role FROM users WHERE email = 'raymond.obrian@yahoo.com'`;
-    results.J_allRaymondRows = r.map((row: any) => ({ id: row.id?.substring(0, 8), email: row.email, role: row.role }));
-  } catch (e: any) { results.J_allRaymondRows = { error: e.message }; }
+    meRows = await sql`
+      SELECT
+        id, name, email, company, phone, role, email_verified, created_at,
+        plan, subscription_status, trial_starts_at, trial_ends_at,
+        is_free_pass, free_pass_note,
+        company_logo_url, company_website, company_address, company_phone,
+        brand_primary_color, brand_secondary_color, proposal_footer_text
+      FROM users WHERE id = ${id} LIMIT 1
+    `;
+  } catch (colErr: any) {
+    useFallback = true;
+    try {
+      meRows = await sql`
+        SELECT id, name, email, company, phone, role, email_verified, created_at
+        FROM users WHERE id = ${id} LIMIT 1
+      `;
+    } catch (e2: any) {
+      results.meSimulation = { error: e2.message };
+    }
+  }
+  
+  results.meSimulation = {
+    useFallback,
+    role: meRows[0]?.role,
+    allKeys: meRows[0] ? Object.keys(meRows[0]) : [],
+    finalRole: meRows[0]?.role || 'user',
+  };
 
   return NextResponse.json(results, {
     headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
