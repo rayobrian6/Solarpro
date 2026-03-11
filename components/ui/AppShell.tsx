@@ -25,18 +25,18 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard',  href: '/dashboard', icon: <LayoutDashboard size={17} /> },
-  { label: 'Clients',    href: '/clients',   icon: <Users size={17} /> },
-  { label: 'Projects',   href: '/projects',  icon: <FolderOpen size={17} />, color: 'text-amber-400' },
-  { label: 'Analytics',  href: '/analytics', icon: <BarChart3 size={17} /> },
-  { label: 'Settings',   href: '/settings',  icon: <Settings size={17} /> },
+  { label: 'Dashboard',     href: '/dashboard',  icon: <LayoutDashboard size={17} /> },
+  { label: 'Clients',       href: '/clients',    icon: <Users size={17} /> },
+  { label: 'Projects',      href: '/projects',   icon: <FolderOpen size={17} />, color: 'text-amber-400' },
+  { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
+  { label: 'Engineering',   href: '/engineering',icon: <Wrench size={17} />, color: 'text-blue-400' },
+  { label: 'Proposals',     href: '/proposals',  icon: <FileText size={17} /> },
+  { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
+  { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
 ];
 
-// Secondary tools — accessible from within Projects, kept here for direct access
-const toolItems: NavItem[] = [
-  { label: 'Design Studio', href: '/design',    icon: <Map size={17} />,      color: 'text-amber-400' },
-  { label: 'Proposals',     href: '/proposals', icon: <FileText size={17} />, color: 'text-blue-400' },
-];
+// Secondary tools section (empty — all tools restored to main nav)
+const toolItems: NavItem[] = [];
 
 const adminItems: NavItem[] = [
   { label: 'Equipment Library', href: '/admin/hardware', icon: <Cpu size={17} /> },
