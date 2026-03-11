@@ -1,305 +1,491 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import AppShell from '@/components/ui/AppShell';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import type { Project } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
-  ArrowLeft, Map, FileText, Zap, DollarSign, Sun,
-  User, Calendar, Settings, TrendingUp, Leaf, Edit
+  ArrowLeft, Upload, Map, FileText, Zap, DollarSign,
+  User, Calendar, AlertTriangle, CheckCircle, ChevronRight,
+  Settings, BarChart2, Shield, Sun, Wrench, Send, Package
 } from 'lucide-react';
 import Link from 'next/link';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, LineChart, Line
-} from 'recharts';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
+import BillTab from '@/components/project/BillTab';
+import SystemSizeTab from '@/components/project/SystemSizeTab';
+import DesignTab from '@/components/project/DesignTab';
+import ProposalTab from '@/components/project/ProposalTab';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// ─── Types ────────────────────────────────────────────────────────────────────
+type TabId = 'bill' | 'system' | 'design' | 'engineering' | 'proposal';
 
+// ─── Workflow Steps ────────────────────────────────────────────────────────────
+interface WorkflowStep {
+  id: string;
+  label: string;
+  shortLabel: string;
+  icon: React.ReactNode;
+  check: (p: Project) => boolean;
+  tab: TabId;
+}
+
+const WORKFLOW_STEPS: WorkflowStep[] = [
+  {
+    id: 'bill',
+    label: 'Bill Uploaded',
+    shortLabel: 'Bill',
+    icon: <Upload size={13} />,
+    check: p => !!p.billAnalysis,
+    tab: 'bill',
+  },
+  {
+    id: 'system',
+    label: 'System Sized',
+    shortLabel: 'Sized',
+    icon: <Zap size={13} />,
+    check: p => !!(p.systemSizeKw || p.billAnalysis?.recommendedSystemKw),
+    tab: 'system',
+  },
+  {
+    id: 'design',
+    label: 'Design Complete',
+    shortLabel: 'Design',
+    icon: <Map size={13} />,
+    check: p => !!p.layout,
+    tab: 'design',
+  },
+  {
+    id: 'engineering',
+    label: 'Engineering Done',
+    shortLabel: 'Eng.',
+    icon: <Wrench size={13} />,
+    check: p => p.status === 'proposal' || p.status === 'approved' || p.status === 'installed',
+    tab: 'engineering',
+  },
+  {
+    id: 'proposal',
+    label: 'Proposal Sent',
+    shortLabel: 'Proposal',
+    icon: <Send size={13} />,
+    check: p => p.status === 'approved' || p.status === 'installed',
+    tab: 'proposal',
+  },
+];
+
+// ─── Tab Config ────────────────────────────────────────────────────────────────
+interface TabConfig {
+  id: TabId;
+  label: string;
+  icon: React.ReactNode;
+  badge?: (p: Project) => string | null;
+}
+
+const TABS: TabConfig[] = [
+  {
+    id: 'bill',
+    label: 'Bill',
+    icon: <Upload size={14} />,
+    badge: p => !p.billAnalysis ? '!' : null,
+  },
+  {
+    id: 'system',
+    label: 'System Size',
+    icon: <Zap size={14} />,
+    badge: p => !(p.systemSizeKw || p.billAnalysis?.recommendedSystemKw) ? '!' : null,
+  },
+  {
+    id: 'design',
+    label: 'Design',
+    icon: <Map size={14} />,
+    badge: p => !p.layout ? '!' : null,
+  },
+  {
+    id: 'engineering',
+    label: 'Engineering',
+    icon: <Wrench size={14} />,
+  },
+  {
+    id: 'proposal',
+    label: 'Proposal',
+    icon: <FileText size={14} />,
+  },
+];
+
+// ─── Missing Data Warnings ─────────────────────────────────────────────────────
+function getMissingWarnings(project: Project): { label: string; action: string; tab: TabId }[] {
+  const warnings: { label: string; action: string; tab: TabId }[] = [];
+  if (!project.billAnalysis) {
+    warnings.push({ label: 'No utility bill uploaded', action: 'Upload Bill', tab: 'bill' });
+  }
+  if (!project.utilityName) {
+    warnings.push({ label: 'Utility provider not detected', action: 'Upload Bill', tab: 'bill' });
+  }
+  if (!project.systemSizeKw && !project.billAnalysis?.recommendedSystemKw) {
+    warnings.push({ label: 'System size not calculated', action: 'View System Size', tab: 'system' });
+  }
+  if (!project.layout) {
+    warnings.push({ label: 'No design created', action: 'Open Design Studio', tab: 'design' });
+  }
+  if (!project.selectedPanel) {
+    warnings.push({ label: 'No panel selected', action: 'Edit Design', tab: 'design' });
+  }
+  if (!project.selectedInverter) {
+    warnings.push({ label: 'No inverter selected', action: 'Edit Design', tab: 'design' });
+  }
+  if (!project.lat || !project.lng) {
+    warnings.push({ label: 'Address not geocoded', action: 'Check Bill', tab: 'bill' });
+  }
+  return warnings;
+}
+
+// ─── Status Colors ─────────────────────────────────────────────────────────────
 const statusColors: Record<string, string> = {
   lead: 'badge-lead', design: 'badge-design', proposal: 'badge-proposal',
   approved: 'badge-approved', installed: 'badge-installed',
 };
 
+// ─── Quick Actions ─────────────────────────────────────────────────────────────
+interface QuickAction {
+  label: string;
+  icon: React.ReactNode;
+  color: string;
+  action: 'tab' | 'link';
+  target: string;
+  enabled: (p: Project) => boolean;
+  disabledReason?: string;
+}
+
+// ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
 
-  // ✅ Phase 5/6: Use global store — loadActiveProject has 3-tier fallback
   const loadActiveProject = useAppStore(s => s.loadActiveProject);
   const projects = useAppStore(s => s.projects);
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'engineering'>('overview');
+  const [activeTab, setActiveTab] = useState<TabId>('bill');
+  const [showAllWarnings, setShowAllWarnings] = useState(false);
 
   useEffect(() => {
-    // Check store first (instant)
     const existing = projects.find(p => p.id === id);
     if (existing) {
       setProject(existing);
       setLoading(false);
+      // Auto-navigate to first incomplete step
+      autoSelectTab(existing);
       return;
     }
-    // Otherwise use loadActiveProject (server → localStorage fallback)
     loadActiveProject(id)
-      .then(p => { setProject(p); setLoading(false); })
+      .then(p => {
+        setProject(p);
+        setLoading(false);
+        if (p) autoSelectTab(p);
+      })
       .catch(() => setLoading(false));
-  }, [id, projects, loadActiveProject]);
+  }, [id]);
 
-  if (loading) return <AppShell><div className="p-6 flex items-center justify-center h-64"><div className="spinner w-8 h-8" /></div></AppShell>;
-  if (!project) return (
-    <AppShell>
-      <div className="p-6 text-center">
-        <p className="text-slate-400 mb-4">Project not found</p>
-        <Link href="/projects" className="btn-primary">Back to Projects</Link>
-      </div>
-    </AppShell>
-  );
+  const autoSelectTab = (p: Project) => {
+    // Start at first incomplete workflow step
+    for (const step of WORKFLOW_STEPS) {
+      if (!step.check(p)) {
+        setActiveTab(step.tab);
+        return;
+      }
+    }
+    // All complete — show proposal
+    setActiveTab('proposal');
+  };
 
-  const production = project.production;
-  const cost = project.costEstimate;
-  const layout = project.layout;
+  const handleUploadBill = useCallback(() => {
+    // Navigate to bill upload — could be a modal or redirect
+    router.push(`/projects/${id}/upload-bill`);
+  }, [id, router]);
 
-  const productionChartData = production
-    ? MONTHS.map((month, i) => ({
-        month,
-        production: production.monthlyProductionKwh[i],
-        usage: Math.round((project.client?.annualKwh || 0) / 12),
-      }))
-    : [];
+  const handleRunAutoSize = useCallback(() => {
+    setActiveTab('system');
+  }, []);
 
-  const savingsData = cost
-    ? Array.from({ length: 25 }, (_, i) => ({
-        year: `Y${i + 1}`,
-        cumulative: Math.round(cost.annualSavings * (i + 1) * Math.pow(1.035, i)),
-        netCost: i === 0 ? cost.netCost : 0,
-      }))
-    : [];
+  if (loading) {
+    return (
+      <AppShell>
+        <div className="p-6 flex items-center justify-center h-64">
+          <div className="spinner w-8 h-8" />
+        </div>
+      </AppShell>
+    );
+  }
 
-  const typeIcon = { roof: '🏠', ground: '🌱', fence: '🔲' }[project.systemType];
+  if (!project) {
+    return (
+      <AppShell>
+        <div className="p-6 text-center">
+          <p className="text-slate-400 mb-4">Project not found</p>
+          <Link href="/projects" className="btn-primary">Back to Projects</Link>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const warnings = getMissingWarnings(project);
+  const visibleWarnings = showAllWarnings ? warnings : warnings.slice(0, 3);
+  const completedSteps = WORKFLOW_STEPS.filter(s => s.check(project)).length;
+  const progressPct = Math.round((completedSteps / WORKFLOW_STEPS.length) * 100);
   const typeLabel = { roof: 'Roof Mount', ground: 'Ground Mount', fence: 'Sol Fence' }[project.systemType];
+
+  const quickActions: QuickAction[] = [
+    {
+      label: 'Upload Bill',
+      icon: <Upload size={14} />,
+      color: 'text-amber-400',
+      action: 'tab',
+      target: 'bill',
+      enabled: () => true,
+    },
+    {
+      label: 'Design Studio',
+      icon: <Map size={14} />,
+      color: 'text-blue-400',
+      action: 'link',
+      target: `/design?projectId=${id}`,
+      enabled: p => !!p.billAnalysis,
+      disabledReason: 'Upload bill first',
+    },
+    {
+      label: 'Engineering',
+      icon: <Wrench size={14} />,
+      color: 'text-purple-400',
+      action: 'tab',
+      target: 'engineering',
+      enabled: p => !!p.layout,
+      disabledReason: 'Complete design first',
+    },
+    {
+      label: 'Generate Proposal',
+      icon: <FileText size={14} />,
+      color: 'text-emerald-400',
+      action: 'link',
+      target: `/proposals?projectId=${id}`,
+      enabled: p => !!p.layout && !!p.billAnalysis,
+      disabledReason: 'Need bill + design',
+    },
+    {
+      label: 'Permit Packet',
+      icon: <Package size={14} />,
+      color: 'text-slate-400',
+      action: 'tab',
+      target: 'engineering',
+      enabled: p => p.status === 'proposal' || p.status === 'approved' || p.status === 'installed',
+      disabledReason: 'Complete engineering first',
+    },
+  ];
 
   return (
     <AppShell>
-      <div className="p-6 space-y-6 animate-fade-in">
-        {/* Header */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <Link href="/projects" className="btn-ghost p-2 rounded-lg"><ArrowLeft size={18} /></Link>
+      <div className="p-4 md:p-6 space-y-4 animate-fade-in">
+
+        {/* ── Header ─────────────────────────────────────────────────────── */}
+        <div className="flex items-start gap-3 flex-wrap">
+          <Link href="/projects" className="btn-ghost p-2 rounded-lg mt-0.5">
+            <ArrowLeft size={18} />
+          </Link>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-bold text-white">{project.name}</h1>
               <span className={`badge ${statusColors[project.status]}`}>{project.status}</span>
-              <span className={`badge ${project.systemType === 'roof' ? 'badge-roof' : project.systemType === 'ground' ? 'badge-ground' : 'badge-fence'}`}>{typeLabel}</span>
+              <span className={`badge ${project.systemType === 'roof' ? 'badge-roof' : project.systemType === 'ground' ? 'badge-ground' : 'badge-fence'}`}>
+                {typeLabel}
+              </span>
             </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-              <span className="flex items-center gap-1"><User size={10} />{project.client?.name}</span>
+            <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
+              {project.client?.name && (
+                <span className="flex items-center gap-1"><User size={10} />{project.client.name}</span>
+              )}
               <span className="flex items-center gap-1"><Calendar size={10} />{new Date(project.createdAt).toLocaleDateString()}</span>
+              {project.address && (
+                <span className="text-slate-500 truncate max-w-xs">{project.address}</span>
+              )}
             </div>
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <Link href={`/design?projectId=${id}`} className="btn-secondary btn-sm"><Map size={14} /> Design Studio</Link>
-            <button
-              onClick={() => setActiveTab(activeTab === 'engineering' ? 'overview' : 'engineering')}
-              className={`btn-sm flex items-center gap-1.5 ${activeTab === 'engineering' ? 'btn-primary' : 'btn-secondary'}`}
-            >
-              <Zap size={14} /> Engineering
-            </button>
-            <Link href={`/proposals?projectId=${id}`} className="btn-primary btn-sm"><FileText size={14} /> Generate Proposal</Link>
           </div>
         </div>
 
-        {/* Status Pipeline */}
+        {/* ── Workflow Progress Tracker ───────────────────────────────────── */}
         <div className="card p-4">
-          <div className="flex items-center gap-2">
-            {['lead', 'design', 'proposal', 'approved', 'installed'].map((status, i, arr) => (
-              <React.Fragment key={status}>
-                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                  project.status === status ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                  arr.indexOf(project.status) > i ? 'text-emerald-400' : 'text-slate-500'
-                }`}>
-                  {arr.indexOf(project.status) > i && <span>✓</span>}
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
-                </div>
-                {i < arr.length - 1 && <div className={`flex-1 h-px ${arr.indexOf(project.status) > i ? 'bg-emerald-500/40' : 'bg-slate-700'}`} />}
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-
-        {/* Tab Navigation */}
-        <div className="flex gap-1 border-b border-slate-700/50 pb-0">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-              activeTab === 'overview'
-                ? 'bg-slate-800 text-white border border-slate-700/50 border-b-slate-800'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Overview
-          </button>
-          <button
-            onClick={() => setActiveTab('engineering')}
-            className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors flex items-center gap-1.5 ${
-              activeTab === 'engineering'
-                ? 'bg-slate-800 text-white border border-slate-700/50 border-b-slate-800'
-                : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            <Zap size={13} className="text-amber-400" /> Engineering
-          </button>
-        </div>
-
-        {/* Engineering Tab */}
-        {activeTab === 'engineering' && (
-          <div className="card p-0 overflow-hidden">
-            <EngineeringTab projectId={id} projectName={project.name} />
-          </div>
-        )}
-
-        {/* Overview Tab */}
-        {activeTab === 'overview' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* System Info */}
-              <div className="card p-5 space-y-4">
-                <h3 className="font-semibold text-white text-sm flex items-center gap-2">
-                  <span className="text-xl">{typeIcon}</span> System Configuration
-                </h3>
-                {layout ? (
-                  <div className="space-y-2 text-sm">
-                    {[
-                      { label: 'System Size', value: `${layout.systemSizeKw.toFixed(2)} kW` },
-                      { label: 'Panel Count', value: `${layout.totalPanels} panels` },
-                      { label: 'System Type', value: typeLabel },
-                      ...(project.systemType === 'fence' ? [
-                        { label: 'Tilt', value: '90° (Vertical)' },
-                        { label: 'Bifacial', value: layout.bifacialOptimized ? 'Yes (+20%)' : 'Yes (+10%)' },
-                      ] : [
-                        { label: 'Tilt', value: `${layout.groundTilt || 20}°` },
-                        { label: 'Azimuth', value: `${layout.groundAzimuth || 180}°` },
-                      ]),
-                    ].map(item => (
-                      <div key={item.label} className="flex justify-between border-b border-slate-700/50 pb-2">
-                        <span className="text-slate-400">{item.label}</span>
-                        <span className="font-medium text-white">{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <p className="text-slate-500 text-sm">No design yet</p>
-                    <Link href={`/design?projectId=${id}`} className="btn-primary btn-sm mt-3 inline-flex">Open Design Studio</Link>
-                  </div>
-                )}
-              </div>
-
-              {/* Production Summary */}
-              <div className="card p-5 space-y-4">
-                <h3 className="font-semibold text-white text-sm flex items-center gap-2"><Zap size={14} className="text-amber-400" /> Production</h3>
-                {production ? (
-                  <div className="space-y-3">
-                    <div className="text-center py-2">
-                      <div className="text-3xl font-bold text-amber-400">{production.annualProductionKwh.toLocaleString()}</div>
-                      <div className="text-xs text-slate-400">kWh per year</div>
-                    </div>
-                    <div className="progress-bar">
-                      <div className="progress-fill bg-gradient-to-r from-amber-500 to-emerald-500" style={{ width: `${Math.min(100, production.offsetPercentage)}%` }} />
-                    </div>
-                    <div className="text-center text-sm font-semibold text-emerald-400">{production.offsetPercentage}% energy offset</div>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      {[
-                        { label: 'Specific Yield', value: `${production.specificYield} kWh/kWp` },
-                        { label: 'CO₂ Offset', value: `${production.co2OffsetTons} tons/yr` },
-                        { label: 'Trees Equiv.', value: `${production.treesEquivalent}` },
-                        { label: 'Perf. Ratio', value: `${(production.performanceRatio * 100).toFixed(0)}%` },
-                      ].map(item => (
-                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
-                          <div className="text-slate-500">{item.label}</div>
-                          <div className="font-semibold text-white">{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <p className="text-slate-500 text-sm">No production data</p>
-                    <p className="text-slate-600 text-xs mt-1">Complete design to calculate</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Financial Summary */}
-              <div className="card p-5 space-y-4">
-                <h3 className="font-semibold text-white text-sm flex items-center gap-2"><DollarSign size={14} className="text-emerald-400" /> Financials</h3>
-                {cost ? (
-                  <div className="space-y-2 text-sm">
-                    {[
-                      { label: 'Gross Cost', value: `$${cost.grossCost.toLocaleString()}` },
-                      { label: 'Tax Credit', value: `-$${cost.taxCredit.toLocaleString()}`, color: 'text-emerald-400' },
-                      { label: 'Net Cost', value: `$${cost.netCost.toLocaleString()}`, bold: true, color: 'text-amber-400' },
-                      { label: 'Annual Savings', value: `$${cost.annualSavings.toLocaleString()}/yr`, color: 'text-emerald-400' },
-                      { label: 'Payback', value: `${cost.paybackYears} years` },
-                      { label: '25-yr Savings', value: `$${cost.lifetimeSavings.toLocaleString()}`, color: 'text-emerald-400' },
-                      { label: 'ROI', value: `${cost.roi}%`, color: 'text-emerald-400' },
-                    ].map(item => (
-                      <div key={item.label} className={`flex justify-between border-b border-slate-700/50 pb-1.5 ${(item as any).bold ? 'font-bold text-base' : ''}`}>
-                        <span className="text-slate-400">{item.label}</span>
-                        <span className={(item as any).color || 'text-white'}>{item.value}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-4">
-                    <p className="text-slate-500 text-sm">No cost estimate</p>
-                  </div>
-                )}
-              </div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Workflow Progress</div>
+            <div className="text-xs text-slate-400">
+              <span className={progressPct === 100 ? 'text-emerald-400 font-semibold' : 'text-white font-semibold'}>
+                {completedSteps}/{WORKFLOW_STEPS.length}
+              </span> steps complete
             </div>
+          </div>
 
-            {/* Charts */}
-            {production && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="card p-5">
-                  <h3 className="font-semibold text-white mb-4 text-sm">Monthly Production vs Usage</h3>
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={productionChartData} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                      <XAxis dataKey="month" tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fill: '#64748b', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} />
-                      <Bar dataKey="production" fill="#f59e0b" radius={[2, 2, 0, 0]} name="Production (kWh)" />
-                      <Bar dataKey="usage" fill="#3b82f6" radius={[2, 2, 0, 0]} name="Usage (kWh)" opacity={0.6} />
-                    </BarChart>
-                  </ResponsiveContainer>
+          {/* Progress bar */}
+          <div className="w-full h-1.5 bg-slate-700 rounded-full mb-4">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${progressPct === 100 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+
+          {/* Steps */}
+          <div className="flex items-center gap-1 overflow-x-auto pb-1">
+            {WORKFLOW_STEPS.map((step, i) => {
+              const done = step.check(project);
+              const isActive = activeTab === step.tab;
+              const isCurrent = !done && (i === 0 || WORKFLOW_STEPS[i - 1].check(project));
+              return (
+                <React.Fragment key={step.id}>
+                  <button
+                    onClick={() => setActiveTab(step.tab)}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap flex-shrink-0 ${
+                      done
+                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 hover:bg-emerald-500/25'
+                        : isCurrent
+                          ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse-subtle'
+                          : isActive
+                            ? 'bg-slate-700 text-white border border-slate-600'
+                            : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                    }`}
+                  >
+                    {done ? <CheckCircle size={12} className="text-emerald-400" /> : step.icon}
+                    <span className="hidden sm:inline">{step.label}</span>
+                    <span className="sm:hidden">{step.shortLabel}</span>
+                  </button>
+                  {i < WORKFLOW_STEPS.length - 1 && (
+                    <ChevronRight size={12} className={`flex-shrink-0 ${done ? 'text-emerald-500/40' : 'text-slate-700'}`} />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Quick Actions Bar ───────────────────────────────────────────── */}
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {quickActions.map(qa => {
+            const enabled = qa.enabled(project);
+            if (qa.action === 'link' && enabled) {
+              return (
+                <Link
+                  key={qa.label}
+                  href={qa.target}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-medium text-white transition-all whitespace-nowrap flex-shrink-0 hover:bg-slate-700"
+                >
+                  <span className={qa.color}>{qa.icon}</span>
+                  {qa.label}
+                </Link>
+              );
+            }
+            if (qa.action === 'tab' && enabled) {
+              return (
+                <button
+                  key={qa.label}
+                  onClick={() => setActiveTab(qa.target as TabId)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-medium text-white transition-all whitespace-nowrap flex-shrink-0 hover:bg-slate-700"
+                >
+                  <span className={qa.color}>{qa.icon}</span>
+                  {qa.label}
+                </button>
+              );
+            }
+            return (
+              <div
+                key={qa.label}
+                title={qa.disabledReason}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/40 border border-slate-700/40 text-xs font-medium text-slate-600 whitespace-nowrap flex-shrink-0 cursor-not-allowed"
+              >
+                <span className="opacity-40">{qa.icon}</span>
+                {qa.label}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* ── Missing Data Warnings ───────────────────────────────────────── */}
+        {warnings.length > 0 && (
+          <div className="card p-4 border border-amber-500/20 bg-amber-500/5">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle size={14} className="text-amber-400" />
+              <span className="text-sm font-semibold text-amber-300">
+                {warnings.length} item{warnings.length !== 1 ? 's' : ''} need attention
+              </span>
+            </div>
+            <div className="space-y-2">
+              {visibleWarnings.map((w, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0" />
+                  <span className="text-xs text-slate-400 flex-1">{w.label}</span>
+                  <button
+                    onClick={() => setActiveTab(w.tab)}
+                    className="text-xs text-amber-400 hover:text-amber-300 transition-colors whitespace-nowrap"
+                  >
+                    {w.action} →
+                  </button>
                 </div>
-                {cost && (
-                  <div className="card p-5">
-                    <h3 className="font-semibold text-white mb-4 text-sm">25-Year Cumulative Savings</h3>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <LineChart data={savingsData} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                        <XAxis dataKey="year" tick={{ fill: '#64748b', fontSize: 9 }} axisLine={false} tickLine={false} interval={4} />
-                        <YAxis tick={{ fill: '#64748b', fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                        <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', fontSize: '11px' }} formatter={(v: number) => [`$${v.toLocaleString()}`, 'Savings']} />
-                        <Line type="monotone" dataKey="cumulative" stroke="#10b981" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Notes */}
-            {project.notes && (
-              <div className="card p-5">
-                <h3 className="font-semibold text-white mb-2 text-sm">Notes</h3>
-                <p className="text-slate-400 text-sm">{project.notes}</p>
-              </div>
+              ))}
+            </div>
+            {warnings.length > 3 && (
+              <button
+                onClick={() => setShowAllWarnings(!showAllWarnings)}
+                className="text-xs text-slate-500 hover:text-slate-300 mt-2 transition-colors"
+              >
+                {showAllWarnings ? 'Show less' : `+${warnings.length - 3} more`}
+              </button>
             )}
           </div>
         )}
+
+        {/* ── Tab Navigation ──────────────────────────────────────────────── */}
+        <div className="flex gap-0.5 border-b border-slate-700/50 overflow-x-auto">
+          {TABS.map(tab => {
+            const badge = tab.badge?.(project);
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap relative flex-shrink-0 ${
+                  activeTab === tab.id
+                    ? 'bg-slate-800 text-white border border-slate-700/50 border-b-slate-800'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span className={activeTab === tab.id ? 'text-amber-400' : 'text-slate-500'}>
+                  {tab.icon}
+                </span>
+                {tab.label}
+                {badge && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-slate-900 text-xs font-bold flex items-center justify-center">
+                    {badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Tab Content ─────────────────────────────────────────────────── */}
+        <div className="min-h-[400px]">
+          {activeTab === 'bill' && (
+            <BillTab project={project} onUploadBill={handleUploadBill} />
+          )}
+          {activeTab === 'system' && (
+            <SystemSizeTab project={project} onRunAutoSize={handleRunAutoSize} />
+          )}
+          {activeTab === 'design' && (
+            <DesignTab project={project} />
+          )}
+          {activeTab === 'engineering' && (
+            <div className="card p-0 overflow-hidden">
+              <EngineeringTab projectId={id} projectName={project.name} />
+            </div>
+          )}
+          {activeTab === 'proposal' && (
+            <ProposalTab project={project} />
+          )}
+        </div>
+
       </div>
     </AppShell>
   );

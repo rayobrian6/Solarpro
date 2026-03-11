@@ -25,14 +25,17 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard',     href: '/dashboard',  icon: <LayoutDashboard size={17} /> },
-  { label: 'Clients',       href: '/clients',    icon: <Users size={17} /> },
-  { label: 'Projects',      href: '/projects',   icon: <FolderOpen size={17} /> },
-  { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
-  { label: 'Engineering',   href: '/engineering',icon: <Wrench size={17} />, color: 'text-blue-400' },
-  { label: 'Proposals',     href: '/proposals',  icon: <FileText size={17} /> },
-  { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
-  { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
+  { label: 'Dashboard',  href: '/dashboard', icon: <LayoutDashboard size={17} /> },
+  { label: 'Clients',    href: '/clients',   icon: <Users size={17} /> },
+  { label: 'Projects',   href: '/projects',  icon: <FolderOpen size={17} />, color: 'text-amber-400' },
+  { label: 'Analytics',  href: '/analytics', icon: <BarChart3 size={17} /> },
+  { label: 'Settings',   href: '/settings',  icon: <Settings size={17} /> },
+];
+
+// Secondary tools — accessible from within Projects, kept here for direct access
+const toolItems: NavItem[] = [
+  { label: 'Design Studio', href: '/design',    icon: <Map size={17} />,      color: 'text-amber-400' },
+  { label: 'Proposals',     href: '/proposals', icon: <FileText size={17} />, color: 'text-blue-400' },
 ];
 
 const adminItems: NavItem[] = [
@@ -253,6 +256,38 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     <span className="text-xs text-amber-500/60 font-normal">Studio</span>
                   )}
                 </>
+              )}
+            </Link>
+          );
+        })}
+
+        {/* Tools section — quick access to Design Studio & Proposals */}
+        <div className={`${collapsed ? 'border-t border-slate-700/50 my-3' : 'mt-5 mb-2'}`}>
+          {!collapsed && (
+            <div className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-3 mb-2">Tools</div>
+          )}
+        </div>
+        {toolItems.map((item) => {
+          const active = isActive(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`
+                flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
+                ${collapsed ? 'justify-center px-2' : ''}
+                ${active
+                  ? 'bg-amber-500/15 text-amber-400 border border-amber-500/20'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50 border border-transparent'
+                }
+              `}
+              title={collapsed ? item.label : undefined}
+            >
+              <span className={`flex-shrink-0 ${active ? 'text-amber-400' : item.color || ''}`}>
+                {item.icon}
+              </span>
+              {!collapsed && (
+                <span className="flex-1">{item.label}</span>
               )}
             </Link>
           );
