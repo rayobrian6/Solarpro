@@ -15,6 +15,7 @@ const PUBLIC_PATHS = [
   '/api/auth/me',
   '/api/pricing',
   '/api/version',
+  '/api/health',
   '/api/engineering/sld',
   '/api/engineering/sld/test',
   '/api/enterprise',
