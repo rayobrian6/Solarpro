@@ -3,10 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3008",
+    "dev": "next dev -p 3000",
     "build": "next build",
-    "start": "next start -p 3008",
-    "lint": "next lint"
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "dev:3008": "next dev -p 3008",
+    "start:3008": "next start -p 3008",
+    "type-check": "tsc --noEmit",
+    "dev:debug": "NODE_OPTIONS=\"--inspect\" next dev -p 3000"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",

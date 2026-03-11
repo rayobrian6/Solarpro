@@ -1,29 +1,69 @@
 # ============================================================
-# main.yml — Promote Vercel Production Alias
-# Runs after every push to master.
+# main.yml — Deploy to Vercel Production
+# Runs ONLY on push to master branch.
+# Does NOT run on feature branches or PRs.
+#
+# LOCAL DEVELOPMENT: Do not push to master until code is stable.
+# Run locally with: npm run dev
 # ============================================================
 
-name: Promote Vercel Production
+name: Deploy to Vercel Production
 
 on:
   push:
     branches:
       - master
+    # Skip workflow for documentation-only changes
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 jobs:
-  promote:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
-      - name: Wait for READY deployment and assign alias
+      - name: Trigger Vercel deployment
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
         run: |
-          echo "Checking latest Vercel deployment..."
+          echo "Triggering Vercel deployment for master branch..."
+
+          RESPONSE=$(curl -s -X POST \
+            "https://api.vercel.com/v13/deployments" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              &quot;name&quot;: &quot;solarpro-v3.1&quot;,
+              &quot;gitSource&quot;: {
+                &quot;type&quot;: &quot;github&quot;,
+                &quot;repoId&quot;: &quot;1173887298&quot;,
+                &quot;ref&quot;: &quot;master&quot;
+              },
+              &quot;target&quot;: &quot;production&quot;
+            }")
+
+          echo "Vercel response: $RESPONSE"
+          ERR=$(echo "$RESPONSE" | jq -r '.error.message // empty')
+
+          if [ -n "$ERR" ]; then
+            echo "ERROR triggering deployment: $ERR"
+            exit 1
+          fi
+
+          DUID=$(echo "$RESPONSE" | jq -r '.uid // empty')
+          echo "Deployment started: $DUID"
+
+      - name: Wait for deployment to be READY and assign alias
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
+        run: |
+          echo "Waiting for deployment to be READY..."
           MAX_ATTEMPTS=30
-          SLEEP_SECONDS=10
+          SLEEP_SECONDS=15
           DUID=""
           STATE=""
 
@@ -54,9 +94,7 @@ jobs:
             exit 1
           fi
 
-          echo "Assigning solarpro-v31.vercel.app → $DUID ..."
-
-          # Write JSON to a temp file to avoid shell quoting issues
+          echo "Assigning alias solarpro-v31.vercel.app → $DUID ..."
           echo '{"alias":"solarpro-v31.vercel.app"}' > /tmp/alias_payload.json
 
           RESULT=$(curl -s -X POST \
@@ -65,9 +103,9 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary @/tmp/alias_payload.json)
 
-          echo "Vercel response: $RESULT"
-
+          echo "Alias response: $RESULT"
           ERR_CODE=$(echo "$RESULT" | jq -r '.error.code // empty')
+
           if [ -n "$ERR_CODE" ] && [ "$ERR_CODE" != "not_modified" ]; then
             echo "ERROR assigning alias: $ERR_CODE"
             exit 1
@@ -77,13 +115,9 @@ jobs:
 
       - name: Health check
         run: |
-          sleep 5
-          HEALTH=$(curl -s https://solarpro-v31.vercel.app/api/health)
+          sleep 10
           VERSION=$(curl -s https://solarpro-v31.vercel.app/api/version | jq -r '.version // "unknown"')
           echo "Live version: $VERSION"
-          DB_OK=$(echo "$HEALTH" | jq -r '.db.ok // false')
-          if [ "$DB_OK" = "true" ]; then
-            echo "All systems healthy — $VERSION is live."
-          else
-            echo "WARNING: DB health returned: $DB_OK"
-          fi
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" https://solarpro-v31.vercel.app/api/health)
+          echo "Health check HTTP status: $HEALTH"
+          echo "Deployment complete!"

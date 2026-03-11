@@ -1,89 +1,23 @@
 # ============================================================
-# promote-production.yml — Promote Vercel Production Alias
-# Runs after every push to master.
+# promote-production.yml — DISABLED
+#
+# This workflow has been consolidated into main.yml.
+# Kept as placeholder to avoid broken references.
+# All deployment logic is in main.yml.
 # ============================================================
 
-name: Promote Production Alias
+name: Promote Production (disabled)
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    # Manual trigger only — not automatic
+    # Use main.yml for all production deployments
 
 jobs:
-  promote:
+  noop:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
     steps:
-      - name: Wait for READY deployment and assign alias
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          PROJECT_ID: prj_1txcMFd4kjPJ3XHv5RbEaqi04MY0
+      - name: This workflow is disabled
         run: |
-          echo "Checking latest Vercel deployment..."
-          MAX_ATTEMPTS=30
-          SLEEP_SECONDS=10
-          DUID=""
-          STATE=""
-
-          for i in $(seq 1 $MAX_ATTEMPTS); do
-            RESPONSE=$(curl -s \
-              "https://api.vercel.com/v6/deployments?projectId=${PROJECT_ID}&limit=1" \
-              -H "Authorization: Bearer ${VERCEL_TOKEN}")
-
-            STATE=$(echo "$RESPONSE" | jq -r '.deployments[0].state')
-            DUID=$(echo "$RESPONSE" | jq -r '.deployments[0].uid')
-            URL=$(echo "$RESPONSE" | jq -r '.deployments[0].url')
-
-            echo "Attempt $i/$MAX_ATTEMPTS — $DUID — State: $STATE"
-
-            if [ "$STATE" = "READY" ]; then
-              echo "Deployment READY: $DUID ($URL)"
-              break
-            elif [ "$STATE" = "ERROR" ] || [ "$STATE" = "CANCELED" ]; then
-              echo "ERROR: Deployment failed with state: $STATE"
-              exit 1
-            fi
-
-            sleep $SLEEP_SECONDS
-          done
-
-          if [ "$STATE" != "READY" ]; then
-            echo "ERROR: No READY deployment after $MAX_ATTEMPTS attempts."
-            exit 1
-          fi
-
-          echo "Assigning solarpro-v31.vercel.app → $DUID ..."
-
-          # Write JSON to a temp file to avoid shell quoting issues
-          echo '{"alias":"solarpro-v31.vercel.app"}' > /tmp/alias_payload.json
-
-          RESULT=$(curl -s -X POST \
-            "https://api.vercel.com/v10/deployments/${DUID}/aliases" \
-            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data-binary @/tmp/alias_payload.json)
-
-          echo "Vercel response: $RESULT"
-
-          ERR_CODE=$(echo "$RESULT" | jq -r '.error.code // empty')
-          if [ -n "$ERR_CODE" ] && [ "$ERR_CODE" != "not_modified" ]; then
-            echo "ERROR assigning alias: $ERR_CODE"
-            exit 1
-          fi
-
-          echo "SUCCESS: solarpro-v31.vercel.app → $DUID"
-
-      - name: Health check
-        run: |
-          sleep 5
-          HEALTH=$(curl -s https://solarpro-v31.vercel.app/api/health)
-          VERSION=$(curl -s https://solarpro-v31.vercel.app/api/version | jq -r '.version // "unknown"')
-          echo "Live version: $VERSION"
-          DB_OK=$(echo "$HEALTH" | jq -r '.db.ok // false')
-          if [ "$DB_OK" = "true" ]; then
-            echo "All systems healthy — $VERSION is live."
-          else
-            echo "WARNING: DB health returned: $DB_OK"
-          fi
+          echo "Deployment is handled by main.yml on push to master."
+          echo "To deploy manually, use the Vercel dashboard or trigger main.yml."
