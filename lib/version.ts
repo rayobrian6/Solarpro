@@ -1,16 +1,17 @@
 // lib/version.ts — SolarPro Build Version
-export const BUILD_VERSION     = 'v45.1';
+export const BUILD_VERSION     = 'v45.2';
 export const BUILD_DATE        = '2025-01-12';
-export const BUILD_DESCRIPTION = 'Architecture Refactor — Single Source of Truth extended to Design Studio SLD';
+export const BUILD_DESCRIPTION = 'Plan Set payload now reads from computedSystem — single source of truth end-to-end';
 export const BUILD_FEATURES    = [
-  'Design Studio SLD now reads all electrical values from computeSystem() engine',
-  'acOCPD, backfeedAmps, dcWireGauge, acWireGauge, egcGauge all from PermitSystemModel',
-  'Removed duplicate Math.ceil(acOutputAmps * 1.25) OCPD calc from sld/route.ts',
-  'EGC gauge on SLD wire segments from NEC 250.122 engine table (no more hardcoded #10)',
-  'X-System-Model: computed | fallback header on SLD responses',
-  'Permit plan set generator: pure visual renderer — no duplicate NEC calculations',
-  'computeSystem() called once at route entry for all NEC 690.7/690.8/310.15/705.12 values',
-  'PermitSystemModel bridge type routes pre-computed values to all sheet builders',
+  'UI plan set payload now reads from computedSystem (cs) — no more stale config.* values',
+  'dcWireGauge from cs.runMap[DC_STRING_RUN].wireGauge (was: config.wireGauge)',
+  'acWireGauge from cs.runMap[DISCO_TO_METER_RUN].wireGauge (was: compliance.electrical.acWireGauge)',
+  'acBreakerAmps/acDisconnectAmps from cs.acOcpdAmps (was: Math.ceil duplicate NEC calc)',
+  'backfeedBreakerAmps from cs.backfeedBreakerAmps (was: compliance.electrical.busbar || 20)',
+  'groundWireGauge from cs.runMap[DC_STRING_RUN].egcGauge (was: hardcoded #8 AWG)',
+  'planStrings[i].ocpdAmps/wireGauge/stringVoc/Isc from cs.strings[i] (was: compliance fallback)',
+  'Design Studio SLD and Permit Plan Set now use identical engine output',
+  'Cover sheet engine version string is now dynamic (BUILD_VERSION — no more hardcoded v44.0)',
   '7-sheet permit plan set: G-1, E-1, E-2, S-1, A-1, M-1, C-1',
 ];
 
