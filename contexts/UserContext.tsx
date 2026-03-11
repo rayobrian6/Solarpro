@@ -70,6 +70,7 @@ async function fetchUserFromDb(): Promise<AppUser | null> {
       roleLower === 'admin' ||
       isFP ||
       status === 'active' ||
+      status === 'free_pass' ||   // set by admin grant_free_pass alongside is_free_pass boolean
       (status === 'trialing' && trialEnd !== null && trialEnd > new Date());
 
     return {

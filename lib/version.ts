@@ -2,9 +2,9 @@
  * BUILD VERSION - Single source of truth for all version badges
  * Auto-increment BUILD_VERSION by 0.1 on every commit push
  */
-export const BUILD_VERSION = 'v40.8';
+export const BUILD_VERSION = 'v40.9';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Unified hasPlatformAccess() — single permission source; admin actions immediately propagate to all feature gates';
+export const BUILD_DESCRIPTION = 'FIX: User state propagation — camelCase normalization, free_pass status in all access checks, DELETE id param fix';
 export const BUILD_FEATURES = [
   // Admin Portal v39.6
   'NEW: /admin route — Full SolarPro Admin Portal (role-gated: admin + super_admin only)',
@@ -59,6 +59,12 @@ export const BUILD_FEATURES = [
   'FIX: next.config.js — injects NEXT_PUBLIC_BUILD_VERSION env var so client knows its build version',
   'FIX: app/api/version/route.ts — returns version + ts fields with no-cache headers',
   'FIX: app/account/billing/page.tsx — full rewrite: role+plan shown independently; admin bypass; no free_pass status inference',
+  // v40.9 — User state propagation: camelCase normalization + free_pass status fixes
+  'FIX: lib/permissions.ts — hasPlatformAccess() now handles status=free_pass string (set by grant_free_pass action)',
+  'FIX: contexts/UserContext.tsx — hasAccess now includes status===free_pass check (was missing, caused Sarah bug)',
+  'FIX: app/api/auth/me/route.ts — hasAccess now includes subscription_status===free_pass check',
+  'FIX: app/api/admin/users/route.ts — PATCH returns normalized user with BOTH camelCase AND snake_case fields',
+  'FIX: app/api/admin/users/route.ts — DELETE now accepts id as query param (?id=) OR JSON body (was only body)',
   // v40.8 — Unified permission propagation
   'NEW: lib/permissions.ts — hasPlatformAccess(user) is now the SINGLE source of truth for all access decisions',
   'FIX: lib/permissions.ts — hasPlatformAccess() supports both snake_case (DB) and camelCase (frontend) field names',

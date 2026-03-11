@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
          role === 'admin' ||
          dbUser.is_free_pass === true ||
          dbUser.subscription_status === 'active' ||
+         dbUser.subscription_status === 'free_pass' ||   // set by admin grant_free_pass
          (dbUser.subscription_status === 'trialing' && trialEnd && trialEnd > now));
 
     return NextResponse.json({

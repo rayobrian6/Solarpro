@@ -94,13 +94,33 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
     }
 
-    // Return the updated user record so the frontend can refresh state immediately
+    // Return the updated user record — normalized to camelCase so frontend can use directly
     const updated = await sql`
       SELECT id, name, email, company, role, plan, subscription_status, is_free_pass,
              free_pass_note, trial_ends_at, created_at
       FROM users WHERE id = ${id} LIMIT 1
     `;
-    return NextResponse.json({ success: true, user: updated[0] ?? null });
+    const raw = updated[0] ?? null;
+    const normalizedUser = raw ? {
+      id: raw.id,
+      name: raw.name,
+      email: raw.email,
+      company: raw.company,
+      role: raw.role,
+      plan: raw.plan,
+      // camelCase — used by frontend UserContext / hasPlatformAccess
+      subscriptionStatus: raw.subscription_status,
+      isFreePass: raw.is_free_pass,
+      freePassNote: raw.free_pass_note,
+      trialEndsAt: raw.trial_ends_at,
+      createdAt: raw.created_at,
+      // snake_case — kept for admin UI tables that read raw DB fields
+      subscription_status: raw.subscription_status,
+      is_free_pass: raw.is_free_pass,
+      free_pass_note: raw.free_pass_note,
+      trial_ends_at: raw.trial_ends_at,
+    } : null;
+    return NextResponse.json({ success: true, user: normalizedUser });
   } catch (e: any) {
     return NextResponse.json({ success: false, error: e.message }, { status: 500 });
   }
@@ -114,7 +134,12 @@ export async function DELETE(req: NextRequest) {
 
   try {
     const sql = getDb();
-    const { id } = await req.json();
+    // Support both query param (?id=...) and JSON body ({ id: ... })
+    const urlId = req.nextUrl.searchParams.get('id');
+    let id = urlId;
+    if (!id) {
+      try { const body = await req.json(); id = body.id; } catch {}
+    }
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
     await sql`DELETE FROM users WHERE id = ${id}`;
     return NextResponse.json({ success: true });

@@ -62,9 +62,14 @@ export function hasPlatformAccess(user: {
   if (user.is_free_pass === true) return true;
   if (user.isFreePass === true) return true;
 
-  // Active subscription
+  // Subscription status checks
+  // Support both snake_case (DB) and camelCase (frontend) field names
   const status = (user.subscription_status || user.subscriptionStatus || '').toLowerCase();
+
   if (status === 'active') return true;
+
+  // free_pass status string — set by admin grant_free_pass action alongside is_free_pass boolean
+  if (status === 'free_pass') return true;
 
   // Active trial
   if (status === 'trialing') {
