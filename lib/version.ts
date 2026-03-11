@@ -4,8 +4,14 @@
  */
 export const BUILD_VERSION = 'v41.3';
 export const BUILD_DATE = '2025-03-10';
-export const BUILD_DESCRIPTION = 'FIX: Remove vercel.json autoAlias:false — new deployments now auto-update solarpro-v31.vercel.app alias; useVersionCheck polls every 30s';
+export const BUILD_DESCRIPTION = 'FIX: User state propagation + Vercel alias fix — admin role/free-pass changes reflect in UI within 30s; refreshUser() queue; visibilitychange listener; Vercel alias auto-update';
 export const BUILD_FEATURES = [
+  // v41.3 — User state propagation fixes
+  'FIX: contexts/UserContext.tsx — refreshUser() now queues pending refresh instead of dropping concurrent calls',
+  'FIX: contexts/UserContext.tsx — 30-second polling interval ensures admin-granted permissions propagate within 30s',
+  'FIX: contexts/UserContext.tsx — visibilitychange listener added (handles mobile tab switching)',
+  'FIX: app/admin/users/page.tsx — Edit modal final refreshUser() after all 3 sequential actions complete',
+  'FIX: app/admin/users/page.tsx — action() uses setTimeout(refreshUser, 100) to avoid fetchingRef guard drops',
   // v41.3 — Vercel alias freeze fix
   'FIX: vercel.json — removed autoAlias:false; new deployments now automatically update solarpro-v31.vercel.app alias',
   'FIX: vercel.json — alias was frozen on original deployment; every push now goes live immediately',

@@ -69,7 +69,8 @@ export default function AdminUsers() {
         // Refresh the users list
         load();
         // Refresh the logged-in admin's own user state in case they changed their own record
-        await refreshUser();
+        // Use a small delay to avoid the fetchingRef guard dropping rapid sequential calls
+        setTimeout(() => refreshUser(), 100);
       } else {
         showToast(d.error || 'Failed', false);
       }
@@ -272,10 +273,15 @@ export default function AdminUsers() {
               <button onClick={() => setEditUser(null)} className="flex-1 py-2 rounded-lg border border-white/10 text-sm text-slate-400 hover:text-white transition-colors">Cancel</button>
               <button
                 onClick={async () => {
+                  // Run all three updates sequentially, then refresh once at the end
+                  // (action() calls refreshUser() internally, but we also do a final
+                  //  explicit refresh after all three complete to ensure consistency)
                   await action(editUser.id, 'update', { name: editUser.name, company: editUser.company });
                   await action(editUser.id, 'set_role', { role: editUser.role });
                   await action(editUser.id, 'set_plan', { plan: editUser.plan });
                   setEditUser(null);
+                  // Final authoritative refresh after all actions complete
+                  setTimeout(() => refreshUser(), 300);
                 }}
                 className="flex-1 py-2 rounded-lg bg-amber-500 text-black text-sm font-semibold hover:bg-amber-400 transition-colors"
               >

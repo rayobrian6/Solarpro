@@ -99,17 +99,31 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
   const fetchingRef = useRef(false);
+  // Queue a refresh if one is already in-flight — ensures the last call wins
+  const pendingRefreshRef = useRef(false);
 
   const refreshUser = useCallback(async () => {
-    // Prevent concurrent fetches
-    if (fetchingRef.current) return;
+    // If already fetching, queue one more refresh for when it completes
+    if (fetchingRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
     fetchingRef.current = true;
+    pendingRefreshRef.current = false;
     try {
       const u = await fetchUserFromDb();
       setUser(u);
     } finally {
       fetchingRef.current = false;
       setLoading(false);
+      // If a refresh was queued while we were fetching, run it now
+      if (pendingRefreshRef.current) {
+        pendingRefreshRef.current = false;
+        // Small delay to avoid tight loop
+        setTimeout(() => {
+          fetchUserFromDb().then(u => setUser(u)).catch(() => {});
+        }, 200);
+      }
     }
   }, []);
 
@@ -126,9 +140,34 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       // Avoids unnecessary fetches on login page
       refreshUser();
     };
+    // Also refresh when tab becomes visible (handles mobile app switching)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshUser();
+      }
+    };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [refreshUser]);
+
+  // Periodic re-fetch every 30 seconds — ensures admin-granted permissions
+  // (free pass, role changes) propagate to the affected user's session
+  // without requiring a manual page reload or tab switch.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      // Only poll if the page is visible and user is logged in
+      if (document.visibilityState === 'visible' && !loading) {
+        fetchUserFromDb().then(u => {
+          if (u) setUser(u);
+        }).catch(() => {});
+      }
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   return (
     <UserContext.Provider value={{ user, loading, refreshUser }}>
