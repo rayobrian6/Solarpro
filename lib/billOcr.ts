@@ -957,7 +957,17 @@ ${ocrText.substring(0, 4000)}`,
 
 
 // ── Validate extracted data ───────────────────────────────────────────────────
-export function validateBillData(result: BillExtractResult): {
+export interface BillValidationContext {
+  /** The matched utility name from DB/state-fallback (if any). Suppresses "Could not identify" warning. */
+  matchedUtilityName?: string | null;
+  /** The final validated rate after DB lookup / correction (if any). Suppresses "no rate" warning. */
+  finalRate?: number | null;
+}
+
+export function validateBillData(
+  result: BillExtractResult,
+  context?: BillValidationContext,
+): {
   valid: boolean;
   warnings: string[];
   errors: string[];
@@ -977,15 +987,23 @@ export function validateBillData(result: BillExtractResult): {
   if (result.monthlyKwh && (result.monthlyKwh < 50 || result.monthlyKwh > 50000)) {
     warnings.push(`Unusual monthly kWh: ${result.monthlyKwh} — please verify`);
   }
-  if (!result.utilityProvider) {
+
+  // Utility provider warning: only show if no utility was identified from any source
+  const resolvedUtility = result.utilityProvider || context?.matchedUtilityName;
+  if (!resolvedUtility) {
     warnings.push('Could not identify utility provider — will use location-based detection');
   }
-  if (!result.electricityRate) {
+
+  // Rate warning: use finalRate (post-correction) if provided, else fall back to result.electricityRate
+  const resolvedRate = context?.finalRate ?? result.electricityRate;
+  if (!resolvedRate) {
     warnings.push('Could not extract electricity rate — will use state average');
   }
-  if (result.electricityRate && (result.electricityRate < 0.01 || result.electricityRate > 1.5)) {
-    warnings.push(`Unusual electricity rate: $${result.electricityRate}/kWh — please verify`);
+  // Valid retail rate range: $0.06-$0.50/kWh. Outside this range is unusual.
+  if (resolvedRate && (resolvedRate < 0.06 || resolvedRate > 0.50)) {
+    warnings.push(`Unusual electricity rate: $${resolvedRate.toFixed(4)}/kWh — please verify`);
   }
+
   if (result.billType === 'combined') {
     warnings.push('Combined electric + gas bill detected — only electric usage used for solar sizing');
   }

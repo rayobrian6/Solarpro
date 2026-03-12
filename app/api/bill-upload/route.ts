@@ -239,9 +239,8 @@ export async function POST(req: NextRequest) {
       debugLog:            parseResult.debugLog,
     };
 
-    const validation = validateBillData(finalBillData);
-    console.log('[bill-upload] Validation:', validation.valid, validation.errors?.join(', ') || 'ok');
-
+    // Validation is deferred — run AFTER geocoding + utility matching + rate correction
+    // so warnings accurately reflect the final resolved values (not the pre-match state).
     let locationData = null;
     let utilityData = null;
     let matchedUtility = null;
@@ -302,8 +301,9 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Rate Validation ──────────────────────────────────────────────────────
-    // If extracted rate looks like avoided cost (< $0.07/kWh), replace with
-    // the utility's known retail rate from the rules database.
+    // Correct rates outside valid retail range ($0.06-$0.50/kWh).
+    // Below $0.06 = likely avoided cost / wholesale; above $0.50 = likely misparse.
+    // Falls back to utility DB rate or national default ($0.13).
     const utilityNameForRate = finalBillData.utilityProvider || utilityData?.utilityName || null;
     const rateValidation = validateAndCorrectUtilityRate(finalBillData.electricityRate ?? null, utilityNameForRate);
     if (rateValidation.corrected) {
@@ -311,6 +311,19 @@ export async function POST(req: NextRequest) {
       finalBillData.electricityRate = rateValidation.rate;
     } else {
       console.log(`[bill-upload] Rate valid: $${billData.electricityRate?.toFixed(3)}/kWh`);
+    }
+
+    // ── Deferred Validation ──────────────────────────────────────────────
+    // Run AFTER geocoding + utility matching + rate correction so warnings reflect
+    // final resolved values. Context suppresses stale warnings when values were resolved.
+    const resolvedMatchedUtility = matchedUtility?.utilityName ?? utilityData?.utilityName ?? null;
+    const validation = validateBillData(finalBillData, {
+      matchedUtilityName: resolvedMatchedUtility,
+      finalRate: finalBillData.electricityRate ?? null,
+    });
+    console.log('[bill-upload] Validation:', validation.valid, validation.errors?.join(', ') || 'ok');
+    if (validation.warnings.length > 0) {
+      console.log('[bill-upload] Validation warnings:', validation.warnings.join(' | '));
     }
 
     // ── System Size Calculation ───────────────────────────────────────────────

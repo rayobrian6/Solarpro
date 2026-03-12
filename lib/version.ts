@@ -1,8 +1,14 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v46.9';
-export const BUILD_DATE        = '2026-03-17';
-export const BUILD_DESCRIPTION = 'DB readiness guard: Neon cold-start retry + login UI starting state';
+export const BUILD_VERSION     = 'v47.0';
+export const BUILD_DATE        = '2026-03-18';
+export const BUILD_DESCRIPTION = 'Utility bill parsing pipeline audit: deferred validation, rate range fix, stale warning suppression';
 export const BUILD_FEATURES    = [
+  // v47.0 -- Utility bill parsing pipeline audit
+  'FIX: lib/billOcr.ts -- validateBillData() accepts optional BillValidationContext; suppresses stale utility/rate warnings when values resolved post-match',
+  'FIX: lib/billOcr.ts -- rate warning range updated to $0.06-$0.50/kWh; unusual rate warning replaces hard rejection',
+  'FIX: lib/utility-rules.ts -- MIN_VALID_RETAIL_RATE lowered 0.07->0.06; MAX_VALID_RETAIL_RATE=0.50 added; rates above max corrected to DB rate',
+  'FIX: app/api/bill-upload/route.ts -- validateBillData() moved from pre-geocoding (line 242) to post-rate-correction; context passes resolvedMatchedUtility + finalRate',
+  'FIX: app/api/bill-upload/route.ts -- UI warnings now reflect fully resolved state (utility matched, rate corrected) not raw parse output',
   // v46.9 -- DB readiness guard
   'NEW: lib/db-ready.ts -- getDbWithRetry() 3x retry with 1s/2s/4s exponential backoff for Neon cold starts',
   'NEW: lib/db-ready.ts -- probeDbReady() SELECT 1 wake probe before auth queries',

@@ -723,14 +723,21 @@ const UTILITY_RETAIL_RATES: Record<string, number> = {
   'western-illinois-il':   0.12,  // Western Illinois Electrical IL
 };
 
-// Minimum plausible retail electricity rate.
-// Anything below this is likely an avoided cost / wholesale credit rate, NOT retail.
-const MIN_VALID_RETAIL_RATE = 0.07; // $/kWh
+// Valid retail electricity rate range: $0.06–$0.50/kWh.
+// Below MIN: likely an avoided cost / wholesale credit rate, not retail.
+// Above MAX: likely a misparse (e.g. total bill amount mistaken for per-kWh rate).
+const MIN_VALID_RETAIL_RATE = 0.06; // $/kWh
+const MAX_VALID_RETAIL_RATE = 0.50; // $/kWh
 
 /**
  * Validate and correct an extracted electricity rate.
- * If the extracted rate is below MIN_VALID_RETAIL_RATE (e.g. $0.038 avoided cost),
- * look up the utility's known retail rate and return that instead.
+ *
+ * Corrects if:
+ *   - Rate is missing/null
+ *   - Rate < $0.06/kWh (likely avoided cost / wholesale credit)
+ *   - Rate > $0.50/kWh (likely a misparse — total charge vs per-kWh rate)
+ *
+ * Correction order: utility DB rate → national default ($0.13)
  */
 export function validateAndCorrectUtilityRate(
   extractedRate: number | null | undefined,
@@ -743,12 +750,17 @@ export function validateAndCorrectUtilityRate(
 } {
   const original = extractedRate ?? null;
 
-  // If extracted rate looks valid, use it as-is
-  if (extractedRate && extractedRate >= MIN_VALID_RETAIL_RATE) {
+  // If extracted rate is within valid retail range, use it as-is
+  if (
+    extractedRate !== null &&
+    extractedRate !== undefined &&
+    extractedRate >= MIN_VALID_RETAIL_RATE &&
+    extractedRate <= MAX_VALID_RETAIL_RATE
+  ) {
     return { rate: extractedRate, corrected: false, originalRate: original, source: 'extracted' };
   }
 
-  // Rate is missing or suspiciously low — look up utility DB
+  // Rate is missing, too low (avoided cost), or too high (misparse) — look up utility DB
   if (utilityName) {
     const utilityEntry = getUtilityRules(utilityName);
     const utilityId = utilityEntry?.id;
