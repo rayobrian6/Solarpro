@@ -4,6 +4,9 @@
 // Returns: geometry, loads, mount layout, racking BOM, rafter check
 // ============================================================
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { runStructuralCalcV3, type StructuralInputV3 } from '@/lib/structural-engine-v3';

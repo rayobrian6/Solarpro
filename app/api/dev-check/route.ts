@@ -3,6 +3,9 @@
  * LOCAL DEVELOPMENT ONLY — checks env vars are loaded.
  * Returns 404 in production.
  */
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { NextResponse } from 'next/server';
 
 export async function GET() {

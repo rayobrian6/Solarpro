@@ -1,3 +1,6 @@
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getStateIncentives, calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { runIncentiveEngine } from '@/lib/incentives/incentiveEngine';

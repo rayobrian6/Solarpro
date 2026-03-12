@@ -25,6 +25,9 @@
  *   - Tesseract CLI preferred over WASM (faster, better accuracy on Tesseract 5.x)
  */
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import { NextRequest, NextResponse } from 'next/server';
 
 // This directive tells Next.js to use the Node.js runtime (not Edge).

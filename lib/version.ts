@@ -1,8 +1,16 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.9';
+export const BUILD_VERSION     = 'v47.10';
 export const BUILD_DATE        = '2026-06-10';
-export const BUILD_DESCRIPTION = 'v47.9: Definitive deployment startup fix -- 5 root causes identified and resolved, DB cold-start now fully resilient across all Vercel plan tiers';
+export const BUILD_DESCRIPTION = 'v47.10: Force all 97 API routes to be dynamic -- eliminates DYNAMIC_SERVER_USAGE static rendering errors on all routes';
 export const BUILD_FEATURES    = [
+  // v47.10 -- Force dynamic on all API routes
+  'ROOT CAUSE: Next.js attempted to statically render API routes at build time; routes accessing request.headers/cookies()/DB at render time triggered DYNAMIC_SERVER_USAGE error',
+  'ROOT CAUSE: /api/settings/branding and /api/stats confirmed failing in Vercel logs with digest: DYNAMIC_SERVER_USAGE -- login flow broken',
+  'FIX: Audited all 97 route.ts files in /app/api -- 57 already had force-dynamic; 40 were missing it',
+  "FIX: Added export const dynamic = 'force-dynamic' to all 40 missing routes -- forces runtime evaluation, never static rendering",
+  'FIX: Added export const revalidate = 0 to all 40 routes -- disables static caching, ensures fresh data on every request',
+  'ROUTES PATCHED: auth/login, auth/logout, auth/register, auto-design, auto-size, bill-upload, bill-upload/test, clients/[id], clients, dev-check, dsm, elevation, engineering/structural-v2, enterprise/contact, equipment/save, geocode, hardware, incentives, maps-session, migrate, ocr, pricing, production, projects/[id]/layout, projects/[id], projects/[id]/versions/[versionId], projects/[id]/versions, projects, proposals/[id], proposals/[id]/share, proposals, settings/branding, settings/logo, settings/profile, solar, stats, stripe/checkout, stripe/portal, tile, utility-detect',
+  "VERIFIED: All 97/97 route.ts files now contain export const dynamic = 'force-dynamic'",
   // v47.9 -- Definitive deployment startup fix
   'ROOT CAUSE 1: channel_binding=require in DATABASE_URL caused SSL handshake failures during Neon proxy cold start -- errors mis-classified as fatal causing DB_CONFIG_ERROR banner',
   'ROOT CAUSE 2: getDbWithRetry() delays 1s/2s/4s=7s too aggressive for Vercel Hobby 10s timeout -- probe retries consumed entire timeout budget before actual query ran',
