@@ -1,8 +1,27 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.6';
-export const BUILD_DATE        = '2026-06-09';
-export const BUILD_DESCRIPTION = 'v47.6: Critical production stability audit -- all 70+ API routes now cold-start resilient with getDbReady() retry and standardized 503 DB_STARTING responses';
+export const BUILD_VERSION     = 'v47.8';
+export const BUILD_DATE        = '2026-06-10';
+export const BUILD_DESCRIPTION = 'v47.8: Bill workflow pipeline bug fix -- city/stateCode/utilityName/utilityRate now fully persisted via bill_data JSONB and hydrated on every project reload';
 export const BUILD_FEATURES    = [
+  // v47.8 -- Bill workflow pipeline bug fix
+  'ROOT CAUSE: handleBillComplete PUT body stored _stateCode in bill_data JSONB but never _city -- Location field on System Size page always showed Not set',
+  'ROOT CAUSE: rowToProject() hydrated stateCode/utilityName/utilityRatePerKwh from bill_data JSONB but had no city hydration path -- city was lost on every DB round-trip',
+  'ROOT CAUSE: updatedProject merge in handleBillComplete included stateCode override but completely omitted city -- city was lost immediately after the modal closed',
+  'ROOT CAUSE: getProjectWithDetails() had its own inline bill_data hydration block that also lacked city hydration -- detail fetches returned project without city too',
+  'ROOT CAUSE: store cache returned stale project on navigation (loadActiveProject returns cached entry) -- bill data appeared missing if store was not updated after save',
+  'FIX: page.tsx handleBillComplete -- added city = result.locationData?.city capture',
+  'FIX: page.tsx handleBillComplete -- bill_data JSONB now includes _city field alongside _stateCode/_utilityName/_utilityRatePerKwh/_billAnalysis',
+  'FIX: page.tsx handleBillComplete -- updatedProject merge now includes city: city || json.data.city (was missing entirely)',
+  'FIX: page.tsx handleBillComplete -- calls syncProjectToStore(updatedProject) after save to keep in-memory store cache warm',
+  'FIX: db-neon.ts rowToProject() -- added city hydration from bill_data._city; city now included in returned Project object',
+  'FIX: db-neon.ts getProjectWithDetails() -- same city hydration from bill_data._city in inline hydration block',
+  'FIX: store/appStore.ts -- added syncProjectToStore(project) action: replaces project in store array + localSaveProject without re-fetching',
+  'FIX: store/appStore.ts -- added syncProjectToStore to AppStore interface',
+  'LOGGING: [BILL_PARSED] logs annualKwh/utilityName/utilityRate/stateCode/city after OCR result processing',
+  'LOGGING: [BILL_SAVING] logs projectId/systemKw/utilityName/annualKwh/stateCode/city before PUT',
+  'LOGGING: [BILL_SAVED_TO_PROJECT] logs all key fields after successful PUT response',
+  'LOGGING: [PROJECT_STATE_UPDATED] logs billAnalysis presence + utilityName/stateCode/city/utilityRate after setProject',
+  'LOGGING: [SYSTEM_SIZE_LOADED] SystemSizeTab useEffect logs all 8 key fields on every project prop change',
   // v47.6 -- Critical production stability audit
   'ROOT CAUSE: All non-auth API routes used getDb() (synchronous, no retry) -- any Neon cold start caused immediate DbConfigError/500 across entire app',
   'ROOT CAUSE: db-neon.ts exported functions (getProjectById, updateProject, getClientsByUser, etc.) all called getDb() internally -- 22 functions affected',

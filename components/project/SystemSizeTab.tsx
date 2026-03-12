@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Zap, Sun, AlertTriangle, CheckCircle, Info, ExternalLink, Shield, TrendingUp, Settings } from 'lucide-react';
 import type { Project } from '@/types';
 import { getUtilityRules, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
@@ -11,6 +11,20 @@ interface SystemSizeTabProps {
 
 export default function SystemSizeTab({ project, onRunAutoSize }: SystemSizeTabProps) {
   const bill = project.billAnalysis;
+
+  // FIX v47.8: structured pipeline logging for SYSTEM_SIZE_LOADED
+  useEffect(() => {
+    console.log('[SYSTEM_SIZE_LOADED] projectId=%s annualKwh=%s utilityRate=%s stateCode=%s city=%s utilityName=%s systemKw=%s billAnalysis=%s',
+      project.id,
+      bill?.annualKwh ?? 'MISSING',
+      project.utilityRatePerKwh ?? 'MISSING',
+      project.stateCode ?? 'NOT_SET',
+      project.city ?? 'NOT_SET',
+      project.utilityName ?? 'NOT_DETECTED',
+      project.systemSizeKw ?? bill?.recommendedSystemKw ?? 'NONE',
+      bill ? 'PRESENT' : 'MISSING'
+    );
+  }, [project.id, bill, project.utilityRatePerKwh, project.stateCode, project.city, project.utilityName, project.systemSizeKw]);
   const utilityRules = project.utilityName ? getUtilityRules(project.utilityName) : null;
   const systemKw = project.systemSizeKw || bill?.recommendedSystemKw;
   const productionFactor = getProductionFactor(project.utilityName);

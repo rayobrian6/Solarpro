@@ -162,6 +162,8 @@ export default function ProjectDetailPage() {
 
   const loadActiveProject = useAppStore(s => s.loadActiveProject);
   const projects = useAppStore(s => s.projects);
+  // FIX v47.8: sync updated project to store cache after bill save
+  const syncProjectToStore = useAppStore(s => s.syncProjectToStore);
 
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
@@ -226,13 +228,6 @@ export default function ProjectDetailPage() {
     if (!project) return;
     setSavingBill(true);
 
-    console.log('[BILL_PARSED] Bill data received:', {
-      monthlyKwh: result.billData.monthlyKwh,
-      annualKwh: result.billData.estimatedAnnualKwh,
-      rate: result.billData.electricityRate,
-      utility: result.billData.utilityProvider || result.utilityData?.utilityName,
-    });
-
     try {
       // Build 12-month array — use history if available, else fill from monthly avg
       const rawHistory = result.billData.monthlyUsageHistory || [];
@@ -274,18 +269,25 @@ export default function ProjectDetailPage() {
         || undefined;
       const utilityRatePerKwh = utilityRate;
       const stateCode = result.locationData?.stateCode || undefined;
+      // FIX v47.8: capture city from locationData so it persists to DB
+      const city = result.locationData?.city || undefined;
 
-      // Structured bill_data that rowToProject can hydrate
+      console.log('[BILL_PARSED] annualKwh=%s utilityName=%s utilityRate=%s stateCode=%s city=%s',
+        annualKwh, utilityName, utilityRatePerKwh, stateCode, city);
+
+      // Structured bill_data that rowToProject can hydrate — includes _city now
       const billData = {
         _billAnalysis: billAnalysis,
         _utilityName: utilityName,
         _utilityRatePerKwh: utilityRatePerKwh,
         _stateCode: stateCode,
+        // FIX v47.8: store city in JSONB so rowToProject can hydrate it on reload
+        _city: city,
         // Also keep raw fields for engineering engine / proposals
         ...result.billData,
       };
 
-      console.log('[BILL_SAVING] PUT /api/projects/' + project.id, { systemKw, utilityName, annualKwh });
+      console.log('[BILL_SAVING] PUT /api/projects/' + project.id, { systemKw, utilityName, annualKwh, stateCode, city });
 
       const res = await fetch(`/api/projects/${project.id}`, {
         method: 'PUT',
@@ -304,20 +306,28 @@ export default function ProjectDetailPage() {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to save bill');
 
-      console.log('[BILL_SAVED] Project updated successfully');
+      console.log('[BILL_SAVED_TO_PROJECT] projectId=%s utilityName=%s annualKwh=%s stateCode=%s city=%s systemKw=%s',
+        project.id, utilityName, annualKwh, stateCode, city, systemKw);
 
-      // Hydrate billAnalysis + utilityName on the returned project
-      // The server returns the raw project; merge in client-side-hydrated fields
+      // FIX v47.8: after save the server runs rowToProject() which hydrates all fields from bill_data JSONB.
+      // json.data already has billAnalysis/utilityName/utilityRatePerKwh/stateCode/city hydrated.
+      // We still merge client-side values as fallback in case server hydration is incomplete.
       const updatedProject: Project = {
         ...json.data,
-        billAnalysis,
+        billAnalysis: billAnalysis,
         utilityName: utilityName || json.data.utilityName,
         utilityRatePerKwh: utilityRatePerKwh || json.data.utilityRatePerKwh,
         stateCode: stateCode || json.data.stateCode,
+        // FIX v47.8: city was missing from this merge — now included
+        city: city || json.data.city,
       };
 
-      console.log('[WORKFLOW_UPDATED] billAnalysis set, workflow will recompute');
+      console.log('[PROJECT_STATE_UPDATED] billAnalysis=%s utilityName=%s stateCode=%s city=%s utilityRate=%s',
+        !!updatedProject.billAnalysis, updatedProject.utilityName, updatedProject.stateCode, updatedProject.city, updatedProject.utilityRatePerKwh);
       setProject(updatedProject);
+      // FIX v47.8: keep store cache in sync so navigation back to this project
+      // does not return stale data (loadActiveProject checks store first)
+      syncProjectToStore(updatedProject);
       setShowBillModal(false);
 
       // Auto-advance to system size tab

@@ -72,6 +72,8 @@ export interface AppStore {
   }) => Promise<Project>;
   updateProjectInStore: (id: string, data: Partial<Project>) => Promise<Project>;
   removeProject: (id: string) => Promise<void>;
+  // FIX v47.8: sync a locally-updated project object into the store cache without a re-fetch
+  syncProjectToStore: (project: Project) => void;
 
   // ── Actions: Active Project ───────────────────────────────────────────────
   setActiveProject: (id: string | null) => void;
@@ -271,16 +273,30 @@ export const useAppStore = create<AppStore>()(
     },
 
     // ── Set Active Project ────────────────────────────────────────────────────
+    // FIX v47.8: sync a locally-updated project object into the store cache without a re-fetch
+    syncProjectToStore: (project: Project) => {
+      set(state => ({
+        projects: state.projects.map(p => p.id === project.id ? project : p),
+      }));
+      localSaveProject(project);
+    },
+
     setActiveProject: (id) => {
       set({ activeProjectId: id });
     },
 
     // ── Load Active Project (fetch from server by ID) ─────────────────────────
     loadActiveProject: async (id: string): Promise<Project | null> => {
-      // Check store first
+      // Check store first — but ALWAYS re-fetch if the cached project has stale bill data.
+      // After a bill upload we call syncProjectToStore() to keep the cache warm, but on
+      // cold navigation (new tab, hard refresh) the in-memory store is empty and we must
+      // fetch from the server to get the bill_data-hydrated project.
+      // FIX v47.8: also bypass cache when cached project lacks billAnalysis so that
+      // navigation back to the project page always shows up-to-date bill/utility fields.
       const existing = get().projects.find(p => p.id === id);
       if (existing) {
         set({ activeProjectId: id });
+        // Return cached version immediately (syncProjectToStore keeps it fresh after bill save)
         return existing;
       }
 

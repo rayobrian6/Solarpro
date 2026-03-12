@@ -187,6 +187,8 @@ function rowToProject(row: Record<string, unknown>): Project {
   let utilityName: string | undefined;
   let utilityRatePerKwh: number | undefined;
   let stateCode: string | undefined;
+  // FIX v47.8: city was never hydrated from bill_data -- added _city hydration
+  let city: string | undefined;
 
   if (rawBillData) {
     // bill_data may have been saved with billAnalysis nested or flat
@@ -196,6 +198,8 @@ function rowToProject(row: Record<string, unknown>): Project {
       utilityName = (rawBillData._utilityName as string) || undefined;
       utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
       stateCode = (rawBillData._stateCode as string) || undefined;
+      // FIX v47.8: hydrate city from bill_data._city (stored by handleBillComplete)
+      city = (rawBillData._city as string) || undefined;
     } else if (rawBillData.monthlyKwh && Array.isArray(rawBillData.monthlyKwh)) {
       // Legacy flat format: bill_data IS the BillAnalysis
       billAnalysis = rawBillData as unknown as import('@/types').BillAnalysis;
@@ -219,6 +223,8 @@ function rowToProject(row: Record<string, unknown>): Project {
     utilityName,
     utilityRatePerKwh,
     stateCode,
+    // FIX v47.8: city now hydrated from bill_data._city
+    city,
     engineeringSeed: row.engineering_seed
       ? (typeof row.engineering_seed === 'string'
           ? JSON.parse(row.engineering_seed)
@@ -1062,6 +1068,8 @@ export async function getProjectWithDetails(
   let utilityName: string | undefined;
   let utilityRatePerKwh: number | undefined;
   let stateCode: string | undefined;
+  // FIX v47.8: city hydration from bill_data._city (matches rowToProject fix)
+  let cityDetail: string | undefined;
 
   if (rawBillData) {
     if (rawBillData._billAnalysis) {
@@ -1069,6 +1077,8 @@ export async function getProjectWithDetails(
       utilityName = (rawBillData._utilityName as string) || undefined;
       utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
       stateCode = (rawBillData._stateCode as string) || undefined;
+      // FIX v47.8: hydrate city from bill_data._city
+      cityDetail = (rawBillData._city as string) || undefined;
     } else if (rawBillData.monthlyKwh && Array.isArray(rawBillData.monthlyKwh)) {
       billAnalysis = rawBillData as unknown as import('@/types').BillAnalysis;
     }
@@ -1092,6 +1102,8 @@ export async function getProjectWithDetails(
     utilityName,
     utilityRatePerKwh,
     stateCode,
+    // FIX v47.8: city now hydrated from bill_data._city
+    city: cityDetail,
     layout,
     production,
     costEstimate,
