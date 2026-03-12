@@ -4,7 +4,13 @@ import {
 } from '@/lib/auth';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
+// v47.9: Explicit maxDuration prevents Vercel from killing this function during
+// DB cold-start retries. Auth routes need up to ~9s for 5 probe retries + query.
+// Default Vercel Hobby timeout is 10s — far too short. 30s is safe for all plans.
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
+  console.log('[AUTH_LOGIN_REQUEST] POST /api/auth/login received');
   try {
     const body = await req.json();
     const { email, password } = body;
@@ -16,11 +22,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    console.log(`[AUTH_LOGIN_REQUEST] Attempting login for: ${email.toLowerCase().trim()}`);
+
     // ── DB with cold-start retry ─────────────────────────────────────────
-    // getDbReady() fires a SELECT 1 probe with up to 3 retries (1s/2s/4s
-    // backoff) to handle Neon compute cold starts. If the DB is already
-    // warm this adds ~0ms overhead. If cold, the probe wakes the node so
-    // the auth query below lands on a live connection.
+    // v47.9: getDbReady() uses module-level singleton + warm-cache flag.
+    // On warm instances: returns cached executor instantly (~0ms).
+    // On cold start: retries SELECT 1 probe up to 5x with 300ms/600ms/1200ms/2400ms/4800ms backoff.
+    // Total budget ~9s, well under maxDuration=30.
+    console.log('[AUTH_SESSION_CHECK] Acquiring DB connection for login');
     const sql = await getDbReady();
 
     // ── Fetch user ───────────────────────────────────────────────────────

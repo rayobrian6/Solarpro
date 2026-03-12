@@ -9,10 +9,11 @@
  * - Jurisdictional requirements
  */
 
-import { getDb } from './auth';
+// v47.9: Use getDbReady() (async, cold-start resilient) instead of getDb() (sync, no retry)
+import { getDbReady } from '@/lib/db-neon';
 
-// Get database connection
-const getSql = () => getDb();
+// Get database connection — async, retries on Neon cold start
+const getSql = () => getDbReady();
 
 // ===== TYPES =====
 
@@ -318,7 +319,7 @@ export async function autoConfigureProject(
   });
   
   // ===== STEP 3: FETCH ENVIRONMENTAL DATA =====
-  const envResult = await getSql()`
+  const envResult = await (await getSql())`
     SELECT wind_speed_mph, ground_snow_load_psf, exposure_category
     FROM county_environmental_data
     WHERE state = ${geo.state} AND county = ${geo.county}
@@ -467,7 +468,7 @@ export async function autoConfigureProject(
   // Primary mounting: Roof Tech Mini II with L-Bracket
   const hardware: HardwareSelection[] = [];
   
-  const rackingResult = await getSql()`
+  const rackingResult = await (await getSql())`
     SELECT id, manufacturer, model, part_number, specs
     FROM hardware_components
     WHERE category = 'racking' AND model ILIKE '%Mini II%'
@@ -495,7 +496,7 @@ export async function autoConfigureProject(
   }
   
   // Auto-select conductor
-  const conductorResult = await getSql()`
+  const conductorResult = await (await getSql())`
     SELECT id, manufacturer, model, part_number
     FROM hardware_components
     WHERE category = 'conductor' AND specs->>'awg' = ${minimumWireGauge.split(' ')[0]} AND specs->>'type' = ${conductorType}
@@ -516,7 +517,7 @@ export async function autoConfigureProject(
   }
   
   // Auto-select AC breaker
-  const breakerResult = await getSql()`
+  const breakerResult = await (await getSql())`
     SELECT id, manufacturer, model, part_number
     FROM hardware_components
     WHERE category = 'breakers' AND specs->>'amperage' = ${acBreakerSize}::text
@@ -552,7 +553,7 @@ export async function autoConfigureProject(
     auto_configured: true,
   };
   
-  await getSql()`
+  await (await getSql())`
     INSERT INTO site_conditions (
       project_id, state, county, latitude, longitude,
       nec_version, wind_speed_mph, ground_snow_load_psf,
@@ -580,7 +581,7 @@ export async function autoConfigureProject(
   
   // Log all auto-configuration decisions
   for (const log of logs) {
-    await getSql()`
+    await (await getSql())`
       INSERT INTO auto_config_log (project_id, field_name, auto_value, reason, was_overridden)
       VALUES (${projectId}, ${log.field}, ${JSON.stringify(log.auto_value)}, ${log.reason}, FALSE)
     `;
@@ -605,7 +606,7 @@ export async function generateDynamicSLG(
   systemCapacityKw: number
 ): Promise<string> {
   // Get site conditions
-  const siteResult = await getSql()`
+  const siteResult = await (await getSql())`
     SELECT * FROM site_conditions WHERE project_id = ${projectId}
   `;
   
@@ -616,7 +617,7 @@ export async function generateDynamicSLG(
   const site = siteResult[0];
   
   // Get electrical config from logs
-  const electricalLogs = await getSql()`
+  const electricalLogs = await (await getSql())`
     SELECT field_name, auto_value FROM auto_config_log
     WHERE project_id = ${projectId} AND field_name IN (
       'ac_breaker_size', 'minimum_wire_gauge', 'egc_size', 'voltage_drop_percent',
@@ -707,7 +708,7 @@ export async function runEngineeringAssist(projectId: number, params: {
   );
   
   // Mark project as "Auto-Configured"
-  await getSql()`
+  await (await getSql())`
     UPDATE projects
     SET notes = COALESCE(notes, '') || E'\\nAuto-configured by SolarPro V2.5 on ' || NOW()::text
     WHERE id = ${projectId}
@@ -728,7 +729,7 @@ export async function overrideAutoConfig(
   reason: string
 ) {
   // Get current auto value
-  const currentResult = await getSql()`
+  const currentResult = await (await getSql())`
     SELECT auto_value FROM auto_config_log
     WHERE project_id = ${projectId} AND field_name = ${fieldName} AND was_overridden = FALSE
     ORDER BY calculated_at DESC LIMIT 1
@@ -741,7 +742,7 @@ export async function overrideAutoConfig(
   const originalValue = currentResult[0].auto_value;
   
   // Log the override
-  await getSql()`
+  await (await getSql())`
     INSERT INTO auto_config_log (project_id, field_name, auto_value, override_value, reason, was_overridden)
     VALUES (${projectId}, ${fieldName}, ${JSON.stringify(originalValue)}, ${JSON.stringify(overrideValue)}, ${reason}, TRUE)
   `;

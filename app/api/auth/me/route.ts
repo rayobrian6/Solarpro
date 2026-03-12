@@ -4,6 +4,10 @@ import { getDbReady } from '@/lib/db-neon';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
 export const dynamic = 'force-dynamic';
+// v47.9: Explicit maxDuration prevents Vercel from killing this function during
+// DB cold-start retries. /api/auth/me is called on mount/focus/tab-switch.
+// Without maxDuration, Vercel Hobby (10s default) can kill during retry loop.
+export const maxDuration = 30;
 
 /**
  * GET /api/auth/me
@@ -26,6 +30,7 @@ export const dynamic = 'force-dynamic';
  *   [AUTH_DB_QUERY_ERROR]  — unexpected query error
  */
 export async function GET(req: NextRequest) {
+  console.log('[AUTH_SESSION_CHECK] GET /api/auth/me received');
   // ── Step 1: Validate JWT ───────────────────────────────────────────────────
   // No DB needed. If no valid cookie → 401 (definitive "not authenticated").
   const session = getUserFromRequest(req);

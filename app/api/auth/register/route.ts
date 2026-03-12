@@ -6,6 +6,9 @@ import {
 import { getDbReady, DbConfigError , handleRouteDbError } from '@/lib/db-neon';
 import { isTransientDbError } from '@/lib/db-ready';
 
+// v47.9: Explicit maxDuration for DB cold-start retry budget
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();

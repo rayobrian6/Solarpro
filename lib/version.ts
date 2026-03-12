@@ -1,8 +1,33 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.8';
+export const BUILD_VERSION     = 'v47.9';
 export const BUILD_DATE        = '2026-06-10';
-export const BUILD_DESCRIPTION = 'v47.8: Bill workflow pipeline bug fix -- city/stateCode/utilityName/utilityRate now fully persisted via bill_data JSONB and hydrated on every project reload';
+export const BUILD_DESCRIPTION = 'v47.9: Definitive deployment startup fix -- 5 root causes identified and resolved, DB cold-start now fully resilient across all Vercel plan tiers';
 export const BUILD_FEATURES    = [
+  // v47.9 -- Definitive deployment startup fix
+  'ROOT CAUSE 1: channel_binding=require in DATABASE_URL caused SSL handshake failures during Neon proxy cold start -- errors mis-classified as fatal causing DB_CONFIG_ERROR banner',
+  'ROOT CAUSE 2: getDbWithRetry() delays 1s/2s/4s=7s too aggressive for Vercel Hobby 10s timeout -- probe retries consumed entire timeout budget before actual query ran',
+  'ROOT CAUSE 3: No module-level Neon singleton -- neon(url) called on every /api/auth/me request (mount/focus/tab-switch) creating redundant HTTP clients and SELECT 1 probe overhead',
+  'ROOT CAUSE 4: auth routes had no maxDuration export -- Vercel Hobby killed functions at 10s default while retries were in progress, producing 504 instead of 503 DB_STARTING',
+  'ROOT CAUSE 5: engineering-automation.ts imported synchronous getDb() from auth.ts -- engineering routes returned 500 (not 503) on cold start, breaking frontend error handling',
+  'FIX: lib/db-ready.ts -- getDatabaseUrl() now strips channel_binding=require -> channel_binding=disable at runtime (Vercel env var sanitization)',
+  'FIX: lib/.env.local -- DATABASE_URL updated to use channel_binding=disable',
+  'FIX: lib/db-ready.ts -- module-level Neon singleton (_cachedSql) created once per function instance cold start, not per request',
+  'FIX: lib/db-ready.ts -- _instanceWarm flag: after first successful SELECT 1 probe, subsequent getDbReady() calls skip probe entirely (~0ms overhead on warm paths)',
+  'FIX: lib/db-ready.ts -- MAX_RETRIES 3->5, BASE_DELAY 1000ms->300ms; delays now 300/600/1200/2400/4800ms = 9.1s total budget (was 7s but consumed 70% of Hobby timeout)',
+  'FIX: lib/db-ready.ts -- isTransientDbError() SCRAM/channel-binding errors now explicitly transient (were falling through to non-retryable causing DB_CONFIG_ERROR)',
+  'FIX: app/api/auth/login/route.ts -- maxDuration=30 added; prevents Vercel from killing during retry loop',
+  'FIX: app/api/auth/me/route.ts -- maxDuration=30 added; prevents 504 timeout during DB cold-start retries',
+  'FIX: app/api/auth/register/route.ts -- maxDuration=30 added; consistent with login/me',
+  'FIX: lib/engineering-automation.ts -- replaced getDb() from ./auth with getDbReady() from db-neon; all 11 call sites updated to await (await getSql())`SQL`',
+  'LOGGING: [SERVER_INSTANCE_STARTED] emitted by db-ready.ts and db-neon.ts on module load (once per cold start)',
+  'LOGGING: [ENVIRONMENT_LOADED] DATABASE_URL presence + NODE_ENV + VERCEL_ENV logged at startup',
+  'LOGGING: [ENV_DATABASE_URL_STATUS] DATABASE_URL length + channel_binding sanitization logged on every getDatabaseUrl() call',
+  'LOGGING: [DB_CLIENT_INIT] neon() singleton creation logged',
+  'LOGGING: [DB_CONNECTION_ATTEMPT] each SELECT 1 probe attempt numbered and logged',
+  'LOGGING: [DB_CONNECTION_SUCCESS] successful probe logged with attempt number',
+  'LOGGING: [DB_CONNECTION_FAILED] failed probe logged with error message + retry delay',
+  'LOGGING: [AUTH_LOGIN_REQUEST] login attempt start + email logged',
+  'LOGGING: [AUTH_SESSION_CHECK] DB connection acquisition logged in login and me routes',
   // v47.8 -- Bill workflow pipeline bug fix
   'ROOT CAUSE: handleBillComplete PUT body stored _stateCode in bill_data JSONB but never _city -- Location field on System Size page always showed Not set',
   'ROOT CAUSE: rowToProject() hydrated stateCode/utilityName/utilityRatePerKwh from bill_data JSONB but had no city hydration path -- city was lost on every DB round-trip',

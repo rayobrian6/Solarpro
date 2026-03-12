@@ -17,6 +17,11 @@ import { neon } from '@neondatabase/serverless';
 import { DbConfigError, getDbWithRetry as _getDbWithRetry } from '@/lib/db-ready';
 import { Client, Project, Layout } from '@/types';
 
+// v47.9: Module-level startup log — appears once per Vercel function instance cold start.
+// Searchable in Vercel function logs to trace deployment startup sequence.
+console.log('[SERVER_INSTANCE_STARTED] db-neon.ts module loaded');
+console.log(`[ENVIRONMENT_LOADED] DATABASE_URL present: ${!!process.env.DATABASE_URL} NODE_ENV: ${process.env.NODE_ENV} VERCEL_ENV: ${process.env.VERCEL_ENV || 'local'}`);
+
 // ============================================================
 // PRICING CONFIG TYPE
 // ============================================================
