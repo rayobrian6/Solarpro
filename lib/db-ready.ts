@@ -4,7 +4,7 @@
  * Database readiness guard for Neon serverless PostgreSQL.
  *
  * WHY THIS EXISTS
- * ──────────────────────────────────────────────────────────────────────────
+ * ──────────────────────────────────────────────────────────────────────────────
  * Neon uses HTTP-based serverless Postgres — there is no persistent TCP
  * connection pool to "warm up". However, Neon compute nodes auto-suspend
  * after ~5 minutes of inactivity. The first query after a cold start wakes
@@ -14,32 +14,29 @@
  *
  * On Vercel, a deployment creates new serverless function instances that
  * are also cold — so the first login attempt immediately after a deploy
- * can hit this Neon cold-start window and return an error, which the old
- * login route mis-classified as "Database not configured."
+ * can hit this Neon cold-start window and return an error, which without
+ * this guard would be mis-classified as "Database not configured."
  *
  * HOW THIS FIXES IT
- * ──────────────────────────────────────────────────────────────────────────
+ * ──────────────────────────────────────────────────────────────────────────────
  * 1. getDbWithRetry()  — wraps any DB query in up to 3 attempts with
  *    exponential backoff (1s → 2s → 4s). Transient cold-start errors are
  *    retried automatically; env-var/config errors are thrown immediately.
  *
  * 2. probeDbReady()    — fires a lightweight SELECT 1 probe to wake the
- *    Neon compute before the real query runs. Called by login so the auth
- *    query lands on an already-warm connection.
+ *    Neon compute before the real query runs.
  *
  * 3. isTransientDbError() — classifies errors as transient (retry) vs
- *    fatal (throw immediately). Prevents retrying on misconfiguration.
+ *    fatal (throw immediately). Uses a WHITELIST-FATAL approach: only
+ *    explicitly known fatal errors are non-retryable. Everything else is
+ *    treated as transient to prevent cold-start errors from being
+ *    mis-classified as configuration failures.
  *
- * USAGE
- * ──────────────────────────────────────────────────────────────────────────
- *   import { getDbWithRetry, probeDbReady } from '@/lib/db-ready';
- *
- *   // Probe first (optional — warms the compute node):
- *   await probeDbReady();
- *
- *   // Then run queries with automatic retry:
- *   const sql = await getDbWithRetry();
- *   const rows = await sql`SELECT ...`;
+ * LOG CODES (searchable in Vercel logs)
+ * ──────────────────────────────────────────────────────────────────────────────
+ *   AUTH_DB_STARTING     — transient connection failure, retry in progress
+ *   AUTH_DB_CONFIG_ERROR — DATABASE_URL missing or invalid, non-retryable
+ *   AUTH_DB_QUERY_ERROR  — query succeeded but returned unexpected data
  */
 
 import { neon, NeonQueryFunction } from '@neondatabase/serverless';
@@ -47,12 +44,12 @@ import { neon, NeonQueryFunction } from '@neondatabase/serverless';
 // Concrete type for a default neon() sql executor (no array mode, no full results)
 type SqlExecutor = NeonQueryFunction<false, false>;
 
-// ─── Config ────────────────────────────────────────────────────────────────
+// ─── Config ──────────────────────────────────────────────────────────────────
 
 const MAX_RETRIES   = 3;
 const BASE_DELAY_MS = 1000; // 1s, 2s, 4s for attempts 0, 1, 2
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -66,7 +63,7 @@ function getDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
   if (!url || url === 'YOUR_NEON_DATABASE_URL_HERE') {
     console.error(
-      '\n[db-ready] DATABASE_URL is not configured.\n' +
+      '\n[AUTH_DB_CONFIG_ERROR] DATABASE_URL is not configured.\n' +
       '  -> Add DATABASE_URL to your Vercel project environment variables.\n' +
       '  -> Get it from: https://console.neon.tech -> your project -> Connection string\n'
     );
@@ -77,9 +74,12 @@ function getDatabaseUrl(): string {
   return url;
 }
 
+// ─── Error Classes ────────────────────────────────────────────────────────────
+
 /**
  * A non-retryable configuration error.
  * Thrown when DATABASE_URL is missing — retrying won't help.
+ * Routes must check for this specifically and return DB_CONFIG_ERROR to the client.
  */
 export class DbConfigError extends Error {
   constructor(message: string) {
@@ -88,52 +88,62 @@ export class DbConfigError extends Error {
   }
 }
 
+// ─── Error Classification ─────────────────────────────────────────────────────
+
 /**
  * Classifies a DB error as transient (should retry) or fatal (throw immediately).
  *
- * Transient errors: network timeouts, ECONNRESET, Neon cold-start,
- * connection refused on first wake-up.
+ * DESIGN: Uses a WHITELIST-FATAL approach.
+ * Only explicitly known fatal error patterns are classified as non-retryable.
+ * ALL other errors (including unknown Neon errors) are treated as transient.
  *
- * Fatal errors: missing env var, auth failure, invalid SQL.
+ * This prevents Neon cold-start errors with unusual messages from being
+ * mis-classified as configuration failures and shown to the user as
+ * "Database not configured."
+ *
+ * Fatal (non-retryable) patterns:
+ *   - Missing DATABASE_URL (DbConfigError)
+ *   - PostgreSQL authentication failure (wrong password)
+ *   - PostgreSQL role does not exist (wrong connection string)
+ *   - Permission denied (wrong database user)
+ *
+ * Transient (retryable) patterns — everything else, including:
+ *   - Neon cold start: "endpoint is starting", "compute is starting"
+ *   - Network errors: ECONNRESET, ECONNREFUSED, ETIMEDOUT
+ *   - HTTP transport errors: "fetch failed", "failed to fetch", "network error"
+ *   - Connection drops: "connection terminated", "connection closed", "socket hang up"
+ *   - Unknown Neon infrastructure errors (treated as transient by default)
  */
 export function isTransientDbError(err: unknown): boolean {
+  // DbConfigError is always fatal — DATABASE_URL missing, retrying won't help
   if (err instanceof DbConfigError) return false;
 
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
 
-  // Fatal: env/config errors — retrying won't help
-  if (msg.includes('database_url') || msg.includes('not set') ||
-      msg.includes('not configured')) {
-    return false;
-  }
+  // ── WHITELIST: explicitly fatal errors ────────────────────────────────────
+  // Only these specific patterns are treated as non-retryable.
 
-  // Fatal: auth/permission errors
-  if (msg.includes('password authentication') ||
-      msg.includes('role') && msg.includes('does not exist') ||
-      msg.includes('permission denied')) {
-    return false;
-  }
+  // PostgreSQL auth failure — wrong password or user
+  if (msg.includes('password authentication failed')) return false;
 
-  // Transient: known Neon cold-start / network errors
-  if (msg.includes('econnreset') ||
-      msg.includes('econnrefused') ||
-      msg.includes('etimedout') ||
-      msg.includes('timeout') ||
-      msg.includes('starting') ||           // "endpoint is starting"
-      msg.includes('connection terminated') ||
-      msg.includes('connection closed') ||
-      msg.includes('socket hang up') ||
-      msg.includes('network error') ||
-      msg.includes('fetch failed') ||
-      msg.includes('failed to fetch')) {
-    return true;
-  }
+  // PostgreSQL role missing — wrong DATABASE_URL user component
+  if (msg.includes('role') && msg.includes('does not exist')) return false;
 
-  // Default: treat unknown DB errors as transient on first occurrence
+  // PostgreSQL permission denied — insufficient privileges
+  if (msg.includes('permission denied') && !msg.includes('permission denied to')) return false;
+
+  // Database does not exist — wrong database name in URL
+  if (msg.includes('database') && msg.includes('does not exist')) return false;
+
+  // ── Everything else is transient ──────────────────────────────────────────
+  // Neon cold-start errors, network errors, HTTP transport errors, and
+  // any unknown error from Neon infrastructure are all treated as transient.
+  // This is the safe default — a brief retry delay is far better than
+  // incorrectly showing "Database not configured" to the user.
   return true;
 }
 
-// ─── Core API ──────────────────────────────────────────────────────────────
+// ─── Core API ─────────────────────────────────────────────────────────────────
 
 /**
  * Returns a Neon SQL executor, retrying up to MAX_RETRIES times with
@@ -161,20 +171,24 @@ export async function getDbWithRetry(): Promise<SqlExecutor> {
 
       if (!isTransientDbError(err)) {
         // Fatal error — don't retry
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[AUTH_DB_CONFIG_ERROR] Non-retryable DB error on attempt ${attempt + 1}: ${msg}`);
         throw err;
       }
 
       const delay = BASE_DELAY_MS * Math.pow(2, attempt); // 1s, 2s, 4s
+      const msg = err instanceof Error ? err.message : String(err);
       console.warn(
-        `[db-ready] DB connection attempt ${attempt + 1}/${MAX_RETRIES} failed` +
-        ` — retrying in ${delay}ms. Error: ${err instanceof Error ? err.message : err}`
+        `[AUTH_DB_STARTING] DB connection attempt ${attempt + 1}/${MAX_RETRIES} failed` +
+        ` — retrying in ${delay}ms. Error: ${msg}`
       );
       await sleep(delay);
     }
   }
 
-  // All retries exhausted
-  console.error('[db-ready] All DB connection attempts failed.');
+  // All retries exhausted — still transient, caller decides how to handle
+  const msg = lastError instanceof Error ? lastError.message : String(lastError);
+  console.error(`[AUTH_DB_STARTING] All ${MAX_RETRIES} DB connection attempts failed. Last error: ${msg}`);
   throw lastError;
 }
 

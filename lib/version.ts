@@ -1,8 +1,21 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.1';
+export const BUILD_VERSION     = 'v47.2';
 export const BUILD_DATE        = '2026-03-18';
-export const BUILD_DESCRIPTION = 'Production stability: deployment cold-start session fix, retry-aware auth pipeline, Secure cookie flag';
+export const BUILD_DESCRIPTION = 'Production stability v2: defense-in-depth DB error classification, all cold-start paths return DB_STARTING';
 export const BUILD_FEATURES    = [
+  // v47.2 -- Production stability: defense-in-depth DB error handling
+  'ROOT CAUSE: isTransientDbError() used blacklist approach -- any Neon cold-start error with unusual message fell through to non-transient, causing DB_CONFIG_ERROR mis-classification',
+  'ROOT CAUSE: login/route.ts catch used msg.includes(DATABASE_URL) -- matched Neon connection string errors during cold start, showed Database not configured to users',
+  'ROOT CAUSE: me/route.ts generic 500 fallthrough -- UserContext does not retry on 500, so unrecognized errors appeared as logout',
+  'ROOT CAUSE: UserContext treated any non-200 non-503 as definitive logout (if (!res.ok) return null)',
+  'FIX: lib/db-ready.ts -- isTransientDbError() rewritten with WHITELIST-FATAL approach: only explicit pg auth/permission/missing errors are fatal; all unknown errors default to transient',
+  'FIX: lib/db-ready.ts -- AUTH_DB_STARTING / AUTH_DB_CONFIG_ERROR log codes on every error path for Vercel log searchability',
+  'FIX: app/api/auth/me/route.ts -- handleDbError() centralizes all DB error responses; defaults to DB_STARTING for ALL non-DbConfigError errors (never 500)',
+  'FIX: app/api/auth/me/route.ts -- inner fallback query wrapped in own try/catch; connection errors in fallback correctly return DB_STARTING not 500',
+  'FIX: app/api/auth/me/route.ts -- AUTH_DB_STARTING/AUTH_DB_CONFIG_ERROR/AUTH_DB_QUERY_ERROR log tags on every code path with stage= context',
+  'FIX: app/api/auth/login/route.ts -- removed msg.includes(DATABASE_URL) from config error check; only DbConfigError is fatal',
+  'FIX: app/api/auth/login/route.ts -- all non-DbConfigError errors return DB_STARTING (not 500/Login failed); same safe-default pattern',
+  'FIX: contexts/UserContext.tsx -- HTTP 500 from /api/auth/me now retries (not logout); only HTTP 401 = definitive logout',
   // v47.1 -- Production stability: deployment cold-start session fix
   'ROOT CAUSE: /api/auth/me used getDb() (no retry) -- UserContext called on mount/focus/30s -- cold start = null user = apparent logout',
   'FIX: app/api/auth/me/route.ts -- switched getDb() to getDbReady() (3x retry, 1s/2s/4s backoff); returns DB_STARTING 503 on transient failure (not 500)',

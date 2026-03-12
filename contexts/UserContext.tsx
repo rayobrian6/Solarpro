@@ -79,10 +79,23 @@ async function fetchUserFromDb(): Promise<{ user: AppUser | null; retry?: boolea
       return { user: null, retry: true };
     }
 
-    // 401 — definitively not authenticated, stop immediately
+    // 401 — definitively not authenticated (expired/missing cookie), stop immediately
     if (res.status === 401) return { user: null, retry: false };
 
-    if (!res.ok) return { user: null, retry: false };
+    // 500 or other server errors during startup — retry conservatively.
+    // A 500 during a Vercel cold start means the function crashed before
+    // it could return DB_STARTING. Retrying is always safer than logging out.
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      const errCode = (errJson as any)?.code;
+      // Only stop retrying if we get an explicit non-transient code
+      if (errCode === 'DB_CONFIG_ERROR') {
+        console.error('[UserContext] DB config error (non-200) — not retrying');
+        return { user: null, retry: false };
+      }
+      console.warn(`[UserContext] /api/auth/me returned ${res.status} — will retry`);
+      return { user: null, retry: true };
+    }
 
     const json = await res.json();
     const u = json?.data || json?.user || json;

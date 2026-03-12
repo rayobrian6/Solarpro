@@ -12,166 +12,210 @@ export const dynamic = 'force-dynamic';
  * ALL user data (role, plan, is_free_pass, subscription_status) comes from the DB.
  * Role is NEVER read from the JWT payload.
  *
- * Uses getDbReady() with cold-start retry so that a Vercel deployment cold start
- * does NOT cause UserContext to see null (which looks like logout to the user).
+ * ERROR CODE CONTRACT (used by UserContext and login page):
+ *   401                      — not authenticated (no cookie / expired JWT)
+ *   503 + DB_STARTING        — DB temporarily unreachable (cold start), client MUST retry
+ *   503 + DB_CONFIG_ERROR    — DATABASE_URL missing (genuine misconfiguration)
+ *   500 + DB_QUERY_ERROR     — query ran but returned unexpected results
+ *
+ * CRITICAL: Only 401 means "log the user out". All other errors mean "wait and retry."
+ *
+ * LOG CODES (searchable in Vercel function logs):
+ *   [AUTH_DB_STARTING]     — transient connection failure
+ *   [AUTH_DB_CONFIG_ERROR] — DATABASE_URL missing
+ *   [AUTH_DB_QUERY_ERROR]  — unexpected query error
  */
 export async function GET(req: NextRequest) {
-  try {
-    // Step 1: Extract user ID from JWT — nothing else is trusted from the token
-    const session = getUserFromRequest(req);
-    if (!session?.id) {
-      return NextResponse.json(
-        { success: false, error: 'Not authenticated' },
-        { status: 401 }
-      );
-    }
-
-    const userId = session.id;
-
-    // Step 2: Get DB with cold-start retry (handles Vercel deployment cold starts)
-    const sql = await getDbReady();
-
-    // Step 3: Fetch ALL user data from DB — this is the single source of truth
-    let rows: any[] = [];
-    let useFallback = false;
-
-    try {
-      // NOTE: Query formatting intentionally differs from other routes to avoid
-      // Neon prepared statement cache collisions (different template = different PS key)
-      rows = await sql`
-        SELECT id, name, email, company, phone,
-          role, email_verified, created_at,
-          plan, subscription_status,
-          trial_starts_at, trial_ends_at,
-          is_free_pass, free_pass_note,
-          company_logo_url, company_website,
-          company_address, company_phone,
-          brand_primary_color, brand_secondary_color,
-          proposal_footer_text
-        FROM users WHERE id = ${userId} LIMIT 1
-      `;
-    } catch (colErr: any) {
-      // New columns don't exist yet (migration not run) — fall back to base columns
-      console.warn('Auth me: falling back to base columns:', colErr.message);
-      useFallback = true;
-      rows = await sql`
-        SELECT id, name, email,
-          company, phone, role,
-          email_verified, created_at
-        FROM users WHERE id = ${userId} LIMIT 1
-      `;
-    }
-
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      );
-    }
-
-    const db = rows[0];
-
-    // Step 4: Compute hasAccess from DB fields only — mirrors hasPlatformAccess()
-    const now = new Date();
-    const trialEnd = !useFallback && db.trial_ends_at ? new Date(db.trial_ends_at) : null;
-    const role = (db.role || '').toLowerCase();
-    const hasAccess = useFallback
-      ? true  // migration not run yet — allow access so users aren't locked out
-      : (role === 'super_admin' ||
-         role === 'admin' ||
-         db.is_free_pass === true ||
-         db.subscription_status === 'active' ||
-         db.subscription_status === 'free_pass' ||
-         (db.subscription_status === 'trialing' && trialEnd && trialEnd > now));
-
-    // Step 5: Return normalized user object
-    // camelCase fields for frontend; snake_case fields kept for compatibility
-    return NextResponse.json({
-      success: true,
-      data: {
-        // Identity
-        id:            db.id,
-        name:          db.name,
-        email:         db.email,
-        company:       db.company   || null,
-        phone:         db.phone     || null,
-        emailVerified: db.email_verified || false,
-        createdAt:     db.created_at || null,
-
-        // Role — ALWAYS from DB, never from JWT
-        role: db.role || 'user',
-
-        // Subscription — camelCase (frontend canonical)
-        plan:               db.plan               || 'starter',
-        subscriptionStatus: db.subscription_status || 'trialing',
-        trialStartsAt:      db.trial_starts_at    || null,
-        trialEndsAt:        db.trial_ends_at       || null,
-        isFreePass:         db.is_free_pass        === true,
-        freePassNote:       db.free_pass_note      || null,
-        hasAccess,
-
-        // Subscription — snake_case (kept for any legacy consumers)
-        subscription_status: db.subscription_status || 'trialing',
-        is_free_pass:        db.is_free_pass        === true,
-        trial_ends_at:       db.trial_ends_at       || null,
-
-        // Branding
-        companyLogoUrl:      db.company_logo_url    || null,
-        companyWebsite:      db.company_website     || null,
-        companyAddress:      db.company_address     || null,
-        companyPhone:        db.company_phone       || null,
-        brandPrimaryColor:   db.brand_primary_color   || '#f59e0b',
-        brandSecondaryColor: db.brand_secondary_color || '#0f172a',
-        proposalFooterText:  db.proposal_footer_text  || null,
-      }
-    }, {
-      headers: {
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-        'Pragma':        'no-cache',
-        'Expires':       '0',
-      }
-    });
-
-  } catch (error: any) {
-    // ── Config error: DATABASE_URL missing ────────────────────────────────────
-    // This is a genuine misconfiguration — return a clear code but NOT 401.
-    // UserContext must NOT treat this as "logged out".
-    if (error instanceof DbConfigError) {
-      console.error('[/api/auth/me] DATABASE_URL not configured:', error.message);
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Server configuration error. Please contact your administrator.',
-          code: 'DB_CONFIG_ERROR',
-        },
-        { status: 503 }
-      );
-    }
-
-    // ── Transient error: cold start / network timeout ─────────────────────────
-    // getDbReady() already retried 3x — if we still land here, DB is temporarily
-    // unreachable. Return DB_STARTING so UserContext can retry instead of logging out.
-    if (isTransientDbError(error)) {
-      console.warn('[/api/auth/me] DB temporarily unreachable after retries:', error.message);
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Server is starting up — please wait a moment.',
-          code: 'DB_STARTING',
-          retryAfterMs: 3000,
-        },
-        {
-          status: 503,
-          headers: { 'Retry-After': '3' },
-        }
-      );
-    }
-
-    // ── Unexpected error ──────────────────────────────────────────────────────
-    console.error('[/api/auth/me] Unexpected error:', error);
+  // ── Step 1: Validate JWT ───────────────────────────────────────────────────
+  // No DB needed. If no valid cookie → 401 (definitive "not authenticated").
+  const session = getUserFromRequest(req);
+  if (!session?.id) {
     return NextResponse.json(
-      { success: false, error: 'Failed to get user' },
-      { status: 500 }
+      { success: false, error: 'Not authenticated' },
+      { status: 401 }
     );
   }
+
+  const userId = session.id;
+
+  // ── Step 2: Get DB with cold-start retry ───────────────────────────────────
+  // getDbReady() fires a SELECT 1 probe with up to 3 retries (1s/2s/4s backoff).
+  // On genuine config error (missing DATABASE_URL) → throws DbConfigError.
+  // On transient error (cold start / network) → throws last error after retries.
+  let sql: Awaited<ReturnType<typeof getDbReady>>;
+  try {
+    sql = await getDbReady();
+  } catch (err: unknown) {
+    return handleDbError(err, 'getDbReady');
+  }
+
+  // ── Step 3: Fetch user data ────────────────────────────────────────────────
+  // Try full column set first. If new columns don't exist (migration pending),
+  // fall back to base columns. Both queries wrapped individually so a connection
+  // error in either path is correctly classified and returned as DB_STARTING.
+  let rows: any[] = [];
+  let useFallback = false;
+
+  try {
+    rows = await sql`
+      SELECT id, name, email, company, phone,
+        role, email_verified, created_at,
+        plan, subscription_status,
+        trial_starts_at, trial_ends_at,
+        is_free_pass, free_pass_note,
+        company_logo_url, company_website,
+        company_address, company_phone,
+        brand_primary_color, brand_secondary_color,
+        proposal_footer_text
+      FROM users WHERE id = ${userId} LIMIT 1
+    `;
+  } catch (fullErr: unknown) {
+    // Check if this is a missing-column error (migration not yet run)
+    const fullMsg = (fullErr instanceof Error ? fullErr.message : String(fullErr)).toLowerCase();
+    const isMissingColumn = fullMsg.includes('column') && (
+      fullMsg.includes('does not exist') ||
+      fullMsg.includes('undefined') ||
+      fullMsg.includes('unknown')
+    );
+
+    if (isMissingColumn) {
+      // Migration not run yet — try base columns
+      console.warn('[AUTH_DB_QUERY_ERROR] Full query failed (missing columns), trying fallback:', fullMsg);
+      useFallback = true;
+      try {
+        rows = await sql`
+          SELECT id, name, email,
+            company, phone, role,
+            email_verified, created_at
+          FROM users WHERE id = ${userId} LIMIT 1
+        `;
+      } catch (fallbackErr: unknown) {
+        // Fallback query also failed — could be connection error during cold start
+        return handleDbError(fallbackErr, 'fallback-query');
+      }
+    } else {
+      // Not a missing-column error — could be connection error, classify properly
+      return handleDbError(fullErr, 'full-query');
+    }
+  }
+
+  // ── Step 4: User not found ────────────────────────────────────────────────
+  if (rows.length === 0) {
+    // The user ID from JWT has no matching row — deleted account or stale token
+    return NextResponse.json(
+      { success: false, error: 'User not found' },
+      { status: 404 }
+    );
+  }
+
+  const db = rows[0];
+
+  // ── Step 5: Compute hasAccess ─────────────────────────────────────────────
+  const now = new Date();
+  const trialEnd = !useFallback && db.trial_ends_at ? new Date(db.trial_ends_at) : null;
+  const role = (db.role || '').toLowerCase();
+  const hasAccess = useFallback
+    ? true  // migration not run yet — allow access so users aren't locked out
+    : (role === 'super_admin' ||
+       role === 'admin' ||
+       db.is_free_pass === true ||
+       db.subscription_status === 'active' ||
+       db.subscription_status === 'free_pass' ||
+       (db.subscription_status === 'trialing' && trialEnd && trialEnd > now));
+
+  // ── Step 6: Return normalized user object ─────────────────────────────────
+  return NextResponse.json({
+    success: true,
+    data: {
+      // Identity
+      id:            db.id,
+      name:          db.name,
+      email:         db.email,
+      company:       db.company   || null,
+      phone:         db.phone     || null,
+      emailVerified: db.email_verified || false,
+      createdAt:     db.created_at || null,
+
+      // Role — ALWAYS from DB, never from JWT
+      role: db.role || 'user',
+
+      // Subscription — camelCase (frontend canonical)
+      plan:               db.plan               || 'starter',
+      subscriptionStatus: db.subscription_status || 'trialing',
+      trialStartsAt:      db.trial_starts_at    || null,
+      trialEndsAt:        db.trial_ends_at       || null,
+      isFreePass:         db.is_free_pass        === true,
+      freePassNote:       db.free_pass_note      || null,
+      hasAccess,
+
+      // Subscription — snake_case (kept for any legacy consumers)
+      subscription_status: db.subscription_status || 'trialing',
+      is_free_pass:        db.is_free_pass        === true,
+      trial_ends_at:       db.trial_ends_at       || null,
+
+      // Branding
+      companyLogoUrl:      db.company_logo_url    || null,
+      companyWebsite:      db.company_website     || null,
+      companyAddress:      db.company_address     || null,
+      companyPhone:        db.company_phone       || null,
+      brandPrimaryColor:   db.brand_primary_color   || '#f59e0b',
+      brandSecondaryColor: db.brand_secondary_color || '#0f172a',
+      proposalFooterText:  db.proposal_footer_text  || null,
+    }
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+      'Pragma':        'no-cache',
+      'Expires':       '0',
+    }
+  });
+}
+
+/**
+ * Centralised DB error handler for /api/auth/me.
+ *
+ * CRITICAL CONTRACT:
+ *   - DbConfigError        → 503 DB_CONFIG_ERROR (genuine misconfiguration)
+ *   - isTransientDbError() → 503 DB_STARTING     (cold start / network)
+ *   - Everything else      → 503 DB_STARTING     (SAFE DEFAULT — never 500)
+ *
+ * We default to DB_STARTING (not 500) because:
+ *   1. Neon can throw unusual error messages during cold start that don't
+ *      match any known pattern. Treating them as transient is always safer
+ *      than showing "Database not configured" to a logged-in user.
+ *   2. UserContext retries on DB_STARTING — it does NOT retry on 500.
+ *   3. The only true fatal condition is missing DATABASE_URL (DbConfigError).
+ */
+function handleDbError(err: unknown, stage: string): NextResponse {
+  const msg = err instanceof Error ? err.message : String(err);
+
+  // Genuine misconfiguration — DATABASE_URL missing
+  if (err instanceof DbConfigError) {
+    console.error(`[AUTH_DB_CONFIG_ERROR] [stage=${stage}] DATABASE_URL not configured: ${msg}`);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Server configuration error. Please contact your administrator.',
+        code: 'DB_CONFIG_ERROR',
+      },
+      { status: 503 }
+    );
+  }
+
+  // Transient or unknown error — always return DB_STARTING so client retries
+  // isTransientDbError() check is informational only — we return DB_STARTING regardless
+  const classified = isTransientDbError(err) ? 'transient' : 'unknown-defaulting-to-transient';
+  console.warn(`[AUTH_DB_STARTING] [stage=${stage}] [classified=${classified}] DB error: ${msg}`);
+  return NextResponse.json(
+    {
+      success: false,
+      error: 'Server is starting up — please wait a moment.',
+      code: 'DB_STARTING',
+      retryAfterMs: 2000,
+    },
+    {
+      status: 503,
+      headers: { 'Retry-After': '2' },
+    }
+  );
 }

@@ -72,46 +72,42 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     const msg = error?.message || String(error);
 
-    // ── Config error: DATABASE_URL missing ──────────────────────────────
-    // This is a genuine misconfiguration — tell the admin clearly.
-    if (error instanceof DbConfigError || msg.includes('DATABASE_URL')) {
-      console.error('\n[/api/auth/login] DATABASE_URL not configured:');
-      console.error(' ', msg);
-      console.error('  -> Add DATABASE_URL to your Vercel environment variables.\n');
+    // ── Config error: DATABASE_URL genuinely missing ──────────────────────────
+    // ONLY DbConfigError (thrown by getDatabaseUrl()) is a true config error.
+    // Do NOT check msg.includes('DATABASE_URL') — that can match Neon connection
+    // string errors during cold start and incorrectly show "Database not configured."
+    if (error instanceof DbConfigError) {
+      console.error('[AUTH_DB_CONFIG_ERROR] /api/auth/login: DATABASE_URL not configured:', msg);
       return NextResponse.json(
         {
           success: false,
-          error: 'Database not configured. Contact your administrator.',
+          error: 'Server configuration error. Please contact your administrator.',
           code: 'DB_CONFIG_ERROR',
         },
         { status: 503 }
       );
     }
 
-    // ── Transient error: cold start / network timeout ────────────────────
-    // getDbReady() already retried 3x — if we still land here, the DB is
-    // genuinely unreachable right now. Tell the client to retry shortly.
-    if (isTransientDbError(error)) {
-      console.warn('[/api/auth/login] DB temporarily unreachable after retries:', msg);
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Server is starting up — please wait a moment and try again.',
-          code: 'DB_STARTING',
-          retryAfterMs: 3000,
-        },
-        {
-          status: 503,
-          headers: { 'Retry-After': '3' },
-        }
-      );
-    }
-
-    // ── Unexpected error ─────────────────────────────────────────────────
-    console.error('[/api/auth/login] Unexpected login error:', error);
+    // ── All other errors: cold start / network / unknown ──────────────────────
+    // getDbReady() already retried 3x. Any remaining error is either a transient
+    // Neon cold-start error or an unknown error. In both cases return DB_STARTING
+    // so the login page retries instead of showing an error banner.
+    //
+    // SAFE DEFAULT: returning DB_STARTING for unknown errors is always better
+    // than showing "Login failed" or "Database not configured" for a cold start.
+    const classified = isTransientDbError(error) ? 'transient' : 'unknown-defaulting-to-transient';
+    console.warn(`[AUTH_DB_STARTING] /api/auth/login: DB error [${classified}]:`, msg);
     return NextResponse.json(
-      { success: false, error: 'Login failed. Please try again.' },
-      { status: 500 }
+      {
+        success: false,
+        error: 'Server is starting up — please wait a moment and try again.',
+        code: 'DB_STARTING',
+        retryAfterMs: 3000,
+      },
+      {
+        status: 503,
+        headers: { 'Retry-After': '3' },
+      }
     );
   }
 }
