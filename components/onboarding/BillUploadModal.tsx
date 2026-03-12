@@ -459,6 +459,31 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         }
       }
 
+      // 6. Persist parsed bill data to the bills table so it survives page reload
+      try {
+        await fetch('/api/bills', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            utilityName: result.billData.utilityProvider || result.utilityData?.utilityName || null,
+            monthlyKwh: result.billData.monthlyKwh || null,
+            annualKwh: result.billData.estimatedAnnualKwh || null,
+            electricRate: result.billData.electricityRate || result.utilityData?.avgRatePerKwh || null,
+            parsedJson: sanitizeForJson({
+              billData: result.billData,
+              locationData: result.locationData,
+              utilityData: result.utilityData,
+              systemSizing: result.systemSizing,
+              rateValidation: result.rateValidation,
+            }),
+          }),
+        });
+        log('✓ Bill data persisted');
+      } catch {
+        // Non-fatal — bill data is also in project.bill_data JSONB
+      }
+
       log('✓ All done! Redirecting to project...');
 
       const entities: CreatedEntities = {

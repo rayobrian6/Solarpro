@@ -351,6 +351,65 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ projects.engineering_seed: ${e.message}`);
     }
 
+        // ============================================================
+    // Migration 009: Add default_residential_rate + source to utility_policies
+    // ============================================================
+    try {
+      await sql`ALTER TABLE utility_policies ADD COLUMN IF NOT EXISTS default_residential_rate NUMERIC(6,4)`;
+      results.push('✅ utility_policies.default_residential_rate — added (or already existed)');
+    } catch (e: any) {
+      results.push(`⚠️ utility_policies.default_residential_rate: ${e.message}`);
+    }
+    try {
+      await sql`ALTER TABLE utility_policies ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'`;
+      results.push('✅ utility_policies.source — added (or already existed)');
+    } catch (e: any) {
+      results.push(`⚠️ utility_policies.source: ${e.message}`);
+    }
+    // Enable pg_trgm extension for fuzzy matching
+    try {
+      await sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`;
+      results.push('✅ pg_trgm extension enabled');
+    } catch (e: any) {
+      results.push(`⚠️ pg_trgm: ${e.message}`);
+    }
+    // GIN index on utility_name for fast trigram similarity search
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_utility_policies_name_trgm ON utility_policies USING GIN (utility_name gin_trgm_ops)`;
+      results.push('✅ GIN trigram index on utility_policies.utility_name');
+    } catch (e: any) {
+      results.push(`⚠️ trigram index: ${e.message}`);
+    }
+
+    // ============================================================
+    // Migration 010: bills table — persistent bill storage per project
+    // ============================================================
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS bills (
+          id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          user_id         UUID NOT NULL,
+          utility_name    TEXT,
+          monthly_kwh     NUMERIC(10,2),
+          annual_kwh      NUMERIC(10,2),
+          electric_rate   NUMERIC(6,4),
+          file_url        TEXT,
+          parsed_json     JSONB,
+          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ bills table ready');
+    } catch (e: any) {
+      results.push(`⚠️ bills table: ${e.message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_bills_project_id ON bills(project_id)`;
+      results.push('✅ bills.project_id index ready');
+    } catch (e: any) {
+      results.push(`⚠️ bills index: ${e.message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     console.error('[POST /api/migrate]', error);

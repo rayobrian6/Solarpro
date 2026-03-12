@@ -1,8 +1,20 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v46.5';
-export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'Bill parser: fix P3 Monthly Usage Summary -- values are monthly kWh totals, not daily averages';
+export const BUILD_VERSION     = 'v46.6';
+export const BUILD_DATE        = '2026-03-15';
+export const BUILD_DESCRIPTION = 'Utility detection + bill persistence: pg_trgm fuzzy match, auto-discover utilities, bills table, DB rate, state-aware production factors';
 export const BUILD_FEATURES    = [
+  // v46.6 -- Utility detection + bill persistence
+  'NEW: lib/utilityMatcher.ts -- normalizeUtilityName() strips noise words; matchUtility() P1 exact / P2 pg_trgm fuzzy / P3 state fallback / P4 auto-discover',
+  'FIX: app/api/bill-upload/route.ts -- calls matchUtility() after parseBill(); applies DB rate (default_residential_rate) to billData.electricityRate',
+  'FIX: app/api/bill-upload/route.ts -- geo detectUtility() is now fallback-only; parsed name match wins',
+  'FIX: app/api/bill-upload/route.ts -- bill persisted to bills table when projectId in form data',
+  'NEW: app/api/migrate/route.ts -- Migration 009: default_residential_rate + source on utility_policies; pg_trgm extension; GIN index',
+  'NEW: app/api/migrate/route.ts -- Migration 010: bills table (project_id, utility_name, monthly_kwh, annual_kwh, electric_rate, parsed_json)',
+  'NEW: lib/db-neon.ts -- saveBill() and getBillsByProject() functions',
+  'NEW: app/api/bills/route.ts -- GET ?projectId= and POST endpoints',
+  'FIX: components/onboarding/BillUploadModal.tsx -- step 6 persists bill to /api/bills after project creation',
+  'FIX: lib/utility-rules.ts -- getProductionFactor() accepts stateCode param; state-aware factors (ME/VT/NH=1050, CA/AZ/NV=1600, FL/TX=1500, NY/NJ/CT=1100)',
+  'FIX: app/api/bill-upload/route.ts -- passes locationData.stateCode to getProductionFactor()',
   // v46.5 -- Bill parser P3 fix
   'billParser: parseBarGraphTable -- Monthly Usage Summary values are monthly kWh totals (not daily averages x days)',
   // v46.4 -- Bill parser comma-kWh fix

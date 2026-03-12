@@ -6,6 +6,7 @@ import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
 import { extractPdfTextPure } from '@/lib/pdfExtract';
 import { validateAndCorrectUtilityRate, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
+import { matchUtility } from '@/lib/utilityMatcher';
 // billOcrEngine and billParser are imported dynamically inside extractImageTextSmart()
 // to prevent webpack from bundling tesseract.js worker_threads at module load time.
 // Static import of tesseract.js causes HTML 500 errors before the route handler runs.
@@ -243,14 +244,38 @@ export async function POST(req: NextRequest) {
 
     let locationData = null;
     let utilityData = null;
+    let matchedUtility = null;
 
     if (finalBillData.serviceAddress) {
       console.log('[bill-upload] Geocoding address:', finalBillData.serviceAddress);
       try {
-        const geoResult = await geocodeAddress(billData.serviceAddress);
+        const geoResult = await geocodeAddress(finalBillData.serviceAddress);
         if (geoResult.success && geoResult.location) {
           locationData = geoResult.location;
           console.log('[bill-upload] Geocoded:', locationData.city, locationData.stateCode);
+
+          // P1/P2/P3: Match parsed utility name against DB + state fallback
+          const parsedUtilityName = finalBillData.utilityProvider || null;
+          console.log(`[bill-upload] Matching utility name: "${parsedUtilityName}" for state: ${locationData.stateCode}`);
+          try {
+            matchedUtility = await matchUtility(parsedUtilityName, locationData.stateCode);
+            if (matchedUtility) {
+              console.log(`[bill-upload] Utility matched: "${matchedUtility.utilityName}" via ${matchedUtility.source}, rate: ${matchedUtility.defaultResidentialRate}`);
+              if (!finalBillData.utilityProvider) {
+                finalBillData.utilityProvider = matchedUtility.utilityName;
+              }
+              if (!finalBillData.electricityRate && matchedUtility.defaultResidentialRate) {
+                finalBillData.electricityRate = matchedUtility.defaultResidentialRate;
+                console.log(`[bill-upload] Using DB rate: $${matchedUtility.defaultResidentialRate}/kWh from matched utility`);
+              }
+            } else {
+              console.warn('[bill-upload] No utility match found in DB or state fallback');
+            }
+          } catch (matchErr: unknown) {
+            console.warn('[bill-upload] Utility matching failed:', matchErr instanceof Error ? matchErr.message : matchErr);
+          }
+
+          // Geo-based utility detection (fallback if no name match)
           const utilityResult = await detectUtility(
             geoResult.location.lat,
             geoResult.location.lng,
@@ -259,8 +284,12 @@ export async function POST(req: NextRequest) {
           );
           if (utilityResult.success) {
             utilityData = utilityResult.utility;
-            if (!finalBillData.utilityProvider && utilityData?.utilityName) finalBillData.utilityProvider = utilityData.utilityName;
-            if (!finalBillData.electricityRate && utilityData?.avgRatePerKwh) finalBillData.electricityRate = utilityData.avgRatePerKwh;
+            if (!finalBillData.utilityProvider && utilityData?.utilityName) {
+              finalBillData.utilityProvider = utilityData.utilityName;
+            }
+            if (!finalBillData.electricityRate && utilityData?.avgRatePerKwh) {
+              finalBillData.electricityRate = utilityData.avgRatePerKwh;
+            }
           }
         } else {
           console.warn('[bill-upload] Geocoding failed:', geoResult.error);
@@ -288,7 +317,7 @@ export async function POST(req: NextRequest) {
     console.log('[bill-upload] Calculating system size...');
     const annualKwhForSizing = finalBillData.estimatedAnnualKwh || 0;
     // Use utility-aware production factor for accurate sizing
-    const productionFactor = getProductionFactor(utilityNameForRate);
+    const productionFactor = getProductionFactor(utilityNameForRate, locationData?.stateCode ?? null);
     const systemSizeKw = annualKwhForSizing > 0
       ? Math.round((annualKwhForSizing / productionFactor) * 10) / 10
       : null;
@@ -304,6 +333,38 @@ export async function POST(req: NextRequest) {
       (validation as any).warnings.push(netMeteringWarning);
     }
 
+    // ── Bill Persistence (when projectId provided in form data) ─────────────
+    const projectId = formData.get('projectId') as string | null;
+    const userId = user.id as string;
+    let savedBillId: string | null = null;
+
+    if (projectId) {
+      try {
+        const { saveBill: saveBillFn } = await import('@/lib/db-neon');
+        const savedBill = await saveBillFn({
+          projectId,
+          userId,
+          utilityName: finalBillData.utilityProvider || null,
+          monthlyKwh: finalBillData.monthlyKwh || null,
+          annualKwh: finalBillData.estimatedAnnualKwh || annualKwhForSizing || null,
+          electricRate: rateValidation.rate || null,
+          parsedJson: {
+            billData: finalBillData,
+            locationData,
+            utilityData,
+            matchedUtility,
+            systemSizing: systemSizeKw
+              ? { recommendedKw: systemSizeKw, annualKwh: annualKwhForSizing, offsetPercent: 100, productionFactor }
+              : null,
+          } as Record<string, unknown>,
+        });
+        savedBillId = savedBill?.id ?? null;
+        console.log(`[bill-upload] Bill saved to DB: ${savedBillId}`);
+      } catch (billErr: unknown) {
+        console.warn('[bill-upload] Bill persistence failed:', billErr instanceof Error ? billErr.message : billErr);
+      }
+    }
+
     console.log('[bill-upload] Returning success response');
     return NextResponse.json({
       success: true,
@@ -312,7 +373,16 @@ export async function POST(req: NextRequest) {
       validation,
       locationData,
       utilityData,
+      matchedUtility: matchedUtility ? {
+        id: matchedUtility.id,
+        utilityName: matchedUtility.utilityName,
+        state: matchedUtility.state,
+        defaultResidentialRate: matchedUtility.defaultResidentialRate,
+        netMetering: matchedUtility.netMetering,
+        source: matchedUtility.source,
+      } : null,
       extractionMethod,
+      savedBillId,
       rateValidation: rateValidation.corrected ? {
         corrected: true,
         originalRate: rateValidation.originalRate,

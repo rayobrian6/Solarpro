@@ -792,7 +792,19 @@ export function checkNetMeteringLimit(
  * Get the production factor (kWh/kW/year) for a utility's location.
  * Used for system sizing: system_kw = annual_kwh / production_factor
  */
-export function getProductionFactor(utilityName: string | null | undefined): number {
+export function getProductionFactor(utilityName: string | null | undefined, stateCode?: string | null): number {
+  // Use stateCode directly if provided (more reliable than name lookup)
+  const state = stateCode?.toUpperCase();
+  if (state) {
+    if (['CA', 'NV', 'AZ', 'NM'].includes(state)) return 1600;
+    if (['FL', 'TX', 'GA', 'SC', 'NC'].includes(state)) return 1500;
+    if (['CO', 'UT', 'OR', 'WA'].includes(state)) return 1350;
+    if (['IL', 'IN', 'OH', 'MO', 'KS'].includes(state)) return 1280;
+    if (['NY', 'NJ', 'CT', 'PA', 'DE', 'MD', 'VA'].includes(state)) return 1100;
+    if (['ME', 'NH', 'VT', 'MA', 'RI'].includes(state)) return 1050;
+    if (['MI', 'WI', 'MN'].includes(state)) return 1150;
+    return 1250; // national average for unlisted states
+  }
   if (!utilityName) return 1250;
   const utility = getUtilityRules(utilityName);
   if (!utility || utility.id === 'default') return 1250;
@@ -800,6 +812,8 @@ export function getProductionFactor(utilityName: string | null | undefined): num
   if (utility.states.includes('CA')) return 1600;
   if (utility.states.includes('FL')) return 1500;
   if (utility.states.includes('NJ') || utility.states.includes('NY')) return 1100;
+  if (utility.states.includes('ME') || utility.states.includes('NH') ||
+      utility.states.includes('VT') || utility.states.includes('MA')) return 1050;
   return 1250;
 }
 
