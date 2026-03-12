@@ -5,8 +5,9 @@ import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
 import { extractPdfTextPure } from '@/lib/pdfExtract';
 import { validateAndCorrectUtilityRate, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
-import { recognizeImage, recognizeImageWithVision, recognizeImageWithGoogle } from '@/lib/billOcrEngine';
-import { parseMonthlyUsage } from '@/lib/billParser';
+// billOcrEngine and billParser are imported dynamically inside extractImageTextSmart()
+// to prevent webpack from bundling tesseract.js worker_threads at module load time.
+// Static import of tesseract.js causes HTML 500 errors before the route handler runs.
 
 // Top-level reference so webpack marks pdf-parse as external (not bundled)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -24,6 +25,9 @@ export const maxDuration = 60;
 
 // POST /api/bill-upload
 export async function POST(req: NextRequest) {
+  // ── JSON Error Boundary ──────────────────────────────────────────────────
+  // Catches any uncaught throw (including module load errors, type errors, etc.)
+  // and guarantees a JSON response is always returned — never an HTML error page.
   try {
     const user = await getUserFromRequest(req);
     if (!user) {
@@ -366,17 +370,25 @@ async function extractPdfTextCli(buffer: Buffer): Promise<string> {
 }
 
 // ── Smart 3-stage image extraction ──────────────────────────────────────────
-// Stage 1: Tesseract.js (free, no API cost) — primary OCR
+// Stage 1: Tesseract CLI (free, no API cost) — primary OCR
 // Stage 2: Check if monthly usage was detected from Tesseract output
 // Stage 3: OpenAI Vision / Google Vision fallback ONLY if:
 //          - Tesseract confidence < 60, OR
 //          - No monthly usage detected from Tesseract text
+//
+// Uses dynamic imports to prevent webpack from bundling tesseract.js
+// worker_threads at module load time (causes HTML 500 before handler runs).
 async function extractImageTextSmart(
   buffer: Buffer,
   mimeType: string,
 ): Promise<{ text: string; method: string; confidence: number }> {
   const openaiKey = process.env.OPENAI_API_KEY;
   const googleKey = process.env.GOOGLE_MAPS_API_KEY;
+
+  // Dynamic imports — prevents webpack from statically bundling these modules
+  const { recognizeImage, recognizeImageWithVision, recognizeImageWithGoogle } =
+    await import('@/lib/billOcrEngine');
+  const { parseMonthlyUsage } = await import('@/lib/billParser');
 
   // ── Stage 1: Tesseract OCR (free) ─────────────────────────────────────────
   console.log('[bill-upload] Stage 1: Tesseract OCR...');
