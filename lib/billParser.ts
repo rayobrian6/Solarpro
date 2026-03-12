@@ -11,7 +11,7 @@
  * MONTHLY USAGE PRIORITY (highest → lowest):
  *   P1  Printed monthly table    (explicit month + kWh label, full 12-month)
  *   P2  Handwritten month list   (Jan 555 kWh / NWH — 6+ months)
- *   P3  Bar graph table          (Monthly Usage Summary daily-avg × days)
+ *   P3  Monthly usage summary    (Monthly Usage Summary kWh -- use values directly)
  *   P4  Partial handwritten      (< 6 months but ≥ 3 — use with lower confidence)
  *   P5  Annual ÷ 12              (last resort — only if no monthly data at all)
  *
@@ -48,7 +48,7 @@ const MONTH_RE_SRC =
 export type SourceType =
   | 'printed_table'        // Explicit month + kWh column in a printed table
   | 'handwritten_list'     // Handwritten Jan–Dec list with kWh values
-  | 'bar_graph_table'      // Monthly Usage Summary bar graph daily-avg × days
+  | 'bar_graph_table'      // Monthly Usage Summary table -- monthly kWh totals
   | 'explicit_annual'      // "Total for 2025 6723 kWh" line
   | 'monthly_sum'          // Computed: sum of monthly values
   | 'extrapolated'         // Computed: avg × 12 from partial months
@@ -300,86 +300,72 @@ function parseHandwrittenList(
   return { months, evidence };
 }
 
-// ── P3: Bar graph / Monthly Usage Summary table ───────────────────────────────
+// ── P3: Monthly Usage Summary table ───────────────────────────────────────────────
 /**
  * CMP and similar utilities print a section like:
  *
  *   Your Monthly Usage Summary(kWh)
  *   Month  2025  2024  2023
- *   Jan     20    24    20
- *   Feb     24    28    26
+ *   Jan     362   324   298
+ *   Feb     450   410   389
  *
- * Numbers are DAILY AVERAGES (kWh/day) — multiply by days-in-month.
- * Values 1–200 accepted as plausible daily averages.
+ * Numbers ARE the monthly kWh totals -- use them directly.
+ * The header says "Monthly Usage Summary (kWh)" -- these are monthly totals, NOT daily averages.
+ * Valid monthly kWh range: 10-5000.
  *
- * IMPORTANT: Only activate bar graph parsing if:
- *   - A "monthly usage summary" header is found, OR
- *   - ALL matched values are ≤ 200 (daily avg range)
- *   - AND values are clearly too small to be monthly kWh
+ * IMPORTANT: Only activate this parser if:
+ *   - A "monthly usage summary" header is found in the text
  */
 function parseBarGraphTable(
   text: string,
   log: string[],
 ): { months: Partial<Record<MonthKey, number>>; evidence: string[] } {
   const evidence: string[] = [];
-  const dailyAvg: Partial<Record<MonthKey, number>> = {};
+  const months: Partial<Record<MonthKey, number>> = {};
   const lines = text.split('\n');
 
-  // Find section start
-  let sectionStart = 0;
-  let hasSummaryHeader = false;
+  // Find section start -- only activate if "monthly usage summary" header found
+  let sectionStart = -1;
   for (let i = 0; i < lines.length; i++) {
     if (/monthly\s+usage\s+summary/i.test(lines[i])) {
       sectionStart = i;
-      hasSummaryHeader = true;
-      log.push(`[bill-parser] P3 bar graph header at line ${i}: "${lines[i].trim()}"`);
+      log.push(`[bill-parser] P3 monthly usage summary header at line ${i}: "${lines[i].trim()}"`);
       break;
     }
   }
 
-  // Only scan bar graph rows after the section header (or full text if no header)
+  if (sectionStart === -1) {
+    log.push('[bill-parser] P3 bar graph: no "Monthly Usage Summary" header found -- skipping');
+    return { months: {}, evidence: [] };
+  }
+
+  // Scan rows after the header -- each row: MonthName  value [optional extra columns]
+  // Accept monthly kWh values 10-5000
   const rowPat = new RegExp(
-    `^\\s*(${MONTH_RE_SRC})[a-z]*\\s+([0-9]{1,3})(?:\\s+[0-9]{1,4})*\\s*$`,
+    `^\\s*(${MONTH_RE_SRC})[a-z]*\\s+([0-9]{1,4})(?:\\s+[0-9]{1,4})*\\s*$`,
     'i',
   );
 
-  for (let i = sectionStart; i < lines.length; i++) {
+  for (let i = sectionStart + 1; i < lines.length; i++) {
     const m = lines[i].match(rowPat);
     if (!m) continue;
     const key = m[1].slice(0, 3).toLowerCase() as MonthKey;
     const val = parseInt(m[2], 10);
-    if (val >= 1 && val <= 200) {
-      dailyAvg[key] = val;
+    // Valid monthly kWh: 10-5000
+    if (isValidMonthly(val) && val >= 10) {
+      months[key] = val;
       evidence.push(lines[i].trim());
     }
   }
 
-  const rawCount = Object.keys(dailyAvg).length;
+  const count = Object.keys(months).length;
 
-  // Guard: only use bar graph values if header found OR all values look like daily avgs
-  if (rawCount === 0) {
-    log.push('[bill-parser] P3 bar graph: no rows found');
+  if (count === 0) {
+    log.push('[bill-parser] P3 bar graph: header found but no valid monthly rows');
     return { months: {}, evidence: [] };
   }
 
-  if (!hasSummaryHeader) {
-    // Without a header, verify values are plausibly daily averages (≤ 200)
-    // and that we have several months to reduce false-positive risk
-    if (rawCount < 6) {
-      log.push(`[bill-parser] P3 bar graph: skipped — no summary header and only ${rawCount} rows`);
-      return { months: {}, evidence: [] };
-    }
-  }
-
-  // Convert daily avg → monthly kWh
-  const months: Partial<Record<MonthKey, number>> = {};
-  for (const mk of MONTH_ORDER) {
-    if (dailyAvg[mk] !== undefined) {
-      months[mk] = Math.round(dailyAvg[mk]! * DAYS_IN_MONTH[mk]);
-    }
-  }
-
-  log.push(`[bill-parser] P3 bar graph: ${rawCount} daily-avg rows → monthly totals: ${JSON.stringify(months)}`);
+  log.push(`[bill-parser] P3 monthly usage summary: ${count} months → ${JSON.stringify(months)}`);
   return { months, evidence };
 }
 
@@ -504,7 +490,7 @@ function selectBestMonthlySource(
       months: p3.months,
       source: 'bar_graph_table',
       confidence: 0.80,
-      evidence: `Bar graph table (daily avg × days): ${p3.evidence.slice(0, 3).join(', ')}${p3Count > 3 ? '...' : ''}`,
+      evidence: `Monthly Usage Summary: ${p3.evidence.slice(0, 3).join(', ')}${p3Count > 3 ? '...' : ''}`,
     };
   }
 
