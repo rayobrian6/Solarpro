@@ -3,18 +3,12 @@
 // Neon PostgreSQL operations for engineering_reports table
 // ============================================================
 
-import { neon } from '@neondatabase/serverless';
 import type { EngineeringReport, EngineeringReportRow, EngineeringStatus } from './types';
-
-function getDb() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL not set');
-  return neon(url);
-}
+import { getDbReady } from '@/lib/db-neon';
 
 // ── Ensure table exists (idempotent) ─────────────────────────────────────────
 export async function ensureEngineeringTable(): Promise<void> {
-  const sql = getDb();
+  const sql = await getDbReady();
   await sql`
     CREATE TABLE IF NOT EXISTS engineering_reports (
       id                  VARCHAR(36)   PRIMARY KEY DEFAULT gen_random_uuid()::text,
@@ -53,7 +47,7 @@ export async function upsertEngineeringReport(
   report: EngineeringReport,
   projectId: string
 ): Promise<EngineeringReportRow> {
-  const sql = getDb();
+  const sql = await getDbReady();
   
   // Ensure table exists
   await ensureEngineeringTable();
@@ -131,7 +125,7 @@ export async function upsertEngineeringReport(
 export async function getEngineeringReport(
   projectId: string
 ): Promise<EngineeringReport | null> {
-  const sql = getDb();
+  const sql = await getDbReady();
   
   try {
     await ensureEngineeringTable();
@@ -164,7 +158,7 @@ export async function isEngineeringReportStale(
   projectId: string,
   currentDesignVersionId: string
 ): Promise<boolean> {
-  const sql = getDb();
+  const sql = await getDbReady();
   
   try {
     await ensureEngineeringTable();
@@ -184,7 +178,7 @@ export async function isEngineeringReportStale(
 
 // ── Mark Report as Stale ──────────────────────────────────────────────────────
 export async function markEngineeringReportStale(projectId: string): Promise<void> {
-  const sql = getDb();
+  const sql = await getDbReady();
   
   try {
     await ensureEngineeringTable();

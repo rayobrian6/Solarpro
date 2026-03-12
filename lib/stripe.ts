@@ -12,7 +12,7 @@
  */
 
 import Stripe from 'stripe';
-import { getDb } from './db-neon';
+import { getDbReady } from './db-neon';
 
 // ============================================================
 // LAZY STRIPE INIT (prevents build-time errors)
@@ -272,7 +272,7 @@ export function getPlanPermissions(plan: PlanId): PlanPermissions {
 export async function getOrCreateStripeCustomer(
   userId: string, email: string, name: string, companyName?: string
 ): Promise<string> {
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`SELECT stripe_customer_id FROM users WHERE id = ${userId} LIMIT 1`;
   if (rows.length > 0 && rows[0].stripe_customer_id) return rows[0].stripe_customer_id as string;
 
@@ -325,7 +325,7 @@ export async function createCheckoutSession(
 
 export async function createPortalSession(userId: string): Promise<{ url: string | null; error?: string }> {
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`SELECT stripe_customer_id FROM users WHERE id = ${userId} LIMIT 1`;
     if (!rows[0]?.stripe_customer_id) return { url: null, error: 'No subscription found.' };
 
@@ -346,7 +346,7 @@ export async function createPortalSession(userId: string): Promise<{ url: string
 // ============================================================
 
 export async function handleWebhookEvent(event: Stripe.Event): Promise<{ success: boolean; message: string }> {
-  const sql = getDb();
+  const sql = await getDbReady();
 
   switch (event.type) {
     case 'checkout.session.completed': {

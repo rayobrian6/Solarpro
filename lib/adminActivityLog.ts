@@ -1,4 +1,4 @@
-import { getDb } from '@/lib/db-neon';
+import { getDbReady } from '@/lib/db-neon';
 
 export interface LogActionParams {
   adminId: string;
@@ -14,7 +14,7 @@ export interface LogActionParams {
  */
 export async function logAdminAction(params: LogActionParams): Promise<void> {
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const { adminId, action, targetUserId = null, targetCompany = null, metadata = {} } = params;
     await sql`
       INSERT INTO admin_activity_log

@@ -12,7 +12,7 @@
  * as a pending row with source='auto_discovered' so an admin can enrich it later.
  */
 
-import { getDb } from '@/lib/db-neon';
+import { getDbReady } from '@/lib/db-neon';
 import { STATE_UTILITY_FALLBACK } from '@/lib/utilityDetector';
 
 // ── Noise words stripped during normalization ──────────────────────────────
@@ -67,7 +67,7 @@ export async function matchUtility(
   const normalized = normalizeUtilityName(parsedName);
   if (!normalized) return null;
 
-  const sql = getDb();
+  const sql = await getDbReady();
 
   // ── P1: Exact match (case-insensitive) ──────────────────────────────────
   try {
@@ -199,7 +199,7 @@ async function ensureUtilityRow(
   defaultRate: number | null,
   isAutoDiscovered = false,
 ): Promise<string> {
-  const sql = getDb();
+  const sql = await getDbReady();
   const source = isAutoDiscovered ? 'auto_discovered' : 'state_fallback';
 
   // Try to find existing row first
