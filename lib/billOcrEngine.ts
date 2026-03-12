@@ -129,7 +129,7 @@ export async function recognizeImageWithVision(
           content: [
             {
               type: 'text',
-              text: 'You are reading an electric utility bill image. Extract ALL text exactly as it appears. Pay special attention to: (1) handwritten month lists like "Jan 555 kWh" or "Jan 555 NWH", (2) printed tables under "Monthly Usage Summary" or "Your Monthly Usage Summary(kWh)" showing month names with numeric columns where the first column is the current year daily average kWh, (3) any yearly total kWh line. Output only the raw extracted text, preserving table layout with month names and numbers on the same line.',
+              text: `You are reading an electric utility bill image. Extract ALL text exactly as it appears on the bill.\n\nPAY SPECIAL ATTENTION TO:\n1. The utility company name at the top of the bill (e.g. "Central Maine Power", "Eversource", "National Grid", "Versant Power").\n2. Handwritten month lists such as "Jan 555 kWh", "Feb 609 NWH", "Mar 736" — a list of month names with numbers.\n3. Printed monthly usage tables labeled "Your Monthly Usage Summary(kWh)" or "Monthly Usage Summary" — rows of month names followed by numbers (e.g. "Jan  362  324  298"). Each row is one month; the FIRST number is the most recent year kWh.\n4. The electricity rate — lines like "Energy Charge 362 kWh @ $0.12534" or "0.12534 per kWh" or "Rate: $0.198/kWh".\n5. Any annual or 12-month total kWh line.\n6. The service address.\n\nOutput ONLY the raw extracted text. Preserve table layout — keep month names and numbers on the same line. Do NOT summarize.`,
             },
             {
               type: 'image_url',

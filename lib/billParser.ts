@@ -151,36 +151,45 @@ const UTILITY_ALIASES: [RegExp, string][] = [
 ];
 
 function extractUtility(text: string, log: string[]): ExtractedValue<string> | null {
-  // U1: Check first 500 chars (bill header area) first — highest confidence
-  const header = text.slice(0, 500);
+  // Log the first 300 chars so we can see what the OCR captured at the top of the bill
+  const preview = text.slice(0, 300).replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+  log.push(`[bill-parser] utility detection: first 300 chars = "${preview}"`);
+
+  // U1: Check first 1000 chars (bill header area) — highest confidence.
+  // 1000 chars instead of 500 because some OCR engines output logo/noise text before
+  // the actual utility name, pushing it past the 500-char mark.
+  const header = text.slice(0, 1000);
   for (const [pat, name] of UTILITY_ALIASES) {
     if (pat.test(header)) {
-      log.push(`[bill-parser] utility: "${name}" from printed header (U1)`);
-      return { value: name, source_type: 'printed_header', source_text: name, confidence: 0.97 };
+      const matchText = header.match(pat)?.[0] ?? name;
+      log.push(`[bill-parser] utility: "${name}" from printed header (U1) — matched: "${matchText}"`);
+      return { value: name, source_type: 'printed_header', source_text: matchText, confidence: 0.97 };
     }
   }
 
   // U2: Search full text for known alias
   for (const [pat, name] of UTILITY_ALIASES) {
     if (pat.test(text)) {
-      log.push(`[bill-parser] utility: "${name}" from alias match in full text (U2)`);
-      return { value: name, source_type: 'utility_alias', source_text: name, confidence: 0.85 };
+      const matchText = text.match(pat)?.[0] ?? name;
+      log.push(`[bill-parser] utility: "${name}" from alias match in full text (U2) — matched: "${matchText}"`);
+      return { value: name, source_type: 'utility_alias', source_text: matchText, confidence: 0.85 };
     }
   }
 
   // U3: Generic pattern — "X Electric / X Power / X Energy"
+  // Case-insensitive start (removed [A-Z] anchor that failed on all-caps OCR like "CENTRAL MAINE POWER").
   const genericMatch = text.match(
-    /([A-Z][a-zA-Z\s]{2,30}(?:Electric(?:ity)?|Power|Energy|Light(?:ing)?|Gas|Utilities?|Cooperative))\b/
+    /\b([A-Za-z][a-zA-Z\s]{2,30}(?:Electric(?:ity)?|Power|Energy|Light(?:ing)?|Gas|Utilities?|Cooperative))\b/
   );
   if (genericMatch) {
     const name = genericMatch[1].trim();
-    if (name.length > 4 && name.length < 50) {
+    if (name.length > 4 && name.length < 60) {
       log.push(`[bill-parser] utility: "${name}" from generic pattern (U3)`);
       return { value: name, source_type: 'generic_pattern', source_text: genericMatch[0], confidence: 0.55 };
     }
   }
 
-  log.push('[bill-parser] utility: not found');
+  log.push('[bill-parser] utility: not found — no alias or generic pattern matched');
   return null;
 }
 
@@ -283,8 +292,10 @@ function parseHandwrittenList(
     // Skip values that are clearly years (1900-2099) not already consumed by optional group
     if (val >= 1900 && val <= 2099) continue;
 
-    // kWh values on bills are typically >= 10 (a value of 1-9 is almost always a date/day)
-    if (val < 10) continue;
+    // kWh values on bills are typically >= 50/month for residential.
+    // Values < 50 are almost always day numbers, meter reads, or noise — not monthly kWh.
+    // Note: val < 10 case already handled by date-day filter above; extending to 50 here.
+    if (val < 50) continue;
 
     if (isValidMonthly(val)) {
       // Only overwrite if not already set by printed table (P1 takes priority)
@@ -407,36 +418,66 @@ function parseExplicitAnnual(text: string, log: string[]): ExtractedValue<number
  * Extract retail electricity rate from bill text.
  * Returns null if no reliable rate found — do NOT guess.
  * Rates must be $0.05–$0.75/kWh to be plausible retail rates.
+ *
+ * Patterns are OCR-robust: handle mangled "@" (4, ©, @, at), missing "$",
+ * and various bill layouts (CMP, NSTAR, Eversource, National Grid, etc.)
  */
 function extractRate(text: string, log: string[]): ExtractedValue<number> | null {
   const t = normalise(text);
   const patterns: [RegExp, string][] = [
-    [/(?:energy\s+)?(?:charge|rate|price)\s*[\:\@]\s*\$?([0-9]+\.[0-9]{2,5})\s*(?:per\s+)?(?:\/\s*)?kwh/i, 'rate_label'],
-    [/\$([0-9]+\.[0-9]{2,5})\s*(?:per\s+)?(?:\/\s*)?kwh/i,              'dollar_per_kwh'],
-    [/kwh\s+@\s+\$?([0-9]+\.[0-9]{3,5})/i,                              'kwh_at_rate'],
-    [/([0-9]+\.[0-9]{3,5})\s*(?:¢|cents?)\s*(?:per\s+)?(?:\/\s*)?kwh/i, 'cents_per_kwh'],
+    // "Energy Charge: $0.12534 / kWh" or "Rate: $0.198 per kWh"
+    [/(?:energy\s+)?(?:charge|rate|price)\s*[:\@]\s*\$?([0-9]+\.[0-9]{2,5})\s*(?:per\s+)?(?:\/\s*)?kwh/i, 'rate_label'],
+    // "$0.12534 / kWh" or "$0.198/kWh"
+    [/\$([0-9]+\.[0-9]{2,5})\s*(?:per\s+)?(?:\/\s*)?kwh/i, 'dollar_per_kwh'],
+    // "kWh @ $0.12534" — OCR-robust: "@" may appear as "4", "©", "a", "@", "at", "©"
+    [/kwh\s+[@©a4]\s+\$?([0-9]+\.[0-9]{3,5})/i, 'kwh_at_rate'],
+    // "kWh at $0.12534" or "kWh at 0.12534"
+    [/kwh\s+at\s+\$?([0-9]+\.[0-9]{3,5})/i, 'kwh_at_word'],
+    // "362 kWh  0.12534" — rate immediately after kWh count on same line (CMP format)
+    // Must be 3-5 decimal places to distinguish from kWh values
+    [/[1-9][0-9]{1,4}\s+kwh\s+([0-9]+\.[0-9]{3,5})/i, 'kwh_inline_rate'],
+    // "0.12534 $/kWh" or "0.198 per kWh"
+    [/([0-9]+\.[0-9]{3,5})\s*(?:\$\/|per\s+)?kwh/i, 'rate_before_kwh'],
+    // Cents: "12.534 ¢/kWh" or "19.8 cents per kWh"
+    [/([0-9]+\.[0-9]{1,4})\s*(?:¢|cents?)\s*(?:per\s+)?(?:\/\s*)?kwh/i, 'cents_per_kwh'],
+    // "Distribution Charge  0.06543  per kWh" (tabular format)
+    [/(?:distribution|supply|generation|delivery)\s+(?:charge|rate|service)\s+([0-9]+\.[0-9]{3,5})\s+per\s+kwh/i, 'line_item_rate'],
   ];
 
+  const candidates: { rate: number; label: string; text: string }[] = [];
+
   for (const [pat, label] of patterns) {
-    const m = t.match(pat);
-    if (m) {
+    const allMatches = [...t.matchAll(new RegExp(pat.source, pat.flags.includes('g') ? pat.flags : pat.flags + 'g'))];
+    for (const m of allMatches) {
       let rate = parseFloat(m[1]);
       if (rate > 1) rate = rate / 100; // Convert cents to dollars
-      // Retail electricity rates are $0.05–$0.75/kWh
+      // Retail electricity rates: $0.05–$0.75/kWh
       if (rate >= 0.05 && rate <= 0.75) {
-        log.push(`[bill-parser] rate: $${rate.toFixed(4)}/kWh (pattern: ${label})`);
-        return {
-          value: Math.round(rate * 100000) / 100000,
-          source_type: 'printed_table',
-          source_text: m[0].trim(),
-          confidence: 0.85,
-        };
+        candidates.push({ rate, label, text: m[0].trim() });
       }
     }
   }
 
-  log.push('[bill-parser] rate: not found in bill text — returning null (do not guess)');
-  return null;
+  if (candidates.length === 0) {
+    log.push('[bill-parser] rate: not found in bill text — returning null (do not guess)');
+    return null;
+  }
+
+  // If multiple candidates, prefer higher-specificity patterns (earlier in list = higher specificity)
+  // and rates in the $0.08–$0.45 residential range
+  const residential = candidates.filter(c => c.rate >= 0.08 && c.rate <= 0.45);
+  const best = residential.length > 0 ? residential[0] : candidates[0];
+
+  log.push(`[bill-parser] rate: $${best.rate.toFixed(4)}/kWh (pattern: ${best.label}, text: "${best.text}")`);
+  if (candidates.length > 1) {
+    log.push(`[bill-parser] rate: ${candidates.length} candidates found — using best: $${best.rate.toFixed(4)}`);
+  }
+  return {
+    value: Math.round(best.rate * 100000) / 100000,
+    source_type: 'printed_table',
+    source_text: best.text,
+    confidence: 0.85,
+  };
 }
 
 // ── Source selection ──────────────────────────────────────────────────────────

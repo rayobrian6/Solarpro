@@ -606,6 +606,172 @@ const UTILITY_REGISTRY: Record<string, UtilityRuleEntry> = {
     ],
     notes: 'PSE&G serves northern and central New Jersey. NJ SREC-II program registration required for incentives.',
   },
+
+  'central-maine-power': {
+    id: 'central-maine-power', name: 'Central Maine Power', states: ['ME'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 60, maxSystemSizeKw: 660,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: true,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 660, netMeteringProgram: 'Net Metering at Retail Rate',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.cmpco.com/en/account-tools/solar-and-net-energy-billing.html',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 100, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'Maine PUC Chapter 313', description: 'Net Energy Billing rules for Maine', requirement: 'Net metering enrollment required before energizing; annual true-up in April' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+      { rule: 'Maine Building Codes', description: 'Maine electrical and building codes', requirement: 'All installations must comply with Maine Electrical Code' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'CMP requires a visible, lockable AC disconnect accessible to utility personnel at the meter or service entrance.',
+    },
+    labelingRequirements: [
+      'NEC 705.10 — Identification of power sources',
+      'NEC 690.54 — Equipment identification',
+      "CMP requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at main panel",
+    ],
+    notes: 'Central Maine Power serves 60%+ of Maine. Net metering at retail rate up to 660 kW. Maine offers SREC incentives through Efficiency Maine.',
+  },
+
+  'versant-power': {
+    id: 'versant-power', name: 'Versant Power', states: ['ME'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 60, maxSystemSizeKw: 660,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: true,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 660, netMeteringProgram: 'Net Energy Billing at Retail Rate',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.versantpower.com/residential/solar/',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 100, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'Maine PUC Chapter 313', description: 'Net Energy Billing rules for Maine', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Versant Power (formerly Emera Maine) requires a visible, lockable AC disconnect.',
+    },
+    labelingRequirements: [
+      'NEC 705.10 — Identification of power sources',
+      'NEC 690.54 — Equipment identification',
+    ],
+    notes: 'Versant Power serves northern and eastern Maine (Bangor Hydro-Electric territory). Net Energy Billing at retail rate.',
+  },
+
+  'eversource-ma': {
+    id: 'eversource-ma', name: 'Eversource Energy', states: ['MA', 'CT', 'NH'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 60, maxSystemSizeKw: 2000,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: true,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 2000, netMeteringProgram: 'Net Metering at Retail Rate',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.eversource.com/content/residential/products-services/clean-energy-options/net-metering',
+    preApplicationRequired: false, preApplicationThresholdKw: 25,
+    studyRequiredAboveKw: 25, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'DOER 225 CMR 20', description: 'Massachusetts net metering regulations', requirement: 'Net metering enrollment required; excess credits roll over monthly' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Eversource requires a visible, lockable AC disconnect accessible to utility personnel.',
+    },
+    labelingRequirements: [
+      'NEC 705.10 — Identification of power sources',
+      'NEC 690.54 — Equipment identification',
+      "Eversource requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter",
+    ],
+    notes: 'Eversource serves MA, CT, and NH. MA SMART program available for incentives. CT Residential Solar Incentive Program (RSIP) available.',
+  },
+
+  'national-grid-ma': {
+    id: 'national-grid-ma', name: 'National Grid', states: ['MA', 'NY', 'RI'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 60, maxSystemSizeKw: 2000,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: true,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 2000, netMeteringProgram: 'Net Metering at Retail Rate',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.nationalgridus.com/MA-Home/Renewable-Energy/Solar-Information',
+    preApplicationRequired: false, preApplicationThresholdKw: 25,
+    studyRequiredAboveKw: 25, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'DOER 225 CMR 20', description: 'Massachusetts net metering regulations', requirement: 'Net metering enrollment required' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'National Grid requires a visible, lockable AC disconnect.',
+    },
+    labelingRequirements: [
+      'NEC 705.10 — Identification of power sources',
+      'NEC 690.54 — Equipment identification',
+    ],
+    notes: 'National Grid serves eastern MA, upstate NY, and RI. MA SMART program and RI ConnectedSolutions available.',
+  },
+
+  'green-mountain-power': {
+    id: 'green-mountain-power', name: 'Green Mountain Power', states: ['VT'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 60, maxSystemSizeKw: 500,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 500, netMeteringProgram: 'Net Metering at Retail Rate',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://greenmountainpower.com/account-tools/solar/',
+    preApplicationRequired: false, preApplicationThresholdKw: 15,
+    studyRequiredAboveKw: 150, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'Vermont PUC Net Metering Rule', description: 'Vermont net metering rules', requirement: 'Net metering enrollment required; 1-year payback period applies' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'GMP requires a visible, lockable AC disconnect.',
+    },
+    labelingRequirements: [
+      'NEC 705.10 — Identification of power sources',
+      'NEC 690.54 — Equipment identification',
+    ],
+    notes: 'Green Mountain Power serves ~75% of Vermont. VT Clean Energy Development Fund incentives available. GMP offers innovative battery leasing programs.',
+  },
+
+  'unitil': {
+    id: 'unitil', name: 'Unitil', states: ['NH', 'MA'],
+    preferredInterconnection: 'LOAD_SIDE',
+    maxLoadSideBreaker: 60, maxSystemSizeKw: 1000,
+    allowsMainBreakerDerate: true, allowsLineSideTap: true,
+    requiresVisibleDisconnect: true, requiresProductionMeter: false,
+    requiresAntiIslanding: true, netMeteringAvailable: true,
+    netMeteringMaxKw: 1000, netMeteringProgram: 'Net Metering at Retail Rate',
+    interconnectionApplicationRequired: true,
+    interconnectionApplicationUrl: 'https://www.unitil.com/renewable-energy/solar',
+    preApplicationRequired: false, preApplicationThresholdKw: 10,
+    studyRequiredAboveKw: 10, ieee1547Compliant: true, ul1741Compliant: true,
+    ruleReferences: [
+      { rule: 'NH PUC Interconnection Standards', description: 'New Hampshire interconnection requirements', requirement: 'All systems must comply with NH PUC standards' },
+      { rule: 'IEEE 1547-2018', description: 'Standard for interconnection of distributed energy resources', requirement: 'Inverter must be IEEE 1547-2018 certified' },
+    ],
+    disconnectRequirements: {
+      acDisconnect: true, acDisconnectVisible: true, acDisconnectLockable: true, utilityAccessible: true,
+      notes: 'Unitil requires a visible, lockable AC disconnect.',
+    },
+    labelingRequirements: [
+      'NEC 705.10 — Identification of power sources',
+      'NEC 690.54 — Equipment identification',
+    ],
+    notes: 'Unitil serves portions of NH (Concord, Fitchburg) and northern MA. NH Electric Co-op territory borders Unitil service areas.',
+  },
+
 };
 
 // Default fallback
@@ -651,6 +817,19 @@ export function getUtilityRules(utilityName: string): UtilityRuleEntry {
     .replace('dukeenergy', 'duke')
     .replace('pseg', 'pseg')
     .replace('publicserviceenterprisegroup', 'pseg')
+    // NE utility aliases
+    .replace('centralmainepowerco', 'centralmainepower')
+    .replace('centralmainepowercorp', 'centralmainepower')
+    .replace('centralmainepowercorporation', 'centralmainepower')
+    .replace('cmpco', 'centralmainepower')
+    .replace('versantpower', 'versantpower')
+    .replace('bangorhydroelectric', 'versantpower')
+    .replace('ameramainepower', 'versantpower')
+    .replace('eversourceenergy', 'eversourcema')
+    .replace('eversource', 'eversourcema')
+    .replace('nationalgrid', 'nationalgridma')
+    .replace('greenmountainpower', 'greenmountainpower')
+    .replace('gmp', 'greenmountainpower')
     // IL Co-op aliases
     .replace('southwesternelectriccooperative', 'swecil')
     .replace('southwesternelectric', 'swecil')
@@ -721,6 +900,13 @@ const UTILITY_RETAIL_RATES: Record<string, number> = {
   'shelby-il':             0.12,  // Shelby Electric IL
   'spoon-river-il':        0.12,  // Spoon River Electric IL
   'western-illinois-il':   0.12,  // Western Illinois Electrical IL
+  // ── New England utilities ─────────────────────────────────────────────────
+  'central-maine-power':   0.198, // CMP ME (EIA 2024 residential avg)
+  'versant-power':         0.198, // Versant Power ME
+  'eversource-ma':         0.248, // Eversource MA/CT/NH
+  'national-grid-ma':      0.248, // National Grid MA/NY/RI
+  'green-mountain-power':  0.198, // Green Mountain Power VT
+  'unitil':                0.228, // Unitil NH/MA
 };
 
 // Valid retail electricity rate range: $0.06–$0.50/kWh.
