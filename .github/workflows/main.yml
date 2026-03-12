@@ -2,11 +2,16 @@
 # main.yml — Deploy to Vercel Production
 #
 # TRIGGERS: push to master ONLY
-# dev branch pushes → NO deployment (preview only via Vercel GitHub integration)
+#
+# IMPORTANT — Single deployment guarantee:
+#   - Vercel GitHub App: preview deployments for dev/other branches
+#     are DISABLED via vercel.json "git.deploymentEnabled"
+#   - This workflow: fires on master push → Vercel production build
+#   - Result: exactly ONE deployment per commit (production only)
 #
 # WORKFLOW:
-#   dev branch  → local development + preview URLs (no production deploy)
-#   master branch → this workflow runs → Vercel production deployment
+#   All work is committed directly to master (no dev branch pushes)
+#   master push → this workflow → Vercel production deployment
 # ============================================================
 
 name: Deploy to Vercel Production
@@ -14,7 +19,7 @@ name: Deploy to Vercel Production
 on:
   push:
     branches:
-      - master        # ONLY master triggers production deployment
+      - master        # ONLY master triggers deployment
     paths-ignore:
       - '**.md'       # Skip for documentation-only changes
       - 'docs/**'

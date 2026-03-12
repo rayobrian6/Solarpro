@@ -2,6 +2,14 @@
   "version": 2,
   "name": "solarpro-v31",
   "alias": ["solarpro-v31.vercel.app"],
+
+  "git": {
+    "deploymentEnabled": {
+      "dev": false,
+      "underthesunsolar24-6883": false
+    }
+  },
+
   "headers": [
     {
       "source": "/(.*)",
