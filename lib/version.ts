@@ -1,9 +1,15 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v46.7';
-export const BUILD_DATE        = '2026-03-16';
-export const BUILD_DESCRIPTION = 'Fix TS build errors: plan-set panelVoc/panelIsc, remove invalid systemModel field, sharp type stub';
+export const BUILD_VERSION     = 'v46.8';
+export const BUILD_DATE        = '2026-03-17';
+export const BUILD_DESCRIPTION = 'Fix fence/roof/ground/row/plane panel clearing: lastRenderedPanelsRef sync before onPanelsChange';
 export const BUILD_FEATURES    = [
-  // v46.6 -- Utility detection + bill persistence
+  // v46.8 -- Panel clearing fix
+  'FIX: SolarEngine3D.tsx -- finalizeFence: set lastRenderedPanelsRef.current before onPanelsChange to prevent orphaned entities',
+  'FIX: SolarEngine3D.tsx -- handleRoofClick: same lastRenderedPanelsRef sync fix',
+  'FIX: SolarEngine3D.tsx -- handleGroundClick: same lastRenderedPanelsRef sync fix',
+  'FIX: SolarEngine3D.tsx -- finalizePlane: same lastRenderedPanelsRef sync fix',
+  'FIX: SolarEngine3D.tsx -- Row finalization: same lastRenderedPanelsRef sync fix',
+  // v46.7 -- TS build fixes (was v46.6 remote)
   'NEW: lib/utilityMatcher.ts -- normalizeUtilityName() strips noise words; matchUtility() P1 exact / P2 pg_trgm fuzzy / P3 state fallback / P4 auto-discover',
   'FIX: app/api/bill-upload/route.ts -- calls matchUtility() after parseBill(); applies DB rate (default_residential_rate) to billData.electricityRate',
   'FIX: app/api/bill-upload/route.ts -- geo detectUtility() is now fallback-only; parsed name match wins',

@@ -1446,6 +1446,7 @@ function SolarEngine3D({
       addPanelEntity(viewer, C, panel);
       const newPanels = [...panelsRef.current, panel];
       panelsRef.current = newPanels;
+      lastRenderedPanelsRef.current = newPanels; // prevent double-render orphan
       onPanelsChange(newPanels);
       setPanelCount(newPanels.length);
       setStatusMsg(`✅ Roof panel placed (${tiltDeg.toFixed(0)}° pitch, ${azimuthDeg.toFixed(0)}° az) — click to continue, right-click to stop`);
@@ -1482,6 +1483,7 @@ function SolarEngine3D({
       addPanelEntity(viewer, C, panel);
       const newPanels = [...panelsRef.current, panel];
       panelsRef.current = newPanels;
+      lastRenderedPanelsRef.current = newPanels; // prevent double-render orphan
       onPanelsChange(newPanels);
       setPanelCount(newPanels.length);
       setStatusMsg(`✅ Ground panel placed (${groundTilt}° tilt)`);
@@ -1879,6 +1881,15 @@ function SolarEngine3D({
 
     const allPanels = [...panelsRef.current, ...newPanels];
     panelsRef.current = allPanels;
+    // Sync lastRenderedPanelsRef BEFORE calling onPanelsChange so the
+    // panels-prop useEffect's incremental diff sees these panels as
+    // "already rendered" and does NOT call addPanelEntity a second time.
+    // Without this, renderAllPanels would treat the new fence panels as
+    // "new" (not in lastRenderedPanelsRef), call addPanelEntity again,
+    // overwrite panelMapRef with a second entity, and leave the first
+    // entity orphaned in the Cesium scene — making clearPanels() unable
+    // to remove it. This matches the same pattern used in finalizeGroundArray.
+    lastRenderedPanelsRef.current = allPanels;
     onPanelsChange(allPanels);
     setPanelCount(allPanels.length);
     fencePtsRef.current = [];
@@ -1977,6 +1988,7 @@ function SolarEngine3D({
     const newPanels = fillRoofSegmentWithPanels(viewer, C, syntheticSeg);
     const allPanels = [...panelsRef.current, ...newPanels];
     panelsRef.current = allPanels;
+    lastRenderedPanelsRef.current = allPanels; // prevent double-render orphan
     onPanelsChange(allPanels);
     setPanelCount(allPanels.length);
     planePtsRef.current = [];
@@ -2111,6 +2123,7 @@ function SolarEngine3D({
     }
     const allPanels = [...panelsRef.current, ...newPanels];
     panelsRef.current = allPanels;
+    lastRenderedPanelsRef.current = allPanels; // prevent double-render orphan
     onPanelsChange(allPanels);
     setPanelCount(allPanels.length);
     setStatusMsg(`✅ Row: ${newPanels.length} panels placed (${orient}) — click to start next row`);
