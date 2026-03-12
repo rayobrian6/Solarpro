@@ -138,6 +138,27 @@ function rowToClient(row: Record<string, unknown>): Client {
 }
 
 function rowToProject(row: Record<string, unknown>): Project {
+  // Hydrate bill_data JSONB into typed BillAnalysis + utility fields
+  const rawBillData = row.bill_data as Record<string, unknown> | undefined;
+  let billAnalysis: import('@/types').BillAnalysis | undefined;
+  let utilityName: string | undefined;
+  let utilityRatePerKwh: number | undefined;
+  let stateCode: string | undefined;
+
+  if (rawBillData) {
+    // bill_data may have been saved with billAnalysis nested or flat
+    if (rawBillData._billAnalysis) {
+      // New format: bill_data._billAnalysis = BillAnalysis object
+      billAnalysis = rawBillData._billAnalysis as import('@/types').BillAnalysis;
+      utilityName = (rawBillData._utilityName as string) || undefined;
+      utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
+      stateCode = (rawBillData._stateCode as string) || undefined;
+    } else if (rawBillData.monthlyKwh && Array.isArray(rawBillData.monthlyKwh)) {
+      // Legacy flat format: bill_data IS the BillAnalysis
+      billAnalysis = rawBillData as unknown as import('@/types').BillAnalysis;
+    }
+  }
+
   return {
     id: row.id as string,
     userId: row.user_id as string,
@@ -150,7 +171,11 @@ function rowToProject(row: Record<string, unknown>): Project {
     lat: row.lat as number | undefined,
     lng: row.lng as number | undefined,
     systemSizeKw: row.system_size_kw as number | undefined,
-    billData: row.bill_data as Record<string, unknown> | undefined,
+    billData: rawBillData,
+    billAnalysis,
+    utilityName,
+    utilityRatePerKwh,
+    stateCode,
     engineeringSeed: row.engineering_seed
       ? (typeof row.engineering_seed === 'string'
           ? JSON.parse(row.engineering_seed)
@@ -474,23 +499,52 @@ export async function updateProject(
   // clientId must be a valid UUID or null
   const clientId = isValidUUID(merged.clientId) ? merged.clientId : null;
 
-  const rows = await sql`
-    UPDATE projects SET
-      name          = ${merged.name},
-      client_id     = ${clientId},
-      status        = ${merged.status || 'lead'},
-      system_type   = ${merged.systemType || 'roof'},
-      notes         = ${merged.notes || ''},
-      address       = ${merged.address || ''},
-      lat           = ${merged.lat ?? null},
-      lng           = ${merged.lng ?? null},
-      system_size_kw= ${merged.systemSizeKw ?? null},
-      updated_at    = NOW()
-    WHERE id = ${id}
-      AND user_id = ${userId}
-      AND deleted_at IS NULL
-    RETURNING *
-  `;
+  // Serialize bill_data JSONB — preserve existing if not provided in update
+  const billDataJson: string | null = ('billData' in data && data.billData !== undefined)
+    ? JSON.stringify(data.billData)
+    : (current.billData ? JSON.stringify(current.billData) : null);
+
+  // postgres.js does not support conditional fragment expressions inside a template literal.
+  // Use two separate queries: one with bill_data update, one without.
+  let rows: Record<string, unknown>[];
+  if (billDataJson !== null) {
+    rows = await sql`
+      UPDATE projects SET
+        name          = ${merged.name},
+        client_id     = ${clientId},
+        status        = ${merged.status || 'lead'},
+        system_type   = ${merged.systemType || 'roof'},
+        notes         = ${merged.notes || ''},
+        address       = ${merged.address || ''},
+        lat           = ${merged.lat ?? null},
+        lng           = ${merged.lng ?? null},
+        system_size_kw= ${merged.systemSizeKw ?? null},
+        bill_data     = ${billDataJson}::jsonb,
+        updated_at    = NOW()
+      WHERE id = ${id}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      RETURNING *
+    `;
+  } else {
+    rows = await sql`
+      UPDATE projects SET
+        name          = ${merged.name},
+        client_id     = ${clientId},
+        status        = ${merged.status || 'lead'},
+        system_type   = ${merged.systemType || 'roof'},
+        notes         = ${merged.notes || ''},
+        address       = ${merged.address || ''},
+        lat           = ${merged.lat ?? null},
+        lng           = ${merged.lng ?? null},
+        system_size_kw= ${merged.systemSizeKw ?? null},
+        updated_at    = NOW()
+      WHERE id = ${id}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      RETURNING *
+    `;
+  }
   return rows.length > 0 ? rowToProject(rows[0]) : null;
 }
 
@@ -959,6 +1013,24 @@ export async function getProjectWithDetails(
     }
   }
 
+  // Hydrate bill_data JSONB into typed BillAnalysis + utility fields
+  const rawBillData = row.bill_data as Record<string, unknown> | undefined;
+  let billAnalysis: import('@/types').BillAnalysis | undefined;
+  let utilityName: string | undefined;
+  let utilityRatePerKwh: number | undefined;
+  let stateCode: string | undefined;
+
+  if (rawBillData) {
+    if (rawBillData._billAnalysis) {
+      billAnalysis = rawBillData._billAnalysis as import('@/types').BillAnalysis;
+      utilityName = (rawBillData._utilityName as string) || undefined;
+      utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
+      stateCode = (rawBillData._stateCode as string) || undefined;
+    } else if (rawBillData.monthlyKwh && Array.isArray(rawBillData.monthlyKwh)) {
+      billAnalysis = rawBillData as unknown as import('@/types').BillAnalysis;
+    }
+  }
+
   return {
     id: row.id as string,
     userId: row.user_id as string,
@@ -972,6 +1044,11 @@ export async function getProjectWithDetails(
     lat: row.lat as number | undefined,
     lng: row.lng as number | undefined,
     systemSizeKw: row.system_size_kw as number | undefined,
+    billData: rawBillData,
+    billAnalysis,
+    utilityName,
+    utilityRatePerKwh,
+    stateCode,
     layout,
     production,
     costEstimate,

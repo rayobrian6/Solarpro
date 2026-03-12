@@ -1,8 +1,23 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.2';
-export const BUILD_DATE        = '2026-03-18';
-export const BUILD_DESCRIPTION = 'Production stability v2: defense-in-depth DB error classification, all cold-start paths return DB_STARTING';
+export const BUILD_VERSION     = 'v47.5';
+export const BUILD_DATE        = '2026-06-06';
+export const BUILD_DESCRIPTION = 'v47.5: Fix bill upload workflow pipeline -- billAnalysis now persisted to project, workflow state updates after upload';
 export const BUILD_FEATURES    = [
+  // v47.5 -- Bill upload workflow pipeline fix
+  'project/[id]/page.tsx: handleUploadBill now opens inline BillUploadFlow modal (not 404 route)',
+  'project/[id]/page.tsx: handleBillComplete builds BillAnalysis + PUTs to /api/projects/[id]',
+  'project/[id]/page.tsx: setProject() with hydrated billAnalysis after save -- workflow recomputes',
+  'db-neon.ts: updateProject() now persists bill_data JSONB column',
+  'db-neon.ts: rowToProject() hydrates billAnalysis/utilityName/utilityRatePerKwh/stateCode from bill_data',
+  'db-neon.ts: getProjectWithDetails() also hydrates billAnalysis from bill_data._billAnalysis',
+  // v47.4 -- Bill parser audit
+  'billParser.ts: U1 header search 500->1000 chars; U3 case-insensitive; hardened rate patterns; P2 min 50',
+  'utility-rules.ts: CMP, Versant, Eversource, National Grid, GMP, Unitil added to registry',
+  'billOcrEngine.ts: improved Vision prompt for CMP bill format',
+  // v47.3 -- UserContext logout fix
+  'ROOT CAUSE: refreshUser() called setUser(null) on retry exhaustion (Neon cold start after idle)',
+  'FIX: contexts/UserContext.tsx -- fetchUserWithRetry() returns transient on retry exhaustion; only 401 triggers logout',
+  'FIX: contexts/UserContext.tsx -- FetchStatus string enum: ok/logout/retry/preserve',
   // v47.2 -- Production stability: defense-in-depth DB error handling
   'ROOT CAUSE: isTransientDbError() used blacklist approach -- any Neon cold-start error with unusual message fell through to non-transient, causing DB_CONFIG_ERROR mis-classification',
   'ROOT CAUSE: login/route.ts catch used msg.includes(DATABASE_URL) -- matched Neon connection string errors during cold start, showed Database not configured to users',
@@ -42,14 +57,14 @@ export const BUILD_FEATURES    = [
   'NEW: lib/db-ready.ts -- DbConfigError non-retryable class for missing DATABASE_URL',
   'FIX: lib/auth.ts -- getDbReady() async wrapper uses getDbWithRetry; getDb() kept for non-auth routes',
   'FIX: app/api/auth/login/route.ts -- uses getDbReady() with retry; returns code=DB_STARTING on 503; Retry-After header',
-  'FIX: app/auth/login/page.tsx -- detects DB_STARTING 503; shows "Starting server..." banner; auto-retries up to 5x with countdown',
+  'FIX: app/auth/login/page.tsx -- detects DB_STARTING 503; shows Starting server... banner; auto-retries up to 5x with countdown',
   // v46.8 -- Panel clearing fix
   'FIX: SolarEngine3D.tsx -- finalizeFence: set lastRenderedPanelsRef.current before onPanelsChange to prevent orphaned entities',
   'FIX: SolarEngine3D.tsx -- handleRoofClick: same lastRenderedPanelsRef sync fix',
   'FIX: SolarEngine3D.tsx -- handleGroundClick: same lastRenderedPanelsRef sync fix',
   'FIX: SolarEngine3D.tsx -- finalizePlane: same lastRenderedPanelsRef sync fix',
   'FIX: SolarEngine3D.tsx -- Row finalization: same lastRenderedPanelsRef sync fix',
-  // v46.7 -- TS build fixes (was v46.6 remote)
+  // v46.7 -- TS build fixes
   'NEW: lib/utilityMatcher.ts -- normalizeUtilityName() strips noise words; matchUtility() P1 exact / P2 pg_trgm fuzzy / P3 state fallback / P4 auto-discover',
   'FIX: app/api/bill-upload/route.ts -- calls matchUtility() after parseBill(); applies DB rate (default_residential_rate) to billData.electricityRate',
   'FIX: app/api/bill-upload/route.ts -- geo detectUtility() is now fallback-only; parsed name match wins',

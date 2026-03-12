@@ -1,7 +1,7 @@
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
 import AppShell from '@/components/ui/AppShell';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import type { Project } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
 import BillTab from '@/components/project/BillTab';
+import BillUploadFlow from '@/components/onboarding/BillUploadFlow';
 import SystemSizeTab from '@/components/project/SystemSizeTab';
 import DesignTab from '@/components/project/DesignTab';
 import ProposalTab from '@/components/project/ProposalTab';
@@ -158,7 +159,6 @@ interface QuickAction {
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
 
   const loadActiveProject = useAppStore(s => s.loadActiveProject);
   const projects = useAppStore(s => s.projects);
@@ -167,6 +167,8 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('bill');
   const [showAllWarnings, setShowAllWarnings] = useState(false);
+  const [showBillModal, setShowBillModal] = useState(false);
+  const [savingBill, setSavingBill] = useState(false);
 
   useEffect(() => {
     const existing = projects.find(p => p.id === id);
@@ -199,9 +201,137 @@ export default function ProjectDetailPage() {
   };
 
   const handleUploadBill = useCallback(() => {
-    // Navigate to bill upload — could be a modal or redirect
-    router.push(`/projects/${id}/upload-bill`);
-  }, [id, router]);
+    setShowBillModal(true);
+  }, []);
+
+  // ─── Bill upload complete: build BillAnalysis + persist to project ───────
+  const handleBillComplete = useCallback(async (result: {
+    billData: {
+      monthlyKwh?: number;
+      estimatedAnnualKwh?: number;
+      electricityRate?: number;
+      estimatedMonthlyBill?: number;
+      totalAmount?: number;
+      utilityProvider?: string;
+      monthlyUsageHistory?: number[];
+      customerName?: string;
+      serviceAddress?: string;
+    };
+    locationData?: { stateCode?: string; lat?: number; lng?: number; city?: string; state?: string };
+    utilityData?: { utilityName?: string; avgRatePerKwh?: number };
+    systemSizing?: { recommendedKw?: number };
+    systemKw: number;
+    offsetPercent: number;
+  }) => {
+    if (!project) return;
+    setSavingBill(true);
+
+    console.log('[BILL_PARSED] Bill data received:', {
+      monthlyKwh: result.billData.monthlyKwh,
+      annualKwh: result.billData.estimatedAnnualKwh,
+      rate: result.billData.electricityRate,
+      utility: result.billData.utilityProvider || result.utilityData?.utilityName,
+    });
+
+    try {
+      // Build 12-month array — use history if available, else fill from monthly avg
+      const rawHistory = result.billData.monthlyUsageHistory || [];
+      const monthlyKwh: number[] = rawHistory.length >= 12
+        ? rawHistory.slice(0, 12)
+        : Array(12).fill(result.billData.monthlyKwh || 0);
+
+      const annualKwh = result.billData.estimatedAnnualKwh
+        || (result.billData.monthlyKwh ? result.billData.monthlyKwh * 12 : monthlyKwh.reduce((a, b) => a + b, 0));
+      const avgMonthlyKwh = annualKwh / 12;
+      const utilityRate = result.billData.electricityRate
+        || result.utilityData?.avgRatePerKwh
+        || 0.13;
+      const avgMonthlyBill = result.billData.estimatedMonthlyBill
+        || result.billData.totalAmount
+        || (avgMonthlyKwh * utilityRate);
+      const annualBill = avgMonthlyBill * 12;
+      const peakIdx = monthlyKwh.indexOf(Math.max(...monthlyKwh));
+      const systemKw = result.systemKw || result.systemSizing?.recommendedKw || 0;
+      const panelCount = Math.ceil(systemKw * 1000 / 440);
+
+      // Build typed BillAnalysis
+      const billAnalysis = {
+        monthlyKwh,
+        annualKwh,
+        averageMonthlyKwh: avgMonthlyKwh,
+        averageMonthlyBill: avgMonthlyBill,
+        annualBill,
+        utilityRate,
+        peakMonthKwh: monthlyKwh[peakIdx] || 0,
+        peakMonth: peakIdx,
+        recommendedSystemKw: systemKw,
+        recommendedPanelCount: panelCount,
+        offsetTarget: result.offsetPercent || 100,
+      };
+
+      const utilityName = result.billData.utilityProvider
+        || result.utilityData?.utilityName
+        || undefined;
+      const utilityRatePerKwh = utilityRate;
+      const stateCode = result.locationData?.stateCode || undefined;
+
+      // Structured bill_data that rowToProject can hydrate
+      const billData = {
+        _billAnalysis: billAnalysis,
+        _utilityName: utilityName,
+        _utilityRatePerKwh: utilityRatePerKwh,
+        _stateCode: stateCode,
+        // Also keep raw fields for engineering engine / proposals
+        ...result.billData,
+      };
+
+      console.log('[BILL_SAVING] PUT /api/projects/' + project.id, { systemKw, utilityName, annualKwh });
+
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          billData,
+          systemSizeKw: systemKw || undefined,
+          // Update lat/lng if we got location from bill
+          ...(result.locationData?.lat && result.locationData?.lng ? {
+            lat: result.locationData.lat,
+            lng: result.locationData.lng,
+          } : {}),
+        }),
+      });
+
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to save bill');
+
+      console.log('[BILL_SAVED] Project updated successfully');
+
+      // Hydrate billAnalysis + utilityName on the returned project
+      // The server returns the raw project; merge in client-side-hydrated fields
+      const updatedProject: Project = {
+        ...json.data,
+        billAnalysis,
+        utilityName: utilityName || json.data.utilityName,
+        utilityRatePerKwh: utilityRatePerKwh || json.data.utilityRatePerKwh,
+        stateCode: stateCode || json.data.stateCode,
+      };
+
+      console.log('[WORKFLOW_UPDATED] billAnalysis set, workflow will recompute');
+      setProject(updatedProject);
+      setShowBillModal(false);
+
+      // Auto-advance to system size tab
+      setActiveTab('system');
+      console.log('[PROJECT_REFRESHED] UI updated, navigated to system tab');
+
+    } catch (err) {
+      console.error('[BILL_SAVE_ERROR]', err instanceof Error ? err.message : err);
+      // Close modal even on error — don't leave user stuck
+      setShowBillModal(false);
+    } finally {
+      setSavingBill(false);
+    }
+  }, [project]);
 
   const handleRunAutoSize = useCallback(() => {
     setActiveTab('system');
@@ -487,6 +617,19 @@ export default function ProjectDetailPage() {
         </div>
 
       </div>
+
+      {/* ── Bill Upload Modal ──────────────────────────────────────────── */}
+      {showBillModal && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-8 bg-black/60 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-xl">
+            <BillUploadFlow
+              onComplete={handleBillComplete}
+              onClose={() => setShowBillModal(false)}
+            />
+          </div>
+        </div>
+      )}
+
     </AppShell>
   );
 }
