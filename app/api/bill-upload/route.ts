@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { parseBillText, validateBillData } from '@/lib/billOcr';
+import { parseBillText, validateBillData, extractBillDataWithAI } from '@/lib/billOcr';
 import type { BillExtractResult } from '@/lib/billOcr';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
@@ -100,6 +100,18 @@ export async function POST(req: NextRequest) {
 
     console.log(`[bill-upload] Extracted ${extractedText.length} chars via ${extractionMethod}`);
 
+    // ── RAW OCR TEXT LOG ──────────────────────────────────────────────────────
+    // Log the raw OCR text before any parsing — critical for debugging failures
+    console.log('[bill-upload] === RAW OCR TEXT ===');
+    const ocrLines = extractedText.split('\n');
+    for (const line of ocrLines.slice(0, 60)) {
+      if (line.trim()) console.log(`[ocr-raw] ${line}`);
+    }
+    if (ocrLines.length > 60) {
+      console.log(`[ocr-raw] ... (${ocrLines.length - 60} more lines)`);
+    }
+    console.log('[bill-upload] === END RAW OCR TEXT ===');
+
     // ── Deterministic parsing ─────────────────────────────────────────────────
     // Stage A: parseBill() — authoritative deterministic source for all usage fields.
     //          Same input → same output always. No LLM rewrites of numeric fields.
@@ -197,6 +209,22 @@ export async function POST(req: NextRequest) {
     console.log('[bill-upload] Bill parsed (deterministic). Fields:', extractedFields.join(', ') || 'none');
     console.log('[bill-upload] Confidence:', confidence, '| monthlyKwh:', monthlyKwh, '| annualKwh:', annualKwh, '| monthsFound:', monthsFound, '| address:', legacyResult.serviceAddress);
 
+    // ── AI Extraction Fallback ────────────────────────────────────────────────
+    // If zero fields extracted (OCR text exists but regex found nothing),
+    // use structured AI extraction to fill in what's available.
+    // This never overrides deterministic usage values — only fills structural gaps.
+    let finalBillData = billData;
+    if (extractedFields.length === 0 && extractedText.trim().length > 50) {
+      console.log('[bill-upload] 0 fields extracted — triggering AI structured fallback');
+      finalBillData = await extractBillDataWithAI(extractedText, billData);
+      console.log('[bill-upload] AI fallback result: fields =', finalBillData.extractedFields?.join(', ') || 'none', '| confidence =', finalBillData.confidence);
+    } else if (extractedFields.length < 2 && extractedText.trim().length > 100) {
+      // Also try AI if very few fields found — may have OCR issues
+      console.log(`[bill-upload] Only ${extractedFields.length} fields extracted — attempting AI supplement`);
+      finalBillData = await extractBillDataWithAI(extractedText, billData);
+      console.log('[bill-upload] AI supplement result: fields =', finalBillData.extractedFields?.join(', ') || 'none');
+    }
+
     // Extraction evidence — returned to UI for transparency
     const extractionEvidence = {
       monthlySource:       parseResult.monthlySource,
@@ -210,14 +238,14 @@ export async function POST(req: NextRequest) {
       debugLog:            parseResult.debugLog,
     };
 
-    const validation = validateBillData(billData);
+    const validation = validateBillData(finalBillData);
     console.log('[bill-upload] Validation:', validation.valid, validation.errors?.join(', ') || 'ok');
 
     let locationData = null;
     let utilityData = null;
 
-    if (billData.serviceAddress) {
-      console.log('[bill-upload] Geocoding address:', billData.serviceAddress);
+    if (finalBillData.serviceAddress) {
+      console.log('[bill-upload] Geocoding address:', finalBillData.serviceAddress);
       try {
         const geoResult = await geocodeAddress(billData.serviceAddress);
         if (geoResult.success && geoResult.location) {
@@ -231,8 +259,8 @@ export async function POST(req: NextRequest) {
           );
           if (utilityResult.success) {
             utilityData = utilityResult.utility;
-            if (!billData.utilityProvider && utilityData?.utilityName) billData.utilityProvider = utilityData.utilityName;
-            if (!billData.electricityRate && utilityData?.avgRatePerKwh) billData.electricityRate = utilityData.avgRatePerKwh;
+            if (!finalBillData.utilityProvider && utilityData?.utilityName) finalBillData.utilityProvider = utilityData.utilityName;
+            if (!finalBillData.electricityRate && utilityData?.avgRatePerKwh) finalBillData.electricityRate = utilityData.avgRatePerKwh;
           }
         } else {
           console.warn('[bill-upload] Geocoding failed:', geoResult.error);
@@ -247,18 +275,18 @@ export async function POST(req: NextRequest) {
     // ── Rate Validation ──────────────────────────────────────────────────────
     // If extracted rate looks like avoided cost (< $0.07/kWh), replace with
     // the utility's known retail rate from the rules database.
-    const utilityNameForRate = billData.utilityProvider || utilityData?.utilityName || null;
-    const rateValidation = validateAndCorrectUtilityRate(billData.electricityRate ?? null, utilityNameForRate);
+    const utilityNameForRate = finalBillData.utilityProvider || utilityData?.utilityName || null;
+    const rateValidation = validateAndCorrectUtilityRate(finalBillData.electricityRate ?? null, utilityNameForRate);
     if (rateValidation.corrected) {
       console.log(`[bill-upload] Rate corrected: $${rateValidation.originalRate?.toFixed(3) ?? 'null'} → $${rateValidation.rate.toFixed(3)}/kWh (source: ${rateValidation.source})`);
-      billData.electricityRate = rateValidation.rate;
+      finalBillData.electricityRate = rateValidation.rate;
     } else {
       console.log(`[bill-upload] Rate valid: $${billData.electricityRate?.toFixed(3)}/kWh`);
     }
 
     // ── System Size Calculation ───────────────────────────────────────────────
     console.log('[bill-upload] Calculating system size...');
-    const annualKwhForSizing = billData.estimatedAnnualKwh || 0;
+    const annualKwhForSizing = finalBillData.estimatedAnnualKwh || 0;
     // Use utility-aware production factor for accurate sizing
     const productionFactor = getProductionFactor(utilityNameForRate);
     const systemSizeKw = annualKwhForSizing > 0
@@ -279,7 +307,7 @@ export async function POST(req: NextRequest) {
     console.log('[bill-upload] Returning success response');
     return NextResponse.json({
       success: true,
-      billData,
+      billData: finalBillData,
       extractionEvidence,
       validation,
       locationData,

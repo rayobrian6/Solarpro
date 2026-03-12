@@ -809,6 +809,153 @@ export async function parseBillTextWithLLM(text: string): Promise<BillExtractRes
   }
 }
 
+// ── AI Structured Extraction Fallback ─────────────────────────────────────────
+/**
+ * extractBillDataWithAI()
+ *
+ * Called when parseBillText() extracts ZERO fields from OCR text.
+ * Sends raw OCR text to OpenAI with a structured JSON schema prompt.
+ * Uses semantic detection rather than rigid label matching.
+ *
+ * Returns the exact BillExtractResult fields that were successfully extracted.
+ * Usage fields (kWh) are NOT overridden by the main parseBill() deterministic
+ * parser — this function only fills structural fields when regex finds nothing.
+ */
+export async function extractBillDataWithAI(
+  ocrText: string,
+  existingResult: BillExtractResult,
+): Promise<BillExtractResult> {
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (!openaiKey) {
+    console.log('[billOcr] AI fallback skipped — no OPENAI_API_KEY');
+    return existingResult;
+  }
+
+  if (!ocrText || ocrText.trim().length < 20) {
+    console.log('[billOcr] AI fallback skipped — OCR text too short');
+    return existingResult;
+  }
+
+  console.log(`[billOcr] AI structured extraction fallback — text length: ${ocrText.length}`);
+
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        response_format: { type: 'json_object' },
+        max_tokens: 600,
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert utility bill parser. Extract structured data from OCR text of an electric utility bill.
+
+Return ONLY valid JSON matching this schema (use null for any field not found):
+{
+  "utility": "string — utility company name (e.g. 'Central Maine Power', 'Eversource')",
+  "account_number": "string — account or customer number",
+  "customer_name": "string — customer/account holder name",
+  "service_address": "string — service/property address",
+  "billing_period_start": "string — start date of billing period (ISO or readable)",
+  "billing_period_end": "string — end date of billing period",
+  "kwh_usage": "number — electricity usage in kWh for this billing period (most recent month)",
+  "annual_kwh": "number — annual or 12-month total kWh if shown",
+  "electricity_rate": "number — cost per kWh in dollars (e.g. 0.15 not 15)",
+  "bill_total": "number — total amount due in dollars",
+  "bill_type": "electric | gas | combined | unknown"
+}
+
+Rules:
+- Use semantic reasoning — labels may be absent or OCR-garbled
+- For kWh: look for numbers followed by kWh, KWH, NWH, or similar
+- For rate: look for $/kWh patterns or cents-per-kWh (convert cents to dollars)
+- For address: look for street numbers, city/state/zip patterns
+- Do NOT guess values not present in the text
+- Return null for any field you cannot confidently identify`,
+          },
+          {
+            role: 'user',
+            content: `Extract data from this utility bill OCR text:
+
+${ocrText.substring(0, 4000)}`,
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(25000),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.warn(`[billOcr] AI fallback HTTP ${res.status}: ${errBody.slice(0, 200)}`);
+      return existingResult;
+    }
+
+    const completion = await res.json();
+    const raw = completion.choices?.[0]?.message?.content || '{}';
+    let ai: Record<string, any> = {};
+    try { ai = JSON.parse(raw); } catch { ai = {}; }
+
+    console.log('[billOcr] AI extraction result:', JSON.stringify(ai));
+
+    // Merge AI results into existing — AI fills gaps, never overrides existing values
+    const merged: BillExtractResult = {
+      ...existingResult,
+      utilityProvider:    existingResult.utilityProvider    ?? (ai.utility          || undefined),
+      accountNumber:      existingResult.accountNumber      ?? (ai.account_number   || undefined),
+      customerName:       existingResult.customerName       ?? (ai.customer_name    || undefined),
+      serviceAddress:     existingResult.serviceAddress     ?? (ai.service_address  || undefined),
+      billingPeriodStart: existingResult.billingPeriodStart ?? (ai.billing_period_start || undefined),
+      billingPeriodEnd:   existingResult.billingPeriodEnd   ?? (ai.billing_period_end   || undefined),
+      monthlyKwh:         existingResult.monthlyKwh         ?? (ai.kwh_usage > 0 ? ai.kwh_usage : undefined),
+      annualKwh:          existingResult.annualKwh          ?? (ai.annual_kwh > 0 ? ai.annual_kwh : undefined),
+      electricityRate:    existingResult.electricityRate    ?? (ai.electricity_rate > 0 ? ai.electricity_rate : undefined),
+      totalAmount:        existingResult.totalAmount        ?? (ai.bill_total > 0 ? ai.bill_total : undefined),
+      billType:           (existingResult.billType !== 'unknown' ? existingResult.billType : (ai.bill_type || 'unknown')) as BillExtractResult['billType'],
+      usedLlmFallback: true,
+    };
+
+    // Recalculate estimatedAnnualKwh
+    merged.estimatedAnnualKwh =
+      merged.annualKwh ??
+      (merged.monthlyUsageHistory?.length
+        ? Math.round(merged.monthlyUsageHistory.reduce((a, b) => a + b, 0) / merged.monthlyUsageHistory.length * 12)
+        : merged.monthlyKwh ? merged.monthlyKwh * 12 : existingResult.estimatedAnnualKwh);
+
+    // Rebuild extractedFields
+    const newFields: string[] = [];
+    if (merged.utilityProvider)    newFields.push('utilityProvider');
+    if (merged.customerName)       newFields.push('customerName');
+    if (merged.serviceAddress)     newFields.push('serviceAddress');
+    if (merged.accountNumber)      newFields.push('accountNumber');
+    if (merged.monthlyKwh)         newFields.push('monthlyKwh');
+    if (merged.annualKwh)          newFields.push('annualKwh');
+    if (merged.monthlyUsageHistory?.length) newFields.push('monthlyUsageHistory');
+    if (merged.electricityRate)    newFields.push('electricityRate');
+    if (merged.totalAmount)        newFields.push('totalAmount');
+    if (merged.billingPeriodStart) newFields.push('billingPeriod');
+    merged.extractedFields = newFields;
+
+    // Upgrade confidence based on fields found
+    if (newFields.length >= 4)      merged.confidence = 'high';
+    else if (newFields.length >= 2) merged.confidence = 'medium';
+    else if (newFields.length >= 1) merged.confidence = 'low';
+    merged.success = newFields.length > 0;
+
+    console.log(`[billOcr] AI fallback: ${newFields.length} fields — ${newFields.join(', ')} — confidence: ${merged.confidence}`);
+    return merged;
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn('[billOcr] AI structured extraction failed:', msg);
+    return existingResult;
+  }
+}
+
+
 // ── Validate extracted data ───────────────────────────────────────────────────
 export function validateBillData(result: BillExtractResult): {
   valid: boolean;

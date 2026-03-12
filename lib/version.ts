@@ -1,29 +1,27 @@
 // lib/version.ts — SolarPro Build Version
-export const BUILD_VERSION     = 'v46.0';
+export const BUILD_VERSION     = 'v46.1';
 export const BUILD_DATE        = '2026-03-12';
-export const BUILD_DESCRIPTION = 'Deterministic bill parser — parseBill() replaces parseBillTextWithLLM(), evidence-based extraction';
+export const BUILD_DESCRIPTION = 'OCR pipeline: image preprocessing + multi-pass Tesseract + AI fallback + dev branch workflow';
 export const BUILD_FEATURES    = [
-  // v46.0 — Deterministic bill parser wiring
+  // v46.1 — OCR extraction repair
+  'billImagePreprocess.ts: EXIF auto-rotate, grayscale, normalize, sharpen, threshold, upscale to 2400px',
+  'ocr/route.ts: multi-pass Tesseract — PSM 3 (auto) + PSM 6 (document block), best result wins',
+  'ocr/route.ts: raw OCR text logged before any parsing — full debug visibility',
+  'ocr/route.ts: preprocessing pipeline applied before every OCR run',
+  'billOcr.ts: extractBillDataWithAI() — structured JSON fallback when 0 fields extracted',
+  'route.ts: AI fallback triggered when extractedFields === 0 or < 2',
+  'route.ts: raw OCR text logged to console before parsing',
+  'vercel.json: dev=preview, master=manual-only — no accidental production deploys',
+  'main.yml: manual-trigger-only production deploy with DEPLOY confirmation guard',
+  'next.config.js: sharp + exif-reader added to webpack externals',
+  // v46.0 — Deterministic bill parser
   'route: parseBill() from billParser.ts is now the single authoritative final parser',
   'route: parseBillTextWithLLM() removed — no LLM rewrites of numeric fields ever',
-  'route: parseBillText() used only for non-usage fields (address, account, charges)',
-  'route: usage fields (kWh, annual, monthly history) sourced exclusively from parseBill()',
-  'route: extractionEvidence returned in API response — source tags, debug log, confidence',
   'billParser: strict source priority P1 printed table > P2 handwritten > P3 bar graph',
-  'billParser: annual A1 explicit total > A2 monthly sum > A3 extrapolated — cross-checked',
   'billParser: rate returns null if not found — never guesses',
-  'billParser: utility name from bill header (CMP → Central Maine Power)',
-  'billParser: BillParseResult with ExtractedValue<T> evidence on every field',
-  'billParser: debugLog[] — deterministic, same input = same log',
   // v45.9 — SaaS Tesseract OCR
-  'app/api/ocr/route.ts — dedicated OCR endpoint, webpack-isolated, tesseract.js loaded at runtime',
-  'billOcrEngine: calls internal /api/ocr for Tesseract — no worker_threads in main route bundle',
+  'app/api/ocr/route.ts — dedicated OCR endpoint, webpack-isolated',
   'OCR pipeline: Tesseract.js WASM (primary) → Tesseract CLI (secondary) → OpenAI Vision (fallback)',
-  'OpenAI Vision only called if Tesseract confidence < 60 OR no monthly usage detected',
-  // v45.8 — JSON error fix
-  'route: billOcrEngine/billParser moved to dynamic import() — fixes HTML 500',
-  // v45.4 — Plan set HTML viewer
-  'wrapDocument() floating toolbar + auto-print on file:// open',
 ];
 
 export function getBuildBadge(): string {
