@@ -74,15 +74,18 @@ export async function POST(req: NextRequest) {
     }
 
     if (!extractedText.trim()) {
+      const visionError = (extractImageText as any)._lastError || null;
       return NextResponse.json({
         success: false,
         error: 'Could not extract text from file. Please ensure the file is a clear, readable utility bill.',
         stage: extractionMethod,
+        visionError,
         debug: {
           hasOpenAI: !!process.env.OPENAI_API_KEY,
           pdfParseLoaded: !!PDFParse,
           fileType: file?.type,
           fileSize: file?.size,
+          visionError,
         },
       }, { status: 422 });
     }
@@ -363,12 +366,15 @@ async function extractPdfTextCli(buffer: Buffer): Promise<string> {
 async function extractImageText(buffer: Buffer, mimeType: string): Promise<string> {
   const safeMime = mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
   const openaiKey = process.env.OPENAI_API_KEY;
+  const base64SizeKb = Math.round(buffer.length * 4 / 3 / 1024);
+  console.log(`[bill-upload] extractImageText: mime=${safeMime}, buffer=${buffer.length}b, base64~${base64SizeKb}KB, hasOpenAI=${!!openaiKey}`);
 
   // 1. OpenAI Vision
   if (openaiKey) {
     try {
       const base64 = buffer.toString('base64');
       const dataUrl = `data:${safeMime};base64,${base64}`;
+      console.log(`[bill-upload] Sending to OpenAI Vision: dataUrl length=${dataUrl.length}`);
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
@@ -378,12 +384,12 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
           messages: [{
             role: 'user',
             content: [
-              { type: 'text', text: 'Extract ALL text from this utility bill image exactly as it appears. Output only the raw extracted text.' },
+              { type: 'text', text: 'Extract ALL text from this utility bill image exactly as it appears. Pay special attention to: (1) any handwritten month lists like "Jan 555 kWh", (2) printed tables beneath "Monthly Usage Summary" or "Your Monthly Usage Summary(kWh)" showing month names with numeric columns, (3) any yearly total kWh. Output only the raw extracted text, preserving the table layout with month names and numbers on the same line.' },
               { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
             ],
           }],
         }),
-        signal: AbortSignal.timeout(25000),
+        signal: AbortSignal.timeout(45000),
       });
       if (res.ok) {
         const data = await res.json();
@@ -392,12 +398,18 @@ async function extractImageText(buffer: Buffer, mimeType: string): Promise<strin
           console.log('[bill-upload] OpenAI Vision extracted', text.length, 'chars from image');
           return text;
         }
+        console.warn('[bill-upload] OpenAI Vision returned empty/short text. finish_reason:', data?.choices?.[0]?.finish_reason, '| usage:', JSON.stringify(data?.usage));
+        // Don't return '' here — fall through to Google Vision fallback
       } else {
         const errBody = await res.text();
-        console.warn('[bill-upload] OpenAI Vision error:', res.status, errBody.slice(0, 200));
+        console.warn('[bill-upload] OpenAI Vision HTTP error:', res.status, errBody.slice(0, 400));
+        // Store error for debug surfacing but continue to next method
+        (extractImageText as any)._lastError = `OpenAI Vision ${res.status}: ${errBody.slice(0, 200)}`;
       }
     } catch (err: unknown) {
-      console.warn('[bill-upload] OpenAI Vision failed:', err instanceof Error ? err.message : err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn('[bill-upload] OpenAI Vision failed:', msg);
+      (extractImageText as any)._lastError = msg;
     }
   }
 

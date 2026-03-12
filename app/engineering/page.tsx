@@ -524,8 +524,15 @@ function EngineeringPageInner() {
             `✅ Preliminary system loaded from bill upload: ${seed.system_kw} kW · ${seed.panel_count} panels${utilityLabel}${priceLabel}`
           );
 
+          // Restore pre-rendered SLD from seed so plan-set E-1 uses the same
+          // diagram the user reviewed in Design Studio, not the fallback renderer.
+          if (seed.sldSvg) {
+            setSldSvg(seed.sldSvg);
+            console.log('[EngineeringPage] SLD restored from engineering_seed');
+          }
+
         } else {
-          // No seed — use layout data if available
+          // No seed — use layout data if available</old_str>
           console.log('[EngineeringPage] No engineering_seed found for project:', projectId, '— falling back to layout/selected equipment');
           const panelCount = layout?.totalPanels || 0;
           const systemKw = layout?.systemSizeKw || 0;
@@ -1671,9 +1678,8 @@ function EngineeringPageInner() {
   };
 
   // ── V4 SLD fetch (uses /api/engineering/sld — professional renderer) ──────────
-  const fetchSLD = async () => {
-    setSldLoading(true);
-    setSldError(null);
+  // ── Core SLD fetch helper — returns SVG string or null, no state side-effects ──
+  const fetchSLDSvg = async (): Promise<string | null> => {
     try {
       const firstInv = config.inverters[0];
       const firstStr = firstInv?.strings[0];
@@ -1848,16 +1854,32 @@ function EngineeringPageInner() {
         const ct = res.headers.get('content-type') || '';
         if (ct.includes('svg') || ct.includes('xml')) {
           const svgText = await res.text();
-          setSldSvg(svgText);
+          return svgText;
         } else {
           const data = await res.json();
-          setSldSvg(data.svg || data.data?.svg || null);
-          if (!data.svg && !data.data?.svg) setSldError('No SVG returned from SLD engine');
+          return (data.svg || data.data?.svg || null);
         }
-        logDecision('Generate SLD', `Professional SLD rendered — ${topoType} topology`, 'auto');
       } else {
         const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-        setSldError(err.error || 'Failed to generate SLD');
+        return null;
+      }
+      return null;
+    } catch (e: any) {
+      return null;
+    }
+  };
+
+  // ── V4 SLD fetch (uses /api/engineering/sld — professional renderer) ──────────
+  const fetchSLD = async () => {
+    setSldLoading(true);
+    setSldError(null);
+    try {
+      const svgResult = await fetchSLDSvg();
+      if (svgResult) {
+        setSldSvg(svgResult);
+        logDecision('Generate SLD', `Professional SLD rendered`, 'auto');
+      } else {
+        setSldError('No SVG returned from SLD engine');
       }
     } catch (e: any) {
       setSldError(e.message);
@@ -2493,6 +2515,21 @@ function EngineeringPageInner() {
     setPlanSetError(null);
     setPlanSetResult(null);
     try {
+      // Ensure we have the accurate SLD before building the plan set.
+      // If sldSvg is null (user hasn't clicked Generate SLD this session),
+      // fetch it now so E-1 always uses renderSLDProfessional(), never the fallback.
+      let activeSldSvg = sldSvg;
+      if (!activeSldSvg) {
+        console.log('[handleGeneratePlanSet] sldSvg is null — auto-fetching SLD before plan-set...');
+        activeSldSvg = await fetchSLDSvg();
+        if (activeSldSvg) {
+          setSldSvg(activeSldSvg);
+          console.log('[handleGeneratePlanSet] SLD auto-fetched successfully for plan-set');
+        } else {
+          console.warn('[handleGeneratePlanSet] SLD auto-fetch returned null — E-1 will use fallback renderer');
+        }
+      }
+
       // Gather all system data
       const firstInv = config.inverters[0];
       const firstStr = firstInv?.strings[0];
@@ -2661,7 +2698,9 @@ function EngineeringPageInner() {
         stringCount: planStrings.length,
         // Pass pre-rendered SLD SVG so E-1 uses the same diagram already reviewed
         // in Design Studio — avoids generating a different SLD from scratch.
-        sldSvg: sldSvg || undefined,
+        // activeSldSvg is either the existing state value OR a freshly-fetched SVG
+        // (auto-fetched above if sldSvg was null when plan-set was triggered).
+        sldSvg: activeSldSvg || undefined,
         // Structural
         windSpeedMph: config.windSpeed || 90,
         groundSnowPsf: config.groundSnowLoad || 0,

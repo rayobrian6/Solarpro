@@ -769,7 +769,7 @@ export async function POST(req: NextRequest) {
 
     try {
       execSync(
-        `wkhtmltopdf --page-size Letter --orientation Landscape --margin-top 0 --margin-bottom 0 --margin-left 0 --margin-right 0 --print-media-type --enable-local-file-access --quiet "${htmlPath}" "${pdfPath}"`,
+        `wkhtmltopdf --page-width 11in --page-height 8.5in --orientation Landscape --margin-top 0 --margin-bottom 0 --margin-left 0 --margin-right 0 --enable-local-file-access --quiet "${htmlPath}" "${pdfPath}"`,
         { timeout: 45000 }
       );
       pdfBuffer = readFileSync(pdfPath);

@@ -124,55 +124,140 @@ function extractUtilityName(text: string): string | undefined {
   return undefined;
 }
 
-// ── Extract kWh usage ─────────────────────────────────────────────────────────
-function extractKwh(text: string): { monthly?: number; annual?: number } {
-  const result: { monthly?: number; annual?: number } = {};
+// ── Extract kWh usage ───────────────────────────────────────────────────────
+// Priority 1: Handwritten month lines        (Jan 555 NWH)
+// Priority 2: Monthly Usage Summary table    (Jan 20 24 20 — col1 = current year)
+// Priority 3: Yearly total line              (Total For 2025 6723 kWh)
+function extractKwh(text: string): { monthly?: number; annual?: number; monthlyHistory?: number[] } {
+  const result: { monthly?: number; annual?: number; monthlyHistory?: number[] } = {};
 
-  const monthlyPatterns = [
-    // "Energy 4,993 kWh @ 0.03770" — energy line item (most specific, check first)
-    /energy\s+([0-9,]+)\s*kwh\s*@/i,
-    // "4,993 kWh 31 days" — usage followed by billing days (This Month block)
-    /([1-9][0-9,]{2,})\s*kwh\s+\d+\s*days/i,
-    // "kWh Usage ... 1 4,993" — meter reading table
-    /kwh\s+usage[^0-9]*(?:\d+\s+)?([0-9,]{3,})/i,
-    // Multiplier table: "Multiplier kWh Usage ... 1 4,993"
-    /multiplier\s+kwh\s+usage[^0-9]*\d+\s+([0-9,]+)/i,
-    /(?:total\s+)?(?:energy\s+)?(?:usage|used|consumption|kwh\s+used)[:\s]+([0-9,]+)\s*kwh/i,
-    /([0-9,]+)\s*kwh\s+(?:used|usage|consumed|billed)/i,
-    /(?:electric\s+)?(?:usage|consumption)[:\s]+([0-9,]+)\s*(?:kwh|kw-?h)/i,
-    /([0-9,]+)\s*kw[h-]?\s*@/i,
-    /(?:current\s+)?(?:month(?:ly)?\s+)?usage[:\s]+([0-9,]+)/i,
-    /(?:billing\s+)?(?:period\s+)?usage[:\s]+([0-9,]+)\s*kwh/i,
-    /(?:total\s+)?kwh\s+(?:this\s+(?:month|period))[:\s]+([0-9,]+)/i,
-    /(?:electricity\s+)?(?:used\s+this\s+(?:month|period))[:\s]+([0-9,]+)/i,
-    /(?:net\s+)?(?:metered\s+)?usage[:\s]+([0-9,]+)\s*kwh/i,
-  ];
+  const MONTH_ORDER = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+  const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
-  for (const pattern of monthlyPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const val = parseFloat(match[1].replace(/,/g, ''));
-      if (val > 0 && val < 100000) {
-        result.monthly = val;
-        break;
+  // Normalise handwritten / OCR kWh aliases before all pattern matching
+  const t = text
+    .replace(/\bN\.?W\.?H\.?\b/gi, 'kWh')
+    .replace(/\bK\.?W\.?H\.?\b/g,  'kWh')
+    .replace(/\bkw-h\b/gi,         'kWh');
+
+  console.log(`[bill-upload] OCR text length: ${text.length} chars`);
+
+  // ── PRIORITY 1: Handwritten month lines ───────────────────────────────────
+  // "Jan 555 kWh"  "Feb 609 kWh" (after NWH normalisation)
+  const MONTH_RE_SRC = '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+  const handwrittenPat = new RegExp(`(${MONTH_RE_SRC})[a-z]*[\\s\\.\\:]+([1-9][0-9]{2,4})\\s*kwh`, 'gi');
+  const handwrittenMonths: Record<string, number> = {};
+  let hwMatch: RegExpExecArray | null;
+  while ((hwMatch = handwrittenPat.exec(t)) !== null) {
+    const key = hwMatch[1].slice(0, 3).toLowerCase();
+    const val = parseInt(hwMatch[2], 10);
+    if (val > 50 && val < 50000) handwrittenMonths[key] = val;
+  }
+  const hwCount = Object.keys(handwrittenMonths).length;
+  console.log(`[bill-upload] Handwritten months detected: ${hwCount}`, hwCount > 0 ? JSON.stringify(handwrittenMonths) : '');
+
+  // ── PRIORITY 2: Monthly Usage Summary bar graph table ─────────────────
+  // Rows: "Jan  20  24  20"  (month-name + 1-3 year columns, col1 = current year)
+  // Values are daily averages (1–200) — we multiply by days-in-month to get monthly kWh
+  const barGraphMonths: Record<string, number> = {};
+  const hasSummaryHeader = /monthly\s+usage\s+summary/i.test(text);
+  console.log(`[bill-upload] Bar graph section header found: ${hasSummaryHeader}`);
+
+  const barRowPat = new RegExp(
+    `^\\s*(${MONTH_RE_SRC})[a-z]*\\s+([0-9]{1,3})(?:\\s+[0-9]{1,4})*\\s*$`,
+    'gim'
+  );
+  let barMatch: RegExpExecArray | null;
+  while ((barMatch = barRowPat.exec(text)) !== null) {
+    const key = barMatch[1].slice(0, 3).toLowerCase();
+    const val = parseInt(barMatch[2], 10);
+    if (val >= 0 && val <= 200) barGraphMonths[key] = val;
+  }
+  const barCount = Object.keys(barGraphMonths).length;
+  console.log(`[bill-upload] Bar graph rows detected: ${barCount}`, barCount > 0 ? JSON.stringify(barGraphMonths) : '');
+
+  // ── Choose source and build history ───────────────────────────────────────
+  let chosenMonths: Record<string, number> | null = null;
+  let sourceLabel = 'none';
+
+  if (hwCount >= 6) {
+    chosenMonths = handwrittenMonths;
+    sourceLabel = 'handwritten';
+  } else if (barCount >= 6) {
+    // Convert daily averages → monthly totals
+    const converted: Record<string, number> = {};
+    MONTH_ORDER.forEach((m, i) => {
+      if (barGraphMonths[m] !== undefined) {
+        converted[m] = Math.round(barGraphMonths[m] * DAYS_IN_MONTH[i]);
+      }
+    });
+    chosenMonths = converted;
+    sourceLabel = 'bar-graph';
+    console.log('[bill-upload] Bar graph daily-avg → monthly totals:', JSON.stringify(converted));
+  } else if (hwCount > 0) {
+    chosenMonths = handwrittenMonths;
+    sourceLabel = `handwritten-partial(${hwCount})`;
+  }
+
+  if (chosenMonths && Object.keys(chosenMonths).length > 0) {
+    const history = MONTH_ORDER.map(m => chosenMonths![m] ?? 0);
+    result.monthlyHistory = history;
+
+    const nonZero = history.filter(v => v > 0);
+    const lastNonZero = [...history].reverse().find(v => v > 0);
+    if (lastNonZero) result.monthly = lastNonZero;
+
+    if (nonZero.length >= 10) {
+      result.annual = history.reduce((a, b) => a + b, 0);
+    } else if (nonZero.length >= 3) {
+      result.annual = Math.round((nonZero.reduce((a, b) => a + b, 0) / nonZero.length) * 12);
+    }
+
+    const monthObj = Object.fromEntries(MONTH_ORDER.map((m, i) => [m, history[i]]));
+    console.log('[bill-upload] Parsed monthly usage object:', JSON.stringify(monthObj));
+    console.log(`[bill-upload] Yearly usage computed: ${result.annual ?? 'n/a'} kWh (${nonZero.length} months, source: ${sourceLabel})`);
+  }
+
+  // ── PRIORITY 3: Explicit yearly total line ─────────────────────────────────
+  if (!result.annual) {
+    const annualPatterns = [
+      /total\s+for\s+\d{4}[\s\:]+([0-9,]+)\s*kwh/i,
+      /(?:annual|yearly|12[- ]month)\s+(?:usage|consumption|average)[\:\s]+([0-9,]+)\s*kwh/i,
+      /(?:last\s+12\s+months?)[\:\s]+([0-9,]+)\s*kwh/i,
+      /(?:12[- ]month\s+total)[\:\s]+([0-9,]+)\s*kwh/i,
+      /^([0-9,]{4,})\s*kwh\s*$/im,
+    ];
+    for (const pat of annualPatterns) {
+      const m = t.match(pat);
+      if (m) {
+        const val = parseFloat(m[1].replace(/,/g, ''));
+        if (val > 0 && val < 1000000) {
+          result.annual = val;
+          console.log(`[bill-upload] Yearly total from explicit line: ${val} kWh`);
+          break;
+        }
       }
     }
   }
 
-  const annualPatterns = [
-    /(?:annual|yearly|12[- ]month)\s+(?:usage|consumption|average)[:\s]+([0-9,]+)\s*kwh/i,
-    /(?:last\s+12\s+months?)[:\s]+([0-9,]+)\s*kwh/i,
-    /(?:annual\s+)?(?:total\s+)?(?:usage\s+)?(?:for\s+the\s+year)[:\s]+([0-9,]+)/i,
-    /(?:12[- ]month\s+total)[:\s]+([0-9,]+)\s*kwh/i,
-  ];
-
-  for (const pattern of annualPatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const val = parseFloat(match[1].replace(/,/g, ''));
-      if (val > 0 && val < 1000000) {
-        result.annual = val;
-        break;
+  // ── PDF/text bill explicit monthly label fallback ──────────────────────────
+  if (!result.monthly) {
+    const monthlyPatterns = [
+      /energy\s+([0-9,]+)\s*kwh\s*@/i,
+      /([1-9][0-9,]{2,})\s*kwh\s+\d+\s*days/i,
+      /kwh\s+usage[^0-9]*(?:\d+\s+)?([0-9,]{3,})/i,
+      /(?:total\s+)?(?:energy\s+)?(?:usage|used|consumption|kwh\s+used)[\:\s]+([0-9,]+)\s*kwh/i,
+      /([0-9,]+)\s*kwh\s+(?:used|usage|consumed|billed)/i,
+      /(?:electric\s+)?(?:usage|consumption)[\:\s]+([0-9,]+)\s*(?:kwh|kw-?h)/i,
+      /([0-9,]+)\s*kwh\s*@/i,
+      /(?:billing\s+)?(?:period\s+)?usage[\:\s]+([0-9,]+)\s*kwh/i,
+      /(?:net\s+)?(?:metered\s+)?usage[\:\s]+([0-9,]+)\s*kwh/i,
+    ];
+    for (const pat of monthlyPatterns) {
+      const m = t.match(pat);
+      if (m) {
+        const val = parseFloat(m[1].replace(/,/g, ''));
+        if (val > 0 && val < 100000) { result.monthly = val; break; }
       }
     }
   }
@@ -180,7 +265,29 @@ function extractKwh(text: string): { monthly?: number; annual?: number } {
   return result;
 }
 
-// ── Extract 12-month usage history ───────────────────────────────────────────
+// ── extractDailyAvgTable (backward-compat stub) ───────────────────────────────────────
+function extractDailyAvgTable(text: string): number[] | undefined {
+  const lines = text.split('\n').map(l => l.replace(/\t/g, ' ').replace(/ {2,}/g, ' ').trim());
+  const yearRowPattern = /^[^0-9]*(\d{4})\s+([\d\s]+)$/;
+  const candidates: { year: number; values: number[]; nonZero: number }[] = [];
+  for (const line of lines) {
+    const m = line.match(yearRowPattern);
+    if (!m) continue;
+    const year = parseInt(m[1]);
+    if (year < 2015 || year > 2030) continue;
+    const nums = m[2].trim().split(/\s+/).map(Number).filter(n => !isNaN(n));
+    if (nums.length < 10 || nums.length > 14) continue;
+    if (nums.some(n => n > 500)) continue;
+    const nonZero = nums.filter(n => n > 0).length;
+    if (nonZero < 2) continue;
+    const padded = [...nums.slice(0, 12), ...Array(Math.max(0, 12 - nums.length)).fill(0)];
+    candidates.push({ year, values: padded, nonZero });
+  }
+  if (candidates.length === 0) return undefined;
+  candidates.sort((a, b) => b.year - a.year || b.nonZero - a.nonZero);
+  return candidates[0].values;
+}
+
 function extractMonthlyHistory(text: string): number[] | undefined {
   // Pattern: month labels followed by kWh values in a table/chart
   // e.g. "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec\n1200 980 1100 ..."
@@ -412,6 +519,27 @@ function extractCustomerName(text: string): string | undefined {
       if (name.length > 2 && name.length < 60) return name;
     }
   }
+
+  // Fallback: bare ALL-CAPS name on its own line (e.g. "WAYNE R ALLEN")
+  // Common in CMP, Eversource, National Grid where name appears without a label.
+  // Must be 2-4 words, all caps, no digits, not a known header/section word.
+  const SKIP_WORDS = /^(?:ACCOUNT|SERVICE|INVOICE|AMOUNT|DATE|BALANCE|TOTAL|PAYMENT|PLEASE|CENTRAL|POWER|ENERGY|ELECTRIC|YOUR|PAGE|AND|FOR|THE|NEW|OLD|CURRENT|PRIOR|NON|CMP|AVANGRID)$/;
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // 2–4 all-caps words (including middle initial like "R"), no digits
+    const allCapsName = trimmed.match(/^([A-Z]{2,}(?:\s+[A-Z]{1,2}(?:\s+[A-Z]{2,})?)?)$/);
+    if (allCapsName) {
+      const words = trimmed.split(/\s+/);
+      if (words.length >= 2 && words.length <= 4 && !words.some(w => SKIP_WORDS.test(w))) {
+        return trimmed
+          .split(/\s+/)
+          .map(w => w.charAt(0) + w.slice(1).toLowerCase())
+          .join(' ');
+      }
+    }
+  }
+
   return undefined;
 }
 
@@ -422,21 +550,34 @@ function extractServiceAddress(text: string): string | undefined {
     /(?:service\s+address|premises|property\s+address)[:\s]+([0-9]+[^,\n]+,[^,\n]+,\s*[A-Z]{2}\s+\d{5})/i,
     // Address with state but no zip
     /(?:service\s+address|premises)[:\s]+([0-9]+\s+[A-Za-z\s]+(?:St|Ave|Blvd|Dr|Rd|Ln|Way|Ct|Pl|Hwy|Pkwy)[.,\s]+[A-Za-z\s]+,\s*[A-Z]{2})/i,
-    // Mailing block: "1016 FRANKLIN ST POCAHONTAS IL 62275-3123" (all caps, no comma)
+    // Mailing block all-caps: "1016 FRANKLIN ST POCAHONTAS IL 62275-3123"
     /([0-9]+\s+[A-Z][A-Z\s]+(?:ST|AVE|BLVD|DR|RD|LN|WAY|CT|PL|HWY)\s+[A-Z][A-Z\s]+[A-Z]{2}\s+\d{5}(?:-\d{4})?)/,
-    // Service address stopping at "Service Location", "Rate Schedule", "Meter"
+    // Service address stopping at known section labels
     /(?:service\s+address)[:\s]+([0-9]+\s+[A-Z][A-Z\s,]+?)(?:\s+Service\s+Location|\s+Rate\s+Schedule|\s+Meter\s+No|\s{3,}|$)/i,
-    // Address at start of line
+    // Address at start of line with comma-separated city/state/zip
     /^([0-9]+\s+[A-Za-z\s]+(?:St|Ave|Blvd|Dr|Rd|Ln|Way|Ct|Pl)\b[^,\n]*,[^,\n]+,\s*[A-Z]{2}\s+\d{5})/im,
   ];
 
   for (const pattern of addrPatterns) {
     const match = text.match(pattern);
     if (match) {
-      const addr = match[1].trim();
+      const addr = match[1].trim().replace(/\n/g, ', ').replace(/\s{2,}/g, ' ');
       if (addr.length > 10 && addr.length < 150) return addr;
     }
   }
+
+  // Fallback: multi-line address block without label
+  // "827 WATERVILLE RD\nSKOWHEGAN ME 04976"  (CMP / National Grid style)
+  // Line 1: number + street name + street type
+  // Line 2: city + 2-letter state + zip
+  const multiLineMatch = text.match(
+    /([0-9]+\s+[A-Z][A-Z0-9 ]{2,40}(?:ST|AVE|BLVD|DR|RD|LN|WAY|CT|PL|HWY|PKWY|TERR?|CIRCLE|CIR|COURT|TRAIL|TRL|PLACE|PLZ))\s*\n\s*([A-Z][A-Z ]{2,30}[A-Z]{2}\s+\d{5}(?:-\d{4})?)/
+  );
+  if (multiLineMatch) {
+    const addr = `${multiLineMatch[1].trim()}, ${multiLineMatch[2].trim()}`;
+    if (addr.length > 10 && addr.length < 150) return addr;
+  }
+
   return undefined;
 }
 
@@ -477,7 +618,12 @@ export function parseBillText(text: string): BillExtractResult {
   if (kwhData.monthly) extractedFields.push('monthlyKwh');
   if (kwhData.annual) extractedFields.push('annualKwh');
 
-  const monthlyUsageHistory = extractMonthlyHistory(text);
+  // Prefer history from daily-avg table (extractKwh) over the month-label scanner
+  // extractDailyAvgTable reconstructs actual monthly kWh from daily avg × days
+  const monthlyUsageHistory =
+    (kwhData.monthlyHistory && kwhData.monthlyHistory.length >= 6)
+      ? kwhData.monthlyHistory
+      : extractMonthlyHistory(text);
   if (monthlyUsageHistory) extractedFields.push('monthlyUsageHistory');
 
   const electricityRate = extractRate(text);
@@ -501,11 +647,22 @@ export function parseBillText(text: string): BillExtractResult {
   const gasUsageTherm = billType !== 'electric' ? extractGasUsage(text) : undefined;
   if (gasUsageTherm) extractedFields.push('gasUsage');
 
-  // Derive annual kWh: use history average if available, else monthly * 12
+  // Derive annual kWh:
+  //   1. Explicit annual from bill text
+  //   2. Sum of full 12-month history (daily-avg table reconstruction)
+  //   3. Average of partial history × 12
+  //   4. Monthly × 12 fallback
   let estimatedAnnualKwh = kwhData.annual;
   if (!estimatedAnnualKwh && monthlyUsageHistory && monthlyUsageHistory.length >= 6) {
-    const avg = monthlyUsageHistory.reduce((a, b) => a + b, 0) / monthlyUsageHistory.length;
-    estimatedAnnualKwh = Math.round(avg * 12);
+    const nonZero = monthlyUsageHistory.filter(v => v > 0);
+    if (nonZero.length >= 10) {
+      // Near-complete year — sum directly
+      estimatedAnnualKwh = monthlyUsageHistory.reduce((a, b) => a + b, 0);
+    } else if (nonZero.length >= 3) {
+      // Partial year — extrapolate from average
+      const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+      estimatedAnnualKwh = Math.round(avg * 12);
+    }
   }
   if (!estimatedAnnualKwh && kwhData.monthly) {
     estimatedAnnualKwh = kwhData.monthly * 12;

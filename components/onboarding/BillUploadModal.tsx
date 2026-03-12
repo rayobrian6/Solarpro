@@ -206,6 +206,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
           const d = data.debug;
           msg += ` | AI:${d.hasOpenAI ? 'yes' : 'NO'} PDF-parse:${d.pdfParseLoaded ? 'yes' : 'no'}`;
         }
+        if (data.visionError) msg += ` | Vision error: ${data.visionError.slice(0, 150)}`;
         setError(msg);
         setProcessingStage('uploading');
         return;

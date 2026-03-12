@@ -53,50 +53,67 @@ export interface TitleBlockData {
 
 // ─── CSS shared across all sheets ────────────────────────────────────────────
 export const PLAN_SET_CSS = `
+  /* == Print / wkhtmltopdf page setup == */
   @page {
     size: 11in 8.5in landscape;
     margin: 0;
   }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
+
+  html, body {
     font-family: 'Arial', 'Helvetica', sans-serif;
     font-size: 8pt;
     color: #000;
+    margin: 0;
+    padding: 0;
     background: #fff;
   }
-  /* Screen: allow vertical scrolling through pages */
-  @media screen {
-    body {
-      width: 11in;
-      margin: 0 auto;
-      background: #e5e7eb;
-      padding: 20px;
-    }
-    .page {
-      width: 11in;
-      height: 8.5in;
-      position: relative;
-      padding: 0.25in 0.25in 1.1in 0.25in;
-      margin-bottom: 20px;
-      background: #fff;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    }
+
+  /* == Each .page = one hard-isolated 11x8.5in landscape sheet ==
+     Rules live OUTSIDE @media print so wkhtmltopdf (screen-mode) honours them. */
+  .page {
+    width: 11in;
+    height: 8.5in;
+    min-height: 8.5in;
+    max-height: 8.5in;
+    position: relative;
+    overflow: hidden;
+    background: #fff;
+    padding: 0.25in 0.25in 1.1in 0.25in;
+    page-break-after: always;
+    break-after: page;
+    page-break-inside: avoid;
+    break-inside: avoid;
+    display: block;
   }
-  /* Print: fixed pages with breaks */
-  @media print {
+  .page:last-child {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  /* == Screen view: paginated cards with shadows == */
+  @media screen {
+    html, body { background: #c8cdd5; }
     body {
-      width: 11in;
-      height: 8.5in;
-      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 72px 0 80px 0;
+      gap: 32px;
     }
     .page {
-      width: 11in;
-      height: 8.5in;
-      position: relative;
-      padding: 0.25in 0.25in 1.1in 0.25in;
-      page-break-after: always;
+      box-shadow: 0 6px 24px rgba(0,0,0,0.28);
+      flex-shrink: 0;
     }
-    .page:last-child { page-break-after: avoid; }
+    #sp-toolbar { display: flex !important; }
+  }
+
+  /* == Print / wkhtmltopdf: clean output == */
+  @media print {
+    html, body { background: #fff !important; display: block; padding: 0; }
+    .page { box-shadow: none !important; margin: 0; }
+    #sp-toolbar { display: none !important; }
   }
 
   /* ── Title Block (bottom strip) ── */
@@ -522,16 +539,88 @@ export function wrapPage(content: string, tb: TitleBlockData, watermark?: string
 
 // ─── Full HTML document wrapper ───────────────────────────────────────────────
 export function wrapDocument(pages: string[], title: string): string {
+  const pageCount = pages.length;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escHtml(title)}</title>
-  <style>${PLAN_SET_CSS}</style>
+  <style>${PLAN_SET_CSS}
+  /* ── Floating toolbar (screen only, hidden on print) ── */
+  #sp-toolbar {
+    display: none;
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    z-index: 9999;
+    align-items: center;
+    gap: 10px;
+    background: rgba(15,23,42,0.92);
+    color: #fff;
+    padding: 10px 16px;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.45);
+    font-family: Arial, sans-serif;
+    font-size: 13px;
+    backdrop-filter: blur(6px);
+    user-select: none;
+  }
+  #sp-toolbar .sp-title {
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: #e2e8f0;
+    margin-right: 6px;
+  }
+  #sp-toolbar .sp-count {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-right: 8px;
+  }
+  #sp-toolbar button {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+    letter-spacing: 0.2px;
+  }
+  #sp-toolbar button:hover { background: #1d4ed8; }
+  #sp-toolbar .sp-tip {
+    font-size: 10px;
+    color: #64748b;
+    margin-top: 0;
+    margin-left: 2px;
+  }
+  </style>
 </head>
 <body>
+  <!-- Floating toolbar — visible in browser, hidden when printing -->
+  <div id="sp-toolbar">
+    <span class="sp-title">SolarPro Plan Set</span>
+    <span class="sp-count">${pageCount} sheets</span>
+    <button onclick="window.print()">&#128438; Save as PDF</button>
+    <span class="sp-tip">Use "Save as PDF" in print dialog</span>
+  </div>
+
   ${pages.join('\n')}
+
+  <script>
+    // Auto-open print dialog when file is opened directly in browser
+    // (allows immediate Save-as-PDF workflow)
+    // Only runs if URL is a file:// or blob:// — not when embedded in the app
+    (function() {
+      var loc = window.location.href;
+      if (loc.startsWith('file://') || loc.startsWith('blob:') || loc.includes('download=')) {
+        // Small delay so the page renders first
+        setTimeout(function() { window.print(); }, 800);
+      }
+    })();
+  </script>
 </body>
 </html>`;
 }
