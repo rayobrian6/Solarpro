@@ -1,6 +1,6 @@
 // lib/version.ts -- SolarPro Build Version
 export const BUILD_VERSION     = 'v46.4';
-export const BUILD_DATE        = '2026-03-13';
+export const BUILD_DATE        = '2026-03-14';
 export const BUILD_DESCRIPTION = 'Bill parser: fix comma-formatted kWh (1,234 kWh) silently dropped in handwritten + printed table parsers';
 export const BUILD_FEATURES    = [
   // v46.4 -- Bill parser comma-kWh fix
