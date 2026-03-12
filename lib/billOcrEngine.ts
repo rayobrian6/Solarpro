@@ -1,173 +1,100 @@
 /**
  * lib/billOcrEngine.ts
- * Stage 1 — Free Tesseract OCR for utility bill images.
+ * OCR engine for utility bill images.
  *
- * Uses the Tesseract CLI binary (tesseract.js worker_threads causes webpack
- * bundling crashes in Next.js App Router routes). CLI is zero-bundle, runs
- * as a child process, and is guaranteed not to interfere with the route module.
+ * ARCHITECTURE:
+ * This module calls the internal /api/ocr route for Tesseract OCR.
+ * Tesseract.js is isolated in its own route to prevent webpack from
+ * bundling worker_threads at compile time (which causes HTML 500 errors).
  *
- * OCR priority order:
- *   1. Tesseract CLI  (free, local — `tesseract` binary must be installed)
- *   2. Tesseract.js   (free, JS fallback — used only if CLI not available)
- *   3. OpenAI Vision  (paid fallback — only if confidence < 60 or no usage)
- *   4. Google Vision  (paid fallback — last resort)
- *
- * Windows install:  https://github.com/UB-Mannheim/tesseract/wiki
- * Mac install:      brew install tesseract
- * Linux install:    apt-get install tesseract-ocr
+ * Priority chain:
+ *   1. Internal /api/ocr  (Tesseract.js WASM — free, no install required)
+ *   2. Tesseract CLI       (faster if binary installed — auto-detected)
+ *   3. OpenAI Vision       (paid — only if Tesseract confidence < 60 or no usage)
+ *   4. Google Vision       (paid — last resort)
  */
-
-import { execFile } from 'child_process';
-import { writeFile, readFile, unlink } from 'fs/promises';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
 
 export interface OcrResult {
   rawText: string;
   confidence: number;       // 0–100
-  method: 'tesseract-cli' | 'tesseract-js' | 'openai-vision' | 'google-vision' | 'none';
+  method: 'tesseract-js' | 'tesseract-cli' | 'openai-vision' | 'google-vision' | 'none';
   error?: string;
 }
 
-// ── Stage 1a: Tesseract CLI ──────────────────────────────────────────────────
-/**
- * Run the system `tesseract` binary as a child process.
- * Writes buffer to a temp file, runs tesseract, reads output, cleans up.
- *
- * This avoids ALL webpack/worker_threads/bundling issues.
- * Returns confidence 0–100 estimated from output length heuristic
- * (Tesseract CLI does not emit a confidence score directly).
- */
-export async function recognizeImageCli(
-  buffer: Buffer,
-  mimeType: string,
-): Promise<OcrResult> {
-  const ext = mimeType.includes('png') ? 'png' : 'jpg';
-  const tmpId = `bill_ocr_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const tmpImg = join(tmpdir(), `${tmpId}.${ext}`);
-  const tmpTxt = join(tmpdir(), tmpId); // tesseract appends .txt automatically
-
-  console.log(`[bill-ocr] Tesseract CLI: buffer=${buffer.length}b, mime=${mimeType}`);
-
-  try {
-    // Write image to temp file
-    await writeFile(tmpImg, buffer);
-
-    // Run tesseract CLI: tesseract <input> <output_base> -l eng --psm 3
-    // --psm 3 = fully automatic page segmentation (best for full documents)
-    // --oem 3 = default OCR engine (LSTM neural net)
-    await execFileAsync('tesseract', [tmpImg, tmpTxt, '-l', 'eng', '--psm', '3', '--oem', '3'], {
-      timeout: 30000,
-    });
-
-    // Read the output text file
-    const outputFile = `${tmpTxt}.txt`;
-    const rawText = await readFile(outputFile, 'utf-8');
-
-    // Estimate confidence from output quality:
-    // - If we got >200 chars with recognizable words → high confidence
-    // - If we got 50–200 chars → medium
-    // - If we got <50 chars → low
-    const wordCount = rawText.trim().split(/\s+/).filter(w => w.length > 2).length;
-    const confidence = wordCount > 50 ? 82 : wordCount > 20 ? 65 : wordCount > 5 ? 45 : 20;
-
-    console.log(`[bill-ocr] Tesseract CLI: chars=${rawText.length}, words=${wordCount}, est.confidence=${confidence}`);
-    if (rawText.length > 0) {
-      console.log(`[bill-ocr] Tesseract preview: ${rawText.slice(0, 200).replace(/\n/g, '↵')}`);
-    }
-
-    return { rawText, confidence, method: 'tesseract-cli' };
-
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[bill-ocr] Tesseract CLI failed: ${msg}`);
-    return { rawText: '', confidence: 0, method: 'none', error: msg };
-  } finally {
-    // Clean up temp files
-    for (const f of [tmpImg, `${tmpTxt}.txt`]) {
-      try { await unlink(f); } catch { /* ignore */ }
-    }
-  }
+// ── Internal base URL for server-to-server calls ──────────────────────────────
+function getBaseUrl(): string {
+  // In Next.js server environment, use NEXTAUTH_URL or NEXT_PUBLIC_APP_URL
+  // Falls back to localhost:3000 for local dev
+  return (
+    process.env.NEXTAUTH_URL ||
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}` ||
+    'http://localhost:3000'
+  );
 }
 
-// ── Stage 1b: Tesseract.js (JS fallback) ─────────────────────────────────────
+// ── Stage 1: Internal OCR route (Tesseract.js WASM) ──────────────────────────
 /**
- * Use tesseract.js npm package as fallback when CLI is not available.
- * Dynamically imported to prevent webpack from trying to bundle worker_threads.
+ * Call the internal /api/ocr endpoint which runs Tesseract.js in isolation.
+ * This is the primary OCR path — free, no API key required.
  *
- * NOTE: This may still fail in some Next.js environments due to worker_threads.
- * If it fails, the error is caught and we fall through to Vision APIs.
- */
-export async function recognizeImageJs(
-  buffer: Buffer,
-  mimeType: string,
-): Promise<OcrResult> {
-  console.log(`[bill-ocr] Tesseract.js fallback: buffer=${buffer.length}b`);
-
-  try {
-    // Dynamic import to prevent webpack static analysis of worker_threads
-    const Tesseract = await import('tesseract.js');
-    const createWorker = Tesseract.createWorker ?? (Tesseract as any).default?.createWorker;
-
-    if (!createWorker) {
-      throw new Error('createWorker not found in tesseract.js');
-    }
-
-    const worker = await createWorker('eng', 1, {
-      cachePath: '/tmp/tesseract-cache',
-      logger: () => {},
-    });
-
-    try {
-      const safeMime = mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
-      const dataUrl = `data:${safeMime};base64,${buffer.toString('base64')}`;
-      const { data } = await (worker as any).recognize(dataUrl);
-
-      const rawText = data.text ?? '';
-      const confidence = Math.round(data.confidence ?? 0);
-
-      console.log(`[bill-ocr] Tesseract.js: confidence=${confidence}, chars=${rawText.length}`);
-      return { rawText, confidence, method: 'tesseract-js' };
-
-    } finally {
-      try { await (worker as any).terminate(); } catch { /* ignore */ }
-    }
-
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.warn(`[bill-ocr] Tesseract.js failed: ${msg}`);
-    return { rawText: '', confidence: 0, method: 'none', error: msg };
-  }
-}
-
-// ── Stage 1: Auto-select best Tesseract method ───────────────────────────────
-/**
- * Try CLI first (preferred — no bundling issues), fall back to JS library.
+ * The route is called server-to-server (within the same Next.js process)
+ * so it works identically in local dev and on Vercel/cloud.
  */
 export async function recognizeImage(
   buffer: Buffer,
   mimeType: string,
 ): Promise<OcrResult> {
-  // Try CLI first
-  const cliResult = await recognizeImageCli(buffer, mimeType);
-  if (cliResult.rawText.length > 30) {
-    return cliResult;
-  }
+  const safeMime = mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
+  const imageBase64 = buffer.toString('base64');
 
-  // CLI not available or returned nothing — try JS library
-  console.log('[bill-ocr] CLI produced no output — trying Tesseract.js');
-  const jsResult = await recognizeImageJs(buffer, mimeType);
-  if (jsResult.rawText.length > 30) {
-    return jsResult;
-  }
+  console.log(`[bill-ocr] Calling internal /api/ocr: mime=${safeMime}, buffer=${buffer.length}b`);
 
-  // Both failed
-  const error = cliResult.error || jsResult.error || 'All Tesseract methods failed';
-  console.warn('[bill-ocr] All Tesseract methods failed');
-  return { rawText: '', confidence: 0, method: 'none', error };
+  try {
+    const baseUrl = getBaseUrl();
+    const res = await fetch(`${baseUrl}/api/ocr`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64, mimeType: safeMime }),
+      signal: AbortSignal.timeout(55000), // OCR can take 30–50s on first cold start
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[bill-ocr] /api/ocr returned HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      return {
+        rawText: '',
+        confidence: 0,
+        method: 'none',
+        error: `OCR route HTTP ${res.status}`,
+      };
+    }
+
+    const json = await res.json();
+
+    if (!json.success && !json.text) {
+      console.warn(`[bill-ocr] /api/ocr failed: ${json.error}`);
+      return {
+        rawText: '',
+        confidence: 0,
+        method: 'none',
+        error: json.error,
+      };
+    }
+
+    const rawText: string = json.text ?? '';
+    const confidence: number = json.confidence ?? 0;
+    const method = (json.method ?? 'tesseract-js') as OcrResult['method'];
+
+    console.log(`[bill-ocr] /api/ocr success: method=${method}, confidence=${confidence}, chars=${rawText.length}`);
+
+    return { rawText, confidence, method };
+
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[bill-ocr] /api/ocr call failed: ${msg}`);
+    return { rawText: '', confidence: 0, method: 'none', error: msg };
+  }
 }
 
 // ── Stage 3a: OpenAI Vision fallback ─────────────────────────────────────────
