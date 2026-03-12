@@ -221,6 +221,8 @@ export default function ProjectDetailPage() {
     };
     locationData?: { stateCode?: string; lat?: number; lng?: number; city?: string; state?: string };
     utilityData?: { utilityName?: string; avgRatePerKwh?: number };
+    // v47.11: matchedUtility carries accurate DB retail rate
+    matchedUtility?: { effectiveRate?: number; retailRate?: number; defaultResidentialRate?: number; source?: string };
     systemSizing?: { recommendedKw?: number };
     systemKw: number;
     offsetPercent: number;
@@ -267,13 +269,20 @@ export default function ProjectDetailPage() {
       const utilityName = result.billData.utilityProvider
         || result.utilityData?.utilityName
         || undefined;
-      const utilityRatePerKwh = utilityRate;
+      // v47.11 rate fallback: bill extracted rate > DB retail rate > state average > national default
+      // result.matchedUtility?.effectiveRate is the accurate 2024/2025 all-in retail rate from DB
+      const dbRetailRate = (result as { matchedUtility?: { effectiveRate?: number } }).matchedUtility?.effectiveRate;
+      const utilityRatePerKwh = (utilityRate > 0 && utilityRate !== 0.13)
+        ? utilityRate            // Bill extracted rate wins if non-default
+        : dbRetailRate           // DB retail rate is next priority
+          ?? result.utilityData?.avgRatePerKwh  // state average fallback
+          ?? utilityRate;        // hardcoded 0.13 last resort
       const stateCode = result.locationData?.stateCode || undefined;
       // FIX v47.8: capture city from locationData so it persists to DB
       const city = result.locationData?.city || undefined;
 
-      console.log('[BILL_PARSED] annualKwh=%s utilityName=%s utilityRate=%s stateCode=%s city=%s',
-        annualKwh, utilityName, utilityRatePerKwh, stateCode, city);
+      console.log('[BILL_PARSED] annualKwh=%s utilityName=%s utilityRate=%s stateCode=%s city=%s dbRetailRate=%s',
+        annualKwh, utilityName, utilityRatePerKwh, stateCode, city, dbRetailRate ?? 'none');
 
       // Structured bill_data that rowToProject can hydrate — includes _city now
       const billData = {

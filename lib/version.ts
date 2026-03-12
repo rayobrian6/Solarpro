@@ -1,8 +1,33 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.10';
+export const BUILD_VERSION     = 'v47.11';
 export const BUILD_DATE        = '2026-06-10';
-export const BUILD_DESCRIPTION = 'v47.10: Force all 97 API routes to be dynamic -- eliminates DYNAMIC_SERVER_USAGE static rendering errors on all routes';
+export const BUILD_DESCRIPTION = 'v47.11: Utility rate database rebuild + bill pipeline rate fallback -- accurate 2024/2025 EIA rates, new rate breakdown schema, 3-tier rate priority';
 export const BUILD_FEATURES    = [
+  // v47.11 -- Utility rate database rebuild + bill pipeline fix
+  'ROOT CAUSE 1: UTILITY_RETAIL_RATES in utility-rules.ts had stale/incorrect rates -- CMP was $0.198 (2022 EIA), actual 2024 rate is $0.265/kWh (EIA ME avg Jan-Sep 2024)',
+  'ROOT CAUSE 2: STATE_UTILITY_FALLBACK avgRate values in utilityDetector.ts were 2022-era EIA data -- ME/VT/NH/CT/CA/HI/MI/AK all needed updating',
+  'ROOT CAUSE 3: utility_policies DB table had only default_residential_rate column -- no retail_rate (all-in) vs supply_rate (energy-only) distinction',
+  'ROOT CAUSE 4: utilityMatcher.ts read only default_residential_rate -- would return stale/supply-only rate as the effective rate for solar calculations',
+  'ROOT CAUSE 5: handleBillComplete rate fallback used hardcoded 0.13 when bill rate unavailable -- did not use DB retail rate as priority 2',
+  'FIX: lib/utility-rules.ts -- Added UtilityRateBreakdown interface with retailRate/supplyRate/distributionRate/transmissionRate/fixedMonthlyCharge/netMeteringType/lastUpdated/rateSource',
+  'FIX: lib/utility-rules.ts -- UTILITY_RATE_BREAKDOWNS replaces flat UTILITY_RETAIL_RATES dict; backward-compat shim auto-derives UTILITY_RETAIL_RATES from it',
+  'FIX: lib/utility-rules.ts -- CMP retail_rate corrected: $0.198 -> $0.265/kWh (EIA + CMP tariff sheet 14, 2024)',
+  'FIX: lib/utility-rules.ts -- Versant Power: $0.198 -> $0.272/kWh; GMP: $0.198 -> $0.215/kWh; Unitil: $0.228 -> $0.235/kWh',
+  'FIX: lib/utility-rules.ts -- PG&E: $0.32 -> $0.338/kWh; PSE&G: $0.17 -> $0.178/kWh; ComEd: $0.13 -> $0.148/kWh; Ameren: $0.12 -> $0.128/kWh',
+  'FIX: lib/utility-rules.ts -- MAX_VALID_RETAIL_RATE raised $0.50 -> $0.60 (HI/CA rates exceed old ceiling)',
+  'FIX: lib/utility-rules.ts -- Added getUtilityRateBreakdown() export: returns full UtilityRateBreakdown for a utility by name',
+  'FIX: lib/utilityDetector.ts -- STATE_UTILITY_FALLBACK avgRate updated for 8 states: ME 0.198->0.265, VT 0.198->0.215, NH 0.228->0.235, CT 0.248->0.252, CA 0.298->0.318, HI 0.388->0.395, MI 0.178->0.188, AK 0.228->0.258',
+  'FIX: lib/utilityMatcher.ts -- MatchedUtility interface adds retailRate + effectiveRate fields',
+  'FIX: lib/utilityMatcher.ts -- P1/P2 queries now SELECT retail_rate column; effectiveRate = retailRate ?? defaultResidentialRate',
+  'FIX: lib/utilityMatcher.ts -- P3/P4 fallback returns include retailRate: null, effectiveRate: fallbackRate',
+  'FIX: app/api/bill-upload/route.ts -- Uses matchedUtility.effectiveRate (not defaultResidentialRate) as DB rate; logs retailRate vs legacyRate vs effectiveRate',
+  'FIX: app/projects/[id]/page.tsx -- handleBillComplete now reads result.matchedUtility?.effectiveRate as priority-2 rate source',
+  'FIX: app/projects/[id]/page.tsx -- 3-tier rate priority: bill_rate (if non-default) > DB retail rate > state average > national default 0.13',
+  'FIX: app/projects/[id]/page.tsx -- handleBillComplete signature now includes matchedUtility?: { effectiveRate, retailRate, ... }',
+  'FIX: app/api/migrate/route.ts -- Migration 011: adds retail_rate/supply_rate/distribution_rate/transmission_rate/fixed_monthly_charge/net_metering_type/last_updated/rate_source columns to utility_policies',
+  'FIX: app/api/migrate/route.ts -- Migration 011: seeds accurate 2024/2025 retail rates for 12 major utilities (CMP, Versant, Eversource, National Grid, GMP, Unitil, PGE, SCE, FPL, Duke, PSE&G, ComEd, Ameren)',
+  'LOGGING: [BILL_PARSED] now logs dbRetailRate for rate source tracing',
+  'LOGGING: [bill-upload] now logs retailRate vs legacyRate vs effectiveRate for each matched utility',
   // v47.10 -- Force dynamic on all API routes
   'ROOT CAUSE: Next.js attempted to statically render API routes at build time; routes accessing request.headers/cookies()/DB at render time triggered DYNAMIC_SERVER_USAGE error',
   'ROOT CAUSE: /api/settings/branding and /api/stats confirmed failing in Vercel logs with digest: DYNAMIC_SERVER_USAGE -- login flow broken',

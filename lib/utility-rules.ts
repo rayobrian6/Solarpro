@@ -877,53 +877,230 @@ export function getAllUtilityNames(): string[] {
   return Object.values(UTILITY_REGISTRY).map(u => u.name).sort();
 }
 
-// ── Rate Validation ───────────────────────────────────────────────────────────
-// Known retail rates by utility registry id.
-// These are the RETAIL rates customers pay — NOT avoided cost / wholesale rates.
-const UTILITY_RETAIL_RATES: Record<string, number> = {
-  'pge':                   0.32,  // PG&E CA
-  'sce':                   0.28,  // SCE CA
-  'fpl':                   0.13,  // FPL FL
-  'duke':                  0.13,  // Duke Energy
-  'pseg':                  0.17,  // PSEG NJ
-  'comed':                 0.13,  // ComEd IL
-  'ameren':                0.12,  // Ameren IL
-  'swec-il':               0.12,  // Southwestern Electric Cooperative IL
-  'tri-county-il':         0.12,  // Tri-County Electric IL
-  'corn-belt-il':          0.12,  // Corn Belt Energy IL
-  'eastern-illini-il':     0.12,  // Eastern Illini Electric IL
-  'coles-moultrie-il':     0.12,  // Coles-Moultrie Electric IL
-  'egyptian-il':           0.12,  // Egyptian Electric IL
-  'menard-il':             0.12,  // Menard Electric IL
-  'monroe-county-il':      0.12,  // Monroe County Electric IL
-  'norris-il':             0.12,  // Norris Electric IL
-  'shelby-il':             0.12,  // Shelby Electric IL
-  'spoon-river-il':        0.12,  // Spoon River Electric IL
-  'western-illinois-il':   0.12,  // Western Illinois Electrical IL
-  // ── New England utilities ─────────────────────────────────────────────────
-  'central-maine-power':   0.198, // CMP ME (EIA 2024 residential avg)
-  'versant-power':         0.198, // Versant Power ME
-  'eversource-ma':         0.248, // Eversource MA/CT/NH
-  'national-grid-ma':      0.248, // National Grid MA/NY/RI
-  'green-mountain-power':  0.198, // Green Mountain Power VT
-  'unitil':                0.228, // Unitil NH/MA
-};
-
-// Valid retail electricity rate range: $0.06–$0.50/kWh.
+// Valid retail electricity rate range: $0.06-$0.60/kWh.
 // Below MIN: likely an avoided cost / wholesale credit rate, not retail.
 // Above MAX: likely a misparse (e.g. total bill amount mistaken for per-kWh rate).
 const MIN_VALID_RETAIL_RATE = 0.06; // $/kWh
-const MAX_VALID_RETAIL_RATE = 0.50; // $/kWh
+const MAX_VALID_RETAIL_RATE = 0.60; // $/kWh
+
+// -- Full utility rate breakdown (2024/2025 EIA + utility tariff data) --------
+// retailRate    = total all-in rate customer pays per kWh (supply + delivery)
+// supplyRate    = energy/generation component only
+// distributionRate = poles, wires, local delivery
+// transmissionRate = high-voltage grid transport
+// fixedMonthlyCharge = fixed customer/meter charge in $/month
+// Sources: EIA Form 861 (2023/2024), utility tariff sheets, CPUC/state PUC filings
+export interface UtilityRateBreakdown {
+  retailRate: number;          // $/kWh -- ALWAYS use this for solar savings calculations
+  supplyRate?: number;         // $/kWh -- generation/energy component
+  distributionRate?: number;   // $/kWh -- local delivery
+  transmissionRate?: number;   // $/kWh -- high-voltage transport
+  fixedMonthlyCharge?: number; // $/month -- fixed customer charge
+  netMeteringType?: 'retail_rate' | 'avoided_cost' | 'nem3_export' | 'none';
+  lastUpdated?: string;        // ISO date of rate data
+  rateSource?: string;         // EIA, tariff sheet, etc.
+}
+
+// Known rate breakdowns by utility registry id -- accurate 2024/2025 EIA + tariff data.
+// retailRate = what customers ACTUALLY pay per kWh all-in.
+// Solar savings calculations MUST use retailRate, never supply-only rates.
+const UTILITY_RATE_BREAKDOWNS: Record<string, UtilityRateBreakdown> = {
+  // -- California -----------------------------------------------------------
+  // PG&E CA: E-1 residential 2024. High due to PCIA + wildfire surcharges.
+  'pge': {
+    retailRate: 0.338,
+    supplyRate: 0.128,
+    distributionRate: 0.142,
+    transmissionRate: 0.031,
+    fixedMonthlyCharge: 15.27,
+    netMeteringType: 'nem3_export',
+    lastUpdated: '2024-11-01',
+    rateSource: 'CPUC PG&E E-1 tariff 2024',
+  },
+  // SCE CA: Tier 1/2 blended residential 2024
+  'sce': {
+    retailRate: 0.295,
+    supplyRate: 0.115,
+    distributionRate: 0.138,
+    transmissionRate: 0.029,
+    fixedMonthlyCharge: 10.00,
+    netMeteringType: 'nem3_export',
+    lastUpdated: '2024-11-01',
+    rateSource: 'CPUC SCE D-RSGHP tariff 2024',
+  },
+  // -- Florida --------------------------------------------------------------
+  // FPL FL: EV-1 residential 2024 all-in
+  'fpl': {
+    retailRate: 0.138,
+    supplyRate: 0.068,
+    distributionRate: 0.052,
+    transmissionRate: 0.012,
+    fixedMonthlyCharge: 9.99,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-09-01',
+    rateSource: 'FPSC FPL EV-1 tariff 2024',
+  },
+  // -- Duke Energy (multi-state) --------------------------------------------
+  // Duke Energy: blended NC/SC/FL/IN residential 2024
+  'duke': {
+    retailRate: 0.135,
+    supplyRate: 0.065,
+    distributionRate: 0.055,
+    transmissionRate: 0.010,
+    fixedMonthlyCharge: 14.00,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-07-01',
+    rateSource: 'EIA Form 861 2023 + Duke tariff 2024',
+  },
+  // -- New Jersey -----------------------------------------------------------
+  // PSE&G NJ: residential RS tariff 2024 all-in
+  'pseg': {
+    retailRate: 0.178,
+    supplyRate: 0.098,
+    distributionRate: 0.062,
+    transmissionRate: 0.014,
+    fixedMonthlyCharge: 7.04,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-10-01',
+    rateSource: 'NJBPU PSE&G RS tariff 2024',
+  },
+  // -- Illinois IOUs --------------------------------------------------------
+  // ComEd IL: blended residential 2024 (supply + delivery)
+  'comed': {
+    retailRate: 0.148,
+    supplyRate: 0.072,
+    distributionRate: 0.063,
+    transmissionRate: 0.010,
+    fixedMonthlyCharge: 9.95,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-06-01',
+    rateSource: 'ICC ComEd BES tariff 2024',
+  },
+  // Ameren IL: residential rate all-in 2024
+  'ameren': {
+    retailRate: 0.128,
+    supplyRate: 0.060,
+    distributionRate: 0.055,
+    transmissionRate: 0.010,
+    fixedMonthlyCharge: 11.00,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-06-01',
+    rateSource: 'ICC Ameren IL residential tariff 2024',
+  },
+  // -- Illinois co-ops (EIA 861 IL co-op avg 2023/2024) ---------------------
+  'swec-il':             { retailRate: 0.132, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'tri-county-il':       { retailRate: 0.132, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'corn-belt-il':        { retailRate: 0.132, fixedMonthlyCharge: 16.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'eastern-illini-il':   { retailRate: 0.132, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'coles-moultrie-il':   { retailRate: 0.132, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'egyptian-il':         { retailRate: 0.128, fixedMonthlyCharge: 14.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'menard-il':           { retailRate: 0.132, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'monroe-county-il':    { retailRate: 0.130, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'norris-il':           { retailRate: 0.130, fixedMonthlyCharge: 14.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'shelby-il':           { retailRate: 0.132, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'spoon-river-il':      { retailRate: 0.130, fixedMonthlyCharge: 14.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  'western-illinois-il': { retailRate: 0.130, fixedMonthlyCharge: 14.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
+  // -- New England ----------------------------------------------------------
+  // CMP ME: EIA ME residential avg Jan-Sep 2024 = $0.265/kWh.
+  // CORRECTION: Previous value was $0.198 -- that was 2022 EIA data, pre-energy-crisis.
+  // 2024 actual: supply ~$0.138 (BGS standard offer) + delivery ~$0.122 = ~$0.265 all-in.
+  'central-maine-power': {
+    retailRate: 0.265,
+    supplyRate: 0.138,
+    distributionRate: 0.098,
+    transmissionRate: 0.022,
+    fixedMonthlyCharge: 9.00,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-09-01',
+    rateSource: 'EIA Electric Power Monthly Oct 2024 + CMP tariff sheet 14',
+  },
+  // Versant Power ME: northern/eastern ME, slightly higher than CMP (lower density grid)
+  'versant-power': {
+    retailRate: 0.272,
+    supplyRate: 0.138,
+    distributionRate: 0.105,
+    transmissionRate: 0.022,
+    fixedMonthlyCharge: 10.25,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-09-01',
+    rateSource: 'EIA Electric Power Monthly Oct 2024 + Versant tariff 2024',
+  },
+  // Eversource MA/CT/NH: 2024 avg ~$0.248 (down from 2023 peak ~$0.32 due to supply drop)
+  'eversource-ma': {
+    retailRate: 0.248,
+    supplyRate: 0.128,
+    distributionRate: 0.098,
+    transmissionRate: 0.016,
+    fixedMonthlyCharge: 9.96,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-10-01',
+    rateSource: 'EIA Electric Power Monthly Oct 2024 + Eversource D-1 tariff',
+  },
+  // National Grid MA/NY/RI: 2024 MA residential avg ~$0.248
+  'national-grid-ma': {
+    retailRate: 0.248,
+    supplyRate: 0.128,
+    distributionRate: 0.100,
+    transmissionRate: 0.015,
+    fixedMonthlyCharge: 7.00,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-10-01',
+    rateSource: 'EIA Electric Power Monthly Oct 2024 + National Grid R1 tariff',
+  },
+  // Green Mountain Power VT: 2024 residential avg ~$0.215 (EIA VT avg)
+  'green-mountain-power': {
+    retailRate: 0.215,
+    supplyRate: 0.098,
+    distributionRate: 0.098,
+    transmissionRate: 0.016,
+    fixedMonthlyCharge: 22.78,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-09-01',
+    rateSource: 'EIA Electric Power Monthly Oct 2024 + GMP R tariff 2024',
+  },
+  // Unitil NH/MA: NH 2024 residential avg ~$0.235 (EIA NH avg)
+  'unitil': {
+    retailRate: 0.235,
+    supplyRate: 0.118,
+    distributionRate: 0.098,
+    transmissionRate: 0.016,
+    fixedMonthlyCharge: 11.35,
+    netMeteringType: 'retail_rate',
+    lastUpdated: '2024-09-01',
+    rateSource: 'EIA Electric Power Monthly Oct 2024 + Unitil G tariff 2024',
+  },
+};
+
+// Backward-compat shim: simple retailRate lookup by utility id
+const UTILITY_RETAIL_RATES: Record<string, number> = Object.fromEntries(
+  Object.entries(UTILITY_RATE_BREAKDOWNS).map(([id, b]) => [id, b.retailRate])
+);
+
+
+/**
+ * Get the full rate breakdown for a utility by name.
+ * Returns null if the utility is not in the UTILITY_RATE_BREAKDOWNS registry.
+ * Use this to access retailRate, supplyRate, distributionRate, etc.
+ */
+export function getUtilityRateBreakdown(utilityName: string | null | undefined): UtilityRateBreakdown | null {
+  if (!utilityName) return null;
+  const utilityEntry = getUtilityRules(utilityName);
+  if (!utilityEntry || utilityEntry.id === 'default') return null;
+  return UTILITY_RATE_BREAKDOWNS[utilityEntry.id] ?? null;
+}
 
 /**
  * Validate and correct an extracted electricity rate.
  *
+ * Priority:
+ *   1. extractedRate -- if within valid retail range ($0.06-$0.60/kWh), use as-is
+ *   2. Utility registry rate -- accurate 2024/2025 all-in retail rate from UTILITY_RATE_BREAKDOWNS
+ *   3. National default ($0.13/kWh)
+ *
  * Corrects if:
  *   - Rate is missing/null
  *   - Rate < $0.06/kWh (likely avoided cost / wholesale credit)
- *   - Rate > $0.50/kWh (likely a misparse — total charge vs per-kWh rate)
- *
- * Correction order: utility DB rate → national default ($0.13)
+ *   - Rate > $0.60/kWh (likely a misparse -- total charge vs per-kWh rate)
  */
 export function validateAndCorrectUtilityRate(
   extractedRate: number | null | undefined,

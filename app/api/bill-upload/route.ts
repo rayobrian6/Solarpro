@@ -263,13 +263,16 @@ export async function POST(req: NextRequest) {
           try {
             matchedUtility = await matchUtility(parsedUtilityName, locationData.stateCode);
             if (matchedUtility) {
-              console.log(`[bill-upload] Utility matched: "${matchedUtility.utilityName}" via ${matchedUtility.source}, rate: ${matchedUtility.defaultResidentialRate}`);
+              // effectiveRate = retailRate (v47.11 new column) ?? defaultResidentialRate (legacy)
+              // retailRate is the accurate all-in rate; legacy was often supply-only or stale
+              const dbRate = matchedUtility.effectiveRate ?? matchedUtility.defaultResidentialRate;
+              console.log(`[bill-upload] Utility matched: "${matchedUtility.utilityName}" via ${matchedUtility.source}, retailRate: ${matchedUtility.retailRate}, legacyRate: ${matchedUtility.defaultResidentialRate}, effectiveRate: ${dbRate}`);
               if (!finalBillData.utilityProvider) {
                 finalBillData.utilityProvider = matchedUtility.utilityName;
               }
-              if (!finalBillData.electricityRate && matchedUtility.defaultResidentialRate) {
-                finalBillData.electricityRate = matchedUtility.defaultResidentialRate;
-                console.log(`[bill-upload] Using DB rate: $${matchedUtility.defaultResidentialRate}/kWh from matched utility`);
+              if (!finalBillData.electricityRate && dbRate) {
+                finalBillData.electricityRate = dbRate;
+                console.log(`[bill-upload] Using DB retail rate: $${dbRate}/kWh from matched utility (source: ${matchedUtility.source})`);
               }
             } else {
               console.warn('[bill-upload] No utility match found in DB or state fallback');
@@ -395,6 +398,8 @@ export async function POST(req: NextRequest) {
         utilityName: matchedUtility.utilityName,
         state: matchedUtility.state,
         defaultResidentialRate: matchedUtility.defaultResidentialRate,
+        retailRate: matchedUtility.retailRate,
+        effectiveRate: matchedUtility.effectiveRate,
         netMetering: matchedUtility.netMetering,
         source: matchedUtility.source,
       } : null,

@@ -45,7 +45,9 @@ export interface MatchedUtility {
   id: string;
   utilityName: string;
   state: string;
-  defaultResidentialRate: number | null;
+  defaultResidentialRate: number | null;  // legacy: default_residential_rate column
+  retailRate: number | null;               // v47.11: retail_rate column (all-in, preferred)
+  effectiveRate: number | null;            // resolved: retailRate ?? defaultResidentialRate
   netMetering: boolean;
   source: 'db_exact' | 'db_fuzzy' | 'state_fallback' | 'auto_discovered';
   similarity?: number;
@@ -72,18 +74,22 @@ export async function matchUtility(
   // ── P1: Exact match (case-insensitive) ──────────────────────────────────
   try {
     const exactRows = await sql`
-      SELECT id, utility_name, state, default_residential_rate, net_metering, source
+      SELECT id, utility_name, state, default_residential_rate, retail_rate, net_metering, source
       FROM utility_policies
       WHERE LOWER(TRIM(utility_name)) = LOWER(TRIM(${parsedName}))
       LIMIT 1
     `;
     if (exactRows.length > 0) {
       const r = exactRows[0];
+      const legacyRate1 = r.default_residential_rate as number | null;
+      const retailRate1 = r.retail_rate as number | null;
       return {
         id: r.id as string,
         utilityName: r.utility_name as string,
         state: r.state as string,
-        defaultResidentialRate: r.default_residential_rate as number | null,
+        defaultResidentialRate: legacyRate1,
+        retailRate: retailRate1,
+        effectiveRate: retailRate1 ?? legacyRate1,
         netMetering: (r.net_metering as boolean) ?? true,
         source: 'db_exact',
       };
@@ -98,7 +104,7 @@ export async function matchUtility(
     // Try with pg_trgm first; if extension not installed this will throw
     const fuzzyRows = stateCode
       ? await sql`
-          SELECT id, utility_name, state, default_residential_rate, net_metering, source,
+          SELECT id, utility_name, state, default_residential_rate, retail_rate, net_metering, source,
                  similarity(LOWER(utility_name), LOWER(${parsedName})) AS sim
           FROM utility_policies
           WHERE state = ${stateCode}
@@ -107,7 +113,7 @@ export async function matchUtility(
           LIMIT 1
         `
       : await sql`
-          SELECT id, utility_name, state, default_residential_rate, net_metering, source,
+          SELECT id, utility_name, state, default_residential_rate, retail_rate, net_metering, source,
                  similarity(LOWER(utility_name), LOWER(${parsedName})) AS sim
           FROM utility_policies
           WHERE similarity(LOWER(utility_name), LOWER(${parsedName})) > 0.45
@@ -117,11 +123,15 @@ export async function matchUtility(
 
     if (fuzzyRows.length > 0) {
       const r = fuzzyRows[0];
+      const legacyRate2 = r.default_residential_rate as number | null;
+      const retailRate2 = r.retail_rate as number | null;
       return {
         id: r.id as string,
         utilityName: r.utility_name as string,
         state: r.state as string,
-        defaultResidentialRate: r.default_residential_rate as number | null,
+        defaultResidentialRate: legacyRate2,
+        retailRate: retailRate2,
+        effectiveRate: retailRate2 ?? legacyRate2,
         netMetering: (r.net_metering as boolean) ?? true,
         source: 'db_fuzzy',
         similarity: r.sim as number,
@@ -159,6 +169,8 @@ export async function matchUtility(
           utilityName: knownName,
           state: stateCode!,
           defaultResidentialRate: fallbackEntry.avgRate,
+          retailRate: null,
+          effectiveRate: fallbackEntry.avgRate,
           netMetering: fallbackEntry.netMetering ?? true,
           source: 'state_fallback',
         };
@@ -177,6 +189,8 @@ export async function matchUtility(
         utilityName: parsedName.trim(),
         state: stateCode,
         defaultResidentialRate: fallbackRate,
+        retailRate: null,
+        effectiveRate: fallbackRate,
         netMetering: true,
         source: 'auto_discovered',
       };
