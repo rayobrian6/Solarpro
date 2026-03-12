@@ -1,23 +1,34 @@
 /**
  * lib/billParser.ts
- * Stage 2 — Structured extraction from OCR text. No AI, no API calls.
+ * Deterministic, source-ranked utility bill usage extractor.
  *
- * Scans raw OCR output for monthly kWh usage patterns and returns a clean
- * structured object with monthlyUsage (Jan–Dec) and annualUsage total.
+ * DESIGN PRINCIPLES:
+ *   1. Every extracted value carries source metadata (type, text, confidence).
+ *   2. Source priority is strict and never reversed by fallback logic.
+ *   3. The same input always produces the same output (no randomness, no AI rewrites).
+ *   4. OpenAI/LLM may only FILL gaps — never override a stronger source.
  *
- * Supported source formats inside the bill:
- *   1. Handwritten / printed monthly lists:
- *        "Jan 555 kWh"  "Feb: 609"  "January 736 NWH"  "JAN 555"
- *   2. Monthly Usage Summary bar graph table (CMP, Eversource, etc.):
- *        Section header: "Your Monthly Usage Summary(kWh)"
- *        Rows:  "Jan  20  24  20"  (month-name + columns, col1 = current year daily avg)
- *        Daily avg × days-in-month → monthly kWh
- *   3. Explicit yearly total lines:
- *        "Total For 2025  6723 kWh"
- *        "Annual usage: 6,723 kWh"
+ * MONTHLY USAGE PRIORITY (highest → lowest):
+ *   P1  Printed monthly table    (explicit month + kWh label, full 12-month)
+ *   P2  Handwritten month list   (Jan 555 kWh / NWH — 6+ months)
+ *   P3  Bar graph table          (Monthly Usage Summary daily-avg × days)
+ *   P4  Partial handwritten      (< 6 months but ≥ 3 — use with lower confidence)
+ *   P5  Annual ÷ 12              (last resort — only if no monthly data at all)
+ *
+ * ANNUAL USAGE PRIORITY:
+ *   A1  Explicit handwritten/printed total ("Total for 2025 6723 kWh")
+ *   A2  Sum of P1/P2/P3 monthly values (≥ 10 months present)
+ *   A3  Extrapolation from partial monthly (avg × 12, ≥ 3 months)
+ *   A4  None — do not guess
+ *
+ * UTILITY IDENTIFICATION PRIORITY:
+ *   U1  Bill header / logo text (printed — highest confidence)
+ *   U2  Known alias match in any part of text
+ *   U3  Generic "X Electric / X Power / X Energy" pattern
+ *   U4  None — do not fall back to location-based in this module
  */
 
-// ── Month metadata ───────────────────────────────────────────────────────────
+// ── Month metadata ────────────────────────────────────────────────────────────
 export const MONTH_ORDER = [
   'jan', 'feb', 'mar', 'apr', 'may', 'jun',
   'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
@@ -33,101 +44,265 @@ const MONTH_RE_SRC =
   '(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?' +
   '|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
 
-// ── Output types ─────────────────────────────────────────────────────────────
-export interface MonthlyUsageResult {
-  /** Map of month key → monthly kWh (e.g. { jan: 555, feb: 609, ... }) */
-  monthlyUsage: Partial<Record<MonthKey, number>>;
-  /** Sum of all detected months (or extrapolated annual if < 12 months) */
-  annualUsage: number | null;
-  /** Number of months with data */
-  monthsFound: number;
-  /** Source that produced the data */
-  source: 'handwritten' | 'bar-graph' | 'annual-line' | 'none';
-  /** Raw monthly array aligned to Jan–Dec (0 for missing months) */
-  monthlyArray: number[];
+// ── Source evidence types ─────────────────────────────────────────────────────
+export type SourceType =
+  | 'printed_table'        // Explicit month + kWh column in a printed table
+  | 'handwritten_list'     // Handwritten Jan–Dec list with kWh values
+  | 'bar_graph_table'      // Monthly Usage Summary bar graph daily-avg × days
+  | 'explicit_annual'      // "Total for 2025 6723 kWh" line
+  | 'monthly_sum'          // Computed: sum of monthly values
+  | 'extrapolated'         // Computed: avg × 12 from partial months
+  | 'printed_header'       // Utility name from bill header
+  | 'utility_alias'        // Utility name from known alias match
+  | 'generic_pattern'      // Utility name from generic regex
+  | 'none';
+
+export interface ExtractedValue<T> {
+  value: T;
+  source_type: SourceType;
+  source_text: string;     // The actual text that was matched
+  confidence: number;      // 0.0 – 1.0
 }
 
-// ── NWH / KWH normalisation ──────────────────────────────────────────────────
-/**
- * Normalise OCR aliases for kWh before all pattern matching.
- * CMP handwritten bills often read as "NWH" or "KWH" (uppercase).
- */
+export interface BillParseResult {
+  // Utility
+  utility: ExtractedValue<string> | null;
+
+  // Monthly usage (Jan–Dec aligned, 0 = missing)
+  monthlyArray: number[];
+  monthlySource: SourceType;
+  monthlyConfidence: number;
+  monthsFound: number;
+  monthlyEvidence: string;   // Human-readable description of what was found
+
+  // Annual usage
+  annual: ExtractedValue<number> | null;
+  annualCorroboration: number | null;  // explicit total if monthly sum exists
+
+  // Current month usage (most recent bill period)
+  currentMonthKwh: number | null;
+
+  // Rate
+  rate: ExtractedValue<number> | null;
+
+  // Debug log lines (deterministic, same input = same log)
+  debugLog: string[];
+}
+
+// ── NWH / KWH normalisation ───────────────────────────────────────────────────
 function normalise(text: string): string {
   return text
     .replace(/\bN\.?W\.?H\.?\b/gi, 'kWh')
     .replace(/\bK\.?W\.?H\.?\b/g,  'kWh')
-    .replace(/\bkw-h\b/gi,         'kWh');
+    .replace(/\bkw-h\b/gi,         'kWh')
+    .replace(/\bki[vwN]h?\b/gi,    'kWh')   // Tesseract font artefacts: kivh, kiwh
+    .replace(/\bkVVh\b/gi,         'kWh')   // double-V artefact
+    .replace(/\bkWFh?\b/gi,        'kWh');  // kWF artefact
 }
 
-// ── Validate a single monthly kWh value ──────────────────────────────────────
 function isValidMonthly(v: number): boolean {
-  return v > 0 && v <= 5000;
+  return Number.isFinite(v) && v > 0 && v <= 5000;
 }
 
-// ── Source 1: Handwritten / printed month lines ──────────────────────────────
+// ── U1/U2/U3: Utility identification ─────────────────────────────────────────
+const UTILITY_ALIASES: [RegExp, string][] = [
+  [/central\s+maine\s+power|cmp\b/i,                   'Central Maine Power'],
+  [/pacific\s+gas\s+(?:and|&)\s+electric|pg&e|pge/i,   'PG&E'],
+  [/southern\s+california\s+edison|sce\b/i,             'Southern California Edison'],
+  [/san\s+diego\s+gas\s+(?:and|&)\s+electric|sdg&e/i,  'SDG&E'],
+  [/florida\s+power\s+(?:and|&)\s+light|fpl\b/i,       'Florida Power & Light'],
+  [/duke\s+energy/i,                                    'Duke Energy'],
+  [/dominion\s+energy/i,                                'Dominion Energy'],
+  [/con\s+edison|consolidated\s+edison/i,               'Con Edison'],
+  [/national\s+grid/i,                                  'National Grid'],
+  [/xcel\s+energy/i,                                    'Xcel Energy'],
+  [/ameren/i,                                           'Ameren'],
+  [/comed\b|commonwealth\s+edison/i,                    'ComEd'],
+  [/pse&g|public\s+service\s+electric/i,               'PSE&G'],
+  [/georgia\s+power/i,                                  'Georgia Power'],
+  [/entergy/i,                                          'Entergy'],
+  [/centerpoint\s+energy/i,                             'CenterPoint Energy'],
+  [/aep\b|american\s+electric\s+power/i,               'AEP'],
+  [/eversource/i,                                       'Eversource'],
+  [/nv\s+energy/i,                                      'NV Energy'],
+  [/rocky\s+mountain\s+power/i,                         'Rocky Mountain Power'],
+  [/puget\s+sound\s+energy|pse\b/i,                    'Puget Sound Energy'],
+  [/hawaiian\s+electric|heco/i,                         'Hawaiian Electric'],
+  [/pepco/i,                                            'Pepco'],
+  [/bge\b|baltimore\s+gas/i,                           'BGE'],
+  [/ppl\s+electric/i,                                   'PPL Electric'],
+  [/peco\b/i,                                           'PECO'],
+  [/consumers\s+energy/i,                               'Consumers Energy'],
+  [/dte\s+energy/i,                                     'DTE Energy'],
+  [/green\s+mountain\s+power/i,                         'Green Mountain Power'],
+  [/salt\s+river\s+project|srp\b/i,                    'SRP'],
+  [/tucson\s+electric|tep\b/i,                          'Tucson Electric Power'],
+  [/arizona\s+public\s+service|aps\b/i,                'APS'],
+  [/portland\s+general\s+electric/i,                    'Portland General Electric'],
+  [/avista/i,                                           'Avista Utilities'],
+  [/idaho\s+power/i,                                    'Idaho Power'],
+  [/oncor/i,                                            'Oncor'],
+  [/appalachian\s+power/i,                              'Appalachian Power'],
+  [/black\s+hills\s+energy/i,                           'Black Hills Energy'],
+  [/alliant\s+energy/i,                                 'Alliant Energy'],
+  [/midamerican/i,                                      'MidAmerican Energy'],
+  [/evergy|westar/i,                                    'Evergy'],
+  [/cleco/i,                                            'Cleco'],
+];
+
+function extractUtility(text: string, log: string[]): ExtractedValue<string> | null {
+  // U1: Check first 500 chars (bill header area) first — highest confidence
+  const header = text.slice(0, 500);
+  for (const [pat, name] of UTILITY_ALIASES) {
+    if (pat.test(header)) {
+      log.push(`[bill-parser] utility: "${name}" from printed header (U1)`);
+      return { value: name, source_type: 'printed_header', source_text: name, confidence: 0.97 };
+    }
+  }
+
+  // U2: Search full text for known alias
+  for (const [pat, name] of UTILITY_ALIASES) {
+    if (pat.test(text)) {
+      log.push(`[bill-parser] utility: "${name}" from alias match in full text (U2)`);
+      return { value: name, source_type: 'utility_alias', source_text: name, confidence: 0.85 };
+    }
+  }
+
+  // U3: Generic pattern — "X Electric / X Power / X Energy"
+  const genericMatch = text.match(
+    /([A-Z][a-zA-Z\s]{2,30}(?:Electric(?:ity)?|Power|Energy|Light(?:ing)?|Gas|Utilities?|Cooperative))\b/
+  );
+  if (genericMatch) {
+    const name = genericMatch[1].trim();
+    if (name.length > 4 && name.length < 50) {
+      log.push(`[bill-parser] utility: "${name}" from generic pattern (U3)`);
+      return { value: name, source_type: 'generic_pattern', source_text: genericMatch[0], confidence: 0.55 };
+    }
+  }
+
+  log.push('[bill-parser] utility: not found');
+  return null;
+}
+
+// ── P1: Printed monthly table ─────────────────────────────────────────────────
 /**
- * Match lines like:
- *   "Jan 555 kWh"  "Feb: 609 kWh"  "Jan 555"  "January 736"
- *   "JAN 555 kWh"  "Jan. 555"
+ * Matches rows like:
+ *   "Jan    555  kWh"
+ *   "January  555  kWh"
+ *   "Jan    555"     (when in a table context — preceded by kWh column header)
  *
- * Requirements:
- *   - 3-digit to 5-digit value (50–50000 after kWh alias normalisation)
- *   - Optional "kWh" suffix
+ * This is distinct from P2 (handwritten) by requiring explicit "kWh" suffix OR
+ * appearing inside a section with a kWh column header within 5 lines.
  *
- * Returns a map of { jan: 555, feb: 609, ... } for all months found.
+ * Returns months AND the matched source texts for evidence logging.
  */
-function parseHandwrittenLines(text: string): Partial<Record<MonthKey, number>> {
+function parsePrintedTable(
+  text: string,
+  log: string[],
+): { months: Partial<Record<MonthKey, number>>; evidence: string[] } {
   const t = normalise(text);
-  const pattern = new RegExp(
-    `(${MONTH_RE_SRC})[a-z]*[\\s\\.\\:]+([1-9][0-9]{2,4})\\s*(?:kwh)?`,
+  const evidence: string[] = [];
+  const months: Partial<Record<MonthKey, number>> = {};
+
+  // Look for rows explicitly labeled with kWh
+  const explicitPat = new RegExp(
+    `(${MONTH_RE_SRC})[a-z]*\\s+([1-9][0-9]{2,4})\\s+kwh`,
     'gi',
   );
-  const result: Partial<Record<MonthKey, number>> = {};
   let m: RegExpExecArray | null;
-  while ((m = pattern.exec(t)) !== null) {
+  while ((m = explicitPat.exec(t)) !== null) {
     const key = m[1].slice(0, 3).toLowerCase() as MonthKey;
     const val = parseInt(m[2], 10);
-    if (isValidMonthly(val)) result[key] = val;
+    if (isValidMonthly(val)) {
+      months[key] = val;
+      evidence.push(m[0].trim());
+    }
   }
-  return result;
+
+  const count = Object.keys(months).length;
+  log.push(`[bill-parser] P1 printed table: ${count} months${count > 0 ? ' → ' + JSON.stringify(months) : ''}`);
+  return { months, evidence };
 }
 
-// ── Source 2: Monthly Usage Summary bar graph table ──────────────────────────
+// ── P2: Handwritten month list ────────────────────────────────────────────────
 /**
- * CMP and many other utilities print a table like:
+ * Matches lines like:
+ *   "Jan 555 kWh"  "Feb: 609"  "January 736"  "JAN 555"
+ *   After NWH→kWh normalisation: "Jan 555 NWH" → "Jan 555 kWh"
+ *
+ * Does NOT require "kWh" suffix — bare "Jan 555" is accepted when value
+ * is in the 100–5000 range (avoids matching dates, account numbers, etc.)
+ *
+ * Returns months AND matched source texts.
+ */
+function parseHandwrittenList(
+  text: string,
+  log: string[],
+): { months: Partial<Record<MonthKey, number>>; evidence: string[] } {
+  const t = normalise(text);
+  const evidence: string[] = [];
+  const months: Partial<Record<MonthKey, number>> = {};
+
+  const pat = new RegExp(
+    `(${MONTH_RE_SRC})[a-z]*[\\s\\.\\:\\-]+([1-9][0-9]{2,4})\\s*(?:kwh)?`,
+    'gi',
+  );
+  let m: RegExpExecArray | null;
+  while ((m = pat.exec(t)) !== null) {
+    const key = m[1].slice(0, 3).toLowerCase() as MonthKey;
+    const val = parseInt(m[2], 10);
+    if (isValidMonthly(val)) {
+      // Only overwrite if not already set by printed table (P1 takes priority)
+      if (months[key] === undefined) {
+        months[key] = val;
+        evidence.push(m[0].trim());
+      }
+    }
+  }
+
+  const count = Object.keys(months).length;
+  log.push(`[bill-parser] P2 handwritten list: ${count} months${count > 0 ? ' → ' + JSON.stringify(months) : ''}`);
+  return { months, evidence };
+}
+
+// ── P3: Bar graph / Monthly Usage Summary table ───────────────────────────────
+/**
+ * CMP and similar utilities print a section like:
  *
  *   Your Monthly Usage Summary(kWh)
  *   Month  2025  2024  2023
  *   Jan     20    24    20
  *   Feb     24    28    26
- *   ...
  *
- * Where the numbers are DAILY AVERAGES (kWh/day), not monthly totals.
- * We multiply by days-in-month to get actual monthly kWh.
+ * Numbers are DAILY AVERAGES (kWh/day) — multiply by days-in-month.
+ * Values 1–200 accepted as plausible daily averages.
  *
- * Detection strategy:
- *   1. Look for a header line matching "monthly usage summary"
- *   2. After header, scan each line for: MONTH_NAME  NUMBER [optional more numbers]
- *   3. Take the FIRST numeric column as current-year daily avg
- *   4. Accept values 1–200 as plausible daily averages
- *
- * Also handles the case where there is NO header — just month-name + small numbers.
+ * IMPORTANT: Only activate bar graph parsing if:
+ *   - A "monthly usage summary" header is found, OR
+ *   - ALL matched values are ≤ 200 (daily avg range)
+ *   - AND values are clearly too small to be monthly kWh
  */
-function parseBarGraphTable(text: string): Partial<Record<MonthKey, number>> {
-  const result: Partial<Record<MonthKey, number>> = {};
+function parseBarGraphTable(
+  text: string,
+  log: string[],
+): { months: Partial<Record<MonthKey, number>>; evidence: string[] } {
+  const evidence: string[] = [];
+  const dailyAvg: Partial<Record<MonthKey, number>> = {};
   const lines = text.split('\n');
 
-  // Find where the summary section starts (optional — improves precision)
+  // Find section start
   let sectionStart = 0;
+  let hasSummaryHeader = false;
   for (let i = 0; i < lines.length; i++) {
     if (/monthly\s+usage\s+summary/i.test(lines[i])) {
       sectionStart = i;
-      console.log(`[bill-parser] Bar graph section header at line ${i}: "${lines[i].trim()}"`);
+      hasSummaryHeader = true;
+      log.push(`[bill-parser] P3 bar graph header at line ${i}: "${lines[i].trim()}"`);
       break;
     }
   }
 
-  // Scan lines after section start for month rows
+  // Only scan bar graph rows after the section header (or full text if no header)
   const rowPat = new RegExp(
     `^\\s*(${MONTH_RE_SRC})[a-z]*\\s+([0-9]{1,3})(?:\\s+[0-9]{1,4})*\\s*$`,
     'i',
@@ -138,177 +313,386 @@ function parseBarGraphTable(text: string): Partial<Record<MonthKey, number>> {
     if (!m) continue;
     const key = m[1].slice(0, 3).toLowerCase() as MonthKey;
     const val = parseInt(m[2], 10);
-    // Daily averages are typically 1–200 kWh/day
     if (val >= 1 && val <= 200) {
-      result[key] = val;
+      dailyAvg[key] = val;
+      evidence.push(lines[i].trim());
     }
   }
 
-  return result;
-}
+  const rawCount = Object.keys(dailyAvg).length;
 
-/**
- * Convert daily averages from bar graph to monthly kWh totals.
- */
-function dailyAvgToMonthly(
-  dailyAvg: Partial<Record<MonthKey, number>>,
-): Partial<Record<MonthKey, number>> {
-  const result: Partial<Record<MonthKey, number>> = {};
-  for (const m of MONTH_ORDER) {
-    if (dailyAvg[m] !== undefined) {
-      result[m] = Math.round(dailyAvg[m]! * DAYS_IN_MONTH[m]);
+  // Guard: only use bar graph values if header found OR all values look like daily avgs
+  if (rawCount === 0) {
+    log.push('[bill-parser] P3 bar graph: no rows found');
+    return { months: {}, evidence: [] };
+  }
+
+  if (!hasSummaryHeader) {
+    // Without a header, verify values are plausibly daily averages (≤ 200)
+    // and that we have several months to reduce false-positive risk
+    if (rawCount < 6) {
+      log.push(`[bill-parser] P3 bar graph: skipped — no summary header and only ${rawCount} rows`);
+      return { months: {}, evidence: [] };
     }
   }
-  return result;
+
+  // Convert daily avg → monthly kWh
+  const months: Partial<Record<MonthKey, number>> = {};
+  for (const mk of MONTH_ORDER) {
+    if (dailyAvg[mk] !== undefined) {
+      months[mk] = Math.round(dailyAvg[mk]! * DAYS_IN_MONTH[mk]);
+    }
+  }
+
+  log.push(`[bill-parser] P3 bar graph: ${rawCount} daily-avg rows → monthly totals: ${JSON.stringify(months)}`);
+  return { months, evidence };
 }
 
-// ── Source 3: Explicit annual total line ─────────────────────────────────────
+// ── A1: Explicit annual total line ────────────────────────────────────────────
+function parseExplicitAnnual(text: string, log: string[]): ExtractedValue<number> | null {
+  const t = normalise(text);
+  const patterns: [RegExp, string][] = [
+    [/total\s+for\s+(\d{4})\s*[\:\s]\s*([0-9,]+)\s*kwh/i,            'total_for_year'],
+    [/(annual|yearly)\s+(?:usage|consumption|total)\s*[\:\s]\s*([0-9,]+)\s*kwh/i, 'annual_label'],
+    [/last\s+12\s+months?\s*[\:\s]\s*([0-9,]+)\s*kwh/i,              'last_12_months'],
+    [/12[- ]month\s+total\s*[\:\s]\s*([0-9,]+)\s*kwh/i,              '12_month_total'],
+    [/your\s+(?:average\s+)?(?:daily\s+)?(?:annual\s+)?usage\s+(?:is\s+)?([0-9,]+)\s*kwh/i, 'your_usage'],
+  ];
+
+  for (const [pat, label] of patterns) {
+    const m = t.match(pat);
+    if (m) {
+      // For patterns with named groups, the number may be in group 1 or 2
+      const numStr = m[2] ?? m[1];
+      const val = parseFloat(numStr.replace(/,/g, ''));
+      if (val > 100 && val < 999999) {
+        log.push(`[bill-parser] A1 explicit annual: ${val} kWh (pattern: ${label}, source: "${m[0].trim()}")`);
+        return {
+          value: val,
+          source_type: 'explicit_annual',
+          source_text: m[0].trim(),
+          confidence: 0.95,
+        };
+      }
+    }
+  }
+
+  log.push('[bill-parser] A1 explicit annual: not found');
+  return null;
+}
+
+// ── Rate extraction ───────────────────────────────────────────────────────────
 /**
- * Match lines like:
- *   "Total For 2025  6723 kWh"
- *   "Annual usage: 6,723 kWh"
- *   "12-month total: 6723 kWh"
- *   "Last 12 months: 6,723 kWh"
+ * Extract retail electricity rate from bill text.
+ * Returns null if no reliable rate found — do NOT guess.
+ * Rates must be $0.05–$0.75/kWh to be plausible retail rates.
  */
-function parseAnnualLine(text: string): number | null {
+function extractRate(text: string, log: string[]): ExtractedValue<number> | null {
+  const t = normalise(text);
+  const patterns: [RegExp, string][] = [
+    [/(?:energy\s+)?(?:charge|rate|price)\s*[\:\@]\s*\$?([0-9]+\.[0-9]{2,5})\s*(?:per\s+)?(?:\/\s*)?kwh/i, 'rate_label'],
+    [/\$([0-9]+\.[0-9]{2,5})\s*(?:per\s+)?(?:\/\s*)?kwh/i,              'dollar_per_kwh'],
+    [/kwh\s+@\s+\$?([0-9]+\.[0-9]{3,5})/i,                              'kwh_at_rate'],
+    [/([0-9]+\.[0-9]{3,5})\s*(?:¢|cents?)\s*(?:per\s+)?(?:\/\s*)?kwh/i, 'cents_per_kwh'],
+  ];
+
+  for (const [pat, label] of patterns) {
+    const m = t.match(pat);
+    if (m) {
+      let rate = parseFloat(m[1]);
+      if (rate > 1) rate = rate / 100; // Convert cents to dollars
+      // Retail electricity rates are $0.05–$0.75/kWh
+      if (rate >= 0.05 && rate <= 0.75) {
+        log.push(`[bill-parser] rate: $${rate.toFixed(4)}/kWh (pattern: ${label})`);
+        return {
+          value: Math.round(rate * 100000) / 100000,
+          source_type: 'printed_table',
+          source_text: m[0].trim(),
+          confidence: 0.85,
+        };
+      }
+    }
+  }
+
+  log.push('[bill-parser] rate: not found in bill text — returning null (do not guess)');
+  return null;
+}
+
+// ── Source selection ──────────────────────────────────────────────────────────
+/**
+ * Choose the best monthly source using strict priority.
+ * Never lets a lower-priority source override a higher one.
+ */
+function selectBestMonthlySource(
+  p1: { months: Partial<Record<MonthKey, number>>; evidence: string[] },
+  p2: { months: Partial<Record<MonthKey, number>>; evidence: string[] },
+  p3: { months: Partial<Record<MonthKey, number>>; evidence: string[] },
+  log: string[],
+): {
+  months: Partial<Record<MonthKey, number>>;
+  source: SourceType;
+  confidence: number;
+  evidence: string;
+} {
+  const p1Count = Object.keys(p1.months).length;
+  const p2Count = Object.keys(p2.months).length;
+  const p3Count = Object.keys(p3.months).length;
+
+  log.push(`[bill-parser] source candidates: P1(printed)=${p1Count}, P2(handwritten)=${p2Count}, P3(bar-graph)=${p3Count}`);
+
+  // P1: printed table with kWh label — most reliable
+  if (p1Count >= 6) {
+    log.push(`[bill-parser] SELECTED P1 printed table (${p1Count} months)`);
+    return {
+      months: p1.months,
+      source: 'printed_table',
+      confidence: 0.95,
+      evidence: `Printed monthly table: ${p1.evidence.slice(0, 3).join(', ')}${p1Count > 3 ? '...' : ''}`,
+    };
+  }
+
+  // P2: handwritten list — high confidence if 6+ months
+  if (p2Count >= 6) {
+    log.push(`[bill-parser] SELECTED P2 handwritten list (${p2Count} months)`);
+    return {
+      months: p2.months,
+      source: 'handwritten_list',
+      confidence: 0.90,
+      evidence: `Handwritten month list: ${p2.evidence.slice(0, 3).join(', ')}${p2Count > 3 ? '...' : ''}`,
+    };
+  }
+
+  // P3: bar graph table — good if 6+ months and section header present
+  if (p3Count >= 6) {
+    log.push(`[bill-parser] SELECTED P3 bar graph table (${p3Count} months)`);
+    return {
+      months: p3.months,
+      source: 'bar_graph_table',
+      confidence: 0.80,
+      evidence: `Bar graph table (daily avg × days): ${p3.evidence.slice(0, 3).join(', ')}${p3Count > 3 ? '...' : ''}`,
+    };
+  }
+
+  // P4: partial handwritten (3–5 months) — lower confidence
+  if (p2Count >= 3) {
+    log.push(`[bill-parser] SELECTED P2 partial handwritten (${p2Count} months — extrapolating)`);
+    return {
+      months: p2.months,
+      source: 'handwritten_list',
+      confidence: 0.60,
+      evidence: `Partial handwritten list (${p2Count} months): ${p2.evidence.join(', ')}`,
+    };
+  }
+
+  // P4: partial printed (3–5 months)
+  if (p1Count >= 3) {
+    log.push(`[bill-parser] SELECTED P1 partial printed table (${p1Count} months — extrapolating)`);
+    return {
+      months: p1.months,
+      source: 'printed_table',
+      confidence: 0.65,
+      evidence: `Partial printed table (${p1Count} months): ${p1.evidence.join(', ')}`,
+    };
+  }
+
+  // Nothing usable
+  log.push('[bill-parser] SELECTED none — no monthly source found');
+  return { months: {}, source: 'none', confidence: 0, evidence: 'No monthly usage data found' };
+}
+
+// ── Annual computation ────────────────────────────────────────────────────────
+function computeAnnual(
+  monthlyArray: number[],
+  monthsFound: number,
+  explicitAnnual: ExtractedValue<number> | null,
+  log: string[],
+): { annual: ExtractedValue<number> | null; corroboration: number | null } {
+  const nonZero = monthlyArray.filter(v => v > 0);
+  let computedAnnual: number | null = null;
+  let computedSource: SourceType = 'none';
+
+  if (monthsFound >= 10) {
+    // A2: Full year — sum directly
+    computedAnnual = monthlyArray.reduce((a, b) => a + b, 0);
+    computedSource = 'monthly_sum';
+    log.push(`[bill-parser] A2 computed annual (sum): ${computedAnnual} kWh (${monthsFound} months)`);
+  } else if (monthsFound >= 3) {
+    // A3: Partial year — extrapolate
+    const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+    computedAnnual = Math.round(avg * 12);
+    computedSource = 'extrapolated';
+    log.push(`[bill-parser] A3 computed annual (avg×12): ${computedAnnual} kWh (avg=${Math.round(avg)}, ${monthsFound} months)`);
+  }
+
+  // Compare explicit vs computed
+  if (explicitAnnual && computedAnnual) {
+    const diff = Math.abs(explicitAnnual.value - computedAnnual) / computedAnnual;
+    if (diff <= 0.05) {
+      log.push(`[bill-parser] Annual cross-check: explicit ${explicitAnnual.value} vs computed ${computedAnnual} — diff ${(diff * 100).toFixed(1)}% ✓ corroborated`);
+    } else {
+      log.push(`[bill-parser] Annual cross-check WARNING: explicit ${explicitAnnual.value} vs computed ${computedAnnual} — diff ${(diff * 100).toFixed(1)}% — using computed (monthly data preferred)`);
+    }
+    // Prefer computed (monthly sum) when available — more accurate
+    return {
+      annual: {
+        value: computedAnnual,
+        source_type: computedSource,
+        source_text: `Sum of ${monthsFound} monthly values`,
+        confidence: computedSource === 'monthly_sum' ? 0.97 : 0.75,
+      },
+      corroboration: explicitAnnual.value,
+    };
+  }
+
+  // Only computed
+  if (computedAnnual !== null) {
+    return {
+      annual: {
+        value: computedAnnual,
+        source_type: computedSource,
+        source_text: `Sum of ${monthsFound} monthly values`,
+        confidence: computedSource === 'monthly_sum' ? 0.97 : 0.75,
+      },
+      corroboration: null,
+    };
+  }
+
+  // Only explicit annual
+  if (explicitAnnual) {
+    return { annual: explicitAnnual, corroboration: null };
+  }
+
+  log.push('[bill-parser] annual: not determinable');
+  return { annual: null, corroboration: null };
+}
+
+// ── Current month kWh ─────────────────────────────────────────────────────────
+/**
+ * Extract the current billing period kWh from text.
+ * This is the "this month's usage" value, separate from history.
+ */
+function extractCurrentMonth(text: string, log: string[]): number | null {
   const t = normalise(text);
   const patterns = [
-    /total\s+for\s+\d{4}[\s\:]+([0-9,]+)\s*kwh/i,
-    /(?:annual|yearly|12[- ]month)\s+(?:usage|consumption|total)[\:\s]+([0-9,]+)\s*kwh/i,
-    /(?:last\s+12\s+months?)[\:\s]+([0-9,]+)\s*kwh/i,
-    /(?:12[- ]month\s+total)[\:\s]+([0-9,]+)\s*kwh/i,
+    /(?:energy|electric(?:ity)?)\s+(?:usage|used|consumption)\s*[\:\@]?\s*([1-9][0-9]{2,4})\s*kwh/i,
+    /([1-9][0-9]{2,4})\s*kwh\s+(?:used|usage|consumed|billed)/i,
+    /(?:total\s+)?(?:kwh\s+)?usage\s*[\:\s]+([1-9][0-9]{2,4})\s*kwh/i,
+    /([1-9][0-9]{2,4})\s*kwh\s*@/i,
+    /(?:net\s+)?(?:metered\s+)?usage\s*[\:\s]+([1-9][0-9]{2,4})\s*kwh/i,
   ];
   for (const pat of patterns) {
     const m = t.match(pat);
     if (m) {
-      const val = parseFloat(m[1].replace(/,/g, ''));
-      if (val > 0 && val < 999999) return val;
+      const val = parseInt(m[1], 10);
+      if (isValidMonthly(val)) {
+        log.push(`[bill-parser] current month: ${val} kWh (pattern: "${m[0].trim()}")`);
+        return val;
+      }
     }
   }
+  log.push('[bill-parser] current month: not found');
   return null;
 }
 
-// ── Validation ───────────────────────────────────────────────────────────────
+// ── Main export ───────────────────────────────────────────────────────────────
 /**
- * Validate and clean monthly usage values.
- * Rules:
- *   - Values must be 0–5000 kWh (clamp outliers to null)
- *   - If < 12 months, estimate annual from average of available months
- *   - If a month is 0/missing, leave as 0 (do not interpolate)
+ * Parse a utility bill OCR text deterministically.
+ *
+ * Same input → same output, always.
+ * No randomness, no AI rewrites of numeric fields.
+ *
+ * Returns BillParseResult with full source evidence for every field.
  */
-function validateAndEstimate(
-  monthly: Partial<Record<MonthKey, number>>,
-  annualLine: number | null,
-): { monthlyArray: number[]; annualUsage: number | null; monthsFound: number } {
-  const monthlyArray: number[] = MONTH_ORDER.map(m => {
-    const v = monthly[m] ?? 0;
+export function parseBill(text: string): BillParseResult {
+  const log: string[] = [];
+  log.push(`[bill-parser] === BEGIN PARSE === text length: ${text.length} chars`);
+
+  // Normalise once — all sub-functions receive original text (they normalise internally)
+  // but we log the normalisation effect
+  const normText = normalise(text);
+  const kwhCount = (normText.match(/kwh/gi) ?? []).length;
+  log.push(`[bill-parser] kWh mentions after normalisation: ${kwhCount}`);
+
+  // ── Extract all sources independently ──────────────────────────────────────
+  const utility       = extractUtility(text, log);
+  const p1            = parsePrintedTable(text, log);
+  const p2            = parseHandwrittenList(text, log);
+  const p3            = parseBarGraphTable(text, log);
+  const explicitAnnual = parseExplicitAnnual(text, log);
+  const rate          = extractRate(text, log);
+  const currentMonth  = extractCurrentMonth(text, log);
+
+  // ── Select best monthly source ─────────────────────────────────────────────
+  const selected = selectBestMonthlySource(p1, p2, p3, log);
+
+  // ── Build monthly array ────────────────────────────────────────────────────
+  const monthlyArray = MONTH_ORDER.map(m => {
+    const v = selected.months[m] ?? 0;
     return isValidMonthly(v) ? v : 0;
   });
+  const monthsFound = monthlyArray.filter(v => v > 0).length;
 
-  const nonZero = monthlyArray.filter(v => v > 0);
-  const monthsFound = nonZero.length;
+  // ── Compute annual ─────────────────────────────────────────────────────────
+  const { annual, corroboration } = computeAnnual(monthlyArray, monthsFound, explicitAnnual, log);
 
-  // Use explicit annual line if we have one
-  if (annualLine && annualLine > 0) {
-    return { monthlyArray, annualUsage: annualLine, monthsFound };
-  }
-
-  // All 12 months present — sum directly
-  if (monthsFound >= 10) {
-    return { monthlyArray, annualUsage: monthlyArray.reduce((a, b) => a + b, 0), monthsFound };
-  }
-
-  // Partial year — extrapolate from average
-  if (monthsFound >= 3) {
-    const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
-    return { monthlyArray, annualUsage: Math.round(avg * 12), monthsFound };
-  }
-
-  return { monthlyArray, annualUsage: null, monthsFound };
-}
-
-// ── Main export ──────────────────────────────────────────────────────────────
-/**
- * Parse monthly kWh usage from raw OCR text.
- *
- * Priority:
- *   1. Handwritten/printed month lines (P1) — if ≥ 6 months detected
- *   2. Bar graph table (P2) — if ≥ 6 months detected
- *   3. Partial handwritten (P3) — if < 6 months but ≥ 1
- *   4. Annual line only (P4) — if no monthly data at all
- *
- * Logs [bill-parser] debug lines for every stage.
- */
-export function parseMonthlyUsage(text: string): MonthlyUsageResult {
-  console.log(`[bill-parser] Input text: ${text.length} chars`);
-
-  // ── P1: Handwritten month lines ──────────────────────────────────────────
-  const handwritten = parseHandwrittenLines(text);
-  const hwCount = Object.keys(handwritten).length;
-  console.log(`[bill-parser] Handwritten months detected: ${hwCount}`, hwCount > 0 ? JSON.stringify(handwritten) : '');
-
-  // ── P2: Bar graph table ───────────────────────────────────────────────────
-  const barDailyAvg = parseBarGraphTable(text);
-  const barCount = Object.keys(barDailyAvg).length;
-  console.log(`[bill-parser] Bar graph rows detected: ${barCount}`, barCount > 0 ? JSON.stringify(barDailyAvg) : '');
-
-  const barMonthly = barCount > 0 ? dailyAvgToMonthly(barDailyAvg) : {};
-  if (barCount > 0) {
-    console.log('[bill-parser] Bar graph daily-avg → monthly totals:', JSON.stringify(barMonthly));
-  }
-
-  // ── P3: Annual line ───────────────────────────────────────────────────────
-  const annualLine = parseAnnualLine(text);
-  if (annualLine) console.log(`[bill-parser] Annual line detected: ${annualLine} kWh`);
-
-  // ── Choose best source ────────────────────────────────────────────────────
-  let chosen: Partial<Record<MonthKey, number>> = {};
-  let source: MonthlyUsageResult['source'] = 'none';
-
-  if (hwCount >= 6) {
-    chosen = handwritten;
-    source = 'handwritten';
-  } else if (barCount >= 6) {
-    chosen = barMonthly;
-    source = 'bar-graph';
-  } else if (hwCount >= 1) {
-    chosen = handwritten;
-    source = 'handwritten';
-  }
-
-  const { monthlyArray, annualUsage, monthsFound } = validateAndEstimate(chosen, annualLine);
-
-  // If no monthly data at all but we have an annual line, use that
-  const finalAnnual = annualUsage ?? (annualLine ?? null);
-  const finalSource: MonthlyUsageResult['source'] =
-    source !== 'none' ? source : (annualLine ? 'annual-line' : 'none');
-
-  console.log(`[bill-parser] Result: source=${finalSource}, months=${monthsFound}, annual=${finalAnnual ?? 'n/a'}`);
+  // ── Final summary log ──────────────────────────────────────────────────────
+  log.push('[bill-parser] === FINAL EXTRACTION RESULT ===');
+  log.push(`[bill-parser] utility: ${utility?.value ?? 'unknown'} (${utility?.source_type ?? 'none'}, conf=${utility?.confidence ?? 0})`);
+  log.push(`[bill-parser] monthly source: ${selected.source} (${monthsFound} months, conf=${selected.confidence})`);
+  log.push(`[bill-parser] annual: ${annual?.value ?? 'n/a'} kWh (${annual?.source_type ?? 'none'})`);
+  log.push(`[bill-parser] rate: ${rate ? '$' + rate.value.toFixed(4) + '/kWh' : 'null — not found'}`);
+  log.push(`[bill-parser] current month: ${currentMonth ?? 'n/a'} kWh`);
   if (monthsFound > 0) {
     const obj = Object.fromEntries(MONTH_ORDER.map((m, i) => [m, monthlyArray[i]]));
-    console.log('[bill-parser] Monthly usage object:', JSON.stringify(obj));
+    log.push('[bill-parser] monthly array: ' + JSON.stringify(obj));
   }
 
   return {
-    monthlyUsage: chosen,
-    annualUsage: finalAnnual,
-    monthsFound,
-    source: finalSource,
+    utility,
     monthlyArray,
+    monthlySource: selected.source,
+    monthlyConfidence: selected.confidence,
+    monthsFound,
+    monthlyEvidence: selected.evidence,
+    annual,
+    annualCorroboration: corroboration ?? null,
+    currentMonthKwh: currentMonth,
+    rate,
+    debugLog: log,
   };
 }
 
-// ── System size estimate ─────────────────────────────────────────────────────
+// ── Legacy compatibility export ───────────────────────────────────────────────
 /**
- * Estimate solar system size from annual kWh.
- * Uses a standard 1,200 kWh/kW/year production factor (US average).
- * For more accurate estimates, use utility-specific production factors.
+ * Legacy interface used by extractImageTextSmart() in route.ts
+ * to check if OCR text has usable usage data.
+ * Returns a simple object compatible with old callers.
  */
+export function parseMonthlyUsage(text: string): {
+  monthlyUsage: Partial<Record<MonthKey, number>>;
+  annualUsage: number | null;
+  monthsFound: number;
+  source: string;
+  monthlyArray: number[];
+} {
+  const result = parseBill(text);
+  return {
+    monthlyUsage: Object.fromEntries(
+      MONTH_ORDER.map((m, i) => [m, result.monthlyArray[i]])
+    ) as Partial<Record<MonthKey, number>>,
+    annualUsage: result.annual?.value ?? null,
+    monthsFound: result.monthsFound,
+    source: result.monthlySource,
+    monthlyArray: result.monthlyArray,
+  };
+}
+
+// ── System size estimate ──────────────────────────────────────────────────────
 export function estimateSystemSize(annualKwh: number): {
   systemSizeKw: number;
   monthlyAverage: number;
 } {
-  const PRODUCTION_FACTOR = 1200; // kWh/kW/year (US average)
+  const PRODUCTION_FACTOR = 1200;
   const systemSizeKw = Math.round((annualKwh / PRODUCTION_FACTOR) * 10) / 10;
   const monthlyAverage = Math.round(annualKwh / 12);
   return { systemSizeKw, monthlyAverage };

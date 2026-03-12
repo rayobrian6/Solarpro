@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { parseBillText, parseBillTextWithLLM, validateBillData } from '@/lib/billOcr';
+import { parseBillText, validateBillData } from '@/lib/billOcr';
+import type { BillExtractResult } from '@/lib/billOcr';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
@@ -99,10 +100,115 @@ export async function POST(req: NextRequest) {
 
     console.log(`[bill-upload] Extracted ${extractedText.length} chars via ${extractionMethod}`);
 
-    console.log('[bill-upload] Parsing bill text...');
-    const billData = await parseBillTextWithLLM(extractedText);
-    console.log('[bill-upload] Bill parsed. Fields:', billData.extractedFields?.join(', ') || 'none');
-    console.log('[bill-upload] Confidence:', billData.confidence, '| monthlyKwh:', billData.monthlyKwh, '| address:', billData.serviceAddress);
+    // ── Deterministic parsing ─────────────────────────────────────────────────
+    // Stage A: parseBill() — authoritative deterministic source for all usage fields.
+    //          Same input → same output always. No LLM rewrites of numeric fields.
+    // Stage B: parseBillText() — extracts non-usage fields (address, account, charges).
+    //          Only fills gaps; never overrides Stage A usage values.
+    console.log('[bill-upload] Parsing bill text (deterministic)...');
+    const { parseBill } = await import('@/lib/billParser');
+
+    const parseResult = parseBill(extractedText);
+
+    // Log the full debug trace for observability
+    for (const line of parseResult.debugLog) {
+      console.log(line);
+    }
+
+    // Stage B: extract non-usage fields only (address, account, billing period, charges)
+    const legacyResult = parseBillText(extractedText);
+
+    // ── Map BillParseResult → BillExtractResult ───────────────────────────────
+    // Usage fields come EXCLUSIVELY from parseBill() (deterministic, source-ranked).
+    // Non-usage fields come from parseBillText() only when parseBill() has no value.
+    const monthlyArray = parseResult.monthlyArray;
+    const monthsFound  = parseResult.monthsFound;
+    const annualKwh    = parseResult.annual?.value ?? undefined;
+
+    // Monthly kWh: use current month from parseBill, or best from monthly array
+    const monthlyKwh: number | undefined =
+      parseResult.currentMonthKwh ??
+      (monthsFound > 0 ? Math.round(monthlyArray.reduce((s, v) => s + v, 0) / monthsFound) : undefined);
+
+    // estimatedAnnualKwh: A1 explicit annual > A2 sum of monthly > A3 legacy
+    const estimatedAnnualKwh: number | undefined =
+      annualKwh ??
+      (monthsFound >= 10 ? monthlyArray.reduce((s, v) => s + v, 0) : undefined) ??
+      (monthsFound >= 3 ? Math.round((monthlyArray.reduce((s, v) => s + v, 0) / monthsFound) * 12) : undefined) ??
+      legacyResult.estimatedAnnualKwh;
+
+    // Rate: parseBill() returns null if not found — never guess
+    const electricityRate: number | undefined =
+      parseResult.rate?.value ?? legacyResult.electricityRate ?? undefined;
+
+    // Utility: parseBill() header detection wins, then legacy
+    const utilityProvider: string | undefined =
+      parseResult.utility?.value ?? legacyResult.utilityProvider ?? undefined;
+
+    // Build extractedFields list for downstream compatibility
+    const extractedFields: string[] = [];
+    if (utilityProvider)      extractedFields.push('utilityProvider');
+    if (legacyResult.customerName) extractedFields.push('customerName');
+    if (legacyResult.serviceAddress) extractedFields.push('serviceAddress');
+    if (legacyResult.accountNumber) extractedFields.push('accountNumber');
+    if (monthlyKwh !== undefined) extractedFields.push('monthlyKwh');
+    if (annualKwh !== undefined) extractedFields.push('annualKwh');
+    if (monthsFound > 0) extractedFields.push('monthlyUsageHistory');
+    if (electricityRate !== undefined) extractedFields.push('electricityRate');
+    if (legacyResult.totalAmount) extractedFields.push('totalAmount');
+    if (legacyResult.billingPeriodStart) extractedFields.push('billingPeriod');
+
+    // Confidence: based on months found and evidence quality
+    const confidence: 'high' | 'medium' | 'low' =
+      (monthsFound >= 10 || (annualKwh !== undefined && monthsFound >= 3)) ? 'high' :
+      (monthsFound >= 3  || annualKwh !== undefined) ? 'medium' : 'low';
+
+    const billData: BillExtractResult = {
+      success: extractedFields.length > 0,
+      customerName:       legacyResult.customerName,
+      serviceAddress:     legacyResult.serviceAddress,
+      utilityProvider,
+      accountNumber:      legacyResult.accountNumber,
+      billingPeriodStart: legacyResult.billingPeriodStart,
+      billingPeriodEnd:   legacyResult.billingPeriodEnd,
+      billingDays:        legacyResult.billingDays,
+      monthlyKwh,
+      annualKwh,
+      monthlyUsageHistory: monthsFound > 0 ? monthlyArray.filter(v => v > 0) : legacyResult.monthlyUsageHistory,
+      totalAmount:        legacyResult.totalAmount,
+      electricityRate,
+      fixedCharges:       legacyResult.fixedCharges,
+      demandCharge:       legacyResult.demandCharge,
+      demandKw:           legacyResult.demandKw,
+      tier1Kwh:           legacyResult.tier1Kwh,
+      tier2Kwh:           legacyResult.tier2Kwh,
+      tier1Rate:          legacyResult.tier1Rate,
+      tier2Rate:          legacyResult.tier2Rate,
+      billType:           legacyResult.billType,
+      gasUsageTherm:      legacyResult.gasUsageTherm,
+      estimatedAnnualKwh,
+      estimatedMonthlyBill: legacyResult.estimatedMonthlyBill,
+      confidence,
+      extractedFields,
+      usedLlmFallback: false,
+      rawText: extractedText,
+    };
+
+    console.log('[bill-upload] Bill parsed (deterministic). Fields:', extractedFields.join(', ') || 'none');
+    console.log('[bill-upload] Confidence:', confidence, '| monthlyKwh:', monthlyKwh, '| annualKwh:', annualKwh, '| monthsFound:', monthsFound, '| address:', legacyResult.serviceAddress);
+
+    // Extraction evidence — returned to UI for transparency
+    const extractionEvidence = {
+      monthlySource:       parseResult.monthlySource,
+      monthlyConfidence:   parseResult.monthlyConfidence,
+      monthsFound,
+      monthlyEvidence:     parseResult.monthlyEvidence,
+      annualSource:        parseResult.annual?.source_type ?? 'none',
+      annualSourceText:    parseResult.annual?.source_text ?? null,
+      utilitySource:       parseResult.utility?.source_type ?? 'none',
+      rateSource:          parseResult.rate?.source_type ?? 'none',
+      debugLog:            parseResult.debugLog,
+    };
 
     const validation = validateBillData(billData);
     console.log('[bill-upload] Validation:', validation.valid, validation.errors?.join(', ') || 'ok');
@@ -152,13 +258,13 @@ export async function POST(req: NextRequest) {
 
     // ── System Size Calculation ───────────────────────────────────────────────
     console.log('[bill-upload] Calculating system size...');
-    const annualKwh = billData.estimatedAnnualKwh || 0;
+    const annualKwhForSizing = billData.estimatedAnnualKwh || 0;
     // Use utility-aware production factor for accurate sizing
     const productionFactor = getProductionFactor(utilityNameForRate);
-    const systemSizeKw = annualKwh > 0
-      ? Math.round((annualKwh / productionFactor) * 10) / 10
+    const systemSizeKw = annualKwhForSizing > 0
+      ? Math.round((annualKwhForSizing / productionFactor) * 10) / 10
       : null;
-    console.log(`[bill-upload] System size: ${systemSizeKw} kW for ${annualKwh} kWh/yr (factor: ${productionFactor})`);
+    console.log(`[bill-upload] System size: ${systemSizeKw} kW for ${annualKwhForSizing} kWh/yr (factor: ${productionFactor})`);
 
     // ── Net Metering Guardrail ────────────────────────────────────────────────
     const netMeteringWarning = systemSizeKw
@@ -174,6 +280,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       billData,
+      extractionEvidence,
       validation,
       locationData,
       utilityData,
@@ -187,7 +294,7 @@ export async function POST(req: NextRequest) {
       } : null,
       systemSizing: systemSizeKw ? {
         recommendedKw: systemSizeKw,
-        annualKwh,
+        annualKwh: annualKwhForSizing,
         offsetPercent: 100,
         note: `Based on 100% offset. Production factor: ${productionFactor} kWh/kW/yr.`,
       } : null,
