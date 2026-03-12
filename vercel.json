@@ -5,7 +5,8 @@
 
   "git": {
     "deploymentEnabled": {
-      "dev": false,
+      "dev": true,
+      "master": false,
       "underthesunsolar24-6883": false
     }
   },

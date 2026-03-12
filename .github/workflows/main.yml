@@ -1,34 +1,44 @@
 # ============================================================
-# main.yml — Deploy to Vercel Production
+# main.yml — Deploy to Vercel Production (MANUAL APPROVAL REQUIRED)
 #
-# TRIGGERS: push to master ONLY
+# DEPLOYMENT RULES:
+#   dev branch   → Vercel Preview build (automatic, via GitHub App + vercel.json)
+#   master branch → Production (this workflow, MANUAL trigger only via workflow_dispatch)
 #
-# IMPORTANT — Single deployment guarantee:
-#   - Vercel GitHub App: preview deployments for dev/other branches
-#     are DISABLED via vercel.json "git.deploymentEnabled"
-#   - This workflow: fires on master push → Vercel production build
-#   - Result: exactly ONE deployment per commit (production only)
+# Production deployment NEVER runs automatically on push to master.
+# A human must click "Run workflow" in GitHub Actions UI to promote to production.
 #
-# WORKFLOW:
-#   All work is committed directly to master (no dev branch pushes)
-#   master push → this workflow → Vercel production deployment
+# WORKFLOW TO PROMOTE DEV → PRODUCTION:
+#   1. Verify dev preview URL looks correct
+#   2. Go to GitHub Actions → Deploy to Vercel Production → Run workflow
+#   3. Workflow merges dev → master and deploys
 # ============================================================
 
 name: Deploy to Vercel Production
 
 on:
-  push:
-    branches:
-      - master        # ONLY master triggers deployment
-    paths-ignore:
-      - '**.md'       # Skip for documentation-only changes
-      - 'docs/**'
-
-  # Allow manual trigger from GitHub Actions UI
+  # MANUAL TRIGGER ONLY — no automatic push-based production deploys
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DEPLOY to confirm production deployment'
+        required: true
+        default: ''
 
 jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm deployment intent
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+            echo "ERROR: You must type DEPLOY to confirm. Got: '${{ github.event.inputs.confirm }}'"
+            exit 1
+          fi
+          echo "Deployment confirmed. Proceeding..."
+
   deploy:
+    needs: guard
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

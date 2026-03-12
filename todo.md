@@ -1,13 +1,36 @@
-# v46.0 — Deterministic Bill Parser Wiring ✅
+# Bill OCR Extraction Repair + Dev Branch Workflow
 
-## Tasks
-- [x] Review current route.ts (calls parseBillTextWithLLM as final parser)
-- [x] Review billParser.ts (698-line deterministic parseBill() complete)
-- [x] Review BillExtractResult interface in billOcr.ts
-- [x] Wire route.ts: replace parseBillTextWithLLM() with parseBill() as final parser
-- [x] Map BillParseResult → BillExtractResult for response compatibility
-- [x] Add extraction evidence to API response (debugLog, source tags)
-- [x] Preserve non-usage fields (serviceAddress, customerName, etc.) from billOcr.parseBillText()
-- [x] Update version.ts to v46.0
-- [x] TypeScript check — 0 errors
-- [x] Git commit + push (dev + master)
+## Phase 1: Audit (read-only)
+- [ ] Read current route.ts parsing pipeline end-to-end
+- [ ] Read billParser.ts extractors (printed table, handwritten, bar graph, utility, rate)
+- [ ] Read billOcr.ts parseBillText() — address, customer, account, charges
+- [ ] Read billOcrEngine.ts — OCR engine, confidence scoring
+- [ ] Read /api/ocr/route.ts — Tesseract WASM/CLI path
+- [ ] Identify exact failure point: OCR producing text? Parser failing on text?
+
+## Phase 2: Dev branch setup
+- [ ] Create dev branch from master
+- [ ] Configure vercel.json: dev=preview, master=production (manual only)
+- [ ] Update main.yml: require manual approval before production deploy
+
+## Phase 3: OCR fixes
+- [ ] Add raw OCR text logging before any parsing
+- [ ] Add image preprocessing (grayscale, contrast, threshold, upscale) via sharp/jimp
+- [ ] Add multi-pass OCR (PSM 4 standard + PSM 6 document layout)
+- [ ] Merge best text from both passes
+
+## Phase 4: Parser fixes
+- [ ] Audit each extractor against real CMP bill patterns
+- [ ] Fix utility detection (flexible header scan)
+- [ ] Fix kWh extraction (flexible patterns, no rigid label requirement)
+- [ ] Fix address/customer/rate/total extraction
+- [ ] Add AI extraction fallback when 0 fields parsed
+
+## Phase 5: Confidence + UI
+- [ ] Fix confidence scoring (not "0 fields" when text exists)
+- [ ] Confirm UI shows partial results + manual correction path
+
+## Phase 6: Commit + push to dev only
+- [ ] TypeScript check
+- [ ] Commit to dev branch
+- [ ] Push dev → preview only (NOT master)
