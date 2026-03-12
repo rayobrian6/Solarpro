@@ -1,7 +1,7 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v46.6';
-export const BUILD_DATE        = '2026-03-15';
-export const BUILD_DESCRIPTION = 'Utility detection + bill persistence: pg_trgm fuzzy match, auto-discover utilities, bills table, DB rate, state-aware production factors';
+export const BUILD_VERSION     = 'v46.7';
+export const BUILD_DATE        = '2026-03-16';
+export const BUILD_DESCRIPTION = 'Fix TS build errors: plan-set panelVoc/panelIsc, remove invalid systemModel field, sharp type stub';
 export const BUILD_FEATURES    = [
   // v46.6 -- Utility detection + bill persistence
   'NEW: lib/utilityMatcher.ts -- normalizeUtilityName() strips noise words; matchUtility() P1 exact / P2 pg_trgm fuzzy / P3 state fallback / P4 auto-discover',

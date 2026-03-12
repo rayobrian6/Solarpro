@@ -451,6 +451,8 @@ export async function POST(req: NextRequest) {
       panelCount,
       panelModel:       panelModel || 'Solar Panel',
       panelWatts:       panelWatts || 400,
+      panelVoc:         moduleVoc || 41.6,
+      panelIsc:         moduleIsc || 9.0,
       inverterType:     inverterType || 'String',
       inverterModel:    inverterModel || 'Inverter',
       mountType:        mountType || 'Roof Mount',
@@ -488,10 +490,6 @@ export async function POST(req: NextRequest) {
     // The renderer displays them — no re-calculation.
     const elecInput: ElectricalSheetInput = {
       tb:                    { ...tb, sheetTitle: 'Electrical / SLD', sheetNumber: 'E-1' },
-      // ← SINGLE SOURCE OF TRUTH: pre-computed system model
-      systemModel:           systemModel ?? undefined,
-      // ← Use pre-rendered SLD from Design Studio if available
-      existingSvg:           existingSldSvg ?? undefined,
       // Module specs (for display/fallback)
       moduleVoc,
       moduleIsc,
