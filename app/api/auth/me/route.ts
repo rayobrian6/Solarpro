@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest } from '@/lib/auth';
+import { getDbReady } from '@/lib/db-neon';
+import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +11,9 @@ export const dynamic = 'force-dynamic';
  * JWT is used ONLY to extract the user ID.
  * ALL user data (role, plan, is_free_pass, subscription_status) comes from the DB.
  * Role is NEVER read from the JWT payload.
+ *
+ * Uses getDbReady() with cold-start retry so that a Vercel deployment cold start
+ * does NOT cause UserContext to see null (which looks like logout to the user).
  */
 export async function GET(req: NextRequest) {
   try {
@@ -22,9 +27,11 @@ export async function GET(req: NextRequest) {
     }
 
     const userId = session.id;
-    const sql = getDb();
 
-    // Step 2: Fetch ALL user data from DB — this is the single source of truth
+    // Step 2: Get DB with cold-start retry (handles Vercel deployment cold starts)
+    const sql = await getDbReady();
+
+    // Step 3: Fetch ALL user data from DB — this is the single source of truth
     let rows: any[] = [];
     let useFallback = false;
 
@@ -64,7 +71,7 @@ export async function GET(req: NextRequest) {
 
     const db = rows[0];
 
-    // Step 3: Compute hasAccess from DB fields only — mirrors hasPlatformAccess()
+    // Step 4: Compute hasAccess from DB fields only — mirrors hasPlatformAccess()
     const now = new Date();
     const trialEnd = !useFallback && db.trial_ends_at ? new Date(db.trial_ends_at) : null;
     const role = (db.role || '').toLowerCase();
@@ -77,7 +84,7 @@ export async function GET(req: NextRequest) {
          db.subscription_status === 'free_pass' ||
          (db.subscription_status === 'trialing' && trialEnd && trialEnd > now));
 
-    // Step 4: Return normalized user object
+    // Step 5: Return normalized user object
     // camelCase fields for frontend; snake_case fields kept for compatibility
     return NextResponse.json({
       success: true,
@@ -126,7 +133,42 @@ export async function GET(req: NextRequest) {
     });
 
   } catch (error: any) {
-    console.error('Auth me error:', error);
+    // ── Config error: DATABASE_URL missing ────────────────────────────────────
+    // This is a genuine misconfiguration — return a clear code but NOT 401.
+    // UserContext must NOT treat this as "logged out".
+    if (error instanceof DbConfigError) {
+      console.error('[/api/auth/me] DATABASE_URL not configured:', error.message);
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Server configuration error. Please contact your administrator.',
+          code: 'DB_CONFIG_ERROR',
+        },
+        { status: 503 }
+      );
+    }
+
+    // ── Transient error: cold start / network timeout ─────────────────────────
+    // getDbReady() already retried 3x — if we still land here, DB is temporarily
+    // unreachable. Return DB_STARTING so UserContext can retry instead of logging out.
+    if (isTransientDbError(error)) {
+      console.warn('[/api/auth/me] DB temporarily unreachable after retries:', error.message);
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Server is starting up — please wait a moment.',
+          code: 'DB_STARTING',
+          retryAfterMs: 3000,
+        },
+        {
+          status: 503,
+          headers: { 'Retry-After': '3' },
+        }
+      );
+    }
+
+    // ── Unexpected error ──────────────────────────────────────────────────────
+    console.error('[/api/auth/me] Unexpected error:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to get user' },
       { status: 500 }

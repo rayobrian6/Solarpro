@@ -42,17 +42,51 @@ const UserContext = createContext<UserContextValue>({
   refreshUser: async () => {},
 });
 
-async function fetchUserFromDb(): Promise<AppUser | null> {
+// How many times UserContext will retry a DB_STARTING 503 before giving up.
+// Total max wait: ME_MAX_RETRIES * ME_RETRY_DELAY = ~15s
+const ME_MAX_RETRIES = 5;
+const ME_RETRY_DELAY = 3000; // ms
+
+/**
+ * Fetches the current user from /api/auth/me.
+ *
+ * Returns:
+ *   { user: AppUser }           — authenticated user
+ *   { user: null }              — definitively not authenticated (401/404)
+ *   { user: null, retry: true } — transient error (DB cold start), caller should retry
+ */
+async function fetchUserFromDb(): Promise<{ user: AppUser | null; retry?: boolean }> {
   try {
     const res = await fetch('/api/auth/me', {
       credentials: 'include',
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
-    if (!res.ok) return null;
+
+    // 503 — DB cold start or config error. Do NOT treat as "logged out".
+    if (res.status === 503) {
+      const json = await res.json().catch(() => ({}));
+      const code = (json as any)?.code;
+      if (code === 'DB_STARTING') {
+        console.warn('[UserContext] DB starting up — will retry');
+        return { user: null, retry: true };
+      }
+      if (code === 'DB_CONFIG_ERROR') {
+        console.error('[UserContext] DB config error — not retrying');
+        return { user: null, retry: false };
+      }
+      // Unknown 503 — retry conservatively
+      return { user: null, retry: true };
+    }
+
+    // 401 — definitively not authenticated, stop immediately
+    if (res.status === 401) return { user: null, retry: false };
+
+    if (!res.ok) return { user: null, retry: false };
+
     const json = await res.json();
     const u = json?.data || json?.user || json;
-    if (!u?.id) return null;
+    if (!u?.id) return { user: null, retry: false };
 
     // isFreePass MUST come from DB boolean is_free_pass only
     // Never infer from subscriptionStatus string
@@ -74,25 +108,45 @@ async function fetchUserFromDb(): Promise<AppUser | null> {
       (status === 'trialing' && trialEnd !== null && trialEnd > new Date());
 
     return {
-      id: u.id,
-      name: u.name || u.email,
-      email: u.email,
-      role,
-      company: u.company,
-      phone: u.phone,
-      plan: u.plan || 'starter',
-      subscriptionStatus: status,
-      trialEndsAt,
-      isFreePass: isFP,
-      freePassNote: u.freePassNote || null,
-      hasAccess,
-      companyLogoUrl: u.companyLogoUrl || null,
-      brandPrimaryColor: u.brandPrimaryColor || '#f59e0b',
-      brandSecondaryColor: u.brandSecondaryColor || '#0f172a',
+      user: {
+        id: u.id,
+        name: u.name || u.email,
+        email: u.email,
+        role,
+        company: u.company,
+        phone: u.phone,
+        plan: u.plan || 'starter',
+        subscriptionStatus: status,
+        trialEndsAt,
+        isFreePass: isFP,
+        freePassNote: u.freePassNote || null,
+        hasAccess,
+        companyLogoUrl: u.companyLogoUrl || null,
+        brandPrimaryColor: u.brandPrimaryColor || '#f59e0b',
+        brandSecondaryColor: u.brandSecondaryColor || '#0f172a',
+      },
     };
   } catch {
-    return null;
+    // Network error — retry
+    return { user: null, retry: true };
   }
+}
+
+/**
+ * Fetches the current user with automatic retry on DB cold starts.
+ * Retries up to ME_MAX_RETRIES times before giving up.
+ * Only returns null (logged-out appearance) after all retries fail with non-transient errors.
+ */
+async function fetchUserWithRetry(): Promise<AppUser | null> {
+  for (let attempt = 0; attempt <= ME_MAX_RETRIES; attempt++) {
+    const { user, retry } = await fetchUserFromDb();
+    if (user) return user;
+    if (!retry) return null; // definitive non-auth — stop immediately
+    if (attempt < ME_MAX_RETRIES) {
+      await new Promise(r => setTimeout(r, ME_RETRY_DELAY));
+    }
+  }
+  return null;
 }
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
@@ -111,7 +165,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     fetchingRef.current = true;
     pendingRefreshRef.current = false;
     try {
-      const u = await fetchUserFromDb();
+      const u = await fetchUserWithRetry();
       setUser(u);
     } finally {
       fetchingRef.current = false;
@@ -121,7 +175,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         pendingRefreshRef.current = false;
         // Small delay to avoid tight loop
         setTimeout(() => {
-          fetchUserFromDb().then(u => setUser(u)).catch(() => {});
+          fetchUserWithRetry().then(u => setUser(u)).catch(() => {});
         }, 200);
       }
     }
@@ -161,7 +215,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     const interval = setInterval(() => {
       // Only poll if the page is visible and user is logged in
       if (document.visibilityState === 'visible' && !loading) {
-        fetchUserFromDb().then(u => {
+        fetchUserWithRetry().then(u => {
           if (u) setUser(u);
         }).catch(() => {});
       }

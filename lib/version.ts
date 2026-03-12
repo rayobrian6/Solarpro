@@ -1,8 +1,21 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.0';
+export const BUILD_VERSION     = 'v47.1';
 export const BUILD_DATE        = '2026-03-18';
-export const BUILD_DESCRIPTION = 'Utility bill parsing pipeline audit: deferred validation, rate range fix, stale warning suppression';
+export const BUILD_DESCRIPTION = 'Production stability: deployment cold-start session fix, retry-aware auth pipeline, Secure cookie flag';
 export const BUILD_FEATURES    = [
+  // v47.1 -- Production stability: deployment cold-start session fix
+  'ROOT CAUSE: /api/auth/me used getDb() (no retry) -- UserContext called on mount/focus/30s -- cold start = null user = apparent logout',
+  'FIX: app/api/auth/me/route.ts -- switched getDb() to getDbReady() (3x retry, 1s/2s/4s backoff); returns DB_STARTING 503 on transient failure (not 500)',
+  'FIX: app/api/auth/me/route.ts -- DB_CONFIG_ERROR vs DB_STARTING error codes prevent UserContext from misclassifying cold starts as logouts',
+  'FIX: contexts/UserContext.tsx -- fetchUserWithRetry() wraps fetchUserFromDb(); retries up to 5x (3s each) on DB_STARTING 503 before clearing user state',
+  'FIX: contexts/UserContext.tsx -- 503/DB_STARTING never clears user state; only 401 is treated as definitive logout',
+  'FIX: app/api/auth/register/route.ts -- switched getDb() to getDbReady(); proper DB_STARTING/DB_CONFIG_ERROR error codes',
+  'FIX: lib/adminAuth.ts -- requireAdmin() and requireAdminApi() switched to getDbReady() with retry',
+  'FIX: lib/auth.ts -- makeSessionCookie() adds Secure flag in production (NODE_ENV=production) for HTTPS-only cookie delivery',
+  'FIX: lib/auth.ts -- clearSessionCookie() adds matching Secure flag',
+  'FIX: lib/auth.ts -- exports DbConfigError re-export from db-ready for convenience',
+  'FIX: lib/db-neon.ts -- getDb() now throws DbConfigError (non-retryable) instead of plain Error; routes can distinguish config vs transient',
+  'FIX: lib/db-neon.ts -- exports getDbReady() async wrapper and DbConfigError for routes importing from db-neon',
   // v47.0 -- Utility bill parsing pipeline audit
   'FIX: lib/billOcr.ts -- validateBillData() accepts optional BillValidationContext; suppresses stale utility/rate warnings when values resolved post-match',
   'FIX: lib/billOcr.ts -- rate warning range updated to $0.06-$0.50/kWh; unusual rate warning replaces hard rejection',

@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { neon, NeonQueryFunction } from '@neondatabase/serverless';
 import { getDbWithRetry, getDbDirect, DbConfigError } from '@/lib/db-ready';
+export { DbConfigError } from '@/lib/db-ready';
 
 type SqlExecutor = NeonQueryFunction<false, false>;
 
@@ -100,11 +101,15 @@ export function verifyToken(token: string): SessionUser | null {
 // ── Cookie helpers ────────────────────────────────────────────────────────────
 export function makeSessionCookie(token: string): string {
   const expires = new Date(Date.now() + COOKIE_MAX_AGE * 1000).toUTCString();
-  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Expires=${expires}`;
+  // Add Secure flag in production (HTTPS) so the cookie is never sent over plain HTTP.
+  // In local dev (http://localhost) we omit Secure so the cookie still works.
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${secure}; Expires=${expires}`;
 }
 
 export function clearSessionCookie(): string {
-  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
 // ── Get current user from request cookies ────────────────────────────────────

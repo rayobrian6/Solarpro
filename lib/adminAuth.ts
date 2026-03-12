@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
-import { verifyToken, getDb } from '@/lib/auth';
+import { verifyToken } from '@/lib/auth';
+import { getDbReady } from '@/lib/db-neon';
 import { redirect } from 'next/navigation';
 
 export type AdminUser = {
@@ -17,6 +18,7 @@ export function isAdminRole(role?: string | null): role is 'admin' | 'super_admi
 /**
  * SERVER COMPONENT admin guard (Next.js 14 — cookies() is synchronous).
  * Role is NEVER read from JWT — always fetched from DB.
+ * Uses getDbReady() with retry to handle Vercel cold starts after deployment.
  */
 export async function requireAdmin(): Promise<AdminUser> {
   // Next.js 14: cookies() is synchronous — no await
@@ -41,7 +43,7 @@ export async function requireAdmin(): Promise<AdminUser> {
   let dbError: string | null = null;
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT id, name, email, role
       FROM users
@@ -85,6 +87,7 @@ export async function requireAdmin(): Promise<AdminUser> {
 /**
  * API ROUTE admin guard.
  * Role is NEVER read from JWT — always fetched from DB.
+ * Uses getDbReady() with retry to handle Vercel cold starts after deployment.
  */
 export async function requireAdminApi(req: NextRequest): Promise<AdminUser | null> {
   const cookieHeader = req.headers.get('cookie') || '';
@@ -95,7 +98,7 @@ export async function requireAdminApi(req: NextRequest): Promise<AdminUser | nul
   if (!jwtUser?.id) return null;
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT id, name, email, role
       FROM users

@@ -14,6 +14,7 @@
  */
 
 import { neon } from '@neondatabase/serverless';
+import { DbConfigError, getDbWithRetry as _getDbWithRetry } from '@/lib/db-ready';
 import { Client, Project, Layout } from '@/types';
 
 // ============================================================
@@ -55,18 +56,35 @@ export interface DbPricingConfig {
   updatedAt: string;
 }
 
+/**
+ * Synchronous DB getter — throws DbConfigError (non-retryable) if DATABASE_URL
+ * is missing, otherwise returns a Neon SQL executor.
+ *
+ * NOTE: For routes that run immediately after a Vercel deployment (cold start),
+ * prefer getDbReady() which retries on transient Neon wake-up errors.
+ */
 export function getDb() {
   const url = process.env.DATABASE_URL;
   if (!url || url === 'YOUR_NEON_DATABASE_URL_HERE') {
     console.error(
-      '\n[getDb] DATABASE_URL is not configured.\n' +
-      '  -> Open solarpro/.env.local and set DATABASE_URL to your Neon connection string.\n' +
+      '\n[db-neon:getDb] DATABASE_URL is not configured.\n' +
+      '  -> Add DATABASE_URL to your Vercel project environment variables.\n' +
       '  -> Get it from: https://console.neon.tech -> your project -> Connection string\n'
     );
-    throw new Error('DATABASE_URL is not set. Check .env.local — see console for instructions.');
+    throw new DbConfigError('DATABASE_URL is not set. Add it to your Vercel environment variables.');
   }
   return neon(url);
 }
+
+/**
+ * Async DB getter with cold-start retry (up to 3x, exponential backoff 1s/2s/4s).
+ * Use this for any route that may run immediately after a Vercel deployment.
+ */
+export async function getDbReady() {
+  return _getDbWithRetry();
+}
+
+export { DbConfigError } from '@/lib/db-ready';
 
 // ============================================================
 // UUID VALIDATION — prevents "invalid input syntax for type uuid"

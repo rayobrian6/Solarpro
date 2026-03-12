@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  getDb, hashPassword, signToken, makeSessionCookie, SessionUser
+  hashPassword, signToken, makeSessionCookie, SessionUser
 } from '@/lib/auth';
+import { getDbReady, DbConfigError } from '@/lib/db-neon';
+import { isTransientDbError } from '@/lib/db-ready';
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,7 +21,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Password must be at least 8 characters.' }, { status: 400 });
     }
 
-    const sql = getDb();
+    // Use retry-aware DB getter to handle Neon cold starts after deployment
+    const sql = await getDbReady();
 
     const existing = await sql`
       SELECT id FROM users WHERE email = ${email.toLowerCase().trim()} LIMIT 1
@@ -68,7 +71,37 @@ export async function POST(req: NextRequest) {
     );
 
   } catch (error: any) {
-    console.error('Register error:', error);
+    // Config error — DATABASE_URL missing
+    if (error instanceof DbConfigError) {
+      console.error('[/api/auth/register] DATABASE_URL not configured:', error.message);
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Server configuration error. Please contact your administrator.',
+          code: 'DB_CONFIG_ERROR',
+        },
+        { status: 503 }
+      );
+    }
+
+    // Transient error — cold start / network timeout
+    if (isTransientDbError(error)) {
+      console.warn('[/api/auth/register] DB temporarily unreachable:', error.message);
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Server is starting up — please wait a moment and try again.',
+          code: 'DB_STARTING',
+          retryAfterMs: 3000,
+        },
+        {
+          status: 503,
+          headers: { 'Retry-After': '3' },
+        }
+      );
+    }
+
+    console.error('[/api/auth/register] Unexpected error:', error);
     return NextResponse.json(
       { success: false, error: 'Failed to create account. Please try again.' },
       { status: 500 }
