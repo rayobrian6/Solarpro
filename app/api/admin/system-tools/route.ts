@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 import { neon } from '@neondatabase/serverless';
 import fs from 'fs';
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const { tool, params } = await req.json();
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
 
     switch (tool) {
 
@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
       default:
         return NextResponse.json({ success: false, error: `Unknown tool: ${tool}` }, { status: 400 });
     }
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/system-tools/route.ts]', e);
   }
 }

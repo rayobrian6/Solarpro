@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/auth';
+import { getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const results: string[] = [];
 
     // Step 1: Check current state
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
       is_super_admin: after[0]?.role === 'super_admin'
     });
 
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/fix-raymond/route.ts]', e);
   }
 }

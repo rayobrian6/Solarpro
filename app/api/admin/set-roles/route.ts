@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const results: string[] = [];
 
     // Step 1: Drop old constraint
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, results });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/set-roles/route.ts]', e);
   }
 }

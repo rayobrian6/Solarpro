@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getStateIncentives, calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { runIncentiveEngine } from '@/lib/incentives/incentiveEngine';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 // GET /api/incentives?state=CA — get incentives for a state
 export async function GET(req: NextRequest) {
@@ -61,8 +62,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, ...result });
-  } catch (err: any) {
-    console.error('[incentives]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[incen', err);
   }
 }

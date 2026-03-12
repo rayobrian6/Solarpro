@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 const GOOGLE_SOLAR_API_KEY = process.env.GOOGLE_SOLAR_API_KEY || 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
 
@@ -43,11 +44,7 @@ export async function GET(req: NextRequest) {
     const data = await response.json();
     return NextResponse.json(data);
 
-  } catch (error) {
-    console.error('Solar API proxy error:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch solar data' },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('[S]', error);
   }
 }

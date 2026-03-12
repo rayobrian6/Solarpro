@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import db from '@/lib/db';
 import { getAllUnifiedPanels, getAllUnifiedInverters } from '@/lib/equipment-library';
 
@@ -20,9 +21,8 @@ export async function GET(req: NextRequest) {
       success: true, 
       data: { panels, inverters, mountings, batteries } 
     });
-  } catch (err) {
-    console.error('[GET /api/hardware]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch hardware' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/hardware]', err);
   }
 }
 
@@ -56,9 +56,8 @@ export async function POST(req: NextRequest) {
     }
     
     return NextResponse.json({ success: false, error: 'Invalid type' }, { status: 400 });
-  } catch (err) {
-    console.error('[POST /api/hardware]', err);
-    return NextResponse.json({ success: false, error: 'Failed to save hardware' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/hardware]', err);
   }
 }
 
@@ -94,9 +93,8 @@ export async function PUT(req: NextRequest) {
     }
     
     return NextResponse.json({ success: false, error: 'Invalid type' }, { status: 400 });
-  } catch (err) {
-    console.error('[PUT /api/hardware]', err);
-    return NextResponse.json({ success: false, error: 'Failed to update hardware' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[PUT /api/hardware]', err);
   }
 }
 
@@ -126,8 +124,7 @@ export async function DELETE(req: NextRequest) {
     }
     
     return NextResponse.json({ success: false, error: 'Invalid type' }, { status: 400 });
-  } catch (err) {
-    console.error('[DELETE /api/hardware]', err);
-    return NextResponse.json({ success: false, error: 'Failed to delete hardware' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[DELETE /api/hardware]', err);
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError} from '@/lib/db-neon';
 
 export async function POST(req: NextRequest) {
   try {
@@ -36,7 +36,7 @@ Submitted at: ${new Date().toISOString()}
 
     // Store in DB (best effort — table created in migration 007)
     try {
-      const sql = getDb();
+      const sql = await getDbReady();
       await sql`
         INSERT INTO enterprise_leads (
           company_name, contact_email, contact_phone,
@@ -56,8 +56,7 @@ Submitted at: ${new Date().toISOString()}
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
-    console.error('Enterprise contact error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to submit. Please email sales@underthesun.solutions directly.' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/enterprise/contact/route.ts', error);
   }
 }

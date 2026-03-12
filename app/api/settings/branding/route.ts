@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export async function PUT(req: NextRequest) {
   try {
@@ -18,7 +19,7 @@ export async function PUT(req: NextRequest) {
       proposalFooterText,
     } = body;
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     await sql`
       UPDATE users SET
@@ -35,9 +36,8 @@ export async function PUT(req: NextRequest) {
     `;
 
     return NextResponse.json({ success: true, message: 'Branding updated.' });
-  } catch (error: any) {
-    console.error('Settings branding error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to update branding.' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/settings/branding/route.ts', error);
   }
 }
 
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT
         company               AS "companyName",
@@ -65,8 +65,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, data: rows[0] });
-  } catch (error: any) {
-    console.error('Settings branding GET error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to load branding.' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/settings/branding/route.ts', error);
   }
 }

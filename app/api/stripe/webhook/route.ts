@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import Stripe from 'stripe';
 import { stripe, handleWebhookEvent } from '@/lib/stripe';
 
@@ -32,8 +33,7 @@ export async function POST(req: NextRequest) {
     console.log(`[Stripe Webhook] ${event.type}: ${result.message}`);
 
     return NextResponse.json({ received: true, ...result });
-  } catch (error: any) {
-    console.error('Webhook error:', error);
-    return NextResponse.json({ error: error.message || 'Webhook handler failed' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('[Webh]', error);
   }
 }

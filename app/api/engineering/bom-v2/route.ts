@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { generateBOMV2 } from '@/lib/bom-v2-engine';
 import { SystemState } from '@/lib/system-state';
 import { EngineeringModel } from '@/lib/electrical-calc';
@@ -23,8 +24,7 @@ export async function POST(req: NextRequest) {
 
     const result = generateBOMV2(systemState, engineeringModel);
     return NextResponse.json({ success: true, data: result });
-  } catch (error: any) {
-    console.error('BOM V2 error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'BOM generation failed' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('[BOM V2 err]', error);
   }
 }

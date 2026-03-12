@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
 import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const sql = getDb();
+  const sql = await getDbReady();
   const id = session.id;
   const results: any = { jwtId: id };
 

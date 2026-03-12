@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
@@ -19,9 +20,8 @@ export async function GET(req: NextRequest) {
 
     const userId = session.id;
     
-    // Test 1: Using getDb() (cached neon instance) - same as /api/auth/me
-    const { getDb } = await import('@/lib/auth');
-    const sql = getDb();
+    // Test 1: Using getDbReady() with retry - same as /api/auth/me
+    const sql = await getDbReady();
 
     let rows: any[] = [];
     let useFallback = false;
@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
 
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('[app/api/admin/me-exact-debug/route.ts]', error);
   }
 }

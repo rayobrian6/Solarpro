@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { createPortalSession } from '@/lib/stripe';
 
 export async function POST(req: NextRequest) {
@@ -16,8 +17,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, url: result.url });
-  } catch (error: any) {
-    console.error('Portal error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create portal session' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('[P]', error);
   }
 }

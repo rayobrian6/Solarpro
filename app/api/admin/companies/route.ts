@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
   const companyName = searchParams.get('company') || '';
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
 
     if (companyName) {
       // Detailed view for a single company
@@ -63,8 +63,8 @@ export async function GET(req: NextRequest) {
     `;
 
     return NextResponse.json({ success: true, companies: rows });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/companies/route.ts]', e);
   }
 }
 
@@ -74,7 +74,7 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const body = await req.json();
     const { company, action } = body;
     if (!company || !action)
@@ -155,7 +155,7 @@ export async function PATCH(req: NextRequest) {
       default:
         return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
     }
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/companies/route.ts]', e);
   }
 }

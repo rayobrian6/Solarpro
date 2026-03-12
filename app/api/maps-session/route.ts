@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
 
@@ -30,8 +31,8 @@ export async function GET(req: NextRequest) {
   try {
     const session = await getSessionToken();
     return NextResponse.json({ session, key: GOOGLE_MAPS_API_KEY });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/maps-session/route.ts]', e);
   }
 }
 
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
         'Access-Control-Allow-Origin': '*',
       },
     });
-  } catch (e: any) {
-    return new NextResponse('Error', { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/maps-session/route.ts]', e);
   }
 }

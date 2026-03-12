@@ -87,6 +87,49 @@ export async function getDbReady() {
 export { DbConfigError } from '@/lib/db-ready';
 
 // ============================================================
+// ROUTE ERROR HANDLER — cold-start resilient 503 responses
+// ============================================================
+
+/**
+ * handleRouteDbError — standardized DB error handler for all API routes.
+ *
+ * Maps DbConfigError → 503 DB_CONFIG_ERROR (genuine misconfiguration)
+ * Maps all other DB errors → 503 DB_STARTING (transient Neon cold start)
+ *
+ * CRITICAL: Never return 500 for DB errors — UserContext treats 500 as
+ * transient and retries, but 503+code tells the frontend exactly what happened.
+ *
+ * Usage in route catch blocks:
+ *   } catch (error: unknown) {
+ *     return handleRouteDbError('[GET /api/proposals]', error);
+ *   }
+ */
+export function handleRouteDbError(
+  routeLabel: string,
+  error: unknown
+): import('next/server').NextResponse {
+  const { NextResponse } = require('next/server');
+
+  if (error instanceof DbConfigError) {
+    console.error(`${routeLabel} DB_CONFIG_ERROR:`, error.message);
+    return NextResponse.json(
+      { success: false, error: 'Database not configured. Please contact your administrator.', code: 'DB_CONFIG_ERROR' },
+      { status: 503 }
+    );
+  }
+
+  // All other errors (connection refused, timeout, cold-start wake-up) → DB_STARTING
+  console.error(`${routeLabel} DB_STARTING:`, error);
+  return NextResponse.json(
+    { success: false, error: 'Service temporarily unavailable. Please try again in a moment.', code: 'DB_STARTING' },
+    {
+      status: 503,
+      headers: { 'Retry-After': '3' },
+    }
+  );
+}
+
+// ============================================================
 // UUID VALIDATION — prevents "invalid input syntax for type uuid"
 // ============================================================
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -216,7 +259,7 @@ function rowToLayout(row: Record<string, unknown>): Layout {
 
 export async function getClientsByUser(userId: string): Promise<Client[]> {
   assertUUID(userId, 'userId');
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM clients
     WHERE user_id = ${userId}
@@ -228,7 +271,7 @@ export async function getClientsByUser(userId: string): Promise<Client[]> {
 
 export async function getClientById(id: string, userId: string): Promise<Client | null> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return null;
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM clients
     WHERE id = ${id}
@@ -259,7 +302,7 @@ export async function createClient(data: {
   utilityRate?: number;
 }): Promise<Client> {
   assertUUID(data.userId, 'userId');
-  const sql = getDb();
+  const sql = await getDbReady();
   const monthlyKwhJson = JSON.stringify(data.monthlyKwh || []);
   const rows = await sql`
     INSERT INTO clients (
@@ -297,7 +340,7 @@ export async function updateClient(
   data: Partial<Omit<Client, 'id' | 'userId' | 'createdAt' | 'updatedAt'>>
 ): Promise<Client | null> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return null;
-  const sql = getDb();
+  const sql = await getDbReady();
   const current = await getClientById(id, userId);
   if (!current) return null;
 
@@ -333,7 +376,7 @@ export async function updateClient(
 
 export async function softDeleteClient(id: string, userId: string): Promise<boolean> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return false;
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     UPDATE clients
     SET deleted_at = NOW(), updated_at = NOW()
@@ -351,7 +394,7 @@ export async function softDeleteClient(id: string, userId: string): Promise<bool
 
 export async function getProjectsByUser(userId: string): Promise<Project[]> {
   assertUUID(userId, 'userId');
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM projects
     WHERE user_id = ${userId}
@@ -363,7 +406,7 @@ export async function getProjectsByUser(userId: string): Promise<Project[]> {
 
 export async function getProjectsByClient(clientId: string, userId: string): Promise<Project[]> {
   if (!isValidUUID(clientId) || !isValidUUID(userId)) return [];
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM projects
     WHERE client_id = ${clientId}
@@ -376,7 +419,7 @@ export async function getProjectsByClient(clientId: string, userId: string): Pro
 
 export async function getProjectById(id: string, userId: string): Promise<Project | null> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return null;
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM projects
     WHERE id = ${id}
@@ -423,7 +466,7 @@ export async function createProject(data: {
     return obj;
   };
   const billDataJson = data.billData ? JSON.stringify(sanitizeBillData(data.billData)) : null;
-  const sql = getDb();
+  const sql = await getDbReady();
 
   // Try INSERT with bill_data + system_size_kw columns first.
   // If those columns don't exist yet (migration not run on live DB), fall back to base INSERT.
@@ -491,7 +534,7 @@ export async function updateProject(
   data: Partial<Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt'>>
 ): Promise<Project | null> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return null;
-  const sql = getDb();
+  const sql = await getDbReady();
   const current = await getProjectById(id, userId);
   if (!current) return null;
 
@@ -550,7 +593,7 @@ export async function updateProject(
 
 export async function softDeleteProject(id: string, userId: string): Promise<boolean> {
   if (!isValidUUID(id) || !isValidUUID(userId)) return false;
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     UPDATE projects
     SET deleted_at = NOW(), updated_at = NOW()
@@ -568,7 +611,7 @@ export async function softDeleteProject(id: string, userId: string): Promise<boo
 
 export async function getLayoutByProject(projectId: string, userId: string): Promise<Layout | null> {
   if (!isValidUUID(projectId) || !isValidUUID(userId)) return null;
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM layouts
     WHERE project_id = ${projectId}
@@ -602,7 +645,7 @@ export interface UpsertLayoutData {
 export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
-  const sql = getDb();
+  const sql = await getDbReady();
   const panelsJson = JSON.stringify(data.panels || []);
   const roofPlanesJson = data.roofPlanes ? JSON.stringify(data.roofPlanes) : null;
   const fenceLineJson = data.fenceLine ? JSON.stringify(data.fenceLine) : null;
@@ -701,7 +744,7 @@ export async function saveProjectVersion(data: {
 }): Promise<ProjectVersion> {
   assertUUID(data.projectId, 'projectId');
   assertUUID(data.userId, 'userId');
-  const sql = getDb();
+  const sql = await getDbReady();
 
   // Get next version number
   const versionResult = await sql`
@@ -744,7 +787,7 @@ export async function saveProjectVersion(data: {
 
 export async function getProjectVersions(projectId: string, userId: string): Promise<ProjectVersion[]> {
   if (!isValidUUID(projectId) || !isValidUUID(userId)) return [];
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM project_versions
     WHERE project_id = ${projectId}
@@ -771,7 +814,7 @@ export async function getProjectVersion(
   userId: string
 ): Promise<ProjectVersion | null> {
   if (!isValidUUID(projectId) || !isValidUUID(versionId) || !isValidUUID(userId)) return null;
-  const sql = getDb();
+  const sql = await getDbReady();
   const rows = await sql`
     SELECT * FROM project_versions
     WHERE id = ${versionId}
@@ -809,7 +852,7 @@ export async function upsertProduction(data: {
   panelCount?: number;
 }): Promise<void> {
   if (!isValidUUID(data.projectId) || !isValidUUID(data.userId)) return;
-  const sql = getDb();
+  const sql = await getDbReady();
   const dataJson = JSON.stringify({
     production: data.production,
     costEstimate: data.costEstimate,
@@ -917,7 +960,7 @@ export async function getProjectWithDetails(
   userId: string
 ): Promise<import('@/types').Project | null> {
   if (!isValidUUID(projectId) || !isValidUUID(userId)) return null;
-  const sql = getDb();
+  const sql = await getDbReady();
 
   // Fetch project, layout, client, and production in parallel
   const [projectRows, layoutRows, productionRows] = await Promise.all([
@@ -1108,7 +1151,7 @@ export async function saveBill(data: {
 }): Promise<DbBill | null> {
   if (!isValidUUID(data.projectId) || !isValidUUID(data.userId)) return null;
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const parsedJsonStr = data.parsedJson
       ? JSON.stringify(data.parsedJson).replace(/\u0000/g, '')
       : null;
@@ -1158,7 +1201,7 @@ export async function saveBill(data: {
 export async function getBillsByProject(projectId: string, userId: string): Promise<DbBill[]> {
   if (!isValidUUID(projectId) || !isValidUUID(userId)) return [];
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT * FROM bills
       WHERE project_id = ${projectId}
@@ -1217,7 +1260,7 @@ function rowToPricingConfig(row: Record<string, unknown>): DbPricingConfig {
  */
 export async function getPricingConfig(): Promise<DbPricingConfig | null> {
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT * FROM pricing_config ORDER BY updated_at DESC LIMIT 1
     `;
@@ -1235,7 +1278,7 @@ export async function getPricingConfig(): Promise<DbPricingConfig | null> {
  * If a row exists, updates it. If not, inserts one.
  */
 export async function upsertPricingConfig(data: Partial<Omit<DbPricingConfig, 'id' | 'updatedAt'>>): Promise<DbPricingConfig> {
-  const sql = getDb();
+  const sql = await getDbReady();
 
   // Check if a row exists
   const existing = await sql`SELECT id FROM pricing_config LIMIT 1`;

@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   hashPassword, signToken, makeSessionCookie, SessionUser
 } from '@/lib/auth';
-import { getDbReady, DbConfigError } from '@/lib/db-neon';
+import { getDbReady, DbConfigError , handleRouteDbError } from '@/lib/db-neon';
 import { isTransientDbError } from '@/lib/db-ready';
 
 export async function POST(req: NextRequest) {

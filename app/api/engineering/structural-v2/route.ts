@@ -5,6 +5,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { runStructuralCalcV3, type StructuralInputV3 } from '@/lib/structural-engine-v3';
 
 export const runtime = 'nodejs';
@@ -126,11 +127,7 @@ export async function POST(req: NextRequest) {
       recommendations:      result.recommendations,
     });
 
-  } catch (err: any) {
-    console.error('[structural-v3]', err);
-    return NextResponse.json(
-      { error: 'Structural calculation failed', details: err?.message },
-      { status: 500 }
-    );
+  } catch (err: unknown) {
+    return handleRouteDbError('[s', err);
   }
 }

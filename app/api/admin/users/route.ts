@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 import crypto from 'crypto';
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * limit;
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const pattern = `%${search}%`;
 
     const [rows, countRows] = await Promise.all([
@@ -43,8 +43,8 @@ export async function GET(req: NextRequest) {
       page,
       limit,
     });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/users/route.ts]', e);
   }
 }
 
@@ -54,7 +54,7 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const body = await req.json();
     const { id, action } = body;
     if (!id || !action) return NextResponse.json({ success: false, error: 'Missing id or action' }, { status: 400 });
@@ -166,8 +166,8 @@ export async function PATCH(req: NextRequest) {
       trial_ends_at: raw.trial_ends_at,
     } : null;
     return NextResponse.json({ success: true, user: normalizedUser });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/users/route.ts]', e);
   }
 }
 
@@ -178,7 +178,7 @@ export async function DELETE(req: NextRequest) {
   if (admin.role !== 'super_admin') return NextResponse.json({ success: false, error: 'Only super_admin can delete users' }, { status: 403 });
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const urlId = req.nextUrl.searchParams.get('id');
     let id = urlId;
     if (!id) {
@@ -190,7 +190,7 @@ export async function DELETE(req: NextRequest) {
     await sql`DELETE FROM users WHERE id = ${id}`;
     await logAdminAction({ adminId: admin.id, action: 'delete_user', targetUserId: id, targetCompany: targetRows[0]?.company, metadata: { targetEmail: targetRows[0]?.email } });
     return NextResponse.json({ success: true });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/users/route.ts]', e);
   }
 }

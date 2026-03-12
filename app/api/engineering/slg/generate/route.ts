@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { generateDynamicSLG } from '@/lib/engineering-automation';
 
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify user has access to this project
-    const sql = getDb();
+    const sql = await getDbReady();
     const projectCheck = await sql`
       SELECT user_id FROM projects WHERE id = ${projectId}
     `;
@@ -46,11 +47,7 @@ export async function POST(req: NextRequest) {
     );
 
     return NextResponse.json({ success: true, data: { slg } });
-  } catch (error: any) {
-    console.error('SLG generation error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to generate SLG' },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('[POST /api/engineering/slg/generate]', error);
   }
 }

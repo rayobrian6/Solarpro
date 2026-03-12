@@ -25,7 +25,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { generateBOMV4, bomToMarkdown } from '@/lib/bom-engine-v4';
 import { renderSLDProfessional } from '@/lib/sld-professional-renderer';
-import { upsertLayout, upsertProduction, getDb, getProjectWithDetails } from '@/lib/db-neon';
+import { upsertLayout, upsertProduction, getDbReady, getProjectWithDetails , handleRouteDbError } from '@/lib/db-neon';
 import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
 import { upsertEngineeringReport, generateReportId } from '@/lib/engineering/db-engineering';
 
@@ -545,7 +545,7 @@ export async function POST(req: NextRequest) {
         generated_at: new Date().toISOString(),
       };
       try {
-        const sqlDb = getDb();
+        const sqlDb = await getDbReady();
         await sqlDb`
           UPDATE projects
           SET engineering_seed = ${JSON.stringify(engineeringSeed)}::jsonb,
@@ -659,7 +659,7 @@ export async function POST(req: NextRequest) {
       }
 
       // ── Step 10: Save engineering workspace files ─────────────────────────
-      const sql = getDb();
+      const sql = await getDbReady();
 
       // 10a. Bill Data summary
       const billDataText = buildBillDataSummary({
@@ -785,9 +785,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  } catch (err: any) {
-    console.error('[engineering/preliminary] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[engineering/preliminary] Err', err);
   }
 }
 

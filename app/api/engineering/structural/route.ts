@@ -6,6 +6,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 import { runStructuralCalc, StructuralInput } from '@/lib/structural-calc';
@@ -118,7 +119,6 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Structural calculation failed';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return handleRouteDbError('[app/api/engineering/structural/route.ts]', err);
   }
 }

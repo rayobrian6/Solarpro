@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'email is required' }, { status: 400 });
     }
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     if (action === 'grant') {
       // Check if user exists
@@ -136,9 +137,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: `Unknown action: ${action}. Use 'grant', 'revoke', or 'list'.` }, { status: 400 });
     }
 
-  } catch (error: any) {
-    console.error('Free pass API error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Internal server error' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('[Free pass API err]', error);
   }
 }
 
@@ -157,7 +157,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const freePassUsers = await sql`
       SELECT id, name, email, company, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at, created_at
       FROM users
@@ -169,7 +169,7 @@ export async function GET(req: NextRequest) {
       count: freePassUsers.length,
       users: freePassUsers,
     });
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('[app/api/admin/free-pass/route.ts]', error);
   }
 }

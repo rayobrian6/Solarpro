@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const fileId = searchParams.get('id');
     if (!fileId) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     const rows = await sql`
       SELECT file_name, mime_type, file_data
@@ -47,8 +47,7 @@ export async function GET(req: NextRequest) {
         'Cache-Control': 'private, max-age=3600',
       },
     });
-  } catch (err: any) {
-    console.error('[project-files/download]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/project-files/download]', err);
   }
 }

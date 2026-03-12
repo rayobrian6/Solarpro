@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   const adminId = searchParams.get('adminId') || '';
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Try to query the activity log — if table doesn't exist yet, return empty
     try {
@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
       }
       throw tableErr;
     }
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/activity-log/route.ts]', e);
   }
 }

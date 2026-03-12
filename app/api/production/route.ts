@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getClientById, getLayoutByProject, upsertLayout, updateProject, upsertProduction } from '@/lib/db-neon';
+import { getProjectById, getClientById, getLayoutByProject, upsertLayout, updateProject, upsertProduction , handleRouteDbError } from '@/lib/db-neon';
 import { calculateProduction } from '@/lib/pvwatts';
 import { calculateFinalPrice, calculateItemizedPrice, loadPricingConfig } from '@/lib/pricingEngine';
 import type { Client, Layout } from '@/types';
@@ -141,9 +141,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: { layout: savedLayout, production, costEstimate } });
   } catch (error: unknown) {
-    console.error('[POST /api/production]', error);
-    const message = error instanceof Error ? error.message : 'Failed to calculate production';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return handleRouteDbError('[POST /api/pr', error);
   }
 }
 
@@ -200,7 +198,6 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: { production: null, layout, costEstimate } });
   } catch (error: unknown) {
-    console.error('[GET /api/production]', error);
-    return NextResponse.json({ success: false, error: 'Failed to fetch production data' }, { status: 500 });
+    return handleRouteDbError('[GET /api/pr', error);
   }
 }

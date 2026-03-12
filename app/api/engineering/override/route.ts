@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { overrideAutoConfig } from '@/lib/engineering-automation';
 
 export const dynamic = 'force-dynamic';
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify user has access to this project
-    const sql = getDb();
+    const sql = await getDbReady();
     const projectCheck = await sql`
       SELECT user_id FROM projects WHERE id = ${projectId}
     `;
@@ -34,11 +35,7 @@ export async function POST(req: NextRequest) {
     const result = await overrideAutoConfig(projectId, fieldName, overrideValue, reason || 'Manual override');
 
     return NextResponse.json({ success: true, data: result });
-  } catch (error: any) {
-    console.error('Override error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to override auto-configuration' },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('[POST /api/engineering/override]', error);
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getClientById, updateClient, softDeleteClient } from '@/lib/db-neon';
+import { getClientById, updateClient, softDeleteClient , handleRouteDbError } from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -14,9 +14,8 @@ export async function GET(req: NextRequest, context: RouteContext) {
     if (!client) return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: client });
-  } catch (err) {
-    console.error('[GET /api/clients/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch client' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/clien', err);
   }
 }
 
@@ -40,9 +39,8 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     if (!updated) return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: updated });
-  } catch (err) {
-    console.error('[PUT /api/clients/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to update client' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[PUT /api/clien', err);
   }
 }
 
@@ -57,8 +55,7 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     if (!deleted) return NextResponse.json({ success: false, error: 'Client not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, message: 'Client deleted' });
-  } catch (err) {
-    console.error('[DELETE /api/clients/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to delete client' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[DELETE /api/clien', err);
   }
 }

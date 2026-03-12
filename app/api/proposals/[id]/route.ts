@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, isValidUUID } from '@/lib/db-neon';
+import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     if (!isValidUUID(id)) {
       return NextResponse.json({ success: false, error: 'Invalid proposal ID' }, { status: 400 });
     }
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT * FROM proposals WHERE id = ${id} LIMIT 1
     `;
@@ -26,9 +26,8 @@ export async function GET(req: NextRequest, context: RouteContext) {
     `;
 
     return NextResponse.json({ success: true, data: proposal });
-  } catch (err) {
-    console.error('[GET /api/proposals/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch proposal' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/proposals/[id]]', err);
   }
 }
 
@@ -39,7 +38,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ success: false, error: 'Invalid proposal ID' }, { status: 400 });
     }
     const body = await req.json();
-    const sql = getDb();
+    const sql = await getDbReady();
 
     const existing = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;
     if (existing.length === 0) return NextResponse.json({ success: false, error: 'Proposal not found' }, { status: 404 });
@@ -57,8 +56,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     `;
 
     return NextResponse.json({ success: true, data: rows[0] });
-  } catch (err) {
-    console.error('[PUT /api/proposals/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to update proposal' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[PUT /api/proposals/[id]]', err);
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb, isValidUUID, getProjectWithDetails } from '@/lib/db-neon';
+import { getDbReady, isValidUUID, getProjectWithDetails , handleRouteDbError} from '@/lib/db-neon';
 import { v4 as uuidv4 } from 'uuid';
 import type { Proposal } from '@/types';
 
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get('projectId');
 
-    const sql = getDb();
+    const sql = await getDbReady();
     let rows: Record<string, unknown>[];
 
     if (projectId) {
@@ -64,8 +64,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: proposals });
   } catch (error: unknown) {
-    console.error('[GET /api/proposals]', error);
-    return NextResponse.json({ success: false, error: 'Failed to fetch proposals' }, { status: 500 });
+    return handleRouteDbError('[GET /api/proposals]', error);
   }
 }
 
@@ -93,7 +92,7 @@ export async function POST(req: NextRequest) {
     const proposalName = title || `Solar Proposal - ${project.name}`;
     const preparedByName = preparedBy || 'SolarPro Design Team';
 
-    const sql = getDb();
+    const sql = await getDbReady();
     const dataJson = JSON.stringify({
       status: 'draft',
       title: proposalName,
@@ -128,7 +127,6 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error: unknown) {
-    console.error('[POST /api/proposals]', error);
-    return NextResponse.json({ success: false, error: 'Failed to create proposal' }, { status: 500 });
+    return handleRouteDbError('[POST /api/proposals]', error);
   }
 }

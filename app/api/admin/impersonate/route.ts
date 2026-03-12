@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { signToken } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Look up the token — must be unused and not expired
     const rows = await sql`
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
     });
 
     return response;
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/impersonate/route.ts]', e);
   }
 }

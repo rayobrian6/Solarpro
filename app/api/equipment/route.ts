@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import {
   SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, OPTIMIZERS,
   RACKING_SYSTEMS, CONDUCTORS, CONDUITS
@@ -73,11 +74,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, data, count: data.length });
 
-  } catch (error: any) {
-    console.error('Equipment API error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('[E]', error);
   }
 }

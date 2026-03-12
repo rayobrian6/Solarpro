@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import db from '@/lib/db';
 
 /**
@@ -65,11 +66,7 @@ export async function POST(req: NextRequest) {
       message: `${equipmentType} saved successfully`
     }, { status: 201 });
     
-  } catch (err) {
-    console.error('[POST /api/equipment/save]', err);
-    return NextResponse.json({ 
-      success: false, 
-      error: 'Failed to save equipment' 
-    }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/e', err);
   }
 }

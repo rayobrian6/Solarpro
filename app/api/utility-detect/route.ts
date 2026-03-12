@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 
@@ -31,8 +32,8 @@ export async function POST(req: NextRequest) {
 
     const result = await detectUtility(resolvedLat, resolvedLng, resolvedState, resolvedCity);
     return NextResponse.json(result);
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[app/api/utility-detect/route.ts]', err);
   }
 }
 

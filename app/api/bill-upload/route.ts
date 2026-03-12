@@ -4,6 +4,7 @@ import type { BillExtractResult } from '@/lib/billOcr';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { extractPdfTextPure } from '@/lib/pdfExtract';
 import { validateAndCorrectUtilityRate, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
 import { matchUtility } from '@/lib/utilityMatcher';

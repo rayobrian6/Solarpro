@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export async function PUT(req: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Valid email is required.' }, { status: 400 });
     }
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Check email uniqueness (allow same email for same user)
     const existing = await sql`
@@ -37,8 +38,7 @@ export async function PUT(req: NextRequest) {
     `;
 
     return NextResponse.json({ success: true, message: 'Profile updated.' });
-  } catch (error: any) {
-    console.error('Settings profile error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to update profile.' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/settings/profile/route.ts', error);
   }
 }

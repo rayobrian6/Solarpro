@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 // Max logo size: 2MB
 const MAX_SIZE = 2 * 1024 * 1024;
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
     const dataUrl = `data:${file.type};base64,${base64}`;
 
     // Save to database
-    const sql = getDb();
+    const sql = await getDbReady();
     await sql`
       UPDATE users SET
         company_logo_url = ${dataUrl},
@@ -54,9 +55,8 @@ export async function POST(req: NextRequest) {
       message: 'Logo uploaded successfully.',
     });
 
-  } catch (error: any) {
-    console.error('Logo upload error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to upload logo.' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/settings/logo/route.ts', error);
   }
 }
 
@@ -65,7 +65,7 @@ export async function DELETE(req: NextRequest) {
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
-    const sql = getDb();
+    const sql = await getDbReady();
     await sql`
       UPDATE users SET
         company_logo_url = NULL,
@@ -74,8 +74,7 @@ export async function DELETE(req: NextRequest) {
     `;
 
     return NextResponse.json({ success: true, message: 'Logo removed.' });
-  } catch (error: any) {
-    console.error('Logo delete error:', error);
-    return NextResponse.json({ success: false, error: 'Failed to remove logo.' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/settings/logo/route.ts', error);
   }
 }

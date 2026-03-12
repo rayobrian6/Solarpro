@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { generateAutoDesign } from '@/lib/autoDesign';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 // POST /api/auto-design — generate initial solar layout from system size + location
 export async function POST(req: NextRequest) {
@@ -65,8 +66,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(result);
-  } catch (err: any) {
-    console.error('[auto-design]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[a', err);
   }
 }

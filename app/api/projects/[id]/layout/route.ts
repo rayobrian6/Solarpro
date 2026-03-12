@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion } from '@/lib/db-neon';
+import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion , handleRouteDbError } from '@/lib/db-neon';
 import { buildDesignSnapshot } from '@/lib/engineering/designSnapshot';
 import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
 import { upsertEngineeringReport, generateReportId, isEngineeringReportStale } from '@/lib/engineering/db-engineering';
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
             await upsertEngineeringReport(report, projectId);
             console.log(`[engineering] Auto-generated report for project ${projectId}: ${totalPanels} panels, ${systemSizeKw}kW`);
           }
-        } catch (engErr) {
+        } catch (engErr: unknown) {
           console.error('[engineering] Auto-generation failed (non-critical):', engErr);
         }
       })();
@@ -101,9 +101,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       },
     });
   } catch (error: unknown) {
-    console.error('[POST /api/projects/[id]/layout]', error);
-    const message = error instanceof Error ? error.message : 'Failed to save layout';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return handleRouteDbError('[POST /api/pr', error);
   }
 }
 
@@ -119,7 +117,6 @@ export async function GET(req: NextRequest, context: RouteContext) {
     const layout = await getLayoutByProject(id, user.id);
     return NextResponse.json({ success: true, data: layout });
   } catch (error: unknown) {
-    console.error('[GET /api/projects/[id]/layout]', error);
-    return NextResponse.json({ success: false, error: 'Failed to fetch layout' }, { status: 500 });
+    return handleRouteDbError('[GET /api/pr', error);
   }
 }

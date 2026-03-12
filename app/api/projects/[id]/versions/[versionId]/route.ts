@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getProjectVersion, upsertLayout, saveProjectVersion } from '@/lib/db-neon';
+import { getProjectById, getProjectVersion, upsertLayout, saveProjectVersion , handleRouteDbError } from '@/lib/db-neon';
 import { Layout } from '@/types';
 
 type RouteContext = { params: Promise<{id: string; versionId: string}> };
@@ -19,9 +19,8 @@ export async function GET(req: NextRequest, context: RouteContext) {
     if (!version) return NextResponse.json({ success: false, error: 'Version not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: version });
-  } catch (err) {
-    console.error('[GET /api/projects/[id]/versions/[versionId]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch version' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/pr', err);
   }
 }
 
@@ -91,8 +90,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
         message: `Successfully restored version ${version.versionNumber}`,
       },
     });
-  } catch (err) {
-    console.error('[POST /api/projects/[id]/versions/[versionId]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to restore version' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/pr', err);
   }
 }

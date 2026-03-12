@@ -1,31 +1,38 @@
 # v47.5 Fix Plan
 
-## Root Causes Found
+## Root Causes Fixed
 
-### Bug 1: handleUploadBill navigates to non-existent route
-- `handleUploadBill` does `router.push('/projects/${id}/upload-bill')` → 404
-- Should open a modal inline (or use BillUploadFlow embedded in BillTab)
+### Bug 1: handleUploadBill navigated to non-existent route ✅
+- Was: `router.push('/projects/${id}/upload-bill')` → 404
+- Fix: `setShowBillModal(true)` — opens inline `BillUploadFlow` modal
 
-### Bug 2: BillUploadFlow.onComplete does nothing with projectId
-- `BillUploadFlow` fires `onComplete(result)` but project page doesn't handle it
-- The project page never calls `updateProject` / `PUT /api/projects/[id]`
-- No `billAnalysis` is ever set on the project record
+### Bug 2: BillUploadFlow.onComplete was never handled ✅
+- Was: `onComplete` prop not passed, bill data discarded after parsing
+- Fix: `handleBillComplete()` builds typed `BillAnalysis`, calls `PUT /api/projects/[id]`, 
+       updates `setProject()`, auto-advances to System Size tab
 
-### Bug 3: updateProject in db-neon doesn't update bill_data / billAnalysis columns
-- `updateProject` SQL only updates: name, client_id, status, system_type, notes, address, lat, lng, system_size_kw
-- Does NOT persist `bill_data`, `utility_name`, `utility_rate_per_kwh`, `state_code`
+### Bug 3: updateProject() didn't persist bill_data ✅
+- Was: SQL only updated name/status/address/lat/lng/system_size_kw
+- Fix: Two-branch SQL with/without `bill_data::jsonb` — preserves existing if not in update
 
-### Bug 4: getProjectWithDetails doesn't populate billAnalysis
-- rowToProject only maps `bill_data` raw, never constructs `BillAnalysis` object
-- `Project.billAnalysis` is never set → workflow check `!!p.billAnalysis` always false
+### Bug 4: rowToProject() never hydrated billAnalysis ✅
+- Was: `bill_data` raw field only, `billAnalysis` always undefined → workflow check failed
+- Fix: Reads `bill_data._billAnalysis` (new format) + legacy flat format
+       Also hydrates `utilityName`, `utilityRatePerKwh`, `stateCode`
 
-### Bug 5: Version badge stale at v47.2
+### Bug 5: getProjectWithDetails() same hydration gap ✅
+- Fix: Same `_billAnalysis` hydration in the detail query return object
+
+### Bug 6: Version badge stale ✅
+- Was: v46.5 (even older than summary said)
+- Fix: v47.5 with full feature history preserved
 
 ## Tasks
 
-- [ ] 1. Fix `updateProject` in db-neon.ts to persist bill_data, system_size_kw, utility fields
-- [ ] 2. Fix `rowToProject`/`getProjectWithDetails` to hydrate `billAnalysis` from `bill_data`
-- [ ] 3. Fix `project/[id]/page.tsx` handleUploadBill to open inline modal + handle onComplete → persist
-- [ ] 4. Add new API route `/api/projects/[id]/bill` for atomic bill save + project update
-- [ ] 5. Update version badge to v47.5
-- [ ] 6. TypeScript check + commit
+- [x] 1. Fix `updateProject` in db-neon.ts to persist bill_data
+- [x] 2. Fix `rowToProject`/`getProjectWithDetails` to hydrate `billAnalysis` from `bill_data`
+- [x] 3. Fix `project/[id]/page.tsx` handleUploadBill to open inline modal + handle onComplete → persist
+- [x] 4. Pipeline logging: BILL_PARSED, BILL_SAVING, BILL_SAVED, WORKFLOW_UPDATED, PROJECT_REFRESHED
+- [x] 5. Update version badge to v47.5
+- [x] 6. TypeScript check: 0 errors
+- [x] 7. Commit + push to origin/master (14c71aa)

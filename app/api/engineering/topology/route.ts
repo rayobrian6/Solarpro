@@ -5,6 +5,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 import { resolveTopology, TopologyManagerContext } from '@/lib/topology-manager';
@@ -60,7 +61,6 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Topology detection failed';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return handleRouteDbError('[app/api/engineering/topology/route.ts]', err);
   }
 }

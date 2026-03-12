@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getLayoutByProject } from '@/lib/db-neon';
+import { getProjectById, getLayoutByProject , handleRouteDbError } from '@/lib/db-neon';
 import { buildDesignSnapshot } from '@/lib/engineering/designSnapshot';
 import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
 import { upsertEngineeringReport, generateReportId, isEngineeringReportStale } from '@/lib/engineering/db-engineering';
@@ -76,11 +76,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  } catch (err: any) {
-    console.error('[engineering/generate] Error:', err);
-    return NextResponse.json({
-      success: false,
-      error: err.message || 'Engineering generation failed',
-    }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[engineering/genera', err);
   }
 }

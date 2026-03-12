@@ -5,6 +5,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -158,8 +159,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(response);
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'PVWatts API call failed';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return handleRouteDbError('[app/api/engineering/pvwatts/route.ts]', err);
   }
 }
 

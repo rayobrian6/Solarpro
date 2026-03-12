@@ -3,6 +3,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { runRulesEngine, RulesEngineInput } from '@/lib/rules-engine';
 import { OverrideEntry } from '@/lib/rules-engine';
 
@@ -40,11 +41,7 @@ export async function POST(req: NextRequest) {
         dependencyChain: result.dependencyChain,
       },
     });
-  } catch (error: any) {
-    console.error('Rules engine error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Rules engine failed' },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('[R]', error);
   }
 }

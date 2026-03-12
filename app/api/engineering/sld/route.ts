@@ -12,6 +12,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
@@ -235,7 +236,7 @@ export async function POST(req: NextRequest) {
         dcConduitType: String(body.dcConduitType ?? body.conduitType ?? '3/4" EMT'),
         acConduitType: String(body.acConduitType ?? body.conduitType ?? '1" EMT'),
       });
-    } catch (csErr) {
+    } catch (csErr: unknown) {
       // Non-fatal: fall back to body values
       console.warn('[SLD] computeSystem failed, using body fallback values:', csErr);
       cs = null;
@@ -414,7 +415,6 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'SLD generation failed';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return handleRouteDbError('[app/api/engineering/sld/route.ts]', err);
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getProjectWithDetails, updateProject, softDeleteProject } from '@/lib/db-neon';
+import { getProjectById, getProjectWithDetails, updateProject, softDeleteProject, handleRouteDbError } from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -16,9 +16,8 @@ export async function GET(req: NextRequest, context: RouteContext) {
     if (!project) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: project });
-  } catch (err) {
-    console.error('[GET /api/projects/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch project' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/projects/[id]]', err);
   }
 }
 
@@ -33,9 +32,8 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     if (!updated) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, data: updated });
-  } catch (err) {
-    console.error('[PUT /api/projects/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to update project' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[PUT /api/projects/[id]]', err);
   }
 }
 
@@ -50,8 +48,7 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     if (!deleted) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
 
     return NextResponse.json({ success: true, message: 'Project deleted' });
-  } catch (err) {
-    console.error('[DELETE /api/projects/[id]]', err);
-    return NextResponse.json({ success: false, error: 'Failed to delete project' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[DELETE /api/projects/[id]]', err);
   }
 }

@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
     }
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Verify ownership
     const projectCheck = await sql`
@@ -352,9 +352,8 @@ export async function POST(req: NextRequest) {
     if (engineeringRunId) console.log('[save-outputs] Engineering run ID:', engineeringRunId);
 
     return NextResponse.json({ success: true, saved, engineeringRunId });
-  } catch (err: any) {
-    console.error('[save-outputs] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/engineering/save-outputs]', err);
   }
 }
 

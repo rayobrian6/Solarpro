@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
     }
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Verify project ownership
     const projectCheck = await sql`
@@ -176,8 +176,7 @@ export async function GET(req: NextRequest) {
       })),
     });
 
-  } catch (err: any) {
-    console.error('[latest-run] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/engineering/latest-run]', err);
   }
 }

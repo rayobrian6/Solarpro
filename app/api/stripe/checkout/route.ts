@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { createCheckoutSession, getSubscriptionPlans } from '@/lib/stripe';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError} from '@/lib/db-neon';
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Get user details from DB
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT email, name, company FROM users WHERE id = ${user.id} LIMIT 1
     `;
@@ -50,8 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, url: result.url });
-  } catch (error: any) {
-    console.error('Checkout error:', error);
-    return NextResponse.json({ success: false, error: error.message || 'Failed to create checkout session' }, { status: 500 });
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/stripe/checkout/route.ts', error);
   }
 }

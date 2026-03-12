@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/auth';
+import { getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Check by email
     const byEmail = await sql`
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
       emailMatch: byEmail.length > 0 ? byEmail[0].id === '011526da-28fc-4c01-85a0-d52c0f578fdf' : false
     });
 
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/check-raymond/route.ts]', e);
   }
 }

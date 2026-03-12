@@ -9,7 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'fileId required' }, { status: 400 });
     }
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Look up the file and verify ownership
     const fileRows = await sql`
@@ -183,8 +183,7 @@ export async function GET(req: NextRequest) {
       })),
     });
 
-  } catch (err: any) {
-    console.error('[run-from-file] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/engineering/run-from-file]', err);
   }
 }

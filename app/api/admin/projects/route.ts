@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * limit;
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const pattern = `%${search}%`;
 
     const [rows, countRows] = await Promise.all([
@@ -51,8 +51,8 @@ export async function GET(req: NextRequest) {
       page,
       limit,
     });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/projects/route.ts]', e);
   }
 }
 
@@ -62,7 +62,7 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const { id, action, userId } = await req.json();
     if (!id || !action) return NextResponse.json({ success: false, error: 'Missing id or action' }, { status: 400 });
 
@@ -76,7 +76,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/projects/route.ts]', e);
   }
 }

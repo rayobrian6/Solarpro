@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest, getDb } from '@/lib/auth';
+import { getUserFromRequest, getDbReady } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     const projectId = parseInt(id);
 
     // Verify user has access to this project
-    const sql = getDb();
+    const sql = await getDbReady();
     const projectCheck = await sql`
       SELECT user_id FROM projects WHERE id = ${projectId}
     `;
@@ -58,11 +59,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
         electrical,
       },
     });
-  } catch (error: any) {
-    console.error('Site conditions error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to get site conditions' },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('app/api/projects/[id]/site-conditions/route.ts', error);
   }
 }

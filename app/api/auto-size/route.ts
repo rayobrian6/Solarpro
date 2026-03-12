@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { calculateSystemSize } from '@/lib/autoSizing';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 
 // POST /api/auto-size — calculate recommended system size from consumption data
 export async function POST(req: NextRequest) {
@@ -65,8 +66,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(result);
-  } catch (err: any) {
-    console.error('[auto-size]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[a', err);
   }
 }

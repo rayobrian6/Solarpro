@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken, getDb } from '@/lib/auth';
+import { verifyToken, getDbReady } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   let db_error: string | null = null;
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT id, name, email, role FROM users WHERE id = ${jwtUser.id} LIMIT 1
     `;

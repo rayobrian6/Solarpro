@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     const projectId = searchParams.get('projectId');
     if (!projectId) return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
 
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Verify user owns this project
     const projectCheck = await sql`
@@ -56,9 +56,8 @@ export async function GET(req: NextRequest) {
     `;
 
     return NextResponse.json({ success: true, data: files });
-  } catch (err: any) {
-    console.error('[project-files GET]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/project-files]', err);
   }
 }
 
@@ -69,7 +68,7 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
     const contentType = req.headers.get('content-type') || '';
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Handle JSON (for saving generated engineering packets as text/base64)
     if (contentType.includes('application/json')) {
@@ -147,9 +146,8 @@ export async function POST(req: NextRequest) {
     `;
 
     return NextResponse.json({ success: true, data: rows[0] });
-  } catch (err: any) {
-    console.error('[project-files POST]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/project-files]', err);
   }
 }
 
@@ -163,7 +161,7 @@ export async function DELETE(req: NextRequest) {
     const fileId = searchParams.get('id');
     if (!fileId) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
 
-    const sql = getDb();
+    const sql = await getDbReady();
     const result = await sql`
       DELETE FROM project_files
       WHERE id = ${fileId} AND user_id = ${user.id}
@@ -175,8 +173,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error('[project-files DELETE]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[DELETE /api/project-files]', err);
   }
 }

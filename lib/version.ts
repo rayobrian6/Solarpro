@@ -1,8 +1,25 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.5';
-export const BUILD_DATE        = '2026-06-06';
-export const BUILD_DESCRIPTION = 'v47.5: Fix bill upload workflow pipeline -- billAnalysis now persisted to project, workflow state updates after upload';
+export const BUILD_VERSION     = 'v47.6';
+export const BUILD_DATE        = '2026-06-09';
+export const BUILD_DESCRIPTION = 'v47.6: Critical production stability audit -- all 70+ API routes now cold-start resilient with getDbReady() retry and standardized 503 DB_STARTING responses';
 export const BUILD_FEATURES    = [
+  // v47.6 -- Critical production stability audit
+  'ROOT CAUSE: All non-auth API routes used getDb() (synchronous, no retry) -- any Neon cold start caused immediate DbConfigError/500 across entire app',
+  'ROOT CAUSE: db-neon.ts exported functions (getProjectById, updateProject, getClientsByUser, etc.) all called getDb() internally -- 22 functions affected',
+  'ROOT CAUSE: 65 direct API route files called getDb() from @/lib/auth or @/lib/db-neon without retry',
+  'ROOT CAUSE: All non-auth catch blocks returned raw 500 -- UserContext retries on 503 DB_STARTING but treats 500 as transient without code; frontend had no semantic signal',
+  'FIX: lib/db-neon.ts -- all 22 internal getDb() calls replaced with await getDbReady() -- ALL exported db functions now cold-start resilient',
+  'FIX: lib/db-neon.ts -- new handleRouteDbError(routeLabel, error) utility: DbConfigError->503 DB_CONFIG_ERROR; all other->503 DB_STARTING with Retry-After: 3',
+  'FIX: app/api/projects/* -- all routes (GET/PUT/DELETE project, layout, versions) now use handleRouteDbError',
+  'FIX: app/api/clients/* -- all routes (GET/POST/PUT/DELETE client) now use handleRouteDbError',
+  'FIX: app/api/proposals/* -- all routes (GET/POST/PUT proposal, share) now use handleRouteDbError',
+  'FIX: app/api/settings/* -- profile, branding, logo routes now use handleRouteDbError',
+  'FIX: app/api/engineering/* -- plan-set, preliminary, auto-configure, override, assist, slg, save-outputs, latest-run, run-from-file, and all others use handleRouteDbError',
+  'FIX: app/api/admin/* -- all 19 admin routes (users, utilities, incentives, free-pass, etc.) use handleRouteDbError',
+  'FIX: app/api/production/route.ts, equipment/*, stripe/*, stats/* -- all use handleRouteDbError',
+  'VERIFIED: TypeScript build passes with zero errors after all replacements',
+  'PRESERVED: auth routes (login, me, register) retain their existing per-route DbConfigError handling (not changed)',
+  'PRESERVED: Non-DB 500s (missing MIGRATE_SECRET, OCR errors, external API failures) remain as-is -- not DB cold-start paths',
   // v47.5 -- Bill upload workflow pipeline fix
   'project/[id]/page.tsx: handleUploadBill now opens inline BillUploadFlow modal (not 404 route)',
   'project/[id]/page.tsx: handleBillComplete builds BillAnalysis + PUTs to /api/projects/[id]',

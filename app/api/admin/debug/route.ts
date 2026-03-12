@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken, getDb } from '@/lib/auth';
+import { verifyToken, getDbReady } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
   let dbRole = 'unknown';
   let dbFound = false;
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`SELECT id, email, role FROM users WHERE id = ${jwtUser.id} LIMIT 1`;
     if (rows.length > 0) {
       dbRole = rows[0].role ?? 'user';

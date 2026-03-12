@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,11 +8,11 @@ export async function GET(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const rows = await sql`SELECT * FROM incentive_overrides ORDER BY created_at DESC`;
     return NextResponse.json({ success: true, incentives: rows });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/incentives/route.ts]', e);
   }
 }
 
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const b = await req.json();
     const rows = await sql`
       INSERT INTO incentive_overrides
@@ -33,8 +33,8 @@ export async function POST(req: NextRequest) {
       RETURNING *
     `;
     return NextResponse.json({ success: true, incentive: rows[0] });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/incentives/route.ts]', e);
   }
 }
 
@@ -42,7 +42,7 @@ export async function PATCH(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const b = await req.json();
     if (!b.id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
     await sql`
@@ -62,8 +62,8 @@ export async function PATCH(req: NextRequest) {
       WHERE id = ${b.id}
     `;
     return NextResponse.json({ success: true });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/incentives/route.ts]', e);
   }
 }
 
@@ -71,12 +71,12 @@ export async function DELETE(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const { id } = await req.json();
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
     await sql`DELETE FROM incentive_overrides WHERE id = ${id}`;
     return NextResponse.json({ success: true });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/incentives/route.ts]', e);
   }
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { runElectricalCalc, ElectricalCalcInput } from '@/lib/electrical-calc';
 import { runStructuralCalcV4, type StructuralInputV4 } from '@/lib/structural-engine-v4';
 import { getJurisdictionInfo, getDesignTemperatures, getGroundSnowLoad, getDesignWindSpeed, parseStateFromAddress } from '@/lib/jurisdiction';
@@ -79,7 +80,7 @@ export async function POST(req: NextRequest) {
           }
         }
         // Microinverter: stringConfig stays null — AC trunk cable sizing handled by electrical-calc
-      } catch (strErr) {
+      } catch (strErr: unknown) {
         console.warn('[calculate] String generation warning:', strErr);
       }
     }
@@ -162,7 +163,7 @@ export async function POST(req: NextRequest) {
           frostDepthIn:     structural.frostDepthIn,
         };
         structuralResult = runStructuralCalcV4(structuralInput);
-      } catch (structErr) {
+      } catch (structErr: unknown) {
         console.warn('[calculate] V4 structural engine warning:', structErr);
         // Fallback: return PASS with warning rather than crashing
         structuralResult = { status: 'WARNING', errors: [], warnings: [{ code: 'ENGINE_ERROR', message: String(structErr), severity: 'warning', suggestion: 'Check structural inputs' }] };
@@ -236,11 +237,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  } catch (error: any) {
-    console.error('Engineering calculate error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Calculation failed' },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('[Engineering calc]', error);
   }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getProjectVersions } from '@/lib/db-neon';
+import { getProjectById, getProjectVersions , handleRouteDbError } from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -16,8 +16,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
     const versions = await getProjectVersions(id, user.id);
     return NextResponse.json({ success: true, data: versions });
-  } catch (err) {
-    console.error('[GET /api/projects/[id]/versions]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch versions' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/pr', err);
   }
 }

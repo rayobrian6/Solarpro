@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectsByUser, createProject, getClientById, isValidUUID } from '@/lib/db-neon';
+import { getProjectsByUser, createProject, getClientById, isValidUUID , handleRouteDbError } from '@/lib/db-neon';
 import { geocodeAddress } from '@/lib/geocode';
 
 export async function GET(req: NextRequest) {
@@ -10,9 +10,8 @@ export async function GET(req: NextRequest) {
 
     const projects = await getProjectsByUser(user.id);
     return NextResponse.json({ success: true, data: projects });
-  } catch (err) {
-    console.error('[GET /api/projects]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch projects' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/pr', err);
   }
 }
 
@@ -78,7 +77,7 @@ export async function POST(req: NextRequest) {
         } else {
           console.warn(`[POST /api/projects] Geocoding returned null for "${projectAddress}"`);
         }
-      } catch (geoErr) {
+      } catch (geoErr: unknown) {
         // Non-fatal — project still creates, design studio will geocode on load
         console.warn(`[POST /api/projects] Geocoding failed (non-fatal):`, geoErr);
       }
@@ -105,9 +104,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: project }, { status: 201 });
-  } catch (err) {
-    console.error('[POST /api/projects]', err);
-    const message = err instanceof Error ? err.message : 'Project could not be created. Please try again.';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/pr', err);
   }
 }

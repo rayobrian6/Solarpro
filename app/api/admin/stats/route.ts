@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
-    const sql = getDb();
+    const sql = await getDbReady();
     const today = new Date().toISOString().split('T')[0];
 
     const [
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
         projectTrend: projectTrend.map(r => ({ day: r.day, count: Number(r.cnt) })),
       },
     });
-  } catch (e: any) {
-    return NextResponse.json({ success: false, error: e.message }, { status: 500 });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/admin/stats/route.ts]', e);
   }
 }

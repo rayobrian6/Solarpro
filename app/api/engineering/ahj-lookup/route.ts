@@ -6,6 +6,7 @@
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
 import {
   searchAhj,
   getAhjById,
@@ -85,8 +86,7 @@ export async function GET(req: NextRequest) {
       error: 'Provide one of: id, address, state, city, county, or q (text search)',
     }, { status: 400 });
 
-  } catch (err: any) {
-    console.error('[ahj-lookup] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[ahj-l', err);
   }
 }

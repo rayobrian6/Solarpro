@@ -26,7 +26,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { execSync } from 'child_process';
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
     const projectId = searchParams.get('projectId');
     if (!projectId) return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
 
-    const sql = await getDb();
+    const sql = await getDbReady();
     const rows = await sql`
       SELECT id, file_name, file_size, upload_date
       FROM project_files
@@ -73,8 +73,8 @@ export async function GET(req: NextRequest) {
     `;
 
     return NextResponse.json({ success: true, planSets: rows });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[app/api/engineering/plan-set/route.ts]', err);
   }
 }
 
@@ -326,7 +326,7 @@ export async function POST(req: NextRequest) {
     try {
       const ahjResults = searchAhj({ stateCode: state, city, text: ahj });
       if (ahjResults.length > 0) ahjData = ahjResults[0];
-    } catch (_) {}
+    } catch (_: unknown) {}
 
     let setbacks: any = {
       ridgeSetbackIn: 18,
@@ -346,7 +346,7 @@ export async function POST(req: NextRequest) {
         stories:      1,
         buildingType: 'residential',
       });
-    } catch (_) {}
+    } catch (_: unknown) {}
 
     // ─────────────────────────────────────────────────────────────────────
     // STEP 4: Structural loads
@@ -801,7 +801,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Save to project_files ─────────────────────────────────────────────
-    const sql = await getDb();
+    const sql = await getDbReady();
 
     const projectRows = await sql`
       SELECT id FROM projects WHERE id = ${projectId} AND user_id = ${user.id}
@@ -866,12 +866,11 @@ export async function POST(req: NextRequest) {
         : `Plan set PDF generated and saved to project files (${BUILD_VERSION} — 7 sheets)`,
     });
 
-  } catch (err: any) {
-    console.error('[plan-set] Error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[plan-se', err);
   } finally {
     for (const f of tmpFiles) {
-      try { if (existsSync(f)) unlinkSync(f); } catch (_) {}
+      try { if (existsSync(f)) unlinkSync(f); } catch (_: unknown) {}
     }
   }
 }

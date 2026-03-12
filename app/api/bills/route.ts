@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getBillsByProject, saveBill, isValidUUID } from '@/lib/db-neon';
+import { getBillsByProject, saveBill, isValidUUID , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +23,7 @@ export async function GET(req: NextRequest) {
     const bills = await getBillsByProject(projectId, user.id as string);
     return NextResponse.json({ success: true, bills });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[GET /api/bills]', msg);
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+    return handleRouteDbError('[GET /api/bills]', err);
   }
 }
 
@@ -65,8 +63,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, bill });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Unknown error';
-    console.error('[POST /api/bills]', msg);
-    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+    return handleRouteDbError('[POST /api/bills]', err);
   }
 }

@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -219,8 +220,6 @@ export async function POST(req: NextRequest) {
     }
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'PDF generation failed';
-    console.error('SLD PDF error:', message);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    return handleRouteDbError('[SLD PDF err]', err);
   }
 }

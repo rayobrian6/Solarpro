@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectsByUser, getClientsByUser, getLayoutByProject } from '@/lib/db-neon';
+import { getProjectsByUser, getClientsByUser, getLayoutByProject , handleRouteDbError } from '@/lib/db-neon';
 
 export async function GET(req: NextRequest) {
   try {
@@ -45,8 +45,7 @@ export async function GET(req: NextRequest) {
         })),
       }
     });
-  } catch (err) {
-    console.error('[GET /api/stats]', err);
-    return NextResponse.json({ success: false, error: 'Failed to fetch stats' }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/s', err);
   }
 }

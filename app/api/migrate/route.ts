@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError} from '@/lib/db-neon';
 
 export async function GET(req: NextRequest) {
   // Allow GET with secret param for easy browser access
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
   const validSecret = secret === migrateSecret;
     if (!user && !validSecret) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
-    const sql = getDb();
+    const sql = await getDbReady();
     const results: string[] = [];
 
     // Migration 003: unique constraint on productions.project_id
@@ -412,7 +412,6 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
-    console.error('[POST /api/migrate]', error);
-    return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
+    return handleRouteDbError('[POST /api/migrate]', error);
   }
 }

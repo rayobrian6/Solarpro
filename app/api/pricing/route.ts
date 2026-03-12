@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getPricingConfig, upsertPricingConfig } from '@/lib/db-neon';
+import { getPricingConfig, upsertPricingConfig, handleRouteDbError, getDbReady } from '@/lib/db-neon';
 
 // Default fallback config (used when DB table not yet migrated)
 const DEFAULT_CONFIG = {
@@ -62,8 +62,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     // Ensure all new columns exist (idempotent migration)
-    const { getDb } = await import('@/lib/db-neon');
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Create table if not exists (with all columns)
     await sql`
@@ -128,9 +127,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true, data: config });
-  } catch (err) {
-    console.error('[POST /api/pricing]', err);
-    const message = err instanceof Error ? err.message : 'Failed to save pricing config';
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[POST /api/pricing]', err);
   }
 }

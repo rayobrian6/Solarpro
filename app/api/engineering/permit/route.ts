@@ -12,6 +12,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
@@ -900,11 +901,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  } catch (error: any) {
-    console.error('Permit package error:', error);
-    return NextResponse.json(
-      { success: false, error: error.message || 'Permit package generation failed' },
-      { status: 500 }
-    );
+  } catch (error: unknown) {
+    return handleRouteDbError('[Permi]', error);
   }
 }

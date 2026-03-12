@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -15,7 +15,7 @@ export async function POST(
     }
 
     const { id: proposalId } = await params;
-    const sql = getDb();
+    const sql = await getDbReady();
 
     // Verify proposal belongs to this user
     const rows = await sql`
@@ -74,7 +74,7 @@ export async function GET(
     }
 
     const { id: proposalId } = await params;
-    const sql = getDb();
+    const sql = await getDbReady();
 
     const rows = await sql`
       SELECT p.id, p.share_token, p.share_expires_at
@@ -101,8 +101,7 @@ export async function GET(
       shareToken: row.share_token,
       expiresAt: row.share_expires_at,
     });
-  } catch (err: any) {
-    console.error('[get share link]', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/proposals/[id]/share]', err);
   }
 }
