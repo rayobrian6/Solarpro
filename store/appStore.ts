@@ -325,6 +325,8 @@ export const useAppStore = create<AppStore>()(
           activeProjectId: id,
         }));
         localSaveProject(project);
+        // FIX v47.13 T2e: structured reload log
+        console.log(`[PROJECT_RELOADED] id=${id} billAnalysis=${!!project.billAnalysis} utilityRatePerKwh=${project.utilityRatePerKwh ?? 'null'} utilityName="${project.utilityName ?? 'null'}" stateCode=${project.stateCode ?? 'null'} systemSizeKw=${project.systemSizeKw ?? 'null'}`);
         return project;
       } catch (err) {
         console.error('[store] loadActiveProject error:', err);

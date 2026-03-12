@@ -1,8 +1,17 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.12';
-export const BUILD_DATE        = '2026-06-11';
-export const BUILD_DESCRIPTION = 'v47.12: Proposal pipeline fixes -- client name from OCR, system type from layout, fence BOM gating, utility rate priority, northern climate zone, SREC whitelist, incentive system-type filter';
+export const BUILD_VERSION     = 'v47.13';
+export const BUILD_DATE        = '2026-06-12';
+export const BUILD_DESCRIPTION = 'v47.13: Bill upload pipeline & utility rate fixes -- rate floor $0.10 catches supply-only rates (CMP $0.069), DB rate override for suspect rates, bill_data _billAnalysis wrapper for rowToProject hydration, structured debug logs (BILL_PARSE_COMPLETE, UTILITY_RATE_SELECTED, UTILITY_RATE_SOURCE, BILL_SAVED_TO_PROJECT, PROJECT_CREATED_FROM_BILL, PROJECT_RELOADED)';
 export const BUILD_FEATURES    = [
+  // v47.13 -- Bill upload pipeline & utility rate fixes
+  'T1 FIX: lib/utility-rules.ts -- MIN_VALID_RETAIL_RATE raised from $0.06 to $0.10 (residential retail floor; $0.069 CMP supply charge is now correctly flagged as suspect)',
+  'T1 FIX: validateAndCorrectUtilityRate -- added DB rate override logic: if extracted rate < 50% of known DB rate, treat as supply-only and use DB rate instead',
+  'T1 FIX: validateAndCorrectUtilityRate -- added suspect field to return type for downstream transparency',
+  'T1 FIX: app/api/bill-upload/route.ts -- structured logs: [BILL_PARSE_COMPLETE], [UTILITY_RATE_SELECTED], [UTILITY_RATE_SOURCE] with rate, source, suspect flag',
+  'T2 FIX: components/onboarding/BillUploadModal.tsx -- handleCreateAll now wraps billData in _billAnalysis format that rowToProject expects for hydration on reload',
+  'T2 FIX: BillUploadModal -- also sends utilityName, utilityRatePerKwh, stateCode, city as top-level project fields for immediate use without DB reload',
+  'T2 FIX: BillUploadModal -- log [PROJECT_CREATED_FROM_BILL] and [BILL_SAVED_TO_PROJECT] after each step',
+  'T3/T4 FIX: store/appStore.ts loadActiveProject -- log [PROJECT_RELOADED] with billAnalysis, utilityRatePerKwh, utilityName, stateCode after DB fetch',
   // v47.12 -- Proposal pipeline fixes (7 issues from E2E testing)
   'Issue 1 FIX: app/projects/[id]/page.tsx handleBillComplete -- PUT /api/clients/[id] when OCR extracts customerName and current name is placeholder (contains "customer", < 3 chars, etc.)',
   'Issue 1 FIX: updatedProject merge includes new client name in local React state immediately after bill save',

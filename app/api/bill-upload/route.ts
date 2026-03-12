@@ -308,17 +308,24 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Rate Validation ──────────────────────────────────────────────────────
-    // Correct rates outside valid retail range ($0.06-$0.50/kWh).
-    // Below $0.06 = likely avoided cost / wholesale; above $0.50 = likely misparse.
-    // Falls back to utility DB rate or national default ($0.13).
+    // Correct rates outside valid retail range ($0.10-$0.60/kWh).
+    // Below $0.10 = suspect — likely supply-only/generation component from bill (not retail).
+    //   e.g. CMP supply charge ~$0.069 vs all-in retail ~$0.265. Falls back to DB rate.
+    // Above $0.60 = likely a misparse (total bill amount vs per-kWh rate).
+    // FIX v47.13 T1d/T1e: Added structured logging + raised floor to $0.10
     const utilityNameForRate = finalBillData.utilityProvider || utilityData?.utilityName || null;
-    const rateValidation = validateAndCorrectUtilityRate(finalBillData.electricityRate ?? null, utilityNameForRate);
+    const preValidationRate = finalBillData.electricityRate ?? null;
+    const rateValidation = validateAndCorrectUtilityRate(preValidationRate, utilityNameForRate);
     if (rateValidation.corrected) {
-      console.log(`[bill-upload] Rate corrected: $${rateValidation.originalRate?.toFixed(3) ?? 'null'} → $${rateValidation.rate.toFixed(3)}/kWh (source: ${rateValidation.source})`);
+      console.log(`[UTILITY_RATE_SELECTED] source=${rateValidation.source} rate=$${rateValidation.rate.toFixed(3)}/kWh originalRate=$${rateValidation.originalRate?.toFixed(3) ?? 'null'} suspect=${rateValidation.suspect} utility="${utilityNameForRate}"`);
       finalBillData.electricityRate = rateValidation.rate;
     } else {
-      console.log(`[bill-upload] Rate valid: $${billData.electricityRate?.toFixed(3)}/kWh`);
+      console.log(`[UTILITY_RATE_SELECTED] source=extracted rate=$${rateValidation.rate.toFixed(3)}/kWh suspect=false utility="${utilityNameForRate}"`);
     }
+    console.log(`[UTILITY_RATE_SOURCE] extracted=$${preValidationRate?.toFixed(3) ?? 'null'} final=$${finalBillData.electricityRate?.toFixed(3) ?? 'null'} corrected=${rateValidation.corrected} source=${rateValidation.source}`);
+
+    // Structured parse complete log
+    console.log(`[BILL_PARSE_COMPLETE] utility="${finalBillData.utilityProvider ?? 'unknown'}" monthlyKwh=${finalBillData.monthlyKwh ?? 'null'} annualKwh=${finalBillData.estimatedAnnualKwh ?? 'null'} rate=$${finalBillData.electricityRate?.toFixed(3) ?? 'null'} confidence=${finalBillData.confidence} fields=${finalBillData.extractedFields?.join(',') ?? 'none'}`);
 
     // ── Deferred Validation ──────────────────────────────────────────────
     // Run AFTER geocoding + utility matching + rate correction so warnings reflect
@@ -405,13 +412,16 @@ export async function POST(req: NextRequest) {
       } : null,
       extractionMethod,
       savedBillId,
-      rateValidation: rateValidation.corrected ? {
-        corrected: true,
+      rateValidation: {
+        corrected: rateValidation.corrected,
+        suspect: rateValidation.suspect,
         originalRate: rateValidation.originalRate,
         correctedRate: rateValidation.rate,
         source: rateValidation.source,
-        message: `Rate corrected from $${rateValidation.originalRate?.toFixed(3) ?? 'null'}/kWh (likely avoided cost) to $${rateValidation.rate.toFixed(3)}/kWh (retail rate)`,
-      } : null,
+        message: rateValidation.corrected
+          ? `Rate ${rateValidation.suspect ? 'suspect (supply-only component)' : 'out of range'}: $${rateValidation.originalRate?.toFixed(3) ?? 'null'}/kWh → $${rateValidation.rate.toFixed(3)}/kWh (${rateValidation.source})`
+          : null,
+      },
       systemSizing: systemSizeKw ? {
         recommendedKw: systemSizeKw,
         annualKwh: annualKwhForSizing,

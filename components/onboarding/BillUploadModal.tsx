@@ -342,7 +342,39 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
             `Utility: ${result.billData.utilityProvider || result.utilityData?.utilityName || 'Unknown'}`,
             `System size: ${systemKw.toFixed(1)} kW (${offsetPercent}% offset)`,
           ].join('\n'),
-          billData: sanitizeForJson(result.billData),
+          // FIX v47.13 T2d: Wrap billData in _billAnalysis format that rowToProject expects.
+          // rowToProject checks for rawBillData._billAnalysis (new format) to hydrate
+          // billAnalysis, utilityRatePerKwh, utilityName, stateCode, city on reload.
+          // Sending flat BillData object caused all those fields to be undefined after reload.
+          billData: sanitizeForJson({
+            _billAnalysis: {
+              // Standard BillAnalysis fields expected by downstream screens
+              monthlyKwh: result.billData.monthlyKwh ?? null,
+              annualKwh: result.billData.estimatedAnnualKwh ?? null,
+              monthlyUsageHistory: result.billData.monthlyUsageHistory ?? [],
+              estimatedAnnualKwh: result.billData.estimatedAnnualKwh ?? null,
+              electricityRate: result.billData.electricityRate ?? result.utilityData?.avgRatePerKwh ?? null,
+              utilityProvider: result.billData.utilityProvider ?? result.utilityData?.utilityName ?? null,
+              customerName: result.billData.customerName ?? null,
+              serviceAddress: result.billData.serviceAddress ?? null,
+              confidence: result.billData.confidence ?? 'medium',
+              extractedFields: result.billData.extractedFields ?? [],
+            },
+            // Top-level keys used by rowToProject hydration
+            _utilityRatePerKwh: result.billData.electricityRate ?? result.utilityData?.avgRatePerKwh ?? null,
+            _utilityName: result.billData.utilityProvider ?? result.utilityData?.utilityName ?? null,
+            _stateCode: result.locationData?.stateCode ?? null,
+            _city: result.locationData?.city ?? null,
+            // Preserve full raw data for debugging
+            _rawBillData: result.billData,
+            _locationData: result.locationData,
+            _utilityData: result.utilityData,
+          }),
+          // Also pass as top-level project fields for immediate use (no reload needed)
+          utilityName: result.billData.utilityProvider ?? result.utilityData?.utilityName ?? undefined,
+          utilityRatePerKwh: result.billData.electricityRate ?? result.utilityData?.avgRatePerKwh ?? undefined,
+          stateCode: result.locationData?.stateCode ?? undefined,
+          city: result.locationData?.city ?? undefined,
         }),
       });
       const projectData = await projectRes.json();
@@ -352,6 +384,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
       // API returns { success: true, data: project }
       const projectId = projectData.data?.id;
       if (!projectId) throw new Error('Project created but no ID returned');
+      console.log(`[PROJECT_CREATED_FROM_BILL] projectId=${projectId} utilityRate=${result.billData.electricityRate ?? result.utilityData?.avgRatePerKwh} utility=&quot;${result.billData.utilityProvider ?? result.utilityData?.utilityName}&quot; annualKwh=${result.billData.estimatedAnnualKwh}`);
       log(`✓ Project created: ${projectName}`);
 
       // 3. Create proposal (API only needs projectId — fetches project data itself)
@@ -479,9 +512,11 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
             }),
           }),
         });
+        console.log(`[BILL_SAVED_TO_PROJECT] projectId=${projectId} utilityRate=${result.billData.electricityRate ?? result.utilityData?.avgRatePerKwh} annualKwh=${result.billData.estimatedAnnualKwh} utility=&quot;${result.billData.utilityProvider ?? result.utilityData?.utilityName}&quot;`);
         log('✓ Bill data persisted');
-      } catch {
+      } catch (billErr) {
         // Non-fatal — bill data is also in project.bill_data JSONB
+        console.warn('[BILL_SAVE_FAILED] bills table persistence failed (non-fatal):', billErr);
       }
 
       log('✓ All done! Redirecting to project...');

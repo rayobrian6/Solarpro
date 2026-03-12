@@ -877,10 +877,13 @@ export function getAllUtilityNames(): string[] {
   return Object.values(UTILITY_REGISTRY).map(u => u.name).sort();
 }
 
-// Valid retail electricity rate range: $0.06-$0.60/kWh.
-// Below MIN: likely an avoided cost / wholesale credit rate, not retail.
+// Valid retail electricity rate range: $0.10-$0.60/kWh.
+// Below MIN: suspect rate — likely a supply-only/generation component extracted from bill
+//   (e.g. CMP supply charge ~$0.069/kWh) instead of all-in retail. Maine retail is ~$0.265.
+//   $0.10 is the residential retail floor across all US states (no state is below that).
 // Above MAX: likely a misparse (e.g. total bill amount mistaken for per-kWh rate).
-const MIN_VALID_RETAIL_RATE = 0.06; // $/kWh
+// FIX v47.13 T1d: raised from $0.06 → $0.10 to catch supply-only rates like CMP's $0.069
+const MIN_VALID_RETAIL_RATE = 0.10; // $/kWh — residential retail floor (was $0.06, too low)
 const MAX_VALID_RETAIL_RATE = 0.60; // $/kWh
 
 // -- Full utility rate breakdown (2024/2025 EIA + utility tariff data) --------
@@ -1093,13 +1096,17 @@ export function getUtilityRateBreakdown(utilityName: string | null | undefined):
  * Validate and correct an extracted electricity rate.
  *
  * Priority:
- *   1. extractedRate -- if within valid retail range ($0.06-$0.60/kWh), use as-is
- *   2. Utility registry rate -- accurate 2024/2025 all-in retail rate from UTILITY_RATE_BREAKDOWNS
- *   3. National default ($0.13/kWh)
+ *   1. Utility registry rate -- if extracted rate is SUSPECT (< $0.10), always override with DB rate
+ *      This catches supply-only/generation-component rates extracted from bills
+ *      (e.g. CMP supply charge ~$0.069/kWh instead of all-in retail ~$0.265/kWh)
+ *   2. extractedRate -- if within valid retail range ($0.10-$0.60/kWh) AND no DB override, use as-is
+ *   3. Utility registry rate -- fallback for missing/invalid rates
+ *   4. National default ($0.13/kWh)
  *
  * Corrects if:
  *   - Rate is missing/null
- *   - Rate < $0.06/kWh (likely avoided cost / wholesale credit)
+ *   - Rate < $0.10/kWh (suspect — likely supply-only component, not retail)
+ *     FIX v47.13: raised from $0.06 to $0.10 — no US state has residential retail below $0.10
  *   - Rate > $0.60/kWh (likely a misparse -- total charge vs per-kWh rate)
  */
 export function validateAndCorrectUtilityRate(
@@ -1110,31 +1117,50 @@ export function validateAndCorrectUtilityRate(
   corrected: boolean;
   originalRate: number | null;
   source: 'extracted' | 'utility_db' | 'national_default';
+  suspect: boolean;
 } {
   const original = extractedRate ?? null;
 
-  // If extracted rate is within valid retail range, use it as-is
-  if (
-    extractedRate !== null &&
-    extractedRate !== undefined &&
-    extractedRate >= MIN_VALID_RETAIL_RATE &&
-    extractedRate <= MAX_VALID_RETAIL_RATE
-  ) {
-    return { rate: extractedRate, corrected: false, originalRate: original, source: 'extracted' };
-  }
-
-  // Rate is missing, too low (avoided cost), or too high (misparse) — look up utility DB
-  if (utilityName) {
+  // FIX v47.13 T1d: If we have a DB rate for this utility, ALWAYS prefer it over a suspect
+  // extracted rate (< $0.10). OCR frequently picks up supply-only line items (e.g. CMP $0.069)
+  // instead of the all-in retail rate ($0.265). DB rate is authoritative 2024/2025 data.
+  const dbRate = (() => {
+    if (!utilityName) return null;
     const utilityEntry = getUtilityRules(utilityName);
     const utilityId = utilityEntry?.id;
-    if (utilityId && UTILITY_RETAIL_RATES[utilityId]) {
-      return {
-        rate: UTILITY_RETAIL_RATES[utilityId],
-        corrected: true,
-        originalRate: original,
-        source: 'utility_db',
-      };
+    if (utilityId && UTILITY_RETAIL_RATES[utilityId]) return UTILITY_RETAIL_RATES[utilityId];
+    return null;
+  })();
+
+  // If extracted rate is within valid retail range AND not suspect, use it
+  // But if DB rate exists, only trust extracted if it's reasonably close (within 50% of DB rate)
+  const isSuspect =
+    extractedRate === null ||
+    extractedRate === undefined ||
+    extractedRate < MIN_VALID_RETAIL_RATE ||
+    extractedRate > MAX_VALID_RETAIL_RATE;
+
+  if (!isSuspect) {
+    // Rate is in valid range — but if DB rate exists and extracted is far below DB, flag as suspect
+    const isUnreasonablyLow = dbRate !== null && extractedRate! < dbRate * 0.5;
+    if (!isUnreasonablyLow) {
+      return { rate: extractedRate!, corrected: false, originalRate: original, source: 'extracted', suspect: false };
     }
+    // Extracted is less than 50% of known DB rate — likely a supply-only component
+    if (dbRate) {
+      return { rate: dbRate, corrected: true, originalRate: original, source: 'utility_db', suspect: true };
+    }
+  }
+
+  // Rate is missing, too low (avoided cost/supply-only), or too high (misparse) — look up utility DB
+  if (dbRate) {
+    return {
+      rate: dbRate,
+      corrected: true,
+      originalRate: original,
+      source: 'utility_db',
+      suspect: isSuspect,
+    };
   }
 
   // Fall back to national average
@@ -1143,6 +1169,7 @@ export function validateAndCorrectUtilityRate(
     corrected: true,
     originalRate: original,
     source: 'national_default',
+    suspect: isSuspect,
   };
 }
 
