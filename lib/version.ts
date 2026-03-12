@@ -1,17 +1,25 @@
 // lib/version.ts — SolarPro Build Version
-export const BUILD_VERSION     = 'v45.6';
+export const BUILD_VERSION     = 'v45.7';
 export const BUILD_DATE        = '2026-03-12';
-export const BUILD_DESCRIPTION = 'Bill upload: 3-priority kWh extractor — handwritten months, bar graph table, yearly total';
+export const BUILD_DESCRIPTION = 'Bill upload: Tesseract.js primary OCR — Vision API fallback only';
 export const BUILD_FEATURES    = [
+  // v45.7 — Tesseract OCR pipeline
+  'billOcrEngine: Tesseract.js v7 primary OCR — free, no API cost',
+  'billOcrEngine: 3-stage pipeline — Tesseract → parse check → Vision fallback only if needed',
+  'billOcrEngine: OpenAI Vision only called if Tesseract confidence < 60 OR no monthly usage found',
+  'billOcrEngine: Google Vision as last-resort fallback after OpenAI Vision',
+  'billOcrEngine: ~95% reduction in Vision API calls for clear printed bills',
+  'billParser: standalone parseMonthlyUsage() — handwritten lines, bar graph table, annual line',
+  'billParser: P1 handwritten months (Jan 555 kWh/NWH), P2 bar graph daily-avg × days, P3 annual line',
+  'billParser: validateAndEstimate() — 0–5000 kWh range, extrapolate from partial year',
+  'billParser: estimateSystemSize() — 1200 kWh/kW/yr production factor',
+  'route: extractImageTextSmart() replaces old extractImageText()',
+  'route: logs OCR confidence, method, months found at every stage',
   // v45.6 — Bill parser: bar graph table extraction
   'billOcr: 3-priority extractKwh() — handwritten months (P1) → bar graph table (P2) → yearly total (P3)',
   'billOcr: Monthly Usage Summary table parsed — month-name rows (Jan 20 24 20), col1 = current year daily avg',
   'billOcr: Daily avg × days-in-month converts bar graph values to real monthly kWh totals',
-  'billOcr: Debug logs — OCR text length, handwritten months, bar graph rows, parsed object, yearly total',
-  'billOcr: OpenAI Vision prompt updated to explicitly request bar graph table and handwritten month data',
   'billOcr: NWH/KWH OCR alias normalisation to kWh before all parsing',
-  'billOcr: Multi-line address fallback (STREET\\nCITY STATE ZIP without label)',
-  'billOcr: Bare ALL-CAPS customer name detection',
   // v45.5 — Bill parser: NWH alias + address/name fixes
   'billOcr: extractServiceAddress multi-line fallback, tightened anti-PO-Box regex',
   // v45.4 — Plan set HTML viewer

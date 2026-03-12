@@ -5,6 +5,8 @@ import { detectUtility } from '@/lib/utilityDetector';
 import { getUserFromRequest } from '@/lib/auth';
 import { extractPdfTextPure } from '@/lib/pdfExtract';
 import { validateAndCorrectUtilityRate, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
+import { recognizeImage, recognizeImageWithVision, recognizeImageWithGoogle } from '@/lib/billOcrEngine';
+import { parseMonthlyUsage } from '@/lib/billParser';
 
 // Top-level reference so webpack marks pdf-parse as external (not bundled)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -65,16 +67,17 @@ export async function POST(req: NextRequest) {
         fileName.endsWith('.webp')
       ) {
         const safeMime = fileType.startsWith('image/') ? fileType : 'image/jpeg';
-        extractedText = await extractImageText(buffer, safeMime);
-        extractionMethod = 'image-vision';
-        console.log(`[bill-upload] Image extraction result: chars=${extractedText.length}`);
+        const ocrResult = await extractImageTextSmart(buffer, safeMime);
+        extractedText = ocrResult.text;
+        extractionMethod = ocrResult.method;
+        console.log(`[bill-upload] Image extraction result: method=${ocrResult.method}, chars=${extractedText.length}, confidence=${ocrResult.confidence}`);
       } else {
         return NextResponse.json({ success: false, error: 'Unsupported file type. Please upload PDF, JPG, or PNG.' }, { status: 400 });
       }
     }
 
     if (!extractedText.trim()) {
-      const visionError = (extractImageText as any)._lastError || null;
+      const visionError = null;
       return NextResponse.json({
         success: false,
         error: 'Could not extract text from file. Please ensure the file is a clear, readable utility bill.',
@@ -362,83 +365,107 @@ async function extractPdfTextCli(buffer: Buffer): Promise<string> {
   return text;
 }
 
-// ── Image extraction ──────────────────────────────────────────────────────────
-async function extractImageText(buffer: Buffer, mimeType: string): Promise<string> {
-  const safeMime = mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
+// ── Smart 3-stage image extraction ──────────────────────────────────────────
+// Stage 1: Tesseract.js (free, no API cost) — primary OCR
+// Stage 2: Check if monthly usage was detected from Tesseract output
+// Stage 3: OpenAI Vision / Google Vision fallback ONLY if:
+//          - Tesseract confidence < 60, OR
+//          - No monthly usage detected from Tesseract text
+async function extractImageTextSmart(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<{ text: string; method: string; confidence: number }> {
   const openaiKey = process.env.OPENAI_API_KEY;
-  const base64SizeKb = Math.round(buffer.length * 4 / 3 / 1024);
-  console.log(`[bill-upload] extractImageText: mime=${safeMime}, buffer=${buffer.length}b, base64~${base64SizeKb}KB, hasOpenAI=${!!openaiKey}`);
+  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
 
-  // 1. OpenAI Vision
+  // ── Stage 1: Tesseract OCR (free) ─────────────────────────────────────────
+  console.log('[bill-upload] Stage 1: Tesseract OCR...');
+  const tesseractResult = await recognizeImage(buffer, mimeType);
+
+  if (tesseractResult.rawText.length > 50) {
+    // ── Stage 2: Check if we got usable monthly data ─────────────────────────
+    const parseCheck = parseMonthlyUsage(tesseractResult.rawText);
+    const hasUsage = parseCheck.monthsFound >= 3 || parseCheck.annualUsage !== null;
+
+    console.log(`[bill-upload] Tesseract: confidence=${tesseractResult.confidence}, chars=${tesseractResult.rawText.length}, monthsFound=${parseCheck.monthsFound}, annualLine=${parseCheck.annualUsage}, hasUsage=${hasUsage}`);
+
+    // Good OCR with usage data — use it directly, no AI needed
+    if (tesseractResult.confidence >= 60 && hasUsage) {
+      console.log('[bill-upload] Tesseract sufficient — skipping Vision API (cost $0)');
+      return {
+        text: tesseractResult.rawText,
+        method: 'tesseract',
+        confidence: tesseractResult.confidence,
+      };
+    }
+
+    // Decent OCR but no usage found — try Vision as supplement
+    if (tesseractResult.confidence >= 60 && !hasUsage) {
+      console.log('[bill-upload] Tesseract high confidence but no usage detected — trying Vision fallback');
+    } else {
+      console.log(`[bill-upload] Tesseract confidence low (${tesseractResult.confidence}) — trying Vision fallback`);
+    }
+  } else {
+    console.log(`[bill-upload] Tesseract returned too little text (${tesseractResult.rawText.length} chars) — trying Vision fallback`);
+  }
+
+  // ── Stage 3: Vision API fallback ──────────────────────────────────────────
+  // Only reached if Tesseract confidence < 60 OR no monthly usage detected
+
   if (openaiKey) {
-    try {
-      const base64 = buffer.toString('base64');
-      const dataUrl = `data:${safeMime};base64,${base64}`;
-      console.log(`[bill-upload] Sending to OpenAI Vision: dataUrl length=${dataUrl.length}`);
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          max_tokens: 2000,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: 'Extract ALL text from this utility bill image exactly as it appears. Pay special attention to: (1) any handwritten month lists like "Jan 555 kWh", (2) printed tables beneath "Monthly Usage Summary" or "Your Monthly Usage Summary(kWh)" showing month names with numeric columns, (3) any yearly total kWh. Output only the raw extracted text, preserving the table layout with month names and numbers on the same line.' },
-              { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
-            ],
-          }],
-        }),
-        signal: AbortSignal.timeout(45000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const text = data?.choices?.[0]?.message?.content?.trim();
-        if (text && text.length > 20) {
-          console.log('[bill-upload] OpenAI Vision extracted', text.length, 'chars from image');
-          return text;
-        }
-        console.warn('[bill-upload] OpenAI Vision returned empty/short text. finish_reason:', data?.choices?.[0]?.finish_reason, '| usage:', JSON.stringify(data?.usage));
-        // Don't return '' here — fall through to Google Vision fallback
+    console.log('[bill-upload] Stage 3a: OpenAI Vision fallback...');
+    const visionResult = await recognizeImageWithVision(buffer, mimeType, openaiKey);
+    if (visionResult.rawText.length > 50) {
+      const visionParse = parseMonthlyUsage(visionResult.rawText);
+      const tesseractParse = tesseractResult.rawText.length > 50
+        ? parseMonthlyUsage(tesseractResult.rawText)
+        : null;
+
+      if (
+        visionParse.monthsFound >= (tesseractParse?.monthsFound ?? 0) ||
+        (visionParse.annualUsage !== null && tesseractParse?.annualUsage === null)
+      ) {
+        console.log(`[bill-upload] Using OpenAI Vision text (${visionParse.monthsFound} months vs Tesseract ${tesseractParse?.monthsFound ?? 0})`);
+        return {
+          text: visionResult.rawText,
+          method: 'openai-vision-fallback',
+          confidence: visionResult.confidence,
+        };
       } else {
-        const errBody = await res.text();
-        console.warn('[bill-upload] OpenAI Vision HTTP error:', res.status, errBody.slice(0, 400));
-        // Store error for debug surfacing but continue to next method
-        (extractImageText as any)._lastError = `OpenAI Vision ${res.status}: ${errBody.slice(0, 200)}`;
+        console.log(`[bill-upload] Keeping Tesseract text (${tesseractParse?.monthsFound ?? 0} months vs Vision ${visionParse.monthsFound})`);
+        return {
+          text: tesseractResult.rawText,
+          method: 'tesseract-kept',
+          confidence: tesseractResult.confidence,
+        };
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn('[bill-upload] OpenAI Vision failed:', msg);
-      (extractImageText as any)._lastError = msg;
     }
   }
 
-  // 2. Google Vision fallback
-  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
   if (googleKey) {
-    try {
-      const base64 = buffer.toString('base64');
-      const res = await fetch(
-        `https://vision.googleapis.com/v1/images:annotate?key=${googleKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ requests: [{ image: { content: base64 }, features: [{ type: 'DOCUMENT_TEXT_DETECTION' }] }] }),
-          signal: AbortSignal.timeout(20000),
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const text = data?.responses?.[0]?.fullTextAnnotation?.text;
-        if (text?.trim().length > 20) {
-          console.log('[bill-upload] Google Vision extracted', text.length, 'chars from image');
-          return text;
-        }
-      }
-    } catch { /* ignore */ }
+    console.log('[bill-upload] Stage 3b: Google Vision fallback...');
+    const googleResult = await recognizeImageWithGoogle(buffer, googleKey);
+    if (googleResult.rawText.length > 50) {
+      return {
+        text: googleResult.rawText,
+        method: 'google-vision-fallback',
+        confidence: googleResult.confidence,
+      };
+    }
   }
 
-  return '';
+  // All stages failed — return best we have
+  if (tesseractResult.rawText.length > 20) {
+    console.log('[bill-upload] All vision fallbacks failed — using low-confidence Tesseract result');
+    return {
+      text: tesseractResult.rawText,
+      method: 'tesseract-low-confidence',
+      confidence: tesseractResult.confidence,
+    };
+  }
+
+  console.error('[bill-upload] All OCR stages failed — no text extracted');
+  return { text: '', method: 'failed', confidence: 0 };
 }
 
 // ── System size ───────────────────────────────────────────────────────────────

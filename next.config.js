@@ -13,7 +13,7 @@ const nextConfig = {
   },
   experimental: {
     // Optional server-only packages — skip webpack bundling, resolved at runtime
-    serverComponentsExternalPackages: ['pdf2pic', 'openai', 'pdf-parse', 'pdfjs-dist'],
+    serverComponentsExternalPackages: ['pdf2pic', 'openai', 'pdf-parse', 'pdfjs-dist', 'tesseract.js'],
   },
   images: {
     remotePatterns: [
@@ -30,6 +30,7 @@ const nextConfig = {
       'openai',
       'pdf-parse',
       'pdfjs-dist',
+      'tesseract.js',
     ];
     return config;
   },
