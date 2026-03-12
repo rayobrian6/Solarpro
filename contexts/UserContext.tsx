@@ -42,20 +42,29 @@ const UserContext = createContext<UserContextValue>({
   refreshUser: async () => {},
 });
 
-// How many times UserContext will retry a DB_STARTING 503 before giving up.
-// Total max wait: ME_MAX_RETRIES * ME_RETRY_DELAY = ~15s
-const ME_MAX_RETRIES = 5;
-const ME_RETRY_DELAY = 3000; // ms
+// ─── Retry configuration ──────────────────────────────────────────────────────
+//
+// CRITICAL RULE: setUser(null) is called ONLY when the server returns 401.
+// Any other failure (503, 500, network) PRESERVES the existing user state.
+// A logged-in user must NEVER be logged out because of a database error.
+//
+const ME_MAX_RETRIES   = 10;
+const ME_BASE_DELAY_MS = 1000;   // exponential: 1s, 2s, 4s, 8s, 16s… capped at 15s
+const ME_MAX_DELAY_MS  = 15_000;
+
+// Status values returned by fetchUserFromDb
+// 'ok'        — authenticated, user populated
+// 'logout'    — 401, JWT invalid/expired, must clear session
+// 'retry'     — transient error, retry with backoff
+// 'preserve'  — permanent error but NOT auth failure, keep existing session
+type FetchStatus = 'ok' | 'logout' | 'retry' | 'preserve';
+type FetchResult = { status: FetchStatus; user: AppUser | null };
 
 /**
- * Fetches the current user from /api/auth/me.
- *
- * Returns:
- *   { user: AppUser }           — authenticated user
- *   { user: null }              — definitively not authenticated (401/404)
- *   { user: null, retry: true } — transient error (DB cold start), caller should retry
+ * Single fetch attempt for /api/auth/me.
+ * Returns a { status, user } pair — never throws.
  */
-async function fetchUserFromDb(): Promise<{ user: AppUser | null; retry?: boolean }> {
+async function fetchUserFromDb(): Promise<FetchResult> {
   try {
     const res = await fetch('/api/auth/me', {
       credentials: 'include',
@@ -63,53 +72,48 @@ async function fetchUserFromDb(): Promise<{ user: AppUser | null; retry?: boolea
       headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
     });
 
-    // 503 — DB cold start or config error. Do NOT treat as "logged out".
+    // ── 401: JWT invalid/expired — the ONLY true logout signal ───────────────
+    if (res.status === 401) {
+      console.log('[UserContext] 401 — session expired or cookie missing');
+      return { status: 'logout', user: null };
+    }
+
+    // ── 503: DB cold start or config error ───────────────────────────────────
     if (res.status === 503) {
       const json = await res.json().catch(() => ({}));
       const code = (json as any)?.code;
-      if (code === 'DB_STARTING') {
-        console.warn('[UserContext] DB starting up — will retry');
-        return { user: null, retry: true };
-      }
       if (code === 'DB_CONFIG_ERROR') {
-        console.error('[UserContext] DB config error — not retrying');
-        return { user: null, retry: false };
+        // Genuine server misconfiguration — retrying won't help.
+        // But this is NOT an auth failure — preserve the session.
+        console.error('[UserContext] AUTH_DB_CONFIG_ERROR — preserving existing session');
+        return { status: 'preserve', user: null };
       }
-      // Unknown 503 — retry conservatively
-      return { user: null, retry: true };
+      console.warn('[UserContext] AUTH_DB_STARTING — DB waking up, will retry');
+      return { status: 'retry', user: null };
     }
 
-    // 401 — definitively not authenticated (expired/missing cookie), stop immediately
-    if (res.status === 401) return { user: null, retry: false };
-
-    // 500 or other server errors during startup — retry conservatively.
-    // A 500 during a Vercel cold start means the function crashed before
-    // it could return DB_STARTING. Retrying is always safer than logging out.
+    // ── Any other non-200: 500, 502, 504, etc ────────────────────────────────
+    // NEVER treat these as logout. Always retry — it could be a cold start
+    // that didn't return DB_STARTING correctly.
     if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      const errCode = (errJson as any)?.code;
-      // Only stop retrying if we get an explicit non-transient code
-      if (errCode === 'DB_CONFIG_ERROR') {
-        console.error('[UserContext] DB config error (non-200) — not retrying');
-        return { user: null, retry: false };
-      }
-      console.warn(`[UserContext] /api/auth/me returned ${res.status} — will retry`);
-      return { user: null, retry: true };
+      console.warn(`[UserContext] /api/auth/me returned ${res.status} — treating as transient`);
+      return { status: 'retry', user: null };
     }
 
+    // ── 200: parse response ───────────────────────────────────────────────────
     const json = await res.json();
     const u = json?.data || json?.user || json;
-    if (!u?.id) return { user: null, retry: false };
 
-    // isFreePass MUST come from DB boolean is_free_pass only
-    // Never infer from subscriptionStatus string
+    // Empty response — transient parse issue, retry
+    if (!u?.id) {
+      console.warn('[UserContext] /api/auth/me returned 200 but no user id — will retry');
+      return { status: 'retry', user: null };
+    }
+
     const isFP = u.isFreePass === true;
     const role = u.role || 'user';
     const status = u.subscriptionStatus || 'trialing';
     const trialEndsAt = u.trialEndsAt || null;
-
-    // Compute hasAccess using the same logic as hasPlatformAccess()
-    // This ensures UserContext.hasAccess is always consistent with lib/permissions.ts
     const roleLower = role.toLowerCase();
     const trialEnd = trialEndsAt ? new Date(trialEndsAt) : null;
     const hasAccess =
@@ -117,49 +121,63 @@ async function fetchUserFromDb(): Promise<{ user: AppUser | null; retry?: boolea
       roleLower === 'admin' ||
       isFP ||
       status === 'active' ||
-      status === 'free_pass' ||   // set by admin grant_free_pass alongside is_free_pass boolean
+      status === 'free_pass' ||
       (status === 'trialing' && trialEnd !== null && trialEnd > new Date());
 
-    return {
-      user: {
-        id: u.id,
-        name: u.name || u.email,
-        email: u.email,
-        role,
-        company: u.company,
-        phone: u.phone,
-        plan: u.plan || 'starter',
-        subscriptionStatus: status,
-        trialEndsAt,
-        isFreePass: isFP,
-        freePassNote: u.freePassNote || null,
-        hasAccess,
-        companyLogoUrl: u.companyLogoUrl || null,
-        brandPrimaryColor: u.brandPrimaryColor || '#f59e0b',
-        brandSecondaryColor: u.brandSecondaryColor || '#0f172a',
-      },
+    const user: AppUser = {
+      id: u.id,
+      name: u.name || u.email,
+      email: u.email,
+      role,
+      company: u.company,
+      phone: u.phone,
+      plan: u.plan || 'starter',
+      subscriptionStatus: status,
+      trialEndsAt,
+      isFreePass: isFP,
+      freePassNote: u.freePassNote || null,
+      hasAccess,
+      companyLogoUrl: u.companyLogoUrl || null,
+      brandPrimaryColor: u.brandPrimaryColor || '#f59e0b',
+      brandSecondaryColor: u.brandSecondaryColor || '#0f172a',
     };
+    return { status: 'ok', user };
+
   } catch {
-    // Network error — retry
-    return { user: null, retry: true };
+    // Network error, fetch aborted — always retry
+    console.warn('[UserContext] fetchUserFromDb: network error — will retry');
+    return { status: 'retry', user: null };
   }
 }
 
 /**
- * Fetches the current user with automatic retry on DB cold starts.
- * Retries up to ME_MAX_RETRIES times before giving up.
- * Only returns null (logged-out appearance) after all retries fail with non-transient errors.
+ * Fetches the current user with exponential backoff retry on transient errors.
+ *
+ * Returns:
+ *   AppUser    — authenticated, fresh from DB
+ *   null       — 401 — definitively not authenticated (JWT expired/missing)
+ *   'transient'— all retries exhausted but NOT a logout condition
+ *                callers MUST preserve existing session state
  */
-async function fetchUserWithRetry(): Promise<AppUser | null> {
+async function fetchUserWithRetry(): Promise<AppUser | null | 'transient'> {
   for (let attempt = 0; attempt <= ME_MAX_RETRIES; attempt++) {
-    const { user, retry } = await fetchUserFromDb();
-    if (user) return user;
-    if (!retry) return null; // definitive non-auth — stop immediately
+    const { status, user } = await fetchUserFromDb();
+
+    if (status === 'ok' && user)   return user;
+    if (status === 'logout')       return null;      // 401 only — truly not authenticated
+    if (status === 'preserve')     return 'transient'; // config error — preserve session
+
+    // status === 'retry' — wait then try again
     if (attempt < ME_MAX_RETRIES) {
-      await new Promise(r => setTimeout(r, ME_RETRY_DELAY));
+      const delay = Math.min(ME_BASE_DELAY_MS * Math.pow(2, attempt), ME_MAX_DELAY_MS);
+      console.warn(`[UserContext] Retry attempt ${attempt + 1}/${ME_MAX_RETRIES} in ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
     }
   }
-  return null;
+
+  // All retries exhausted — DB unreachable but user may still be authenticated
+  console.warn('[UserContext] All retries exhausted — preserving existing session state');
+  return 'transient';
 }
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
@@ -169,6 +187,14 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   // Queue a refresh if one is already in-flight — ensures the last call wins
   const pendingRefreshRef = useRef(false);
 
+  /**
+   * refreshUser — re-fetches user from DB and updates state.
+   *
+   * CRITICAL CONTRACT:
+   * - On success: updates user state with fresh data
+   * - On 401: clears user state (user truly not authenticated)
+   * - On ANY other failure: PRESERVES existing user state (never logs out on DB error)
+   */
   const refreshUser = useCallback(async () => {
     // If already fetching, queue one more refresh for when it completes
     if (fetchingRef.current) {
@@ -178,40 +204,43 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     fetchingRef.current = true;
     pendingRefreshRef.current = false;
     try {
-      const u = await fetchUserWithRetry();
-      setUser(u);
+      const result = await fetchUserWithRetry();
+      if (result === 'transient') {
+        // Transient failure — preserve existing state, do NOT call setUser(null)
+        console.warn('[UserContext] refreshUser: transient failure — keeping existing session');
+        // Do not touch user state — keep whatever was there before
+      } else {
+        // null = 401 (definitively not authenticated), AppUser = success
+        setUser(result);
+      }
     } finally {
       fetchingRef.current = false;
       setLoading(false);
       // If a refresh was queued while we were fetching, run it now
       if (pendingRefreshRef.current) {
         pendingRefreshRef.current = false;
-        // Small delay to avoid tight loop
         setTimeout(() => {
-          fetchUserWithRetry().then(u => setUser(u)).catch(() => {});
-        }, 200);
+          fetchUserWithRetry().then(result => {
+            if (result !== 'transient') setUser(result);
+          }).catch(() => {
+            // Network completely down — preserve state
+          });
+        }, 500);
       }
     }
   }, []);
 
-  // Fetch on mount
+  // Fetch on mount — initial load
   useEffect(() => {
     refreshUser();
   }, [refreshUser]);
 
-  // Re-fetch when window regains focus — ensures stale state is cleared
-  // after admin actions, tab switches, or long idle periods
+  // Re-fetch when window regains focus or tab becomes visible.
+  // Uses background refresh — on failure, preserves existing session.
   useEffect(() => {
-    const onFocus = () => {
-      // Only refresh if we already have a user (i.e. logged in)
-      // Avoids unnecessary fetches on login page
-      refreshUser();
-    };
-    // Also refresh when tab becomes visible (handles mobile app switching)
+    const onFocus = () => { refreshUser(); };
     const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        refreshUser();
-      }
+      if (document.visibilityState === 'visible') { refreshUser(); }
     };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -221,18 +250,27 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refreshUser]);
 
-  // Periodic re-fetch every 30 seconds — ensures admin-granted permissions
-  // (free pass, role changes) propagate to the affected user's session
-  // without requiring a manual page reload or tab switch.
+  // Periodic re-fetch every 5 minutes — ensures admin-granted permissions
+  // (free pass, role changes) propagate. Uses a background refresh that
+  // NEVER clears session state on failure.
   useEffect(() => {
     const interval = setInterval(() => {
-      // Only poll if the page is visible and user is logged in
       if (document.visibilityState === 'visible' && !loading) {
-        fetchUserWithRetry().then(u => {
-          if (u) setUser(u);
-        }).catch(() => {});
+        fetchUserWithRetry().then(result => {
+          // Only update state on success — never clear on failure
+          if (result !== null && result !== 'transient') {
+            setUser(result as AppUser);
+          }
+          // null (401) clears state — session genuinely expired
+          if (result === null) {
+            setUser(null);
+          }
+          // 'transient' — do nothing, keep current state
+        }).catch(() => {
+          // Network down — preserve state
+        });
       }
-    }, 30_000);
+    }, 5 * 60_000); // 5 minutes — was 30s which was too aggressive
     return () => clearInterval(interval);
   }, [loading]);
 
