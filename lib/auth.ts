@@ -16,6 +16,7 @@ export const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export function getDb() {
   const url = process.env.DATABASE_URL;
+  console.log('DATABASE_URL loaded:', !!url);
   if (!url || url === 'YOUR_NEON_DATABASE_URL_HERE') {
     console.error(
       '\n[getDb] DATABASE_URL is not configured.\n' +
