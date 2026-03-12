@@ -1,8 +1,14 @@
 // lib/version.ts — SolarPro Build Version
-export const BUILD_VERSION     = 'v46.1';
-export const BUILD_DATE        = '2026-03-12';
-export const BUILD_DESCRIPTION = 'OCR pipeline: image preprocessing + multi-pass Tesseract + AI fallback + dev branch workflow';
+export const BUILD_VERSION     = 'v46.2';
+export const BUILD_DATE        = '2026-03-13';
+export const BUILD_DESCRIPTION = 'Bill parser: fix handwritten list parser — date vs kWh disambiguation, currentMonthKwh detection';
 export const BUILD_FEATURES    = [
+  // v46.2 — Bill parser fixes
+  'billParser: parseHandwrittenList — skip year-number false matches (Jan 2025 362 → 362 not 2025)',
+  'billParser: parseHandwrittenList — date context guard (Jan 15, 2025 / Jan 15 2025 → skip 15)',
+  'billParser: parseHandwrittenList — comma-number support (1,234 kWh)',
+  'billParser: extractCurrentMonth — added Energy Charge pattern + kWh@ pattern',
+  'billParser: annual cross-check now correctly computes 0.0% diff when explicit == computed',
   // v46.1 — OCR extraction repair
   'billImagePreprocess.ts: EXIF auto-rotate, grayscale, normalize, sharpen, threshold, upscale to 2400px',
   'ocr/route.ts: multi-pass Tesseract — PSM 3 (auto) + PSM 6 (document block), best result wins',

@@ -243,14 +243,49 @@ function parseHandwrittenList(
   const evidence: string[] = [];
   const months: Partial<Record<MonthKey, number>> = {};
 
+  // Match: MonthName [optional year like 2024/2025] number [optional kWh]
+  // e.g. "Jan 2025  362 kWh"  or  "Jan  362"  or  "January    1,234 kWh"
+  // The year (1900-2099) is optional and must be skipped to get the kWh value.
+  // IMPORTANT: Must NOT match billing period dates like "Jan 15, 2025" where
+  // 15 is a day number, not a kWh value. We detect this by checking if the
+  // number is followed by a comma (date separator) or is a plausible day (1-31)
+  // without a kWh suffix in a date context.
   const pat = new RegExp(
-    `(${MONTH_RE_SRC})[a-z]*[\\s\\.\\:\\-]+([1-9][0-9]{2,4})\\s*(?:kwh)?`,
+    `(${MONTH_RE_SRC})[a-z]*` +                          // month name
+    `[\\s\\.\\:\\-]+` +                                    // separator
+    `(?:(?:19|20)\\d{2}[\\s\\.\\:\\-]+)?` +              // optional year (skip it)
+    `([1-9][0-9]{1,3}(?:,[0-9]{3})?)` +                  // kWh value: 10-9999 or 1,234
+    `\\s*(?:kwh)?`,                                        // optional kWh suffix
     'gi',
   );
   let m: RegExpExecArray | null;
   while ((m = pat.exec(t)) !== null) {
     const key = m[1].slice(0, 3).toLowerCase() as MonthKey;
-    const val = parseInt(m[2], 10);
+    // Remove commas from numbers like "1,234"
+    const valStr = m[2].replace(/,/g, '');
+    const val = parseInt(valStr, 10);
+
+    // Skip date-like matches: day numbers (1-31) that appear in a date context
+    // e.g. "Jan 15, 2025"  -> 15 is a day (comma+year follows)
+    //      "Jan 15 2025"   -> 15 followed directly by a 4-digit year
+    //      "Jan 15/2025"   -> 15 is a day (slash+year follows)
+    // But "Jan 15 kWh" or "Jan 15" at end of line = valid kWh only if clearly labeled
+    // Strategy: for values <= 31, require either a kWh suffix in the match OR
+    //           confirm no year follows in the text immediately after
+    const matchEnd = (m.index ?? 0) + m[0].length;
+    const afterMatch = t.slice(matchEnd, matchEnd + 15);
+    const hasKwhSuffix = /kwh/i.test(m[0]);
+    const yearFollows = /^\s*(?:19|20)\d{2}\b/.test(afterMatch);
+    const commaOrSlashYear = /^[,\/]\s*(?:19|20)\d{2}\b/.test(afterMatch.trim());
+    // If val is a plausible day number (1-31) AND no kWh suffix AND year follows -> it's a date
+    if (val <= 31 && !hasKwhSuffix && (yearFollows || commaOrSlashYear)) continue;
+
+    // Skip values that are clearly years (1900-2099) not already consumed by optional group
+    if (val >= 1900 && val <= 2099) continue;
+
+    // kWh values on bills are typically >= 10 (a value of 1-9 is almost always a date/day)
+    if (val < 10) continue;
+
     if (isValidMonthly(val)) {
       // Only overwrite if not already set by printed table (P1 takes priority)
       if (months[key] === undefined) {
@@ -574,11 +609,22 @@ function computeAnnual(
 function extractCurrentMonth(text: string, log: string[]): number | null {
   const t = normalise(text);
   const patterns = [
-    /(?:energy|electric(?:ity)?)\s+(?:usage|used|consumption)\s*[\:\@]?\s*([1-9][0-9]{2,4})\s*kwh/i,
-    /([1-9][0-9]{2,4})\s*kwh\s+(?:used|usage|consumed|billed)/i,
-    /(?:total\s+)?(?:kwh\s+)?usage\s*[\:\s]+([1-9][0-9]{2,4})\s*kwh/i,
-    /([1-9][0-9]{2,4})\s*kwh\s*@/i,
-    /(?:net\s+)?(?:metered\s+)?usage\s*[\:\s]+([1-9][0-9]{2,4})\s*kwh/i,
+    // "Energy Charge  362 kWh  $45.23" — most common CMP bill format
+    /(?:energy|electric(?:ity)?)\s+(?:charge|usage|used|consumption)\s+([1-9][0-9]{1,4})\s*kwh/i,
+    // "362 kWh  @  $0.12534" — rate line
+    /([1-9][0-9]{1,4})\s*kwh\s*[@\$]/i,
+    // "Usage:  362 kWh" or "Current Usage  362 kWh"
+    /(?:current\s+)?(?:energy|electric(?:ity)?\s+)?usage\s*[:\s]+([1-9][0-9]{1,4})\s*kwh/i,
+    // "Total kWh Used:  362"
+    /total\s+kwh\s+(?:used|billed|consumed)\s*[:\s]+([1-9][0-9]{1,4})/i,
+    // "kWh Used  362"
+    /kwh\s+(?:used|billed|consumed)\s+([1-9][0-9]{1,4})/i,
+    // "362 kWh used"
+    /([1-9][0-9]{1,4})\s*kwh\s+(?:used|usage|consumed|billed)/i,
+    // "Net metered usage: 362 kWh"
+    /(?:net\s+)?(?:metered\s+)?usage\s*[:\s]+([1-9][0-9]{1,4})\s*kwh/i,
+    // "Electric Usage  362 kWh" (no label)
+    /\belectric(?:ity)?\s+([1-9][0-9]{1,4})\s*kwh/i,
   ];
   for (const pat of patterns) {
     const m = t.match(pat);
