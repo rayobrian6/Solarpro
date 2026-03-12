@@ -206,14 +206,14 @@ function parsePrintedTable(
 
   // Look for rows explicitly labeled with kWh
   const explicitPat = new RegExp(
-    `(${MONTH_RE_SRC})[a-z]*\\s+([1-9][0-9]{2,4})\\s+kwh`,
+    `(${MONTH_RE_SRC})[a-z]*\\s+([1-9][0-9]{0,3}(?:,[0-9]{3})?)\\s+kwh`,
     'gi',
   );
   let m: RegExpExecArray | null;
   while ((m = explicitPat.exec(t)) !== null) {
     const key = m[1].slice(0, 3).toLowerCase() as MonthKey;
-    const val = parseInt(m[2], 10);
-    if (isValidMonthly(val)) {
+    const val = parseInt(m[2].replace(/,/g, ''), 10);
+    if (isValidMonthly(val) && val >= 100) {  // printed table values always >= 100 kWh
       months[key] = val;
       evidence.push(m[0].trim());
     }
@@ -254,7 +254,7 @@ function parseHandwrittenList(
     `(${MONTH_RE_SRC})[a-z]*` +                          // month name
     `[\\s\\.\\:\\-]+` +                                    // separator
     `(?:(?:19|20)\\d{2}[\\s\\.\\:\\-]+)?` +              // optional year (skip it)
-    `([1-9][0-9]{1,3}(?:,[0-9]{3})?)` +                  // kWh value: 10-9999 or 1,234
+    `([1-9][0-9]{0,2}(?:,[0-9]{3})?)` +                  // kWh value: 10-9999 or 1,234
     `\\s*(?:kwh)?`,                                        // optional kWh suffix
     'gi',
   );

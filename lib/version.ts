@@ -1,8 +1,11 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v46.3';
+export const BUILD_VERSION     = 'v46.4';
 export const BUILD_DATE        = '2026-03-13';
-export const BUILD_DESCRIPTION = 'Fix build: clean version.ts, remove all conflict markers, ASCII-safe strings';
+export const BUILD_DESCRIPTION = 'Bill parser: fix comma-formatted kWh (1,234 kWh) silently dropped in handwritten + printed table parsers';
 export const BUILD_FEATURES    = [
+  // v46.4 -- Bill parser comma-kWh fix
+  'billParser: parseHandwrittenList -- fix comma-kWh (1,234 kWh) regex {1,3} -> {0,2}',
+  'billParser: parsePrintedTable -- fix comma-kWh regex {2,4} -> {0,3} + val>=100 guard',
   // v46.3 -- Build fix
   'version.ts: rewritten with ASCII-only strings to prevent TypeScript merge-conflict false positives',
   // v46.2 -- Bill parser fixes
