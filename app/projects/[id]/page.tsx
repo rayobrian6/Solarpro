@@ -318,6 +318,27 @@ export default function ProjectDetailPage() {
       console.log('[BILL_SAVED_TO_PROJECT] projectId=%s utilityName=%s annualKwh=%s stateCode=%s city=%s systemKw=%s',
         project.id, utilityName, annualKwh, stateCode, city, systemKw);
 
+      // FIX v47.12 Issue 1: If bill OCR extracted a customerName AND the client record
+      // still has a placeholder name (e.g. "Skowhegan Customer"), update it now.
+      const extractedCustomerName = result.billData.customerName?.trim();
+      const currentClientName = project.client?.name?.trim() || '';
+      const isPlaceholder = !currentClientName
+        || currentClientName.toLowerCase().includes('customer')
+        || currentClientName.toLowerCase().includes('placeholder')
+        || currentClientName.length < 3;
+      if (extractedCustomerName && extractedCustomerName.length >= 2 && isPlaceholder && project.clientId) {
+        try {
+          await fetch(`/api/clients/${project.clientId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: extractedCustomerName }),
+          });
+          console.log('[CLIENT_NAME_UPDATED] clientId=%s name=%s', project.clientId, extractedCustomerName);
+        } catch (nameErr) {
+          console.warn('[CLIENT_NAME_UPDATE_FAILED]', nameErr);
+        }
+      }
+
       // FIX v47.8: after save the server runs rowToProject() which hydrates all fields from bill_data JSONB.
       // json.data already has billAnalysis/utilityName/utilityRatePerKwh/stateCode/city hydrated.
       // We still merge client-side values as fallback in case server hydration is incomplete.
@@ -329,6 +350,15 @@ export default function ProjectDetailPage() {
         stateCode: stateCode || json.data.stateCode,
         // FIX v47.8: city was missing from this merge — now included
         city: city || json.data.city,
+        // FIX v47.12 Issue 1: merge updated client name into local state
+        client: json.data.client
+          ? {
+              ...json.data.client,
+              name: (extractedCustomerName && isPlaceholder)
+                ? extractedCustomerName
+                : (json.data.client.name || currentClientName),
+            }
+          : json.data.client,
       };
 
       console.log('[PROJECT_STATE_UPDATED] billAnalysis=%s utilityName=%s stateCode=%s city=%s utilityRate=%s',

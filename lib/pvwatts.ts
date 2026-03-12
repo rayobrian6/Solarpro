@@ -8,11 +8,14 @@ const PVWATTS_API_KEY = process.env.PVWATTS_API_KEY || 'DEMO_KEY';
 const PVWATTS_BASE_URL = 'https://developer.nrel.gov/api/pvwatts/v8.json';
 
 // Monthly solar irradiance multipliers by climate zone (fallback)
+// FIX v47.12 Issue 5: Added 'northern' zone for lat >= 43° (ME, VT, NH, MN, WI, ND, MT, etc.)
+// Northern zone peaks in June (idx 5) with steep winter falloff — matches NREL data for ~44°N
 const CLIMATE_MULTIPLIERS: Record<string, number[]> = {
-  desert: [0.72, 0.82, 1.02, 1.12, 1.18, 1.22, 1.15, 1.12, 1.05, 0.92, 0.75, 0.68],
+  northern:      [0.42, 0.58, 0.82, 1.05, 1.23, 1.32, 1.27, 1.14, 0.90, 0.68, 0.45, 0.35],
+  desert:        [0.72, 0.82, 1.02, 1.12, 1.18, 1.22, 1.15, 1.12, 1.05, 0.92, 0.75, 0.68],
   mediterranean: [0.68, 0.78, 0.98, 1.10, 1.18, 1.22, 1.20, 1.15, 1.02, 0.88, 0.70, 0.62],
-  continental: [0.55, 0.68, 0.88, 1.05, 1.18, 1.22, 1.20, 1.12, 0.95, 0.78, 0.58, 0.48],
-  coastal: [0.62, 0.72, 0.90, 1.05, 1.12, 1.10, 1.08, 1.08, 1.00, 0.85, 0.68, 0.58],
+  continental:   [0.55, 0.68, 0.88, 1.05, 1.18, 1.22, 1.20, 1.12, 0.95, 0.78, 0.58, 0.48],
+  coastal:       [0.62, 0.72, 0.90, 1.05, 1.12, 1.10, 1.08, 1.08, 1.00, 0.85, 0.68, 0.58],
 };
 
 // Azimuth correction factors (south=180° is optimal)
@@ -49,12 +52,16 @@ function bifacialGainFactor(tilt: number, bifacialFactor: number, azimuth: numbe
 }
 
 // Determine climate zone from coordinates
+// FIX v47.12 Issue 5: Added northern zone (lat >= 43°) for accurate northern US production
 function getClimateZone(lat: number, lng: number): string {
+  // Northern US / Northern New England (ME, VT, NH, MN, WI, ND, MT, northern MI, etc.)
+  // Lat >= 43° with eastern longitudes: use 'northern' zone (peaks June)
+  if (lat >= 43 && lng >= -100) return 'northern';
   // Southwest US (desert)
   if (lat >= 25 && lat <= 40 && lng >= -120 && lng <= -100) return 'desert';
   // California coast
   if (lat >= 32 && lat <= 42 && lng >= -125 && lng <= -118) return 'mediterranean';
-  // Pacific Northwest / Northeast
+  // Pacific Northwest (lat >= 43, western longitudes) — still continental
   if (lat >= 40) return 'continental';
   return 'mediterranean';
 }

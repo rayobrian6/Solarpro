@@ -22,6 +22,14 @@ import { useSubscription } from '@/hooks/useSubscription';
 import UpgradeModal from '@/components/ui/UpgradeModal';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// FIX v47.12 Issue 6: States with active SREC or TREC markets.
+// Maine has no SREC market — do NOT show SREC section for ME.
+// Sources: DSIRE 2024, SEIA state policy map.
+const SREC_STATES = new Set([
+  'DC', 'MA', 'MD', 'NJ', 'PA', 'OH', 'IL', 'DE', 'CT', 'RI',
+  'NY', 'VA', 'NC', 'MI', 'MO', 'IN',
+]);
 const MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 function ProposalContent() {
@@ -319,7 +327,12 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     : ((proj as any)?.systemSizeKw ?? 0);
   const systemSizeW = systemSizeKw * 1000;
   const storedCashPrice = cost?.cashPrice ?? cost?.grossCost ?? 0;
-  const systemType = proj?.systemType ?? 'roof';
+  // FIX v47.12 Issue 2: Derive system type from layout (most accurate) > project > fallback
+  // Never hardcode 'roof' — layout.systemType reflects actual 3D design placement
+  const systemType: string =
+    (layout?.systemType ? String(layout.systemType) : '') ||
+    (proj?.systemType   ? String(proj.systemType)   : '') ||
+    'roof'; // genuine last-resort fallback only
 
   // Live price-per-watt from admin pricing config
   const livePpw = pricingCfg
@@ -353,14 +366,15 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     : (systemSizeW > 0 ? parseFloat((effectiveFinal / systemSizeW).toFixed(2)) : (cost?.pricePerWatt ?? livePpw));
 
   // Savings — use stored values or estimate
-  const annualSavings   = cost?.annualSavings   ?? Math.round((production?.annualProductionKwh ?? 0) * (client?.utilityRate ?? 0.13));
+  // FIX v47.12 Issue 4: use effectiveUtilityRate (set below after utilityRate computed) — reference same priority chain
+  const annualSavings   = cost?.annualSavings   ?? Math.round((production?.annualProductionKwh ?? 0) * (((proj as any)?.utilityRatePerKwh && (proj as any).utilityRatePerKwh > 0.06) ? (proj as any).utilityRatePerKwh : (client?.utilityRate ?? 0.13)));
   const paybackYears    = cost?.paybackYears    ?? (annualSavings > 0 ? parseFloat((effectiveNet / annualSavings).toFixed(1)) : 0);
   const lifetimeSavings = cost?.lifetimeSavings ?? 0;
 
   // State incentives — computed from project stateCode
   const projectStateCode = (proj as any)?.stateCode || client?.state || '';
   const incentiveCalc = projectStateCode && systemSizeKw > 0
-    ? calculateIncentives(projectStateCode, effectiveFinal, systemSizeKw, production?.annualProductionKwh ?? 0, !isCommercial)
+    ? calculateIncentives(projectStateCode, effectiveFinal, systemSizeKw, production?.annualProductionKwh ?? 0, !isCommercial, systemType)
     : null;
   // Normalize to a consistent shape for the UI
   // IMPORTANT: Only CASH incentives (ITC, tax credits, rebates) reduce net cost.
@@ -390,7 +404,14 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
 
 
   // ── Financial chart data ──────────────────────────────────────────────────
-  const utilityRate = client?.utilityRate ?? 0.15;
+  // FIX v47.12 Issue 4: Priority: project.utilityRatePerKwh (bill-pipeline retail rate) >
+  // client.utilityRate (may be stale 0.13 default) > national fallback 0.15
+  const utilityRate =
+    ((proj as any)?.utilityRatePerKwh && (proj as any).utilityRatePerKwh > 0.06)
+      ? (proj as any).utilityRatePerKwh
+      : (client?.utilityRate && client.utilityRate > 0.06)
+        ? client.utilityRate
+        : 0.15;
   const utilityInflation = 0.03;
   const panelDegradation = 0.005;
 
@@ -713,7 +734,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 </div>
 
 
-                {/* Roof Attachment */}
+                {/* FIX v47.12 Issue 3: Roof Attachment Hardware — only for roof systems */}
+                {(systemType === 'roof' || systemType === 'ROOF_MOUNT') && (
                 <div>
                   <div className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Roof Attachment Hardware</div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -766,6 +788,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                     ))}
                   </div>
                 </div>
+                )}
 
                 <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
                   <span>Prepared by: {proposal.preparedBy}</span>
@@ -1378,7 +1401,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 </div>
               </div>
 
-            {/* SREC Section */}
+            {/* SREC Section — FIX v47.12 Issue 6: only show for states with active SREC/TREC markets */}
+          {SREC_STATES.has((projectStateCode || '').toUpperCase()) && (
             <div>
               <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-6">
                 <div className="flex items-start justify-between gap-4 mb-4">
@@ -1431,6 +1455,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                 <p className="text-xs text-slate-400 mt-3">† Estimates for a 10kW system generating ~12 SRECs/year. Prices from Flett Exchange & SRECTrade, 2025. SREC availability depends on your state. Source: SRECTrade.com, DSIRE.org.</p>
               </div>
             </div>
+          )}
           </div>
 
           {/* ── Why Solar ── */}

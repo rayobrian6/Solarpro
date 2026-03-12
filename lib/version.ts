@@ -1,8 +1,24 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.11';
-export const BUILD_DATE        = '2026-06-10';
-export const BUILD_DESCRIPTION = 'v47.11: Utility rate database rebuild + bill pipeline rate fallback -- accurate 2024/2025 EIA rates, new rate breakdown schema, 3-tier rate priority';
+export const BUILD_VERSION     = 'v47.12';
+export const BUILD_DATE        = '2026-06-11';
+export const BUILD_DESCRIPTION = 'v47.12: Proposal pipeline fixes -- client name from OCR, system type from layout, fence BOM gating, utility rate priority, northern climate zone, SREC whitelist, incentive system-type filter';
 export const BUILD_FEATURES    = [
+  // v47.12 -- Proposal pipeline fixes (7 issues from E2E testing)
+  'Issue 1 FIX: app/projects/[id]/page.tsx handleBillComplete -- PUT /api/clients/[id] when OCR extracts customerName and current name is placeholder (contains "customer", < 3 chars, etc.)',
+  'Issue 1 FIX: updatedProject merge includes new client name in local React state immediately after bill save',
+  'Issue 2 FIX: app/proposals/page.tsx ProposalPreview -- systemType derived from layout.systemType > project.systemType > "roof" (never hardcoded to roof)',
+  'Issue 3 FIX: app/proposals/page.tsx -- "Roof Attachment Hardware" BOM section gated with (systemType === "roof" || systemType === "ROOF_MOUNT") -- fence/ground/carport no longer show roof racking',
+  'Issue 4 FIX: app/proposals/page.tsx -- utilityRate priority: project.utilityRatePerKwh (bill-pipeline retail rate) > client.utilityRate (stale) > 0.15 national fallback',
+  'Issue 4 FIX: app/proposals/page.tsx -- annualSavings same priority chain for consistent $ calculations',
+  'Issue 5 FIX: lib/pvwatts.ts -- added "northern" climate zone for lat >= 43deg eastern US (ME, VT, NH, MN, WI, ND, MT) with June production peak matching NREL data',
+  'Issue 5 FIX: lib/pvwatts.ts -- getClimateZone() returns "northern" for lat >= 43 && lng >= -100 (eastern); continental retained for Pacific NW',
+  'Issue 5 FIX: lib/pvwatts.ts -- northern CLIMATE_MULTIPLIERS: [0.42,0.58,0.82,1.05,1.23,1.32,1.27,1.14,0.90,0.68,0.45,0.35] -- June peak (idx 5 = 1.32)',
+  'Issue 6 FIX: app/proposals/page.tsx -- SREC_STATES whitelist: DC,MA,MD,NJ,PA,OH,IL,DE,CT,RI,NY,VA,NC,MI,MO,IN -- SREC section hidden for ME and all non-SREC states',
+  'Issue 7 FIX: lib/incentives/stateIncentives.ts -- Incentive interface adds optional systemTypes field for per-incentive system-type restrictions',
+  'Issue 7 FIX: lib/incentives/stateIncentives.ts -- normaliseSystemTypeKey() maps raw systemType string (ROOF_MOUNT/SOL_FENCE/etc.) to canonical key',
+  'Issue 7 FIX: lib/incentives/stateIncentives.ts -- calculateIncentives() accepts optional systemType param; skips incentives whose systemTypes array excludes the current type',
+  'Issue 7 FIX: app/proposals/page.tsx -- calculateIncentives() call now passes systemType as 6th argument',
+  'VERIFIED: Maine stateIncentives has no SREC entries (only property_tax_exemption + sales_tax_exemption) -- correct for ME market',
   // v47.11 -- Utility rate database rebuild + bill pipeline fix
   'ROOT CAUSE 1: UTILITY_RETAIL_RATES in utility-rules.ts had stale/incorrect rates -- CMP was $0.198 (2022 EIA), actual 2024 rate is $0.265/kWh (EIA ME avg Jan-Sep 2024)',
   'ROOT CAUSE 2: STATE_UTILITY_FALLBACK avgRate values in utilityDetector.ts were 2022-era EIA data -- ME/VT/NH/CT/CA/HI/MI/AK all needed updating',

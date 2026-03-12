@@ -36,6 +36,10 @@ export interface Incentive {
   websiteUrl?: string;
   // Stackable
   stackable: boolean;      // can be combined with other incentives
+  // FIX v47.12 Issue 7: Optional system-type restriction.
+  // If present, incentive only applies to the listed system types.
+  // e.g. ['roof'] means roof-mount only. Omit = applies to all types.
+  systemTypes?: Array<'roof' | 'ground' | 'fence' | 'carport'>;
 }
 
 export interface StateIncentiveProfile {
@@ -1263,12 +1267,25 @@ export interface IncentiveCalculation {
   notes?: string;
 }
 
+// FIX v47.12 Issue 7: systemType param filters incentives that are restricted
+// to specific installation types (e.g. roof-only utility rebates).
+// Normalise incoming systemType to the canonical short key used in systemTypes[].
+function normaliseSystemTypeKey(raw: string | undefined): 'roof' | 'ground' | 'fence' | 'carport' {
+  if (!raw) return 'roof';
+  const s = raw.toLowerCase();
+  if (s.includes('fence') || s === 'sol_fence') return 'fence';
+  if (s.includes('carport'))                    return 'carport';
+  if (s.includes('ground') || s === 'ground_mount') return 'ground';
+  return 'roof';
+}
+
 export function calculateIncentives(
   stateCode: string,
   systemCost: number,
   systemKw: number,
   annualKwh: number,
   isResidential: boolean = true,
+  systemType?: string,   // FIX v47.12 Issue 7: optional — 'roof'|'ground'|'fence'|'carport'
 ): {
   federal: IncentiveCalculation;
   state: IncentiveCalculation[];
@@ -1292,10 +1309,17 @@ export function calculateIncentives(
   const profile = STATE_INCENTIVES[stateCode];
   const stateCalcs: IncentiveCalculation[] = [];
 
+  // FIX v47.12 Issue 7: normalise the caller's systemType to a canonical key
+  const sysTypeKey = normaliseSystemTypeKey(systemType);
+
   if (profile) {
     for (const incentive of profile.incentives) {
       if (isResidential && !incentive.residential) continue;
       if (!isResidential && !incentive.commercial) continue;
+      // If the incentive has a systemTypes restriction, skip if our type isn't listed
+      if (incentive.systemTypes && incentive.systemTypes.length > 0) {
+        if (!incentive.systemTypes.includes(sysTypeKey)) continue;
+      }
 
       let value = 0;
       let description = '';
