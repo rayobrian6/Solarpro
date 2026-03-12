@@ -1,8 +1,16 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v46.8';
+export const BUILD_VERSION     = 'v46.9';
 export const BUILD_DATE        = '2026-03-17';
-export const BUILD_DESCRIPTION = 'Fix fence/roof/ground/row/plane panel clearing: lastRenderedPanelsRef sync before onPanelsChange';
+export const BUILD_DESCRIPTION = 'DB readiness guard: Neon cold-start retry + login UI starting state';
 export const BUILD_FEATURES    = [
+  // v46.9 -- DB readiness guard
+  'NEW: lib/db-ready.ts -- getDbWithRetry() 3x retry with 1s/2s/4s exponential backoff for Neon cold starts',
+  'NEW: lib/db-ready.ts -- probeDbReady() SELECT 1 wake probe before auth queries',
+  'NEW: lib/db-ready.ts -- isTransientDbError() classifies transient vs fatal DB errors',
+  'NEW: lib/db-ready.ts -- DbConfigError non-retryable class for missing DATABASE_URL',
+  'FIX: lib/auth.ts -- getDbReady() async wrapper uses getDbWithRetry; getDb() kept for non-auth routes',
+  'FIX: app/api/auth/login/route.ts -- uses getDbReady() with retry; returns code=DB_STARTING on 503; Retry-After header',
+  'FIX: app/auth/login/page.tsx -- detects DB_STARTING 503; shows "Starting server..." banner; auto-retries up to 5x with countdown',
   // v46.8 -- Panel clearing fix
   'FIX: SolarEngine3D.tsx -- finalizeFence: set lastRenderedPanelsRef.current before onPanelsChange to prevent orphaned entities',
   'FIX: SolarEngine3D.tsx -- handleRoofClick: same lastRenderedPanelsRef sync fix',

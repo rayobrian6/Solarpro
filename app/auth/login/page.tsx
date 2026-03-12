@@ -1,52 +1,193 @@
 'use client';
-import React, { useState, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle } from 'lucide-react';
+import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle, RefreshCw } from 'lucide-react';
+
+// ── How many times the UI will auto-retry a DB_STARTING 503 ──────────────────
+const MAX_AUTO_RETRIES    = 5;
+const RETRY_BASE_DELAY_MS = 3000; // 3s, 4.5s, 6s, 7.5s, 9s
 
 function LoginForm() {
-  const router = useRouter();
+  const router       = useRouter();
   const searchParams = useSearchParams();
+
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [loading,      setLoading]      = useState(false);
+  const [error,        setError]        = useState('');
+  const [starting,     setStarting]     = useState(false); // DB cold-start state
+  const [countdown,    setCountdown]    = useState(0);     // seconds until next retry
   const [form, setForm] = useState({ email: '', password: '', remember: false });
 
+  const retryCountRef    = useRef(0);
+  const retryTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastFormRef      = useRef(form);
+
   const redirect = searchParams.get('redirect') || '/dashboard';
+
+  // Keep lastFormRef in sync so the retry closure sees the current values
+  useEffect(() => { lastFormRef.current = form; }, [form]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (retryTimerRef.current)    clearTimeout(retryTimerRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    };
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
     setForm(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
-    setError('');
+    // Clear errors when user edits fields — but keep "starting" state intact
+    if (error && !starting) setError('');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.email || !form.password) return setError('Email and password are required.');
-    setLoading(true);
-    setError('');
-
+  /**
+   * Core submit — separated from handleSubmit so it can be called by the
+   * auto-retry path with the same credentials after a DB_STARTING 503.
+   */
+  async function attemptLogin(email: string, password: string): Promise<'success' | 'auth_error' | 'db_starting' | 'db_config' | 'network_error'> {
     try {
       const res = await fetch('/api/auth/login', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: form.email, password: form.password }),
+        body:    JSON.stringify({ email, password }),
       });
 
       const data = await res.json();
 
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Login failed. Please try again.');
-        setLoading(false);
-        return;
+      if (res.ok && data.success) {
+        return 'success';
       }
 
+      // 503 with DB_STARTING code = Neon cold start, auto-retry
+      if (res.status === 503 && data.code === 'DB_STARTING') {
+        return 'db_starting';
+      }
+
+      // 503 with DB_CONFIG_ERROR = genuine misconfiguration, don't retry
+      if (res.status === 503 && data.code === 'DB_CONFIG_ERROR') {
+        return 'db_config';
+      }
+
+      // 400/401/500 = real auth or server error
+      setError(data.error || 'Login failed. Please try again.');
+      return 'auth_error';
+
+    } catch {
+      return 'network_error';
+    }
+  }
+
+  /**
+   * Schedules an auto-retry after `delayMs` ms, updating the countdown
+   * timer so the user sees "Retrying in Xs…"
+   */
+  function scheduleRetry(email: string, password: string, delayMs: number) {
+    // Start countdown display
+    let remaining = Math.ceil(delayMs / 1000);
+    setCountdown(remaining);
+
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    countdownTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      setCountdown(remaining);
+      if (remaining <= 0 && countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    }, 1000);
+
+    // Schedule the actual retry
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    retryTimerRef.current = setTimeout(async () => {
+      retryTimerRef.current = null;
+      setCountdown(0);
+      const result = await attemptLogin(email, password);
+      handleAttemptResult(result, email, password);
+    }, delayMs);
+  }
+
+  /**
+   * Handles the result of an attemptLogin() call — either advances the
+   * retry sequence or resolves to success/failure.
+   */
+  function handleAttemptResult(
+    result: 'success' | 'auth_error' | 'db_starting' | 'db_config' | 'network_error',
+    email: string,
+    password: string
+  ) {
+    if (result === 'success') {
+      setStarting(false);
+      setLoading(false);
       router.push(redirect);
       router.refresh();
-    } catch (err) {
-      setError('Network error. Please check your connection and try again.');
-      setLoading(false);
+      return;
     }
+
+    if (result === 'db_starting') {
+      retryCountRef.current += 1;
+
+      if (retryCountRef.current <= MAX_AUTO_RETRIES) {
+        // Still retrying — keep the "Starting server…" banner
+        setStarting(true);
+        setLoading(false);
+        // Gentle exponential back-off: 3s, 4.5s, 6s, 7.5s, 9s
+        const delay = RETRY_BASE_DELAY_MS * (1 + (retryCountRef.current - 1) * 0.5);
+        scheduleRetry(email, password, delay);
+      } else {
+        // Gave up — show a manual-retry error
+        setStarting(false);
+        setLoading(false);
+        setError('Server is taking longer than expected to start. Please try again.');
+      }
+      return;
+    }
+
+    if (result === 'db_config') {
+      setStarting(false);
+      setLoading(false);
+      setError('Database not configured. Please contact your administrator.');
+      return;
+    }
+
+    if (result === 'network_error') {
+      setStarting(false);
+      setLoading(false);
+      setError('Network error. Please check your connection and try again.');
+      return;
+    }
+
+    // 'auth_error' — setError already called inside attemptLogin
+    setStarting(false);
+    setLoading(false);
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.email || !form.password) return setError('Email and password are required.');
+
+    // Cancel any pending retry
+    if (retryTimerRef.current)    clearTimeout(retryTimerRef.current);
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    retryCountRef.current = 0;
+
+    setLoading(true);
+    setError('');
+    setStarting(false);
+    setCountdown(0);
+
+    const result = await attemptLogin(form.email, form.password);
+    handleAttemptResult(result, form.email, form.password);
+  };
+
+  // ── Manual "Try again" when auto-retry gave up ──────────────────────────
+  const handleManualRetry = () => {
+    retryCountRef.current = 0;
+    setError('');
+    handleSubmit({ preventDefault: () => {} } as React.FormEvent);
   };
 
   return (
@@ -112,12 +253,46 @@ function LoginForm() {
               <span className="text-sm text-slate-400">Remember me for 30 days</span>
             </label>
 
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">{error}</div>
+            {/* ── DB cold-start banner ──────────────────────────────────── */}
+            {starting && (
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2 text-amber-400 text-sm font-medium mb-1">
+                  <RefreshCw size={14} className="animate-spin flex-shrink-0" />
+                  Starting server — please wait…
+                </div>
+                <p className="text-amber-400/70 text-xs">
+                  {countdown > 0
+                    ? `Retrying in ${countdown}s (attempt ${retryCountRef.current}/${MAX_AUTO_RETRIES})…`
+                    : 'Connecting to database…'}
+                </p>
+              </div>
             )}
 
-            <button type="submit" disabled={loading} className="w-full btn-primary py-3 text-base font-bold justify-center mt-2">
-              {loading ? (<><span className="spinner w-4 h-4" /> Signing in...</>) : (<>Sign In <ArrowRight size={16} /></>)}
+            {/* ── Error banner ─────────────────────────────────────────── */}
+            {error && !starting && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3">
+                <p className="text-red-400 text-sm">{error}</p>
+                {error.includes('taking longer') && (
+                  <button
+                    type="button"
+                    onClick={handleManualRetry}
+                    className="mt-2 text-xs text-red-300 hover:text-red-200 underline underline-offset-2 transition-colors"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading || starting}
+              className="w-full btn-primary py-3 text-base font-bold justify-center mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {loading || starting
+                ? (<><span className="spinner w-4 h-4" /> {starting ? 'Starting server…' : 'Signing in…'}</>)
+                : (<>Sign In <ArrowRight size={16} /></>)
+              }
             </button>
           </form>
         </div>

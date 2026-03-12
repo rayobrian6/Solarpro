@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getDb, verifyPassword, signToken, makeSessionCookie, SessionUser
+  getDbReady, verifyPassword, signToken, makeSessionCookie, SessionUser
 } from '@/lib/auth';
+import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,9 +16,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sql = getDb();
+    // ── DB with cold-start retry ─────────────────────────────────────────
+    // getDbReady() fires a SELECT 1 probe with up to 3 retries (1s/2s/4s
+    // backoff) to handle Neon compute cold starts. If the DB is already
+    // warm this adds ~0ms overhead. If cold, the probe wakes the node so
+    // the auth query below lands on a live connection.
+    const sql = await getDbReady();
 
-    // Fetch user — role is fetched but NOT put in JWT
+    // ── Fetch user ───────────────────────────────────────────────────────
+    // Role is fetched but NOT put in JWT
     const rows = await sql`
       SELECT id, name, email, password_hash, company, phone, role
       FROM users
@@ -64,17 +71,44 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     const msg = error?.message || String(error);
-    // Surface DB config errors clearly in the terminal
-    if (msg.includes('DATABASE_URL') || msg.includes('database') || msg.includes('neon')) {
-      console.error('\n[/api/auth/login] DATABASE ERROR — auth will not work until fixed:');
+
+    // ── Config error: DATABASE_URL missing ──────────────────────────────
+    // This is a genuine misconfiguration — tell the admin clearly.
+    if (error instanceof DbConfigError || msg.includes('DATABASE_URL')) {
+      console.error('\n[/api/auth/login] DATABASE_URL not configured:');
       console.error(' ', msg);
-      console.error('  -> Set DATABASE_URL in solarpro/.env.local and restart npm run dev\n');
+      console.error('  -> Add DATABASE_URL to your Vercel environment variables.\n');
       return NextResponse.json(
-        { success: false, error: 'Database not configured. Check server console for instructions.' },
+        {
+          success: false,
+          error: 'Database not configured. Contact your administrator.',
+          code: 'DB_CONFIG_ERROR',
+        },
         { status: 503 }
       );
     }
-    console.error('[/api/auth/login] Login error:', error);
+
+    // ── Transient error: cold start / network timeout ────────────────────
+    // getDbReady() already retried 3x — if we still land here, the DB is
+    // genuinely unreachable right now. Tell the client to retry shortly.
+    if (isTransientDbError(error)) {
+      console.warn('[/api/auth/login] DB temporarily unreachable after retries:', msg);
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Server is starting up — please wait a moment and try again.',
+          code: 'DB_STARTING',
+          retryAfterMs: 3000,
+        },
+        {
+          status: 503,
+          headers: { 'Retry-After': '3' },
+        }
+      );
+    }
+
+    // ── Unexpected error ─────────────────────────────────────────────────
+    console.error('[/api/auth/login] Unexpected login error:', error);
     return NextResponse.json(
       { success: false, error: 'Login failed. Please try again.' },
       { status: 500 }

@@ -1,6 +1,9 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { neon } from '@neondatabase/serverless';
+import { neon, NeonQueryFunction } from '@neondatabase/serverless';
+import { getDbWithRetry, getDbDirect, DbConfigError } from '@/lib/db-ready';
+
+type SqlExecutor = NeonQueryFunction<false, false>;
 
 // Lazy getter — only throws at runtime, NOT at build time
 function getJwtSecret(): string {
@@ -11,10 +14,27 @@ function getJwtSecret(): string {
   return secret;
 }
 
-export const COOKIE_NAME = 'solarpro_session';
+export const COOKIE_NAME    = 'solarpro_session';
 export const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
-export function getDb() {
+/**
+ * Returns a Neon SQL executor with retry/backoff for cold-start resilience.
+ * Replaces the old getDb() which threw immediately on any connection error.
+ *
+ * Used by the login route — retries up to 3x with exponential backoff so
+ * that transient Neon cold-start errors don't surface as "Database not
+ * configured" to the end user.
+ */
+export async function getDbReady(): Promise<SqlExecutor> {
+  return getDbWithRetry();
+}
+
+/**
+ * Synchronous DB getter for routes that don't need retry logic.
+ * Kept for backward compatibility with non-auth routes.
+ * Throws immediately if DATABASE_URL is missing.
+ */
+export function getDb(): SqlExecutor {
   const url = process.env.DATABASE_URL;
   console.log('DATABASE_URL loaded:', !!url);
   if (!url || url === 'YOUR_NEON_DATABASE_URL_HERE') {
@@ -23,12 +43,12 @@ export function getDb() {
       '  -> Open solarpro/.env.local and set DATABASE_URL to your Neon connection string.\n' +
       '  -> Get it from: https://console.neon.tech -> your project -> Connection string\n'
     );
-    throw new Error('DATABASE_URL is not set. Check .env.local — see console for instructions.');
+    throw new DbConfigError('DATABASE_URL is not set. Check .env.local — see console for instructions.');
   }
-  return neon(url);
+  return neon(url) as SqlExecutor;
 }
 
-// ── Password helpers ────────────────────────────────────────────────────────
+// ── Password helpers ─────────────────────────────────────────────────────────
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
 }
@@ -37,7 +57,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
-// ── JWT / Session ────────────────────────────────────────────────────────────
+// ── JWT / Session ─────────────────────────────────────────────────────────────
 // JWT contains ONLY identity — id, name, email, company.
 // Role is NEVER stored in the JWT. Always fetch from DB.
 export interface SessionUser {
