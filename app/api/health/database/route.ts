@@ -85,11 +85,27 @@ export async function GET() {
       ORDER BY table_name
     `;
 
-    const foundTables = new Set(tableRows.map((r: any) => r.table_name as string));
+    // Normalise: neon() returns an array, but other clients may return { rows: [...] }
+    const rows: any[] = Array.isArray(tableRows)
+      ? tableRows
+      : (tableRows as any)?.rows ?? [];
+
+    // If DB is connected but no tables found at all, return a safe diagnostic
+    if (!rows.length) {
+      checks.tables = {};
+      checks.status = 'database_connected_but_no_tables_detected';
+      checks.required_tables_present = false;
+      checks.missing_required_tables = [...REQUIRED_TABLES];
+      checks.elapsed_ms = Date.now() - startMs;
+      console.log('[HEALTH_DB] DB connected but no public tables found');
+      return NextResponse.json(checks, { status: 503 });
+    }
+
+    const foundTables = new Set(rows.map((r: any) => r.table_name as string));
 
     for (const tbl of REQUIRED_TABLES) {
       const present = foundTables.has(tbl);
-      const row = tableRows.find((r: any) => r.table_name === tbl);
+      const row = rows.find((r: any) => r.table_name === tbl);
       tableChecks[tbl] = {
         exists: present,
         required: true,
@@ -100,7 +116,7 @@ export async function GET() {
 
     for (const tbl of OPTIONAL_TABLES) {
       const present = foundTables.has(tbl);
-      const row = tableRows.find((r: any) => r.table_name === tbl);
+      const row = rows.find((r: any) => r.table_name === tbl);
       tableChecks[tbl] = {
         exists: present,
         required: false,
