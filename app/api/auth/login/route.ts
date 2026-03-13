@@ -53,9 +53,21 @@ export async function POST(req: NextRequest) {
     const sql = await getDbReady();
 
     // -- Fetch user -------------------------------------------------------------
-    // Role is fetched but NOT put in JWT
+    // Role is fetched but NOT put in JWT.
+    // tos_accepted_at / tos_version: selected with a safe fallback — if Migration 010
+    // hasn't run yet and the columns don't exist, the query would crash and block ALL
+    // logins. Use information_schema to detect presence, then COALESCE to NULL if missing.
+    // Once migration runs (ALTER TABLE ADD COLUMN IF NOT EXISTS), this resolves cleanly.
     const rows = await sql`
-      SELECT id, name, email, password_hash, company, phone, role, tos_accepted_at, tos_version
+      SELECT id, name, email, password_hash, company, phone, role,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='users' AND column_name='tos_accepted_at'
+        ) THEN tos_accepted_at ELSE NULL END AS tos_accepted_at,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='users' AND column_name='tos_version'
+        ) THEN tos_version ELSE NULL END AS tos_version
       FROM users
       WHERE email = ${email.toLowerCase().trim()}
       LIMIT 1

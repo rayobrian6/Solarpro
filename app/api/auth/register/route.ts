@@ -44,12 +44,15 @@ export async function POST(req: NextRequest) {
     const hashedPassword = await hashPassword(password);
     const userId = uuidv4();
 
-    // Record ToS acceptance at signup if user checked the box
+    // Record ToS acceptance at signup if user checked the box.
+    // Use the base INSERT (without tos columns) if Migration 010 hasn't run yet,
+    // then update tos fields separately — this prevents a crash if the columns
+    // don't exist yet in production.
     const tosAcceptedAt = tosAccepted ? new Date().toISOString() : null;
     const tosVersion    = tosAccepted ? 'v1.0' : null;
 
     await sql`
-      INSERT INTO users (id, name, email, password_hash, company, phone, role, email_verified, tos_accepted_at, tos_version)
+      INSERT INTO users (id, name, email, password_hash, company, phone, role, email_verified)
       VALUES (
         ${userId},
         ${name.trim()},
@@ -58,11 +61,25 @@ export async function POST(req: NextRequest) {
         ${company?.trim() || null},
         ${phone?.trim() || null},
         'user',
-        false,
-        ${tosAcceptedAt},
-        ${tosVersion}
+        false
       )
     `;
+
+    // Attempt to record ToS acceptance — silently skip if columns don't exist yet
+    if (tosAccepted) {
+      try {
+        await sql`
+          UPDATE users
+          SET tos_accepted_at = ${tosAcceptedAt},
+              tos_version     = ${tosVersion},
+              updated_at      = NOW()
+          WHERE id = ${userId}
+        `;
+      } catch (tosErr: any) {
+        // Migration 010 not yet run — tos columns missing. Non-fatal: user can accept via /terms
+        console.warn('[/api/auth/register] ToS columns not yet available (run migration):', tosErr?.message);
+      }
+    }
 
     // JWT contains ONLY identity — role is NOT included
     const sessionUser: SessionUser = {

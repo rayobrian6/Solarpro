@@ -77,7 +77,15 @@ export async function GET(req: NextRequest) {
     const sql = await getDbReady();
 
     const rows = await sql`
-      SELECT tos_accepted_at, tos_version
+      SELECT
+        CASE WHEN EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='users' AND column_name='tos_accepted_at'
+        ) THEN tos_accepted_at ELSE NULL END AS tos_accepted_at,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name='users' AND column_name='tos_version'
+        ) THEN tos_version ELSE NULL END AS tos_version
       FROM users
       WHERE id = ${user.id}
       LIMIT 1
