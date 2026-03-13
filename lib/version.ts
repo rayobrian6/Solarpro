@@ -1,8 +1,24 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.20';
+export const BUILD_VERSION     = 'v47.21';
 export const BUILD_DATE        = '2026-06-14';
-export const BUILD_DESCRIPTION = 'v47.20: Full reliability audit -- vitest test suite (25 tests), env-var startup validation, DB health check endpoint (/api/health/database), GitHub Actions CI pipeline (test+lint+typecheck+build gate)';
+export const BUILD_DESCRIPTION = 'v47.21: OCR pipeline reliability fix -- direct CLI-first OCR, OpenAI Vision as direct fallback (no HTTP round-trip), buffer/mime logging, ocr_failed soft response, /api/debug/ocr endpoint';
 export const BUILD_FEATURES    = [
+  // v47.21 -- OCR pipeline reliability fix
+  'ROOT CAUSE: extractImageTextSmart called /api/ocr via HTTP server-to-server fetch -- on Vercel cold start NEXTAUTH_URL is often unset, fetch falls back to localhost:3000 which does not resolve -- Tesseract returned 0 chars silently',
+  'ROOT CAUSE: When Tesseract returned 0 chars, Stage 1b (inline CLI) was tried but Vision was only triggered if openaiKey set AND CLI also failed -- silent failure path left users with empty OCR',
+  'ROOT CAUSE: Empty OCR returned hard 422 with no allow_manual_entry flag -- UI showed error instead of offering manual entry',
+  'ROOT CAUSE: GOOGLE_MAPS_API_KEY used as Google Vision key -- wrong env var, Google Vision needs GOOGLE_VISION_API_KEY',
+  'FIX: extractImageTextSmart -- Stage 1 now runs Tesseract CLI DIRECTLY (runTesseractCliInline) FIRST, bypassing HTTP /api/ocr entirely',
+  'FIX: extractImageTextSmart -- Stage 1b: /api/ocr WASM HTTP only tried if CLI returns <20 chars (now a fallback, not primary)',
+  'FIX: extractImageTextSmart -- Stage 2: OpenAI Vision called DIRECTLY (recognizeImageWithVision) when Tesseract <20 chars or no usage found',
+  'FIX: extractImageTextSmart -- Stage 3: Google Vision uses GOOGLE_VISION_API_KEY with fallback to GOOGLE_MAPS_API_KEY',
+  'FIX: extractImageTextSmart -- [OCR_INPUT_BUFFER_LENGTH] / [OCR_INPUT_MIME_TYPE] / [OCR_INPUT_FILE_SIZE] logged at entry',
+  'FIX: extractImageTextSmart -- [OCR_STARTED] / [OCR_COMPLETED] / [OCR_TEXT_LENGTH] logged at each stage',
+  'FIX: extractImageTextSmart -- buffer.length === 0 guard returns empty-buffer immediately with error log',
+  'FIX: extractImageTextSmart -- Tesseract->Vision handoff threshold lowered from 50->20 chars',
+  'FIX: bill-upload route.ts -- empty OCR text now returns { status: ocr_failed, allow_manual_entry: true } (soft 422) instead of hard error',
+  'NEW: app/api/debug/ocr/route.ts -- POST /api/debug/ocr: upload file, returns file_size/mime_type/buffer_length/ocr_text_length/first_500_chars/ocr_method/debug_log',
+  'NEW: app/api/debug/ocr/route.ts -- auth-protected, supports PDF (pdftotext+pdf-parse) and image (tesseract-cli+openai-vision) paths',
   // v47.20 -- Full reliability audit + deployment safety
   'NEW: tests/bill-upload.test.ts -- 25 vitest unit tests covering parseBill(), parseBillText(), rate validation, sizing math, parser sanity guard, API response shape, and env validation -- all 25 passing',
   'NEW: vitest.config.ts -- vitest v4 config with node environment, globals, 10s timeout, @/* path alias',

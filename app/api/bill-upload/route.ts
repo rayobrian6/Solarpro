@@ -125,9 +125,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (!extractedText.trim()) {
+      // OCR failed completely — return a soft failure that lets the UI show manual entry
+      // rather than a hard error. This matches Step 5 of the OCR reliability spec.
+      console.warn(`[OCR_FAILED] all methods returned empty text name=${file?.name ?? 'none'} mime=${file?.type ?? 'none'} size=${file?.size ?? 0} openai=${!!process.env.OPENAI_API_KEY}`);
       return NextResponse.json({
         success: false,
-        error: 'Could not extract text from file. Please ensure the file is a clear, readable utility bill.',
+        status: 'ocr_failed',
+        error: 'Bill text could not be extracted. Please try a clearer image or enter your usage manually.',
+        allow_manual_entry: true,
         stage: extractionMethod,
         debug: {
           hasOpenAI: !!process.env.OPENAI_API_KEY,
@@ -576,110 +581,124 @@ async function extractImageTextSmart(
   mimeType: string,
 ): Promise<{ text: string; method: string; confidence: number }> {
   const openaiKey = process.env.OPENAI_API_KEY;
-  const googleKey = process.env.GOOGLE_MAPS_API_KEY;
+  // Note: GOOGLE_VISION_API_KEY is separate from GOOGLE_MAPS_API_KEY
+  const googleVisionKey = process.env.GOOGLE_VISION_API_KEY || process.env.GOOGLE_MAPS_API_KEY;
 
   const { recognizeImage, recognizeImageWithVision, recognizeImageWithGoogle } =
     await import('@/lib/billOcrEngine');
   const { parseMonthlyUsage } = await import('@/lib/billParser');
 
-  // Stage 1: Tesseract OCR via /api/ocr
-  console.log('[bill-upload] Stage 1: Tesseract OCR via /api/ocr...');
-  const tesseractResult = await recognizeImage(buffer, mimeType);
+  // ── Log OCR input for observability (Step 1 of audit) ──────────────────────
+  console.log(`[OCR_INPUT_BUFFER_LENGTH] bytes=${buffer.length}`);
+  console.log(`[OCR_INPUT_MIME_TYPE] mime=${mimeType}`);
+  console.log(`[OCR_INPUT_FILE_SIZE] kb=${Math.round(buffer.length / 1024)}`);
 
-  if (tesseractResult.rawText.length > 50) {
-    const parseCheck = parseMonthlyUsage(tesseractResult.rawText);
-    const hasUsage = parseCheck.monthsFound >= 3 || parseCheck.annualUsage !== null;
+  if (buffer.length === 0) {
+    console.error('[OCR_INPUT_BUFFER_LENGTH] ERROR: buffer is empty — upload pipeline broken');
+    return { text: '', method: 'empty-buffer', confidence: 0 };
+  }
 
-    console.log(`[bill-upload] Tesseract: confidence=${tesseractResult.confidence}, chars=${tesseractResult.rawText.length}, monthsFound=${parseCheck.monthsFound}, hasUsage=${hasUsage}`);
+  // ── Stage 1: Inline Tesseract CLI (fastest, most reliable on Vercel) ───────
+  // Try CLI directly FIRST — avoids the HTTP round-trip to /api/ocr which
+  // can fail on cold start when NEXTAUTH_URL / NEXT_PUBLIC_APP_URL is not set.
+  console.log('[OCR_STARTED] stage=1 method=tesseract-cli-inline');
+  let tesseractText = '';
+  try {
+    tesseractText = await runTesseractCliInline(buffer, mimeType);
+    console.log(`[OCR_COMPLETED] stage=1 method=tesseract-cli chars=${tesseractText.length}`);
+  } catch (cliErr) {
+    console.warn('[OCR_COMPLETED] stage=1 method=tesseract-cli failed:', cliErr instanceof Error ? cliErr.message : String(cliErr));
+  }
 
-    if (tesseractResult.confidence >= 60 && hasUsage) {
-      console.log('[bill-upload] Tesseract sufficient — skipping Vision API (cost $0)');
-      return {
-        text: tesseractResult.rawText,
-        method: 'tesseract',
-        confidence: tesseractResult.confidence,
-      };
+  // ── Stage 1b: /api/ocr HTTP (Tesseract.js WASM fallback) ───────────────────
+  // Only try if CLI returned nothing — HTTP route works when NEXTAUTH_URL is set.
+  if (tesseractText.length < 20) {
+    console.log('[OCR_STARTED] stage=1b method=tesseract-wasm-http');
+    try {
+      const wasmResult = await recognizeImage(buffer, mimeType);
+      if (wasmResult.rawText.length > tesseractText.length) {
+        tesseractText = wasmResult.rawText;
+        console.log(`[OCR_COMPLETED] stage=1b method=tesseract-wasm chars=${tesseractText.length} confidence=${wasmResult.confidence}`);
+      }
+    } catch (wasmErr) {
+      console.warn('[OCR_COMPLETED] stage=1b method=tesseract-wasm failed:', wasmErr instanceof Error ? wasmErr.message : String(wasmErr));
     }
+  }
 
-    if (tesseractResult.confidence >= 60 && !hasUsage) {
-      console.log('[bill-upload] Tesseract high confidence but no usage detected — trying Vision fallback');
-    } else {
-      console.log(`[bill-upload] Tesseract confidence low (${tesseractResult.confidence}) — trying Vision fallback`);
+  console.log(`[OCR_TEXT_LENGTH] after_tesseract=${tesseractText.length}`);
+
+  // ── Evaluate Tesseract result ───────────────────────────────────────────────
+  if (tesseractText.length >= 20) {
+    const parseCheck = parseMonthlyUsage(tesseractText);
+    const hasUsage = parseCheck.monthsFound >= 3 || parseCheck.annualUsage !== null;
+    console.log(`[OCR_COMPLETED] tesseract_sufficient=${hasUsage} monthsFound=${parseCheck.monthsFound} chars=${tesseractText.length}`);
+
+    // If Tesseract found good usage data, skip Vision (save cost)
+    if (hasUsage && tesseractText.length > 100) {
+      console.log('[OCR_COMPLETED] stage=tesseract method=tesseract-cli sufficient — skipping Vision (cost $0)');
+      return { text: tesseractText, method: 'tesseract-cli', confidence: 75 };
+    }
+    // Tesseract got text but no usage — Vision may do better, fall through
+    console.log('[OCR_STARTED] stage=2 reason=no_usage_in_tesseract_text — trying Vision');
+  } else {
+    // Tesseract got < 20 chars — Vision is required
+    console.warn(`[OCR_FAILED] stage=1 chars=${tesseractText.length} — escalating to Vision`);
+  }
+
+  // ── Stage 2: OpenAI Vision (direct call, not via /api/ocr) ─────────────────
+  // Call Vision directly from here so we don't depend on the HTTP route.
+  if (openaiKey) {
+    console.log('[OCR_STARTED] stage=2 method=openai-vision');
+    try {
+      const visionResult = await recognizeImageWithVision(buffer, mimeType, openaiKey);
+      console.log(`[OCR_COMPLETED] stage=2 method=openai-vision chars=${visionResult.rawText.length} confidence=${visionResult.confidence}`);
+      console.log(`[OCR_TEXT_LENGTH] after_vision=${visionResult.rawText.length}`);
+
+      if (visionResult.rawText.length >= 20) {
+        // Compare Vision vs Tesseract — pick better result
+        const visionParse = parseMonthlyUsage(visionResult.rawText);
+        const tesseractParse = tesseractText.length >= 20 ? parseMonthlyUsage(tesseractText) : null;
+
+        const visionMonths = visionParse.monthsFound;
+        const tessMonths = tesseractParse?.monthsFound ?? 0;
+
+        if (visionMonths >= tessMonths || (visionParse.annualUsage !== null && (tesseractParse?.annualUsage ?? null) === null)) {
+          console.log(`[OCR_COMPLETED] method=openai-vision chosen months=${visionMonths} vs tesseract=${tessMonths}`);
+          return { text: visionResult.rawText, method: 'openai-vision', confidence: visionResult.confidence };
+        } else {
+          console.log(`[OCR_COMPLETED] method=tesseract-kept months=${tessMonths} > vision=${visionMonths}`);
+          return { text: tesseractText, method: 'tesseract-kept', confidence: 70 };
+        }
+      }
+    } catch (vErr) {
+      console.warn('[OCR_COMPLETED] stage=2 method=openai-vision failed:', vErr instanceof Error ? vErr.message : String(vErr));
     }
   } else {
-    if (tesseractResult.rawText.length === 0 && tesseractResult.error?.includes('401')) {
-      console.warn('[bill-upload] Stage 1 got 401 from /api/ocr — trying inline Tesseract CLI fallback');
-    } else {
-      console.log(`[bill-upload] Tesseract returned too little text (${tesseractResult.rawText.length} chars) — trying inline CLI fallback`);
-    }
+    console.warn('[OCR_STARTED] stage=2 SKIPPED — OPENAI_API_KEY not set');
+  }
 
-    // Stage 1b: Inline Tesseract CLI
+  // ── Stage 3: Google Vision (last resort) ────────────────────────────────────
+  if (googleVisionKey) {
+    console.log('[OCR_STARTED] stage=3 method=google-vision');
     try {
-      const inlineText = await runTesseractCliInline(buffer, mimeType);
-      if (inlineText.length > 50) {
-        console.log(`[bill-upload] Stage 1b inline CLI: ${inlineText.length} chars — using result`);
-        const parseCheck1b = parseMonthlyUsage(inlineText);
-        const hasUsage1b = parseCheck1b.monthsFound >= 3 || parseCheck1b.annualUsage !== null;
-        if (hasUsage1b) {
-          return { text: inlineText, method: 'tesseract-cli-inline', confidence: 75 };
-        }
-        tesseractResult.rawText = inlineText;
-        (tesseractResult as any).confidence = 60;
+      const googleResult = await recognizeImageWithGoogle(buffer, googleVisionKey);
+      console.log(`[OCR_COMPLETED] stage=3 method=google-vision chars=${googleResult.rawText.length}`);
+      console.log(`[OCR_TEXT_LENGTH] after_google=${googleResult.rawText.length}`);
+      if (googleResult.rawText.length >= 20) {
+        return { text: googleResult.rawText, method: 'google-vision', confidence: googleResult.confidence };
       }
-    } catch (cliErr) {
-      console.warn('[bill-upload] Stage 1b inline CLI failed:', cliErr instanceof Error ? cliErr.message : String(cliErr));
+    } catch (gErr) {
+      console.warn('[OCR_COMPLETED] stage=3 method=google-vision failed:', gErr instanceof Error ? gErr.message : String(gErr));
     }
   }
 
-  // Stage 3: Vision API fallback
-  if (openaiKey) {
-    console.log('[bill-upload] Stage 3a: OpenAI Vision fallback...');
-    const visionResult = await recognizeImageWithVision(buffer, mimeType, openaiKey);
-    if (visionResult.rawText.length > 50) {
-      const visionParse = parseMonthlyUsage(visionResult.rawText);
-      const tesseractParse = tesseractResult.rawText.length > 50
-        ? parseMonthlyUsage(tesseractResult.rawText)
-        : null;
-
-      if (
-        visionParse.monthsFound >= (tesseractParse?.monthsFound ?? 0) ||
-        (visionParse.annualUsage !== null && tesseractParse?.annualUsage === null)
-      ) {
-        return {
-          text: visionResult.rawText,
-          method: 'openai-vision-fallback',
-          confidence: visionResult.confidence,
-        };
-      } else {
-        return {
-          text: tesseractResult.rawText,
-          method: 'tesseract-kept',
-          confidence: tesseractResult.confidence,
-        };
-      }
-    }
+  // ── Return whatever Tesseract got (even low confidence) ────────────────────
+  if (tesseractText.length > 0) {
+    console.warn(`[OCR_COMPLETED] method=tesseract-low-confidence chars=${tesseractText.length} — returning partial`);
+    return { text: tesseractText, method: 'tesseract-low-confidence', confidence: 30 };
   }
 
-  if (googleKey) {
-    console.log('[bill-upload] Stage 3b: Google Vision fallback...');
-    const googleResult = await recognizeImageWithGoogle(buffer, googleKey);
-    if (googleResult.rawText.length > 50) {
-      return {
-        text: googleResult.rawText,
-        method: 'google-vision-fallback',
-        confidence: googleResult.confidence,
-      };
-    }
-  }
-
-  if (tesseractResult.rawText.length > 20) {
-    return {
-      text: tesseractResult.rawText,
-      method: 'tesseract-low-confidence',
-      confidence: tesseractResult.confidence,
-    };
-  }
-
+  console.error('[OCR_FAILED] all stages exhausted — returning empty');
   return { text: '', method: 'failed', confidence: 0 };
 }
 
