@@ -9,7 +9,6 @@ export default defineConfig({
     hookTimeout: 10000,
     include: ['tests/**/*.test.ts', 'lib/**/*.test.ts'],
     exclude: ['node_modules', '.next', 'deploy_v24.6'],
-    reporter: ['verbose'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
