@@ -63,13 +63,19 @@ export async function POST(req: NextRequest) {
     `;
 
     // 6. Send email with the RAW token in the URL (never the hash)
+    // Log the URL being used so we can verify it in Vercel logs
+    const appUrlForLogging = process.env.NEXT_PUBLIC_APP_URL
+      || process.env.NEXT_PUBLIC_BASE_URL
+      || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://solarpro-v31.vercel.app');
+    console.log(`[password-reset] Sending reset email to userId=${user.id} — base URL: ${appUrlForLogging}`);
+
     const emailResult = await sendPasswordResetEmail(user.email, rawToken);
 
     if (!emailResult.success) {
       console.error(`[password-reset] Email send failed for userId=${user.id}:`, emailResult.error);
       // Don't expose email failure to client — return success to avoid enumeration
     } else {
-      console.log(`[password-reset] Reset email sent to userId=${user.id}`);
+      console.log(`[password-reset] Reset email sent successfully to userId=${user.id}`);
     }
 
     return NextResponse.json(SUCCESS_RESPONSE);

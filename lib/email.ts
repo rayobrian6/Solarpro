@@ -17,8 +17,32 @@ function getResendClient(): Resend | null {
 }
 
 function getAppUrl(): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  // Priority order:
+  // 1. NEXT_PUBLIC_APP_URL  — explicitly set production URL (preferred)
+  // 2. NEXT_PUBLIC_BASE_URL — used by Stripe routes; accept this too
+  // 3. VERCEL_URL           — auto-set by Vercel BUT this is the *deployment
+  //                           preview* URL, not the production domain.
+  //                           Only use if it doesn't look like an ephemeral SHA URL.
+  // 4. Hard-coded fallback  — production domain
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, '');
+  }
+  if (process.env.NEXT_PUBLIC_BASE_URL) {
+    return process.env.NEXT_PUBLIC_BASE_URL.replace(/\/$/, '');
+  }
+  if (process.env.VERCEL_URL) {
+    const url = `https://${process.env.VERCEL_URL}`;
+    // Warn if VERCEL_URL looks like an ephemeral preview URL (contains git SHA)
+    if (process.env.VERCEL_URL.match(/[a-f0-9]{8,}/)) {
+      console.warn(
+        '[email] WARNING: VERCEL_URL appears to be a preview deployment URL, ' +
+        'not your production domain. Password reset links may point to the wrong URL. ' +
+        'Fix: add NEXT_PUBLIC_APP_URL=https://solarpro-v31.vercel.app to Vercel env vars. ' +
+        `Current VERCEL_URL: ${process.env.VERCEL_URL}`
+      );
+    }
+    return url;
+  }
   return 'https://solarpro-v31.vercel.app';
 }
 
