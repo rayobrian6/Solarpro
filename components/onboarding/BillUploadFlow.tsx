@@ -165,7 +165,12 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       const res = await fetch('/api/bill-upload', { method: 'POST', body: formData });
       cancelSimulation();
 
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Server returned an invalid response. Please try again.');
+      }
 
       if (!data.success) {
         // Map HTTP status codes to friendly messages
@@ -222,7 +227,12 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       `);
 
       const res = await fetch('/api/bill-upload', { method: 'POST', body: formData });
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Server returned an invalid response. Please try again.');
+      }
 
       if (data.success) {
         if (data.billData) {

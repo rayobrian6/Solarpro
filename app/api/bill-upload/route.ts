@@ -30,6 +30,11 @@ try {
 export const maxDuration = 60;
 
 // POST /api/bill-upload
+// Safety helper — guarantees JSON even if called outside the main try/catch
+function safeJsonError(msg: string, status = 500): NextResponse {
+  return NextResponse.json({ success: false, error: msg }, { status });
+}
+
 export async function POST(req: NextRequest) {
   // ── JSON Error Boundary ──────────────────────────────────────────────────
   // Catches any uncaught throw (including module load errors, type errors, etc.)
@@ -436,12 +441,25 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : 'Unknown error';
     const stack = err instanceof Error ? err.stack?.split('\n').slice(0, 5).join(' | ') : '';
-    console.error('[bill-upload] Fatal error:', msg);
-    console.error('[bill-upload] Stack:', stack);
+    console.error('[BILL_UPLOAD_ERROR] Fatal error:', msg);
+    console.error('[BILL_UPLOAD_ERROR] Stack:', stack);
+
+    // Map common failure modes to friendly messages
+    let friendlyMsg = 'Bill processing failed. Please try again.';
+    if (msg.includes('extract') || msg.includes('OCR') || msg.includes('text')) {
+      friendlyMsg = 'Bill processing failed — could not extract readable text from the file.';
+    } else if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) {
+      friendlyMsg = 'Bill processing timed out. Please try a smaller file or try again.';
+    } else if (msg.includes('Unauthorized') || msg.includes('401')) {
+      friendlyMsg = 'Session expired. Please log in again.';
+    } else if (msg.includes('size') || msg.includes('large')) {
+      friendlyMsg = 'File is too large. Please upload a file under 10MB.';
+    }
+
     return NextResponse.json({ 
       success: false, 
-      error: msg,
-      stack: stack?.slice(0, 300),
+      error: friendlyMsg,
+      detail: msg,
     }, { status: 500 });
   }
 }

@@ -1,8 +1,16 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.16';
+export const BUILD_VERSION     = 'v47.17';
 export const BUILD_DATE        = '2026-06-13';
-export const BUILD_DESCRIPTION = 'v47.16: Fix critical auth outage -- DATABASE_URL/JWT_SECRET env vars not loaded in production deployment (Vercel re-deploy required), added /api/health/auth diagnostic endpoint, verified full auth pipeline working: DB connected, login 401 on bad creds, /api/auth/me 401 on no cookie';
+export const BUILD_DESCRIPTION = 'v47.17: Harden bill upload JSON safety -- all 4 fetch sites wrapped in try/catch json parse, route catch block returns friendly error messages, safeJsonError helper, never returns plain text';
 export const BUILD_FEATURES    = [
+  // v47.17 -- Harden bill upload JSON safety (fix "Unexpected token 'A'" crash)
+  'ROOT CAUSE: frontend called res.json() without try/catch -- when server returned non-JSON (Vercel timeout HTML, module crash before handler runs), res.json() threw SyntaxError: Unexpected token A',
+  'FIX: components/onboarding/BillUploadFlow.tsx -- both fetch sites (file upload + manual entry) now wrap res.json() in try/catch, throw friendly Error on parse failure',
+  'FIX: components/onboarding/BillUploadModal.tsx -- both fetch sites (file upload + manual entry) now wrap res.json() in try/catch, throw friendly Error on parse failure',
+  'FIX: app/api/bill-upload/route.ts -- outer catch block now maps error types to friendly messages (OCR failure, timeout, auth, file size)',
+  'FIX: app/api/bill-upload/route.ts -- added safeJsonError() helper for any edge-case non-JSON escape paths',
+  'FIX: app/api/bill-upload/route.ts -- BILL_UPLOAD_ERROR log tag on fatal errors for Vercel log searchability',
+  'USER-VISIBLE: upload modal now shows "Bill processing failed — could not extract readable text" instead of "Unexpected token A is not valid JSON"',
   // v47.16 -- Fix critical auth outage (DATABASE_URL not loaded in production)
   'ROOT CAUSE: Vercel production deployment had encrypted env vars that were not decrypting at runtime -- DATABASE_URL and JWT_SECRET showed false in /api/health despite being configured in Vercel project settings',
   'ROOT CAUSE: Previous deployment (dpl_5b1USpSCLvYgpvEUazEoMoQFsi8D) was built without env vars properly injected -- forced redeploy (dpl_4MBQbPcsLyHQqe6zVLPhJSCFdad2) fixed the issue',

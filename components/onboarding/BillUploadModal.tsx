@@ -194,7 +194,12 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
       formData.append('file', file);
       const res = await fetch('/api/bill-upload', { method: 'POST', body: formData });
       cancelSim();
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Server returned an invalid response. Please try again.');
+      }
 
       if (!data.success) {
         let msg = data.error || 'Failed to process bill';
@@ -238,7 +243,12 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
       const formData = new FormData();
       formData.append('text', `Service Address: ${manualAddress}\nMonthly Usage: ${manualKwh} kWh\nAnnual Usage: ${parseFloat(manualKwh) * 12} kWh`);
       const res = await fetch('/api/bill-upload', { method: 'POST', body: formData });
-      const data = await res.json();
+      let data: any;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Server returned an invalid response. Please try again.');
+      }
       if (data.success) {
         if (data.billData) {
           data.billData.monthlyKwh = parseFloat(manualKwh);
