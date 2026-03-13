@@ -10,7 +10,7 @@
 - [x] Create /api/system/health route
 
 ## Phase 3: Finalize
-- [ ] Update .env.example — consolidate NEXT_PUBLIC_APP_URL guidance, remove NEXT_PUBLIC_BASE_URL duplication
-- [ ] TypeScript check
-- [ ] Commit + push
+- [x] Update .env.example — consolidate NEXT_PUBLIC_APP_URL guidance, remove NEXT_PUBLIC_BASE_URL duplication
+- [x] TypeScript check
+- [x] Commit + push
 - [ ] Output deployment readiness report
