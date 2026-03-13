@@ -168,13 +168,68 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Stage simulation ──────────────────────────────────────────────────────
-  const runStageSimulation = useCallback(() => {
+  // Phase 1 (bill-upload): uploading → extracting → parsing  (~0-5s)
+  // Phase 2 (system-size): geocoding → sizing                (~5-10s)
+  const runUploadStageSimulation = useCallback(() => {
     const delays: [ProcessingStage, number][] = [
-      ['uploading', 300], ['extracting', 1800], ['parsing', 3500],
-      ['geocoding', 5200], ['sizing', 6800],
+      ['uploading', 300], ['extracting', 800], ['parsing', 2500],
     ];
     const timers = delays.map(([stage, ms]) => setTimeout(() => setProcessingStage(stage), ms));
     return () => timers.forEach(clearTimeout);
+  }, []);
+
+  // ── Call /api/system-size after bill parse ─────────────────────────────────
+  const runSystemSizing = useCallback(async (billData: any, uploadResult: any) => {
+    setProcessingStage('geocoding');
+    try {
+      const sizingRes = await fetch('/api/system-size', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          annual_kwh: billData.estimatedAnnualKwh || billData.annualKwh || null,
+          monthly_kwh: billData.monthlyKwh || null,
+          monthly_usage: billData.monthlyUsageHistory || [],
+          address: billData.serviceAddress || null,
+          utility: billData.utilityProvider || null,
+          rate: billData.electricityRate || null,
+          offset_target: 100,
+        }),
+      });
+      setProcessingStage('sizing');
+      let sizingData: any;
+      try {
+        sizingData = await sizingRes.json();
+      } catch {
+        sizingData = { success: false };
+      }
+      if (sizingData.success) {
+        const merged = {
+          ...uploadResult,
+          locationData: sizingData.locationData,
+          utilityData: sizingData.utilityData,
+          matchedUtility: sizingData.matchedUtility,
+          rateValidation: sizingData.rateValidation,
+          systemSizing: sizingData.systemSizing,
+          billData: {
+            ...uploadResult.billData,
+            electricityRate: sizingData.rateValidation?.correctedRate ?? uploadResult.billData?.electricityRate,
+            utilityProvider: sizingData.matchedUtility?.utilityName ?? uploadResult.billData?.utilityProvider,
+          },
+        };
+        setResult(merged);
+        setSystemKw(sizingData.systemSizing?.recommendedKw || 0);
+      } else {
+        console.warn('[BillUploadModal] /api/system-size failed:', sizingData.error);
+        setResult(uploadResult);
+        setSystemKw(0);
+      }
+    } catch (sizingErr: unknown) {
+      console.warn('[BillUploadModal] /api/system-size threw:', sizingErr instanceof Error ? sizingErr.message : sizingErr);
+      setResult(uploadResult);
+      setSystemKw(0);
+    }
+    setProcessingStage('done');
+    setTimeout(() => setStep('review'), 400);
   }, []);
 
   // ── File upload ───────────────────────────────────────────────────────────
@@ -188,7 +243,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
     setSelectedFile({ name: file.name, size: file.size });
     setLastFile(file);
 
-    const cancelSim = runStageSimulation();
+    const cancelSim = runUploadStageSimulation();
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -206,7 +261,6 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         if (res.status === 413) msg = `File too large. Max ${MAX_FILE_SIZE_MB} MB.`;
         if (res.status === 415) msg = 'Unsupported file type.';
         if (res.status === 422) {
-          // parseEmpty = complete extraction failure — show clear actionable message
           if (data.parseEmpty) {
             msg = 'Bill text could not be extracted. Please re-upload a clearer image or enter manually.';
           } else {
@@ -225,10 +279,8 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         return;
       }
 
-      setProcessingStage('done');
-      setResult(data);
-      setSystemKw(data.systemSizing?.recommendedKw || 0);
-      setTimeout(() => setStep('review'), 400);
+      // Phase 1 complete — call /api/system-size for geocoding + sizing
+      await runSystemSizing(data.billData, data);
     } catch (err: unknown) {
       cancelSim();
       setError(err instanceof Error ? err.message : 'Upload failed. Check your connection.');
@@ -236,7 +288,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
     } finally {
       setUploading(false);
     }
-  }, [runStageSimulation]);
+  }, [runUploadStageSimulation, runSystemSizing]);
 
   // ── Manual entry ──────────────────────────────────────────────────────────
   const handleManualEntry = useCallback(async () => {
@@ -246,7 +298,7 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
     }
     setError(null);
     setUploading(true);
-    setProcessingStage('geocoding');
+    setProcessingStage('parsing');
     try {
       const formData = new FormData();
       formData.append('text', `Service Address: ${manualAddress}\nMonthly Usage: ${manualKwh} kWh\nAnnual Usage: ${parseFloat(manualKwh) * 12} kWh`);
@@ -258,13 +310,18 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         throw new Error('Server returned an invalid response. Please try again.');
       }
       if (data.success) {
+        // Patch manual values into billData
         if (data.billData) {
           data.billData.monthlyKwh = parseFloat(manualKwh);
           data.billData.estimatedAnnualKwh = parseFloat(manualKwh) * 12;
+          data.billData.serviceAddress = manualAddress;
         }
-        setResult(data);
-        setSystemKw(data.systemSizing?.recommendedKw || 0);
-        setStep('review');
+        // Run system sizing with manual values
+        await runSystemSizing(data.billData || {
+          monthlyKwh: parseFloat(manualKwh),
+          estimatedAnnualKwh: parseFloat(manualKwh) * 12,
+          serviceAddress: manualAddress,
+        }, data);
       } else {
         setError(data.error || 'Could not process address');
       }
@@ -272,9 +329,8 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
       setError(err instanceof Error ? err.message : 'Request failed');
     } finally {
       setUploading(false);
-      setProcessingStage('uploading');
     }
-  }, [manualKwh, manualAddress]);
+  }, [manualKwh, manualAddress, runSystemSizing]);
 
   // ── Auto-create client + project + proposal + engineering ─────────────────
   const handleCreateAll = useCallback(async () => {

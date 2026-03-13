@@ -125,14 +125,13 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Simulate stage progression during upload ──────────────────────────────
-  const runStageSimulation = useCallback(() => {
-    // Stages advance on a rough timer; actual completion resets to 'done'
+  // Phase 1 (bill-upload): uploading → extracting → parsing  (~0-5s)
+  // Phase 2 (system-size): geocoding → sizing                (~5-10s)
+  const runUploadStageSimulation = useCallback(() => {
     const delays: [ProcessingStage, number][] = [
       ['uploading',  300],
-      ['extracting', 1800],
-      ['parsing',    3500],
-      ['geocoding',  5200],
-      ['sizing',     6800],
+      ['extracting', 800],
+      ['parsing',    2500],
     ];
     const timers: ReturnType<typeof setTimeout>[] = [];
     delays.forEach(([stage, ms]) => {
@@ -141,9 +140,61 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     return () => timers.forEach(clearTimeout);
   }, []);
 
+  const runSystemSizing = useCallback(async (billData: any, uploadResult: any) => {
+    setProcessingStage('geocoding');
+    try {
+      const sizingRes = await fetch('/api/system-size', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          annual_kwh: billData.estimatedAnnualKwh || billData.annualKwh || null,
+          monthly_kwh: billData.monthlyKwh || null,
+          monthly_usage: billData.monthlyUsageHistory || [],
+          address: billData.serviceAddress || null,
+          utility: billData.utilityProvider || null,
+          rate: billData.electricityRate || null,
+          offset_target: 100,
+        }),
+      });
+      setProcessingStage('sizing');
+      let sizingData: any;
+      try {
+        sizingData = await sizingRes.json();
+      } catch {
+        sizingData = { success: false };
+      }
+      if (sizingData.success) {
+        const merged = {
+          ...uploadResult,
+          locationData: sizingData.locationData,
+          utilityData: sizingData.utilityData,
+          matchedUtility: sizingData.matchedUtility,
+          rateValidation: sizingData.rateValidation,
+          systemSizing: sizingData.systemSizing,
+          billData: {
+            ...uploadResult.billData,
+            electricityRate: sizingData.rateValidation?.correctedRate ?? uploadResult.billData?.electricityRate,
+            utilityProvider: sizingData.matchedUtility?.utilityName ?? uploadResult.billData?.utilityProvider,
+          },
+        };
+        setResult(merged);
+        setSystemKw(sizingData.systemSizing?.recommendedKw || 0);
+      } else {
+        console.warn('[BillUploadFlow] /api/system-size failed:', sizingData.error);
+        setResult(uploadResult);
+        setSystemKw(0);
+      }
+    } catch (sizingErr: unknown) {
+      console.warn('[BillUploadFlow] /api/system-size threw:', sizingErr instanceof Error ? sizingErr.message : sizingErr);
+      setResult(uploadResult);
+      setSystemKw(0);
+    }
+    setProcessingStage('done');
+    setTimeout(() => setStep('review'), 400);
+  }, []);
+
   // ── File upload handler ────────────────────────────────────────────────────
   const handleFile = useCallback(async (file: File) => {
-    // Client-side validation
     const validationError = validateFile(file);
     if (validationError) {
       setError(validationError);
@@ -156,7 +207,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     setSelectedFile({ name: file.name, size: file.size, type: file.type });
     setLastFile(file);
 
-    const cancelSimulation = runStageSimulation();
+    const cancelSimulation = runUploadStageSimulation();
 
     try {
       const formData = new FormData();
@@ -173,12 +224,10 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       }
 
       if (!data.success) {
-        // Map HTTP status codes to friendly messages
         let msg = data.error || 'Failed to process bill';
         if (res.status === 413) msg = `File too large. Please upload a file under ${MAX_FILE_SIZE_MB} MB.`;
         if (res.status === 415) msg = 'Unsupported file type. Please upload a PDF, JPG, or PNG.';
         if (res.status === 422) {
-          // parseEmpty = complete extraction failure; other 422s = no text found
           if (data.parseEmpty) {
             msg = 'Bill text could not be extracted. Please re-upload a clearer image or enter manually.';
           } else {
@@ -191,10 +240,8 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         return;
       }
 
-      setProcessingStage('done');
-      setResult(data);
-      setSystemKw(data.systemSizing?.recommendedKw || 0);
-      setTimeout(() => setStep('review'), 400);
+      // Phase 1 complete — call /api/system-size for geocoding + sizing
+      await runSystemSizing(data.billData, data);
     } catch (err: unknown) {
       cancelSimulation();
       const msg = err instanceof Error ? err.message : 'Upload failed. Please check your connection and try again.';
@@ -203,7 +250,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     } finally {
       setUploading(false);
     }
-  }, [runStageSimulation]);
+  }, [runUploadStageSimulation, runSystemSizing]);
 
   // ── Retry handler ─────────────────────────────────────────────────────────
   const handleRetry = useCallback(() => {
@@ -223,15 +270,11 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     }
     setError(null);
     setUploading(true);
-    setProcessingStage('geocoding');
+    setProcessingStage('parsing');
 
     try {
       const formData = new FormData();
-      formData.append('text', `
-        Service Address: ${manualAddress}
-        Monthly Usage: ${manualKwh} kWh
-        Annual Usage: ${parseFloat(manualKwh) * 12} kWh
-      `);
+      formData.append('text', `Service Address: ${manualAddress}\nMonthly Usage: ${manualKwh} kWh\nAnnual Usage: ${parseFloat(manualKwh) * 12} kWh`);
 
       const res = await fetch('/api/bill-upload', { method: 'POST', body: formData });
       let data: any;
@@ -245,10 +288,13 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         if (data.billData) {
           data.billData.monthlyKwh = parseFloat(manualKwh);
           data.billData.estimatedAnnualKwh = parseFloat(manualKwh) * 12;
+          data.billData.serviceAddress = manualAddress;
         }
-        setResult(data);
-        setSystemKw(data.systemSizing?.recommendedKw || 0);
-        setStep('review');
+        await runSystemSizing(data.billData || {
+          monthlyKwh: parseFloat(manualKwh),
+          estimatedAnnualKwh: parseFloat(manualKwh) * 12,
+          serviceAddress: manualAddress,
+        }, data);
       } else {
         setError(data.error || 'Could not process address');
       }
@@ -256,9 +302,8 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       setError(err instanceof Error ? err.message : 'Request failed');
     } finally {
       setUploading(false);
-      setProcessingStage('uploading');
     }
-  }, [manualKwh, manualAddress]);
+  }, [manualKwh, manualAddress, runSystemSizing]);
 
   // ── Drag & drop ────────────────────────────────────────────────────────────
   const handleDrop = useCallback((e: React.DragEvent) => {

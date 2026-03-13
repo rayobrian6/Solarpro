@@ -1,8 +1,28 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.18';
+export const BUILD_VERSION     = 'v47.19';
 export const BUILD_DATE        = '2026-06-14';
-export const BUILD_DESCRIPTION = 'v47.18: Hard fail on empty parse (422 + parseEmpty), sizing gate (skip if 0 kWh), full pipeline debug logging (FILE_RECEIVED, FILE_BUFFER_CREATED, FILE_SAVED, OCR_TEXT_LENGTH, PARSED_FIELDS_COUNT, AI_EXTRACTION_RESULT, PARSE_EMPTY_FAIL, SIZING_INPUTS_READY, SIZING_SKIPPED_EMPTY_PARSE)';
+export const BUILD_DESCRIPTION = 'v47.19: Split bill pipeline into /api/bill-upload (OCR+parse <5s) + /api/system-size (geocode+size+rate); 6s timeout guard on OCR; two-phase stage simulation; fixes Vercel timeout/invalid-response error';
 export const BUILD_FEATURES    = [
+  // v47.19 -- Split bill pipeline to fix Vercel timeout ("Server returned an invalid response")
+  'ROOT CAUSE: /api/bill-upload ran OCR + parse + geocoding + utility match + rate validation + system sizing in a single serverless function -- total time 15-60s exceeded Vercel 60s limit, causing HTML timeout response that res.json() could not parse',
+  'FIX: app/api/bill-upload/route.ts -- SLIM: now only does OCR + text extraction + parseBill + AI fallback -- returns in <5s',
+  'FIX: app/api/bill-upload/route.ts -- REMOVED from route: geocodeAddress, detectUtility, matchUtility, validateAndCorrectUtilityRate, getProductionFactor, checkNetMeteringLimit, saveBill, system sizing math',
+  'FIX: app/api/bill-upload/route.ts -- maxDuration reduced from 60s to 30s (OCR only needs ~5-10s)',
+  'FIX: app/api/bill-upload/route.ts -- returns locationData/utilityData/matchedUtility/systemSizing/rateValidation as null -- frontend calls /api/system-size to fill these',
+  'NEW: app/api/system-size/route.ts -- POST endpoint receiving parsed bill fields (annual_kwh, monthly_kwh, address, utility, rate, offset_target)',
+  'NEW: app/api/system-size/route.ts -- runs: geocodeAddress + matchUtility + detectUtility + validateAndCorrectUtilityRate + getProductionFactor + checkNetMeteringLimit + system size math',
+  'NEW: app/api/system-size/route.ts -- returns: system_kw, estimated_panels, estimated_cost, locationData, matchedUtility, rateValidation, systemSizing',
+  'NEW: app/api/system-size/route.ts -- maxDuration=30s; isolated from OCR so geocoding/DB errors never block text extraction',
+  'FIX: app/api/bill-upload/route.ts -- 6s Promise.race timeout guard on OCR and AI extraction -- returns partial data rather than hanging',
+  'FIX: components/onboarding/BillUploadModal.tsx -- two-phase flow: bill-upload advances uploading/extracting/parsing stages, then calls /api/system-size which advances geocoding/sizing',
+  'FIX: components/onboarding/BillUploadModal.tsx -- runUploadStageSimulation replaces runStageSimulation (only covers upload phases, not geocoding/sizing)',
+  'FIX: components/onboarding/BillUploadModal.tsx -- runSystemSizing() merges sizing result into upload result before setResult()',
+  'FIX: components/onboarding/BillUploadModal.tsx -- handleManualEntry now calls runSystemSizing after bill-upload text parse',
+  'FIX: components/onboarding/BillUploadFlow.tsx -- same two-phase flow and runSystemSizing pattern as BillUploadModal',
+  'FIX: components/onboarding/BillUploadFlow.tsx -- handleManualEntry now calls runSystemSizing',
+  'LOGS: BILL_UPLOAD_STARTED / OCR_COMPLETED / TEXT_LENGTH / FIELDS_EXTRACTED / BILL_UPLOAD_RETURNING added to bill-upload',
+  'LOGS: SYSTEM_SIZE_STARTED / SIZING_COMPLETE / SIZING_SKIPPED / SYSTEM_SIZE_RETURNING added to system-size',
+  'RESULT: bill upload completes in <5s (OCR only), sizing completes in <10s (geocoding+DB), total flow <15s -- well under Vercel 60s limit',
   // v47.18 -- Hard fail on empty parse + sizing gate + full pipeline logging
   'ROOT CAUSE: Pipeline silently returned success=true with 0 fields when OCR/parser found nothing -- review screen showed Extraction confidence: low, 0 fields, $0.130/kWh fallback, 0.0 kW, 0 annual kWh',
   'ROOT CAUSE: extractBillDataWithAI() sets usedLlmFallback=true even when AI returns nothing useful -- caused AI-assisted label on empty results',
