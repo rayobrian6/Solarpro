@@ -1,8 +1,15 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.26';
+export const BUILD_VERSION     = 'v47.27';
 export const BUILD_DATE        = '2026-03-13';
-export const BUILD_DESCRIPTION = 'v47.26: ToS/NDA integration — database acceptance tracking, /terms page, signup checkbox, login gate';
+export const BUILD_DESCRIPTION = 'v47.27: ToS server-side enforcement (TOS_REQUIRED 400), tos_ip audit field, auth fix';
 export const BUILD_FEATURES    = [
+  // v47.27 -- ToS enforcement + auth fixes
+  'TOS: register route — 400 TOS_REQUIRED enforced server-side if tosAccepted not true',
+  'TOS: register route — captures x-forwarded-for IP as tos_ip at signup',
+  'TOS: tos-accept POST — captures IP at /terms page acceptance too',
+  'TOS: migration 010 — tos_ip TEXT column added',
+  'AUTH: login SELECT reverted to base columns — no tos_* fields (removed information_schema overhead)',
+  'AUTH: tos-accept GET — simple try/catch on column error instead of catalog scan',
   // v47.26 -- ToS/NDA integration
   'TOS: Migration 010 — users.tos_accepted_at (TIMESTAMPTZ) + users.tos_version (TEXT) columns',
   'TOS: /api/tos-accept POST — records acceptance with timestamp and version (JWT auth required)',
