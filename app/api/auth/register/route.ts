@@ -18,6 +18,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { name, email, password, company, phone, tosAccepted } = body;
 
+    // Capture client IP for ToS audit trail
+    const tosIp =
+      req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      req.headers.get('x-real-ip') ||
+      null;
+
     if (!name?.trim()) {
       return NextResponse.json({ success: false, error: 'Full name is required.' }, { status: 400 });
     }
@@ -26,6 +32,13 @@ export async function POST(req: NextRequest) {
     }
     if (!password || password.length < 8) {
       return NextResponse.json({ success: false, error: 'Password must be at least 8 characters.' }, { status: 400 });
+    }
+    // ToS acceptance is mandatory
+    if (!tosAccepted) {
+      return NextResponse.json(
+        { success: false, error: 'You must accept the Terms of Service and Confidentiality Agreement to create an account.', code: 'TOS_REQUIRED' },
+        { status: 400 }
+      );
     }
 
     // Use retry-aware DB getter to handle Neon cold starts after deployment
@@ -72,9 +85,11 @@ export async function POST(req: NextRequest) {
           UPDATE users
           SET tos_accepted_at = ${tosAcceptedAt},
               tos_version     = ${tosVersion},
+              tos_ip          = ${tosIp},
               updated_at      = NOW()
           WHERE id = ${userId}
         `;
+        console.log(`[TOS_ACCEPTED_AT_SIGNUP] userId=${userId} version=${tosVersion} ip=${tosIp}`);
       } catch (tosErr: any) {
         // Migration 010 not yet run — tos columns missing. Non-fatal: user can accept via /terms
         console.warn('[/api/auth/register] ToS columns not yet available (run migration):', tosErr?.message);

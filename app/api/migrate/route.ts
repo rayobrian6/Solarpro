@@ -539,6 +539,15 @@ export async function POST(req: NextRequest) {
     } catch (e: any) {
       results.push(`⚠️ idx_users_tos_version: ${e.message}`);
     }
+    try {
+      await sql`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS tos_ip  TEXT DEFAULT NULL
+      `;
+      results.push('✅ users.tos_ip — added (or already existed)');
+    } catch (e: any) {
+      results.push(`⚠️ users.tos_ip: ${e.message}`);
+    }
 
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {

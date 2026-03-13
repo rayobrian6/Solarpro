@@ -10,6 +10,10 @@ ALTER TABLE users
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS tos_version      TEXT        DEFAULT NULL;
 
+-- IP address at time of acceptance (audit trail)
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS tos_ip           TEXT        DEFAULT NULL;
+
 -- Index for fast lookup of users who haven't accepted yet
 CREATE INDEX IF NOT EXISTS idx_users_tos_accepted_at ON users(tos_accepted_at)
   WHERE tos_accepted_at IS NULL;

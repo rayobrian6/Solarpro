@@ -28,6 +28,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const version: string = body?.version || CURRENT_TOS_VERSION;
 
+    // Capture client IP for audit trail
+    const tosIp =
+      req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      req.headers.get('x-real-ip') ||
+      null;
+
     const sql = await getDbReady();
 
     const rows = await sql`
@@ -35,6 +41,7 @@ export async function POST(req: NextRequest) {
       SET
         tos_accepted_at = NOW(),
         tos_version     = ${version},
+        tos_ip          = ${tosIp},
         updated_at      = NOW()
       WHERE id = ${user.id}
       RETURNING tos_accepted_at, tos_version
