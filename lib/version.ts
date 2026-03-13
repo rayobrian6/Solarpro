@@ -1,8 +1,12 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.27';
+export const BUILD_VERSION     = 'v47.28';
 export const BUILD_DATE        = '2026-03-13';
-export const BUILD_DESCRIPTION = 'v47.27: ToS server-side enforcement (TOS_REQUIRED 400), tos_ip audit field, auth fix';
+export const BUILD_DESCRIPTION = 'v47.28: Self-delete endpoint for test cleanup + test script fix';
 export const BUILD_FEATURES    = [
+  // v47.28 -- Self-delete + test script fix
+  'TEST: DELETE /api/auth/delete-account?confirm=true — self-delete endpoint for test user cleanup',
+  'TEST: scripts/test_tos_flow.py — pre-test and step 6 cleanup now use self-delete (DELETE method)',
+  'TEST: delete() helper added to test script for proper HTTP DELETE requests',
   // v47.27 -- ToS enforcement + auth fixes
   'TOS: register route — 400 TOS_REQUIRED enforced server-side if tosAccepted not true',
   'TOS: register route — captures x-forwarded-for IP as tos_ip at signup',
