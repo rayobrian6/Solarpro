@@ -13,6 +13,7 @@
 
 import Stripe from 'stripe';
 import { getDbReady } from './db-neon';
+import { getBaseUrl } from '@/lib/env';
 
 // ============================================================
 // LAZY STRIPE INIT (prevents build-time errors)
@@ -299,7 +300,7 @@ export async function createCheckoutSession(
     if (!plan.priceId) return { url: null, error: 'Payment not configured for this plan.' };
 
     const customerId = await getOrCreateStripeCustomer(userId, email, name, companyName);
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const baseUrl = getBaseUrl();
 
     const session = await getStripe().checkout.sessions.create({
       customer: customerId,
@@ -329,7 +330,7 @@ export async function createPortalSession(userId: string): Promise<{ url: string
     const rows = await sql`SELECT stripe_customer_id FROM users WHERE id = ${userId} LIMIT 1`;
     if (!rows[0]?.stripe_customer_id) return { url: null, error: 'No subscription found.' };
 
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    const baseUrl = getBaseUrl();
     const session = await getStripe().billingPortal.sessions.create({
       customer: rows[0].stripe_customer_id as string,
       return_url: `${baseUrl}/account/billing`,

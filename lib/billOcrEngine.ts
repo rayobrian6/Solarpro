@@ -21,17 +21,7 @@ export interface OcrResult {
   error?: string;
 }
 
-// ── Internal base URL for server-to-server calls ──────────────────────────────
-function getBaseUrl(): string {
-  // In Next.js server environment, use NEXTAUTH_URL or NEXT_PUBLIC_APP_URL
-  // Falls back to localhost:3000 for local dev
-  return (
-    process.env.NEXTAUTH_URL ||
-    process.env.NEXT_PUBLIC_APP_URL ||
-    process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}` ||
-    'http://localhost:3000'
-  );
-}
+import { getBaseUrl } from '@/lib/env';
 
 // ── Stage 1: Internal OCR route (Tesseract.js WASM) ──────────────────────────
 /**

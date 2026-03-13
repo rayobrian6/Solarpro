@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
+import { getBaseUrl } from '@/lib/env';
 
 // POST /api/proposals/[id]/share — generate a shareable token for a proposal
 export async function POST(
@@ -48,7 +49,7 @@ export async function POST(
       // Column may not exist yet — still return a usable URL
     }
 
-    const baseUrl = req.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'https://solarpro.app';
+    const baseUrl = getBaseUrl();
     const shareUrl = `${baseUrl}/proposals/view/${proposalId}?token=${shareToken}`;
 
     return NextResponse.json({
@@ -60,7 +61,7 @@ export async function POST(
   } catch (err: any) {
     console.error('[share proposal]', err);
     const { id: proposalId } = await params;
-    const baseUrl = req.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'https://solarpro.app';
+    const baseUrl = getBaseUrl();
     const shareUrl = `${baseUrl}/proposals/view/${proposalId}`;
     return NextResponse.json({ success: true, shareUrl, shareToken: null });
   }
@@ -96,7 +97,7 @@ export async function GET(
       return NextResponse.json({ success: true, shareUrl: null });
     }
 
-    const baseUrl = req.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'https://solarpro.app';
+    const baseUrl = getBaseUrl();
     const shareUrl = `${baseUrl}/proposals/view/${proposalId}?token=${row.share_token}`;
 
     return NextResponse.json({
