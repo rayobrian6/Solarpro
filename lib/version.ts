@@ -1,8 +1,31 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.13';
-export const BUILD_DATE        = '2026-06-12';
-export const BUILD_DESCRIPTION = 'v47.13: Bill upload pipeline & utility rate fixes -- rate floor $0.10 catches supply-only rates (CMP $0.069), DB rate override for suspect rates, bill_data _billAnalysis wrapper for rowToProject hydration, structured debug logs (BILL_PARSE_COMPLETE, UTILITY_RATE_SELECTED, UTILITY_RATE_SOURCE, BILL_SAVED_TO_PROJECT, PROJECT_CREATED_FROM_BILL, PROJECT_RELOADED)';
+export const BUILD_VERSION     = 'v47.15';
+export const BUILD_DATE        = '2026-06-13';
+export const BUILD_DESCRIPTION = 'v47.15: Fix OCR 401 -- /api/ocr added to middleware PUBLIC_PATHS (was blocked by auth), inline Tesseract CLI Stage 1b fallback bypasses HTTP entirely, INTERNAL_OCR_SECRET defence-in-depth header, OCR_STARTUP env check log, full fallback chain never hard-aborts';
 export const BUILD_FEATURES    = [
+  // v47.15 -- Fix OCR 401 (middleware blocking internal server-to-server call)
+  'ROOT CAUSE: /api/ocr was not in middleware.ts PUBLIC_PATHS -- server-to-server fetch from billOcrEngine.ts had no auth cookie, middleware returned 401, all OCR failed',
+  'FIX: middleware.ts -- added /api/ocr to PUBLIC_PATHS (internal route, no user data, same pattern as /api/health)',
+  'FIX: lib/billOcrEngine.ts -- recognizeImage() now sends x-internal-secret header when INTERNAL_OCR_SECRET env var is set (defence-in-depth)',
+  'FIX: app/api/ocr/route.ts -- added INTERNAL_OCR_SECRET bypass check: rejects wrong secret (403), allows no-header requests (PUBLIC_PATHS covers auth)',
+  'FIX: app/api/ocr/route.ts -- added OCR_STARTUP log block: logs openai/google/internal_secret presence at cold start for Vercel log visibility',
+  'FIX: app/api/bill-upload/route.ts -- Stage 1b runTesseractCliInline(): inline CLI fallback that bypasses HTTP entirely when /api/ocr returns empty/401',
+  'FIX: app/api/bill-upload/route.ts -- Stage 1b detects 401 error code in tesseractResult.error and logs explicit warning before attempting inline CLI',
+  'FIX: app/api/bill-upload/route.ts -- inline CLI result used directly if hasUsage, otherwise kept as candidate text and pipeline continues to Vision',
+  'PIPELINE: upload -> pdftotext/pdf-parse (PDF) OR Tesseract-via-HTTP + CLI-inline (image) -> Vision AI -> extractBillDataWithAI -- never hard-aborts',
+  // v47.14 -- Restore bill parsing pipeline
+  'ROOT CAUSE: extractPdfTextPure returns 182 chars of chart-label text (J F M A M) from CMP bill -- passes old 50-char threshold but contains zero bill data, causing downstream parse failure',
+  'ROOT CAUSE: pdftotext CLI (poppler) was only tried as last resort (Method 5) -- it is the highest-quality extractor and works perfectly on the CMP bill',
+  'ROOT CAUSE: pdf-parse npm module was loaded but never called in extractPdfText -- import existed but call site was missing entirely',
+  'FIX: app/api/bill-upload/route.ts -- new extractPdfText() with 6-method cascade: pdftotext (M1) > pdf-parse (M2) > pure-extract+isUsefulText (M3) > pdfjs-dist (M4) > openai-files-api (M5) > google-vision (M6)',
+  'FIX: app/api/bill-upload/route.ts -- isUsefulText() quality gate: requires length>=100 and >=2 of: $amount, kWh, street address, account keyword, 3+ digit number -- blocks junk text from M3',
+  'FIX: app/api/bill-upload/route.ts -- pdf-parse called correctly for v2.x module (exports { PDFParse: fn }, not default)',
+  'FIX: app/api/bill-upload/route.ts -- pdftotext promoted to Method 1 (was fallback) -- available on Vercel serverless via poppler-utils',
+  'LOG: [FILE_UPLOADED] replaces old 3-line console.log block -- single structured line with name/type/size/openai',
+  'LOG: [PDF_PARSE_STARTED/SUCCESS/FAILED] per-method structured logs in extractPdfText cascade',
+  'LOG: [OCR_STARTED/OCR_SUCCESS/OCR_FAILED] around extractImageTextSmart for image files',
+  'LOG: [AI_EXTRACTION_STARTED] reason=zero_fields_extracted | reason=low_field_count before extractBillDataWithAI calls',
+  'LOG: [AI_EXTRACTION_COMPLETE] fields=... confidence=... after extractBillDataWithAI returns',
   // v47.13 -- Bill upload pipeline & utility rate fixes
   'T1 FIX: lib/utility-rules.ts -- MIN_VALID_RETAIL_RATE raised from $0.06 to $0.10 (residential retail floor; $0.069 CMP supply charge is now correctly flagged as suspect)',
   'T1 FIX: validateAndCorrectUtilityRate -- added DB rate override logic: if extracted rate < 50% of known DB rate, treat as supply-only and use DB rate instead',

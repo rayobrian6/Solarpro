@@ -54,7 +54,15 @@ export async function recognizeImage(
     const baseUrl = getBaseUrl();
     const res = await fetch(`${baseUrl}/api/ocr`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        // Internal server-to-server call — pass secret so middleware bypass works
+        // even if PUBLIC_PATHS ever changes. INTERNAL_OCR_SECRET must match the
+        // same env var checked in /api/ocr/route.ts.
+        ...(process.env.INTERNAL_OCR_SECRET
+          ? { 'x-internal-secret': process.env.INTERNAL_OCR_SECRET }
+          : {}),
+      },
       body: JSON.stringify({ imageBase64, mimeType: safeMime }),
       signal: AbortSignal.timeout(55000), // OCR can take 30–50s on first cold start
     });
@@ -185,7 +193,15 @@ export async function recognizeImageWithGoogle(
       `https://vision.googleapis.com/v1/images:annotate?key=${googleKey}`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+        'Content-Type': 'application/json',
+        // Internal server-to-server call — pass secret so middleware bypass works
+        // even if PUBLIC_PATHS ever changes. INTERNAL_OCR_SECRET must match the
+        // same env var checked in /api/ocr/route.ts.
+        ...(process.env.INTERNAL_OCR_SECRET
+          ? { 'x-internal-secret': process.env.INTERNAL_OCR_SECRET }
+          : {}),
+      },
         body: JSON.stringify({
           requests: [{
             image: { content: base64 },

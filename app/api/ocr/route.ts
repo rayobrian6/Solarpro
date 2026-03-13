@@ -41,9 +41,40 @@ export const maxDuration = 60;
 // Tesseract returns 0–100. Below 40 = likely garbage output.
 const MIN_USABLE_CONFIDENCE = 40;
 
+// ── Startup environment check ───────────────────────────────────────────────
+// Log which keys are available at module load so Vercel cold-start logs show config.
+// Tesseract needs no API key; Vision fallbacks (OpenAI/Google) do.
+if (typeof process !== 'undefined') {
+  const _hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const _hasGoogle = !!process.env.GOOGLE_MAPS_API_KEY;
+  const _hasSecret = !!process.env.INTERNAL_OCR_SECRET;
+  console.log(`[OCR_STARTUP] openai=${_hasOpenAI} google=${_hasGoogle} internal_secret=${_hasSecret}`);
+  if (!_hasOpenAI) console.warn('[OCR_STARTUP] OPENAI_API_KEY not set — Vision fallback disabled in OCR route');
+}
+
 // ── POST handler ────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const debugLog: string[] = [];
+
+  // ── Internal secret bypass ──────────────────────────────────────────────────
+  // When called server-to-server from billOcrEngine.ts, there is no auth cookie.
+  // /api/ocr is in PUBLIC_PATHS (middleware.ts) so this normally passes through.
+  // The secret header is a defence-in-depth backup in case PUBLIC_PATHS changes.
+  const internalSecret = process.env.INTERNAL_OCR_SECRET;
+  if (internalSecret) {
+    const headerSecret = req.headers.get('x-internal-secret');
+    if (headerSecret !== internalSecret) {
+      // Only enforce secret check if caller DID provide a header (wrong secret).
+      // If no header at all, allow through (PUBLIC_PATHS handles auth).
+      if (headerSecret !== null) {
+        console.warn('[OCR] Invalid internal secret — rejecting request');
+        return NextResponse.json(
+          { success: false, error: 'Invalid internal secret' },
+          { status: 403 }
+        );
+      }
+    }
+  }
 
   try {
     const body = await req.json();

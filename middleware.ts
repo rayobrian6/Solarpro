@@ -21,6 +21,7 @@ const PUBLIC_PATHS = [
   '/api/enterprise',
   '/api/stripe/webhook',
   '/api/migrate',
+  '/api/ocr',
   '/api/admin/free-pass',
   '/api/admin/set-roles',
   '/api/admin/debug-role',
