@@ -162,58 +162,116 @@ const PRODUCT_SCREENS = [
   },
 ];
 
+// Plans pulled directly from lib/stripe.ts — getSubscriptionPlans()
+// DO NOT edit prices/features here without updating lib/stripe.ts first.
 const PRICING = [
   {
-    name: 'Starter',
+    id: 'starter',
+    name: 'Starter Trial',
+    trialBadge: '3-Day Free Trial',
     price: '$79',
-    annual: '$63',
-    period: '/mo',
-    desc: 'Perfect for solo installers',
+    period: '/mo after trial',
+    desc: 'Explore SolarPro with limited access.',
+    trialNote: 'Free for 3 days — no credit card required.',
     features: [
-      '3D Design Studio',
-      'Up to 10 active projects',
-      'Up to 25 clients',
-      'PDF proposal generation',
-      'Production analysis (NREL)',
-      'Google Solar API',
+      'Basic 3D Solar Design Studio',
+      'Up to 2 active projects',
+      'Up to 5 clients',
+      'Preview proposals only',
+      'Production analysis (NREL PVWatts)',
+      'Google Solar API integration',
+      'Utility rate calculators',
+      'Email support',
     ],
-    cta: 'Start Free Trial',
+    notIncluded: [
+      'Engineering calculations (SLD)',
+      'Permit packet generation',
+      'BOM generation',
+      'Proposal e-signing',
+      'Sol Fence design',
+    ],
+    cta: 'Start 3-Day Trial',
     highlight: false,
+    isTrial: true,
+    checkoutHref: '/auth/register',
   },
   {
+    id: 'professional',
     name: 'Professional',
+    trialBadge: null,
     price: '$149',
-    annual: '$119',
     period: '/mo',
-    desc: 'For growing install teams',
+    desc: 'Full engineering suite for growing install teams.',
+    trialNote: null,
     features: [
+      'Everything in Starter',
       'Unlimited projects & clients',
-      'Electrical engineering (SLD)',
-      'Sol Fence design',
-      'BOM + structural calcs',
+      'Full engineering calculations (SLD)',
+      'Permit packet generation',
+      'Structural calculations',
+      'BOM generation',
       'Proposal e-signing',
       'White-label branding',
+      'Battery system design',
       'Priority support',
     ],
-    cta: 'Start Free Trial',
+    notIncluded: [],
+    cta: 'Subscribe',
     highlight: true,
     badge: 'Most Popular',
+    isTrial: false,
+    checkoutHref: '/auth/subscribe?plan=professional',
   },
   {
+    id: 'contractor',
     name: 'Contractor',
-    price: '$249',
-    annual: '$199',
+    trialBadge: null,
+    price: '$250',
     period: '/mo',
-    desc: 'For large contracting firms',
+    desc: 'Everything, for large contracting firms.',
+    trialNote: null,
     features: [
       'Everything in Professional',
       'Unlimited team members',
-      'Custom branding & logo upload',
+      'Sol Fence design',
+      'Bulk proposal generation',
+      'Advanced automation tools',
+      'Custom proposal templates',
+      'API access',
       'Dedicated onboarding',
       'SLA support',
     ],
-    cta: 'Start Free Trial',
+    notIncluded: [],
+    cta: 'Subscribe',
     highlight: false,
+    badge: 'Best Value',
+    isTrial: false,
+    checkoutHref: '/auth/subscribe?plan=contractor',
+  },
+  {
+    id: 'enterprise',
+    name: 'Enterprise',
+    trialBadge: null,
+    price: 'Custom',
+    period: ' pricing',
+    desc: 'Multi-company accounts with dedicated support.',
+    trialNote: null,
+    features: [
+      'Everything in Contractor',
+      'Multi-company accounts',
+      'Custom integrations',
+      'Private API access',
+      'Enterprise security controls',
+      'Dedicated account manager',
+      'Custom SLA',
+      'Volume discounts',
+      'White-glove onboarding',
+    ],
+    notIncluded: [],
+    cta: 'Contact Sales',
+    highlight: false,
+    isTrial: false,
+    checkoutHref: 'mailto:sales@underthesun.solutions',
   },
 ];
 
@@ -466,7 +524,6 @@ function BOMMock() {
 
 export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
-  const [annual, setAnnual] = useState(false);
   const [email, setEmail] = useState('');
   const [activeScreen, setActiveScreen] = useState(0);
 
@@ -1029,73 +1086,155 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-medium mb-4">
-              <Lock size={12} /> Simple Pricing
+              <Lock size={12} /> Transparent Pricing
             </div>
             <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
-              Start Free, Scale as You Grow
+              Start with a 3-Day Trial
             </h2>
-            <p className="text-lg text-slate-400 max-w-2xl mx-auto mb-8">
-              3-day free trial on all plans. No credit card required. Cancel anytime.
+            <p className="text-lg text-slate-400 max-w-2xl mx-auto">
+              Try Starter free for 3 days. Choose a paid plan to continue — no lock-in, cancel anytime.
             </p>
-            <div className="inline-flex items-center gap-3 bg-slate-800/60 border border-slate-700/50 rounded-xl p-1">
-              <button
-                onClick={() => setAnnual(false)}
-                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${!annual ? 'bg-amber-500 text-slate-900' : 'text-slate-400 hover:text-white'}`}
-              >
-                Monthly
-              </button>
-              <button
-                onClick={() => setAnnual(true)}
-                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${annual ? 'bg-amber-500 text-slate-900' : 'text-slate-400 hover:text-white'}`}
-              >
-                Annual <span className="text-xs ml-1 opacity-80">Save 20%</span>
-              </button>
-            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          {/* 4-column grid for all plans */}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 max-w-7xl mx-auto">
             {PRICING.map(plan => (
               <div
-                key={plan.name}
-                className={`rounded-2xl border-2 overflow-hidden transition-all ${
-                  plan.highlight ? 'border-amber-500/60 scale-[1.03] shadow-2xl shadow-amber-500/10' : 'border-slate-700/50'
+                key={plan.id}
+                className={`rounded-2xl border-2 overflow-hidden flex flex-col transition-all ${
+                  plan.highlight
+                    ? 'border-amber-500/60 shadow-2xl shadow-amber-500/10 scale-[1.02]'
+                    : plan.isTrial
+                    ? 'border-slate-600/60'
+                    : plan.id === 'enterprise'
+                    ? 'border-purple-500/30'
+                    : 'border-slate-700/50'
                 }`}
               >
-                {plan.badge && (
-                  <div className="bg-amber-500 text-slate-900 text-xs font-black text-center py-1.5">
-                    ⭐ {plan.badge}
+                {/* Top badge bar */}
+                {plan.badge ? (
+                  <div className={`text-xs font-black text-center py-1.5 ${
+                    plan.highlight ? 'bg-amber-500 text-slate-900' : 'bg-slate-600 text-white'
+                  }`}>
+                    {plan.highlight ? '⭐' : '🏗'} {plan.badge}
                   </div>
+                ) : plan.isTrial ? (
+                  <div className="bg-emerald-500/20 border-b border-emerald-500/30 text-emerald-400 text-xs font-black text-center py-1.5">
+                    ✦ FREE FOR 3 DAYS
+                  </div>
+                ) : plan.id === 'enterprise' ? (
+                  <div className="bg-purple-500/15 border-b border-purple-500/20 text-purple-400 text-xs font-black text-center py-1.5">
+                    ◆ CUSTOM PRICING
+                  </div>
+                ) : (
+                  <div className="h-[30px]" />
                 )}
-                <div className={`p-6 ${plan.highlight ? 'bg-gradient-to-br from-amber-500/15 to-orange-500/5' : 'bg-slate-800/40'}`}>
-                  <h3 className="text-xl font-black text-white mb-1">{plan.name}</h3>
-                  <p className="text-slate-500 text-xs mb-4">{plan.desc}</p>
-                  <div className="flex items-end gap-1 mb-6">
-                    <span className="text-4xl font-black text-white">{annual ? plan.annual : plan.price}</span>
-                    <span className="text-slate-400 text-sm mb-1.5">{plan.period}</span>
-                    {annual && <span className="text-xs text-emerald-400 mb-1.5 ml-1">billed annually</span>}
+
+                <div className={`p-5 flex flex-col flex-1 ${
+                  plan.highlight
+                    ? 'bg-gradient-to-br from-amber-500/15 to-orange-500/5'
+                    : plan.isTrial
+                    ? 'bg-slate-800/30'
+                    : plan.id === 'enterprise'
+                    ? 'bg-gradient-to-br from-purple-500/8 to-slate-800/40'
+                    : 'bg-slate-800/40'
+                }`}>
+
+                  {/* Plan name + desc */}
+                  <div className="mb-4">
+                    <h3 className="text-lg font-black text-white mb-0.5">{plan.name}</h3>
+                    <p className="text-slate-500 text-xs leading-relaxed">{plan.desc}</p>
                   </div>
-                  <ul className="space-y-2 mb-6">
+
+                  {/* Price block */}
+                  <div className="mb-4">
+                    {plan.isTrial ? (
+                      <div>
+                        <div className="flex items-baseline gap-1 mb-1">
+                          <span className="text-3xl font-black text-emerald-400">Free</span>
+                          <span className="text-slate-500 text-sm">/ 3 days</span>
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          Then{' '}
+                          <span className="text-slate-300 font-semibold">{plan.price}{plan.period}</span>
+                          {' '}if you subscribe
+                        </div>
+                      </div>
+                    ) : plan.id === 'enterprise' ? (
+                      <div>
+                        <div className="text-3xl font-black text-purple-300 mb-1">Custom</div>
+                        <div className="text-xs text-slate-500">Pricing based on team size</div>
+                      </div>
+                    ) : (
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl font-black text-white">{plan.price}</span>
+                        <span className="text-slate-400 text-sm">{plan.period}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Trial note */}
+                  {plan.isTrial && (
+                    <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-lg px-3 py-2 mb-4">
+                      <p className="text-xs text-emerald-400 leading-relaxed">
+                        No credit card required to start. After 3 days, an active subscription is required to continue.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Features */}
+                  <ul className="space-y-1.5 mb-4 flex-1">
                     {plan.features.map((f, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm text-slate-300">
-                        <CheckCircle size={14} className="text-emerald-400 flex-shrink-0" />
+                      <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
+                        <CheckCircle size={13} className={`flex-shrink-0 mt-0.5 ${
+                          plan.isTrial ? 'text-slate-400' : 'text-emerald-400'
+                        }`} />
                         {f}
                       </li>
                     ))}
+                    {plan.notIncluded && plan.notIncluded.length > 0 && (
+                      <>
+                        {plan.notIncluded.map((f, i) => (
+                          <li key={`no-${i}`} className="flex items-start gap-2 text-xs text-slate-600">
+                            <span className="text-slate-700 flex-shrink-0 mt-0.5 text-[11px] leading-[13px]">✕</span>
+                            {f}
+                          </li>
+                        ))}
+                      </>
+                    )}
                   </ul>
-                  <Link
-                    href="/auth/register"
-                    className={`w-full py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
-                      plan.highlight
-                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-900'
-                        : 'bg-slate-700 hover:bg-slate-600 text-white border border-slate-600'
-                    }`}
-                  >
-                    {plan.cta} <ArrowRight size={14} />
-                  </Link>
+
+                  {/* CTA button */}
+                  {plan.id === 'enterprise' ? (
+                    <a
+                      href={plan.checkoutHref}
+                      className="w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 border border-purple-500/30"
+                    >
+                      {plan.cta} <ArrowRight size={13} />
+                    </a>
+                  ) : (
+                    <Link
+                      href={plan.checkoutHref}
+                      className={`w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
+                        plan.highlight
+                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-900'
+                          : plan.isTrial
+                          ? 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-slate-700 hover:bg-slate-600 text-white border border-slate-600'
+                      }`}
+                    >
+                      {plan.cta} <ArrowRight size={13} />
+                    </Link>
+                  )}
                 </div>
               </div>
             ))}
           </div>
+
+          {/* Disclaimer note */}
+          <p className="text-center text-slate-600 text-xs mt-8">
+            Starter trial provides temporary access. Active subscription required after trial period. All prices in USD, billed monthly.
+          </p>
         </div>
       </section>
 
