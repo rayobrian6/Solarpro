@@ -14,6 +14,23 @@ const SUCCESS_RESPONSE = {
   message: 'If the email exists, a reset link has been sent.',
 };
 
+// ── Helper: ensure password_reset_tokens table exists ────────────────────────
+// Mirrors the same guard in reset-password/route.ts.
+// If the table is missing (Migration 012 not yet run) we return a clear 503
+// instead of the generic "An unexpected error occurred" 500.
+async function ensureTable(sql: Awaited<ReturnType<typeof getDbReady>>): Promise<'ok' | 'missing'> {
+  try {
+    await sql`SELECT 1 FROM password_reset_tokens LIMIT 0`;
+    return 'ok';
+  } catch (e: any) {
+    const msg = (e?.message || '').toLowerCase();
+    if (msg.includes('does not exist') || msg.includes('relation') || msg.includes('undefined table')) {
+      return 'missing';
+    }
+    throw e; // unexpected DB error — re-throw so caller's catch block handles it
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -25,6 +42,17 @@ export async function POST(req: NextRequest) {
     }
 
     const sql = await getDbReady();
+
+    // 0. Table existence check — gives a clear error instead of a generic 500
+    //    if Migration 012 (password_reset_tokens) has not been run yet.
+    const tableStatus = await ensureTable(sql);
+    if (tableStatus === 'missing') {
+      console.error('[password-reset] POST — password_reset_tokens table missing. Run /api/migrate to create it.');
+      return NextResponse.json(
+        { success: false, error: 'Password reset is not yet configured on this server. Please contact support.' },
+        { status: 503 }
+      );
+    }
 
     // 1. Look up user by email — do NOT reveal existence to caller
     const users = await sql`
@@ -81,7 +109,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(SUCCESS_RESPONSE);
 
   } catch (error: any) {
-    console.error('[password-reset] request-password-reset error:', error?.message);
+    console.error('[password-reset] request-password-reset unexpected error:', error?.message, error?.stack);
     // Return generic error — not the success message — only for unexpected server errors
     return NextResponse.json(
       { success: false, error: 'An unexpected error occurred. Please try again.' },
