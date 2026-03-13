@@ -228,6 +228,34 @@ export default function ProjectDetailPage() {
     offsetPercent: number;
   }) => {
     if (!project) return;
+    // ── Pipeline Stage 9: Data propagation diagnostic ─────────────────────────
+    console.log('[PIPELINE_STAGE_9] handleBillComplete entered');
+    console.log('[PARSED_DATA_OBJECT] result shape:', JSON.stringify({
+      hasBillData: !!result.billData,
+      hasLocationData: !!result.locationData,
+      hasUtilityData: !!result.utilityData,
+      hasMatchedUtility: !!result.matchedUtility,
+      hasSystemSizing: !!result.systemSizing,
+      systemKw: result.systemKw,
+      offsetPercent: result.offsetPercent,
+      billData: {
+        monthlyKwh: result.billData?.monthlyKwh,
+        estimatedAnnualKwh: result.billData?.estimatedAnnualKwh,
+        electricityRate: result.billData?.electricityRate,
+        utilityProvider: result.billData?.utilityProvider,
+        serviceAddress: result.billData?.serviceAddress,
+        customerName: result.billData?.customerName,
+        monthlyHistoryLength: result.billData?.monthlyUsageHistory?.length ?? 0,
+      },
+      locationData: result.locationData ? {
+        stateCode: result.locationData.stateCode,
+        city: result.locationData.city,
+      } : null,
+      matchedUtility: result.matchedUtility ? {
+        effectiveRate: result.matchedUtility.effectiveRate,
+        source: result.matchedUtility.source,
+      } : null,
+    }));
     setSavingBill(true);
 
     try {
@@ -297,6 +325,7 @@ export default function ProjectDetailPage() {
       };
 
       console.log('[BILL_SAVING] PUT /api/projects/' + project.id, { systemKw, utilityName, annualKwh, stateCode, city });
+      console.log('[DB_SAVE_STARTED] projectId=' + project.id + ' utilityRate=' + utilityRatePerKwh + ' annualKwh=' + annualKwh + ' systemKw=' + systemKw);
 
       const res = await fetch(`/api/projects/${project.id}`, {
         method: 'PUT',
@@ -317,6 +346,7 @@ export default function ProjectDetailPage() {
 
       console.log('[BILL_SAVED_TO_PROJECT] projectId=%s utilityName=%s annualKwh=%s stateCode=%s city=%s systemKw=%s',
         project.id, utilityName, annualKwh, stateCode, city, systemKw);
+      console.log('[DB_SAVE_COMPLETE] projectId=' + project.id + ' success=true');
 
       // FIX v47.12 Issue 1: If bill OCR extracted a customerName AND the client record
       // still has a placeholder name (e.g. "Skowhegan Customer"), update it now.

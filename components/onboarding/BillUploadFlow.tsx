@@ -814,6 +814,26 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
               <button
                 onClick={() => {
                   setStep('complete');
+                  // ── Pipeline Stage 8: UI state propagation diagnostic ──────────
+                  console.log('[API_RESPONSE_SENT] BillUploadFlow onComplete firing with shape:', JSON.stringify({
+                    hasBillData: !!result?.billData,
+                    hasLocationData: !!result?.locationData,
+                    hasSystemSizing: !!result?.systemSizing,
+                    hasMatchedUtility: !!(result as any)?.matchedUtility,
+                    systemKw,
+                    offsetPercent,
+                    billData: result?.billData ? {
+                      monthlyKwh: result.billData.monthlyKwh,
+                      estimatedAnnualKwh: result.billData.estimatedAnnualKwh,
+                      electricityRate: result.billData.electricityRate,
+                      utilityProvider: result.billData.utilityProvider,
+                      serviceAddress: result.billData.serviceAddress,
+                    } : null,
+                    locationData: result?.locationData ? {
+                      stateCode: result.locationData.stateCode,
+                      city: result.locationData.city,
+                    } : null,
+                  }));
                   onComplete?.({ ...result, systemKw, offsetPercent });
                 }}
                 className="btn-primary flex-1 py-2 text-sm"

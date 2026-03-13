@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'No file or text provided' }, { status: 400 });
     }
 
+    console.log(`[UPLOAD_RECEIVED] file=${file?.name ?? 'none'} size=${file?.size ?? 0} hasText=${!!rawText} openai=${!!process.env.OPENAI_API_KEY} ts=${new Date().toISOString()}`);
     console.log(`[BILL_UPLOAD_STARTED] file=${file?.name ?? 'none'} size=${file?.size ?? 0} hasText=${!!rawText} openai=${!!process.env.OPENAI_API_KEY}`);
 
     let extractedText = rawText || '';
@@ -82,6 +83,11 @@ export async function POST(req: NextRequest) {
       // Create buffer ONCE — used for ALL downstream operations (OCR, PDF parse, save)
       const buffer = Buffer.from(await file.arrayBuffer());
       console.log(`[FILE_BUFFER_CREATED] bytes=${buffer.length} mime=${fileType}`);
+      console.log(`[FILE_SIZE_BYTES] bytes=${buffer.length} kb=${Math.round(buffer.length/1024)} mime=${fileType} name=${fileName}`);
+      if (buffer.length === 0) {
+        console.error('[FILE_BUFFER_CREATED] ERROR: buffer is 0 bytes — file.arrayBuffer() returned empty');
+        return NextResponse.json({ success: false, error: 'File buffer is empty. Please try uploading again.', stage: 'buffer' }, { status: 422 });
+      }
 
       if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
         // PDF path — wrap in 6s timeout guard
@@ -144,6 +150,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`[TEXT_LENGTH] chars=${extractedText.length} method=${extractionMethod} ms=${Date.now() - startMs}`);
+    console.log(`[OCR_TEXT_FIRST_500] method=${extractionMethod} preview=${JSON.stringify(extractedText.slice(0, 500))}`);
 
     // ── RAW OCR TEXT LOG ──────────────────────────────────────────────────────
     console.log('[bill-upload] === RAW OCR TEXT ===');
@@ -238,6 +245,8 @@ export async function POST(req: NextRequest) {
     };
 
     console.log(`[FIELDS_EXTRACTED] count=${extractedFields.length} fields=${extractedFields.join(',') || 'none'} monthlyKwh=${monthlyKwh ?? 'null'} annualKwh=${annualKwh ?? 'null'} confidence=${confidence} ms=${Date.now() - startMs}`);
+    console.log(`[AI_FIELDS_EXTRACTED] deterministic: utility="${utilityProvider ?? 'none'}" monthlyKwh=${monthlyKwh ?? 'null'} annualKwh=${annualKwh ?? 'null'} rate=${electricityRate ?? 'null'} address="${legacyResult.serviceAddress ?? 'none'}" customer="${legacyResult.customerName ?? 'none'}"`);
+    console.log(`[PARSED_DATA_OBJECT] ${JSON.stringify({ utilityProvider, monthlyKwh, annualKwh, electricityRate, address: legacyResult.serviceAddress, customer: legacyResult.customerName, confidence, fieldCount: extractedFields.length })}`);
 
     // ── AI Extraction Fallback ────────────────────────────────────────────────
     let finalBillData = billData;
@@ -299,6 +308,9 @@ export async function POST(req: NextRequest) {
 
     const elapsedMs = Date.now() - startMs;
     console.log(`[BILL_UPLOAD_RETURNING] fields=${totalFinalFields} confidence=${finalBillData.confidence} elapsedMs=${elapsedMs}`);
+    console.log(`[API_RESPONSE_SENT] success=true fields=${totalFinalFields} hasKwh=${hasAnyKwh} hasLocation=${hasLocation} usedAI=${finalBillData.usedLlmFallback} elapsedMs=${elapsedMs}`);
+    console.log(`[DB_SAVE_STARTED] note=bill-upload-route-does-not-save-to-DB — frontend calls /api/bills after project creation`);
+    console.log(`[DB_SAVE_COMPLETE] note=DB-save-handled-by-frontend-after-project-creation`);
 
     // ── Return parsed bill data only ──────────────────────────────────────────
     // Geocoding, utility matching, rate validation, and system sizing

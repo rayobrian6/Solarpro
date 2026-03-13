@@ -76,6 +76,14 @@ export async function POST(req: NextRequest) {
     } = body;
 
     console.log(`[SYSTEM_SIZE_STARTED] annualKwh=${annual_kwh ?? 'null'} monthlyKwh=${monthly_kwh ?? 'null'} address="${address ?? 'none'}" utility="${utility ?? 'none'}" stateCode=${state_code ?? 'null'}`);
+    // Full input validation log for pipeline audit
+    console.log(`[UPLOAD_RECEIVED] route=system-size annualKwh=${annual_kwh ?? 'null'} monthlyKwh=${monthly_kwh ?? 'null'} monthlyUsageItems=${monthly_usage?.length ?? 0} hasAddress=${!!address} hasUtility=${!!utility} hasRate=${!!rate} offsetTarget=${offset_target}`);
+    if (!annual_kwh && !monthly_kwh && (!monthly_usage || monthly_usage.length === 0)) {
+      console.warn('[SYSTEM_SIZE_STARTED] WARNING: no kWh data received — sizing will be skipped');
+    }
+    if (!address) {
+      console.warn('[SYSTEM_SIZE_STARTED] WARNING: no address received — geocoding will be skipped');
+    }
 
     // ── Geocoding ──────────────────────────────────────────────────────────────
     let locationData = null;

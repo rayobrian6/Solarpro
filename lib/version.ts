@@ -1,8 +1,24 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.21';
+export const BUILD_VERSION     = 'v47.22';
 export const BUILD_DATE        = '2026-06-14';
-export const BUILD_DESCRIPTION = 'v47.21: OCR pipeline reliability fix -- direct CLI-first OCR, OpenAI Vision as direct fallback (no HTTP round-trip), buffer/mime logging, ocr_failed soft response, /api/debug/ocr endpoint';
+export const BUILD_DESCRIPTION = 'v47.22: Full pipeline diagnostic audit -- UPLOAD_RECEIVED, FILE_SIZE_BYTES, OCR_TEXT_FIRST_500, AI_FIELDS_EXTRACTED, PARSED_DATA_OBJECT, DB_SAVE_STARTED, DB_SAVE_COMPLETE, API_RESPONSE_SENT at every pipeline stage';
 export const BUILD_FEATURES    = [
+  // v47.22 -- Full pipeline diagnostic audit
+  'LOG: [UPLOAD_RECEIVED] added to bill-upload route with timestamp — first log on every request',
+  'LOG: [FILE_SIZE_BYTES] added after buffer creation with bytes/kb/mime/name',
+  'GUARD: buffer.length===0 check added — returns 422 immediately if arrayBuffer() returned empty',
+  'LOG: [OCR_TEXT_FIRST_500] added before deterministic parsing — shows first 500 chars of OCR text',
+  'LOG: [AI_FIELDS_EXTRACTED] added after parseBill() — dumps utility/monthlyKwh/annualKwh/rate/address/customer',
+  'LOG: [PARSED_DATA_OBJECT] added — JSON.stringify of all extracted fields for Vercel log inspection',
+  'LOG: [API_RESPONSE_SENT] added before return — shows success/fields/hasKwh/hasLocation/usedAI/elapsedMs',
+  'LOG: [DB_SAVE_STARTED] and [DB_SAVE_COMPLETE] added as notes (bill-upload does not save to DB — frontend does)',
+  'LOG: [UPLOAD_RECEIVED] added to system-size route — logs all input fields on entry',
+  'WARN: system-size warns if no kWh data or no address received',
+  'LOG: [PIPELINE_STAGE_9] handleBillComplete entry diagnostic in page.tsx — logs full result shape',
+  'LOG: [DB_SAVE_STARTED] before PUT /api/projects/[id] in handleBillComplete',
+  'LOG: [DB_SAVE_COMPLETE] after successful PUT in handleBillComplete',
+  'LOG: [API_RESPONSE_SENT] in BillUploadFlow before onComplete fires — logs full shape passed to page.tsx',
+  'AUDIT: Every stage now has a unique searchable log marker for Vercel log triage',
   // v47.21 -- OCR pipeline reliability fix
   'ROOT CAUSE: extractImageTextSmart called /api/ocr via HTTP server-to-server fetch -- on Vercel cold start NEXTAUTH_URL is often unset, fetch falls back to localhost:3000 which does not resolve -- Tesseract returned 0 chars silently',
   'ROOT CAUSE: When Tesseract returned 0 chars, Stage 1b (inline CLI) was tried but Vision was only triggered if openaiKey set AND CLI also failed -- silent failure path left users with empty OCR',
