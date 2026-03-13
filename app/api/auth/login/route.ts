@@ -54,20 +54,12 @@ export async function POST(req: NextRequest) {
 
     // -- Fetch user -------------------------------------------------------------
     // Role is fetched but NOT put in JWT.
-    // tos_accepted_at / tos_version: selected with a safe fallback — if Migration 010
-    // hasn't run yet and the columns don't exist, the query would crash and block ALL
-    // logins. Use information_schema to detect presence, then COALESCE to NULL if missing.
-    // Once migration runs (ALTER TABLE ADD COLUMN IF NOT EXISTS), this resolves cleanly.
+    // NOTE: tos_accepted_at / tos_version intentionally NOT selected here.
+    // They are only needed by /api/tos-accept (called from /terms page).
+    // Fetching them here required information_schema guards that added 3-5s
+    // per login on Neon serverless — causing the DB_STARTING timeout loop.
     const rows = await sql`
-      SELECT id, name, email, password_hash, company, phone, role,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_name='users' AND column_name='tos_accepted_at'
-        ) THEN tos_accepted_at ELSE NULL END AS tos_accepted_at,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_name='users' AND column_name='tos_version'
-        ) THEN tos_version ELSE NULL END AS tos_version
+      SELECT id, name, email, password_hash, company, phone, role
       FROM users
       WHERE email = ${email.toLowerCase().trim()}
       LIMIT 1
@@ -103,10 +95,10 @@ export async function POST(req: NextRequest) {
     const token = signToken(sessionUser);
     const cookieHeader = makeSessionCookie(token);
 
-    const tosAccepted = !!user.tos_accepted_at;
-    console.log(`[AUTH_LOGIN_SUCCESS] Login successful for userId=${user.id} email=${user.email} tosAccepted=${tosAccepted}`);
+    console.log(`[AUTH_LOGIN_SUCCESS] Login successful for userId=${user.id} email=${user.email}`);
 
-    // Return role + ToS status in response body for client UI use, but NOT in JWT
+    // Return role in response body for client UI use, but NOT in JWT.
+    // ToS status is checked separately via GET /api/tos-accept (called from /terms page only).
     return NextResponse.json(
       {
         success: true,
@@ -114,12 +106,8 @@ export async function POST(req: NextRequest) {
           user: {
             ...sessionUser,
             role: user.role || 'user',
-            tos_accepted: tosAccepted,
-            tos_version:  user.tos_version ?? null,
           },
         },
-        // Redirect hint: if ToS not yet accepted, client should send user to /terms
-        tos_redirect: tosAccepted ? null : '/terms?required=1',
       },
       {
         status: 200,

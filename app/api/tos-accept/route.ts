@@ -76,29 +76,30 @@ export async function GET(req: NextRequest) {
   try {
     const sql = await getDbReady();
 
-    const rows = await sql`
-      SELECT
-        CASE WHEN EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_name='users' AND column_name='tos_accepted_at'
-        ) THEN tos_accepted_at ELSE NULL END AS tos_accepted_at,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM information_schema.columns
-          WHERE table_name='users' AND column_name='tos_version'
-        ) THEN tos_version ELSE NULL END AS tos_version
-      FROM users
-      WHERE id = ${user.id}
-      LIMIT 1
-    `;
-
-    if (rows.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'User not found.' },
-        { status: 404 }
-      );
+    // Try to select tos columns — if Migration 010 hasn't run yet,
+    // columns won't exist; catch the error and return accepted=false gracefully.
+    let tos_accepted_at: Date | null = null;
+    let tos_version: string | null = null;
+    try {
+      const rows = await sql`
+        SELECT tos_accepted_at, tos_version
+        FROM users
+        WHERE id = ${user.id}
+        LIMIT 1
+      `;
+      if (rows.length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'User not found.' },
+          { status: 404 }
+        );
+      }
+      tos_accepted_at = rows[0].tos_accepted_at ?? null;
+      tos_version     = rows[0].tos_version ?? null;
+    } catch (colErr: any) {
+      // Migration 010 not yet run — columns missing. Return not-accepted gracefully.
+      console.warn('[/api/tos-accept GET] tos columns not yet available:', colErr?.message);
     }
 
-    const { tos_accepted_at, tos_version } = rows[0];
     const accepted      = !!tos_accepted_at;
     const needsReaccept = accepted && tos_version !== CURRENT_TOS_VERSION;
 
