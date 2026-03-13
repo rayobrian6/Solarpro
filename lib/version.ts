@@ -1,8 +1,19 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.15';
+export const BUILD_VERSION     = 'v47.16';
 export const BUILD_DATE        = '2026-06-13';
-export const BUILD_DESCRIPTION = 'v47.15: Fix OCR 401 -- /api/ocr added to middleware PUBLIC_PATHS (was blocked by auth), inline Tesseract CLI Stage 1b fallback bypasses HTTP entirely, INTERNAL_OCR_SECRET defence-in-depth header, OCR_STARTUP env check log, full fallback chain never hard-aborts';
+export const BUILD_DESCRIPTION = 'v47.16: Fix critical auth outage -- DATABASE_URL/JWT_SECRET env vars not loaded in production deployment (Vercel re-deploy required), added /api/health/auth diagnostic endpoint, verified full auth pipeline working: DB connected, login 401 on bad creds, /api/auth/me 401 on no cookie';
 export const BUILD_FEATURES    = [
+  // v47.16 -- Fix critical auth outage (DATABASE_URL not loaded in production)
+  'ROOT CAUSE: Vercel production deployment had encrypted env vars that were not decrypting at runtime -- DATABASE_URL and JWT_SECRET showed false in /api/health despite being configured in Vercel project settings',
+  'ROOT CAUSE: Previous deployment (dpl_5b1USpSCLvYgpvEUazEoMoQFsi8D) was built without env vars properly injected -- forced redeploy (dpl_4MBQbPcsLyHQqe6zVLPhJSCFdad2) fixed the issue',
+  'FIX: Forced fresh Vercel redeploy via API -- new deployment correctly injects DATABASE_URL and JWT_SECRET at runtime',
+  'VERIFIED: /api/health now returns DATABASE_URL=true JWT_SECRET=true db.ok=true db.ts=2026-03-13',
+  'VERIFIED: /api/auth/login returns 401 Invalid email or password (DB query works, auth pipeline functional)',
+  'VERIFIED: /api/auth/me returns 401 Not authenticated (correct for unauthenticated request)',
+  'NEW: app/api/health/auth/route.ts -- diagnostic endpoint GET /api/health/auth',
+  'NEW: /api/health/auth checks: JWT_SECRET present, DATABASE_URL present, DB connection, users table accessible, session cookie present',
+  'NEW: /api/health/auth returns { status: healthy|degraded, jwt, database, users_table, auth, user_count }',
+  'NEW: /api/health/auth covered by /api/health PUBLIC_PATHS entry (startsWith match)',
   // v47.15 -- Fix OCR 401 (middleware blocking internal server-to-server call)
   'ROOT CAUSE: /api/ocr was not in middleware.ts PUBLIC_PATHS -- server-to-server fetch from billOcrEngine.ts had no auth cookie, middleware returned 401, all OCR failed',
   'FIX: middleware.ts -- added /api/ocr to PUBLIC_PATHS (internal route, no user data, same pattern as /api/health)',
