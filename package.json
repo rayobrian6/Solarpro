@@ -10,7 +10,11 @@
     "dev:3008": "next dev -p 3008",
     "start:3008": "next start -p 3008",
     "type-check": "tsc --noEmit",
-    "dev:debug": "NODE_OPTIONS=\"--inspect\" next dev -p 3000"
+    "dev:debug": "NODE_OPTIONS=\"--inspect\" next dev -p 3000",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ci": "vitest run --reporter=verbose"
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.2",
@@ -53,8 +57,10 @@
     "@types/node": "^22.19.13",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@vitest/coverage-v8": "^4.1.0",
     "ts-node": "^10.9.2",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
   }
 }

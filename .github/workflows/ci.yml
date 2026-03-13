@@ -1,0 +1,203 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Unit tests
+  # ─────────────────────────────────────────────
+  test:
+    name: Unit Tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:ci
+        env:
+          # Provide stub values so env-check.ts does not throw during test run
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          JWT_SECRET: ci-test-secret-do-not-use-in-production
+          OPENAI_API_KEY: sk-test-placeholder
+          GOOGLE_MAPS_API_KEY: test-placeholder
+
+  # ─────────────────────────────────────────────
+  # Job 2: Type check
+  # ─────────────────────────────────────────────
+  type-check:
+    name: TypeScript Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run type-check
+
+  # ─────────────────────────────────────────────
+  # Job 3: Lint
+  # ─────────────────────────────────────────────
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  # ─────────────────────────────────────────────
+  # Job 4: Build gate (deployment blocker)
+  # Runs only on push to master and only if
+  # test + type-check + lint all pass.
+  # ─────────────────────────────────────────────
+  build:
+    name: Build Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [test, type-check, lint]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          # Required env vars for Next.js build — use stub values in CI
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          JWT_SECRET: ci-build-secret-do-not-use-in-production
+          OPENAI_API_KEY: sk-test-placeholder
+          GOOGLE_MAPS_API_KEY: test-placeholder
+          # Silence Next.js telemetry in CI
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: nextjs-build-${{ github.sha }}
+          path: .next/
+          retention-days: 3
+
+  # ─────────────────────────────────────────────
+  # Job 5: Env-var deployment blocker
+  # Verifies that all REQUIRED_VARS are listed in
+  # the repo so Vercel can gate on them too.
+  # ─────────────────────────────────────────────
+  env-audit:
+    name: Env Var Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify required env vars are documented
+        run: |
+          echo "Checking that required env vars are referenced in codebase..."
+          MISSING=0
+          for VAR in DATABASE_URL JWT_SECRET; do
+            if grep -r "$VAR" lib/ app/ --include="*.ts" -q; then
+              echo "  ✓ $VAR is referenced in code"
+            else
+              echo "  ✗ $VAR is NOT referenced — deployment may fail"
+              MISSING=$((MISSING + 1))
+            fi
+          done
+          if [ $MISSING -gt 0 ]; then
+            echo "ERROR: $MISSING required env var(s) not found in codebase"
+            exit 1
+          fi
+          echo "All required env vars are properly referenced."
+
+  # ─────────────────────────────────────────────
+  # Summary badge job — always runs last
+  # ─────────────────────────────────────────────
+  ci-complete:
+    name: CI Complete
+    runs-on: ubuntu-latest
+    needs: [test, type-check, lint, env-audit]
+    if: always()
+
+    steps:
+      - name: Report CI status
+        run: |
+          echo "=== CI Summary ==="
+          echo "test:        ${{ needs.test.result }}"
+          echo "type-check:  ${{ needs.type-check.result }}"
+          echo "lint:        ${{ needs.lint.result }}"
+          echo "env-audit:   ${{ needs.env-audit.result }}"
+          echo ""
+          if [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.type-check.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.env-audit.result }}" != "success" ]; then
+            echo "STATUS: FAILED — one or more CI jobs did not succeed"
+            exit 1
+          fi
+          echo "STATUS: PASSED — all CI gates green"

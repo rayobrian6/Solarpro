@@ -7,6 +7,10 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { geocodeAddress } from '@/lib/locationEngine';
+import { logEnvStatus } from '@/lib/env-check';
+
+// Log env status once per cold start for deployment observability
+logEnvStatus('system-size');
 import { detectUtility } from '@/lib/utilityDetector';
 import { validateAndCorrectUtilityRate, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
 import { matchUtility } from '@/lib/utilityMatcher';

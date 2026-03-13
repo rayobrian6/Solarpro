@@ -6,6 +6,10 @@ import { parseBillText, validateBillData, extractBillDataWithAI } from '@/lib/bi
 import type { BillExtractResult } from '@/lib/billOcr';
 import { getUserFromRequest } from '@/lib/auth';
 import { extractPdfTextPure } from '@/lib/pdfExtract';
+import { logEnvStatus } from '@/lib/env-check';
+
+// Log env status once per cold start for deployment observability
+logEnvStatus('bill-upload');
 // billOcrEngine and billParser are imported dynamically inside extractImageTextSmart()
 // to prevent webpack from bundling tesseract.js worker_threads at module load time.
 // Static import of tesseract.js causes HTML 500 errors before the route handler runs.

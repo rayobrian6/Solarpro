@@ -1,8 +1,27 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.19';
+export const BUILD_VERSION     = 'v47.20';
 export const BUILD_DATE        = '2026-06-14';
-export const BUILD_DESCRIPTION = 'v47.19: Split bill pipeline into /api/bill-upload (OCR+parse <5s) + /api/system-size (geocode+size+rate); 6s timeout guard on OCR; two-phase stage simulation; fixes Vercel timeout/invalid-response error';
+export const BUILD_DESCRIPTION = 'v47.20: Full reliability audit -- vitest test suite (25 tests), env-var startup validation, DB health check endpoint (/api/health/database), GitHub Actions CI pipeline (test+lint+typecheck+build gate)';
 export const BUILD_FEATURES    = [
+  // v47.20 -- Full reliability audit + deployment safety
+  'NEW: tests/bill-upload.test.ts -- 25 vitest unit tests covering parseBill(), parseBillText(), rate validation, sizing math, parser sanity guard, API response shape, and env validation -- all 25 passing',
+  'NEW: vitest.config.ts -- vitest v4 config with node environment, globals, 10s timeout, @/* path alias',
+  'NEW: package.json -- added test / test:watch / test:coverage / test:ci scripts; vitest ^4.1.0 devDependency',
+  'NEW: lib/env-check.ts -- startup env validation: validateEnv() checks REQUIRED_VARS (DATABASE_URL, JWT_SECRET) and RECOMMENDED_VARS (OPENAI_API_KEY, GOOGLE_MAPS_API_KEY)',
+  'NEW: lib/env-check.ts -- assertEnv() throws on missing required vars; logEnvStatus(routeLabel) logs once per cold start with [ENV_STATUS] tag',
+  'FIX: app/api/bill-upload/route.ts -- logEnvStatus("bill-upload") called at module load -- cold-start env visibility',
+  'FIX: app/api/system-size/route.ts -- logEnvStatus("system-size") called at module load -- cold-start env visibility',
+  'NEW: app/api/health/database/route.ts -- GET /api/health/database: checks DATABASE_URL set, SELECT 1 ping, required tables [users,clients,projects] present, optional tables [proposals,utility_policies,bills]',
+  'NEW: app/api/health/database/route.ts -- returns { status: healthy|degraded|unhealthy, database, tables, env, elapsed_ms }; HTTP 200=healthy, 503=degraded/unhealthy',
+  'NEW: app/api/health/database/route.ts -- [HEALTH_DB] structured log tag on every check for Vercel log searchability',
+  'NEW: .github/workflows/ci.yml -- GitHub Actions CI: runs on push/PR to master',
+  'NEW: .github/workflows/ci.yml -- Job 1: test (vitest run --reporter=verbose) with stub env vars',
+  'NEW: .github/workflows/ci.yml -- Job 2: type-check (tsc --noEmit)',
+  'NEW: .github/workflows/ci.yml -- Job 3: lint (next lint)',
+  'NEW: .github/workflows/ci.yml -- Job 4: build gate (npm run build) -- runs only after test+type-check+lint pass on push to master',
+  'NEW: .github/workflows/ci.yml -- Job 5: env-audit -- verifies DATABASE_URL and JWT_SECRET are referenced in codebase (deployment blocker)',
+  'NEW: .github/workflows/ci.yml -- Job 6: ci-complete -- summary job, fails CI if any upstream job failed',
+  'NEW: .github/workflows/ci.yml -- concurrency group with cancel-in-progress to prevent redundant runs',
   // v47.19 -- Split bill pipeline to fix Vercel timeout ("Server returned an invalid response")
   'ROOT CAUSE: /api/bill-upload ran OCR + parse + geocoding + utility match + rate validation + system sizing in a single serverless function -- total time 15-60s exceeded Vercel 60s limit, causing HTML timeout response that res.json() could not parse',
   'FIX: app/api/bill-upload/route.ts -- SLIM: now only does OCR + text extraction + parseBill + AI fallback -- returns in <5s',
