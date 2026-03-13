@@ -37,7 +37,7 @@ const PUBLIC_PATHS = [
 /**
  * Decode JWT payload without verification.
  * Middleware only checks: is the token structurally valid and not expired?
- * Role is NOT checked here — that is handled by requireAdmin() in server components
+ * Role is NOT checked here -- that is handled by requireAdmin() in server components
  * and requireAdminApi() in API routes, both of which query the DB.
  */
 function decodeJwtPayload(token: string): { id: string; email: string; exp?: number } | null {
@@ -61,6 +61,7 @@ export function middleware(req: NextRequest) {
 
   // Allow public paths
   if (PUBLIC_PATHS.some(p => pathname.startsWith(p))) {
+    console.log(`[AUTH_MIDDLEWARE_BYPASS] path=${pathname} reason=public_path`);
     return NextResponse.next();
   }
 
@@ -74,19 +75,21 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check for valid session cookie (authentication only — no role check)
+  // Check for valid session cookie (authentication only -- no role check)
   const token = req.cookies.get(COOKIE_NAME)?.value;
   const user  = token ? decodeJwtPayload(token) : null;
 
   if (!user) {
-    // API routes → 401 JSON
+    // API routes -> 401 JSON
     if (pathname.startsWith('/api/')) {
+      console.warn(`[AUTH_MIDDLEWARE_BLOCKED] path=${pathname} reason=no_valid_session hasCookie=${!!token}`);
       return NextResponse.json(
         { success: false, error: 'Authentication required' },
         { status: 401 }
       );
     }
-    // Page routes → redirect to login
+    // Page routes -> redirect to login
+    console.warn(`[AUTH_MIDDLEWARE_BLOCKED] path=${pathname} reason=no_valid_session hasCookie=${!!token} redirecting_to_login`);
     const loginUrl = new URL('/auth/login', req.url);
     if (pathname !== '/' && !pathname.startsWith('/auth')) {
       loginUrl.searchParams.set('redirect', pathname);
@@ -94,11 +97,12 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Authenticated — pass through.
+  // Authenticated -- pass through.
   // /admin role authorization is handled by:
-  //   - app/admin/layout.tsx → requireAdmin() → queries DB for role
-  //   - /api/admin/* routes  → requireAdminApi() → queries DB for role
-  // Middleware does NOT check role — DB is the single source of truth.
+  //   - app/admin/layout.tsx -> requireAdmin() -> queries DB for role
+  //   - /api/admin/* routes  -> requireAdminApi() -> queries DB for role
+  // Middleware does NOT check role -- DB is the single source of truth.
+  console.log(`[AUTH_MIDDLEWARE_BYPASS] path=${pathname} reason=valid_session userId=${user.id}`);
   return NextResponse.next();
 }
 

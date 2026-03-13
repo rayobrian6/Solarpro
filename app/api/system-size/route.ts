@@ -156,6 +156,24 @@ export async function POST(req: NextRequest) {
       console.log(`[system-size] Using geo-detected rate: $${resolvedRate}/kWh`);
     }
 
+    // Log rate priority decision for audit trail
+    // Priority: bill-extracted (from OCR/parse) > DB retail (matched utility) > state/geo average > national default
+    const ratePrioritySource =
+      (rate != null && rate > 0)               ? 'bill_extracted'    :
+      (matchedUtility?.effectiveRate)          ? 'db_retail'         :
+      (matchedUtility?.defaultResidentialRate) ? 'db_legacy'         :
+      (utilityData?.avgRatePerKwh)             ? 'state_geo_avg'     :
+                                                 'national_default';
+    console.log(
+      `[RATE_PRIORITY_DECISION] priority_source=${ratePrioritySource}` +
+      ` bill_rate=${rate ?? 'null'}` +
+      ` db_effective_rate=${matchedUtility?.effectiveRate ?? 'null'}` +
+      ` db_legacy_rate=${matchedUtility?.defaultResidentialRate ?? 'null'}` +
+      ` geo_rate=${utilityData?.avgRatePerKwh ?? 'null'}` +
+      ` resolved_rate=${resolvedRate ?? 'null'}`
+    );
+
+
     // ── Rate Validation ────────────────────────────────────────────────────────
     const rateValidation = validateAndCorrectUtilityRate(resolvedRate, resolvedUtilityName);
     const finalRate = rateValidation.rate;
