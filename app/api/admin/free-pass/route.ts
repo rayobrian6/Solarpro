@@ -3,6 +3,7 @@ import { getUserFromRequest, getDbReady } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 /**
  * POST /api/admin/free-pass

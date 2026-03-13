@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';

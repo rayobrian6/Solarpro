@@ -6,6 +6,7 @@ type RouteContext = { params: Promise<{id: string}> };
 
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest, context: RouteContext) {
   try {

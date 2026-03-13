@@ -3,6 +3,7 @@ import { getDbReady } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 /**
  * GET /api/admin/reset-raymond?token=solarpro-fix-2024

@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 import { generateBOMV4, bomToMarkdown, bomToCSV, BOMGenerationInputV4 } from '@/lib/bom-engine-v4';
 
 export async function POST(req: NextRequest) {

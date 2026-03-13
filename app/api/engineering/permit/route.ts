@@ -21,6 +21,7 @@ import path from 'path';
 import os from 'os';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const execAsync = promisify(exec);
 

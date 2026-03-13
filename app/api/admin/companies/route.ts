@@ -4,6 +4,7 @@ import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // GET /api/admin/companies?company=<name>
 // Returns detailed info about a specific company or all companies

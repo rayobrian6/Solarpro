@@ -12,6 +12,7 @@ import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
 import { getEngineeringReport, upsertEngineeringReport, generateReportId, isEngineeringReportStale } from '@/lib/engineering/db-engineering';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   try {

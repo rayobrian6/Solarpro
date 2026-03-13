@@ -4,6 +4,7 @@ import { handleRouteDbError } from '@/lib/db-neon';
 import { generateDynamicSLG } from '@/lib/engineering-automation';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {

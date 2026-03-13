@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken, getDbReady } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // Legacy debug endpoint — redirects to debug-role
 export async function GET(req: NextRequest) {

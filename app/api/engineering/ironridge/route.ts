@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 import { RACKING_SYSTEMS } from '@/lib/equipment-db';
 
 // ── IronRidge Rail Specifications ────────────────────────────

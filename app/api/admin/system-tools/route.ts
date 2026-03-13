@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // POST /api/admin/system-tools  { tool: string }
 export async function POST(req: NextRequest) {

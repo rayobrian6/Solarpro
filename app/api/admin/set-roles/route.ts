@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // GET /api/admin/set-roles?secret=YOUR_SECRET
 // Emergency endpoint to set admin roles — bypasses JWT auth, uses migrate secret

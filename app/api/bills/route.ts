@@ -3,6 +3,7 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getBillsByProject, saveBill, isValidUUID , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 /**
  * GET /api/bills?projectId=<uuid>

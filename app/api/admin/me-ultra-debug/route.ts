@@ -3,6 +3,7 @@ import { getUserFromRequest, getDbReady } from '@/lib/auth';
 import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   const session = getUserFromRequest(req);

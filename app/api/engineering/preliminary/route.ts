@@ -30,6 +30,7 @@ import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
 import { upsertEngineeringReport, generateReportId } from '@/lib/engineering/db-engineering';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // ── Default equipment for preliminary estimates ──────────────────────────────
 const DEFAULTS = {

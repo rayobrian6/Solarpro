@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const NREL_API_KEY = process.env.NREL_API_KEY || 'DEMO_KEY';
 const PVWATTS_URL = 'https://developer.nrel.gov/api/pvwatts/v6.json';

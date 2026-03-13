@@ -50,6 +50,7 @@ import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/p
 import { BUILD_VERSION } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 // ─── GET — check if plan set exists ───────────────────────────────────────

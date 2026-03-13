@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 import { resolveTopology, TopologyManagerContext } from '@/lib/topology-manager';
 import { TOPOLOGY_LABELS_V4 } from '@/lib/equipment-registry-v4';
 

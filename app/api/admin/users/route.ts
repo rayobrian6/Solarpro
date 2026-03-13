@@ -5,6 +5,7 @@ import { logAdminAction } from '@/lib/adminActivityLog';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // GET /api/admin/users?search=&page=&limit=
 export async function GET(req: NextRequest) {

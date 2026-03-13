@@ -8,6 +8,7 @@ import { runRulesEngine, RulesEngineInput } from '@/lib/rules-engine';
 import { OverrideEntry } from '@/lib/rules-engine';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {

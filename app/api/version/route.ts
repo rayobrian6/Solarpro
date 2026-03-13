@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { BUILD_VERSION, BUILD_DATE, BUILD_DESCRIPTION, BUILD_FEATURES } from '@/lib/version';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 export const revalidate = 0;
 
 export async function GET() {

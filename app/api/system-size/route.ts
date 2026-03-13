@@ -1,4 +1,5 @@
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 export const revalidate = 0;
 
 // Vercel: geocoding + utility match + sizing — up to 30s

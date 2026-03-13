@@ -1,12 +1,20 @@
-# v47.22 — Full Pipeline Diagnostic Audit ✅
+# v47.24 — Production Environment Fix + Runtime Declarations
 
-## All Tasks Complete
-- [x] Audit full pipeline
-- [x] Add UPLOAD_RECEIVED, FILE_SIZE_BYTES + empty buffer guard to bill-upload route
-- [x] Add OCR_TEXT_FIRST_500 before parsing
-- [x] Add AI_FIELDS_EXTRACTED + PARSED_DATA_OBJECT after parseBill()
-- [x] Add API_RESPONSE_SENT + DB_SAVE_STARTED/COMPLETE before return
-- [x] Add system-size input validation logging + warnings
-- [x] Add PIPELINE_STAGE_9 + DB_SAVE_STARTED/COMPLETE to handleBillComplete in page.tsx
-- [x] Add API_RESPONSE_SENT to BillUploadFlow onComplete
-- [x] Bump version to v47.22, commit 424aae2, push to master
+## Phase 1 — Investigation (COMPLETE ✅)
+- [x] Confirm production commit is 65fd7cb (correct)
+- [x] Confirm ALL env vars missing in production (DATABASE_URL, JWT_SECRET, OPENAI_API_KEY, GOOGLE_MAPS_API_KEY all false)
+- [x] Identify root cause: Vercel not injecting encrypted env vars into Git-push-triggered deployment (v47.16 pattern)
+- [x] Identify secondary issue: 89 routes missing `export const runtime = 'nodejs'` including bill-upload and system-size
+
+## Phase 2 — Fix (IN PROGRESS)
+- [ ] Fix 2a: Add `export const runtime = 'nodejs'` to app/api/bill-upload/route.ts
+- [ ] Fix 2b: Add `export const runtime = 'nodejs'` to app/api/system-size/route.ts
+- [ ] Fix 2c: Add `export const runtime = 'nodejs'` to all other critical DB/native routes (auth, debug, health, etc.)
+- [ ] Fix 2d: Bump version to v47.24, commit + push runtime fixes
+- [ ] Fix 2e (user action required): Redeploy from Vercel dashboard to force env var re-injection
+
+## Phase 3 — Verification (NOT STARTED)
+- [ ] Confirm production deployment picks up env vars after redeploy
+- [ ] Test /api/health/auth returns healthy
+- [ ] Test /api/health/database returns healthy
+- [ ] Confirm full pipeline works: bill upload → OCR → parse → sizing

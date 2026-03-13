@@ -12,6 +12,7 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   try {

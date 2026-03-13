@@ -3,6 +3,7 @@ import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { signToken } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 /**
  * GET /api/admin/impersonate?token=xxx

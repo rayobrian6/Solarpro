@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { stripe, handleWebhookEvent } from '@/lib/stripe';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {

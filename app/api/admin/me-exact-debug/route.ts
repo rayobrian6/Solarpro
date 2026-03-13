@@ -4,6 +4,7 @@ import { handleRouteDbError } from '@/lib/db-neon';
 import { neon } from '@neondatabase/serverless';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 /**
  * This endpoint is an EXACT copy of /api/auth/me but returns debug info
