@@ -28,7 +28,7 @@ try {
 
 // Vercel: OCR+parse only — must complete in < 30s (well under 60s limit)
 // Geocoding, utility matching, sizing moved to /api/system-size
-export const maxDuration = 30;
+export const maxDuration = 60; // v47.25: increased for OpenAI Vision fallback on Vercel
 
 // POST /api/bill-upload
 // Responsibilities: buffer creation, OCR/text extraction, bill field parsing.
@@ -371,8 +371,10 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
   }
 
   // Method 1: pdftotext CLI (poppler)
-  console.log('[PDF_PARSE_STARTED] method=pdftotext');
-  try {
+  // v47.25: Skip on Vercel — pdftotext binary not available in serverless runtime
+  const _isVercel = !!(process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_URL);
+  console.log('[PDF_PARSE_STARTED] method=pdftotext isVercel=' + _isVercel);
+  if (!_isVercel) try {
     const text = await extractPdfTextCli(buffer);
     if (isUsefulText(text)) {
       console.log(`[PDF_PARSE_SUCCESS] method=pdftotext chars=${text.length}`);
@@ -381,7 +383,7 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
     console.warn(`[bill-upload] pdftotext returned low-quality text (${text.length} chars) — trying next method`);
   } catch (err: unknown) {
     console.warn('[PDF_PARSE_FAILED] method=pdftotext error:', err instanceof Error ? err.message : err);
-  }
+  } // end if (!_isVercel)
 
   // Method 2: pdf-parse (npm library)
   console.log('[PDF_PARSE_STARTED] method=pdf-parse');
@@ -624,9 +626,13 @@ async function extractImageTextSmart(
   }
 
   // ── Stage 1b: /api/ocr HTTP (Tesseract.js WASM fallback) ───────────────────
-  // Only try if CLI returned nothing — HTTP route works when NEXTAUTH_URL is set.
-  if (tesseractText.length < 20) {
-    console.log('[OCR_STARTED] stage=1b method=tesseract-wasm-http');
+  // v47.25: SKIP on Vercel — WASM init downloads ~400MB and exceeds the 60s budget.
+  // Tesseract CLI is not available on Vercel serverless (no binary install).
+  // When CLI fails, go directly to OpenAI Vision (Stage 2) which is fast (~5s).
+  // Only try WASM HTTP in local dev where CLI might also be missing but WASM is cached.
+  const isVercel = !!(process.env.VERCEL || process.env.VERCEL_ENV || process.env.VERCEL_URL);
+  if (tesseractText.length < 20 && !isVercel) {
+    console.log('[OCR_STARTED] stage=1b method=tesseract-wasm-http (local-dev only)');
     try {
       const wasmResult = await recognizeImage(buffer, mimeType);
       if (wasmResult.rawText.length > tesseractText.length) {
@@ -636,9 +642,9 @@ async function extractImageTextSmart(
     } catch (wasmErr) {
       console.warn('[OCR_COMPLETED] stage=1b method=tesseract-wasm failed:', wasmErr instanceof Error ? wasmErr.message : String(wasmErr));
     }
-  }
-
-  console.log(`[OCR_TEXT_LENGTH] after_tesseract=${tesseractText.length}`);
+  } else if (tesseractText.length < 20 && isVercel) {
+    console.log('[OCR_SKIPPED] stage=1b reason=vercel_no_wasm_binary — escalating directly to OpenAI Vision');
+  }  console.log(`[OCR_TEXT_LENGTH] after_tesseract=${tesseractText.length}`);
 
   // ── Evaluate Tesseract result ───────────────────────────────────────────────
   if (tesseractText.length >= 20) {
