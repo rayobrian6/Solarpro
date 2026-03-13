@@ -80,7 +80,7 @@ print(f"  (confirms login route runs Node.js, not Edge — bcrypt works)")
 # --- Version ---
 print("\n[5] VERSION")
 ver = get("/api/version")
-print(f"  version           : {ok(ver.get('version')=='v47.24')}  ({ver.get('version')})")
+print(f"  version           : {ok(ver.get('version') in ('v47.24','v47.25','v47.26'))}  ({ver.get('version')})")
 print(f"  description       : {ver.get('description', '?')[:60]}...")
 
 # --- Summary ---
@@ -95,7 +95,7 @@ checks = [
     auth_health.get("status") == "healthy",
     auth_health.get("jwt") == "ok",
     proper_rejection,
-    ver.get("version") == "v47.24",
+    ver.get("version") in ("v47.24", "v47.25", "v47.26"),  # accept current+next
 ]
 passed = sum(1 for c in checks if c)
 total = len(checks)

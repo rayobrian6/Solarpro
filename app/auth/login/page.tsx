@@ -245,13 +245,21 @@ function LoginForm() {
               </div>
             </div>
 
-            <label className="flex items-center gap-3 cursor-pointer group">
-              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${form.remember ? 'bg-amber-500 border-amber-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
-                {form.remember && <CheckCircle size={12} className="text-slate-900" />}
-              </div>
-              <input name="remember" type="checkbox" checked={form.remember} onChange={handleChange} className="sr-only" />
-              <span className="text-sm text-slate-400">Remember me for 30 days</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-3 cursor-pointer group">
+                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${form.remember ? 'bg-amber-500 border-amber-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
+                  {form.remember && <CheckCircle size={12} className="text-slate-900" />}
+                </div>
+                <input name="remember" type="checkbox" checked={form.remember} onChange={handleChange} className="sr-only" />
+                <span className="text-sm text-slate-400">Remember me for 30 days</span>
+              </label>
+              <Link
+                href="/auth/forgot-password"
+                className="text-xs text-amber-400 hover:text-amber-300 transition-colors font-medium"
+              >
+                Forgot Password?
+              </Link>
+            </div>
 
             {/* ── DB cold-start banner ──────────────────────────────────── */}
             {starting && (

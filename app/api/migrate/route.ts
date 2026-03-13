@@ -549,6 +549,30 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ users.tos_ip: ${e.message}`);
     }
 
+        // ── Migration 012: Password Reset Tokens ─────────────────────────────────
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+          id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL UNIQUE,
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ password_reset_tokens table — ready');
+    } catch (e: any) {
+      results.push(`⚠️ password_reset_tokens table: ${e.message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_prt_user_id ON password_reset_tokens (user_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_prt_token_hash ON password_reset_tokens (token_hash)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_prt_expires_at ON password_reset_tokens (expires_at)`;
+      results.push('✅ password_reset_tokens indexes — ready');
+    } catch (e: any) {
+      results.push(`⚠️ password_reset_tokens indexes: ${e.message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
