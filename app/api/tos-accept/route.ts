@@ -8,7 +8,8 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 // Current ToS version — bump this string whenever the document is materially revised
-export const CURRENT_TOS_VERSION = 'v1.0';
+// NOTE: not exported at module level (Next.js route files only allow HTTP method exports)
+const CURRENT_TOS_VERSION = 'v1.0';
 
 // ─── POST /api/tos-accept ─────────────────────────────────────────────────────
 // Records acceptance of the current ToS/NDA for the authenticated user.
