@@ -1,8 +1,21 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.25';
+export const BUILD_VERSION     = 'v47.26';
 export const BUILD_DATE        = '2026-03-13';
-export const BUILD_DESCRIPTION = 'v47.25: Fix bill parsing in production — skip WASM on Vercel, direct OpenAI Vision, maxDuration 60s';
+export const BUILD_DESCRIPTION = 'v47.26: ToS/NDA integration — database acceptance tracking, /terms page, signup checkbox, login gate';
 export const BUILD_FEATURES    = [
+  // v47.26 -- ToS/NDA integration
+  'TOS: Migration 010 — users.tos_accepted_at (TIMESTAMPTZ) + users.tos_version (TEXT) columns',
+  'TOS: /api/tos-accept POST — records acceptance with timestamp and version (JWT auth required)',
+  'TOS: /api/tos-accept GET  — returns acceptance status, version, needs_reaccept flag',
+  'TOS: /app/terms/page.tsx — full ToS/NDA text, accept button, already-accepted badge',
+  'TOS: /terms?required=1 — mandatory acceptance gate with warning banner',
+  'TOS: Register page — ToS checkbox now links to /terms, passes tosAccepted to API',
+  'TOS: Register API — records tos_accepted_at=NOW() and tos_version=v1.0 on INSERT',
+  'TOS: Login API — returns tos_redirect hint if user has not yet accepted',
+  'TOS: Login page — follows tos_redirect from login response before going to dashboard',
+  'TOS: middleware.ts — /terms and /api/tos-accept added to PUBLIC_PATHS',
+  'TOS: lib/migrations/010_tos_acceptance.sql — standalone SQL migration file',
+  'TOS: /api/migrate — Migration 010 blocks (ALTER TABLE + index) added',
   // v47.25 -- Production bill parsing fix
   'OCR: extractImageTextSmart() — Stage 1b (Tesseract.js WASM HTTP) now SKIPPED on Vercel',
   'OCR: Vercel detection via process.env.VERCEL || VERCEL_ENV || VERCEL_URL',

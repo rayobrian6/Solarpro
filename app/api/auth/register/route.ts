@@ -16,7 +16,7 @@ export const maxDuration = 30;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { name, email, password, company, phone } = body;
+    const { name, email, password, company, phone, tosAccepted } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ success: false, error: 'Full name is required.' }, { status: 400 });
@@ -44,8 +44,12 @@ export async function POST(req: NextRequest) {
     const hashedPassword = await hashPassword(password);
     const userId = uuidv4();
 
+    // Record ToS acceptance at signup if user checked the box
+    const tosAcceptedAt = tosAccepted ? new Date().toISOString() : null;
+    const tosVersion    = tosAccepted ? 'v1.0' : null;
+
     await sql`
-      INSERT INTO users (id, name, email, password_hash, company, phone, role, email_verified)
+      INSERT INTO users (id, name, email, password_hash, company, phone, role, email_verified, tos_accepted_at, tos_version)
       VALUES (
         ${userId},
         ${name.trim()},
@@ -54,7 +58,9 @@ export async function POST(req: NextRequest) {
         ${company?.trim() || null},
         ${phone?.trim() || null},
         'user',
-        false
+        false,
+        ${tosAcceptedAt},
+        ${tosVersion}
       )
     `;
 

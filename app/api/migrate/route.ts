@@ -512,6 +512,34 @@ export async function POST(req: NextRequest) {
     }
     results.push(`✅ Migration 011 complete: ${seedCount}/${utilityRateSeeds.length} utility rates seeded`);
 
+    // ── Migration 010: ToS acceptance tracking ──────────────────────────────
+    try {
+      await sql`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS tos_accepted_at  TIMESTAMPTZ DEFAULT NULL
+      `;
+      results.push('✅ users.tos_accepted_at — added (or already existed)');
+    } catch (e: any) {
+      results.push(`⚠️ users.tos_accepted_at: ${e.message}`);
+    }
+    try {
+      await sql`
+        ALTER TABLE users
+          ADD COLUMN IF NOT EXISTS tos_version  TEXT DEFAULT NULL
+      `;
+      results.push('✅ users.tos_version — added (or already existed)');
+    } catch (e: any) {
+      results.push(`⚠️ users.tos_version: ${e.message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_users_tos_version ON users(tos_version)
+      `;
+      results.push('✅ idx_users_tos_version index — ready');
+    } catch (e: any) {
+      results.push(`⚠️ idx_users_tos_version: ${e.message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

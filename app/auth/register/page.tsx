@@ -56,6 +56,7 @@ export default function RegisterPage() {
           password: form.password,
           company: form.company,
           phone: form.phone,
+          tosAccepted: form.agreeTerms,
         }),
       });
 
@@ -243,10 +244,9 @@ export default function RegisterPage() {
                 </div>
                 <input name="agreeTerms" type="checkbox" checked={form.agreeTerms} onChange={handleChange} className="sr-only" />
                 <span className="text-sm text-slate-400">
-                  I agree to the{' '}
-                  <a href="#" className="text-amber-400 hover:text-amber-300">Terms of Service</a>
-                  {' '}and{' '}
-                  <a href="#" className="text-amber-400 hover:text-amber-300">Privacy Policy</a>
+                  I have read and agree to the{' '}
+                  <a href="/terms" target="_blank" rel="noopener noreferrer" className="text-amber-400 hover:text-amber-300 underline underline-offset-2">Terms of Service &amp; Confidentiality Agreement</a>
+                  {' '}of SolarPro, operated by Under The Sun Solar
                 </span>
               </label>
 

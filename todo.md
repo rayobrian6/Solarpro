@@ -1,26 +1,33 @@
-# v47.24 — Production Environment Fix + Runtime Declarations
+# v47.26 — ToS/NDA Integration
 
-## Phase 1 — Investigation (COMPLETE ✅)
-- [x] Confirm production commit is 65fd7cb (correct)
-- [x] Confirm ALL env vars missing in production (DATABASE_URL, JWT_SECRET, OPENAI_API_KEY, GOOGLE_MAPS_API_KEY all false)
-- [x] Identify root cause: Vercel not injecting encrypted env vars into Git-push-triggered deployment (v47.16 pattern)
-- [x] Identify secondary issue: 96 routes missing `export const runtime = 'nodejs'` including bill-upload and system-size
+## Phase 1 — Database Migration
+- [ ] Add tos_accepted_at (TIMESTAMPTZ) and tos_version (TEXT) columns to users table
+- [ ] Create migration file in migrations/
+- [ ] Run migration against production DB via migration script
 
-## Phase 2 — Fix (COMPLETE ✅)
-- [x] Fix 2a: Add `export const runtime = 'nodejs'` to app/api/bill-upload/route.ts
-- [x] Fix 2b: Add `export const runtime = 'nodejs'` to app/api/system-size/route.ts
-- [x] Fix 2c: Add `export const runtime = 'nodejs'` to all other 94 critical DB/native routes
-- [x] Fix 2d: Bump version to v47.24, commit a7d9b35 + push to master
-- [x] Fix 2e: Vercel redeployed — env vars now injected into production
+## Phase 2 — API Endpoint
+- [ ] Create /api/tos-accept/route.ts — POST: record acceptance, GET: check status
+- [ ] Add runtime='nodejs', dynamic='force-dynamic', maxDuration=30
+- [ ] JWT auth required, update users SET tos_accepted_at=NOW(), tos_version='v1.0'
 
-## Phase 3 — Verification (COMPLETE ✅)
-- [x] Confirm production deployment picks up env vars after redeploy
-- [x] /api/health/auth returns healthy (jwt=ok, database=ok, users=15)
-- [x] /api/health/database returns healthy (PostgreSQL 17.8, all required tables present)
-- [x] Auth login flow confirmed working (bcrypt runs correctly on Node.js runtime)
-- [x] 10/10 production validation checks passing
+## Phase 3 — /terms Page Route
+- [ ] Create app/terms/page.tsx — serves the ToS content inline
+- [ ] Add accept button at bottom that calls /api/tos-accept then redirects to /dashboard
+- [ ] Handle already-accepted state (show accepted badge, no button)
 
-## Phase 4 — Report (COMPLETE ✅)
-- [x] Root cause documented
-- [x] All fixes applied
-- [x] Production validated
+## Phase 4 — Signup Page Integration
+- [ ] Find the register/signup page component
+- [ ] Add ToS checkbox: "I have read and agree to the Terms of Service and Confidentiality Agreement"
+- [ ] Block form submission if checkbox not checked
+- [ ] On signup, set tos_accepted_at=NOW() and tos_version='v1.0' in the users INSERT
+
+## Phase 5 — Login Gate (redirect unaccepted users)
+- [ ] After successful login, check tos_accepted_at IS NULL
+- [ ] If NULL, redirect to /terms?required=1 with banner
+- [ ] middleware.ts: protect /dashboard and /projects — redirect to /terms if not accepted
+
+## Phase 6 — Version bump + commit
+- [ ] Bump lib/version.ts to v47.26
+- [ ] TypeScript check (tsc --noEmit)
+- [ ] Run tests (vitest)
+- [ ] git add -A && git commit && git push

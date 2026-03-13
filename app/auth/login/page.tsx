@@ -59,6 +59,11 @@ function LoginForm() {
       const data = await res.json();
 
       if (res.ok && data.success) {
+        // If server says ToS not yet accepted, redirect there first
+        if (data.tos_redirect) {
+          router.push(data.tos_redirect + (redirect !== '/dashboard' ? `&redirect=${encodeURIComponent(redirect)}` : ''));
+          router.refresh();
+        }
         return 'success';
       }
 

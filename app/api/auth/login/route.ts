@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     // -- Fetch user -------------------------------------------------------------
     // Role is fetched but NOT put in JWT
     const rows = await sql`
-      SELECT id, name, email, password_hash, company, phone, role
+      SELECT id, name, email, password_hash, company, phone, role, tos_accepted_at, tos_version
       FROM users
       WHERE email = ${email.toLowerCase().trim()}
       LIMIT 1
@@ -91,11 +91,24 @@ export async function POST(req: NextRequest) {
     const token = signToken(sessionUser);
     const cookieHeader = makeSessionCookie(token);
 
-    console.log(`[AUTH_LOGIN_SUCCESS] Login successful for userId=${user.id} email=${user.email}`);
+    const tosAccepted = !!user.tos_accepted_at;
+    console.log(`[AUTH_LOGIN_SUCCESS] Login successful for userId=${user.id} email=${user.email} tosAccepted=${tosAccepted}`);
 
-    // Return role in response body for client UI use, but NOT in JWT
+    // Return role + ToS status in response body for client UI use, but NOT in JWT
     return NextResponse.json(
-      { success: true, data: { user: { ...sessionUser, role: user.role || 'user' } } },
+      {
+        success: true,
+        data: {
+          user: {
+            ...sessionUser,
+            role: user.role || 'user',
+            tos_accepted: tosAccepted,
+            tos_version:  user.tos_version ?? null,
+          },
+        },
+        // Redirect hint: if ToS not yet accepted, client should send user to /terms
+        tos_redirect: tosAccepted ? null : '/terms?required=1',
+      },
       {
         status: 200,
         headers: { 'Set-Cookie': cookieHeader },
