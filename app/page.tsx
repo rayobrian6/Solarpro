@@ -3,11 +3,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Sun, Zap, Map, FileText, BarChart3, ArrowRight,
-  CheckCircle, Star, ChevronDown, Cpu, Shield,
-  TrendingUp, Users, Globe, Leaf, Play, Sparkles,
-  DollarSign, Lock, Phone, Mail, Building2, Wrench,
-  HardHat, Ruler, Package, AlertTriangle
+  CheckCircle, Star, Cpu, Shield,
+  TrendingUp, Users, Leaf, Sparkles,
+  DollarSign, Lock, Mail, Wrench,
+  HardHat, Ruler, Package, AlertTriangle,
+  Upload, Layout, GitBranch, ClipboardList, FileCheck,
+  ChevronRight, Database, Bolt
 } from 'lucide-react';
+
+// ─── DATA ────────────────────────────────────────────────────────────────────
 
 const FEATURES = [
   {
@@ -21,7 +25,7 @@ const FEATURES = [
   {
     icon: <Zap size={22} />,
     title: 'Electrical Engineering',
-    desc: 'Full NEC-compliant single-line diagrams, conductor sizing, AC/DC disconnect specs, and interconnection rules for 19 utilities including 8 major utilities — auto-generated.',
+    desc: 'Full NEC-compliant single-line diagrams, conductor sizing, AC/DC disconnect specs, and interconnection rules for 19 utilities — auto-generated.',
     color: 'from-blue-500/20 to-cyan-500/10 border-blue-500/20',
     iconColor: 'text-blue-400 bg-blue-500/10',
     tag: 'NEC Compliant',
@@ -60,45 +64,101 @@ const FEATURES = [
   },
 ];
 
-const PAIN_POINTS = [
-  { icon: <AlertTriangle size={18} />, text: 'Sales-focused tools that don\'t understand field installation' },
-  { icon: <AlertTriangle size={18} />, text: 'Separate apps for design, engineering, and permitting' },
-  { icon: <AlertTriangle size={18} />, text: 'No support for Sol Fence or ground mount systems' },
-  { icon: <AlertTriangle size={18} />, text: 'Permit packages that get rejected by AHJs' },
+const WORKFLOW_STEPS = [
+  {
+    step: '01',
+    icon: <Upload size={20} />,
+    title: 'Upload Utility Bill',
+    desc: 'Drop a PDF or image — AI extracts usage, rate schedule, and account info automatically.',
+    color: 'text-amber-400',
+    bg: 'bg-amber-500/10 border-amber-500/30',
+  },
+  {
+    step: '02',
+    icon: <Cpu size={20} />,
+    title: 'System Sizing',
+    desc: 'Usage data drives automatic kW sizing, offset targets, and production estimates via NREL PVWatts.',
+    color: 'text-orange-400',
+    bg: 'bg-orange-500/10 border-orange-500/30',
+  },
+  {
+    step: '03',
+    icon: <Map size={20} />,
+    title: 'Layout Design',
+    desc: 'Place panels on satellite imagery. Google Solar API detects roof planes and optimizes placement.',
+    color: 'text-blue-400',
+    bg: 'bg-blue-500/10 border-blue-500/30',
+  },
+  {
+    step: '04',
+    icon: <GitBranch size={20} />,
+    title: 'Single-Line Diagram',
+    desc: 'NEC-compliant SLD auto-generated with conductor sizing, disconnects, and utility specs.',
+    color: 'text-purple-400',
+    bg: 'bg-purple-500/10 border-purple-500/30',
+  },
+  {
+    step: '05',
+    icon: <ClipboardList size={20} />,
+    title: 'Bill of Materials',
+    desc: 'Full BOM with part numbers, quantities, and pricing exported from your actual layout.',
+    color: 'text-emerald-400',
+    bg: 'bg-emerald-500/10 border-emerald-500/30',
+  },
+  {
+    step: '06',
+    icon: <FileCheck size={20} />,
+    title: 'Permit Package',
+    desc: 'One-click AHJ-ready permit package: structural calcs, SLD, equipment specs, and proposal.',
+    color: 'text-teal-400',
+    bg: 'bg-teal-500/10 border-teal-500/30',
+  },
 ];
 
-const SCREENSHOTS = [
+const PRODUCT_SCREENS = [
   {
-    title: 'Design Studio',
-    desc: 'Satellite imagery with real-time panel layout',
-    color: 'from-amber-500/20 to-orange-500/5',
-    border: 'border-amber-500/20',
-    accent: 'bg-amber-500',
-    panels: true,
+    id: 'design',
+    label: 'Design Studio',
+    tag: 'SATELLITE IMAGERY',
+    tagColor: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+    accent: 'amber',
+    title: '3D Panel Layout on Real Satellite Maps',
+    desc: 'Draw roof zones and ground arrays directly on Google Maps imagery. Auto-detect roof segments, place panels with drag-and-drop, and see production estimates update in real time.',
+    bullets: ['Google Solar API roof detection', 'Drag-and-drop panel placement', 'Shade analysis overlay', 'Ground mount & Sol Fence support'],
+    mockType: 'design',
   },
   {
-    title: 'Sol Fence Layout',
-    desc: 'Vertical bifacial fence system designer',
-    color: 'from-purple-500/20 to-violet-500/5',
-    border: 'border-purple-500/20',
-    accent: 'bg-purple-500',
-    panels: false,
+    id: 'sld',
+    label: 'Electrical Engineering',
+    tag: 'NEC COMPLIANT',
+    tagColor: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+    accent: 'blue',
+    title: 'Auto-Generated Single-Line Diagrams',
+    desc: 'Every project generates a complete NEC-compliant SLD. Conductor sizing, AC/DC disconnects, and interconnection specs for 19 utilities — no manual drafting required.',
+    bullets: ['19 utility interconnection rules', 'Conductor sizing auto-calculated', 'AC & DC disconnect specs', 'Printable for AHJ submission'],
+    mockType: 'sld',
   },
   {
-    title: 'Electrical Engineering',
-    desc: 'NEC-compliant single-line diagrams',
-    color: 'from-blue-500/20 to-cyan-500/5',
-    border: 'border-blue-500/20',
-    accent: 'bg-blue-500',
-    panels: false,
+    id: 'solfence',
+    label: 'Sol Fence',
+    tag: 'EXCLUSIVE FEATURE',
+    tagColor: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
+    accent: 'purple',
+    title: 'The Only Platform That Designs Sol Fence Systems',
+    desc: 'Vertical bifacial fence-mounted solar requires a completely different design approach. SolarPro is the only software that natively supports Sol Fence layout, electrical engineering, and permitting.',
+    bullets: ['Vertical bifacial panel layout', 'Fence post spacing calculator', 'Sol Fence SLD template', 'Revenue modeling for fence arrays'],
+    mockType: 'solfence',
   },
   {
-    title: 'Bill of Materials',
-    desc: 'Auto-generated BOM with pricing',
-    color: 'from-emerald-500/20 to-teal-500/5',
-    border: 'border-emerald-500/20',
-    accent: 'bg-emerald-500',
-    panels: false,
+    id: 'bom',
+    label: 'Bill of Materials',
+    tag: 'AUTO-GENERATED',
+    tagColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+    accent: 'emerald',
+    title: 'Complete BOM from Your Actual Layout',
+    desc: 'No more manual counting. Every panel, string, conductor run, and combiner box from your design exports directly into a structured BOM with part numbers and quantities.',
+    bullets: ['Panels, inverters, racking counted', 'Part numbers & quantities', 'CSV / PDF export', 'Pricing integration ready'],
+    mockType: 'bom',
   },
 ];
 
@@ -169,7 +229,7 @@ const TESTIMONIALS = [
     name: 'Maria S.',
     role: 'Lead Installer',
     location: 'San Diego, CA',
-    quote: 'The Sol Fence designer is incredible. No other software even supports fence-mounted systems. We\'ve added a whole new revenue stream thanks to SolarPro.',
+    quote: "The Sol Fence designer is incredible. No other software even supports fence-mounted systems. We've added a whole new revenue stream thanks to SolarPro.",
     rating: 5,
   },
   {
@@ -188,12 +248,227 @@ const STATS = [
   { value: '98%', label: 'Permit Approval', sub: 'First submission rate' },
 ];
 
+// ─── MOCK UI COMPONENTS ───────────────────────────────────────────────────────
+
+function DesignStudioMock() {
+  return (
+    <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700/60">
+      <div className="flex items-center justify-between px-3 py-2 bg-slate-800/80 border-b border-slate-700/50">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-500/70" />
+          <div className="w-2 h-2 rounded-full bg-amber-500/70" />
+          <div className="w-2 h-2 rounded-full bg-emerald-500/70" />
+        </div>
+        <div className="text-xs text-slate-400 font-mono">Design Studio — 8.4 kW System</div>
+        <div className="text-xs text-emerald-400 font-semibold">● Live</div>
+      </div>
+      <div className="relative" style={{ height: 'calc(100% - 40px)' }}>
+        <div className="absolute inset-0"
+          style={{ background: 'linear-gradient(135deg, #1a2332 0%, #0f1923 40%, #1c2e1a 70%, #151f15 100%)' }}
+        />
+        <div className="absolute" style={{ top: '60%', left: 0, right: 0, height: '3px', background: 'rgba(200,180,100,0.15)' }} />
+        <div className="absolute" style={{ left: '30%', top: 0, bottom: 0, width: '2px', background: 'rgba(200,180,100,0.1)' }} />
+        <div className="absolute border-2 border-amber-400/50 rounded"
+          style={{ top: '18%', left: '18%', width: '55%', height: '45%', background: 'rgba(80,60,20,0.3)' }}>
+          <div className="absolute inset-x-0 top-0 h-px bg-amber-400/40" style={{ top: '35%' }} />
+          <div className="absolute grid gap-px"
+            style={{
+              top: '38%', left: '8%', right: '8%', bottom: '8%',
+              gridTemplateColumns: 'repeat(6, 1fr)',
+              gridTemplateRows: 'repeat(3, 1fr)',
+            }}>
+            {Array.from({ length: 18 }).map((_, i) => (
+              <div key={i}
+                className={`rounded-sm border ${i < 15 ? 'bg-blue-500/50 border-blue-400/40' : 'bg-slate-700/30 border-slate-600/20'}`}
+              />
+            ))}
+          </div>
+          <div className="absolute -top-5 right-0 text-xs font-bold text-amber-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-amber-500/30">
+            15 panels
+          </div>
+        </div>
+        <div className="absolute bottom-3 left-3 right-3 flex gap-2">
+          {[
+            { label: 'System Size', value: '8.4 kW' },
+            { label: 'Annual Prod.', value: '11,200 kWh' },
+            { label: 'Offset', value: '94%' },
+          ].map(s => (
+            <div key={s.label} className="flex-1 bg-slate-900/90 border border-slate-700/60 rounded-lg px-2 py-1.5 text-center">
+              <div className="text-xs text-slate-500">{s.label}</div>
+              <div className="text-sm font-bold text-amber-400">{s.value}</div>
+            </div>
+          ))}
+        </div>
+        <div className="absolute top-3 right-3 flex flex-col gap-1.5">
+          {['◻', '+', '⊕', '⊘'].map((icon, i) => (
+            <div key={i} className="w-7 h-7 rounded-lg bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-xs text-slate-400">
+              {icon}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SLDMock() {
+  return (
+    <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700/60">
+      <div className="flex items-center justify-between px-3 py-2 bg-slate-800/80 border-b border-slate-700/50">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-500/70" />
+          <div className="w-2 h-2 rounded-full bg-amber-500/70" />
+          <div className="w-2 h-2 rounded-full bg-emerald-500/70" />
+        </div>
+        <div className="text-xs text-slate-400 font-mono">Electrical Engineering — SLD</div>
+        <div className="text-xs text-blue-400 font-semibold">NEC 2023</div>
+      </div>
+      <div className="p-4" style={{ height: 'calc(100% - 40px)' }}>
+        <div className="relative w-full h-full flex flex-col items-center justify-center gap-0">
+          <div className="flex gap-3 mb-1">
+            {[1, 2].map(s => (
+              <div key={s} className="flex flex-col items-center">
+                <div className="border border-blue-400/50 rounded px-2 py-1 bg-blue-500/10 text-xs text-blue-300 font-mono text-center">
+                  <div className="font-bold">String {s}</div>
+                  <div className="text-blue-400/60 text-[10px]">8 × 400W</div>
+                </div>
+                <div className="w-px h-3 bg-blue-400/40" />
+              </div>
+            ))}
+          </div>
+          <div className="border border-blue-400/40 rounded px-4 py-1 bg-slate-800/60 text-xs text-slate-300 font-mono mb-1">
+            DC Combiner / Disconnect
+          </div>
+          <div className="w-px h-3 bg-blue-400/30" />
+          <div className="border-2 border-amber-400/60 rounded-lg px-6 py-2 bg-amber-500/10 text-center mb-1">
+            <div className="text-xs font-black text-amber-400">INVERTER</div>
+            <div className="text-[10px] text-slate-400 font-mono">8.0 kW · 240V AC</div>
+          </div>
+          <div className="w-px h-3 bg-amber-400/30" />
+          <div className="border border-emerald-400/40 rounded px-4 py-1 bg-slate-800/60 text-xs text-slate-300 font-mono mb-1">
+            AC Disconnect · 60A
+          </div>
+          <div className="w-px h-3 bg-emerald-400/30" />
+          <div className="border border-emerald-400/50 rounded px-4 py-1 bg-emerald-500/10 text-xs text-emerald-300 font-mono mb-1">
+            Main Service Panel · 200A
+          </div>
+          <div className="w-px h-3 bg-slate-500/40" />
+          <div className="border border-slate-500/50 rounded px-4 py-1 bg-slate-800/40 text-xs text-slate-400 font-mono">
+            Utility Meter / Grid
+          </div>
+          <div className="absolute top-2 right-2 flex flex-col gap-1">
+            <div className="text-[10px] bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2 py-0.5 rounded font-mono">✓ NEC 690</div>
+            <div className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-mono">✓ UL Listed</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SolFenceMock() {
+  return (
+    <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700/60">
+      <div className="flex items-center justify-between px-3 py-2 bg-slate-800/80 border-b border-slate-700/50">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-500/70" />
+          <div className="w-2 h-2 rounded-full bg-amber-500/70" />
+          <div className="w-2 h-2 rounded-full bg-emerald-500/70" />
+        </div>
+        <div className="text-xs text-slate-400 font-mono">Sol Fence Designer</div>
+        <div className="text-xs text-purple-400 font-semibold">● Exclusive</div>
+      </div>
+      <div className="p-4" style={{ height: 'calc(100% - 40px)' }}>
+        <div className="text-[10px] text-slate-500 mb-2 font-mono uppercase tracking-wider">Elevation View</div>
+        <div className="relative bg-slate-800/40 rounded-lg border border-slate-700/40 p-3 mb-3 overflow-hidden">
+          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-slate-700/30 to-transparent" />
+          <div className="absolute bottom-6 left-0 right-0 h-px bg-slate-600/60" />
+          <div className="flex justify-around items-end pt-2" style={{ height: '80px' }}>
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex flex-col items-center">
+                <div className="flex gap-px mb-1">
+                  {[0, 1].map(p => (
+                    <div key={p} className="rounded-sm border border-purple-400/40 bg-purple-500/20"
+                      style={{ width: '10px', height: '40px' }}
+                    />
+                  ))}
+                </div>
+                <div className="w-1.5 h-6 bg-slate-500/60 rounded-sm" />
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { label: 'Fence Length', value: '120 ft' },
+            { label: 'Panel Count', value: '28 panels' },
+            { label: 'Orientation', value: 'Bifacial E/W' },
+            { label: 'Capacity', value: '11.2 kW' },
+          ].map(s => (
+            <div key={s.label} className="bg-slate-800/40 border border-slate-700/40 rounded-lg px-2 py-1.5">
+              <div className="text-[10px] text-slate-500">{s.label}</div>
+              <div className="text-xs font-bold text-purple-300">{s.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BOMMock() {
+  const items = [
+    { qty: 15, part: 'REC400AA Pure-R', cat: 'Module', price: '$312' },
+    { qty: 1, part: 'SMA SB7.7-1SP-US', cat: 'Inverter', price: '$1,240' },
+    { qty: 1, part: 'IronRidge XR-100', cat: 'Racking', price: '$485' },
+    { qty: 2, part: '10AWG PV Wire 50ft', cat: 'Wire', price: '$28' },
+    { qty: 1, part: 'Midnite MNPV3 CB', cat: 'Combiner', price: '$95' },
+    { qty: 1, part: 'Generac XD 60A', cat: 'Disconnect', price: '$118' },
+  ];
+  return (
+    <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700/60">
+      <div className="flex items-center justify-between px-3 py-2 bg-slate-800/80 border-b border-slate-700/50">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-500/70" />
+          <div className="w-2 h-2 rounded-full bg-amber-500/70" />
+          <div className="w-2 h-2 rounded-full bg-emerald-500/70" />
+        </div>
+        <div className="text-xs text-slate-400 font-mono">Bill of Materials</div>
+        <div className="text-xs text-emerald-400 font-semibold">Auto-Generated</div>
+      </div>
+      <div style={{ height: 'calc(100% - 40px)', overflowY: 'auto' }}>
+        <div className="grid grid-cols-12 gap-1 px-3 py-1.5 border-b border-slate-700/50 text-[10px] text-slate-500 font-mono uppercase tracking-wider">
+          <div className="col-span-1">Qty</div>
+          <div className="col-span-6">Part</div>
+          <div className="col-span-3">Category</div>
+          <div className="col-span-2 text-right">Price</div>
+        </div>
+        {items.map((item, i) => (
+          <div key={i} className={`grid grid-cols-12 gap-1 px-3 py-1.5 text-xs border-b border-slate-800/60 ${i % 2 === 0 ? 'bg-slate-800/20' : ''}`}>
+            <div className="col-span-1 text-emerald-400 font-bold">{item.qty}</div>
+            <div className="col-span-6 text-slate-200 font-mono text-[11px] truncate">{item.part}</div>
+            <div className="col-span-3">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-400">{item.cat}</span>
+            </div>
+            <div className="col-span-2 text-right text-emerald-300 font-mono text-[11px]">{item.price}</div>
+          </div>
+        ))}
+        <div className="grid grid-cols-12 gap-1 px-3 py-2 border-t border-emerald-500/20 bg-emerald-500/5">
+          <div className="col-span-10 text-xs font-bold text-white">Total Material Cost</div>
+          <div className="col-span-2 text-right text-emerald-400 font-black text-sm">$6,842</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
+
 export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
   const [annual, setAnnual] = useState(false);
   const [email, setEmail] = useState('');
-  const [countersStarted, setCountersStarted] = useState(false);
-  const statsRef = useRef<HTMLDivElement>(null);
+  const [activeScreen, setActiveScreen] = useState(0);
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20);
@@ -201,15 +476,26 @@ export default function LandingPage() {
     return () => window.removeEventListener('scroll', handler);
   }, []);
 
-  useEffect(() => {
-    if (!statsRef.current) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setCountersStarted(true); },
-      { threshold: 0.3 }
-    );
-    observer.observe(statsRef.current);
-    return () => observer.disconnect();
-  }, []);
+  const accentMap: Record<string, string> = {
+    amber: 'border-amber-500/40 shadow-amber-500/10',
+    blue: 'border-blue-500/40 shadow-blue-500/10',
+    purple: 'border-purple-500/40 shadow-purple-500/10',
+    emerald: 'border-emerald-500/40 shadow-emerald-500/10',
+  };
+  const tabAccentMap: Record<string, string> = {
+    amber: 'border-amber-400 text-amber-400 bg-amber-500/10',
+    blue: 'border-blue-400 text-blue-400 bg-blue-500/10',
+    purple: 'border-purple-400 text-purple-400 bg-purple-500/10',
+    emerald: 'border-emerald-400 text-emerald-400 bg-emerald-500/10',
+  };
+  const bulletAccentMap: Record<string, string> = {
+    amber: 'text-amber-400',
+    blue: 'text-blue-400',
+    purple: 'text-purple-400',
+    emerald: 'text-emerald-400',
+  };
+
+  const currentScreen = PRODUCT_SCREENS[activeScreen];
 
   return (
     <div className="min-h-screen bg-slate-950 text-white overflow-x-hidden">
@@ -230,7 +516,7 @@ export default function LandingPage() {
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm text-slate-400">
             <a href="#features" className="hover:text-white transition-colors">Features</a>
-            <a href="#screenshots" className="hover:text-white transition-colors">Product</a>
+            <a href="#product" className="hover:text-white transition-colors">Product</a>
             <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
             <a href="#testimonials" className="hover:text-white transition-colors">Reviews</a>
           </div>
@@ -245,135 +531,88 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* ── Hero ── */}
+      {/* ── SECTION 1: Hero ── */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
         <div className="absolute inset-0">
           <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950" />
           <div className="absolute inset-0 opacity-[0.03]"
             style={{
               backgroundImage: 'linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)',
-              backgroundSize: '60px 60px'
+              backgroundSize: '60px 60px',
             }}
           />
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl animate-pulse" />
-          <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/8 rounded-full blur-3xl" />
+          <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-blue-500/8 rounded-full blur-3xl" />
         </div>
 
         <div className="relative z-10 max-w-6xl mx-auto px-6 text-center pt-24 pb-16">
-          {/* Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium mb-8">
             <HardHat size={14} />
             Solar Design Software Built by Installers, for Installers
           </div>
 
-          {/* Headline */}
-          <h1 className="text-5xl md:text-7xl font-black text-white mb-4 leading-tight tracking-tight">
-            Solar Design Software
+          <h1 className="text-5xl md:text-7xl font-black text-white mb-6 leading-tight tracking-tight">
+            Design, Engineer, and
             <br />
             <span className="bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 bg-clip-text text-transparent">
-              Built by Installers
+              Quote Solar in Minutes
             </span>
           </h1>
 
-          <p className="text-2xl md:text-3xl font-bold text-slate-300 mb-6 tracking-wide">
-            Design. Engineer. Permit. Install.
+          <p className="text-xl md:text-2xl text-slate-400 max-w-3xl mx-auto mb-10 leading-relaxed">
+            From utility bill upload to permit-ready package — SolarPro automates every step of the solar design and engineering process. No drafting. No spreadsheets. No juggling apps.
           </p>
 
-          <p className="text-lg text-slate-400 max-w-3xl mx-auto mb-10 leading-relaxed">
-            The only solar platform with a full 3D design studio, NEC-compliant electrical engineering,
-            Sol Fence support, and AHJ-ready permit packages — all in one place.
-          </p>
-
-          {/* CTAs */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center mb-4">
-            <Link href="/auth/register" className="btn-primary text-base px-8 py-3.5 rounded-xl shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 transition-shadow inline-flex items-center gap-2 justify-center">
-              <Play size={18} /> Start Designing Free
+          <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
+            <Link href="/auth/register" className="btn-primary px-8 py-4 rounded-xl text-base font-bold inline-flex items-center justify-center gap-2">
+              Start Designing Free
+              <ArrowRight size={18} />
             </Link>
-            <Link href="/auth/login" className="btn-secondary text-base px-8 py-3.5 rounded-xl inline-flex items-center gap-2 justify-center">
-              Book a Demo <ArrowRight size={16} />
-            </Link>
-          </div>
-          <p className="text-slate-500 text-sm mb-14">No credit card required · 3-day free trial · Cancel anytime</p>
-
-          {/* Social proof */}
-          <div className="flex items-center justify-center gap-3 mb-12">
-            <div className="flex -space-x-2">
-              {['JD','MS','TR','AK','BL'].map((initials, i) => (
-                <div key={i} className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 border-2 border-slate-950 flex items-center justify-center text-xs font-bold text-slate-900">
-                  {initials}
-                </div>
-              ))}
-            </div>
-            <div className="text-sm text-slate-400">
-              <span className="text-white font-semibold">500+ contractors</span> trust SolarPro
-            </div>
+            <a href="#product" className="px-8 py-4 rounded-xl text-base font-semibold text-slate-300 border border-slate-700 hover:border-slate-500 hover:text-white transition-all inline-flex items-center justify-center gap-2 bg-slate-800/40">
+              See It In Action
+              <ChevronRight size={18} />
+            </a>
           </div>
 
-          {/* Design Studio Mock UI */}
-          <div className="relative max-w-4xl mx-auto">
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-transparent z-10 pointer-events-none" style={{ top: '60%' }} />
-            <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl overflow-hidden shadow-2xl shadow-black/50">
-              {/* Window chrome */}
-              <div className="flex items-center gap-2 px-4 py-3 bg-slate-900/80 border-b border-slate-700/50">
-                <div className="w-3 h-3 rounded-full bg-red-500/70" />
-                <div className="w-3 h-3 rounded-full bg-yellow-500/70" />
-                <div className="w-3 h-3 rounded-full bg-green-500/70" />
-                <div className="flex-1 mx-4 bg-slate-800 rounded-md px-3 py-1 text-xs text-slate-500">
-                  app.solarpro.design/design?projectId=proj_abc123
-                </div>
+          <div className="flex flex-wrap justify-center gap-6 text-sm text-slate-500 mb-16">
+            {[
+              { icon: <Shield size={13} />, text: 'NEC 2023 Compliant' },
+              { icon: <CheckCircle size={13} />, text: '98% Permit Approval Rate' },
+              { icon: <HardHat size={13} />, text: 'Built by Working Installers' },
+              { icon: <Leaf size={13} />, text: '3-Day Free Trial' },
+            ].map(item => (
+              <div key={item.text} className="flex items-center gap-1.5">
+                <span className="text-amber-400/70">{item.icon}</span>
+                {item.text}
               </div>
-              {/* App layout */}
-              <div className="flex h-64">
-                {/* Sidebar */}
-                <div className="w-48 bg-slate-900/80 border-r border-slate-700/50 p-3 flex flex-col gap-2">
-                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Tools</div>
-                  {['Panel Layout','Roof Zones','Sol Fence','Electrical','BOM','Permits'].map((tool, i) => (
-                    <div key={tool} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs ${i === 0 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-white'}`}>
-                      <div className={`w-1.5 h-1.5 rounded-full ${i === 0 ? 'bg-amber-400' : 'bg-slate-600'}`} />
-                      {tool}
-                    </div>
-                  ))}
+            ))}
+          </div>
+
+          {/* Hero Mock UI */}
+          <div className="relative max-w-4xl mx-auto">
+            <div className="absolute -inset-4 bg-gradient-to-r from-amber-500/10 via-transparent to-blue-500/10 rounded-3xl blur-2xl" />
+            <div className="relative rounded-2xl border border-slate-700/60 overflow-hidden shadow-2xl shadow-slate-950/80"
+              style={{ aspectRatio: '16/9' }}>
+              <DesignStudioMock />
+            </div>
+            <div className="absolute -left-4 top-1/3 -translate-y-1/2 hidden lg:block">
+              <div className="bg-slate-800/95 border border-emerald-500/30 rounded-xl px-3 py-2 shadow-xl">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-xs text-emerald-400 font-semibold">Auto-Sized</span>
                 </div>
-                {/* Map area */}
-                <div className="flex-1 relative bg-slate-800 overflow-hidden">
-                  <div className="absolute inset-0 opacity-20"
-                    style={{
-                      backgroundImage: 'linear-gradient(#4ade80 1px, transparent 1px), linear-gradient(90deg, #4ade80 1px, transparent 1px)',
-                      backgroundSize: '20px 20px'
-                    }}
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div className="relative">
-                      {/* Roof outline */}
-                      <div className="w-48 h-32 border-2 border-amber-400/60 rounded-lg bg-amber-500/5 relative">
-                        {/* Solar panels grid */}
-                        <div className="absolute inset-2 grid grid-cols-6 gap-0.5">
-                          {Array.from({ length: 24 }).map((_, i) => (
-                            <div key={i} className="bg-blue-500/40 border border-blue-400/30 rounded-sm" />
-                          ))}
-                        </div>
-                      </div>
-                      <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-900 text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
-                        24 panels · 9.6 kW
-                      </div>
-                    </div>
-                  </div>
+                <div className="text-white text-sm font-black mt-0.5">8.4 kW</div>
+                <div className="text-slate-500 text-xs">94% offset</div>
+              </div>
+            </div>
+            <div className="absolute -right-4 top-1/2 -translate-y-1/2 hidden lg:block">
+              <div className="bg-slate-800/95 border border-blue-500/30 rounded-xl px-3 py-2 shadow-xl">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                  <span className="text-xs text-blue-400 font-semibold">SLD Ready</span>
                 </div>
-                {/* Right stats panel */}
-                <div className="w-40 bg-slate-900/80 border-l border-slate-700/50 p-3 flex flex-col gap-2">
-                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">System</div>
-                  {[
-                    { label: 'Capacity', value: '9.6 kW', color: 'text-amber-400' },
-                    { label: 'Annual', value: '13,440 kWh', color: 'text-emerald-400' },
-                    { label: 'Offset', value: '94%', color: 'text-blue-400' },
-                    { label: 'Payback', value: '6.2 yrs', color: 'text-purple-400' },
-                  ].map(stat => (
-                    <div key={stat.label} className="bg-slate-800/60 rounded-lg p-2">
-                      <div className="text-xs text-slate-500">{stat.label}</div>
-                      <div className={`text-xs font-bold ${stat.color}`}>{stat.value}</div>
-                    </div>
-                  ))}
-                </div>
+                <div className="text-white text-sm font-black mt-0.5">NEC 690</div>
+                <div className="text-slate-500 text-xs">Auto-generated</div>
               </div>
             </div>
           </div>
@@ -381,171 +620,254 @@ export default function LandingPage() {
       </section>
 
       {/* ── Stats Bar ── */}
-      <div ref={statsRef} className="py-12 bg-slate-900/60 border-y border-slate-800">
-        <div className="max-w-5xl mx-auto px-6 grid grid-cols-2 md:grid-cols-4 gap-6">
-          {STATS.map((stat) => (
-            <div key={stat.label} className="text-center">
-              <div className="text-3xl md:text-4xl font-black text-amber-400 mb-1">{stat.value}</div>
-              <div className="text-sm font-semibold text-white">{stat.label}</div>
-              <div className="text-xs text-slate-500">{stat.sub}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Problem Section ── */}
-      <section className="py-24 relative">
-        <div className="max-w-6xl mx-auto px-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-            <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium mb-6">
-                <AlertTriangle size={12} /> The Problem
-              </div>
-              <h2 className="text-4xl md:text-5xl font-black text-white mb-6 leading-tight">
-                Most solar software was built for{' '}
-                <span className="bg-gradient-to-r from-red-400 to-rose-400 bg-clip-text text-transparent">
-                  sales teams
-                </span>
-              </h2>
-              <p className="text-lg text-slate-400 mb-8 leading-relaxed">
-                Not installers. Not engineers. Not the people who actually show up on the roof.
-                The result? Tools that look great in demos but fall apart in the field.
-              </p>
-              <div className="space-y-3">
-                {PAIN_POINTS.map((p, i) => (
-                  <div key={i} className="flex items-start gap-3 text-slate-400">
-                    <span className="text-red-400 mt-0.5 flex-shrink-0">{p.icon}</span>
-                    <span className="text-sm">{p.text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-gradient-to-br from-amber-500/10 to-emerald-500/10 border border-amber-500/20 rounded-2xl p-8">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-4">
-                <CheckCircle size={12} /> The SolarPro Difference
-              </div>
-              <h3 className="text-2xl font-black text-white mb-4">Built from the ground up for installers</h3>
-              <p className="text-slate-400 text-sm leading-relaxed mb-6">
-                We started by talking to hundreds of solar installers, engineers, and permit technicians.
-                Every feature in SolarPro exists because someone in the field needed it.
-              </p>
-              <div className="space-y-3">
-                {[
-                  'AHJ-ready permit packages on first submission',
-                  'NEC-compliant electrical diagrams auto-generated',
-                  'Sol Fence vertical bifacial system support',
-                  'Field-tested BOM with real supplier pricing',
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center gap-3">
-                    <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />
-                    <span className="text-sm text-slate-300">{item}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Features Grid ── */}
-      <section id="features" className="py-24 bg-slate-900/50 relative">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-16">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-4">
-              <Zap size={12} /> Full Platform
-            </div>
-            <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
-              Everything an installer needs
-            </h2>
-            <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-              From first site survey to final permit submission — every tool in one platform.
-            </p>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {FEATURES.map((feature) => (
-              <div
-                key={feature.title}
-                className={`relative rounded-2xl p-6 bg-gradient-to-br border ${feature.color} hover:scale-[1.02] transition-transform duration-200`}
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${feature.iconColor}`}>
-                    {feature.icon}
-                  </div>
-                  <span className="text-xs font-semibold text-slate-500 bg-slate-800/60 px-2 py-1 rounded-full">{feature.tag}</span>
+      <section className="py-10 border-y border-slate-800/60 bg-slate-900/40">
+        <div className="max-w-5xl mx-auto px-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+            {STATS.map(stat => (
+              <div key={stat.label} className="text-center">
+                <div className="text-3xl md:text-4xl font-black mb-1">
+                  <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
+                    {stat.value}
+                  </span>
                 </div>
-                <h3 className="text-lg font-bold text-white mb-2">{feature.title}</h3>
-                <p className="text-sm text-slate-400 leading-relaxed">{feature.desc}</p>
+                <div className="text-sm font-bold text-white">{stat.label}</div>
+                <div className="text-xs text-slate-500">{stat.sub}</div>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ── Product Screenshots ── */}
-      <section id="screenshots" className="py-24 relative">
-        <div className="max-w-7xl mx-auto px-6">
+      {/* ── SECTION 2: Workflow Pipeline ── */}
+      <section className="py-24 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-[0.02]"
+          style={{
+            backgroundImage: 'radial-gradient(circle, #f59e0b 1px, transparent 1px)',
+            backgroundSize: '32px 32px',
+          }}
+        />
+        <div className="max-w-6xl mx-auto px-6 relative z-10">
           <div className="text-center mb-16">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-4">
-              <Play size={12} /> See It In Action
+              <Sparkles size={12} /> End-to-End Workflow
+            </div>
+            <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
+              From Bill Upload to
+              <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent"> Permit Package</span>
+            </h2>
+            <p className="text-lg text-slate-400 max-w-2xl mx-auto">
+              Every step of the solar design process in one platform. No switching apps. No manual data entry. No mistakes from copy-paste.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 lg:gap-4">
+            {WORKFLOW_STEPS.map((step, idx) => (
+              <div key={step.step} className="relative flex flex-col items-center text-center">
+                {idx < WORKFLOW_STEPS.length - 1 && (
+                  <div className="hidden lg:block absolute top-7 left-[calc(50%+28px)] right-[-8px] h-px bg-slate-700/60" />
+                )}
+                <div className={`w-14 h-14 rounded-2xl border-2 flex items-center justify-center mb-4 relative z-10 ${step.bg} ${step.color}`}>
+                  {step.icon}
+                  <div className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-slate-950 border border-slate-700 flex items-center justify-center">
+                    <span className="text-[9px] font-black text-slate-400">{step.step}</span>
+                  </div>
+                </div>
+                <h3 className={`text-sm font-bold ${step.color} mb-2`}>{step.title}</h3>
+                <p className="text-xs text-slate-500 leading-relaxed">{step.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-14 bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-transparent border border-amber-500/20 rounded-2xl p-6 flex flex-col md:flex-row items-center gap-6">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center flex-shrink-0">
+              <TrendingUp size={26} className="text-amber-400" />
+            </div>
+            <div className="text-center md:text-left">
+              <div className="text-white font-bold text-lg mb-1">From 4 hours to 15 minutes</div>
+              <div className="text-slate-400 text-sm">
+                The average SolarPro user completes a full design-to-permit workflow in under 15 minutes. Legacy tools — Aurora, Helioscope, manual CAD — average 3–4 hours for the same output.
+              </div>
+            </div>
+            <div className="flex-shrink-0 md:ml-auto">
+              <Link href="/auth/register" className="btn-primary px-5 py-2.5 rounded-xl text-sm whitespace-nowrap inline-flex items-center gap-2">
+                Try It Free <ArrowRight size={14} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION 3: Product Screenshots ── */}
+      <section id="product" className="py-24 bg-slate-900/40 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-[0.015]"
+          style={{
+            backgroundImage: 'linear-gradient(#64748b 1px, transparent 1px), linear-gradient(90deg, #64748b 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+          }}
+        />
+        <div className="max-w-7xl mx-auto px-6 relative z-10">
+          <div className="text-center mb-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-4">
+              <Layout size={12} /> Real Product Screens
             </div>
             <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
               Every screen built for the field
             </h2>
             <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-              Clean, fast, and purpose-built for solar professionals who don't have time for bloated software.
+              Not built for salespeople. Not built for software demos. Built for the engineers and installers who actually do the work.
             </p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {SCREENSHOTS.map((screen) => (
-              <div key={screen.title} className={`bg-gradient-to-br ${screen.color} border ${screen.border} rounded-2xl p-6 hover:scale-[1.01] transition-transform`}>
-                <div className="flex items-center gap-3 mb-4">
-                  <div className={`w-2 h-2 rounded-full ${screen.accent}`} />
-                  <span className="text-sm font-bold text-white">{screen.title}</span>
-                  <span className="text-xs text-slate-500 ml-auto">{screen.desc}</span>
-                </div>
-                {/* Mock screen content */}
-                <div className="bg-slate-900/60 rounded-xl border border-slate-700/50 h-40 flex items-center justify-center overflow-hidden relative">
-                  <div className="absolute inset-0 opacity-10"
-                    style={{
-                      backgroundImage: 'linear-gradient(#64748b 1px, transparent 1px), linear-gradient(90deg, #64748b 1px, transparent 1px)',
-                      backgroundSize: '16px 16px'
-                    }}
-                  />
-                  {screen.panels ? (
-                    <div className="relative z-10">
-                      <div className="w-36 h-24 border-2 border-amber-400/60 rounded-lg bg-amber-500/5 relative">
-                        <div className="absolute inset-1.5 grid grid-cols-5 gap-0.5">
-                          {Array.from({ length: 20 }).map((_, i) => (
-                            <div key={i} className="bg-blue-500/50 border border-blue-400/30 rounded-sm" />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="relative z-10 w-full px-4">
-                      <div className="space-y-2">
-                        {[80, 60, 90, 45].map((w, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <div className="w-16 h-2 bg-slate-700 rounded-full" />
-                            <div className={`h-2 rounded-full ${screen.accent} opacity-60`} style={{ width: `${w}px` }} />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+
+          <div className="flex flex-wrap justify-center gap-2 mb-10">
+            {PRODUCT_SCREENS.map((screen, idx) => (
+              <button
+                key={screen.id}
+                onClick={() => setActiveScreen(idx)}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                  activeScreen === idx
+                    ? tabAccentMap[screen.accent]
+                    : 'border-slate-700/50 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                {screen.label}
+              </button>
             ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+            <div className={`rounded-2xl border shadow-2xl overflow-hidden ${accentMap[currentScreen.accent]}`}
+              style={{ aspectRatio: '4/3' }}>
+              {currentScreen.mockType === 'design' && <DesignStudioMock />}
+              {currentScreen.mockType === 'sld' && <SLDMock />}
+              {currentScreen.mockType === 'solfence' && <SolFenceMock />}
+              {currentScreen.mockType === 'bom' && <BOMMock />}
+            </div>
+
+            <div>
+              <div className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-xs font-bold mb-4 ${tabAccentMap[currentScreen.accent]}`}>
+                {currentScreen.tag}
+              </div>
+              <h3 className="text-2xl md:text-3xl font-black text-white mb-4 leading-tight">
+                {currentScreen.title}
+              </h3>
+              <p className="text-slate-400 leading-relaxed mb-6">{currentScreen.desc}</p>
+              <ul className="space-y-3 mb-8">
+                {currentScreen.bullets.map(b => (
+                  <li key={b} className="flex items-center gap-3 text-sm text-slate-300">
+                    <CheckCircle size={16} className={bulletAccentMap[currentScreen.accent]} />
+                    {b}
+                  </li>
+                ))}
+              </ul>
+              <Link href="/auth/register" className="btn-primary px-6 py-3 rounded-xl inline-flex items-center gap-2">
+                Try {currentScreen.label} Free <ArrowRight size={16} />
+              </Link>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ── Built by Installers ── */}
+      {/* ── SECTION 4: Bill Parsing Feature ── */}
+      <section className="py-24 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-slate-950 to-blue-500/5" />
+        <div className="max-w-6xl mx-auto px-6 relative z-10">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-6">
+                <Upload size={12} /> AI-Powered Bill Parsing
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black text-white mb-6 leading-tight">
+                Upload a utility bill.
+                <br />
+                <span className="text-amber-400">Get a sized system.</span>
+              </h2>
+              <p className="text-slate-400 leading-relaxed mb-6">
+                Drop any utility bill — PDF, photo, or scan — and SolarPro's AI extracts the customer's usage history, rate schedule, and account details automatically. The system size, offset target, and financial analysis are calculated before you've had a chance to close the file.
+              </p>
+              <p className="text-slate-400 leading-relaxed mb-8">
+                Works with all major U.S. utilities. Handles tiered rates, TOU schedules, net metering, and demand charges. No manual data entry. No spreadsheets. Just upload and design.
+              </p>
+              <div className="space-y-3 mb-8">
+                {[
+                  'Extracts 12-month usage history automatically',
+                  'Identifies rate schedule (tiered, TOU, flat)',
+                  'Calculates recommended system size & offset',
+                  'Works with any U.S. utility bill format',
+                ].map(pt => (
+                  <div key={pt} className="flex items-start gap-3 text-sm text-slate-300">
+                    <CheckCircle size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                    {pt}
+                  </div>
+                ))}
+              </div>
+              <Link href="/auth/register" className="btn-primary px-6 py-3 rounded-xl inline-flex items-center gap-2">
+                Try Bill Upload Free <ArrowRight size={16} />
+              </Link>
+            </div>
+
+            <div className="relative">
+              <div className="absolute -inset-4 bg-gradient-to-r from-amber-500/8 to-transparent rounded-3xl blur-2xl" />
+              <div className="relative bg-slate-800/60 rounded-2xl border border-slate-700/60 overflow-hidden shadow-2xl">
+                <div className="flex items-center justify-between px-4 py-3 bg-slate-900/80 border-b border-slate-700/50">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-500/70" />
+                    <div className="w-2 h-2 rounded-full bg-amber-500/70" />
+                    <div className="w-2 h-2 rounded-full bg-emerald-500/70" />
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono">Bill Parser — AI Analysis</div>
+                  <div className="text-xs text-amber-400">Processing...</div>
+                </div>
+                <div className="p-5">
+                  <div className="border-2 border-dashed border-amber-500/30 rounded-xl p-4 mb-4 text-center bg-amber-500/5">
+                    <Upload size={24} className="text-amber-400/60 mx-auto mb-2" />
+                    <div className="text-xs text-amber-400 font-semibold">Edison_Bill_March2024.pdf</div>
+                    <div className="text-xs text-slate-500 mt-1">Southern California Edison · Account #4821-0093</div>
+                  </div>
+                  <div className="text-xs text-slate-500 font-mono uppercase tracking-wider mb-2">Extracted Data</div>
+                  <div className="space-y-2 mb-4">
+                    {[
+                      { label: 'Avg Monthly Usage', value: '1,240 kWh', color: 'text-amber-400' },
+                      { label: 'Annual Usage', value: '14,880 kWh', color: 'text-amber-400' },
+                      { label: 'Rate Schedule', value: 'TOU-D-Prime', color: 'text-blue-400' },
+                      { label: 'Avg Monthly Bill', value: '$248', color: 'text-emerald-400' },
+                    ].map(row => (
+                      <div key={row.label} className="flex items-center justify-between bg-slate-900/50 rounded-lg px-3 py-2">
+                        <span className="text-slate-400 text-xs">{row.label}</span>
+                        <span className={`text-xs font-bold ${row.color}`}>{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="bg-gradient-to-r from-amber-500/15 to-orange-500/5 border border-amber-500/30 rounded-xl p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Sparkles size={14} className="text-amber-400" />
+                      <span className="text-xs font-bold text-amber-400">AI Recommendation</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: 'System Size', value: '10.5 kW' },
+                        { label: 'Offset', value: '95%' },
+                        { label: 'Payback', value: '6.2 yrs' },
+                      ].map(rec => (
+                        <div key={rec.label} className="text-center">
+                          <div className="text-white font-black text-sm">{rec.value}</div>
+                          <div className="text-slate-500 text-[10px]">{rec.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION 5: Trust / Built by Installers ── */}
       <section className="py-24 bg-slate-900/50 relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.02]"
           style={{
             backgroundImage: 'radial-gradient(circle, #f59e0b 1px, transparent 1px)',
-            backgroundSize: '40px 40px'
+            backgroundSize: '40px 40px',
           }}
         />
         <div className="max-w-6xl mx-auto px-6 relative z-10">
@@ -558,11 +880,11 @@ export default function LandingPage() {
                 "We got tired of explaining to software companies what a{' '}
                 <span className="text-amber-400">J-box</span> was. So we built our own."
               </blockquote>
+              <p className="text-slate-400 leading-relaxed mb-6">
+                SolarPro was founded by a team of working solar installers and electrical engineers who spent years fighting with tools built for salespeople. We know what an AHJ wants to see. We know how a roof mount differs from a ground mount. We know Sol Fence. That knowledge is baked into every screen of this platform.
+              </p>
               <p className="text-slate-400 leading-relaxed mb-8">
-                SolarPro was founded by a team of working solar installers and electrical engineers who
-                spent years fighting with tools built for salespeople. We know what an AHJ wants to see.
-                We know how a roof mount differs from a ground mount. We know Sol Fence.
-                That knowledge is baked into every screen of this platform.
+                When we say "built by installers," we mean the people writing this code have pulled wire, mounted racking, and submitted permit packages that got rejected — and fixed them. We're not a VC-funded startup guessing at what the industry needs. We're it.
               </p>
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center">
@@ -574,13 +896,35 @@ export default function LandingPage() {
                 </div>
               </div>
             </div>
+
             <div className="grid grid-cols-1 gap-4">
               {[
-                { icon: <Wrench size={20} />, title: '15+ Years Field Experience', desc: 'Our founders have installed thousands of systems across residential, commercial, and utility-scale projects.', color: 'text-amber-400 bg-amber-500/10' },
-                { icon: <FileText size={20} />, title: 'Permit Experts', desc: 'We\'ve submitted permits in 40+ jurisdictions. We know what AHJs want and built it into every output.', color: 'text-blue-400 bg-blue-500/10' },
-                { icon: <Zap size={20} />, title: 'Licensed Electricians on Staff', desc: 'Every electrical engineering feature is reviewed by licensed electricians for NEC compliance.', color: 'text-emerald-400 bg-emerald-500/10' },
-              ].map((card) => (
-                <div key={card.title} className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-5 flex items-start gap-4">
+                {
+                  icon: <Wrench size={20} />,
+                  title: '15+ Years Field Experience',
+                  desc: 'Our founders have installed thousands of systems across residential, commercial, and utility-scale projects.',
+                  color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+                },
+                {
+                  icon: <FileText size={20} />,
+                  title: 'Permit Experts',
+                  desc: "We've submitted permits in 40+ jurisdictions. We know what AHJs want and built it into every output.",
+                  color: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+                },
+                {
+                  icon: <Zap size={20} />,
+                  title: 'Licensed Electricians on Staff',
+                  desc: 'Every electrical engineering feature is reviewed by licensed electricians for NEC compliance.',
+                  color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+                },
+                {
+                  icon: <Users size={20} />,
+                  title: '500+ Active Installers Trust Us',
+                  desc: 'Contractors from solo operators to 50-person crews use SolarPro daily to run their businesses.',
+                  color: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
+                },
+              ].map(card => (
+                <div key={card.title} className={`border rounded-xl p-5 flex items-start gap-4 ${card.color}`}>
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${card.color}`}>
                     {card.icon}
                   </div>
@@ -595,8 +939,93 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── SECTION 6: Feature Grid ── */}
+      <section id="features" className="py-24 relative">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="text-center mb-14">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-4">
+              <Package size={12} /> Full Platform
+            </div>
+            <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
+              Everything you need. Nothing you don't.
+            </h2>
+            <p className="text-lg text-slate-400 max-w-2xl mx-auto">
+              Six core modules covering every phase of the solar project lifecycle — all in one subscription.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {FEATURES.map(feature => (
+              <div
+                key={feature.title}
+                className={`bg-gradient-to-br ${feature.color} border rounded-2xl p-6 hover:scale-[1.02] transition-all duration-200 hover:shadow-lg group`}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${feature.iconColor}`}>
+                    {feature.icon}
+                  </div>
+                  <span className="text-xs font-bold text-slate-500 border border-slate-700/50 px-2 py-0.5 rounded-full">
+                    {feature.tag}
+                  </span>
+                </div>
+                <h3 className="text-lg font-bold text-white mb-2 group-hover:text-amber-100 transition-colors">
+                  {feature.title}
+                </h3>
+                <p className="text-slate-400 text-sm leading-relaxed">{feature.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Before/After comparison */}
+          <div className="mt-16 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-slate-800/40 border border-slate-700/40 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <AlertTriangle size={16} className="text-rose-400" />
+                <h3 className="text-rose-400 font-bold text-sm uppercase tracking-wider">The Old Way</h3>
+              </div>
+              <div className="space-y-3">
+                {[
+                  "Sales-focused tools that don't understand field installation",
+                  'Separate apps for design, engineering, and permitting',
+                  'No support for Sol Fence or ground mount systems',
+                  'Permit packages that get rejected by AHJs',
+                  'Manual BOM counting from layout screenshots',
+                  'Waiting days for an engineer stamp on your SLD',
+                ].map(pt => (
+                  <div key={pt} className="flex items-start gap-3 text-sm text-slate-500">
+                    <span className="text-rose-500 mt-0.5 flex-shrink-0">✕</span>
+                    {pt}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border border-emerald-500/20 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <CheckCircle size={16} className="text-emerald-400" />
+                <h3 className="text-emerald-400 font-bold text-sm uppercase tracking-wider">The SolarPro Way</h3>
+              </div>
+              <div className="space-y-3">
+                {[
+                  "Built by installers who've done every job type",
+                  'Design, engineering, BOM, and permits in one platform',
+                  'Native Sol Fence and ground mount support',
+                  '98% first-submission AHJ approval rate',
+                  'BOM auto-generated from your actual layout',
+                  'NEC-compliant SLDs generated in seconds — no stamp needed',
+                ].map(pt => (
+                  <div key={pt} className="flex items-start gap-3 text-sm text-slate-300">
+                    <CheckCircle size={15} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                    {pt}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* ── Pricing ── */}
-      <section id="pricing" className="py-24 relative">
+      <section id="pricing" className="py-24 relative bg-slate-900/30">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-medium mb-4">
@@ -608,7 +1037,6 @@ export default function LandingPage() {
             <p className="text-lg text-slate-400 max-w-2xl mx-auto mb-8">
               3-day free trial on all plans. No credit card required. Cancel anytime.
             </p>
-            {/* Billing toggle */}
             <div className="inline-flex items-center gap-3 bg-slate-800/60 border border-slate-700/50 rounded-xl p-1">
               <button
                 onClick={() => setAnnual(false)}
@@ -626,7 +1054,7 @@ export default function LandingPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
-            {PRICING.map((plan) => (
+            {PRICING.map(plan => (
               <div
                 key={plan.name}
                 className={`rounded-2xl border-2 overflow-hidden transition-all ${
@@ -671,27 +1099,9 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Trust + Testimonials ── */}
-      <section id="testimonials" className="py-24 bg-slate-900/50 relative">
+      {/* ── Testimonials ── */}
+      <section id="testimonials" className="py-24 relative">
         <div className="max-w-7xl mx-auto px-6">
-          {/* Trust pillars */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-20">
-            {[
-              { icon: <Shield size={24} />, title: 'SOC 2 Compliant', desc: 'Your project data is encrypted at rest and in transit. We never sell your data.', color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
-              { icon: <CheckCircle size={24} />, title: '98% Permit Approval', desc: 'Our permit packages are reviewed by licensed engineers and accepted by AHJs nationwide.', color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' },
-              { icon: <HardHat size={24} />, title: 'Built by Installers', desc: 'Every feature was designed with input from working solar installers and electrical engineers.', color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
-            ].map((pillar) => (
-              <div key={pillar.title} className={`bg-gradient-to-br border rounded-2xl p-6 text-center ${pillar.color}`}>
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4 ${pillar.color}`}>
-                  {pillar.icon}
-                </div>
-                <h3 className="text-white font-bold text-lg mb-2">{pillar.title}</h3>
-                <p className="text-slate-400 text-sm leading-relaxed">{pillar.desc}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Testimonials */}
           <div className="text-center mb-12">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-4">
               <Star size={12} /> Trusted by Solar Pros
@@ -699,7 +1109,7 @@ export default function LandingPage() {
             <h2 className="text-4xl font-black text-white">What installers are saying</h2>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {TESTIMONIALS.map((t) => (
+            {TESTIMONIALS.map(t => (
               <div key={t.name} className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6">
                 <div className="flex gap-1 mb-4">
                   {Array.from({ length: t.rating }).map((_, i) => (
@@ -722,24 +1132,28 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Final CTA ── */}
-      <section className="py-24 relative overflow-hidden">
+      {/* ── SECTION 7: Final CTA ── */}
+      <section className="py-28 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 via-slate-900 to-blue-500/10" />
         <div className="absolute inset-0 opacity-[0.03]"
           style={{
             backgroundImage: 'linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)',
-            backgroundSize: '40px 40px'
+            backgroundSize: '40px 40px',
           }}
         />
         <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
           <div className="w-20 h-20 rounded-2xl solar-gradient flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-amber-500/30">
             <Sun size={36} className="text-slate-900" />
           </div>
-          <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
-            Stop juggling solar software.
+          <h2 className="text-4xl md:text-6xl font-black text-white mb-6 leading-tight">
+            Start Designing Solar
+            <br />
+            <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
+              Systems Today
+            </span>
           </h2>
-          <p className="text-xl text-slate-400 mb-10 leading-relaxed">
-            Design, engineer, permit, and install — all from one platform built by people who've done it themselves.
+          <p className="text-xl text-slate-400 mb-10 leading-relaxed max-w-2xl mx-auto">
+            Join 500+ solar contractors who design, engineer, and permit faster with SolarPro. 3-day free trial, no credit card required.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto mb-6">
@@ -749,7 +1163,7 @@ export default function LandingPage() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="Enter your email"
+                placeholder="Enter your work email"
                 className="w-full bg-slate-800/60 border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/30 transition-all"
               />
             </div>
@@ -760,7 +1174,7 @@ export default function LandingPage() {
               Start Designing Free
             </Link>
           </div>
-          <p className="text-slate-500 text-sm mb-8">3-day free trial · No credit card required · Cancel anytime</p>
+          <p className="text-slate-500 text-sm mb-10">3-day free trial · No credit card required · Cancel anytime</p>
 
           <div className="flex flex-wrap justify-center gap-6 text-sm text-slate-400">
             {[
@@ -825,7 +1239,7 @@ export default function LandingPage() {
             <p className="text-slate-600 text-xs">© 2025 SolarPro Design Platform. All rights reserved.</p>
             <div className="flex gap-4 text-xs text-slate-600">
               <a href="#" className="hover:text-slate-400 transition-colors">Privacy Policy</a>
-              <a href="#" className="hover:text-slate-400 transition-colors">Terms of Service</a>
+              <Link href="/terms" className="hover:text-slate-400 transition-colors">Terms of Service</Link>
             </div>
           </div>
         </div>
