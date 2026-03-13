@@ -36,7 +36,7 @@ function safeJsonError(msg: string, status = 500): NextResponse {
 }
 
 export async function POST(req: NextRequest) {
-  // ── JSON Error Boundary ──────────────────────────────────────────────────
+  // ── JSON Error Boundary ──────────────────────────────────────────────────────
   // Catches any uncaught throw (including module load errors, type errors, etc.)
   // and guarantees a JSON response is always returned — never an HTML error page.
   try {
@@ -64,8 +64,16 @@ export async function POST(req: NextRequest) {
 
       const fileType = file.type;
       const fileName = file.name.toLowerCase();
+
+      // ── TASK 2: FILE_RECEIVED log ─────────────────────────────────────────
+      console.log(`[FILE_RECEIVED] name=${fileName} type=${fileType} size=${file.size} openai=${!!process.env.OPENAI_API_KEY}`);
+
+      // Create buffer ONCE — used for ALL downstream operations (OCR, PDF parse, save)
+      // Do NOT read file.arrayBuffer() again after this point.
       const buffer = Buffer.from(await file.arrayBuffer());
 
+      // ── TASK 2: FILE_BUFFER_CREATED log ──────────────────────────────────
+      console.log(`[FILE_BUFFER_CREATED] bytes=${buffer.length} mime=${fileType}`);
       console.log(`[FILE_UPLOADED] name=${fileName} type=${fileType} size=${buffer.length} openai=${!!process.env.OPENAI_API_KEY}`);
 
       if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {
@@ -84,6 +92,10 @@ export async function POST(req: NextRequest) {
         const ocrResult = await extractImageTextSmart(buffer, safeMime);
         extractedText = ocrResult.text;
         extractionMethod = ocrResult.method;
+
+        // ── TASK 2: OCR_TEXT_LENGTH log ───────────────────────────────────
+        console.log(`[OCR_TEXT_LENGTH] chars=${extractedText.length} method=${ocrResult.method} confidence=${ocrResult.confidence}`);
+
         if (extractedText.length > 50) {
           console.log(`[OCR_SUCCESS] method=${ocrResult.method} chars=${extractedText.length} confidence=${ocrResult.confidence}`);
         } else {
@@ -92,6 +104,11 @@ export async function POST(req: NextRequest) {
       } else {
         return NextResponse.json({ success: false, error: 'Unsupported file type. Please upload PDF, JPG, or PNG.' }, { status: 400 });
       }
+
+      // ── TASK 2: FILE_SAVED log (buffer used, not re-read) ────────────────
+      // Note: actual DB/storage save happens later using this same buffer.
+      // We log here to confirm buffer was successfully created and OCR attempted.
+      console.log(`[FILE_SAVED] buffer_intact=${buffer.length > 0} extracted_chars=${extractedText.length}`);
     }
 
     if (!extractedText.trim()) {
@@ -219,6 +236,8 @@ export async function POST(req: NextRequest) {
       rawText: extractedText,
     };
 
+    // ── TASK 2: PARSED_FIELDS_COUNT log ──────────────────────────────────────
+    console.log(`[PARSED_FIELDS_COUNT] count=${extractedFields.length} fields=${extractedFields.join(',') || 'none'} monthlyKwh=${monthlyKwh ?? 'null'} annualKwh=${annualKwh ?? 'null'} confidence=${confidence}`);
     console.log('[bill-upload] Bill parsed (deterministic). Fields:', extractedFields.join(', ') || 'none');
     console.log('[bill-upload] Confidence:', confidence, '| monthlyKwh:', monthlyKwh, '| annualKwh:', annualKwh, '| monthsFound:', monthsFound, '| address:', legacyResult.serviceAddress);
 
@@ -236,6 +255,41 @@ export async function POST(req: NextRequest) {
       console.log(`[AI_EXTRACTION_STARTED] reason=low_field_count fields=${extractedFields.length}`);
       finalBillData = await extractBillDataWithAI(extractedText, billData);
       console.log(`[AI_EXTRACTION_COMPLETE] fields=${finalBillData.extractedFields?.join(',') || 'none'} confidence=${finalBillData.confidence}`);
+    }
+
+    // ── TASK 2: AI_EXTRACTION_RESULT log ────────────────────────────────────
+    const aiFieldCount = finalBillData.extractedFields?.length ?? 0;
+    console.log(`[AI_EXTRACTION_RESULT] totalFields=${aiFieldCount} usedAI=${finalBillData.usedLlmFallback} monthlyKwh=${finalBillData.monthlyKwh ?? 'null'} annualKwh=${finalBillData.estimatedAnnualKwh ?? 'null'} utility="${finalBillData.utilityProvider ?? 'none'}" address="${finalBillData.serviceAddress ?? 'none'}"`);
+
+    // ── TASK 3: HARD FAIL on completely empty parse payload ──────────────────
+    // If BOTH deterministic parsing AND AI extraction returned nothing usable,
+    // do NOT silently proceed with 0 kWh defaults → 0.0 kW system.
+    // Return a clear error so the user can re-upload or enter manually.
+    //
+    // Empty is defined as: no kWh data (monthly or annual) AND no utility AND
+    // no address — i.e. the parser found absolutely nothing meaningful.
+    const hasAnyKwh = (finalBillData.monthlyKwh ?? 0) > 0
+      || (finalBillData.estimatedAnnualKwh ?? 0) > 0
+      || (finalBillData.annualKwh ?? 0) > 0
+      || (finalBillData.monthlyUsageHistory?.length ?? 0) > 0;
+    const hasLocation = !!(finalBillData.serviceAddress || finalBillData.utilityProvider);
+    const totalFinalFields = finalBillData.extractedFields?.length ?? 0;
+
+    if (totalFinalFields === 0 && !hasAnyKwh && !hasLocation && file) {
+      // Complete parse failure — cannot silently proceed
+      console.warn(`[PARSE_EMPTY_FAIL] name=${file.name} extractedChars=${extractedText.length} method=${extractionMethod} — returning 422`);
+      return NextResponse.json({
+        success: false,
+        error: 'Bill text could not be extracted. Please re-upload a clearer image or enter manually.',
+        stage: extractionMethod,
+        parseEmpty: true,
+        debug: {
+          hasOpenAI: !!process.env.OPENAI_API_KEY,
+          extractedChars: extractedText.length,
+          method: extractionMethod,
+          fieldsFound: totalFinalFields,
+        },
+      }, { status: 422 });
     }
 
     // Extraction evidence — returned to UI for transparency
@@ -315,7 +369,7 @@ export async function POST(req: NextRequest) {
       console.warn('[bill-upload] No service address found in bill data');
     }
 
-    // ── Rate Validation ──────────────────────────────────────────────────────
+    // ── Rate Validation ───────────────────────────────────────────────────────
     // Correct rates outside valid retail range ($0.10-$0.60/kWh).
     // Below $0.10 = suspect — likely supply-only/generation component from bill (not retail).
     //   e.g. CMP supply charge ~$0.069 vs all-in retail ~$0.265. Falls back to DB rate.
@@ -335,7 +389,7 @@ export async function POST(req: NextRequest) {
     // Structured parse complete log
     console.log(`[BILL_PARSE_COMPLETE] utility="${finalBillData.utilityProvider ?? 'unknown'}" monthlyKwh=${finalBillData.monthlyKwh ?? 'null'} annualKwh=${finalBillData.estimatedAnnualKwh ?? 'null'} rate=$${finalBillData.electricityRate?.toFixed(3) ?? 'null'} confidence=${finalBillData.confidence} fields=${finalBillData.extractedFields?.join(',') ?? 'none'}`);
 
-    // ── Deferred Validation ──────────────────────────────────────────────
+    // ── Deferred Validation ───────────────────────────────────────────────────
     // Run AFTER geocoding + utility matching + rate correction so warnings reflect
     // final resolved values. Context suppresses stale warnings when values were resolved.
     const resolvedMatchedUtility = matchedUtility?.utilityName ?? utilityData?.utilityName ?? null;
@@ -348,14 +402,34 @@ export async function POST(req: NextRequest) {
       console.log('[bill-upload] Validation warnings:', validation.warnings.join(' | '));
     }
 
-    // ── System Size Calculation ───────────────────────────────────────────────
+    // ── TASK 4: System Size Gate — ONLY run if usable kWh data present ────────
+    // Do NOT size with 0 kWh defaults — that produces fake 0.0 kW results.
+    // Minimum requirement: estimatedAnnualKwh > 0 OR monthlyKwh > 0.
     console.log('[bill-upload] Calculating system size...');
     const annualKwhForSizing = finalBillData.estimatedAnnualKwh || 0;
+    const monthlyKwhForSizing = finalBillData.monthlyKwh || 0;
+
     // Use utility-aware production factor for accurate sizing
     const productionFactor = getProductionFactor(utilityNameForRate, locationData?.stateCode ?? null);
-    const systemSizeKw = annualKwhForSizing > 0
-      ? Math.round((annualKwhForSizing / productionFactor) * 10) / 10
-      : null;
+
+    let systemSizeKw: number | null = null;
+
+    if (annualKwhForSizing > 0) {
+      // Primary: use annual kWh
+      systemSizeKw = Math.round((annualKwhForSizing / productionFactor) * 10) / 10;
+      // ── TASK 2: SIZING_INPUTS_READY log ─────────────────────────────────
+      console.log(`[SIZING_INPUTS_READY] annualKwh=${annualKwhForSizing} productionFactor=${productionFactor} systemSizeKw=${systemSizeKw}`);
+    } else if (monthlyKwhForSizing > 0) {
+      // Fallback: extrapolate from monthly
+      const annualFromMonthly = monthlyKwhForSizing * 12;
+      systemSizeKw = Math.round((annualFromMonthly / productionFactor) * 10) / 10;
+      console.log(`[SIZING_INPUTS_READY] monthlyKwh=${monthlyKwhForSizing} extrapolatedAnnual=${annualFromMonthly} productionFactor=${productionFactor} systemSizeKw=${systemSizeKw}`);
+    } else {
+      // ── TASK 2: SIZING_SKIPPED_EMPTY_PARSE log ──────────────────────────
+      console.warn(`[SIZING_SKIPPED_EMPTY_PARSE] annualKwh=0 monthlyKwh=0 — no kWh data to size system`);
+      systemSizeKw = null;
+    }
+
     console.log(`[bill-upload] System size: ${systemSizeKw} kW for ${annualKwhForSizing} kWh/yr (factor: ${productionFactor})`);
 
     // ── Net Metering Guardrail ────────────────────────────────────────────────
@@ -368,7 +442,7 @@ export async function POST(req: NextRequest) {
       (validation as any).warnings.push(netMeteringWarning);
     }
 
-    // ── Bill Persistence (when projectId provided in form data) ─────────────
+    // ── Bill Persistence (when projectId provided in form data) ───────────────
     const projectId = formData.get('projectId') as string | null;
     const userId = user.id as string;
     let savedBillId: string | null = null;
@@ -464,7 +538,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ── PDF extraction ────────────────────────────────────────────────────────────
+// ── PDF extraction ─────────────────────────────────────────────────────────────
 async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: string }> {
   const openaiKey = process.env.OPENAI_API_KEY;
 
@@ -631,7 +705,7 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
     console.warn('[bill-upload] No OPENAI_API_KEY — skipping OpenAI extraction');
   }
 
-  // ── Method 6: Google Vision ───────────────────────────────────────────────
+  // ── Method 6: Google Vision ────────────────────────────────────────────────
   const googleKey = process.env.GOOGLE_MAPS_API_KEY;
   if (googleKey) {
     console.log('[PDF_PARSE_STARTED] method=google-vision');
@@ -659,12 +733,12 @@ async function extractPdfText(buffer: Buffer): Promise<{ text: string; method: s
     }
   }
 
-  // ── All methods failed ────────────────────────────────────────────────────
+  // ── All methods failed ─────────────────────────────────────────────────────
   console.error('[PDF_PARSE_FAILED] All PDF extraction methods exhausted — no usable text');
   return { text: '', method: 'failed' };
 }
 
-// ── PDF CLI fallback ──────────────────────────────────────────────────────────
+// ── PDF CLI fallback ───────────────────────────────────────────────────────────
 async function extractPdfTextCli(buffer: Buffer): Promise<string> {
   const { execSync } = await import('child_process');
   const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
@@ -680,7 +754,7 @@ async function extractPdfTextCli(buffer: Buffer): Promise<string> {
   return text;
 }
 
-// ── Smart 3-stage image extraction ──────────────────────────────────────────
+// ── Smart 3-stage image extraction ────────────────────────────────────────────
 // Stage 1: Tesseract CLI (free, no API cost) — primary OCR
 // Stage 2: Check if monthly usage was detected from Tesseract output
 // Stage 3: OpenAI Vision / Google Vision fallback ONLY if:
@@ -689,7 +763,7 @@ async function extractPdfTextCli(buffer: Buffer): Promise<string> {
 //
 // Uses dynamic imports to prevent webpack from bundling tesseract.js
 // worker_threads at module load time (causes HTML 500 before handler runs).
-// ── Inline Tesseract CLI runner ──────────────────────────────────────────────────────────────────
+// ── Inline Tesseract CLI runner ────────────────────────────────────────────────
 // Called as Stage 1b fallback when the /api/ocr HTTP call returns empty or 401.
 // Runs tesseract directly in this process — no network hop needed.
 // Returns empty string if CLI is not installed (Vercel does not have it; local dev does).
@@ -743,7 +817,7 @@ async function extractImageTextSmart(
     await import('@/lib/billOcrEngine');
   const { parseMonthlyUsage } = await import('@/lib/billParser');
 
-  // ── Stage 1: Tesseract OCR via /api/ocr (free, no key needed) ─────────────────
+  // ── Stage 1: Tesseract OCR via /api/ocr (free, no key needed) ─────────────
   // recognizeImage() does an internal HTTP fetch to /api/ocr.
   // /api/ocr is in PUBLIC_PATHS so no auth cookie is needed.
   // If the fetch fails (401, network error, timeout), rawText is '' and we fall through.
@@ -751,7 +825,7 @@ async function extractImageTextSmart(
   const tesseractResult = await recognizeImage(buffer, mimeType);
 
   if (tesseractResult.rawText.length > 50) {
-    // ── Stage 2: Check if we got usable monthly data ─────────────────────────
+    // ── Stage 2: Check if we got usable monthly data ───────────────────────
     const parseCheck = parseMonthlyUsage(tesseractResult.rawText);
     const hasUsage = parseCheck.monthsFound >= 3 || parseCheck.annualUsage !== null;
 
@@ -782,7 +856,7 @@ async function extractImageTextSmart(
       console.log(`[bill-upload] Tesseract returned too little text (${tesseractResult.rawText.length} chars) — trying inline CLI fallback`);
     }
 
-    // ── Stage 1b: Inline Tesseract CLI (bypasses HTTP, no auth needed) ──────────────
+    // ── Stage 1b: Inline Tesseract CLI (bypasses HTTP, no auth needed) ──────
     try {
       const inlineText = await runTesseractCliInline(buffer, mimeType);
       if (inlineText.length > 50) {

@@ -205,9 +205,17 @@ export default function BillUploadModal({ onClose, onComplete }: BillUploadModal
         let msg = data.error || 'Failed to process bill';
         if (res.status === 413) msg = `File too large. Max ${MAX_FILE_SIZE_MB} MB.`;
         if (res.status === 415) msg = 'Unsupported file type.';
+        if (res.status === 422) {
+          // parseEmpty = complete extraction failure — show clear actionable message
+          if (data.parseEmpty) {
+            msg = 'Bill text could not be extracted. Please re-upload a clearer image or enter manually.';
+          } else {
+            msg = data.error || 'Could not extract text from bill. Try a clearer image or enter manually.';
+          }
+        }
         if (res.status === 500) msg = `Server error: ${data.error || 'Unknown'}${data.stack ? ' | ' + data.stack.slice(0, 100) : ''}`;
-        if (data.stage) msg += ` [stage: ${data.stage}]`;
-        if (data.debug) {
+        if (data.stage && res.status !== 422) msg += ` [stage: ${data.stage}]`;
+        if (data.debug && res.status !== 422) {
           const d = data.debug;
           msg += ` | AI:${d.hasOpenAI ? 'yes' : 'NO'} PDF-parse:${d.pdfParseLoaded ? 'yes' : 'no'}`;
         }

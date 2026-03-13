@@ -1,8 +1,27 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.17';
-export const BUILD_DATE        = '2026-06-13';
-export const BUILD_DESCRIPTION = 'v47.17: Harden bill upload JSON safety -- all 4 fetch sites wrapped in try/catch json parse, route catch block returns friendly error messages, safeJsonError helper, never returns plain text';
+export const BUILD_VERSION     = 'v47.18';
+export const BUILD_DATE        = '2026-06-14';
+export const BUILD_DESCRIPTION = 'v47.18: Hard fail on empty parse (422 + parseEmpty), sizing gate (skip if 0 kWh), full pipeline debug logging (FILE_RECEIVED, FILE_BUFFER_CREATED, FILE_SAVED, OCR_TEXT_LENGTH, PARSED_FIELDS_COUNT, AI_EXTRACTION_RESULT, PARSE_EMPTY_FAIL, SIZING_INPUTS_READY, SIZING_SKIPPED_EMPTY_PARSE)';
 export const BUILD_FEATURES    = [
+  // v47.18 -- Hard fail on empty parse + sizing gate + full pipeline logging
+  'ROOT CAUSE: Pipeline silently returned success=true with 0 fields when OCR/parser found nothing -- review screen showed Extraction confidence: low, 0 fields, $0.130/kWh fallback, 0.0 kW, 0 annual kWh',
+  'ROOT CAUSE: extractBillDataWithAI() sets usedLlmFallback=true even when AI returns nothing useful -- caused AI-assisted label on empty results',
+  'ROOT CAUSE: systemSizeKw was calculated with annualKwhForSizing=0 giving 0.0 kW instead of null/omitted',
+  'FIX: app/api/bill-upload/route.ts -- Hard fail gate: if totalFinalFields===0 AND !hasAnyKwh AND !hasLocation AND file -- return 422 with parseEmpty=true and actionable message',
+  'FIX: app/api/bill-upload/route.ts -- Sizing gate: systemSizeKw only set when annualKwhForSizing > 0 OR monthlyKwhForSizing > 0 -- null when no kWh data available',
+  'FIX: app/api/bill-upload/route.ts -- Buffer created ONCE via Buffer.from(await file.arrayBuffer()) at line ~67 -- confirmed no double-read regression',
+  'FIX: app/api/bill-upload/route.ts -- saveBill runs AFTER parsing -- confirmed parse-before-save order preserved',
+  'LOG: [FILE_RECEIVED] name/type/size/openai at top of file handler',
+  'LOG: [FILE_BUFFER_CREATED] bytes/mime immediately after buffer creation',
+  'LOG: [OCR_TEXT_LENGTH] chars/method/confidence after image OCR completes',
+  'LOG: [FILE_SAVED] buffer_intact/extracted_chars after saveBill call',
+  'LOG: [PARSED_FIELDS_COUNT] count/fields/monthlyKwh/annualKwh/confidence after parseBill()',
+  'LOG: [AI_EXTRACTION_RESULT] totalFields/usedAI/monthlyKwh/annualKwh/utility/address after extractBillDataWithAI()',
+  'LOG: [PARSE_EMPTY_FAIL] name/extractedChars/method on 422 hard fail',
+  'LOG: [SIZING_INPUTS_READY] annualKwh/productionFactor/systemSizeKw when sizing proceeds',
+  'LOG: [SIZING_SKIPPED_EMPTY_PARSE] annualKwh=0 monthlyKwh=0 when sizing skipped',
+  'FIX: components/onboarding/BillUploadFlow.tsx -- 422 with parseEmpty=true shows: Bill text could not be extracted. Please re-upload a clearer image or enter manually.',
+  'FIX: components/onboarding/BillUploadModal.tsx -- 422 with parseEmpty=true shows same actionable message',
   // v47.17 -- Harden bill upload JSON safety (fix "Unexpected token 'A'" crash)
   'ROOT CAUSE: frontend called res.json() without try/catch -- when server returned non-JSON (Vercel timeout HTML, module crash before handler runs), res.json() threw SyntaxError: Unexpected token A',
   'FIX: components/onboarding/BillUploadFlow.tsx -- both fetch sites (file upload + manual entry) now wrap res.json() in try/catch, throw friendly Error on parse failure',

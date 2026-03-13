@@ -177,7 +177,14 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         let msg = data.error || 'Failed to process bill';
         if (res.status === 413) msg = `File too large. Please upload a file under ${MAX_FILE_SIZE_MB} MB.`;
         if (res.status === 415) msg = 'Unsupported file type. Please upload a PDF, JPG, or PNG.';
-        if (res.status === 422) msg = data.error || 'Could not extract data from this bill.';
+        if (res.status === 422) {
+          // parseEmpty = complete extraction failure; other 422s = no text found
+          if (data.parseEmpty) {
+            msg = 'Bill text could not be extracted. Please re-upload a clearer image or enter manually.';
+          } else {
+            msg = data.error || 'Could not extract data from this bill. Try a clearer image or enter manually.';
+          }
+        }
         setError(msg);
         setUploading(false);
         setProcessingStage('uploading');
