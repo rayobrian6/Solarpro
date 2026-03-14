@@ -158,25 +158,29 @@ interface PermitInput {
 function statusColor(s: string) {
   if (s === 'PASS' || s === 'pass') return '#10b981';
   if (s === 'WARNING' || s === 'warning') return '#f59e0b';
-  if (s === 'FAIL' || s === 'error') return '#ef4444';
+  if (s === 'FAIL' || s === 'error' || s === 'fail') return '#ef4444';
+  if (s === 'info' || s === 'INFO') return '#3b82f6';
   return '#64748b';
 }
 function statusBg(s: string) {
   if (s === 'PASS' || s === 'pass') return '#f0fdf4';
   if (s === 'WARNING' || s === 'warning') return '#fffbeb';
-  if (s === 'FAIL' || s === 'error') return '#fef2f2';
+  if (s === 'FAIL' || s === 'error' || s === 'fail') return '#fef2f2';
+  if (s === 'info' || s === 'INFO') return '#eff6ff';
   return '#f8fafc';
 }
 function statusBorder(s: string) {
   if (s === 'PASS' || s === 'pass') return '#bbf7d0';
   if (s === 'WARNING' || s === 'warning') return '#fde68a';
-  if (s === 'FAIL' || s === 'error') return '#fecaca';
+  if (s === 'FAIL' || s === 'error' || s === 'fail') return '#fecaca';
+  if (s === 'info' || s === 'INFO') return '#bfdbfe';
   return '#e2e8f0';
 }
 function statusLabel(s: string) {
   if (s === 'PASS' || s === 'pass') return '✓ PASS';
   if (s === 'WARNING' || s === 'warning') return '⚠ WARNING';
-  if (s === 'FAIL' || s === 'error') return '✗ FAIL';
+  if (s === 'FAIL' || s === 'error' || s === 'fail') return '✗ FAIL';
+  if (s === 'info' || s === 'INFO') return 'ℹ INFO';
   return s?.toUpperCase() || '—';
 }
 
@@ -297,7 +301,7 @@ function pageCoverSheet(input: PermitInput, pageNum: number, totalPages: number)
     { id: 'PV-5', title: 'Warning Labels & Required Placards', sheet: '8' },
     { id: 'SCHED', title: 'Equipment Schedule', sheet: '9' },
     { id: 'CERT', title: 'Engineer Certification Block', sheet: '10' },
-    { id: 'E-1', title: 'Single-Line Electrical Diagram (SLD)', sheet: 'E-1' },
+    { id: 'E-1', title: 'Single-Line Electrical Diagram (SLD)', sheet: '11' },
   ];
 
   return `
@@ -1354,9 +1358,754 @@ function pageEngineerCert(input: PermitInput, pageNum: number, totalPages: numbe
 // FULL HTML DOCUMENT ASSEMBLY
 // ═══════════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// E-1: Single Line Diagram (SLD)
+// Adapted from sld-professional-renderer.ts V14
+// IEEE/ANSI standard symbols, ANSI B (17"×22") format
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function pageSingleLineDiagram(input: PermitInput, pageNum: number, totalPages: number): string {
+  const { project, system, compliance } = input;
+
+  // ── Canvas ────────────────────────────────────────────────────────────────
+  const W = 2304, H = 1728, MAR = 40;
+  const TB_W = 260;
+  const TB_X = W - TB_W - MAR;
+  const DX = MAR, DY = MAR;
+  const DW = TB_X - MAR - 10;
+  const DH = H - MAR * 2;
+  const SCH_X = DX, SCH_Y = DY + 30;
+  const SCH_W = DW;
+  const SCH_H = Math.round(DH * 0.50);
+  const BUS_Y = SCH_Y + Math.round(SCH_H * 0.46);
+  const GND_Y = BUS_Y + 100;
+  const CALC_Y  = SCH_Y + SCH_H + 8;
+  const CALC_H  = 180;
+  const SCHED_Y = CALC_Y + CALC_H + 8;
+  const SCHED_H = H - MAR - SCHED_Y;
+
+  // ── Colors ────────────────────────────────────────────────────────────────
+  const BLK = '#000000', WHT = '#FFFFFF', GRN = '#005500';
+  const LGY = '#F5F5F5', PASS_C = '#004400', FAIL_C = '#AA0000';
+  const LOAD_CLR = '#1B5E20';
+
+  // ── Stroke widths ─────────────────────────────────────────────────────────
+  const SW_BORDER=2.5, SW_HEAVY=2.0, SW_MED=1.5, SW_THIN=1.0, SW_HAIR=0.5, SW_BUS=3.5;
+
+  // ── Font sizes ────────────────────────────────────────────────────────────
+  const F = { title:12, hdr:8.5, label:7.5, sub:7, seg:6.5, tiny:6.5, tb:7, tbTitle:10 };
+
+  // ── SVG Primitives ────────────────────────────────────────────────────────
+  function esc(s: any): string { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function txt(x: number, y: number, s: any, o: any={}): string {
+    const sz=o.sz??F.label, bld=o.bold?'font-weight="bold"':'', anc=`text-anchor="${o.anc??'start'}"`;
+    const clr=`fill="${o.fill??BLK}"`, itl=o.italic?'font-style="italic"':'';
+    return `<text x="${x}" y="${y}" font-family="Arial,sans-serif" font-size="${sz}" ${bld} ${anc} ${clr} ${itl} dominant-baseline="auto">${esc(s)}</text>`;
+  }
+
+  function tspan(x: number, y: number, lines: string[], o: any={}): string {
+    if(!lines.length) return '';
+    const sz=o.sz??F.seg, bld=o.bold?'font-weight="bold"':'', anc=`text-anchor="${o.anc??'middle'}"`;
+    const clr=`fill="${o.fill??BLK}"`, lh=o.lh??Math.round(sz*1.4);
+    const spans=lines.map((l,i)=>`<tspan x="${x}" dy="${i===0?0:lh}">${esc(l)}</tspan>`).join('');
+    return `<text x="${x}" y="${y}" font-family="Arial,sans-serif" font-size="${sz}" ${bld} ${anc} ${clr} dominant-baseline="auto">${spans}</text>`;
+  }
+
+  function rect(x: number, y: number, w: number, h: number, o: any={}): string {
+    const f=o.fill??WHT, s=o.stroke??BLK, sw=o.sw??SW_THIN, rx=o.rx?`rx="${o.rx}"`:'', da=o.dash?`stroke-dasharray="${o.dash}"`:'';
+    return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${f}" stroke="${s}" stroke-width="${sw}" ${rx} ${da}/>`;
+  }
+
+  function ln(x1: number, y1: number, x2: number, y2: number, o: any={}): string {
+    const s=o.stroke??BLK, sw=o.sw??SW_MED, da=o.dash?`stroke-dasharray="${o.dash}"`:'';
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${s}" stroke-width="${sw}" ${da}/>`;
+  }
+
+  function circ(cx: number, cy: number, r: number, o: any={}): string {
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${o.fill??WHT}" stroke="${o.stroke??BLK}" stroke-width="${o.sw??SW_THIN}"/>`;
+  }
+
+  function gnd(x: number, y: number, color: string=GRN): string {
+    return [ln(x,y,x,y+8,{stroke:color,sw:SW_MED}),ln(x-9,y+8,x+9,y+8,{stroke:color,sw:SW_MED}),
+            ln(x-6,y+12,x+6,y+12,{stroke:color,sw:SW_MED}),ln(x-3,y+16,x+3,y+16,{stroke:color,sw:SW_MED})].join('');
+  }
+
+  function callout(cx: number, cy: number, n: number): string {
+    return circ(cx,cy,10,{fill:WHT,stroke:BLK,sw:SW_MED})+txt(cx,cy+1,String(n),{sz:F.hdr,bold:true,anc:'middle'});
+  }
+
+  // ── IEEE Standard Equipment Symbols ─────────────────────────────────────
+  function pvModuleSymbol(cx: number, cy: number, w=28, h=20): string {
+    return [rect(cx-w/2,cy-h/2,w,h,{fill:WHT,sw:SW_MED}),ln(cx-w/2,cy+h/2,cx+w/2,cy-h/2,{sw:SW_THIN})].join('');
+  }
+
+  function fuseSymbol(cx: number, cy: number, w=16, h=8): string {
+    return [ln(cx-w/2-6,cy,cx-w/2,cy,{sw:SW_MED}),rect(cx-w/2,cy-h/2,w,h,{fill:WHT,sw:SW_MED}),ln(cx+w/2,cy,cx+w/2+6,cy,{sw:SW_MED})].join('');
+  }
+
+  function breakerSymbol(cx: number, cy: number, w=18, h=12, amps?: number): string {
+    const p=[rect(cx-w/2,cy-h/2,w,h,{fill:WHT,sw:SW_THIN}),
+             `<path d="M${cx-5},${cy+3} Q${cx},${cy-5} ${cx+5},${cy+3}" fill="none" stroke="${BLK}" stroke-width="${SW_HAIR}"/>`];
+    if(amps) p.push(txt(cx,cy-h/2-2,`${amps}A`,{sz:5.5,anc:'middle',bold:true}));
+    return p.join('');
+  }
+
+  function lug(cx: number, cy: number): string { return circ(cx,cy,3,{fill:WHT,sw:SW_MED})+circ(cx,cy,1,{fill:BLK,sw:0}); }
+
+  function busbar(x1: number, x2: number, y: number, label?: string): string {
+    const p=[ln(x1,y,x2,y,{stroke:BLK,sw:SW_BUS})];
+    if(label) p.push(txt((x1+x2)/2,y-5,label,{sz:5.5,anc:'middle',bold:true}));
+    return p.join('');
+  }
+
+  function knifeSwitch(cx: number, cy: number, w=40): string {
+    const lx=cx-w/2, rx=cx+w/2;
+    return [ln(lx,cy,lx+10,cy,{sw:SW_MED}),circ(lx+10,cy,3,{fill:BLK,sw:0}),
+            ln(lx+10,cy,rx-10,cy-10,{sw:SW_MED}),circ(rx-10,cy,3,{fill:WHT,sw:SW_MED}),
+            ln(rx-10,cy,rx,cy,{sw:SW_MED})].join('');
+  }
+
+  // ── Overlap Guard ─────────────────────────────────────────────────────────
+  function makeOverlapGuard(): (x1: number, x2: number, y: number) => number {
+    const used: Array<{x1:number,x2:number,y:number}> = [];
+    return function(x1: number, x2: number, y: number): number {
+      const xMin=Math.min(x1,x2), xMax=Math.max(x1,x2);
+      let c=y, att=0;
+      while(att<10) {
+        const conf=used.find(r=>Math.abs(r.y-c)<4&&r.x1<xMax&&r.x2>xMin);
+        if(!conf) break; c+=4; att++;
+      }
+      used.push({x1:xMin,x2:xMax,y:c}); return c;
+    };
+  }
+
+  // ── Wire Segment ──────────────────────────────────────────────────────────
+  function wireSeg(x1: number, x2: number, y: number, lines: string[], opts: any={}): string {
+    const isOA=opts.openAir??false, color=isOA?GRN:BLK, dash=isOA?'10,5':undefined;
+    const cnt=Math.min(opts.bundleCount??1,6), cx=(x1+x2)/2, above=opts.above??true;
+    const p: string[]=[];
+    if(cnt<=1) { p.push(ln(x1,y,x2,y,{stroke:color,sw:SW_MED,dash})); }
+    else {
+      const sp=3, span=(cnt-1)*sp, sy=y-span/2;
+      for(let i=0;i<cnt;i++) p.push(ln(x1,sy+i*sp,x2,sy+i*sp,{stroke:color,sw:SW_THIN,dash}));
+      p.push(ln(x1,sy,x1,sy+span,{stroke:color,sw:SW_HAIR}));
+      p.push(ln(x2,sy,x2,sy+span,{stroke:color,sw:SW_HAIR}));
+    }
+    if(lines.length>0) {
+      const lh=Math.round(F.seg*1.35), th=lines.length*lh;
+      const ty=above?y-7-th+lh:y+11;
+      p.push(tspan(cx,ty,lines,{sz:F.seg,anc:'middle',fill:color}));
+    }
+    return p.join('');
+  }
+
+  // ── Equipment Renderers ───────────────────────────────────────────────────
+  function renderBattery(cx: number, cy: number, model: string, kwh: number, backfeedA: number, calloutN: number): any {
+    const W2=88,H2=72, bx=cx-W2/2, by2=cy-H2/2, BAT_CLR='#1565C0', p: string[]=[];
+    p.push(rect(bx,by2,W2,H2,{fill:WHT,stroke:BAT_CLR,sw:SW_MED}));
+    p.push(ln(bx,by2+14,bx+W2,by2+14,{stroke:BAT_CLR,sw:SW_THIN}));
+    p.push(txt(cx,by2+10,'BATTERY STORAGE',{sz:5.5,bold:true,anc:'middle',fill:BAT_CLR}));
+    const cellX=cx-14, cellY=cy-4;
+    for(let i=0;i<3;i++){
+      const lx2=cellX+i*7;
+      p.push(ln(lx2,cellY-10,lx2,cellY+10,{stroke:BAT_CLR,sw:2.5}));
+      if(i<2) p.push(ln(lx2+3,cellY-6,lx2+3,cellY+6,{stroke:BAT_CLR,sw:1.5}));
+    }
+    p.push(txt(cellX-8,cellY+4,'−',{sz:9,bold:true,anc:'middle',fill:BAT_CLR}));
+    p.push(txt(cellX+22,cellY+4,'+',{sz:9,bold:true,anc:'middle',fill:BAT_CLR}));
+    const acOutX=cx, acOutY=by2+H2;
+    p.push(lug(acOutX,acOutY-6));
+    p.push(ln(acOutX,acOutY-6,acOutX,acOutY,{stroke:BAT_CLR,sw:SW_MED}));
+    p.push(txt(acOutX,acOutY+6,'AC OUT',{sz:4,anc:'middle',fill:BAT_CLR}));
+    p.push(txt(cx,by2+H2+16,model?(model.substring(0,22)):'BATTERY STORAGE',{sz:F.tiny,anc:'middle',italic:true}));
+    p.push(txt(cx,by2+H2+25,kwh>0?`${kwh} kWh`:'',{sz:F.tiny,anc:'middle',bold:true,fill:BAT_CLR}));
+    if(backfeedA>0) p.push(txt(cx,by2+H2+34,`${backfeedA}A BACKFEED — NEC 705.12(B)`,{sz:F.tiny,anc:'middle',fill:BAT_CLR}));
+    p.push(callout(bx+W2+14,by2-5,calloutN));
+    return {svg:p.join(''),lx:bx,rx:bx+W2,ty:by2,by:by2+H2,acOutX,acOutY};
+  }
+
+  function renderBUI(cx: number, cy: number, brand: string, model: string, ampRating: number, isEnphase: boolean, hasGenerator: boolean, calloutN: number): any {
+    const W2=100,H2=90, bx=cx-W2/2, by2=cy-H2/2;
+    const BUI_CLR=isEnphase?'#0D47A1':'#1565C0', p: string[]=[];
+    p.push(rect(bx,by2,W2,H2,{fill:WHT,stroke:BUI_CLR,sw:SW_MED}));
+    p.push(ln(bx,by2+14,bx+W2,by2+14,{stroke:BUI_CLR,sw:SW_THIN}));
+    const headerText=isEnphase?'IQ SYSTEM CONTROLLER 3':'BACKUP INTERFACE UNIT';
+    p.push(txt(cx,by2+10,headerText,{sz:5.5,bold:true,anc:'middle',fill:BUI_CLR}));
+    const gridY=cy-14;
+    p.push(lug(bx+8,gridY)); p.push(txt(bx+8,gridY-8,'GRID',{sz:4.5,anc:'middle',fill:'#444'}));
+    p.push(ln(bx,gridY,bx+8,gridY,{stroke:BUI_CLR,sw:SW_MED}));
+    const genInputY=cy+14;
+    if(hasGenerator) {
+      p.push(lug(bx+8,genInputY)); p.push(txt(bx+8,genInputY+9,'GEN',{sz:4.5,anc:'middle',fill:'#2E7D32'}));
+      p.push(ln(bx,genInputY,bx+8,genInputY,{stroke:'#2E7D32',sw:SW_MED}));
+    }
+    p.push(ln(bx+11,gridY,bx+42,gridY,{stroke:BUI_CLR,sw:SW_MED}));
+    p.push(circ(bx+11,gridY,2.5,{fill:BUI_CLR,stroke:BUI_CLR,sw:0}));
+    p.push(circ(bx+42,gridY,2.5,{fill:WHT,stroke:BUI_CLR,sw:SW_THIN}));
+    if(hasGenerator){
+      p.push(ln(bx+11,genInputY,bx+32,genInputY-12,{stroke:'#2E7D32',sw:SW_MED}));
+      p.push(circ(bx+11,genInputY,2.5,{fill:'#2E7D32',stroke:'#2E7D32',sw:0}));
+      p.push(circ(bx+42,genInputY,2.5,{fill:WHT,stroke:'#2E7D32',sw:SW_THIN}));
+    }
+    const busX2=bx+55;
+    p.push(ln(busX2,gridY,busX2,hasGenerator?genInputY:gridY+20,{stroke:BUI_CLR,sw:2.5}));
+    p.push(ln(bx+42,gridY,busX2,gridY,{stroke:BUI_CLR,sw:SW_THIN}));
+    if(hasGenerator) p.push(ln(bx+42,genInputY,busX2,genInputY,{stroke:BUI_CLR,sw:SW_THIN}));
+    const loadY=cy;
+    p.push(lug(bx+W2-8,loadY)); p.push(txt(bx+W2-8,loadY-8,'LOAD',{sz:4.5,anc:'middle',fill:'#444'}));
+    p.push(ln(busX2,loadY,bx+W2-8,loadY,{stroke:BUI_CLR,sw:SW_MED}));
+    p.push(ln(bx+W2-8,loadY,bx+W2,loadY,{stroke:BUI_CLR,sw:SW_MED}));
+    const batPortX2=cx, batPortY2=by2+H2;
+    p.push(lug(batPortX2,batPortY2-4));
+    p.push(txt(batPortX2,batPortY2+8,'BATTERY',{sz:4.5,anc:'middle',fill:BUI_CLR}));
+    p.push(ln(batPortX2,batPortY2-4,batPortX2,batPortY2,{stroke:BUI_CLR,sw:SW_MED}));
+    p.push(txt(cx,by2+H2+18,`${brand||'Enphase'} ${model||'IQ SC3'}`,{sz:F.tiny,anc:'middle',italic:true,fill:BUI_CLR}));
+    p.push(txt(cx,by2+H2+27,ampRating>0?`${ampRating}A`:'200A',{sz:F.tiny,anc:'middle',bold:true,fill:BUI_CLR}));
+    p.push(txt(cx,by2+H2+36,'NEC 706 / NEC 230.82 / UL 1741-SA',{sz:F.tiny,anc:'middle',italic:true,fill:BUI_CLR}));
+    p.push(callout(bx+W2+14,by2-5,calloutN));
+    return {svg:p.join(''),lx:bx-10,rx:bx+W2+10,ty:by2,by:by2+H2,
+            batPortX:batPortX2,batPortY:batPortY2,
+            loadPortX:bx+W2,loadPortY:loadY,
+            gridPortX:bx,gridPortY:cy-14,
+            genPortX:bx,genPortY:cy+14};
+  }
+
+  function renderCombiner(cx: number, cy: number, nBranches: number, branchOcpd: number, label: string, calloutN: number): any {
+    const W2=80,H2=90, bx=cx-W2/2, by2=cy-H2/2, p: string[]=[];
+    p.push(rect(bx,by2,W2,H2,{fill:WHT,sw:SW_MED}));
+    p.push(ln(bx,by2+14,bx+W2,by2+14,{sw:SW_THIN}));
+    p.push(txt(cx,by2+10,'AC COMBINER',{sz:6,bold:true,anc:'middle'}));
+    const busY=cy+8;
+    p.push(busbar(bx+10,bx+W2-10,busY));
+    p.push(txt(cx,busY-5,'BUS',{sz:5,anc:'middle'}));
+    const nShow=Math.min(nBranches,4), brkSpacing=(H2-22)/(nShow+1);
+    for(let b=0;b<nShow;b++){
+      const brY=by2+18+brkSpacing*(b+1);
+      p.push(lug(bx+4,brY)); p.push(ln(bx+7,brY,bx+20,brY,{sw:SW_THIN}));
+      p.push(breakerSymbol(bx+29,brY,16,10,branchOcpd));
+      p.push(ln(bx+37,brY,cx-5,busY,{sw:SW_THIN}));
+    }
+    if(nBranches>4) p.push(txt(bx+29,busY-12,`+${nBranches-4}`,{sz:5,anc:'middle',fill:'#666'}));
+    p.push(ln(bx+W2-10,busY,bx+W2-4,busY,{sw:SW_THIN})); p.push(lug(bx+W2-4,busY));
+    p.push(ln(bx+W2,busY,bx+W2+10,busY,{sw:SW_MED}));
+    p.push(txt(cx,by2+H2+10,esc(label),{sz:F.tiny,anc:'middle',italic:true}));
+    p.push(txt(cx,by2+H2+19,`${nBranches} branch inputs`,{sz:F.tiny,anc:'middle'}));
+    p.push(txt(cx,by2+H2+28,'NEC 690.9',{sz:F.tiny,anc:'middle',italic:true}));
+    p.push(callout(bx+W2+14,by2-5,calloutN));
+    p.push(ln(bx-10,busY,bx,busY,{sw:SW_MED}));
+    const feederOutX=bx+W2+10, feederOutY=cy+8;
+    return {svg:p.join(''),lx:bx-10,rx:bx+W2+10,ty:by2,by:by2+H2,feederOutX,feederOutY};
+  }
+
+  function renderDisco(cx: number, cy: number, ocpd: number, calloutN: number): any {
+    const W2=90,H2=70, bx=cx-W2/2, by2=cy-H2/2, p: string[]=[];
+    p.push(rect(bx,by2,W2,H2,{fill:WHT,sw:SW_MED}));
+    p.push(ln(bx,by2+14,bx+W2,by2+14,{sw:SW_THIN}));
+    p.push(txt(cx,by2+10,'AC DISCONNECT',{sz:6,bold:true,anc:'middle'}));
+    const poleY1=cy-8, poleY2=cy+8;
+    p.push(lug(bx+10,poleY1)); p.push(lug(bx+10,poleY2));
+    p.push(txt(bx+10,poleY2+13,'LOAD',{sz:5,anc:'middle',bold:true,fill:'#333'}));
+    p.push(txt(bx+10,poleY2+20,'(FROM COMBINER)',{sz:4.5,anc:'middle',fill:'#555'}));
+    p.push(ln(bx+13,poleY1,bx+30,poleY1,{sw:SW_THIN}));
+    p.push(ln(bx+13,poleY2,bx+30,poleY2,{sw:SW_THIN}));
+    p.push(knifeSwitch(cx,poleY1,30)); p.push(knifeSwitch(cx,poleY2,30));
+    p.push(ln(bx+W2-30,poleY1,bx+W2-13,poleY1,{sw:SW_THIN}));
+    p.push(ln(bx+W2-30,poleY2,bx+W2-13,poleY2,{sw:SW_THIN}));
+    p.push(lug(bx+W2-10,poleY1)); p.push(lug(bx+W2-10,poleY2));
+    p.push(txt(bx+W2-10,poleY2+13,'LINE',{sz:5,anc:'middle',bold:true,fill:'#333'}));
+    p.push(txt(bx+W2-10,poleY2+20,'(TO MSP)',{sz:4.5,anc:'middle',fill:'#555'}));
+    p.push(ln(bx+W2*0.55,by2+14,bx+W2-2,by2+14,{sw:2,stroke:'#888'}));
+    p.push(txt(bx+W2-2,by2+12,'⚡',{sz:5,anc:'end',fill:'#888'}));
+    p.push(ln(bx-10,cy,bx,poleY1,{sw:SW_MED})); p.push(ln(bx-10,cy,bx,poleY2,{sw:SW_MED}));
+    p.push(ln(bx+W2,poleY1,bx+W2+10,cy,{sw:SW_MED})); p.push(ln(bx+W2,poleY2,bx+W2+10,cy,{sw:SW_MED}));
+    p.push(txt(cx,by2+H2+10,`${ocpd}A NON-FUSED`,{sz:F.tiny,anc:'middle'}));
+    p.push(txt(cx,by2+H2+19,'NEC 690.14 — UTILITY ACCESSIBLE',{sz:F.tiny,anc:'middle',italic:true}));
+    p.push(callout(bx+W2+14,by2-5,calloutN));
+    return {svg:p.join(''),lx:bx-10,rx:bx+W2+10,loadInX:bx,loadInY:cy,lineOutX:bx+W2,lineOutY:cy};
+  }
+
+  function renderMSPLoad(cx: number, cy: number, mainAmps: number, pvAmps: number, calloutN: number): any {
+    const W2=96,H2=120, bx=cx-W2/2, by2=cy-H2/2, p: string[]=[];
+    p.push(rect(bx,by2,W2,H2,{fill:WHT,sw:SW_MED}));
+    p.push(ln(bx,by2+14,bx+W2,by2+14,{sw:SW_THIN}));
+    p.push(txt(cx,by2+10,'MAIN SERVICE PANEL',{sz:5.5,bold:true,anc:'middle'}));
+    const mbY=by2+28;
+    p.push(txt(cx,mbY-4,`${mainAmps}A MAIN BREAKER`,{sz:5.5,anc:'middle',bold:true}));
+    p.push(breakerSymbol(cx,mbY,32,14,mainAmps));
+    const busY=mbY+20;
+    p.push(busbar(bx+8,bx+W2-8,busY,'MAIN BUS')); p.push(ln(cx,mbY+7,cx,busY,{sw:SW_MED}));
+    const nX=bx+10;
+    p.push(ln(nX,busY+8,nX,busY+38,{stroke:'#444',sw:3})); p.push(txt(nX,busY+46,'N',{sz:6,anc:'middle',bold:true,fill:'#444'}));
+    const gX=bx+W2-10;
+    p.push(ln(gX,busY+8,gX,busY+38,{stroke:GRN,sw:3})); p.push(txt(gX,busY+46,'G',{sz:6,anc:'middle',bold:true,fill:GRN}));
+    p.push(gnd(gX,busY+48,GRN));
+    const pvBrkX=cx+20, pvBrkY=busY+28;
+    p.push(ln(pvBrkX,busY,pvBrkX,pvBrkY-6,{sw:SW_THIN}));
+    p.push(breakerSymbol(pvBrkX,pvBrkY,20,12,pvAmps));
+    p.push(txt(pvBrkX,pvBrkY+10,'PV',{sz:5.5,anc:'middle',bold:true,fill:LOAD_CLR}));
+    const lugY=pvBrkY+22;
+    p.push(ln(pvBrkX,pvBrkY+6,pvBrkX,lugY-3,{sw:SW_THIN})); p.push(lug(pvBrkX,lugY));
+    p.push(txt(pvBrkX,lugY+9,'LOAD LUG',{sz:5,anc:'middle'}));
+    p.push(ln(bx-10,cy,bx,cy,{sw:SW_MED})); p.push(ln(bx,cy,pvBrkX,lugY,{sw:SW_MED}));
+    p.push(ln(bx+W2-8,busY,bx+W2+10,busY,{sw:SW_MED}));
+    p.push(txt(cx,by2+H2+10,`${mainAmps}A RATED`,{sz:F.tiny,anc:'middle'}));
+    p.push(txt(cx,by2+H2+19,'LOAD SIDE TAP — NEC 705.12(B)',{sz:F.tiny,anc:'middle',bold:true,fill:LOAD_CLR}));
+    p.push(txt(cx,by2+H2+28,`${pvAmps}A PV BREAKER`,{sz:F.tiny,anc:'middle',fill:LOAD_CLR}));
+    p.push(callout(bx+W2+14,by2-5,calloutN));
+    return {svg:p.join(''),lx:bx-10,rx:bx+W2+10,bkfdInX:bx,bkfdInY:cy,busOutX:bx+W2,busOutY:mbY+20};
+  }
+
+  // ── Build the SLD SVG ─────────────────────────────────────────────────────
+  function buildSLD(): string {
+    const parts: string[] = [];
+    const resolveSegY = makeOverlapGuard();
+
+    const totalDcKw = system?.totalDcKw ?? 9.6;
+    const totalAcKw = system?.totalAcKw ?? 7.68;
+    const totalPanels = system?.totalPanels ?? 24;
+    const panelWatts = (project as any).panelWatts ?? 400;
+    const panelModel = (project as any).panelModel ?? 'Q.PEAK DUO BLK ML-G10+ 400';
+    const panelVoc   = (project as any).panelVoc ?? 49.6;
+    const panelIsc   = (project as any).panelIsc ?? 10.5;
+    const inverterModel = (project as any).inverterModel ?? 'IQ8M-72-2-US';
+    const inverterMfr   = (project as any).inverterBrand ?? 'Enphase';
+    const acOutputKw  = totalAcKw;
+    const acOutputAmps = (totalAcKw * 1000 / 240);
+    const acWireGauge  = (compliance as any)?.electrical?.acConductorCallout ?? '#10 AWG';
+    const acConduit    = '3/4"';
+    const acCondType   = 'EMT';
+    const acOCPD       = (project as any).backfeedBreakerA ?? (project as any).pvBackfeedA ?? 40;
+    const mainAmps     = project.mainPanelAmps ?? 200;
+    const backfeedAmps = (project as any).backfeedBreakerA ?? 46;
+    const pvBreakerAmps = backfeedAmps;
+    const utilityName  = project.utilityName ?? 'Utility';
+    const hasBattery   = !!(project.batteryCount && project.batteryCount > 0);
+    const batteryModel = project.batteryModel ?? 'IQ Battery 5P';
+    const batteryKwh   = (project.batteryCount ?? 2) * (project.batteryKwh ?? 5.0);
+    const batteryBackfeedA = project.batteryBackfeedA ?? 46;
+    const egcNum = '10';
+    const branchOcpd = 20;
+    const nBranches = Math.ceil(totalPanels / 16);
+    const deviceCount = totalPanels;
+
+    // X positions
+    const xPad=50, uW=SCH_W-xPad*2;
+    const xPV   = SCH_X + xPad;
+    const xJBox = SCH_X + xPad + uW*0.17;
+    const xComb = SCH_X + xPad + uW*0.36;
+    const xDisco= SCH_X + xPad + uW*0.56;
+    const xMSP  = SCH_X + xPad + uW*0.75;
+    const xUtil = SCH_X + xPad + uW;
+
+    // SVG root
+    parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="background:${WHT};display:block;min-height:19in;max-height:21in;">`);
+    parts.push(rect(0,0,W,H,{fill:WHT,stroke:WHT,sw:0}));
+    parts.push(rect(MAR/2,MAR/2,W-MAR,H-MAR,{fill:WHT,stroke:BLK,sw:SW_BORDER}));
+
+    // Title
+    const tcx=(DX+TB_X)/2;
+    parts.push(txt(tcx,DY+16,'SINGLE LINE DIAGRAM — PHOTOVOLTAIC SYSTEM',{sz:F.title,bold:true,anc:'middle'}));
+    parts.push(txt(tcx,DY+26,`${esc(project.address||'')}  |  MICROINVERTER  |  ${totalPanels} MODULES  |  ${totalAcKw.toFixed(2)} kW AC`,{sz:F.sub,anc:'middle',fill:'#444'}));
+
+    // Schematic border
+    parts.push(rect(SCH_X,SCH_Y,SCH_W,SCH_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+
+    // NODE 1: PV ARRAY
+    const pvW=80, pvH=68, pvCX=xPV, pvCY=BUS_Y;
+    parts.push(rect(pvCX-pvW/2,pvCY-pvH/2,pvW,pvH,{fill:WHT,sw:SW_MED}));
+    for(let row=0;row<2;row++) for(let col=0;col<3;col++) {
+      const mx=pvCX-pvW/2+10+col*22, my=pvCY-pvH/2+12+row*26;
+      parts.push(pvModuleSymbol(mx+9,my+9,18,14));
+    }
+    parts.push(txt(pvCX,pvCY-pvH/2-18,'PV ARRAY',{sz:F.hdr,bold:true,anc:'middle'}));
+    parts.push(txt(pvCX,pvCY-pvH/2-8,`${totalPanels} × ${panelWatts}W`,{sz:F.sub,anc:'middle'}));
+    parts.push(txt(pvCX,pvCY+pvH/2+9,esc(panelModel),{sz:F.tiny,anc:'middle',italic:true}));
+    parts.push(txt(pvCX,pvCY+pvH/2+18,`${deviceCount} × ${esc(inverterModel)}`,{sz:F.tiny,anc:'middle'}));
+    parts.push(callout(pvCX+pvW/2+14,pvCY-pvH/2-5,1));
+    const pvOutX=pvCX+pvW/2;
+
+    // NODE 2: ROOF J-BOX
+    const jbW=40, jbH=40, jbCX=xJBox, jbCY=BUS_Y;
+    parts.push(rect(jbCX-jbW/2,jbCY-jbH/2,jbW,jbH,{fill:WHT,sw:SW_MED}));
+    parts.push(ln(jbCX-jbW/2+5,jbCY-jbH/2+5,jbCX+jbW/2-5,jbCY+jbH/2-5,{sw:SW_HAIR}));
+    parts.push(ln(jbCX+jbW/2-5,jbCY-jbH/2+5,jbCX-jbW/2+5,jbCY+jbH/2-5,{sw:SW_HAIR}));
+    parts.push(lug(jbCX-jbW/2+6,jbCY)); parts.push(lug(jbCX+jbW/2-6,jbCY));
+    parts.push(txt(jbCX,jbCY-jbH/2-15,'ROOF J-BOX',{sz:F.sub,bold:true,anc:'middle'}));
+    parts.push(txt(jbCX,jbCY-jbH/2-7,'AC JUNCTION',{sz:F.tiny,anc:'middle'}));
+    parts.push(txt(jbCX,jbCY+jbH/2+9,`${nBranches} branches`,{sz:F.tiny,anc:'middle'}));
+    parts.push(txt(jbCX,jbCY+jbH/2+18,`${branchOcpd}A OCPD ea.`,{sz:F.tiny,anc:'middle'}));
+    parts.push(callout(jbCX+jbW/2+12,jbCY-jbH/2-5,2));
+
+    // SEGMENT 1: PV → J-Box (open air)
+    parts.push(wireSeg(pvOutX,jbCX-jbW/2,resolveSegY(pvOutX,jbCX-jbW/2,BUS_Y),
+      ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','OPEN AIR — NEC 690.31'],{openAir:true}));
+
+    // NODE 3: AC COMBINER
+    const combLabel=`${inverterMfr} IQ Combiner 5C`;
+    const cr=renderCombiner(xComb,BUS_Y,nBranches,branchOcpd,combLabel,3);
+    parts.push(cr.svg);
+    parts.push(txt(xComb,cr.ty-8,'AC COMBINER',{sz:F.hdr,bold:true,anc:'middle'}));
+    const node3RX=cr.feederOutX;
+
+    // SEGMENT 2: J-Box → Combiner
+    parts.push(wireSeg(jbCX+jbW/2,cr.lx,resolveSegY(jbCX+jbW/2,cr.lx,BUS_Y),
+      ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','IN 3/4" EMT']));
+
+    // NODE 5: AC DISCONNECT
+    const discoResult=renderDisco(xDisco,BUS_Y,acOCPD,4);
+    parts.push(discoResult.svg);
+    parts.push(txt(xDisco,BUS_Y-40,'(N) AC DISCONNECT',{sz:F.hdr,bold:true,anc:'middle'}));
+
+    // SEGMENT: Combiner → AC Disco
+    parts.push(wireSeg(node3RX,discoResult.loadInX,resolveSegY(node3RX,discoResult.loadInX,BUS_Y),
+      ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','IN 3/4" EMT']));
+
+    // NODE 6: MSP
+    const mspResult=renderMSPLoad(xMSP,BUS_Y,mainAmps,pvBreakerAmps,5);
+    parts.push(mspResult.svg);
+
+    // SEGMENT: AC Disco LINE → MSP
+    parts.push(wireSeg(discoResult.lineOutX,mspResult.bkfdInX,resolveSegY(discoResult.lineOutX,mspResult.bkfdInX,BUS_Y),
+      ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','IN 3/4" EMT']));
+
+    let buiRX=mspResult.rx;
+
+    // NODE 8: BUI + BATTERY (if battery)
+    if(hasBattery) {
+      const buiCX=xMSP+130, buiCY=BUS_Y;
+      const buiResult=renderBUI(buiCX,buiCY,'Enphase','IQ System Controller 3',200,true,false,7);
+      parts.push(buiResult.svg);
+      buiRX=buiResult.rx;
+
+      // Wire: MSP → BUI GRID
+      parts.push(ln(mspResult.rx,buiResult.gridPortY,buiResult.gridPortX,buiResult.gridPortY,{stroke:BLK,sw:SW_MED}));
+      if(Math.abs(buiResult.gridPortY-BUS_Y)>2) parts.push(ln(mspResult.rx,BUS_Y,mspResult.rx,buiResult.gridPortY,{stroke:BLK,sw:SW_MED}));
+
+      // Battery backfeed breaker at MSP
+      const bfX=xMSP+30;
+      parts.push(breakerSymbol(bfX,BUS_Y+30,20,12,batteryBackfeedA));
+      parts.push(ln(bfX,BUS_Y,bfX,BUS_Y+24,{sw:SW_THIN,stroke:'#1565C0'}));
+      parts.push(txt(bfX,BUS_Y+48,`${batteryBackfeedA}A BATT`,{sz:5,anc:'middle',bold:true,fill:'#1565C0'}));
+      parts.push(txt(bfX,BUS_Y+56,'NEC 705.12(B)',{sz:4.5,anc:'middle',italic:true,fill:'#1565C0'}));
+
+      // Battery symbol above BUI
+      const batCX=buiCX, batCY=BUS_Y-120;
+      const batResult=renderBattery(batCX,batCY,batteryModel,batteryKwh,batteryBackfeedA,8);
+      parts.push(batResult.svg);
+
+      // Wire: Battery → BUI BATTERY port
+      parts.push(ln(batResult.acOutX,batResult.acOutY,buiResult.batPortX,buiResult.batPortY,{stroke:'#1565C0',sw:SW_MED,dash:'6,3'}));
+      parts.push(tspan(batResult.acOutX+8,batResult.acOutY+(buiResult.batPortY-batResult.acOutY)/2,
+        ['#10 AWG THWN-2',`${batteryBackfeedA}A CIRCUIT`],{sz:F.tiny,anc:'start',fill:'#1565C0'}));
+    }
+
+    // NODE 7: UTILITY METER
+    const utilCX=xUtil, utilCY=BUS_Y, mR=24;
+    parts.push(wireSeg(buiRX,utilCX-mR-10,resolveSegY(buiRX,utilCX-mR-10,BUS_Y),
+      ['#10 AWG THWN-2','1×#'+egcNum+' GRN EGC','IN 3/4" EMT']));
+    parts.push(`<circle cx="${utilCX}" cy="${utilCY}" r="${mR}" fill="${WHT}" stroke="${BLK}" stroke-width="${SW_MED}"/>`);
+    parts.push(txt(utilCX,utilCY+3,'M',{sz:14,bold:true,anc:'middle'}));
+    parts.push(ln(utilCX-mR-10,utilCY,utilCX-mR,utilCY,{sw:SW_MED}));
+    parts.push(txt(utilCX,utilCY-mR-15,'UTILITY METER',{sz:F.hdr,bold:true,anc:'middle'}));
+    parts.push(txt(utilCX,utilCY-mR-6,esc(utilityName),{sz:F.sub,anc:'middle'}));
+    parts.push(txt(utilCX,utilCY+mR+9,'120/240V, 1Ø, 3W',{sz:F.tiny,anc:'middle'}));
+    parts.push(callout(utilCX+mR+14,utilCY-mR-5,6));
+
+    // Utility grid drop
+    const gridCY=utilCY+mR+48;
+    parts.push(ln(utilCX,utilCY+mR,utilCX,gridCY-16,{sw:SW_MED}));
+    parts.push(circ(utilCX,gridCY,16,{fill:WHT,sw:SW_MED}));
+    parts.push(txt(utilCX,gridCY-1,'UTIL',{sz:5.5,bold:true,anc:'middle'}));
+    parts.push(txt(utilCX,gridCY+7,'GRID',{sz:5,anc:'middle'}));
+    parts.push(txt(utilCX,gridCY+24,'UTILITY GRID',{sz:F.tiny,anc:'middle',bold:true}));
+    parts.push(txt(utilCX,gridCY+33,esc(utilityName),{sz:F.tiny,anc:'middle'}));
+    parts.push(ln(utilCX,gridCY+16,utilCX,gridCY+26,{sw:SW_MED}));
+    parts.push(gnd(utilCX,gridCY+26));
+
+    // GROUNDING RAIL
+    const gndPts=[xJBox,xComb,xDisco,xMSP];
+    const gx1=gndPts[0], gx2=gndPts[gndPts.length-1];
+    parts.push(ln(gx1,GND_Y,gx2,GND_Y,{stroke:GRN,sw:SW_MED}));
+    for(const gx of gndPts) {
+      parts.push(ln(gx,BUS_Y+36,gx,GND_Y,{stroke:GRN,sw:SW_MED}));
+      parts.push(gnd(gx,GND_Y));
+    }
+    parts.push(txt((gx1+gx2)/2,GND_Y-5,'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43',{sz:F.tiny,anc:'middle',fill:GRN}));
+
+    // RAPID SHUTDOWN
+    const rY=SCH_Y+SCH_H-22;
+    parts.push(rect(SCH_X+5,rY-10,290,16,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(txt(SCH_X+10,rY,'RAPID SHUTDOWN — NEC 690.12 COMPLIANT — INTEGRATED IN IQ8M MICROINVERTERS',{sz:F.tiny,bold:true}));
+
+    // LEGEND
+    const legEntries: Array<{dash:string,stroke:string,label:string}> = [
+      {dash:'',    stroke:BLK,       label:'AC Conductor in Conduit (THWN-2)'},
+      {dash:'10,5',stroke:GRN,       label:'Open Air — PV Wire/THWN-2 (NEC 690.31)'},
+      {dash:'',    stroke:GRN,       label:'Equipment Grounding Conductor (EGC)'},
+      ...(hasBattery?[{dash:'6,3',stroke:'#1565C0',label:'Battery AC-Coupled Connection'}]:[]),
+    ];
+    const legH=16+legEntries.length*11;
+    const legX=SCH_X+SCH_W-195, legY=SCH_Y+SCH_H-legH-4;
+    parts.push(rect(legX,legY,188,legH,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(txt(legX+4,legY+10,'LEGEND',{sz:F.sub,bold:true}));
+    parts.push(ln(legX,legY+13,legX+188,legY+13,{sw:SW_THIN}));
+    legEntries.forEach((item,i)=>{
+      const ly=legY+19+i*11;
+      parts.push(ln(legX+4,ly,legX+38,ly,{stroke:item.stroke,sw:SW_MED,dash:item.dash||undefined}));
+      parts.push(txt(legX+44,ly+3,item.label,{sz:F.tiny}));
+    });
+
+    // CALCULATION PANELS (3 panels)
+    const cW=Math.floor(DW/3)-4;
+    const dcKw=totalPanels*panelWatts/1000;
+    const md=deviceCount, ab=nBranches;
+    const ba=branchOcpd;
+
+    // Panel 1: AC Branch Circuit Info
+    const p1x=DX;
+    parts.push(rect(p1x,CALC_Y,cW,CALC_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(rect(p1x,CALC_Y,cW,14,{fill:BLK,sw:0}));
+    parts.push(txt(p1x+cW/2,CALC_Y+10,'AC BRANCH CIRCUIT INFO',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    const rows1: [string,string][]=[
+      ['Topology','MICROINVERTER'],
+      ['Microinverters',`${md} units`],
+      ['Total DC Power',`${dcKw.toFixed(2)} kW`],
+      ['AC per Micro',`${Math.round(totalAcKw*1000/md)} W`],
+      ['Branch Circuits',`${ab}`],
+      ['Max Micros/Branch','16 (NEC 690.8)'],
+      ['Branch OCPD',`${ba} A`],
+      ['Branch Wire','#10 AWG THWN-2'],
+      ['Feeder Wire',acWireGauge],
+      ['Feeder Conduit',`3/4" ${acCondType}`],
+      ['Module Voc',`${panelVoc} V`],
+      ['Module Isc',`${panelIsc} A`],
+    ];
+    const rh1=Math.min(13,(CALC_H-17)/rows1.length);
+    rows1.forEach(([l,v],i)=>{
+      const ry=CALC_Y+19+i*rh1;
+      if(i%2===1) parts.push(rect(p1x,ry-rh1+2,cW,rh1,{fill:LGY,stroke:'none',sw:0}));
+      parts.push(txt(p1x+4,ry,l,{sz:F.tiny}));
+      parts.push(txt(p1x+cW-4,ry,v,{sz:F.tiny,anc:'end',bold:true}));
+    });
+
+    // Panel 2: AC System Calculations
+    const p2x=DX+cW+4;
+    const _batBfA = hasBattery ? batteryBackfeedA : 0;
+    const _totalBfA = pvBreakerAmps + _batBfA;
+    const _busLimit = mainAmps * 1.2;
+    const _120pass = _busLimit >= mainAmps + _totalBfA;
+    parts.push(rect(p2x,CALC_Y,cW,CALC_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(rect(p2x,CALC_Y,cW,14,{fill:BLK,sw:0}));
+    parts.push(txt(p2x+cW/2,CALC_Y+10,'AC SYSTEM CALCULATIONS',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    const rows2: [string,string][]=[
+      ['AC Output (kW)',`${totalAcKw.toFixed(2)} kW`],
+      ['AC Output Amps',`${acOutputAmps.toFixed(1)} A`],
+      ['AC OCPD (125%)',`${acOCPD} A`],
+      ['AC Wire Gauge',acWireGauge],
+      ['AC Conduit Type',acCondType],
+      ['Conduit Size',acConduit],
+      ['Service Voltage','120/240V, 1Ø'],
+      ['Main Panel Rating',`${mainAmps} A`],
+      ['Interconnection','Load Side Tap'],
+      ['NEC Reference','NEC 705.12(B)'],
+      ['PV Breaker',`${pvBreakerAmps} A`],
+      ...(_batBfA>0?[['Batt. Backfeed Bkr',`${_batBfA} A`] as [string,string]]:[]),
+      ['Total Backfeed',`${_totalBfA} A`],
+      ['Bus 120% Limit',`${_busLimit.toFixed(0)} A`],
+      ['120% Rule',`${_120pass?'PASS ✓':'FAIL ✗'}`],
+    ];
+    const rh2=Math.min(13,(CALC_H-17)/rows2.length);
+    rows2.forEach(([l,v],i)=>{
+      const ry=CALC_Y+19+i*rh2;
+      if(i%2===1) parts.push(rect(p2x,ry-rh2+2,cW,rh2,{fill:LGY,stroke:'none',sw:0}));
+      parts.push(txt(p2x+4,ry,l,{sz:F.tiny}));
+      const isPF=v.includes('✓')||v.includes('✗');
+      const vc2=isPF?(v.includes('✓')?PASS_C:FAIL_C):BLK;
+      parts.push(txt(p2x+cW-4,ry,v,{sz:F.tiny,anc:'end',bold:true,fill:vc2}));
+    });
+
+    // Panel 3: Equipment Schedule
+    const p3x=DX+(cW+4)*2;
+    parts.push(rect(p3x,CALC_Y,cW,CALC_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(rect(p3x,CALC_Y,cW,14,{fill:BLK,sw:0}));
+    parts.push(txt(p3x+cW/2,CALC_Y+10,'EQUIPMENT SCHEDULE',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    const rows3: [string,string][]=[
+      ['PV Module',esc(panelModel)],
+      ['Module Wattage',`${panelWatts} W`],
+      ['Total Modules',`${totalPanels}`],
+      ['Microinverters',`${md} units`],
+      ['Branch Circuits',`${ab}`],
+      ['Inverter Mfr.',esc(inverterMfr)],
+      ['Inverter Model',esc(inverterModel)],
+      ['Inverter Output',`${totalAcKw.toFixed(2)} kW AC`],
+      ['AC Combiner','Enphase IQ Combiner 5C'],
+      ['AC Disconnect',`${acOCPD}A Non-Fused`],
+      ['Main Panel',`${mainAmps} A`],
+      ['Utility',esc(utilityName)],
+      ['Interconnection','LOAD_SIDE'],
+      ['Rapid Shutdown','INTEGRATED'],
+      ['Battery Storage',hasBattery?esc(batteryModel):'NONE'],
+      ...(hasBattery&&batteryKwh?[['Battery Capacity',`${batteryKwh.toFixed(1)} kWh`] as [string,string]]:[]),
+      ...(hasBattery?[['Batt. Backfeed',`${batteryBackfeedA}A — NEC 705.12(B)`] as [string,string]]:[]),
+    ];
+    const rh3=Math.min(12,(CALC_H-17)/rows3.length);
+    rows3.forEach(([l,v],i)=>{
+      const ry=CALC_Y+19+i*rh3;
+      if(i%2===1) parts.push(rect(p3x,ry-rh3+2,cW,rh3,{fill:LGY,stroke:'none',sw:0}));
+      parts.push(txt(p3x+4,ry,l,{sz:F.tiny}));
+      parts.push(txt(p3x+cW-4,ry,v,{sz:F.tiny,anc:'end',bold:true}));
+    });
+
+    // CONDUIT & CONDUCTOR SCHEDULE
+    parts.push(rect(DX,SCHED_Y,DW,SCHED_H,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(rect(DX,SCHED_Y,DW,14,{fill:BLK,sw:0}));
+    parts.push(txt(DX+DW/2,SCHED_Y+10,'CONDUIT & CONDUCTOR SCHEDULE',{sz:F.hdr,bold:true,anc:'middle',fill:WHT}));
+    const schedCols=[['Circuit / Run',200],['Wire',110],['Conduit',70],['Size',55],['Length',65],['Qty Conductors',90],['From',120],['To',120],['Notes',200]] as [string,number][];
+    let sx=DX+2, sy=SCHED_Y+16;
+    schedCols.forEach(([h,w])=>{
+      parts.push(txt(sx+3,sy+7,h,{sz:F.tiny,bold:true})); sx+=w;
+    });
+    parts.push(ln(DX,sy+9,DX+DW,sy+9,{sw:SW_HAIR}));
+    const schedRows=[
+      ['PV Array → Roof J-Box','#10 AWG THWN-2','PV Wire','—','20 ft','3 (2 + EGC)','PV ARRAY','ROOF J-BOX','Open Air — NEC 690.31(E)'],
+      ['Roof J-Box → AC Combiner','#10 AWG THWN-2','EMT','3/4"','30 ft','3 (2 + EGC)','ROOF J-BOX','AC COMBINER 5C','In conduit — NEC 690.31'],
+      ['AC Combiner → AC Disconnect','#10 AWG THWN-2','EMT','3/4"','10 ft','3 (2 + EGC)','AC COMBINER 5C','AC DISCONNECT','NEC 705.12(B)'],
+      ['AC Disconnect → MSP','#10 AWG THWN-2','EMT','3/4"','25 ft','3 (2 + EGC)','AC DISCONNECT','MAIN SERVICE PANEL','Backfeed — NEC 705.12(B)'],
+      ...(hasBattery?[
+        ['MSP → IQ System Controller 3','#6 AWG THWN-2','EMT','3/4"','5 ft','3 (2 + EGC)','MAIN SERVICE PANEL','IQ SYS CTRL 3','NEC 706 / NEC 230.82'],
+        ['IQ System Controller 3 → Battery','#10 AWG THWN-2','EMT','3/4"','5 ft','3 (2 + EGC)','IQ SYS CTRL 3','IQ BATTERY 5P','AC-Coupled Battery'],
+      ]:[]),
+      ['Utility Service → MSP','#2/0 AWG THWN-2','EMT','1-1/4"','Service','3 (2 + EGC)','UTILITY METER','MAIN SERVICE PANEL','Utility — NEC 230.54'],
+    ] as string[][];
+    sy+=11;
+    schedRows.forEach((row,ri)=>{
+      if(ri%2===0) parts.push(rect(DX,sy-1,DW,11,{fill:LGY,stroke:'none',sw:0}));
+      sx=DX+2;
+      schedCols.forEach(([,w],ci)=>{
+        parts.push(txt(sx+3,sy+6,row[ci]||'—',{sz:F.tiny})); sx+=w;
+      });
+      sy+=11;
+    });
+
+    // TITLE BLOCK (right side)
+    const tbX=TB_X, tbY=DY, tbH=H-DY*2;
+    parts.push(rect(tbX,tbY,TB_W,tbH,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(rect(tbX,tbY,TB_W,38,{fill:BLK,sw:0}));
+    parts.push(txt(tbX+TB_W/2,tbY+15,'SOLARPRO',{sz:13,bold:true,anc:'middle',fill:WHT}));
+    parts.push(txt(tbX+TB_W/2,tbY+28,'ENGINEERING',{sz:F.tb,anc:'middle',fill:'#AAAAAA'}));
+    parts.push(rect(tbX,tbY+38,TB_W,30,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(txt(tbX+TB_W/2,tbY+51,'SINGLE LINE DIAGRAM',{sz:F.tbTitle,bold:true,anc:'middle'}));
+    parts.push(txt(tbX+TB_W/2,tbY+63,'PHOTOVOLTAIC SYSTEM',{sz:F.tb,anc:'middle'}));
+    parts.push(rect(tbX,tbY+68,TB_W,10,{fill:'#1B5E20',stroke:'none',sw:0}));
+    parts.push(txt(tbX+TB_W/2,tbY+76,'SolarPro V4 — IEEE/ANSI SLD',{sz:4.5,bold:true,anc:'middle',fill:WHT}));
+
+    const tbRowData: [string,string][]=[
+      ['PROJECT',project.projectName||'—'],
+      ['CLIENT',project.clientName||'—'],
+      ['ADDRESS',(project.address||'—').substring(0,30)],
+      ['DESIGNER',project.designer||'—'],
+      ['DATE',project.date||'—'],
+      ['DWG NO.','E-1'],
+      ['REVISION','A'],
+      ['SCALE','NOT TO SCALE'],
+    ];
+    let tbY2=tbY+78;
+    const tbRH=20;
+    tbRowData.forEach(([l,v])=>{
+      parts.push(rect(tbX,tbY2,TB_W,tbRH,{fill:WHT,stroke:BLK,sw:SW_HAIR}));
+      parts.push(txt(tbX+4,tbY2+13,l,{sz:F.tiny,bold:true,fill:'#555'}));
+      parts.push(txt(tbX+62,tbY2+13,esc(String(v??'')),{sz:F.tb}));
+      tbY2+=tbRH;
+    });
+
+    // System summary in title block
+    const sysY=tbY2+3;
+    parts.push(rect(tbX,sysY,TB_W,12,{fill:BLK,sw:0}));
+    parts.push(txt(tbX+TB_W/2,sysY+9,'SYSTEM SUMMARY',{sz:F.sub,bold:true,anc:'middle',fill:WHT}));
+    const sysRows: [string,string][]=[
+      ['TOPOLOGY','MICROINVERTER'],
+      ['DC SIZE',`${dcKw.toFixed(2)} kW`],
+      ['AC OUTPUT',`${totalAcKw.toFixed(2)} kW`],
+      ['MODULES',`${totalPanels} × ${panelWatts}W`],
+      ['INVERTER',esc(inverterMfr)],
+      ['MODEL',esc(inverterModel)],
+      ['SERVICE',`${mainAmps}A`],
+      ['UTILITY',esc(utilityName)],
+      ['INTERCONN.','LOAD_SIDE'],
+    ];
+    let sysY2=sysY+12;
+    const sysRH=16;
+    sysRows.forEach(([l,v])=>{
+      parts.push(rect(tbX,sysY2,TB_W,sysRH,{fill:WHT,stroke:BLK,sw:SW_HAIR}));
+      parts.push(txt(tbX+4,sysY2+11,l,{sz:F.tiny,bold:true,fill:'#555'}));
+      parts.push(txt(tbX+70,sysY2+11,esc(String(v??'')),{sz:F.tb}));
+      sysY2+=sysRH;
+    });
+
+    // Code references
+    const codeY=sysY2+3;
+    parts.push(rect(tbX,codeY,TB_W,12,{fill:BLK,sw:0}));
+    parts.push(txt(tbX+TB_W/2,codeY+9,'CODE REFERENCES',{sz:F.sub,bold:true,anc:'middle',fill:WHT}));
+    const codes=[
+      '• NEC 690 — PV SYSTEMS',
+      '• NEC 705 — INTERCONNECTED ELEC.',
+      '• NEC 706 — ENERGY STORAGE',
+      '• NEC 310 — CONDUCTORS',
+      '• NEC 250 — GROUNDING/BONDING',
+      '• NEC 358/352 — CONDUIT',
+      '• NEC 230 — SERVICES',
+      '• IBC / ASCE 7 — STRUCTURAL',
+    ];
+    let codeY2=codeY+12;
+    codes.forEach(c=>{ parts.push(txt(tbX+4,codeY2+9,c,{sz:F.tiny})); codeY2+=12; });
+
+    // Revisions
+    const revY=codeY2+3, revH=Math.min(80,tbY+tbH-revY-50);
+    if(revH>24){
+      parts.push(rect(tbX,revY,TB_W,12,{fill:BLK,sw:0}));
+      parts.push(txt(tbX+TB_W/2,revY+9,'REVISIONS',{sz:F.sub,bold:true,anc:'middle',fill:WHT}));
+      parts.push(rect(tbX,revY+12,TB_W,revH,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+      const rcw=TB_W/3;
+      parts.push(txt(tbX+3,revY+22,'REV',{sz:F.tiny,bold:true}));
+      parts.push(txt(tbX+rcw+3,revY+22,'DESCRIPTION',{sz:F.tiny,bold:true}));
+      parts.push(txt(tbX+rcw*2+3,revY+22,'DATE',{sz:F.tiny,bold:true}));
+      parts.push(ln(tbX,revY+24,tbX+TB_W,revY+24,{sw:SW_HAIR}));
+      parts.push(ln(tbX+rcw,revY+12,tbX+rcw,revY+revH,{sw:SW_HAIR}));
+      parts.push(ln(tbX+rcw*2,revY+12,tbX+rcw*2,revY+revH,{sw:SW_HAIR}));
+      parts.push(txt(tbX+3,revY+34,'A',{sz:F.tiny}));
+      parts.push(txt(tbX+rcw+3,revY+34,'INITIAL ISSUE FOR PERMIT',{sz:F.tiny}));
+      parts.push(txt(tbX+rcw*2+3,revY+34,project.date||'—',{sz:F.tiny}));
+    }
+
+    // Engineer seal
+    const sealY=tbY+tbH-50;
+    parts.push(rect(tbX,sealY,TB_W,50,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(circ(tbX+TB_W/2,sealY+22,18,{fill:WHT,stroke:BLK,sw:SW_THIN}));
+    parts.push(txt(tbX+TB_W/2,sealY+19,'ENGINEER',{sz:F.tiny,anc:'middle',fill:'#888'}));
+    parts.push(txt(tbX+TB_W/2,sealY+28,'SEAL',{sz:F.tiny,anc:'middle',fill:'#888'}));
+    parts.push(txt(tbX+TB_W/2,sealY+44,`${esc(project.designer||'SolarPro Engineering')} — ${esc(project.date||'')}`,{sz:F.tiny,anc:'middle',fill:'#555'}));
+
+    parts.push('</svg>');
+    return parts.join('\n');
+  }
+
+  // Build SVG and wrap in permit page
+  const svgContent = buildSLD();
+
+  return `
+  <div class="page sld-page">
+    ${titleBlock(input, 'E-1', 'SINGLE-LINE ELECTRICAL DIAGRAM', pageNum, totalPages)}
+    <div style="padding:0;overflow:hidden;width:100%;flex:1;margin:0;display:flex;align-items:flex-start;justify-content:center;">
+        ${svgContent}
+    </div>
+  </div>`;
+}
+
+
 function generatePermitHTML(input: PermitInput): string {
   const { project } = input;
-  const TOTAL = 10;
+  const TOTAL = 11;
 
   const pages = [
     pageCoverSheet(input, 1, TOTAL),
@@ -1369,6 +2118,7 @@ function generatePermitHTML(input: PermitInput): string {
     pageWarningLabels(input, 8, TOTAL),
     pageEquipmentSchedule(input, 9, TOTAL),
     pageEngineerCert(input, 10, TOTAL),
+    pageSingleLineDiagram(input, 11, TOTAL),
   ];
 
   return `<!DOCTYPE html>
@@ -1382,6 +2132,7 @@ function generatePermitHTML(input: PermitInput): string {
 
   /* Page */
   .page { width:17in; min-height:22in; padding:0.45in; page-break-after:always; display:flex; flex-direction:column; }
+  .sld-page { padding:0.2in 0.2in 0.1in 0.2in; }
   .page:last-child { page-break-after:avoid; }
   .page-content { flex:1; margin-top:10px; }
 

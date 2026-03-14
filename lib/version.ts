@@ -1,8 +1,16 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.28';
-export const BUILD_DATE        = '2026-03-13';
-export const BUILD_DESCRIPTION = 'v47.28: Self-delete endpoint for test cleanup + test script fix';
+export const BUILD_VERSION     = 'v47.38';
+export const BUILD_DATE        = '2026-03-14';
+export const BUILD_DESCRIPTION = 'v47.38: Full 11-page permit plan set — SLD (E-1) sheet 11, NEC/status fixes ported to route.ts';
 export const BUILD_FEATURES    = [
+  // v47.38 -- Full 11-page permit plan set with SLD
+  'PERMIT: pageSingleLineDiagram() — Sheet 11 (E-1) added to route.ts — IEEE/ANSI SVG SLD renderer',
+  'PERMIT: Full MICROINVERTER topology: PV Array → J-Box → AC Combiner → AC Disco → MSP → IQ SC3/BUI → Utility Meter',
+  'PERMIT: Battery storage shown (IQ Battery 5P × 2 connected via BUI) — NEC 705.12(B) 120% rule',
+  'PERMIT: TOTAL updated 10 → 11 pages — cover sheet index updated to include E-1 as sheet 11',
+  'PERMIT: statusColor/statusBg/statusBorder/statusLabel — added fail/info cases for full NEC compliance display',
+  'PERMIT: .sld-page CSS class added — reduced padding for SLD page rendering',
+  'PERMIT: Cover sheet E-1 sheet number updated from "E-1" to "11" in sheet index',
   // v47.28 -- Self-delete + test script fix
   'TEST: DELETE /api/auth/delete-account?confirm=true — self-delete endpoint for test user cleanup',
   'TEST: scripts/test_tos_flow.py — pre-test and step 6 cleanup now use self-delete (DELETE method)',
