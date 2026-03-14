@@ -1,7 +1,7 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.42';
+export const BUILD_VERSION     = 'v47.43';
 export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.42: ENV object + requireEnv() + startup logging + clearer auth error messages';
+export const BUILD_DESCRIPTION = 'v47.43: Fix permit 500 crash — null-safe compliance normalization in POST handler';
 export const BUILD_FEATURES    = [
   // v47.38 -- Full 11-page permit plan set with SLD
   'PERMIT: pageSingleLineDiagram() — Sheet 11 (E-1) added to route.ts — IEEE/ANSI SVG SLD renderer',

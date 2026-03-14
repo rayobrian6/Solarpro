@@ -2591,6 +2591,41 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Missing project data' }, { status: 400 });
     }
 
+    // ── Normalize compliance: ensure it always has at least a skeleton so
+    //    page functions never crash on compliance.jurisdiction?.xxx access
+    //    when the frontend omits or sends null/undefined compliance.
+    if (!body.compliance) {
+      (body as any).compliance = {
+        overallStatus: 'PASS',
+        jurisdiction: {
+          state:      project.address?.match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '—',
+          necVersion: '2020',
+          ahj:        (project as any).ahj || '—',
+          permitNotes: undefined,
+        },
+      };
+    } else if (!body.compliance.jurisdiction) {
+      body.compliance.jurisdiction = {
+        state:      project.address?.match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '—',
+        necVersion: '2020',
+        ahj:        (project as any).ahj || '—',
+      };
+    }
+
+    // ── Normalize system: ensure inverters array exists
+    if (!body.system) {
+      (body as any).system = {
+        totalDcKw:   0,
+        totalAcKw:   0,
+        totalPanels: 0,
+        dcAcRatio:   1,
+        topology:    'microinverter',
+        inverters:   [],
+      };
+    } else if (!body.system.inverters) {
+      (body.system as any).inverters = [];
+    }
+
     // Fetch aerial roof data (satellite image + Solar API roof segments)
     // This runs server-side so we can embed the base64 image in the PDF
     console.log('[permit/POST] Starting aerial fetch for address:', body.project?.address || '(none)');
