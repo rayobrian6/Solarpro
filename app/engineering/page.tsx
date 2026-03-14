@@ -404,6 +404,20 @@ function EngineeringPageInner() {
         // Store layout in component state so permit buttons can access panel positions
         if (layout) setProjectLayout(layout);
 
+        // SAFETY NET: if p.layout came back null (e.g. user-id mismatch in join),
+        // fetch the layout directly from the dedicated endpoint.
+        if (!layout) {
+          fetch(`/api/projects/${projectId}/layout`)
+            .then(r => r.json())
+            .then(lr => {
+              if (lr.success && lr.data?.panels?.length > 0) {
+                console.log('[EngineeringPage] SAFETY NET layout fetch succeeded:', lr.data.panels.length, 'panels');
+                setProjectLayout(lr.data);
+              }
+            })
+            .catch(err => console.warn('[EngineeringPage] Safety net layout fetch failed:', err));
+        }
+
         console.log('[EngineeringPage] Loaded project engineering_seed:', seed);
 
         // Build config patches
@@ -448,7 +462,17 @@ function EngineeringPageInner() {
           console.log('[EngineeringPage] Loaded synthetic eng config:', engCfg);
 
           const invType: InverterType = (engCfg?.inverterType ?? seed.inverter_type) as InverterType;
-          const panelCount: number = engCfg?.panelCount ?? seed.panel_count;
+          // LAYOUT OVERRIDE: if the design studio layout has panels, it is the
+          // ground truth — always prefer it over the seed's panel_count.
+          const layoutPanelCount = layout?.panels?.length ?? 0;
+          const seedPanelCount: number = engCfg?.panelCount ?? seed.panel_count;
+          const panelCount: number = layoutPanelCount > 0 ? layoutPanelCount : seedPanelCount;
+          console.log('[EngineeringPage] PANEL COUNT RESOLUTION:', {
+            layoutPanelCount,
+            seedPanelCount,
+            finalPanelCount: panelCount,
+            source: layoutPanelCount > 0 ? 'LAYOUT (design studio)' : 'SEED (bill upload)',
+          });
           const tilt: number = seed.tilt ?? 20;
           const azimuth: number = seed.azimuth ?? 180;
 
@@ -533,8 +557,13 @@ function EngineeringPageInner() {
           const priceLabel = seed.cost_low && seed.cost_high
             ? ` · $${Math.round(seed.cost_low / 1000)}k–$${Math.round(seed.cost_high / 1000)}k estimate`
             : '';
+          const displayPanels = layoutPanelCount > 0 ? layoutPanelCount : seed.panel_count;
+          const displayKw = layoutPanelCount > 0
+            ? (layout!.systemSizeKw || (layoutPanelCount * 0.4)).toFixed(2)
+            : seed.system_kw;
+          const layoutNote = layoutPanelCount > 0 ? ` [layout: ${layoutPanelCount} panels]` : '';
           setAutoLoadBanner(
-            `✅ Preliminary system loaded from bill upload: ${seed.system_kw} kW · ${seed.panel_count} panels${utilityLabel}${priceLabel}`
+            `✅ System loaded: ${displayKw} kW · ${displayPanels} panels${utilityLabel}${priceLabel}${layoutNote}`
           );
 
           // Restore pre-rendered SLD from seed so plan-set E-1 uses the same
@@ -2500,13 +2529,58 @@ function EngineeringPageInner() {
   const [permitLoading, setPermitLoading] = useState(false);
   const [planSetLoading, setPlanSetLoading] = useState(false);
   const [projectLayout, setProjectLayout] = useState<any>(null); // layout from 3D design engine (panels[], roofPlanes[])
+  const [layoutFetchedDirect, setLayoutFetchedDirect] = useState(false);
   const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
   const [planSetError, setPlanSetError] = useState<string | null>(null);
   const [planSetPreviewSheet, setPlanSetPreviewSheet] = useState<string | null>(null); // sheet id being previewed
 
+  // Direct layout fetch — runs when currentProjectId is known
+  useEffect(() => {
+    if (!currentProjectId || layoutFetchedDirect) return;
+    setLayoutFetchedDirect(true);
+    console.log('[EngineeringPage] Direct layout fetch for projectId:', currentProjectId);
+    fetch(`/api/projects/${currentProjectId}/layout`)
+      .then(r => r.json())
+      .then(lr => {
+        if (lr.success && lr.data) {
+          const panelCount = lr.data.panels?.length ?? 0;
+          const roofPlaneCount = lr.data.roofPlanes?.length ?? 0;
+          console.log('[EngineeringPage] DIRECT LAYOUT RESULT:', { panelCount, roofPlaneCount, systemSizeKw: lr.data.systemSizeKw });
+          if (panelCount > 0) {
+            setProjectLayout(lr.data);
+            console.log('[EngineeringPage] projectLayout SET from direct fetch:', panelCount, 'panels');
+          } else {
+            console.warn('[EngineeringPage] Direct layout fetch: 0 panels — no layout saved yet');
+          }
+        } else {
+          console.warn('[EngineeringPage] Direct layout fetch failed:', lr.error);
+        }
+      })
+      .catch(err => console.warn('[EngineeringPage] Direct layout fetch error:', err));
+  }, [currentProjectId, layoutFetchedDirect]);
+
   const handleGeneratePermitPackage = async () => {
+    // GUARD: if layout is missing entirely, block and warn
+    if (!projectLayout || !projectLayout.panels || projectLayout.panels.length === 0) {
+      alert('No layout found. Please open Design Studio, place panels, and save your layout before generating a permit.');
+      return;
+    }
     setPermitLoading(true);
     logDecision('Permit Package', 'Generating full permit package (SLD + BOM + Structural + Cover Sheet)', 'auto');
+    // PERMIT INPUT DEBUG: log exactly what will be sent to the permit generator
+    console.log('[PERMIT PREFLIGHT]', {
+      layoutPanels: projectLayout.panels.length,
+      layoutRoofPlanes: projectLayout.roofPlanes?.length ?? 0,
+      layoutSystemSizeKw: projectLayout.systemSizeKw,
+      configTotalPanels: totalPanels,
+      configTotalKw: totalKw,
+      projectName: config.projectName,
+      address: config.address,
+      buildVersion: BUILD_VERSION,
+      note: projectLayout.panels.length !== totalPanels
+        ? `WARNING: layout(${projectLayout.panels.length}) != config(${totalPanels}) panel counts differ`
+        : 'OK: layout and config panel counts match',
+    });
     try {
       // Run all three in parallel
       await Promise.all([
@@ -7351,8 +7425,11 @@ function EngineeringPageInner() {
                         panelWidthIn: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.widthIn : undefined; })(),
                       },
                       system: {
-                        totalDcKw: parseFloat(totalKw), totalAcKw: parseFloat(totalInverterKw),
-                        totalPanels, dcAcRatio: parseFloat(totalKw) / (parseFloat(totalInverterKw) || 1),
+                        // Prefer layout panel count as ground truth; fall back to config-derived totalPanels
+                        totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw),
+                        totalAcKw: parseFloat(totalInverterKw),
+                        totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
+                        dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
                         topology: topologyType,
                         inverters: config.inverters.map(inv => {
                           const invData = getInvById(inv.inverterId, inv.type) as any;
@@ -7450,8 +7527,11 @@ function EngineeringPageInner() {
                         atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
                       },
                       system: {
-                        totalDcKw: parseFloat(totalKw), totalAcKw: parseFloat(totalInverterKw),
-                        totalPanels, dcAcRatio: parseFloat(totalKw) / (parseFloat(totalInverterKw) || 1),
+                        // Prefer layout panel count as ground truth; fall back to config-derived totalPanels
+                        totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw),
+                        totalAcKw: parseFloat(totalInverterKw),
+                        totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
+                        dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
                         topology: topologyType,
                         inverters: config.inverters.map(inv => {
                           const invData = getInvById(inv.inverterId, inv.type) as any;

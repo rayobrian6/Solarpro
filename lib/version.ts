@@ -1,9 +1,16 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.50';
+export const BUILD_VERSION     = 'v47.51';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.50: Fix preflight panel TS errors — tsc 0 errors, clean build';
+export const BUILD_DESCRIPTION = 'v47.51: Fix layout→engineering pipeline: layout overrides seed panel count, direct layout fetch, permit guard';
 export const BUILD_FEATURES    = [
+  // v47.51 -- Layout → Engineering pipeline fix
+  'ENGINEERING: Layout panel count OVERRIDES seed.panel_count — layout is ground truth',
+  'ENGINEERING: Direct layout fetch useEffect — runs when currentProjectId is set (safety net)',
+  'ENGINEERING: Safety net layout fetch in project fetch — if p.layout is null, fetch /layout directly',
+  'ENGINEERING: handleGeneratePermitPackage GUARD — blocks if no layout, logs PERMIT PREFLIGHT',
+  'ENGINEERING: system.totalPanels in permit payload now prefers projectLayout.panels.length',
+  'ENGINEERING: system.totalDcKw in permit payload computed from layout panel count',
   // v47.50 -- TypeScript fix
   'ENGINEERING: Fix preflight panel — computedSystem.bomQuantities.panelModel/inverterModel (not config.moduleModel)',
   'ENGINEERING: Fix preflight panel — totalKw for system size (not config.systemKw)',
