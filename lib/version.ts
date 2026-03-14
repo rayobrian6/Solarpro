@@ -1,8 +1,8 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.48';
+export const BUILD_VERSION     = 'v47.49';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.48: Layout pipeline debug instrumentation + critical roofPlanes restore fix';
+export const BUILD_DESCRIPTION = 'v47.49: Pipeline verification — debug page, version footer, layout DB audit';
 export const BUILD_FEATURES    = [
   // v47.46 -- Full 13-page permit planset pipeline
   'PERMIT: 13-page planset (was 11) — PV-0 through E-1 (sheets 1 of 13 .. 13 of 13)',

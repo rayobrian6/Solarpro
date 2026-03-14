@@ -1,4 +1,4 @@
-// BUILD v41.8 — Admin Portal Upgrade
+// BUILD v47.48 — Layout pipeline debug + roofPlanes restore fix
 import type { Metadata } from 'next';
 import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
@@ -7,6 +7,7 @@ import { UserProvider } from '@/contexts/UserContext';
 import SolarAIBot from '@/components/support/SolarAIBot';
 import { Suspense } from 'react';
 import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
+import { BUILD_VERSION } from '@/lib/version';
 
 export const metadata: Metadata = {
   title: 'SolarPro Design Platform',
@@ -37,6 +38,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               {children}
               {/* Free AI Support Bot — floating widget, visible on all pages */}
               <SolarAIBot />
+              {/* Version indicator — always visible for deployment verification */}
+              <div style={{
+                position: 'fixed', bottom: '4px', left: '4px',
+                fontSize: '10px', color: 'rgba(148,163,184,0.6)',
+                background: 'rgba(15,23,42,0.8)', padding: '2px 6px',
+                borderRadius: '4px', zIndex: 9999, pointerEvents: 'none',
+                fontFamily: 'monospace', letterSpacing: '0.02em',
+              }}>
+                {BUILD_VERSION}
+              </div>
             </UserProvider>
           </StoreProvider>
         </ToastProvider>
