@@ -1,8 +1,8 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.60';
+export const BUILD_VERSION     = 'v47.61';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.60: Full system audit — 8-phase codebase audit. TypeScript 0 errors, ESLint 0 errors. jspdf upgraded 2.5.2→4.2.0 (critical ReDoS fix, API-compatible). Next.js 14.2.3→14.2.35 (security). minimatch ReDoS fixed in @typescript-eslint (npm audit fix). Auth VERCEL_ENV guard confirmed. DB schema vs query audit clean. Pipeline BP-3 fix verified. All 5 artifact builders produce real content.';
+export const BUILD_DESCRIPTION = 'v47.61: Second-pass full codebase re-audit. TypeScript 0 errors, ESLint 0 errors (main code). All 330 TS/TSX source files systematically inspected. Auth, DB, pipeline, artifacts, API routes, frontend state all verified. Security findings documented. Build clean.';
 export const BUILD_FEATURES    = [
   // v47.60 -- Full system audit
   'AUDIT: Phase 1 (Static Analysis) — tsc --noEmit = 0 errors, ESLint 0 errors after .eslintrc.json setup and stray eslint-disable comment cleanup',

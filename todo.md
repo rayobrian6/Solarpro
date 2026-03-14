@@ -1,57 +1,60 @@
-# v47.60 Full System Audit — Todo
+# Second-Pass Full System Audit — v47.61
 
-## Phase 1 — Static Analysis ✅
-- [x] tsc --noEmit = 0 errors
-- [x] ESLint configured (.eslintrc.json) — 0 errors
-- [x] Remove stray eslint-disable comments for missing TS-ESLint plugin
+## Status: COMPLETE ✅
 
-## Phase 2 — Dependency Audit ✅
-- [x] npm audit baseline — found 9 vulns in next@14.2.3
-- [x] Upgrade next → 14.2.35 (security patch)
-- [x] jspdf: CRITICAL ReDoS — upgraded to 4.2.0 (API compatible, browser-only usage)
-- [x] npm audit fix — fixed minimatch ReDoS in @typescript-eslint (devDep)
-- [x] Remaining 4 HIGH: next (2x DoS, needs v16) + glob in eslint-config-next (devDep) — ACCEPTED RISK, documented
-- [x] tsc --noEmit after upgrades = 0 errors
-- [x] ESLint after upgrades = 0 errors
+### Phase 1 — File Inventory ✓ COMPLETE
+- [x] Count all files in repo
+- [x] List all 330 TS/TSX source files
+- [x] Map all directories
 
-## Phase 3 — Auth Flow Audit 🔄
-- [ ] Trace login → JWT sign → cookie set flow (api/auth/login)
-- [ ] Trace /api/auth/me cookie verify flow
-- [ ] Audit middleware.ts — which routes are protected, which are public
-- [ ] Verify dev-auth bypass uses VERCEL_ENV guard (v47.59 fix)
-- [ ] Confirm cookie attributes: httpOnly, secure, sameSite, path, maxAge
+### Phase 2 — Core Library Files ✓ COMPLETE
+- [x] lib/auth.ts — JWT decode, cookie, user extraction
+- [x] lib/dev-auth.ts — VERCEL_ENV guard, dev session logic
+- [x] lib/db-neon.ts — DB connection, getDbReady, query helpers
+- [x] lib/db-ready.ts — cold-start retry logic
+- [x] lib/version.ts — updated to v47.61
+- [x] lib/engineering/syncPipeline.ts — pipeline orchestration
+- [x] lib/engineering/artifactBuilders.ts — 5 artifact builders
 
-## Phase 4 — Database Audit
-- [ ] Audit schema.sql — all tables, columns, constraints
-- [ ] Verify all DB queries use correct column names (no stale field refs)
-- [ ] Check upsert conflict targets match actual UNIQUE constraints
-- [ ] Audit project_files table schema vs upsertFile() usage
-- [ ] Verify connection pool / neon config
+### Phase 3 — Auth System Recheck ✓ COMPLETE
+- [x] middleware.ts — PUBLIC_PATHS, cookie check, VERCEL_ENV comment fixed
+- [x] app/api/auth/login/route.ts
+- [x] app/api/auth/logout/route.ts
+- [x] app/api/auth/me/route.ts
+- [x] app/api/auth/register/route.ts
 
-## Phase 5 — API Route Verification
-- [ ] Audit every route under /api — method guards, auth checks, error handling
-- [ ] Verify all routes return proper status codes
-- [ ] Check all routes validate required inputs
-- [ ] Confirm pipeline/run route BP-3 fix is wired correctly
+### Phase 4 — Database Layer Recheck ✓ COMPLETE
+- [x] lib/db-neon.ts full review
+- [x] migrations/001–009 all SQL files reviewed
+- [x] upsertFile() ON CONFLICT target verified against schema constraint
 
-## Phase 6 — Pipeline Logic Audit
-- [ ] Trace full pipeline execution path (steps 1-10)
-- [ ] Verify buildAllArtifacts() produces real content
-- [ ] Confirm upsertFile() calls succeed and write to DB
-- [ ] Check step ordering and dependencies
+### Phase 5 — Pipeline Architecture Review ✓ COMPLETE
+- [x] app/api/pipeline/run/route.ts
+- [x] app/api/engineering/save-outputs/route.ts
+- [x] lib/engineering/syncPipeline.ts deep review
+- [x] lib/engineering/artifactBuilders.ts deep review
 
-## Phase 7 — Logging Audit
-- [ ] Confirm requestId/projectId present in all critical log paths
-- [ ] Check for missing error context in catch blocks
-- [ ] Verify pipeline step logs are consistent
+### Phase 6 — Artifact Generation Review ✓ COMPLETE
+- [x] All 5 builders produce real content (Engineering_Report, SLD, BOM, Permit_Packet, System_Estimate)
+- [x] stateCode TS fix (v47.58) confirmed
 
-## Phase 8 — System Testing
-- [ ] Static verification: login flow
-- [ ] Static verification: project creation
-- [ ] Static verification: pipeline execution
-- [ ] Static verification: artifact generation
+### Phase 7 — All API Routes Review ✓ COMPLETE
+- [x] All 116 routes batch-checked for runtime declarations + auth guards
+- [x] Security Finding #1: PUT /api/proposals/[id] — no auth (documented)
+- [x] Security Finding #2: POST /api/equipment/save — no auth, body userId (documented)
+- [x] Security Finding #3: debug/aerial hardcoded API key, reset-raymond hardcoded token (documented)
 
-## Final
-- [ ] tsc --noEmit = 0 errors (final check)
-- [ ] Bump version to v47.60 in lib/version.ts
-- [ ] Commit and push
+### Phase 8 — Frontend State Flow ✓ COMPLETE
+- [x] store/appStore.ts — Zustand store reviewed
+- [x] contexts/UserContext.tsx — user fetch retry logic reviewed
+- [x] hooks/ — no circular imports or stale closures
+
+### Phase 9 — Build Verification ✓ COMPLETE
+- [x] tsc --noEmit → 0 errors
+- [x] ESLint → 0 errors, 17 warnings (all intentional)
+- [x] next.config.js — no process.exit(), build-time warnings only
+
+### Phase 10 — Final Report ✓ COMPLETE
+- [x] lib/version.ts updated to v47.61
+- [x] SECOND_PASS_AUDIT_REPORT.md written (10 phases, 3 security findings, full checklist)
+- [x] Git commit staged and completed
