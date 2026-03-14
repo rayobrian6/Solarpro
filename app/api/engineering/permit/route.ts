@@ -28,6 +28,8 @@ import path from 'path';
 import os from 'os';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
+export const maxDuration = 60;            // 60s — aerial API calls can take 10-15s total
 
 const execAsync = promisify(exec);
 
@@ -520,45 +522,84 @@ async function fetchAerialRoofData(
 ): Promise<AerialRoofData> {
   const GKEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
 
+  // ── Env + input diagnostics ───────────────────────────────────────────────
+  console.log('[permit/aerial] ══════════════════════════════════════════');
+  console.log('[permit/aerial] START fetchAerialRoofData');
+  console.log('[permit/aerial] address:', address || '(empty)');
+  console.log('[permit/aerial] lat provided:', lat, '| lng provided:', lng);
+  console.log('[permit/aerial] GOOGLE_MAPS_API_KEY env:', process.env.GOOGLE_MAPS_API_KEY ? 'SET' : 'NOT SET (using hardcoded fallback)');
+  console.log('[permit/aerial] DATABASE_URL env:', process.env.DATABASE_URL ? 'SET' : 'NOT SET');
+  console.log('[permit/aerial] Node version:', process.version);
+  console.log('[permit/aerial] Buffer available:', typeof Buffer !== 'undefined' ? 'YES' : 'NO');
+  console.log('[permit/aerial] AbortSignal.timeout available:', typeof AbortSignal?.timeout === 'function' ? 'YES' : 'NO');
+  console.log('[permit/aerial] GKEY prefix:', GKEY.substring(0, 14) + '...');
+
   try {
     // ── Step 1: Geocode address to lat/lng if not provided ────────────────
     let finalLat = lat;
     let finalLng = lng;
 
     if ((!finalLat || !finalLng) && address) {
-      const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GKEY}`;
-      const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
-      if (geoRes.ok) {
-        const geoData = await geoRes.json();
-        if (geoData.results?.[0]?.geometry?.location) {
-          finalLat = geoData.results[0].geometry.location.lat;
-          finalLng = geoData.results[0].geometry.location.lng;
+      console.log('[permit/aerial] Step 1: Geocoding address...');
+      try {
+        const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GKEY}`;
+        const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
+        console.log('[permit/aerial] Geocode HTTP:', geoRes.status, geoRes.statusText);
+        if (geoRes.ok) {
+          const geoData = await geoRes.json();
+          console.log('[permit/aerial] Geocode API status:', geoData.status);
+          if (geoData.error_message) console.log('[permit/aerial] Geocode error_message:', geoData.error_message);
+          if (geoData.results?.[0]?.geometry?.location) {
+            finalLat = geoData.results[0].geometry.location.lat;
+            finalLng = geoData.results[0].geometry.location.lng;
+            console.log('[permit/aerial] Geocoded lat/lng:', finalLat, finalLng);
+          } else {
+            console.log('[permit/aerial] Geocode: no results. Full status:', geoData.status, '| results count:', geoData.results?.length ?? 0);
+          }
+        } else {
+          const errBody = await geoRes.text().catch(() => '');
+          console.log('[permit/aerial] Geocode HTTP error body:', errBody.substring(0, 200));
         }
+      } catch (geoErr: any) {
+        console.log('[permit/aerial] Geocode EXCEPTION:', geoErr?.message);
       }
+    } else {
+      console.log('[permit/aerial] Step 1: Skipping geocode — lat/lng already provided:', finalLat, finalLng);
     }
 
     if (!finalLat || !finalLng) {
+      console.log('[permit/aerial] EARLY RETURN: Could not resolve lat/lng from address:', address);
       return { error: 'Could not geocode address' };
     }
 
     // ── Step 2: Google Solar API — buildingInsights for roof segments ─────
+    console.log('[permit/aerial] Step 2: Solar API at', finalLat, finalLng);
     let roofSegments: AerialRoofData['roofSegments'] = [];
     try {
       const solarUrl = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${finalLat}&location.longitude=${finalLng}&requiredQuality=LOW&key=${GKEY}`;
       const solarRes = await fetch(solarUrl, { signal: AbortSignal.timeout(10000) });
+      console.log('[permit/aerial] Solar API HTTP:', solarRes.status, solarRes.statusText);
       if (solarRes.ok) {
         const solarData = await solarRes.json();
+        if (solarData.error) console.log('[permit/aerial] Solar API error:', JSON.stringify(solarData.error));
         const segs = solarData.solarPotential?.roofSegmentStats || [];
+        console.log('[permit/aerial] Solar roof segments found:', segs.length);
         roofSegments = segs.map((seg: any) => ({
           pitchDegrees: seg.pitchDegrees ?? 0,
           azimuthDegrees: seg.azimuthDegrees ?? 180,
           areaM2: seg.stats?.areaMeters2 ?? 0,
           center: seg.center ? { lat: seg.center.latitude, lng: seg.center.longitude } : undefined,
-          polygon: undefined, // roofSegmentStats don't include polygon; use center+area to infer
+          polygon: undefined,
         }));
+        if (roofSegments.length > 0) {
+          console.log('[permit/aerial] First segment pitch:', roofSegments[0].pitchDegrees, 'az:', roofSegments[0].azimuthDegrees);
+        }
+      } else {
+        const errBody = await solarRes.text().catch(() => '');
+        console.log('[permit/aerial] Solar non-OK body:', errBody.substring(0, 300));
       }
-    } catch (_) {
-      // Solar API optional — proceed without segments
+    } catch (solarErr: any) {
+      console.log('[permit/aerial] Solar API EXCEPTION:', solarErr?.message);
     }
 
     // ── Step 3: Google Maps Static API — satellite image at zoom=20 ──────
@@ -577,19 +618,32 @@ async function fetchAerialRoofData(
     let imageWidth = 640;
     let imageHeight = 640;
 
+    console.log('[permit/aerial] Step 3: Static Maps satellite...');
+    console.log('[permit/aerial] Static Maps URL (no key):', staticUrl.replace(GKEY, 'REDACTED'));
     try {
       const imgRes = await fetch(staticUrl, { signal: AbortSignal.timeout(12000) });
-      if (imgRes.ok && imgRes.headers.get('content-type')?.startsWith('image/')) {
+      const ct = imgRes.headers.get('content-type') || '';
+      console.log('[permit/aerial] Static Maps HTTP:', imgRes.status, '| Content-Type:', ct);
+      console.log('[permit/aerial] Static Maps Content-Length:', imgRes.headers.get('content-length'));
+      if (imgRes.ok && ct.startsWith('image/')) {
         const buf = await imgRes.arrayBuffer();
-        imageBase64 = `data:${imgRes.headers.get('content-type') || 'image/jpeg'};base64,` +
-          Buffer.from(buf).toString('base64');
-        // scale=2 returns 1280x1280 pixels in a 640x640 logical container
+        console.log('[permit/aerial] Static Maps image bytes:', buf.byteLength);
+        imageBase64 = `data:${ct};base64,` + Buffer.from(buf).toString('base64');
+        console.log('[permit/aerial] base64 string length:', imageBase64.length);
+        console.log('[permit/aerial] base64 prefix OK:', imageBase64.startsWith('data:image/'));
         imageWidth = 640;
         imageHeight = 640;
+      } else {
+        const errBody = await imgRes.text().catch(() => '');
+        console.log('[permit/aerial] Static Maps non-image response:', errBody.substring(0, 300));
       }
-    } catch (_) {
-      // Static Maps optional
+    } catch (imgErr: any) {
+      console.log('[permit/aerial] Static Maps EXCEPTION:', imgErr?.message);
     }
+
+    console.log('[permit/aerial] ══ RESULT ══ imageBase64:', imageBase64 ? `YES (${imageBase64.length} chars)` : 'MISSING');
+    console.log('[permit/aerial] ══ RESULT ══ roofSegments:', roofSegments.length);
+    console.log('[permit/aerial] ══════════════════════════════════════════');
 
     return {
       imageBase64,
@@ -602,6 +656,7 @@ async function fetchAerialRoofData(
     };
 
   } catch (err: any) {
+    console.log('[permit/aerial] OUTER EXCEPTION caught:', err?.message, err?.stack?.substring(0, 300));
     return { error: err?.message || 'Aerial fetch failed' };
   }
 }
@@ -619,6 +674,13 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
   // Otherwise fall back to schematic vector diagram.
 
   let roofVisualHtml = '';
+
+  // ── Log which mode is being used ──────────────────────────────────────
+  if (aerial) {
+    console.log('[permit/pageRoofPlan] aerialData present — imageBase64:', aerial.imageBase64 ? `YES (${aerial.imageBase64.length} chars)` : 'NO', '| error:', aerial.error || 'none', '| segments:', aerial.roofSegments?.length ?? 0);
+  } else {
+    console.log('[permit/pageRoofPlan] aerialData MISSING — falling back to schematic');
+  }
 
   if (aerial?.imageBase64) {
     // ── AERIAL MODE: real satellite image + roof segment overlay ──────────
@@ -765,7 +827,8 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
       </div>`;
 
   } else {
-    // ── SCHEMATIC FALLBACK (no aerial image available) ────────────────────
+    // ── SCHEMATIC FALLBACK (no aerial image available) ────────────────
+    console.log('[permit/pageRoofPlan] SCHEMATIC FALLBACK — aerial reason:', aerial?.error || (aerial ? 'imageBase64 missing' : 'aerialData not fetched'));
     const svgW = 520;
     const svgH = 380;
     const roofX = 60, roofY = 40, roofW = 400, roofH = 280;
@@ -2530,11 +2593,22 @@ export async function POST(req: NextRequest) {
 
     // Fetch aerial roof data (satellite image + Solar API roof segments)
     // This runs server-side so we can embed the base64 image in the PDF
+    console.log('[permit/POST] Starting aerial fetch for address:', body.project?.address || '(none)');
+    console.log('[permit/POST] lat:', (body.project as any).lat, '| lng:', (body.project as any).lng);
+    const aerialStart = Date.now();
     const aerialData = await fetchAerialRoofData(
       body.project?.address || '',
       (body.project as any).lat,
       (body.project as any).lng
-    ).catch(() => ({ error: 'Aerial fetch skipped' } as any));
+    ).catch((aerialErr: any) => {
+      console.log('[permit/POST] fetchAerialRoofData THREW:', aerialErr?.message);
+      return { error: 'Aerial fetch threw: ' + aerialErr?.message } as any;
+    });
+    const aerialMs = Date.now() - aerialStart;
+    console.log('[permit/POST] Aerial fetch completed in', aerialMs, 'ms');
+    console.log('[permit/POST] aerialData.imageBase64:', aerialData.imageBase64 ? `YES (${aerialData.imageBase64.length} chars)` : 'NO');
+    console.log('[permit/POST] aerialData.roofSegments:', aerialData.roofSegments?.length ?? 0);
+    console.log('[permit/POST] aerialData.error:', aerialData.error || 'none');
     const enrichedBody: PermitInput = { ...body, aerialData };
 
     const html = generatePermitHTML(enrichedBody);

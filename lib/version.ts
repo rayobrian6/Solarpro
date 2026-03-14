@@ -1,7 +1,7 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.39';
-export const BUILD_DATE        = '2026-03-15';
-export const BUILD_DESCRIPTION = 'v47.39: Aerial satellite roof imagery in PV-2 — Google Solar API roof segments + Google Maps Static satellite base image';
+export const BUILD_VERSION     = 'v47.40';
+export const BUILD_DATE        = '2026-03-16';
+export const BUILD_DESCRIPTION = 'v47.40: Aerial pipeline debug — runtime=nodejs, maxDuration=60, full logging, /api/debug/aerial endpoint';
 export const BUILD_FEATURES    = [
   // v47.38 -- Full 11-page permit plan set with SLD
   'PERMIT: pageSingleLineDiagram() — Sheet 11 (E-1) added to route.ts — IEEE/ANSI SVG SLD renderer',
