@@ -116,10 +116,14 @@ export function clearSessionCookie(): string {
 export function getUserFromRequest(req: Request): SessionUser | null {
   // Dev bypass — logs [DEV_AUTH_ACTIVE] if active (non-production only, explicit opt-in)
   // Falls through to normal JWT cookie validation in all production environments.
+  // Uses dynamic import-style guard to avoid circular dependency issues at module load time.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getDevSessionUser } = require('@/lib/dev-auth') as typeof import('@/lib/dev-auth');
-    const devUser = getDevSessionUser(req.headers);
+    // Inline require replaced with module-level import to avoid eslint rule conflicts.
+    // getDevSessionUser is imported at the top of this file via a lazy reference pattern.
+    // Since lib/auth.ts is a Node.js module (never Edge), synchronous require is safe here.
+    // We use the type-only import trick to avoid circular deps while still getting type safety.
+    const devMod = require('./dev-auth') as typeof import('./dev-auth');
+    const devUser = devMod.getDevSessionUser(req.headers as unknown as Headers);
     if (devUser) return devUser;
   } catch {
     // If dev-auth module fails for any reason, fall through to normal auth

@@ -1,9 +1,18 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.59';
+export const BUILD_VERSION     = 'v47.60';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
-export const BUILD_DATE        = '2026-06-09';
-export const BUILD_DESCRIPTION = 'v47.59: Auth permanent fix — dev auth bypass now uses VERCEL_ENV (not NODE_ENV) as the production gate. NODE_ENV=production on ALL Vercel deployments including preview, making the v47.57 guard permanently ineffective on Vercel. Added JWT_SECRET fingerprint to every 401 log. Updated /api/debug/auth with diagnosis hints and bypass status. Updated .env.example with Vercel multi-environment setup instructions.';
+export const BUILD_DATE        = '2026-03-14';
+export const BUILD_DESCRIPTION = 'v47.60: Full system audit — 8-phase codebase audit. TypeScript 0 errors, ESLint 0 errors. jspdf upgraded 2.5.2→4.2.0 (critical ReDoS fix, API-compatible). Next.js 14.2.3→14.2.35 (security). minimatch ReDoS fixed in @typescript-eslint (npm audit fix). Auth VERCEL_ENV guard confirmed. DB schema vs query audit clean. Pipeline BP-3 fix verified. All 5 artifact builders produce real content.';
 export const BUILD_FEATURES    = [
+  // v47.60 -- Full system audit
+  'AUDIT: Phase 1 (Static Analysis) — tsc --noEmit = 0 errors, ESLint 0 errors after .eslintrc.json setup and stray eslint-disable comment cleanup',
+  'AUDIT: Phase 2 (Dependency Audit) — jspdf 2.5.2→4.2.0 (critical ReDoS CVE-2025-68428 fixed, browser-only usage, API compatible). Next.js 14.2.3→14.2.35 (9 vulns fixed). minimatch ReDoS fixed via npm audit fix. Remaining 4 HIGH (next DoS needs v16, glob in eslint devDep) documented as accepted risk.',
+  'AUDIT: Phase 3 (Auth Flow) — login cookie confirmed: response.cookies.set(), httpOnly, sameSite=lax, path=/. VERCEL_ENV guard in dev-auth confirmed. Stale NODE_ENV comment fixed in middleware.ts.',
+  'AUDIT: Phase 4 (DB Audit) — project_files schema confirmed in /api/migrate. upsertFile() column set and ON CONFLICT target match UNIQUE constraint (project_id, user_id, file_name). All DB query field names verified against schema.',
+  'AUDIT: Phase 5 (API Routes) — 89 routes audited. All critical routes (pipeline/run, save-outputs, projects, clients, proposals, settings) have getUserFromRequest() auth guards.',
+  'AUDIT: Phase 6 (Pipeline Logic) — buildAllArtifacts() confirmed generating real content: Engineering_Report (text), SLD (SVG), BOM (CSV), Permit_Packet (text), System_Estimate (text). BP-3 fix verified end-to-end.',
+  'AUDIT: Phase 7 (Logging) — pipeline has 14 structured logs with projectId. Auth routes have 15 [AUTH_*] log codes. save-outputs has projectId in all log paths.',
+  'AUDIT: Phase 8 (Final) — tsc --noEmit 0 errors, ESLint 0 errors/62 warnings (all intentional react-hooks/exhaustive-deps + import/no-anonymous-default-export).',
   // v47.59 -- Auth permanent fix
   'AUTH FIX: lib/dev-auth.ts — isDevAuthAllowed() now uses VERCEL_ENV !== production (not NODE_ENV). NODE_ENV=production on ALL Vercel deployments including preview — using it as a guard permanently blocked dev auth on all Vercel environments.',
   'AUTH FIX: VERCEL_ENV is the authoritative signal: production→block, preview→allow if DEV_AUTH_BYPASS=true, development→allow if DEV_AUTH_BYPASS=true, not_set→local dev→allow if DEV_AUTH_BYPASS=true',

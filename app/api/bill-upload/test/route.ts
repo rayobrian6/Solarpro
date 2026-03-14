@@ -5,11 +5,9 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 let PDFParse: any = null;
 let pdfParseError = '';
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const m = require('pdf-parse');
   PDFParse = m.PDFParse ?? m.default?.PDFParse ?? null;
 } catch (e: unknown) {

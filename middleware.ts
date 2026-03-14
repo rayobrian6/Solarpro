@@ -84,8 +84,8 @@ export function middleware(req: NextRequest) {
   }
 
   // ── Dev auth bypass (non-production only) ──────────────────────────────────
-  // Active when: NODE_ENV !== 'production' AND VERCEL_ENV !== 'production'
-  //              AND DEV_AUTH_BYPASS=true in env  (explicit opt-in)
+  // Active when: VERCEL_ENV !== 'production' AND DEV_AUTH_BYPASS=true in env
+  //              NOTE: NODE_ENV is always 'production' on Vercel (v47.59 fix)
   // Logs [DEV_AUTH_ACTIVE] so it is visible in function logs.
   // Production builds always skip this block — isDevAuthAllowed() hard-blocks.
   const devUser = getDevSessionUserFromRequest(req);

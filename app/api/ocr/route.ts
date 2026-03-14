@@ -297,7 +297,6 @@ async function tryTesseractJs(
   log.push('[ocr] Trying Tesseract.js (WASM)...');
   try {
     // require() instead of import — keeps webpack from statically analyzing this
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { createWorker } = require('tesseract.js');
 
     const worker = await createWorker('eng', 1, {

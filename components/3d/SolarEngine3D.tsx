@@ -3041,7 +3041,6 @@ function SolarEngine3D({
     heading: number; pitch: number; roll: number;
     orientation?: PanelOrientation;
   }): PlacedPanel {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const p: any = {
       id: `panel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       layoutId: 'layout-1',

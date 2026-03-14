@@ -16,10 +16,8 @@ logEnvStatus('bill-upload');
 // Static import of tesseract.js causes HTML 500 errors before the route handler runs.
 
 // Top-level reference so webpack marks pdf-parse as external (not bundled)
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 let PDFParse: any = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const pdfParseModule = require('pdf-parse');
   PDFParse = pdfParseModule.PDFParse ?? pdfParseModule.default?.PDFParse ?? null;
 } catch (e) {
