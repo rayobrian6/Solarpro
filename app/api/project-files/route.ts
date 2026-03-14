@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
     const files = await sql`
       SELECT
         id, project_id, client_id, file_name, file_type, file_size,
-        mime_type, file_url, notes, upload_date, created_at
+        mime_type, file_url, notes, upload_date, created_at, engineering_run_id
       FROM project_files
       WHERE project_id = ${projectId} AND user_id = ${user.id}
       ORDER BY created_at DESC

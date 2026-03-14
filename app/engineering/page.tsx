@@ -821,6 +821,13 @@ function EngineeringPageInner() {
   const [fileUploading, setFileUploading] = useState(false);
   const [fileUploadError, setFileUploadError] = useState<string | null>(null);
   const filesInputRef = useRef<HTMLInputElement>(null);
+
+  // Pipeline Verification state (v47.56)
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<any | null>(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [pipelineRawExpanded, setPipelineRawExpanded] = useState<Record<string, boolean>>({});
+
   const [structuralOptions, setStructuralOptions] = useState<any[]>([]);
   const [ecosystemLog, setEcosystemLog] = useState<any[]>([]);
   const [ecosystemComponents, setEcosystemComponents] = useState<any[]>([]);
@@ -1990,6 +1997,34 @@ function EngineeringPageInner() {
       fetchProjectFiles();
     }
   }, [activeTab, currentProjectId, fetchProjectFiles]);
+
+  // v47.56: Run full project pipeline
+  const runPipeline = useCallback(async () => {
+    if (!currentProjectId) return;
+    setPipelineRunning(true);
+    setPipelineError(null);
+    setPipelineResult(null);
+    try {
+      const res = await fetch('/api/pipeline/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: currentProjectId }),
+      });
+      const data = await res.json();
+      setPipelineResult(data);
+      // Refresh files list after pipeline run
+      if (currentProjectId) {
+        fetch(`/api/project-files?projectId=${currentProjectId}`)
+          .then(r => r.json())
+          .then(d => { if (d.success) setProjectFiles(d.data || []); })
+          .catch(() => {});
+      }
+    } catch (e: any) {
+      setPipelineError(e.message || 'Pipeline run failed');
+    } finally {
+      setPipelineRunning(false);
+    }
+  }, [currentProjectId]);
 
   const fetchBOM = useCallback(async () => {
     setBomLoading(true);
@@ -8712,6 +8747,352 @@ function EngineeringPageInner() {
                   <XCircle size={13} /> {filesError}
                 </div>
               )}
+
+              {/* ── Pipeline Verification Panel (v47.56) ── */}
+              <div className="border border-slate-700/60 rounded-xl bg-slate-800/40 overflow-hidden">
+                {/* Panel header with RUN button */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50 bg-slate-800/60">
+                  <div className="flex items-center gap-2">
+                    <Activity size={14} className="text-amber-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">Pipeline Verification</span>
+                    {pipelineResult && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        pipelineResult.success
+                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                          : 'bg-red-500/15 text-red-400 border border-red-500/25'
+                      }`}>
+                        {pipelineResult.success ? 'PASS' : 'FAIL'}
+                      </span>
+                    )}
+                    {pipelineResult?.runAt && (
+                      <span className="text-xs text-slate-500">
+                        {new Date(pipelineResult.runAt).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={runPipeline}
+                    disabled={pipelineRunning || !currentProjectId}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-amber-500 hover:bg-amber-400 text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {pipelineRunning
+                      ? <><RefreshCw size={12} className="animate-spin" /> Running&hellip;</>
+                      : <><Zap size={12} /> Run Project Pipeline</>
+                    }
+                  </button>
+                </div>
+
+                {/* Pipeline error banner */}
+                {pipelineError && (
+                  <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-xs text-red-400 flex items-center gap-2">
+                    <XCircle size={12} /> {pipelineError}
+                  </div>
+                )}
+
+                {/* Mismatch banners */}
+                {(pipelineResult?.mismatches?.length ?? 0) > 0 && (
+                  <div className="px-4 py-2 border-b border-slate-700/40 space-y-1.5">
+                    {pipelineResult.mismatches.map((m: any, i: number) => (
+                      <div key={i} className={`flex items-start gap-2 text-xs p-2 rounded-lg ${
+                        m.severity === 'ERROR'
+                          ? 'bg-red-500/10 border border-red-500/20 text-red-300'
+                          : 'bg-amber-500/10 border border-amber-500/20 text-amber-300'
+                      }`}>
+                        <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                        <div>
+                          <span className="font-bold">{m.code}</span>
+                          <span className="text-slate-400 ml-1">&mdash; {m.message}</span>
+                          <span className="ml-2 text-slate-500">
+                            (layout: {m.layoutValue} / engineering: {m.engineeringValue})
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Subsystem status rows */}
+                {pipelineResult ? (
+                  <div className="divide-y divide-slate-700/30">
+
+                    {/* Layout row */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${pipelineResult.layout?.exists ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                          <span className="text-xs font-semibold text-slate-300">Layout</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                          {pipelineResult.layout?.exists ? (
+                            <>
+                              <span>{pipelineResult.layout.panels} panels</span>
+                              <span>{pipelineResult.layout.roofPlanes} planes</span>
+                              <span>{pipelineResult.layout.systemSizeKw?.toFixed(2)} kW</span>
+                              <span className="text-slate-600">|</span>
+                              {pipelineResult.layout.layoutSaved
+                                ? <span className="text-emerald-400 flex items-center gap-1"><CheckCircle size={11} /> Saved</span>
+                                : <span className="text-amber-400 flex items-center gap-1"><AlertTriangle size={11} /> Not saved</span>
+                              }
+                            </>
+                          ) : (
+                            <span className="text-red-400">No layout found</span>
+                          )}
+                          <button
+                            onClick={() => setPipelineRawExpanded(s => ({ ...s, layout: !s.layout }))}
+                            className="text-slate-500 hover:text-slate-300 transition-colors"
+                          >
+                            {pipelineRawExpanded.layout ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                      {pipelineRawExpanded.layout && (
+                        <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
+                          {JSON.stringify(pipelineResult.layout, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* Engineering row */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${pipelineResult.engineering?.exists ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                          <span className="text-xs font-semibold text-slate-300">Engineering</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                          {pipelineResult.engineering?.exists ? (
+                            <>
+                              <span>{pipelineResult.engineering.moduleCount} modules</span>
+                              <span>{pipelineResult.engineering.systemSizeKw?.toFixed(2)} kW</span>
+                              <span className="truncate max-w-[120px]" title={pipelineResult.engineering.panelModel}>
+                                {pipelineResult.engineering.panelModel || '—'}
+                              </span>
+                              <span className="text-slate-600">|</span>
+                              {pipelineResult.engineering.wasRebuilt
+                                ? <span className="text-amber-400 flex items-center gap-1"><RefreshCw size={11} /> Rebuilt</span>
+                                : <span className="text-emerald-400 flex items-center gap-1"><CheckCircle size={11} /> Current</span>
+                              }
+                            </>
+                          ) : (
+                            <span className="text-red-400">No engineering model</span>
+                          )}
+                          <button
+                            onClick={() => setPipelineRawExpanded(s => ({ ...s, engineering: !s.engineering }))}
+                            className="text-slate-500 hover:text-slate-300 transition-colors"
+                          >
+                            {pipelineRawExpanded.engineering ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                      {pipelineRawExpanded.engineering && (
+                        <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
+                          {JSON.stringify(pipelineResult.engineering, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* Artifacts row */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${
+                            Object.values(pipelineResult.artifacts ?? {}).every(Boolean) ? 'bg-emerald-400'
+                            : Object.values(pipelineResult.artifacts ?? {}).some(Boolean) ? 'bg-amber-400'
+                            : 'bg-red-400'
+                          }`} />
+                          <span className="text-xs font-semibold text-slate-300">Artifacts</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs">
+                          {[
+                            { key: 'bomGenerated',     label: 'BOM'     },
+                            { key: 'sldGenerated',     label: 'SLD'     },
+                            { key: 'structuralCalcs',  label: 'Struct'  },
+                            { key: 'permitPacket',     label: 'Permit'  },
+                            { key: 'engineeringReport',label: 'Eng Rpt' },
+                          ].map(a => (
+                            <span key={a.key} className={`flex items-center gap-0.5 ${
+                              pipelineResult.artifacts?.[a.key] ? 'text-emerald-400' : 'text-slate-600'
+                            }`}>
+                              {pipelineResult.artifacts?.[a.key]
+                                ? <CheckCircle size={10} />
+                                : <XCircle size={10} />
+                              }
+                              {a.label}
+                            </span>
+                          ))}
+                          <button
+                            onClick={() => setPipelineRawExpanded(s => ({ ...s, artifacts: !s.artifacts }))}
+                            className="text-slate-500 hover:text-slate-300 transition-colors ml-1"
+                          >
+                            {pipelineRawExpanded.artifacts ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                      {pipelineRawExpanded.artifacts && (
+                        <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
+                          {JSON.stringify(pipelineResult.artifacts, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* Permit row */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${
+                            pipelineResult.permit?.ready ? 'bg-emerald-400' : 'bg-amber-400'
+                          }`} />
+                          <span className="text-xs font-semibold text-slate-300">Permit Sheets</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                          <span className={
+                            (pipelineResult.permit?.sheetsGenerated ?? 0) >= (pipelineResult.permit?.sheetsExpected ?? 13)
+                              ? 'text-emerald-400' : 'text-amber-400'
+                          }>
+                            {pipelineResult.permit?.sheetsGenerated ?? 0} / {pipelineResult.permit?.sheetsExpected ?? 13} sheets
+                          </span>
+                          <span>{pipelineResult.permit?.totalPanels} panels</span>
+                          <span>{pipelineResult.permit?.systemKw?.toFixed(2)} kW</span>
+                          <span className="text-slate-600">|</span>
+                          {pipelineResult.permit?.ready
+                            ? <span className="text-emerald-400 flex items-center gap-1"><CheckCircle size={11} /> Ready</span>
+                            : <span className="text-amber-400 flex items-center gap-1"><AlertTriangle size={11} /> Incomplete</span>
+                          }
+                          <button
+                            onClick={() => setPipelineRawExpanded(s => ({ ...s, permit: !s.permit }))}
+                            className="text-slate-500 hover:text-slate-300 transition-colors"
+                          >
+                            {pipelineRawExpanded.permit ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                      {pipelineRawExpanded.permit && (
+                        <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
+                          {JSON.stringify(pipelineResult.permit, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* Client Files row */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${
+                            (pipelineResult.clientFiles?.visibleWorkspaceFiles ?? 0) > 0 ? 'bg-emerald-400' : 'bg-amber-400'
+                          }`} />
+                          <span className="text-xs font-semibold text-slate-300">Client Files</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-slate-400">
+                          <span>{pipelineResult.clientFiles?.artifactRegistryEntries ?? 0} registry entries</span>
+                          <span className="text-slate-600">|</span>
+                          <span>{pipelineResult.clientFiles?.visibleWorkspaceFiles ?? 0} workspace files</span>
+                          <button
+                            onClick={() => setPipelineRawExpanded(s => ({ ...s, clientFiles: !s.clientFiles }))}
+                            className="text-slate-500 hover:text-slate-300 transition-colors"
+                          >
+                            {pipelineRawExpanded.clientFiles ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                      {pipelineRawExpanded.clientFiles && (
+                        <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
+                          {JSON.stringify(pipelineResult.clientFiles, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* Workflow row */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${
+                            pipelineResult.workflow?.filesReady ? 'bg-emerald-400' : 'bg-slate-500'
+                          }`} />
+                          <span className="text-xs font-semibold text-slate-300">Workflow</span>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs">
+                          {[
+                            { key: 'designComplete',      label: 'Design'      },
+                            { key: 'engineeringComplete', label: 'Engineering' },
+                            { key: 'permitReady',         label: 'Permit'      },
+                            { key: 'filesReady',          label: 'Files'       },
+                          ].map(w => (
+                            <span key={w.key} className={`flex items-center gap-0.5 ${
+                              pipelineResult.workflow?.[w.key] ? 'text-emerald-400' : 'text-slate-600'
+                            }`}>
+                              {pipelineResult.workflow?.[w.key]
+                                ? <CheckCircle size={10} />
+                                : <XCircle size={10} />
+                              }
+                              {w.label}
+                            </span>
+                          ))}
+                          <button
+                            onClick={() => setPipelineRawExpanded(s => ({ ...s, workflow: !s.workflow }))}
+                            className="text-slate-500 hover:text-slate-300 transition-colors ml-1"
+                          >
+                            {pipelineRawExpanded.workflow ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+                        </div>
+                      </div>
+                      {pipelineRawExpanded.workflow && (
+                        <pre className="mt-2 text-xs bg-slate-900/60 rounded-lg p-3 text-slate-400 overflow-x-auto max-h-48 font-mono">
+                          {JSON.stringify(pipelineResult.workflow, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+
+                    {/* Pipeline Steps row */}
+                    <div className="px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-slate-300">
+                            Pipeline Steps ({pipelineResult.steps?.length ?? 0})
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {pipelineResult.durationMs}ms
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setPipelineRawExpanded(s => ({ ...s, steps: !s.steps }))}
+                          className="text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1 text-xs"
+                        >
+                          {pipelineRawExpanded.steps ? 'Hide' : 'Show'} steps
+                          {pipelineRawExpanded.steps ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                        </button>
+                      </div>
+                      {pipelineRawExpanded.steps && (
+                        <div className="mt-2 space-y-1">
+                          {(pipelineResult.steps ?? []).map((st: any, i: number) => (
+                            <div key={i} className={`flex items-start gap-2 text-xs px-2 py-1.5 rounded-lg ${
+                              st.status === 'ok'      ? 'bg-emerald-500/5 text-emerald-300'  :
+                              st.status === 'warning' ? 'bg-amber-500/5   text-amber-300'    :
+                              st.status === 'error'   ? 'bg-red-500/5     text-red-300'      :
+                                                        'bg-slate-700/20  text-slate-500'
+                            }`}>
+                              <span className="shrink-0 w-14 font-mono text-slate-500">Step {st.step}</span>
+                              <span className="font-medium w-40 shrink-0">{st.name}</span>
+                              <span className={`shrink-0 px-1.5 rounded font-bold text-[10px] uppercase ${
+                                st.status === 'ok'      ? 'bg-emerald-500/20 text-emerald-400' :
+                                st.status === 'warning' ? 'bg-amber-500/20   text-amber-400'   :
+                                st.status === 'error'   ? 'bg-red-500/20     text-red-400'     :
+                                                          'bg-slate-600/30   text-slate-400'
+                              }`}>{st.status}</span>
+                              <span className="text-slate-400 flex-1">{st.message}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                ) : (
+                  <div className="px-4 py-6 text-center text-xs text-slate-500">
+                    Click <span className="text-amber-400 font-semibold">Run Project Pipeline</span> to verify all subsystems
+                  </div>
+                )}
+              </div>
+              {/* ── End Pipeline Verification Panel ── */}
 
               {/* File type legend */}
               <div className="flex flex-wrap gap-2">

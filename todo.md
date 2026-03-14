@@ -1,59 +1,39 @@
-# Full System Audit & Pipeline Fix
+# Pipeline Verification System
 
-## PHASE 1 — Audit All Subsystems
-- [x] Read database schema (migrations, tables)
-- [x] Read project API routes (get, save, update)
-- [x] Read layout API routes (save, load)
-- [x] Read engineering API routes + engineering page
-- [x] Read permit generator route
-- [x] Read workflow tracker
-- [x] Read client files / artifact registry
-- [x] Read SLD, BOM, structural routes
-- [x] Read syncPipeline orchestrator (existing v47.52)
-- [x] Read debug page (existing v47.52)
+## PHASE 0 — Audit Current State
+- [ ] Read current syncPipeline implementation
+- [ ] Read current client files tab in engineering page
+- [ ] Read current project files API
+- [ ] Read existing debug/project page
+- [ ] Read engineering sync-pipeline route
+- [ ] Identify root cause of pipeline failures
 
-## PHASE 2 — Trace Critical Fields
-- [x] Trace panelCount from design → permit (layout → syncPipeline → projectLayout state → permit input)
-- [x] Trace systemSize from design → permit (layout.systemSizeKw → panels.length × 0.4)
-- [x] Trace moduleModel/inverterModel (config.inverters → permit input)
-- [x] Trace projectAddress (config.address → permit input)
-- [x] Document where each field breaks (SYSTEM_AUDIT_v47.54.md)
+## PHASE 1 — Backend: Upgrade syncProjectPipeline
+- [ ] Expand syncProjectPipeline to cover all 11 steps with structured logs
+- [ ] Return full diagnostic PipelineResult with counts for every subsystem
+- [ ] Add PIPELINE_MISMATCH detection and error codes
+- [ ] Add all 8 structured log codes
 
-## PHASE 3 — Source of Truth Decision
-- [x] Document canonical source of truth (projectLayout.panels[])
-- [x] Identify duplicate/competing models (engineeringSeed vs layout vs engineering_reports)
+## PHASE 2 — Backend: Debug Endpoint
+- [ ] Create/upgrade /api/debug/project route
+- [ ] Return layout summary, engineering summary, artifact registry, workflow state
+- [ ] Add permit inputs summary
 
-## PHASE 4 — Fix Pipeline Integration
-- [x] syncProjectPipeline covers layout → snapshot → engineering report (confirmed)
-- [x] save-outputs triggered by runCalc() → handleGeneratePermitPackage (confirmed)
-- [x] Layout-save webhook triggers sync correctly (confirmed in layout route)
+## PHASE 3 — Frontend: Pipeline Verification Panel in Client Files
+- [ ] Add RUN PROJECT PIPELINE button to client files tab
+- [ ] Add Pipeline Status Panel (layout / engineering / artifacts / permit / client files)
+- [ ] Add mismatch error banners
+- [ ] Add expandable raw data sections
 
-## PHASE 5 — Remove Silent Default Fallbacks
-- [x] Fix permit generator to block on ENGINEERING_MODEL_STALE (route guard added)
-- [x] Remove 9.6 kW / 24 panel defaults from buildSLD() (changed to ?? 0)
-- [x] Handle ENGINEERING_MODEL_STALE in engineering page UI (both PDF + HTML fetch blocks)
+## PHASE 4 — Workflow Tracker
+- [ ] Verify v47.54 fix still correct
+- [ ] Confirm engineering model existence check works
 
-## PHASE 6 — Client Files & Artifact Registry
-- [x] Audit artifact registry: save-outputs saves 5 files after runCalc()
-- [x] Sheet count: permit generates 13 pages (TOTAL=13), cover sheet index lists 13 — CORRECT, no mismatch
+## PHASE 5 — Client Files Sync
+- [ ] Audit current project-files fetch
+- [ ] Fix any mapping issues
 
-## PHASE 7 — Workflow Tracker
-- [x] Fix design step: check layout.panels.length > 0 (not just truthy layout)
-- [x] Fix engineering step: check layout.panels.length > 0 OR status in [proposal/approved/installed]
-
-## PHASE 8 — Auth (already fixed in v47.53)
-- [x] response.cookies.set() fix
-- [x] removed vercel.json /api override
-- [x] removed router.refresh() race
-
-## PHASE 9 — Diagnostics
-- [x] Verified debug page shows panelCount vs engineeringPanels mismatch correctly
-- [x] Build badge updated to v47.54 in lib/version.ts
-
-## PHASE 10 — Tests
-- [x] All 10 manual verification checks passed (see SYSTEM_AUDIT_v47.54.md)
-- [x] tsc --noEmit = 0 errors
-
-## Final
-- [x] Commit all fixes as v47.54 (413e24f)
-- [x] Push to GitHub (master → origin)
+## PHASE 6 — Final
+- [ ] TypeScript compile check
+- [ ] Commit as v47.56
+- [ ] Push to GitHub

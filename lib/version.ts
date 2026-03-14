@@ -1,9 +1,19 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.55';
+export const BUILD_VERSION     = 'v47.56';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-06-09';
-export const BUILD_DESCRIPTION = 'v47.55: Auth root cause fix — remove Cache-Control: no-store catch-all from vercel.json and next.config.js headers that was stripping Set-Cookie on login response. Add Phase 1-8 auth diagnostics.';
+export const BUILD_DESCRIPTION = 'v47.56: Pipeline Verification System — RUN PROJECT PIPELINE button, status panel for all subsystems (layout/engineering/artifacts/permit/client files/workflow), mismatch detection, expandable raw data sections, /api/pipeline/run, /api/debug/project endpoints.';
 export const BUILD_FEATURES    = [
+  // v47.56 -- Pipeline Verification System
+  'PIPELINE: RUN PROJECT PIPELINE button in Client Files tab — POST /api/pipeline/run, full 11-step orchestration',
+  'PIPELINE: Status Panel — live subsystem rows for Layout, Engineering, Artifacts, Permit Sheets, Client Files, Workflow, Pipeline Steps',
+  'PIPELINE: Mismatch detection — PIPELINE_MISMATCH_ENGINEERING_MODEL_STALE, PIPELINE_ARTIFACT_REGISTRY_OUT_OF_SYNC, PIPELINE_ARTIFACT_REGISTRY_EMPTY with severity ERROR/WARNING',
+  'PIPELINE: Expandable raw data sections — click chevron on any subsystem row to expand full JSON',
+  'PIPELINE: /api/pipeline/run — POST endpoint, all 11 steps, PipelineRunResult with steps[], layout, engineering, artifacts, permit, clientFiles, workflow, mismatches, errors',
+  'PIPELINE: /api/debug/project?id=<projectId> — GET diagnostic endpoint, layout/engineering/artifact/permit/workflow summaries, isStale flag',
+  'PIPELINE: Structured logs — LAYOUT_LOADED, ENGINEERING_REBUILD_STARTED, ENGINEERING_REBUILD_COMPLETED, ARTIFACT_GENERATION_STARTED, ARTIFACT_GENERATION_COMPLETED, PIPELINE_MISMATCH',
+  'PIPELINE: Workflow completion from actual data (layout.panels, engineering.exists, permit.ready, files.count) — not p.status',
+  'PIPELINE: Client Files sync from artifact registry after each pipeline run',
   // v47.55 -- Auth server-side investigation and fix
   'AUTH FIX: Remove "source":"/(.*)" Cache-Control: no-store from vercel.json — this header rule applied to /api/auth/login and caused Vercel edge proxy to strip Set-Cookie on login response',
   'AUTH FIX: Remove catch-all "/(.*)" from next.config.js async headers() — changed to "/((?!api|_next/static|_next/image|favicon.ico).*)" to exclude /api routes',
