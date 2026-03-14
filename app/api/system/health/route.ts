@@ -40,6 +40,7 @@ export const revalidate = 0;
 import { NextResponse } from 'next/server';
 import { getDbReady } from '@/lib/db-neon';
 import { getBaseUrl } from '@/lib/env';
+import { BUILD_VERSION } from '@/lib/version';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -115,13 +116,7 @@ export async function GET() {
   const status    = unhealthy ? 'unhealthy' : degraded ? 'degraded' : 'healthy';
 
   // ── Build response ─────────────────────────────────────────────────────────
-  let version = 'unknown';
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    version = (require('@/../package.json') as { version: string }).version;
-  } catch {
-    // package.json not available at runtime in some build configs — ignore
-  }
+  const version = BUILD_VERSION;
 
   const body = {
     status,
