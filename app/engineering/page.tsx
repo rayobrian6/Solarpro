@@ -204,6 +204,7 @@ interface ProjectConfig {
 
 interface ComplianceResult {
   overallStatus: 'PASS' | 'WARNING' | 'FAIL' | null;
+  utilityName?: string;
   jurisdiction?: any;
   electrical?: any;
   structural?: any;
@@ -7292,6 +7293,7 @@ function EngineeringPageInner() {
                 </div>
                 <button
                   onClick={async () => {
+                    const _mountSys = ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId);
                     const permitInput = {
                       project: {
                         projectName: config.projectName, clientName: config.clientName,
@@ -7302,6 +7304,18 @@ function EngineeringPageInner() {
                         dcDisconnect: config.dcDisconnect, productionMeter: config.productionMeter,
                         rapidShutdown: config.rapidShutdown, conduitType: config.conduitType,
                         wireGauge: config.wireGauge, wireLength: config.wireLength,
+                        // ── New fields for upgraded plan set sheets ──────────────────
+                        utilityName: compliance?.utilityName || config.utilityId || 'Local Utility',
+                        roofType: config.roofType,
+                        mountingSystem: _mountSys ? `${_mountSys.manufacturer} ${_mountSys.model}` : config.mountingId || 'IronRidge XR100',
+                        mountingSystemId: config.mountingId,
+                        roofPitch: config.roofPitch,
+                        rafterSize: config.rafterSize,
+                        rafterSpacing: config.rafterSpacing,
+                        attachmentSpacing: config.attachmentSpacing,
+                        interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+                        panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+                        // ── Battery / Generator ──────────────────────────────────────
                         batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
                         batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
                         batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
@@ -7351,6 +7365,7 @@ function EngineeringPageInner() {
                 </button>
                 <button
                   onClick={async () => {
+                    const _mountSys2 = ALL_MOUNTING_SYSTEMS.find(s => s.id === config.mountingId);
                     const permitInput = {
                       project: {
                         projectName: config.projectName, clientName: config.clientName,
@@ -7361,6 +7376,25 @@ function EngineeringPageInner() {
                         dcDisconnect: config.dcDisconnect, productionMeter: config.productionMeter,
                         rapidShutdown: config.rapidShutdown, conduitType: config.conduitType,
                         wireGauge: config.wireGauge, wireLength: config.wireLength,
+                        // ── New fields for upgraded plan set sheets ──────────────────
+                        utilityName: compliance?.utilityName || config.utilityId || 'Local Utility',
+                        roofType: config.roofType,
+                        mountingSystem: _mountSys2 ? `${_mountSys2.manufacturer} ${_mountSys2.model}` : config.mountingId || 'IronRidge XR100',
+                        mountingSystemId: config.mountingId,
+                        roofPitch: config.roofPitch,
+                        rafterSize: config.rafterSize,
+                        rafterSpacing: config.rafterSpacing,
+                        attachmentSpacing: config.attachmentSpacing,
+                        interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
+                        panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
+                        // ── Battery / Generator ──────────────────────────────────────
+                        batteryBrand: config.batteryBrand, batteryModel: config.batteryModel,
+                        batteryCount: config.batteryCount, batteryKwh: config.batteryKwh,
+                        batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
+                        generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
+                        generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
+                        atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
+                        atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
                       },
                       system: {
                         totalDcKw: parseFloat(totalKw), totalAcKw: parseFloat(totalInverterKw),
@@ -7368,7 +7402,7 @@ function EngineeringPageInner() {
                         topology: topologyType,
                         inverters: config.inverters.map(inv => {
                           const invData = getInvById(inv.inverterId, inv.type) as any;
-                          return { manufacturer: invData?.manufacturer || '', model: invData?.model || '', type: inv.type, acOutputKw: invData?.acOutputKw || 0, maxDcVoltage: invData?.maxDcVoltage || 480, efficiency: invData?.efficiency || 97, ulListing: invData?.ulListing || 'UL 1741', strings: inv.strings.map(str => { const panel = getPanelById(str.panelId) as any; return { label: str.label, panelCount: str.panelCount, panelManufacturer: panel?.manufacturer || '', panelModel: panel?.model || '', panelWatts: panel?.watts || 400, panelVoc: panel?.voc || 41.6, panelIsc: panel?.isc || 12.26, wireGauge: str.wireGauge, wireLength: str.wireLength }; }) };
+                          return { manufacturer: invData?.manufacturer || '', model: invData?.model || '', type: inv.type, acOutputKw: invData?.acOutputKw || (invData?.acOutputW/1000) || 0, maxDcVoltage: invData?.maxDcVoltage || 480, efficiency: invData?.efficiency || 97, ulListing: invData?.ulListing || 'UL 1741', strings: inv.strings.map(str => { const panel = getPanelById(str.panelId) as any; return { label: str.label, panelCount: str.panelCount, panelManufacturer: panel?.manufacturer || '', panelModel: panel?.model || '', panelWatts: panel?.watts || 400, panelVoc: panel?.voc || 41.6, panelIsc: panel?.isc || 12.26, wireGauge: str.wireGauge, wireLength: str.wireLength }; }) };
                         }),
                       },
                       compliance, rulesResult, bom, overrides,
