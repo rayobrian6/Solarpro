@@ -1,9 +1,25 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.49';
+export const BUILD_VERSION     = 'v47.50';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.49: Pipeline verification — debug page, version footer, layout DB audit';
+export const BUILD_DESCRIPTION = 'v47.50: Fix preflight panel TS errors — tsc 0 errors, clean build';
 export const BUILD_FEATURES    = [
+  // v47.50 -- TypeScript fix
+  'ENGINEERING: Fix preflight panel — computedSystem.bomQuantities.panelModel/inverterModel (not config.moduleModel)',
+  'ENGINEERING: Fix preflight panel — totalKw for system size (not config.systemKw)',
+  'BUILD: tsc --noEmit = 0 errors, npm run build = clean',
+  // v47.49 -- Pipeline verification
+  'DEBUG: /debug/project page — visual DB layout inspector',
+  'DEBUG: /api/debug/layout route — authenticated DB schema + layout audit',
+  'ENGINEERING: Preflight panel — panel count, roof planes, system size, module, inverter, BUILD_VERSION',
+  'ENGINEERING: New primary button — Generate & Download Permit Package (13 Sheets)',
+  'FOOTER: Global BUILD_VERSION badge fixed bottom-left on all pages',
+  // v47.48 -- Layout pipeline debug instrumentation
+  'DESIGN: restorePanels() now calls setRoofPlanes() — critical roofPlanes restore fix',
+  'DESIGN: [LAYOUT SAVE PAYLOAD] + [LAYOUT RESTORE FROM DB] logging',
+  'DESIGN: Visible "Layout loaded from DB · N panels · N roof planes" badge',
+  'API: [API RECEIVED LAYOUT] + [LAYOUT SAVED TO DB] logging in layout route',
+  'ENGINEERING: [LOADED PROJECT LAYOUT] Step 4 logging',
   // v47.46 -- Full 13-page permit planset pipeline
   'PERMIT: 13-page planset (was 11) — PV-0 through E-1 (sheets 1 of 13 .. 13 of 13)',
   'PERMIT: pageArrayGeometry() — PV-2B: SVG panel grid, string color-coding, IFC §605.11 fire setback diagram, array parameters table',

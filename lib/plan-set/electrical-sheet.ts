@@ -180,11 +180,11 @@ export function buildElectricalSheet(inp: ElectricalSheetInput): string {
         <div class="info-box" style="border-color:#1a3a6b; background:#f0f4ff;">
           <div class="ib-title" style="color:#1a3a6b;">Inverter Specifications</div>
           <div class="ib-row"><span class="lbl">Model</span><span class="val">${escHtml(inp.inverterModel)}</span></div>
-          <div class="ib-row"><span class="lbl">Max DC Input V</span><span class="val">${inp.inverterMaxDcV}V</span></div>
-          <div class="ib-row"><span class="lbl">MPPT Range</span><span class="val">${inp.inverterMpptMin}–${inp.inverterMpptMax}V</span></div>
-          <div class="ib-row"><span class="lbl">Max DC Input A</span><span class="val">${inp.inverterMaxDcA}A</span></div>
-          <div class="ib-row"><span class="lbl">AC Output</span><span class="val">${inp.inverterKw.toFixed(2)} kW @ ${inp.inverterVacOut}V</span></div>
-          <div class="ib-row"><span class="lbl">Max AC Output A</span><span class="val">${inp.inverterMaxAcA.toFixed(1)}A</span></div>
+          <div class="ib-row"><span class="lbl">Max DC Input V</span><span class="val">${inp.inverterMaxDcV ?? 480}V</span></div>
+          <div class="ib-row"><span class="lbl">MPPT Range</span><span class="val">${inp.inverterMpptMin ?? 100}–${inp.inverterMpptMax ?? 480}V</span></div>
+          <div class="ib-row"><span class="lbl">Max DC Input A</span><span class="val">${inp.inverterMaxDcA ?? '—'}A</span></div>
+          <div class="ib-row"><span class="lbl">AC Output</span><span class="val">${(inp.inverterKw ?? 0).toFixed(2)} kW @ ${inp.inverterVacOut ?? 240}V</span></div>
+          <div class="ib-row"><span class="lbl">Max AC Output A</span><span class="val">${(inp.inverterMaxAcA ?? 0).toFixed(1)}A</span></div>
         </div>
 
         <!-- Engineering Calculations -->

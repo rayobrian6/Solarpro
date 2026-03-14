@@ -7631,29 +7631,65 @@ function EngineeringPageInner() {
                   </div>
                 )}
 
-                {/* ── Generate button ── */}
+                {/* ── PREFLIGHT PANEL: shows exactly what the permit generator will receive ── */}
+                <div className="mb-3 p-3 bg-slate-800/60 border border-slate-700/50 rounded-lg text-xs">
+                  <div className="font-bold text-slate-300 mb-2 flex items-center gap-1.5">
+                    <FileText size={11} className="text-amber-400" /> Permit Preflight Check
+                  </div>
+                  <div className="space-y-1 font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Panel positions</span>
+                      <span className={projectLayout?.panels?.length > 0 ? 'text-emerald-400' : 'text-red-400 font-bold'}>
+                        {projectLayout?.panels?.length > 0 ? `✅ ${projectLayout.panels.length} panels` : '❌ MISSING'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Roof planes</span>
+                      <span className={projectLayout?.roofPlanes?.length > 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                        {projectLayout?.roofPlanes?.length > 0 ? `✅ ${projectLayout.roofPlanes.length} planes` : '⚠ none saved'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">System size</span>
+                      <span className="text-slate-300">{projectLayout?.systemSizeKw ?? totalKw ?? '—'} kW DC</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Module model</span>
+                      <span className="text-slate-300 truncate max-w-[140px]">{computedSystem.bomQuantities?.panelModel || '—'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Inverter model</span>
+                      <span className="text-slate-300 truncate max-w-[140px]">{computedSystem.bomQuantities?.inverterModel || '—'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Build</span>
+                      <span className="text-slate-500">{BUILD_VERSION}</span>
+                    </div>
+                  </div>
+                  {!(projectLayout?.panels?.length > 0) && (
+                    <div className="mt-2 p-2 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-xs">
+                      ⚠ No saved layout detected. Open Design Studio, place panels, and save before generating the permit.
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Primary Generate button — uses new 13-page permit generator ── */}
                 <button
-                  onClick={handleGeneratePlanSet}
-                  disabled={planSetLoading || !permitIsReady}
+                  onClick={handleGeneratePermitPackage}
+                  disabled={permitLoading || calculating || sldLoading || bomLoading}
                   className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg font-semibold text-sm transition-all ${
-                    permitIsReady
-                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-lg shadow-amber-500/20'
-                      : 'bg-slate-700/60 text-slate-500 cursor-not-allowed border border-slate-600/50'
+                    'bg-amber-500 hover:bg-amber-400 text-slate-900 shadow-lg shadow-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed'
                   }`}
                 >
-                  {planSetLoading ? (
-                    <><RefreshCw size={16} className="animate-spin" /> Generating Plan Set…</>
-                  ) : permitIsReady ? (
-                    <><FileText size={16} /> Generate &amp; Download Permit Plan Set (7 Sheets)</>
+                  {permitLoading ? (
+                    <><RefreshCw size={16} className="animate-spin" /> Building Permit Package…</>
                   ) : (
-                    <><Lock size={16} /> Complete {permitTotalCount - permitReadyCount} field{permitTotalCount - permitReadyCount !== 1 ? 's' : ''} above to unlock</>
+                    <><FileText size={16} /> Generate &amp; Download Permit Package (13 Sheets)</>
                   )}
                 </button>
-                {!permitIsReady && (
-                  <p className="text-xs text-slate-500 text-center mt-2">
-                    {permitReadyCount}/{permitTotalCount} permit fields ready · {permitTotalCount - permitReadyCount} remaining
-                  </p>
-                )}
+                <p className="text-xs text-slate-500 text-center mt-1">
+                  Uses real panel positions + roof geometry from Design Studio
+                </p>
               </div>
 
               {/* ── Sheet Preview Modal ── */}

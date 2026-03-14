@@ -441,6 +441,10 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [calcMessage, setCalcMessage] = useState<string>('');
+  // Restore indicators — show what was loaded from DB on mount
+  const [restoredPanelCount, setRestoredPanelCount] = useState<number>(0);
+  const [restoredRoofPlaneCount, setRestoredRoofPlaneCount] = useState<number>(0);
+  const [layoutLoadedFromDB, setLayoutLoadedFromDB] = useState<boolean>(false);
 
   // Auto-save refs — use refs for mapCenter/zoom so the debounce callback
   // doesn't get recreated on every map pan (which would reset the 3-second timer)
@@ -581,12 +585,15 @@ export default function DesignStudio({ project, onSave }: Props) {
         if (data.success && data.data?.panels && data.data.panels.length > 0) {
           setPanels(data.data.panels);
           lastSavedPanelsRef.current = JSON.stringify(data.data.panels);
+          setRestoredPanelCount(data.data.panels.length);
+          setLayoutLoadedFromDB(true);
           console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
         }
         // CRITICAL FIX: Also restore roofPlanes so roofPlanesRef stays populated
         // Without this, auto-save fires with roofPlanesRef.current = [] and roof planes are lost
         if (data.success && data.data?.roofPlanes && data.data.roofPlanes.length > 0) {
           setRoofPlanes(data.data.roofPlanes);
+          setRestoredRoofPlaneCount(data.data.roofPlanes.length);
           console.log(`[DesignStudio] Restored ${data.data.roofPlanes.length} roof planes from DB`);
         }
       } catch (e) {
@@ -1928,6 +1935,12 @@ export default function DesignStudio({ project, onSave }: Props) {
             lastSavedAt={lastSavedAt}
             className="ml-1"
           />
+          {/* Restore indicators — visible proof that layout was loaded from DB */}
+          {layoutLoadedFromDB && (
+            <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1">
+              <CheckCircle size={10} /> Layout loaded from DB · {restoredPanelCount} panels{restoredRoofPlaneCount > 0 ? ` · ${restoredRoofPlaneCount} roof planes` : ''}
+            </span>
+          )}
         </div>
       </div>
 

@@ -4,6 +4,7 @@
 // ============================================================
 
 import { wrapPage, escHtml, fmtDate, type TitleBlockData } from './title-block';
+import { BUILD_VERSION } from '@/lib/version';
 
 export interface CoverSheetInput {
   tb: TitleBlockData;
@@ -124,7 +125,7 @@ export function buildCoverSheet(inp: CoverSheetInput): string {
           ${inp.contractorPhone ? `<tr><td style="color:#555;">Phone</td><td>${escHtml(inp.contractorPhone)}</td></tr>` : ''}
           ${inp.contractorEmail ? `<tr><td style="color:#555;">Email</td><td>${escHtml(inp.contractorEmail)}</td></tr>` : ''}
           <tr><td style="color:#555;">Designer</td><td>${escHtml(inp.designerName)}</td></tr>
-          <tr><td style="color:#555;">Prepared By</td><td>SolarPro Engineering Engine v44.0</td></tr>
+          <tr><td style="color:#555;">Prepared By</td><td>SolarPro Engineering Engine ${BUILD_VERSION}</td></tr>
         </table>
 
       </div>

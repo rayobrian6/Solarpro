@@ -20,6 +20,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
+import { BUILD_VERSION } from '@/lib/version';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
@@ -2218,7 +2219,7 @@ function pageEngineerCert(input: PermitInput, pageNum: number, totalPages: numbe
         </div>
       </div>
       <div class="cert-footer">
-        SolarPro Engineering Platform · Generated ${new Date().toLocaleDateString()} ·
+        SolarPro Engineering Platform ${BUILD_VERSION} · Generated ${new Date().toLocaleDateString()} ·
         This document requires engineer review and wet stamp before AHJ submission.
         All equipment must be UL-listed and installed per manufacturer specifications and NEC ${necVer}.
       </div>
