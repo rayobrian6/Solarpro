@@ -1,9 +1,17 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.57';
+export const BUILD_VERSION     = 'v47.58';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-06-09';
-export const BUILD_DESCRIPTION = 'v47.57: Dev auth bypass — DEV_AUTH_BYPASS=true skips JWT validation in non-production environments, fixing login loops after every preview deployment.';
+export const BUILD_DESCRIPTION = 'v47.58: Pipeline audit and repair — /api/pipeline/run now writes all 5 artifact files to project_files via buildAllArtifacts(). Fixes BP-3: steps 6-9 previously only checked boolean flags and wrote nothing. Client Files workspace now populates after RUN PROJECT PIPELINE.';
 export const BUILD_FEATURES    = [
+  // v47.58 -- Pipeline audit and repair (BP-3 fix)
+  'PIPELINE FIX: /api/pipeline/run steps 6-9 now WRITE real artifact files to project_files (previously only checked boolean flags, wrote nothing)',
+  'PIPELINE FIX: buildAllArtifacts() from lib/engineering/artifactBuilders.ts generates Engineering_Report, SLD, BOM, Permit_Packet, System_Estimate server-side',
+  'PIPELINE FIX: upsertFile() helper in pipeline/run mirrors save-outputs pattern — ON CONFLICT upsert with DELETE+INSERT fallback',
+  'PIPELINE FIX: artifactResult now reports filesWritten (actual count) and fileNames (actual list) instead of flag booleans',
+  'PIPELINE FIX: Client Files workspace populates from artifact registry immediately after RUN PROJECT PIPELINE click',
+  'PIPELINE FIX: Mismatch PIPELINE_ARTIFACT_WRITE_FAILED fires if 0 files written; PIPELINE_ARTIFACT_REGISTRY_OUT_OF_SYNC if < 5 written',
+  'PIPELINE FIX: lib/engineering/artifactBuilders.ts — SystemSummary.stateCode does not exist; fixed to use sys.address + sys.ahj (0 TS errors)',
   // v47.57 -- Dev auth bypass
   'DEV AUTH: lib/dev-auth.ts — single source of truth for bypass logic. Active only when NODE_ENV!==production AND VERCEL_ENV!==production AND DEV_AUTH_BYPASS=true.',
   'DEV AUTH: middleware.ts — checks dev bypass before JWT decode. Passes x-dev-auth-user-id/email headers downstream.',
