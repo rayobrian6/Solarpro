@@ -53,6 +53,8 @@ interface PermitInput {
     conduitType: string;
     wireGauge: string;
     wireLength: number;
+    lat?: number;
+    lng?: number;
     roofType?: string;
     mountingSystem?: string;
     mountingSystemId?: string;
@@ -151,6 +153,22 @@ interface PermitInput {
     engineer: string;
     timestamp: string;
   }>;
+  aerialData?: {
+    imageBase64?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    lat?: number;
+    lng?: number;
+    zoom?: number;
+    roofSegments?: Array<{
+      pitchDegrees: number;
+      azimuthDegrees: number;
+      areaM2: number;
+      polygon?: Array<{ lat: number; lng: number }>;
+      center?: { lat: number; lng: number };
+    }>;
+    error?: string;
+  };
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -293,7 +311,7 @@ function pageCoverSheet(input: PermitInput, pageNum: number, totalPages: number)
   const sheets = [
     { id: 'PV-0', title: 'Cover Sheet, System Summary & Construction Notes', sheet: '1' },
     { id: 'PV-1', title: 'Site Information & Interconnection Details', sheet: '2' },
-    { id: 'PV-2', title: 'Schematic Roof Plan with Fire Setbacks', sheet: '3' },
+    { id: 'PV-2', title: 'Aerial Roof Plan with Fire Setbacks', sheet: '3' },
     { id: 'PV-3', title: 'Attachment Detail & Bill of Materials', sheet: '4' },
     { id: 'PV-4A', title: 'NEC Compliance Sheet', sheet: '5' },
     { id: 'PV-4B', title: 'Conductor & Conduit Schedule', sheet: '6' },
@@ -473,147 +491,357 @@ function pageSiteInformation(input: PermitInput, pageNum: number, totalPages: nu
   </div>`;
 }
 
+
+// ─── Aerial Roof Data: geocode + Google Solar API + Static Maps satellite ──────
+// Called server-side inside the POST handler before generatePermitHTML.
+// Returns aerialData payload that pageRoofPlan() uses to render the real image.
+
+interface AerialRoofData {
+  imageBase64?: string;
+  imageWidth?: number;
+  imageHeight?: number;
+  lat?: number;
+  lng?: number;
+  zoom?: number;
+  roofSegments?: Array<{
+    pitchDegrees: number;
+    azimuthDegrees: number;
+    areaM2: number;
+    polygon?: Array<{ lat: number; lng: number }>;
+    center?: { lat: number; lng: number };
+  }>;
+  error?: string;
+}
+
+async function fetchAerialRoofData(
+  address: string,
+  lat?: number,
+  lng?: number
+): Promise<AerialRoofData> {
+  const GKEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+
+  try {
+    // ── Step 1: Geocode address to lat/lng if not provided ────────────────
+    let finalLat = lat;
+    let finalLng = lng;
+
+    if ((!finalLat || !finalLng) && address) {
+      const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GKEY}`;
+      const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
+      if (geoRes.ok) {
+        const geoData = await geoRes.json();
+        if (geoData.results?.[0]?.geometry?.location) {
+          finalLat = geoData.results[0].geometry.location.lat;
+          finalLng = geoData.results[0].geometry.location.lng;
+        }
+      }
+    }
+
+    if (!finalLat || !finalLng) {
+      return { error: 'Could not geocode address' };
+    }
+
+    // ── Step 2: Google Solar API — buildingInsights for roof segments ─────
+    let roofSegments: AerialRoofData['roofSegments'] = [];
+    try {
+      const solarUrl = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${finalLat}&location.longitude=${finalLng}&requiredQuality=LOW&key=${GKEY}`;
+      const solarRes = await fetch(solarUrl, { signal: AbortSignal.timeout(10000) });
+      if (solarRes.ok) {
+        const solarData = await solarRes.json();
+        const segs = solarData.solarPotential?.roofSegmentStats || [];
+        roofSegments = segs.map((seg: any) => ({
+          pitchDegrees: seg.pitchDegrees ?? 0,
+          azimuthDegrees: seg.azimuthDegrees ?? 180,
+          areaM2: seg.stats?.areaMeters2 ?? 0,
+          center: seg.center ? { lat: seg.center.latitude, lng: seg.center.longitude } : undefined,
+          polygon: undefined, // roofSegmentStats don't include polygon; use center+area to infer
+        }));
+      }
+    } catch (_) {
+      // Solar API optional — proceed without segments
+    }
+
+    // ── Step 3: Google Maps Static API — satellite image at zoom=20 ──────
+    const zoom = 20;
+    const imgSize = '640x640';
+    const staticUrl =
+      `https://maps.googleapis.com/maps/api/staticmap` +
+      `?center=${finalLat},${finalLng}` +
+      `&zoom=${zoom}` +
+      `&size=${imgSize}` +
+      `&maptype=satellite` +
+      `&scale=2` +
+      `&key=${GKEY}`;
+
+    let imageBase64: string | undefined;
+    let imageWidth = 640;
+    let imageHeight = 640;
+
+    try {
+      const imgRes = await fetch(staticUrl, { signal: AbortSignal.timeout(12000) });
+      if (imgRes.ok && imgRes.headers.get('content-type')?.startsWith('image/')) {
+        const buf = await imgRes.arrayBuffer();
+        imageBase64 = `data:${imgRes.headers.get('content-type') || 'image/jpeg'};base64,` +
+          Buffer.from(buf).toString('base64');
+        // scale=2 returns 1280x1280 pixels in a 640x640 logical container
+        imageWidth = 640;
+        imageHeight = 640;
+      }
+    } catch (_) {
+      // Static Maps optional
+    }
+
+    return {
+      imageBase64,
+      imageWidth,
+      imageHeight,
+      lat: finalLat,
+      lng: finalLng,
+      zoom,
+      roofSegments,
+    };
+
+  } catch (err: any) {
+    return { error: err?.message || 'Aerial fetch failed' };
+  }
+}
+
 // ─── PV-2: Schematic Roof Plan ───────────────────────────────────────────────
 
 function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): string {
   const { project, system } = input;
   const pitch = project.roofPitch || 18; // degrees
   const totalPanels = system.totalPanels || 0;
+  const aerial = input.aerialData;
 
-  // Generate schematic SVG roof plan
-  // Simple schematic: rectangular roof outline with array footprint, setback lines, labels
-  const svgW = 520;
-  const svgH = 380;
-  const roofX = 60, roofY = 40, roofW = 400, roofH = 280;
-  const setback = 22; // pixels representing 18"
-  const arrayX = roofX + setback;
-  const arrayY = roofY + setback;
-  const arrayW = roofW - setback * 2;
-  const arrayH = roofH - setback * 2 - 30;
+  // ── Build the roof plan visual ──────────────────────────────────────────
+  // If aerial imagery is available, use the real satellite photo + SVG overlay.
+  // Otherwise fall back to schematic vector diagram.
 
-  // Module grid calculation
-  const modulesPerRow = Math.ceil(Math.sqrt(totalPanels * 1.7));
-  const rows = Math.ceil(totalPanels / modulesPerRow);
-  const modW = Math.floor((arrayW - 10) / modulesPerRow) - 3;
-  const modH = Math.floor((arrayH - 10) / rows) - 3;
+  let roofVisualHtml = '';
 
-  let modules = '';
-  let count = 0;
-  for (let r = 0; r < rows && count < totalPanels; r++) {
-    for (let c = 0; c < modulesPerRow && count < totalPanels; c++) {
-      const mx = arrayX + 5 + c * (modW + 3);
-      const my = arrayY + 5 + r * (modH + 3);
-      modules += `<rect x="${mx}" y="${my}" width="${modW}" height="${modH}" fill="#1e40af" stroke="#93c5fd" stroke-width="0.5" rx="1"/>`;
-      count++;
+  if (aerial?.imageBase64) {
+    // ── AERIAL MODE: real satellite image + roof segment overlay ──────────
+    const imgW = 640;
+    const imgH = 640;
+
+    // Build SVG overlay for roof segments (centered on the image)
+    let segOverlay = '';
+    if (aerial.roofSegments && aerial.roofSegments.length > 0 && aerial.lat && aerial.lng) {
+      // Project lat/lng polygon points to pixel coordinates using Mercator
+      const centerLat = aerial.lat;
+      const centerLng = aerial.lng;
+      const zoom = aerial.zoom || 20;
+
+      // Pixels-per-meter at this zoom level (Web Mercator, scale=2 → 1280px logical 640)
+      // At zoom 20 equatorial: ~0.149 m/px; scale for latitude
+      const metersPerPxEq = 156543.03392 / Math.pow(2, zoom);
+      const metersPerPx = metersPerPxEq * Math.cos(centerLat * Math.PI / 180);
+      // For scale=2 static map, 640 logical px = 1280 physical; we render at 640 logical
+      const pxPerMeter = 1 / metersPerPx;
+
+      // Earth meters per degree lat/lng at center
+      const METERS_PER_DEG_LAT = 111320;
+      const metersPerDegLng = 111320 * Math.cos(centerLat * Math.PI / 180);
+
+      // Colors for different roof segments
+      const segColors = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4'];
+
+      aerial.roofSegments.forEach((seg, idx) => {
+        const color = segColors[idx % segColors.length];
+        const alpha = '88'; // semi-transparent fill
+
+        if (seg.polygon && seg.polygon.length >= 3) {
+          // Render polygon from lat/lng points
+          const pts = seg.polygon.map(pt => {
+            const dLat = pt.lat - centerLat;
+            const dLng = pt.lng - centerLng;
+            const px = imgW / 2 + dLng * metersPerDegLng * pxPerMeter;
+            const py = imgH / 2 - dLat * METERS_PER_DEG_LAT * pxPerMeter;
+            return `${px.toFixed(1)},${py.toFixed(1)}`;
+          }).join(' ');
+          segOverlay += `<polygon points="${pts}" fill="${color}${alpha}" stroke="${color}" stroke-width="2" opacity="0.85"/>`;
+        } else if (seg.center) {
+          // No polygon — draw a circle/label at segment center
+          const dLat = seg.center.lat - centerLat;
+          const dLng = seg.center.lng - centerLng;
+          const cx = imgW / 2 + dLng * metersPerDegLng * pxPerMeter;
+          const cy = imgH / 2 - dLat * METERS_PER_DEG_LAT * pxPerMeter;
+          const r = Math.max(12, Math.sqrt(seg.areaM2 || 20) * pxPerMeter * 0.5);
+          segOverlay += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}" fill="${color}${alpha}" stroke="${color}" stroke-width="2" opacity="0.85"/>`;
+        }
+
+        // Label: pitch + azimuth at segment center
+        if (seg.center) {
+          const dLat = seg.center.lat - centerLat;
+          const dLng = seg.center.lng - centerLng;
+          const tx = imgW / 2 + dLng * metersPerDegLng * pxPerMeter;
+          const ty = imgH / 2 - dLat * METERS_PER_DEG_LAT * pxPerMeter;
+          const pitchLabel = `${Math.round(Math.tan(seg.pitchDegrees * Math.PI / 180) * 12)}/12`;
+          const azLabel = seg.azimuthDegrees < 45 || seg.azimuthDegrees > 315 ? 'N'
+            : seg.azimuthDegrees < 135 ? 'E'
+            : seg.azimuthDegrees < 225 ? 'S' : 'W';
+          segOverlay += `
+            <rect x="${(tx - 22).toFixed(1)}" y="${(ty - 11).toFixed(1)}" width="44" height="22" rx="3"
+              fill="rgba(0,0,0,0.65)" stroke="${color}" stroke-width="1"/>
+            <text x="${tx.toFixed(1)}" y="${(ty - 1).toFixed(1)}" text-anchor="middle"
+              font-family="Arial,sans-serif" font-size="8" font-weight="bold" fill="white">${pitchLabel} ${azLabel}</text>
+            <text x="${tx.toFixed(1)}" y="${(ty + 9).toFixed(1)}" text-anchor="middle"
+              font-family="Arial,sans-serif" font-size="7" fill="#d1d5db">${seg.areaM2 ? seg.areaM2.toFixed(0)+'m²' : ''}</text>`;
+        }
+      });
     }
-  }
 
-  // Attachment points (simplified grid)
-  let attachments = '';
-  const attSpacing = project.attachmentSpacing || 48;
-  const attPixels = attSpacing * (arrayW / 240); // scale
-  for (let r = 0; r < rows; r++) {
-    const ay = arrayY + 5 + r * (modH + 3) + modH / 2;
-    for (let ax = arrayX + attPixels / 2; ax < arrayX + arrayW; ax += attPixels) {
-      attachments += `<circle cx="${ax}" cy="${ay}" r="3" fill="none" stroke="#ef4444" stroke-width="1.2"/>`;
-      attachments += `<line x1="${ax - 3}" y1="${ay}" x2="${ax + 3}" y2="${ay}" stroke="#ef4444" stroke-width="0.8"/>`;
-      attachments += `<line x1="${ax}" y1="${ay - 3}" x2="${ax}" y2="${ay + 3}" stroke="#ef4444" stroke-width="0.8"/>`;
+    // Array footprint indicator (centered blue box, ~15% of image area)
+    const arrW = Math.round(imgW * 0.38);
+    const arrH = Math.round(imgH * 0.28);
+    const arrX = Math.round((imgW - arrW) / 2);
+    const arrY = Math.round((imgH - arrH) / 2);
+    const moduleGrid = (() => {
+      const cols = Math.ceil(Math.sqrt(totalPanels * 1.5));
+      const rows2 = Math.ceil(totalPanels / cols);
+      const mw = Math.floor((arrW - 8) / cols) - 2;
+      const mh = Math.floor((arrH - 8) / rows2) - 2;
+      let g = '';
+      let c2 = 0;
+      for (let r = 0; r < rows2 && c2 < totalPanels; r++) {
+        for (let c = 0; c < cols && c2 < totalPanels; c++) {
+          g += `<rect x="${arrX + 4 + c * (mw + 2)}" y="${arrY + 4 + r * (mh + 2)}" width="${mw}" height="${mh}" fill="none" stroke="#60a5fa" stroke-width="0.8" rx="1"/>`;
+          c2++;
+        }
+      }
+      return g;
+    })();
+
+    // Fire setback lines (18" = ~0.46m, shown as dashed box inset from array edge)
+    const sbPx = 8; // setback indicator in pixels
+    const setbackBox = `<rect x="${arrX - sbPx}" y="${arrY - sbPx}" width="${arrW + sbPx * 2}" height="${arrH + sbPx * 2}"
+      fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="6,3" opacity="0.9"/>`;
+
+    roofVisualHtml = `
+      <div style="position:relative; display:inline-block; border:2px solid #374151; border-radius:6px; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+        <!-- Satellite base image -->
+        <img src="${aerial.imageBase64}" width="${imgW}" height="${imgH}" style="display:block;"
+          alt="Satellite view of ${project.address || 'installation site'}" crossorigin="anonymous"/>
+        <!-- SVG overlay layer -->
+        <svg viewBox="0 0 ${imgW} ${imgH}" width="${imgW}" height="${imgH}"
+          style="position:absolute;top:0;left:0;pointer-events:none;"
+          xmlns="http://www.w3.org/2000/svg">
+          <!-- Roof segment polygons -->
+          ${segOverlay}
+          <!-- Fire setback boundary -->
+          ${setbackBox}
+          <!-- Array footprint outline -->
+          <rect x="${arrX}" y="${arrY}" width="${arrW}" height="${arrH}"
+            fill="rgba(30,64,175,0.25)" stroke="#3b82f6" stroke-width="2" rx="2"/>
+          <!-- Module grid ghost -->
+          ${moduleGrid}
+          <!-- Panel count label -->
+          <rect x="${arrX}" y="${arrY + arrH + 4}" width="${arrW}" height="16" rx="2" fill="rgba(0,0,0,0.65)"/>
+          <text x="${arrX + arrW/2}" y="${arrY + arrH + 15}" text-anchor="middle"
+            font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="#93c5fd">
+            ${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2) || '—'} kW DC
+          </text>
+          <!-- North arrow -->
+          <g transform="translate(${imgW - 32}, 32)">
+            <circle cx="0" cy="0" r="20" fill="rgba(0,0,0,0.6)" stroke="white" stroke-width="1.5"/>
+            <polygon points="0,-14 5,6 0,2 -5,6" fill="white"/>
+            <text x="0" y="32" text-anchor="middle" font-family="Arial,sans-serif"
+              font-size="11" fill="white" font-weight="bold">N</text>
+          </g>
+          <!-- Scale bar -->
+          <g transform="translate(12, ${imgH - 20})">
+            <rect x="0" y="-6" width="60" height="10" rx="2" fill="rgba(0,0,0,0.6)"/>
+            <line x1="0" y1="0" x2="60" y2="0" stroke="white" stroke-width="1.5"/>
+            <line x1="0" y1="-3" x2="0" y2="3" stroke="white" stroke-width="1.5"/>
+            <line x1="60" y1="-3" x2="60" y2="3" stroke="white" stroke-width="1.5"/>
+            <text x="30" y="-9" text-anchor="middle" font-family="Arial,sans-serif"
+              font-size="7" fill="white">≈ 10 m</text>
+          </g>
+        </svg>
+      </div>
+      <div style="font-size:8px;color:#6b7280;font-style:italic;margin-top:4px;">
+        📡 Google Maps Satellite · Zoom ${aerial.zoom || 20} · ${aerial.lat?.toFixed(5)}, ${aerial.lng?.toFixed(5)}
+      </div>`;
+
+  } else {
+    // ── SCHEMATIC FALLBACK (no aerial image available) ────────────────────
+    const svgW = 520;
+    const svgH = 380;
+    const roofX = 60, roofY = 40, roofW = 400, roofH = 280;
+    const setback = 22;
+    const arrayX = roofX + setback;
+    const arrayY = roofY + setback;
+    const arrayW = roofW - setback * 2;
+    const arrayH = roofH - setback * 2 - 30;
+
+    const modulesPerRow = Math.ceil(Math.sqrt(totalPanels * 1.7));
+    const rows = Math.ceil(totalPanels / modulesPerRow);
+    const modW = Math.floor((arrayW - 10) / modulesPerRow) - 3;
+    const modH = Math.floor((arrayH - 10) / rows) - 3;
+
+    let modules = '';
+    let count = 0;
+    for (let r = 0; r < rows && count < totalPanels; r++) {
+      for (let c = 0; c < modulesPerRow && count < totalPanels; c++) {
+        const mx = arrayX + 5 + c * (modW + 3);
+        const my = arrayY + 5 + r * (modH + 3);
+        modules += `<rect x="${mx}" y="${my}" width="${modW}" height="${modH}" fill="#1e40af" stroke="#93c5fd" stroke-width="0.5" rx="1"/>`;
+        count++;
+      }
     }
+
+    let attachments = '';
+    const attSpacing = project.attachmentSpacing || 48;
+    const attPixels = attSpacing * (arrayW / 240);
+    for (let r = 0; r < rows; r++) {
+      const ay = arrayY + 5 + r * (modH + 3) + modH / 2;
+      for (let ax = arrayX + attPixels / 2; ax < arrayX + arrayW; ax += attPixels) {
+        attachments += `<circle cx="${ax}" cy="${ay}" r="3" fill="none" stroke="#ef4444" stroke-width="1.2"/>`;
+        attachments += `<line x1="${ax - 3}" y1="${ay}" x2="${ax + 3}" y2="${ay}" stroke="#ef4444" stroke-width="0.8"/>`;
+        attachments += `<line x1="${ax}" y1="${ay - 3}" x2="${ax}" y2="${ay + 3}" stroke="#ef4444" stroke-width="0.8"/>`;
+      }
+    }
+
+    roofVisualHtml = `
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:6px; padding:12px; display:inline-block;">
+        <svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="font-family:Arial,sans-serif;">
+          <rect width="${svgW}" height="${svgH}" fill="#f8fafc"/>
+          <rect x="${roofX}" y="${roofY}" width="${roofW}" height="${roofH}" fill="none" stroke="#374151" stroke-width="2" stroke-dasharray="8,4"/>
+          <line x1="${roofX}" y1="${roofY + 15}" x2="${roofX + roofW}" y2="${roofY + 15}" stroke="#6b7280" stroke-width="1.5"/>
+          <text x="${roofX + roofW / 2}" y="${roofY + 11}" text-anchor="middle" font-size="8" fill="#6b7280" font-style="italic">RIDGE</text>
+          <rect x="${roofX + setback}" y="${roofY + setback}" width="${roofW - setback * 2}" height="${roofH - setback * 2 - 15}"
+            fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="5,3"/>
+          <rect x="${arrayX}" y="${arrayY}" width="${arrayW}" height="${arrayH}" fill="#dbeafe" stroke="none" rx="2"/>
+          ${modules}
+          ${attachments}
+          <g transform="translate(${roofX + roofW + 20},${roofY + 20})">
+            <circle cx="0" cy="0" r="18" fill="none" stroke="#374151" stroke-width="1.5"/>
+            <polygon points="0,-14 5,8 0,4 -5,8" fill="#374151"/>
+            <text x="0" y="28" text-anchor="middle" font-size="10" fill="#374151" font-weight="bold">N</text>
+          </g>
+          <text x="${arrayX + arrayW / 2}" y="${arrayY + arrayH + 14}" text-anchor="middle" font-size="8" fill="#1e40af" font-weight="bold">
+            ${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2) || '—'} kW DC
+          </text>
+          <text x="${roofX}" y="${roofY + roofH + 20}" font-size="8" fill="#6b7280" font-style="italic">
+            SCHEMATIC ONLY — NOT TO SCALE. Field verify all dimensions.
+          </text>
+        </svg>
+      </div>`;
   }
-
-  const roofSVG = `
-  <svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="font-family:Arial,sans-serif;">
-    <!-- Background -->
-    <rect width="${svgW}" height="${svgH}" fill="#f8fafc"/>
-
-    <!-- Roof outline -->
-    <rect x="${roofX}" y="${roofY}" width="${roofW}" height="${roofH}" fill="none" stroke="#374151" stroke-width="2" stroke-dasharray="8,4"/>
-
-    <!-- Ridge line (top) -->
-    <line x1="${roofX}" y1="${roofY + 15}" x2="${roofX + roofW}" y2="${roofY + 15}" stroke="#6b7280" stroke-width="1.5"/>
-    <text x="${roofX + roofW / 2}" y="${roofY + 11}" text-anchor="middle" font-size="8" fill="#6b7280" font-style="italic">RIDGE</text>
-
-    <!-- Fire setback lines -->
-    <rect x="${roofX + setback}" y="${roofY + setback}" width="${roofW - setback * 2}" height="${roofH - setback * 2 - 15}"
-          fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="5,3"/>
-
-    <!-- Array area fill -->
-    <rect x="${arrayX}" y="${arrayY}" width="${arrayW}" height="${arrayH}" fill="#dbeafe" stroke="none" rx="2"/>
-
-    <!-- Module grid -->
-    ${modules}
-
-    <!-- Attachment points -->
-    ${attachments}
-
-    <!-- Setback dimension arrows — left -->
-    <line x1="${roofX + 2}" y1="${roofY + roofH / 2}" x2="${roofX + setback - 2}" y2="${roofY + roofH / 2}" stroke="#f59e0b" stroke-width="1" marker-end="url(#arrow)"/>
-    <text x="${roofX + setback / 2}" y="${roofY + roofH / 2 - 4}" text-anchor="middle" font-size="7" fill="#d97706" font-weight="bold">18"</text>
-
-    <!-- Setback dimension arrows — bottom -->
-    <line x1="${roofX + roofW / 2}" y1="${roofY + roofH - 5}" x2="${roofX + roofW / 2}" y2="${arrayY + arrayH + 3}" stroke="#f59e0b" stroke-width="1"/>
-    <text x="${roofX + roofW / 2 + 25}" y="${roofY + roofH - 10}" font-size="7" fill="#d97706" font-weight="bold">18" min</text>
-
-    <!-- Pitch annotation -->
-    <text x="${roofX + roofW - 5}" y="${roofY + 12}" text-anchor="end" font-size="8" fill="#374151" font-weight="bold">
-      PITCH: ${Math.round(Math.tan(pitch * Math.PI / 180) * 12)}/12 (${pitch}°)
-    </text>
-
-    <!-- Panel count -->
-    <text x="${arrayX + arrayW / 2}" y="${arrayY + arrayH + 14}" text-anchor="middle" font-size="8" fill="#1e40af" font-weight="bold">
-      ${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2) || '—'} kW DC
-    </text>
-
-    <!-- North arrow -->
-    <g transform="translate(${roofX + roofW + 20},${roofY + 20})">
-      <circle cx="0" cy="0" r="18" fill="none" stroke="#374151" stroke-width="1.5"/>
-      <polygon points="0,-14 5,8 0,4 -5,8" fill="#374151"/>
-      <text x="0" y="28" text-anchor="middle" font-size="10" fill="#374151" font-weight="bold">N</text>
-    </g>
-
-    <!-- Arrow marker def -->
-    <defs>
-      <marker id="arrow" markerWidth="6" markerHeight="6" refX="6" refY="3" orient="auto">
-        <path d="M0,0 L0,6 L6,3 z" fill="#f59e0b"/>
-      </marker>
-    </defs>
-
-    <!-- Legend -->
-    <g transform="translate(${roofX + roofW + 10},${roofY + 60})">
-      <rect x="0" y="0" width="60" height="80" fill="white" stroke="#e2e8f0" stroke-width="1" rx="3"/>
-      <text x="30" y="12" text-anchor="middle" font-size="7" font-weight="bold" fill="#374151">LEGEND</text>
-      <rect x="5" y="18" width="10" height="7" fill="#1e40af" rx="1"/>
-      <text x="19" y="25" font-size="6.5" fill="#374151">PV Module</text>
-      <rect x="5" y="30" width="10" height="7" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>
-      <text x="19" y="37" font-size="6.5" fill="#374151">18" Setback</text>
-      <circle cx="10" cy="48" r="3" fill="none" stroke="#ef4444" stroke-width="1"/>
-      <line x1="7" y1="48" x2="13" y2="48" stroke="#ef4444" stroke-width="0.8"/>
-      <line x1="10" y1="45" x2="10" y2="51" stroke="#ef4444" stroke-width="0.8"/>
-      <text x="17" y="51" font-size="6.5" fill="#374151">Attachment</text>
-      <line x1="5" y1="62" x2="15" y2="62" stroke="#6b7280" stroke-width="1.5"/>
-      <text x="19" y="65" font-size="6.5" fill="#374151">Ridge Line</text>
-    </g>
-
-    <!-- Scale note -->
-    <text x="${roofX}" y="${roofY + roofH + 20}" font-size="8" fill="#6b7280" font-style="italic">
-      SCHEMATIC ONLY — NOT TO SCALE. Field verify all dimensions. Attachment spacing per structural analysis.
-    </text>
-  </svg>`;
 
   return `
   <div class="page">
-    ${titleBlock(input, 'PV-2', 'SCHEMATIC ROOF PLAN WITH FIRE SETBACKS', pageNum, totalPages)}
+    ${titleBlock(input, 'PV-2', 'AERIAL ROOF PLAN WITH FIRE SETBACKS', pageNum, totalPages)}
     <div class="page-content">
 
       <div class="two-col-layout">
         <div class="col-left">
-          <div class="section-title">Schematic Roof Plan</div>
-          <div style="background:white; border:1px solid #e2e8f0; border-radius:6px; padding:12px; display:inline-block;">
-            ${roofSVG}
-          </div>
+          <div class="section-title">${aerial?.imageBase64 ? '📡 Aerial Satellite Roof Plan' : 'Schematic Roof Plan'}</div>
+          ${roofVisualHtml}
         </div>
         <div class="col-right">
-          <div class="section-title">Fire Access & Setback Requirements</div>
+          <div class="section-title">Fire Access &amp; Setback Requirements</div>
           <table class="info-table">
             <tr><td class="il">Roof Edge Setback</td><td class="iv" style="color:#d97706;font-weight:bold;">18" minimum — IFC §605.11.1</td></tr>
             <tr><td class="il">Ridge Setback</td><td class="iv" style="color:#d97706;font-weight:bold;">18" minimum — IFC §605.11.1</td></tr>
@@ -632,13 +860,32 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
             <tr><td class="il">Attachment Spacing</td><td class="iv">${project.attachmentSpacing ? `${project.attachmentSpacing}" max O.C.` : '48" max O.C.'}</td></tr>
           </table>
 
+          ${aerial?.roofSegments && aerial.roofSegments.length > 0 ? `
+          <div class="section-title" style="margin-top:14px">Detected Roof Segments</div>
+          <table class="info-table">
+            <tr style="background:#f1f5f9;">
+              <td class="il" style="font-weight:bold;">#</td>
+              <td class="iv" style="font-weight:bold;">Pitch</td>
+              <td class="iv" style="font-weight:bold;">Azimuth</td>
+              <td class="iv" style="font-weight:bold;">Area</td>
+            </tr>
+            ${(aerial.roofSegments || []).slice(0, 8).map((seg, i) => {
+              const pitchRatio = Math.round(Math.tan(seg.pitchDegrees * Math.PI / 180) * 12);
+              const azDir = seg.azimuthDegrees < 45 || seg.azimuthDegrees > 315 ? 'N (↑)'
+                : seg.azimuthDegrees < 135 ? 'E (→)'
+                : seg.azimuthDegrees < 225 ? 'S (↓)' : 'W (←)';
+              const areaSf = seg.areaM2 ? (seg.areaM2 * 10.764).toFixed(0) : '—';
+              return `<tr><td class="il">${i + 1}</td><td class="iv">${pitchRatio}/12 (${seg.pitchDegrees.toFixed(1)}°)</td><td class="iv">${seg.azimuthDegrees.toFixed(0)}° ${azDir}</td><td class="iv">${areaSf} ft²</td></tr>`;
+            }).join('')}
+          </table>` : ''}
+
           <div class="section-title" style="margin-top:14px">Roof Plan Notes</div>
           <ol class="construction-notes" style="font-size:9px;">
-            <li>Schematic diagram only. Installer shall field verify all roof dimensions, structural member locations, and equipment placement prior to installation.</li>
+            <li>${aerial?.imageBase64 ? 'Aerial image sourced from Google Maps Satellite imagery. Field verify all dimensions, roof features, and obstructions prior to installation.' : 'Schematic diagram only. Installer shall field verify all roof dimensions, structural member locations, and equipment placement prior to installation.'}</li>
             <li>Minimum 18" fire setback required from all roof edges, ridges, hips, and valleys per IFC §605.11.1. Setbacks shall be measured from the module edge to the roof feature.</li>
-            <li>Attachment points (○) to be located over rafters only. Verify rafter locations using approved method prior to drilling.</li>
+            <li>Attachment points to be located over rafters only. Verify rafter locations using approved method prior to drilling.</li>
             <li>All lag bolt penetrations shall be sealed with manufacturer-approved sealant. Flashing required for penetrations through roofing membrane.</li>
-            <li>Module layout shown is schematic. Field adjust to maintain setbacks, avoid obstructions (vents, chimneys, skylights), and align with rafters.</li>
+            <li>Module layout shown is ${aerial?.imageBase64 ? 'approximate footprint overlay' : 'schematic'}. Field adjust to maintain setbacks, avoid obstructions (vents, chimneys, skylights), and align with rafters.</li>
             <li>Roof structural elements (ridge beam, hip rafter, valley rafter) shall not be used as attachment points without structural engineering approval.</li>
           </ol>
         </div>
@@ -2281,7 +2528,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Missing project data' }, { status: 400 });
     }
 
-    const html = generatePermitHTML(body);
+    // Fetch aerial roof data (satellite image + Solar API roof segments)
+    // This runs server-side so we can embed the base64 image in the PDF
+    const aerialData = await fetchAerialRoofData(
+      body.project?.address || '',
+      (body.project as any).lat,
+      (body.project as any).lng
+    ).catch(() => ({ error: 'Aerial fetch skipped' } as any));
+    const enrichedBody: PermitInput = { ...body, aerialData };
+
+    const html = generatePermitHTML(enrichedBody);
     const format = req.nextUrl.searchParams.get('format') || 'html';
 
     if (format === 'html') {
