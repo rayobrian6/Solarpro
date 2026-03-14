@@ -1,9 +1,16 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.58';
+export const BUILD_VERSION     = 'v47.59';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-06-09';
-export const BUILD_DESCRIPTION = 'v47.58: Pipeline audit and repair — /api/pipeline/run now writes all 5 artifact files to project_files via buildAllArtifacts(). Fixes BP-3: steps 6-9 previously only checked boolean flags and wrote nothing. Client Files workspace now populates after RUN PROJECT PIPELINE.';
+export const BUILD_DESCRIPTION = 'v47.59: Auth permanent fix — dev auth bypass now uses VERCEL_ENV (not NODE_ENV) as the production gate. NODE_ENV=production on ALL Vercel deployments including preview, making the v47.57 guard permanently ineffective on Vercel. Added JWT_SECRET fingerprint to every 401 log. Updated /api/debug/auth with diagnosis hints and bypass status. Updated .env.example with Vercel multi-environment setup instructions.';
 export const BUILD_FEATURES    = [
+  // v47.59 -- Auth permanent fix
+  'AUTH FIX: lib/dev-auth.ts — isDevAuthAllowed() now uses VERCEL_ENV !== production (not NODE_ENV). NODE_ENV=production on ALL Vercel deployments including preview — using it as a guard permanently blocked dev auth on all Vercel environments.',
+  'AUTH FIX: VERCEL_ENV is the authoritative signal: production→block, preview→allow if DEV_AUTH_BYPASS=true, development→allow if DEV_AUTH_BYPASS=true, not_set→local dev→allow if DEV_AUTH_BYPASS=true',
+  'AUTH FIX: /api/auth/me now logs JWT_SECRET fingerprint on every 401 (AUTH_COOKIE_MISSING) — previously only logged on login. Fingerprint mismatch between environments is now immediately visible in logs.',
+  'AUTH FIX: /api/debug/auth — added devAuthAllowed, devAuthBypassed, devAuthBypassEnvSet, diagnosisHints[], nodeEnv/vercelEnv distinction explanation',
+  'AUTH FIX: .env.example — JWT_SECRET section updated with Vercel multi-environment setup (Production+Preview+Development must use SAME secret). Dev auth bypass section rewritten with correct VERCEL_ENV guard explanation.',
+  'AUTH FIX: Root cause documented — v47.57 isDevAuthAllowed() checked NODE_ENV!==production which is always false on Vercel, making DEV_AUTH_BYPASS=true completely ineffective for all Vercel preview deployments.',
   // v47.58 -- Pipeline audit and repair (BP-3 fix)
   'PIPELINE FIX: /api/pipeline/run steps 6-9 now WRITE real artifact files to project_files (previously only checked boolean flags, wrote nothing)',
   'PIPELINE FIX: buildAllArtifacts() from lib/engineering/artifactBuilders.ts generates Engineering_Report, SLD, BOM, Permit_Packet, System_Estimate server-side',

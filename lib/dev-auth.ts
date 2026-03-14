@@ -1,46 +1,67 @@
 // ============================================================
 // lib/dev-auth.ts
-// Development Authentication Bypass — v47.57
+// Development Authentication Bypass — v47.59
 //
 // PURPOSE:
-//   Every Vercel preview deployment gets a new URL and a fresh
-//   cold-start instance. When JWT_SECRET is missing or mismatched
-//   between preview and production, verifyToken() returns null,
-//   every request looks unauthenticated, and the developer is
-//   stuck in a login loop.
+//   Every Vercel preview deployment triggers a fresh serverless
+//   instance. If JWT_SECRET is not configured in Vercel Settings
+//   for the Preview environment (separate from Production), every
+//   request appears unauthenticated and the developer is stuck in
+//   a login loop.
 //
 //   This module provides a safe, explicit opt-in bypass so
 //   developers can work without re-authenticating after every
 //   preview deployment.
 //
-// ACTIVATION (ALL three conditions must be true simultaneously):
-//   1. NODE_ENV !== 'production'          — never in prod builds
-//   2. VERCEL_ENV !== 'production'        — never on prod Vercel
-//   3. DEV_AUTH_BYPASS=true in .env.local — explicit opt-in
+// ────────────────────────────────────────────────────────────
+// CRITICAL FIX (v47.59): NODE_ENV IS NOT RELIABLE ON VERCEL
+// ────────────────────────────────────────────────────────────
+//   Vercel sets NODE_ENV=production for ALL deployment types:
+//     - Production deployments  (VERCEL_ENV=production)
+//     - Preview deployments     (VERCEL_ENV=preview)
+//     - Development CLI         (VERCEL_ENV=development)
 //
-//   OR: request carries header  X-Dev-Auth: bypass
-//       AND the same env-level guards pass (1 + 2)
+//   The v47.57 guard `NODE_ENV !== 'production'` permanently
+//   blocked dev auth on ALL Vercel deployments including preview.
+//   DEV_AUTH_BYPASS=true had zero effect on Vercel preview.
+//
+//   CORRECT GUARD: Use VERCEL_ENV, not NODE_ENV.
+//     VERCEL_ENV=production  → ALWAYS block (production deploy)
+//     VERCEL_ENV=preview     → Allow if DEV_AUTH_BYPASS=true
+//     VERCEL_ENV=development → Allow if DEV_AUTH_BYPASS=true
+//     VERCEL_ENV not set     → Local dev → Allow if DEV_AUTH_BYPASS=true
+//
+// ────────────────────────────────────────────────────────────
+// ACTIVATION (ALL conditions must pass):
+//   1. VERCEL_ENV !== 'production'  — never on prod Vercel deploy
+//   2. DEV_AUTH_BYPASS=true in env  — explicit opt-in
 //
 // PRODUCTION HARD-BLOCK:
-//   If NODE_ENV === 'production' OR VERCEL_ENV === 'production',
-//   isDevAuthAllowed() returns false regardless of anything else.
-//   The bypass CANNOT activate in production builds.
+//   If VERCEL_ENV === 'production', isDevAuthAllowed() returns
+//   false regardless of everything else. This is the ONLY guard
+//   that matters on Vercel — NODE_ENV is unreliable.
 //
 // LOG CODE: [DEV_AUTH_ACTIVE]
 //   Search Vercel function logs for this code to confirm/deny
 //   whether dev auth is being used for a given request.
 //
-// SETUP (.env.local — never commit):
+// SETUP — Vercel Dashboard:
+//   Project → Settings → Environment Variables
+//   Add DEV_AUTH_BYPASS with value "true"
+//   Set environment scope to: Preview ✓  Development ✓
+//   Leave Production UNCHECKED — bypass must never reach prod.
+//
+// SETUP — Local dev (.env.local — never commit):
 //   DEV_AUTH_BYPASS=true
-//   DEV_AUTH_USER_ID=dev-user-001          # optional, default used
-//   DEV_AUTH_USER_EMAIL=dev@localhost      # optional, default used
-//   DEV_AUTH_USER_NAME=Dev User            # optional, default used
+//   DEV_AUTH_USER_ID=dev-user-001          # optional
+//   DEV_AUTH_USER_EMAIL=dev@localhost      # optional
+//   DEV_AUTH_USER_NAME=Dev User            # optional
 //
 // ============================================================
 
 import type { SessionUser } from '@/lib/auth';
 
-// ── Constants ────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 /** The fixed dev session user returned when bypass is active. */
 export const DEV_SESSION_USER: SessionUser = {
@@ -50,19 +71,22 @@ export const DEV_SESSION_USER: SessionUser = {
   company: 'SolarPro Dev',
 };
 
-// ── Guards ───────────────────────────────────────────────────
+// ── Guards ────────────────────────────────────────────────────────────────────
 
 /**
  * Returns true ONLY if all production guards pass.
- * This is the single authoritative gate — called by every
- * bypass check point in the application.
  *
- * NEVER returns true when NODE_ENV === 'production' or
- * VERCEL_ENV === 'production'.
+ * v47.59 FIX: Uses VERCEL_ENV (not NODE_ENV) as the production gate.
+ * NODE_ENV is 'production' on ALL Vercel deployments (including preview),
+ * making it useless for distinguishing preview from production.
+ * VERCEL_ENV is the authoritative signal:
+ *   'production'  → block (production Vercel deploy)
+ *   'preview'     → allow if DEV_AUTH_BYPASS=true
+ *   'development' → allow if DEV_AUTH_BYPASS=true
+ *   undefined     → local dev → allow if DEV_AUTH_BYPASS=true
  */
 export function isDevAuthAllowed(): boolean {
-  // Hard block — production environments can never use dev auth
-  if (process.env.NODE_ENV === 'production')   return false;
+  // Hard block — production Vercel deployments can never use dev auth
   if (process.env.VERCEL_ENV === 'production') return false;
 
   // Explicit opt-in required
@@ -88,43 +112,24 @@ export function requestHasDevAuthHeader(
  *
  * Returns the dev SessionUser if bypass should be applied to
  * this request, or null if normal auth should proceed.
- *
- * Logic:
- *   - If isDevAuthAllowed() is false → always null (production)
- *   - If DEV_AUTH_BYPASS=true AND isDevAuthAllowed() → return dev user
- *   - If X-Dev-Auth: bypass header AND isDevAuthAllowed() → return dev user
- *   - Otherwise → null (normal auth)
  */
 export function getDevSessionUser(
   headers?: Headers | { get(name: string): string | null } | null
 ): SessionUser | null {
   if (!isDevAuthAllowed()) return null;
 
-  // Env-var bypass: DEV_AUTH_BYPASS=true is already confirmed by isDevAuthAllowed()
-  // so if we get here, bypass is active globally — return dev user unconditionally.
-  // (The header variant is an alternative that also requires isDevAuthAllowed().)
+  // When isDevAuthAllowed() returns true, DEV_AUTH_BYPASS=true is confirmed
+  // and VERCEL_ENV is not 'production'. Log and return dev user.
   const headerBypass = headers ? requestHasDevAuthHeader(headers) : false;
 
-  // Both paths are valid when isDevAuthAllowed() is true:
-  //   Path A: env-var opt-in (DEV_AUTH_BYPASS=true) — applies to ALL requests
-  //   Path B: per-request header (X-Dev-Auth: bypass) — selective override
-  //
-  // Since isDevAuthAllowed() already confirms DEV_AUTH_BYPASS=true,
-  // env-var path is always active when we reach here.
-  const active = true; // isDevAuthAllowed() already gated this
-
-  if (active || headerBypass) {
-    console.log('[DEV_AUTH_ACTIVE]', JSON.stringify({
-      userId:  DEV_SESSION_USER.id,
-      email:   DEV_SESSION_USER.email,
-      env:     process.env.NODE_ENV,
-      vercelEnv: process.env.VERCEL_ENV ?? 'not-set',
-      via:     headerBypass ? 'header(X-Dev-Auth)' : 'env(DEV_AUTH_BYPASS)',
-    }));
-    return DEV_SESSION_USER;
-  }
-
-  return null;
+  console.log('[DEV_AUTH_ACTIVE]', JSON.stringify({
+    userId:    DEV_SESSION_USER.id,
+    email:     DEV_SESSION_USER.email,
+    nodeEnv:   process.env.NODE_ENV,
+    vercelEnv: process.env.VERCEL_ENV ?? 'not-set (local)',
+    via:       headerBypass ? 'header(X-Dev-Auth)' : 'env(DEV_AUTH_BYPASS)',
+  }));
+  return DEV_SESSION_USER;
 }
 
 /**
@@ -137,7 +142,7 @@ export function getDevSessionUserFromRequest(req: {
   return getDevSessionUser(req.headers);
 }
 
-// ── Dev user response shape (for /api/auth/me) ───────────────
+// ── Dev user response shape (for /api/auth/me) ────────────────────────────────
 
 /**
  * Returns the full /api/auth/me response body for the dev bypass user.
@@ -166,7 +171,7 @@ export function getDevMeResponse(): object {
       trialStartsAt:      null,
       trialEndsAt:        null,
       isFreePass:         true,
-      freePassNote:       'Dev auth bypass — local/preview only',
+      freePassNote:       'Dev auth bypass — preview/local only',
       hasAccess:          true,
 
       // Legacy snake_case aliases

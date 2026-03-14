@@ -64,7 +64,18 @@ export async function GET(req: NextRequest) {
   console.log(`[SESSION_VALIDATION] valid=${sessionValid} userId=${session?.id ?? 'none'} email=${session?.email ?? 'none'}`);
 
   if (!sessionValid) {
-    console.log(`[AUTH_COOKIE_MISSING] No valid solarpro_session cookie — returning 401`);
+    // Log JWT_SECRET fingerprint alongside every 401 so deployment mismatches
+    // are immediately visible without needing to reproduce the login flow.
+    try {
+      const secret = process.env.JWT_SECRET || '';
+      const charSum = secret.split('').reduce((s, c) => s + c.charCodeAt(0), 0) % 9999;
+      const fp = secret
+        ? `len=${secret.length}_head=${secret.substring(0, 4)}_tail=${secret.slice(-4)}_sum=${charSum}`
+        : 'NOT_SET';
+      console.log(`[AUTH_COOKIE_MISSING] No valid solarpro_session cookie — returning 401. jwtSecretFingerprint=${fp} vercelEnv=${process.env.VERCEL_ENV ?? 'local'} nodeEnv=${process.env.NODE_ENV}`);
+    } catch {
+      console.log(`[AUTH_COOKIE_MISSING] No valid solarpro_session cookie — returning 401`);
+    }
     return NextResponse.json(
       { success: false, error: 'Not authenticated' },
       { status: 401 }
