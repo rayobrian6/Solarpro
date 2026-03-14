@@ -1,8 +1,14 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.43';
-export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.43: Fix permit 500 crash — null-safe compliance normalization in POST handler';
+export const BUILD_VERSION     = 'v47.44';
+export const BUILD_DATE        = '2026-03-15';
+export const BUILD_DESCRIPTION = 'v47.44: Flexible equipment resolver — permit plan set works with any inverter/panel brand and payload shape';
 export const BUILD_FEATURES    = [
+  // v47.44 -- Universal equipment resolver
+  'PERMIT: resolveEquipment() — 4-tier fallback: strings[] -> modules[] -> project fields -> system totals',
+  'PERMIT: BOM table — panelMfr/panelModel now resolved from any payload shape (no more hardcoded fallbacks)',
+  'PERMIT: NEC labels — panelIsc/panelVoc resolved from any payload shape (removed strings[0] hardcode)',
+  'PERMIT: SLD builder — all 6 equipment fields resolved from any payload shape (removed Q.PEAK/IQ8M/Enphase hardcodes)',
+  'PERMIT: Works with UI strings payload, modules[] array, project-level fields, or system totals only',
   // v47.38 -- Full 11-page permit plan set with SLD
   'PERMIT: pageSingleLineDiagram() — Sheet 11 (E-1) added to route.ts — IEEE/ANSI SVG SLD renderer',
   'PERMIT: Full MICROINVERTER topology: PV Array → J-Box → AC Combiner → AC Disco → MSP → IQ SC3/BUI → Utility Meter',

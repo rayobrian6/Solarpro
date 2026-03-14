@@ -227,6 +227,100 @@ function interconnectionLabel(m?: string) {
   return m ? (map[m] || m) : 'Load Side — NEC 705.12(B)';
 }
 
+// ─── Equipment Resolver (normalises any payload shape → canonical fields) ──────────────────────
+
+interface ResolvedEquipment {
+  panelManufacturer: string;
+  panelModel: string;
+  panelWatts: number;
+  panelVoc: number;
+  panelIsc: number;
+  inverterManufacturer: string;
+  inverterModel: string;
+  inverterType: string;
+  inverterAcOutputKw: number;
+}
+
+/**
+ * Tries 4 sources in priority order so the permit generator works with
+ * ANY payload shape: UI strings array, modules array, project-level fields,
+ * or system totals only.
+ */
+function resolveEquipment(input: PermitInput): ResolvedEquipment {
+  const { system, project } = input;
+
+  // ── 1. Standard UI payload: system.inverters[*].strings[*] ──────────────
+  const anyString = system?.inverters
+    ?.flatMap((inv) => inv.strings ?? [])
+    .find((s) => s?.panelModel);
+  if (anyString) {
+    const inv0 = system.inverters?.[0];
+    return {
+      panelManufacturer: anyString.panelManufacturer || '—',
+      panelModel:        anyString.panelModel        || '—',
+      panelWatts:        anyString.panelWatts        || 0,
+      panelVoc:          anyString.panelVoc          || 0,
+      panelIsc:          anyString.panelIsc          || 0,
+      inverterManufacturer: inv0?.manufacturer || '—',
+      inverterModel:        inv0?.model        || '—',
+      inverterType:         inv0?.type         || '—',
+      inverterAcOutputKw:   inv0?.acOutputKw   || 0,
+    };
+  }
+
+  // ── 2. Alternative payload: system.modules[] ────────────────────────────
+  const modules = (system as any)?.modules;
+  if (Array.isArray(modules) && modules.length > 0) {
+    const m = modules[0];
+    const inv0 = system?.inverters?.[0];
+    return {
+      panelManufacturer: m.manufacturer || m.panelManufacturer || '—',
+      panelModel:        m.model        || m.panelModel        || '—',
+      panelWatts:        m.watts        || m.panelWatts        || 0,
+      panelVoc:          m.voc          || m.panelVoc          || 0,
+      panelIsc:          m.isc          || m.panelIsc          || 0,
+      inverterManufacturer: inv0?.manufacturer || '—',
+      inverterModel:        inv0?.model        || '—',
+      inverterType:         inv0?.type         || '—',
+      inverterAcOutputKw:   inv0?.acOutputKw   || 0,
+    };
+  }
+
+  // ── 3. Legacy / manual payload: project-level fields ────────────────────
+  const p = project as any;
+  if (p?.panelModel) {
+    return {
+      panelManufacturer: p.panelManufacturer || p.panelBrand || '—',
+      panelModel:        p.panelModel        || '—',
+      panelWatts:        p.panelWatts        || 0,
+      panelVoc:          p.panelVoc          || 0,
+      panelIsc:          p.panelIsc          || 0,
+      inverterManufacturer: p.inverterBrand  || p.inverterManufacturer || '—',
+      inverterModel:        p.inverterModel  || '—',
+      inverterType:         p.inverterType   || '—',
+      inverterAcOutputKw:   p.inverterAcOutputKw || 0,
+    };
+  }
+
+  // ── 4. System totals only — derive what we can ──────────────────────────
+  const derivedWatts =
+    system?.totalPanels && system?.totalDcKw
+      ? Math.round((system.totalDcKw * 1000) / system.totalPanels)
+      : 0;
+  const inv0 = system?.inverters?.[0];
+  return {
+    panelManufacturer: '—',
+    panelModel:        '—',
+    panelWatts:        derivedWatts,
+    panelVoc:          0,
+    panelIsc:          0,
+    inverterManufacturer: inv0?.manufacturer || '—',
+    inverterModel:        inv0?.model        || '—',
+    inverterType:         inv0?.type         || '—',
+    inverterAcOutputKw:   inv0?.acOutputKw   || 0,
+  };
+}
+
 // ─── Title Block (shared across all pages) ───────────────────────────────────
 
 function titleBlock(
@@ -1041,12 +1135,12 @@ function pageAttachmentBOM(input: PermitInput, pageNum: number, totalPages: numb
   </svg>`;
 
   // Build BOM table
-  const panelItem = system.inverters?.[0]?.strings?.[0];
+  const eq_bom = resolveEquipment(input);
   const bomRows: string[] = [];
 
   // Auto-build BOM from system data
-  const panelMfr = panelItem?.panelManufacturer || '—';
-  const panelModel = panelItem?.panelModel || '—';
+  const panelMfr = eq_bom.panelManufacturer;
+  const panelModel = eq_bom.panelModel;
   bomRows.push(`<tr><td>PV Module</td><td>${panelMfr}</td><td>${panelModel}</td><td>—</td><td style="text-align:right;font-weight:bold">${system.totalPanels}</td><td>EA</td><td>UL 61730</td></tr>`);
 
   // Add inverters
@@ -1137,8 +1231,9 @@ function pageWarningLabels(input: PermitInput, pageNum: number, totalPages: numb
   const hasGenerator = (project.generatorKw || 0) > 0;
 
   // Calculate label values
-  const panelIsc = system.inverters?.[0]?.strings?.[0]?.panelIsc || 0;
-  const panelVoc = system.inverters?.[0]?.strings?.[0]?.panelVoc || 0;
+  const eq_labels = resolveEquipment(input);
+  const panelIsc = eq_labels.panelIsc || 0;
+  const panelVoc = eq_labels.panelVoc || 0;
   const topologyType = system.topology || 'MICRO';
   const isMicro = topologyType.toLowerCase().includes('micro');
 
@@ -1974,12 +2069,13 @@ function pageSingleLineDiagram(input: PermitInput, pageNum: number, totalPages: 
     const totalDcKw = system?.totalDcKw ?? 9.6;
     const totalAcKw = system?.totalAcKw ?? 7.68;
     const totalPanels = system?.totalPanels ?? 24;
-    const panelWatts = (project as any).panelWatts ?? 400;
-    const panelModel = (project as any).panelModel ?? 'Q.PEAK DUO BLK ML-G10+ 400';
-    const panelVoc   = (project as any).panelVoc ?? 49.6;
-    const panelIsc   = (project as any).panelIsc ?? 10.5;
-    const inverterModel = (project as any).inverterModel ?? 'IQ8M-72-2-US';
-    const inverterMfr   = (project as any).inverterBrand ?? 'Enphase';
+    const eq_sld = resolveEquipment(input);
+    const panelWatts = eq_sld.panelWatts || (system.totalDcKw && system.totalPanels ? Math.round(system.totalDcKw * 1000 / system.totalPanels) : 400);
+    const panelModel = eq_sld.panelModel !== '—' ? eq_sld.panelModel : (system.totalPanels ? `${panelWatts}W Module` : 'PV Module');
+    const panelVoc   = eq_sld.panelVoc   || 0;
+    const panelIsc   = eq_sld.panelIsc   || 0;
+    const inverterModel = eq_sld.inverterModel !== '—' ? eq_sld.inverterModel : 'Inverter';
+    const inverterMfr   = eq_sld.inverterManufacturer !== '—' ? eq_sld.inverterManufacturer : '';
     const acOutputKw  = totalAcKw;
     const acOutputAmps = (totalAcKw * 1000 / 240);
     const acWireGauge  = (compliance as any)?.electrical?.acConductorCallout ?? '#10 AWG';
