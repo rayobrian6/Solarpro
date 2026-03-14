@@ -31,6 +31,25 @@ export const maxDuration = 30;
  *   [AUTH_DB_QUERY_ERROR]  — unexpected query error
  */
 export async function GET(req: NextRequest) {
+  // ── Dev auth bypass (non-production only) ────────────────────────────────
+  // Returns a fully-formed /api/auth/me response for the dev bypass user.
+  // Active only when DEV_AUTH_BYPASS=true AND NODE_ENV/VERCEL_ENV !== 'production'.
+  // Logs [DEV_AUTH_ACTIVE] — search Vercel function logs to confirm.
+  {
+    const { getDevSessionUser, getDevMeResponse } = await import('@/lib/dev-auth');
+    const devUser = getDevSessionUser(req.headers);
+    if (devUser) {
+      return NextResponse.json(getDevMeResponse(), {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma':        'no-cache',
+          'Expires':       '0',
+        },
+      });
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   // ── Step 1: Validate JWT ───────────────────────────────────────────────────
   // No DB needed. If no valid cookie → 401 (definitive "not authenticated").
 

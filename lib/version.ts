@@ -1,9 +1,17 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.56';
+export const BUILD_VERSION     = 'v47.57';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-06-09';
-export const BUILD_DESCRIPTION = 'v47.56: Pipeline Verification System — RUN PROJECT PIPELINE button, status panel for all subsystems (layout/engineering/artifacts/permit/client files/workflow), mismatch detection, expandable raw data sections, /api/pipeline/run, /api/debug/project endpoints.';
+export const BUILD_DESCRIPTION = 'v47.57: Dev auth bypass — DEV_AUTH_BYPASS=true skips JWT validation in non-production environments, fixing login loops after every preview deployment.';
 export const BUILD_FEATURES    = [
+  // v47.57 -- Dev auth bypass
+  'DEV AUTH: lib/dev-auth.ts — single source of truth for bypass logic. Active only when NODE_ENV!==production AND VERCEL_ENV!==production AND DEV_AUTH_BYPASS=true.',
+  'DEV AUTH: middleware.ts — checks dev bypass before JWT decode. Passes x-dev-auth-user-id/email headers downstream.',
+  'DEV AUTH: lib/auth.ts getUserFromRequest() — checks dev bypass before cookie parse. Falls through to normal JWT auth if bypass inactive.',
+  'DEV AUTH: /api/auth/me — returns full dev user response (super_admin, plan=pro, hasAccess=true) when bypass active. No DB call.',
+  'DEV AUTH: Log code [DEV_AUTH_ACTIVE] — emitted on every bypassed request. Searchable in Vercel function logs.',
+  'DEV AUTH: .env.example — full documentation for DEV_AUTH_BYPASS, DEV_AUTH_USER_ID, DEV_AUTH_USER_EMAIL, DEV_AUTH_USER_NAME.',
+  'DEV AUTH: Production hard-block — isDevAuthAllowed() returns false when NODE_ENV=production OR VERCEL_ENV=production, regardless of env vars.',
   // v47.56 -- Pipeline Verification System
   'PIPELINE: RUN PROJECT PIPELINE button in Client Files tab — POST /api/pipeline/run, full 11-step orchestration',
   'PIPELINE: Status Panel — live subsystem rows for Layout, Engineering, Artifacts, Permit Sheets, Client Files, Workflow, Pipeline Steps',

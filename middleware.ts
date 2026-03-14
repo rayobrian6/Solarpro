@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getDevSessionUserFromRequest } from '@/lib/dev-auth';
 
 const COOKIE_NAME = 'solarpro_session';
 
@@ -81,6 +82,21 @@ export function middleware(req: NextRequest) {
   ) {
     return NextResponse.next();
   }
+
+  // ── Dev auth bypass (non-production only) ──────────────────────────────────
+  // Active when: NODE_ENV !== 'production' AND VERCEL_ENV !== 'production'
+  //              AND DEV_AUTH_BYPASS=true in env  (explicit opt-in)
+  // Logs [DEV_AUTH_ACTIVE] so it is visible in function logs.
+  // Production builds always skip this block — isDevAuthAllowed() hard-blocks.
+  const devUser = getDevSessionUserFromRequest(req);
+  if (devUser) {
+    // Pass through with forwarded identity headers so API routes can read them
+    const res = NextResponse.next();
+    res.headers.set('x-dev-auth-user-id',    devUser.id);
+    res.headers.set('x-dev-auth-user-email', devUser.email);
+    return res;
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   // PHASE 2: Structured cookie diagnostic log
   const rawCookieHeader = req.headers.get('cookie') || '';

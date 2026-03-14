@@ -114,6 +114,17 @@ export function clearSessionCookie(): string {
 
 // ── Get current user from request cookies ────────────────────────────────────
 export function getUserFromRequest(req: Request): SessionUser | null {
+  // Dev bypass — logs [DEV_AUTH_ACTIVE] if active (non-production only, explicit opt-in)
+  // Falls through to normal JWT cookie validation in all production environments.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getDevSessionUser } = require('@/lib/dev-auth') as typeof import('@/lib/dev-auth');
+    const devUser = getDevSessionUser(req.headers);
+    if (devUser) return devUser;
+  } catch {
+    // If dev-auth module fails for any reason, fall through to normal auth
+  }
+
   const cookieHeader = req.headers.get('cookie') || '';
   const match = cookieHeader.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
   if (!match) return null;
