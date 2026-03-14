@@ -2534,30 +2534,119 @@ function EngineeringPageInner() {
   const [planSetError, setPlanSetError] = useState<string | null>(null);
   const [planSetPreviewSheet, setPlanSetPreviewSheet] = useState<string | null>(null); // sheet id being previewed
 
-  // Direct layout fetch — runs when currentProjectId is known
+  // ── SYNC PIPELINE ──────────────────────────────────────────────────────────
+  // Calls /api/engineering/sync-pipeline which:
+  //   1. Reads layout from DB (canonical panel count)
+  //   2. Rebuilds engineering report from layout if stale
+  //   3. Returns panelCount/systemSizeKw/models from LAYOUT (not seed)
+  // This runs once per page load when currentProjectId becomes known.
+  // It is the authoritative integration point between design and engineering.
   useEffect(() => {
     if (!currentProjectId || layoutFetchedDirect) return;
     setLayoutFetchedDirect(true);
-    console.log('[EngineeringPage] Direct layout fetch for projectId:', currentProjectId);
-    fetch(`/api/projects/${currentProjectId}/layout`)
+    console.log('[LAYOUT_LOADED] Calling sync-pipeline for projectId:', currentProjectId);
+
+    fetch(`/api/engineering/sync-pipeline?projectId=${currentProjectId}`)
       .then(r => r.json())
-      .then(lr => {
-        if (lr.success && lr.data) {
-          const panelCount = lr.data.panels?.length ?? 0;
-          const roofPlaneCount = lr.data.roofPlanes?.length ?? 0;
-          console.log('[EngineeringPage] DIRECT LAYOUT RESULT:', { panelCount, roofPlaneCount, systemSizeKw: lr.data.systemSizeKw });
-          if (panelCount > 0) {
-            setProjectLayout(lr.data);
-            console.log('[EngineeringPage] projectLayout SET from direct fetch:', panelCount, 'panels');
-          } else {
-            console.warn('[EngineeringPage] Direct layout fetch: 0 panels — no layout saved yet');
+      .then(sr => {
+        if (!sr.success) {
+          if (sr.error === 'NO_LAYOUT') {
+            console.warn('[EngineeringPage] No layout in DB yet — user must use Design Studio first');
+            return;
           }
-        } else {
-          console.warn('[EngineeringPage] Direct layout fetch failed:', lr.error);
+          console.warn('[EngineeringPage] sync-pipeline failed:', sr.error);
+          // Fallback: try direct layout fetch
+          return fetch(`/api/projects/${currentProjectId}/layout`)
+            .then(r => r.json())
+            .then(lr => {
+              if (lr.success && lr.data?.panels?.length > 0) {
+                setProjectLayout(lr.data);
+                console.log('[EngineeringPage] FALLBACK layout set:', lr.data.panels.length, 'panels');
+              }
+            });
+        }
+
+        const { layout, engineering } = sr.data;
+        console.log('[LAYOUT_LOADED]', {
+          panelCount:     layout.panelCount,
+          roofPlaneCount: layout.roofPlaneCount,
+          systemSizeKw:   layout.systemSizeKw,
+          updatedAt:      layout.updatedAt,
+        });
+        console.log('[ENGINEERING_REBUILD_COMPLETED]', {
+          panelCount:   engineering.panelCount,
+          systemSizeKw: engineering.systemSizeKw,
+          panelModel:   engineering.panelModel,
+          inverterModel: engineering.inverterModel,
+          wasRebuilt:   sr.data.wasRebuilt,
+        });
+
+        // Set projectLayout from sync result (uses DB layout directly)
+        if (layout.panelCount > 0) {
+          // Fetch the full layout object for panel positions
+          fetch(`/api/projects/${currentProjectId}/layout`)
+            .then(r => r.json())
+            .then(lr => {
+              if (lr.success && lr.data) {
+                setProjectLayout(lr.data);
+                console.log('[EngineeringPage] projectLayout SET:', lr.data.panels?.length, 'panels,', lr.data.roofPlanes?.length ?? 0, 'roof planes');
+              }
+            })
+            .catch(() => {});
+        }
+
+        // ── CRITICAL: update config panel count from layout ────────────────
+        // Only update if current config has wrong panel count
+        const currentTotal = config.inverters.reduce((s, inv) =>
+          s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
+        if (layout.panelCount > 0 && currentTotal !== layout.panelCount) {
+          console.log('[EngineeringPage] PANEL COUNT FIX:', currentTotal, '→', layout.panelCount);
+          setConfig(prev => {
+            const newInverters = prev.inverters.map((inv, ii) => {
+              if (ii === 0) {
+                // Redistribute panels across existing strings
+                const invType = inv.type;
+                const pc = layout.panelCount;
+                const panelsPerString = invType === 'micro' ? pc : Math.min(pc, 13);
+                const stringCount = invType === 'micro' ? 1 : Math.ceil(pc / panelsPerString);
+                const newStrings = Array.from({ length: stringCount }, (_, si) => {
+                  const existing = inv.strings[si] || inv.strings[0];
+                  const cnt = si === stringCount - 1
+                    ? pc - panelsPerString * (stringCount - 1)
+                    : panelsPerString;
+                  return { ...existing, id: existing?.id || `str-sync-${si}`, panelCount: cnt };
+                });
+                return { ...inv, strings: newStrings };
+              }
+              return inv;
+            });
+            return { ...prev, inverters: newInverters };
+          });
+          // Trigger recalculation with correct panel count
+          setTimeout(() => {
+            console.log('[EngineeringPage] Auto-recalculating after panel count sync');
+            runCalc();
+          }, 400);
+        }
+
+        // Log pipeline diagnostics
+        if (sr.data.errors?.length > 0) {
+          console.error('[PIPELINE_MISMATCH]', sr.data.errors);
         }
       })
-      .catch(err => console.warn('[EngineeringPage] Direct layout fetch error:', err));
-  }, [currentProjectId, layoutFetchedDirect]);
+      .catch(err => {
+        console.warn('[EngineeringPage] sync-pipeline error:', err);
+        // Last resort fallback
+        fetch(`/api/projects/${currentProjectId}/layout`)
+          .then(r => r.json())
+          .then(lr => {
+            if (lr.success && lr.data?.panels?.length > 0) {
+              setProjectLayout(lr.data);
+            }
+          })
+          .catch(() => {});
+      });
+  }, [currentProjectId, layoutFetchedDirect]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGeneratePermitPackage = async () => {
     // GUARD: if layout is missing entirely, block and warn

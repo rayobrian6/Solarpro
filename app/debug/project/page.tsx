@@ -1,63 +1,131 @@
 'use client';
 /**
- * /debug/project
- * 
- * Visual debug page — proves layout pipeline end-to-end.
- * Shows full DB state, layout data, and pipeline status.
- * 
- * REMOVE THIS PAGE once pipeline is verified.
+ * /debug/project?id=<projectId>
+ *
+ * Full pipeline diagnostic page.
+ * Shows: DB layout, engineering report, permit preflight, artifact status.
+ * Proves the pipeline is wired correctly end-to-end.
  */
 
 import { useState, useEffect } from 'react';
 import { BUILD_VERSION } from '@/lib/version';
 
-interface DebugData {
+interface PipelineDebugData {
+  projectId: string;
   timestamp: string;
-  userId: string;
-  db: {
-    schema: {
-      hasLayouts: boolean;
-      columns: string[];
-      hasPanels: boolean;
-      hasRoofPlanes: boolean;
-      hasMapCenter: boolean;
+  layers: {
+    layout: {
+      exists: boolean;
+      panelCount: number;
+      roofPlaneCount: number;
+      systemSizeKw: number;
+      updatedAt: string;
+      panels?: any[];
+      roofPlanes?: any[];
     };
-    totalLayouts: number;
-    allLayouts: Array<{
-      id: string;
-      project_id: string;
-      project_name: string;
-      panel_count: number;
-      roof_planes_status: string;
-      total_panels: number;
-      system_size_kw: number;
-      updated_at: string;
+    engineering: {
+      exists: boolean;
+      panelCount: number;
+      systemSizeKw: number;
+      panelModel: string;
+      inverterModel: string;
+      wasRebuilt: boolean;
+      designVersionId: string;
+      errors: string[];
+    };
+    mismatches: Array<{
+      field: string;
+      layoutValue: string | number;
+      engineeringValue: string | number;
+      severity: string;
     }>;
   };
-  specificProject: any;
-  specificLayout: any;
 }
 
 export default function DebugProjectPage() {
   const [projectId, setProjectId] = useState('');
-  const [data, setData] = useState<DebugData | null>(null);
+  const [data, setData] = useState<PipelineDebugData | null>(null);
+  const [rawLayout, setRawLayout] = useState<any>(null);
+  const [rawEngineering, setRawEngineering] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [buildVersion] = useState(BUILD_VERSION);
 
-  const fetchDebug = async (pid?: string) => {
+  // Auto-read ?id= from URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id') || params.get('projectId') || '';
+    if (id) {
+      setProjectId(id);
+      runDiagnostics(id);
+    }
+  }, []);
+
+  const runDiagnostics = async (pid: string) => {
+    if (!pid) return;
     setLoading(true);
     setError('');
+    setData(null);
+    setRawLayout(null);
+    setRawEngineering(null);
+
     try {
-      const url = pid
-        ? `/api/debug/layout?projectId=${pid}`
-        : `/api/debug/layout`;
-      const res = await fetch(url);
-      const json = await res.json();
-      if (json.success) {
-        setData(json);
-      } else {
-        setError(json.error || 'Unknown error');
+      // Fetch layout directly
+      const [layoutRes, pipelineRes, dbDebugRes] = await Promise.all([
+        fetch(`/api/projects/${pid}/layout`),
+        fetch(`/api/engineering/sync-pipeline?projectId=${pid}`),
+        fetch(`/api/debug/layout?projectId=${pid}`),
+      ]);
+
+      const layoutJson = await layoutRes.json();
+      const pipelineJson = await pipelineRes.json();
+      const dbDebugJson = await dbDebugRes.json();
+
+      setRawLayout(layoutJson);
+      setRawEngineering(pipelineJson);
+
+      const layout = layoutJson.success ? layoutJson.data : null;
+      const pipeline = pipelineJson.success ? pipelineJson.data : null;
+
+      // Compute mismatches
+      const mismatches: PipelineDebugData['layers']['mismatches'] = [];
+      if (layout && pipeline) {
+        if (layout.panels?.length !== pipeline.engineering.panelCount) {
+          mismatches.push({
+            field: 'panelCount',
+            layoutValue: layout.panels?.length ?? 0,
+            engineeringValue: pipeline.engineering.panelCount,
+            severity: 'ERROR',
+          });
+        }
       }
+
+      setData({
+        projectId: pid,
+        timestamp: new Date().toISOString(),
+        layers: {
+          layout: {
+            exists: !!layout,
+            panelCount: layout?.panels?.length ?? 0,
+            roofPlaneCount: layout?.roofPlanes?.length ?? 0,
+            systemSizeKw: layout?.systemSizeKw ?? 0,
+            updatedAt: layout?.updatedAt ?? 'N/A',
+            panels: layout?.panels?.slice(0, 3),
+            roofPlanes: layout?.roofPlanes?.slice(0, 2),
+          },
+          engineering: {
+            exists: !!pipeline,
+            panelCount: pipeline?.engineering?.panelCount ?? 0,
+            systemSizeKw: pipeline?.engineering?.systemSizeKw ?? 0,
+            panelModel: pipeline?.engineering?.panelModel ?? 'N/A',
+            inverterModel: pipeline?.engineering?.inverterModel ?? 'N/A',
+            wasRebuilt: pipeline?.wasRebuilt ?? false,
+            designVersionId: pipeline?.designVersionId ?? 'N/A',
+            errors: pipeline?.errors ?? [],
+          },
+          mismatches,
+        },
+      });
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -65,213 +133,179 @@ export default function DebugProjectPage() {
     }
   };
 
-  useEffect(() => {
-    fetchDebug();
-  }, []);
-
-  const s = (v: boolean | undefined) => v ? '✅' : '❌';
+  const statusColor = (val: boolean) => val ? 'text-emerald-400' : 'text-red-400';
+  const countColor = (n: number) => n > 0 ? 'text-emerald-400' : 'text-red-400 font-bold';
 
   return (
-    <div style={{ fontFamily: 'monospace', background: '#0f172a', color: '#e2e8f0', minHeight: '100vh', padding: '24px' }}>
-      <div style={{ maxWidth: '960px', margin: '0 auto' }}>
-        
+    <div style={{ background: '#0f172a', minHeight: '100vh', padding: '24px', fontFamily: 'monospace', color: '#e2e8f0' }}>
+      <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+
         {/* Header */}
-        <div style={{ marginBottom: '24px', borderBottom: '1px solid #334155', paddingBottom: '16px' }}>
-          <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#f8fafc', marginBottom: '4px' }}>
-            🔍 SolarPro Pipeline Debug
-          </h1>
-          <div style={{ fontSize: '12px', color: '#64748b' }}>
-            Build: {BUILD_VERSION} · Remove this page when debugging is complete
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+          <div>
+            <h1 style={{ fontSize: '20px', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>
+              🔬 Pipeline Diagnostic
+            </h1>
+            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>
+              {BUILD_VERSION} · {new Date().toLocaleString()}
+            </div>
+          </div>
+          <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '6px 12px', fontSize: '12px', color: '#94a3b8' }}>
+            Build: <span style={{ color: '#f59e0b', fontWeight: 'bold' }}>{buildVersion}</span>
           </div>
         </div>
 
         {/* Project ID input */}
-        <div style={{ marginBottom: '20px', display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
           <input
-            type="text"
-            placeholder="Enter project ID (optional)"
             value={projectId}
             onChange={e => setProjectId(e.target.value)}
+            placeholder="Enter Project ID (UUID)"
             style={{
-              flex: 1, padding: '8px 12px', background: '#1e293b', border: '1px solid #334155',
-              borderRadius: '6px', color: '#e2e8f0', fontSize: '13px', fontFamily: 'monospace',
+              flex: 1, background: '#1e293b', border: '1px solid #334155',
+              borderRadius: '6px', padding: '8px 12px', color: '#e2e8f0',
+              fontSize: '13px', fontFamily: 'monospace',
             }}
           />
           <button
-            onClick={() => fetchDebug(projectId || undefined)}
+            onClick={() => runDiagnostics(projectId)}
+            disabled={loading || !projectId}
             style={{
-              padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none',
-              borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
+              background: '#f59e0b', color: '#0f172a', border: 'none',
+              borderRadius: '6px', padding: '8px 16px', fontWeight: 'bold',
+              cursor: loading ? 'wait' : 'pointer', fontSize: '13px',
             }}
           >
-            {loading ? '...' : 'Query DB'}
-          </button>
-          <button
-            onClick={() => fetchDebug()}
-            style={{
-              padding: '8px 16px', background: '#374151', color: '#d1d5db', border: 'none',
-              borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
-            }}
-          >
-            Reset
+            {loading ? 'Running…' : 'Run Diagnostics'}
           </button>
         </div>
 
         {error && (
-          <div style={{ background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: '6px', padding: '12px', marginBottom: '16px', color: '#fca5a5' }}>
+          <div style={{ background: '#450a0a', border: '1px solid #dc2626', borderRadius: '6px', padding: '12px', color: '#fca5a5', marginBottom: '16px', fontSize: '13px' }}>
             ❌ Error: {error}
           </div>
         )}
 
         {data && (
           <>
-            {/* Status Bar */}
+            {/* Pipeline Status Summary */}
             <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '16px', marginBottom: '16px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#94a3b8', marginBottom: '8px' }}>PIPELINE STATUS</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '8px' }}>
-                <div>{s(data.db.schema.hasPanels)} DB: panels column</div>
-                <div>{s(data.db.schema.hasRoofPlanes)} DB: roof_planes column</div>
-                <div>{s(data.db.schema.hasMapCenter)} DB: map_center column</div>
-                <div>{s(data.db.totalLayouts > 0)} DB: layouts exist ({data.db.totalLayouts} total)</div>
-                {data.specificLayout && (
-                  <>
-                    <div>{s(data.specificLayout.panelCount > 0)} Layout: has panels ({data.specificLayout.panelCount})</div>
-                    <div>{s(data.specificLayout.hasRoofPlanes)} Layout: has roof planes ({data.specificLayout.roofPlaneCount})</div>
-                    <div>{s(data.specificLayout.samplePanels?.[0]?.lat)} Panel: has lat/lng</div>
-                  </>
-                )}
+              <div style={{ fontWeight: 'bold', color: '#f8fafc', marginBottom: '12px', fontSize: '14px' }}>
+                📊 Pipeline Status Summary
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '12px' }}>
+
+                {/* Layer 1: Layout */}
+                <div style={{ background: '#0f172a', borderRadius: '6px', padding: '12px', border: `1px solid ${data.layers.layout.panelCount > 0 ? '#059669' : '#dc2626'}` }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#94a3b8' }}>LAYER 1: DB Layout</div>
+                  <div>Exists: <span className={statusColor(data.layers.layout.exists)}>{data.layers.layout.exists ? '✅ YES' : '❌ NO'}</span></div>
+                  <div>Panels: <span style={{ color: data.layers.layout.panelCount > 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>{data.layers.layout.panelCount}</span></div>
+                  <div>Roof Planes: <span style={{ color: data.layers.layout.roofPlaneCount > 0 ? '#34d399' : '#fbbf24' }}>{data.layers.layout.roofPlaneCount}</span></div>
+                  <div>System kW: <span style={{ color: '#94a3b8' }}>{data.layers.layout.systemSizeKw}</span></div>
+                  <div style={{ color: '#475569', marginTop: '4px' }}>Updated: {new Date(data.layers.layout.updatedAt).toLocaleString()}</div>
+                </div>
+
+                {/* Layer 2: Engineering */}
+                <div style={{ background: '#0f172a', borderRadius: '6px', padding: '12px', border: `1px solid ${data.layers.engineering.panelCount > 0 ? '#059669' : '#dc2626'}` }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '8px', color: '#94a3b8' }}>LAYER 2: Engineering Model</div>
+                  <div>Exists: <span style={{ color: data.layers.engineering.exists ? '#34d399' : '#f87171' }}>{data.layers.engineering.exists ? '✅ YES' : '❌ NO'}</span></div>
+                  <div>Panels: <span style={{ color: data.layers.engineering.panelCount > 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>{data.layers.engineering.panelCount}</span></div>
+                  <div>System kW: <span style={{ color: '#94a3b8' }}>{data.layers.engineering.systemSizeKw}</span></div>
+                  <div>Rebuilt: <span style={{ color: data.layers.engineering.wasRebuilt ? '#fbbf24' : '#34d399' }}>{data.layers.engineering.wasRebuilt ? '⚡ Just rebuilt' : '✅ Was current'}</span></div>
+                  <div style={{ color: '#475569', fontSize: '11px', marginTop: '4px' }}>{data.layers.engineering.panelModel}</div>
+                </div>
+
+              </div>
+
+              {/* Mismatches */}
+              {data.layers.mismatches.length > 0 && (
+                <div style={{ marginTop: '12px', background: '#450a0a', border: '1px solid #dc2626', borderRadius: '6px', padding: '10px', fontSize: '12px' }}>
+                  <div style={{ fontWeight: 'bold', color: '#fca5a5', marginBottom: '6px' }}>⚠️ PIPELINE MISMATCHES DETECTED</div>
+                  {data.layers.mismatches.map((m, i) => (
+                    <div key={i} style={{ color: '#fca5a5' }}>
+                      {m.field}: layout={m.layoutValue} vs engineering={m.engineeringValue} [{m.severity}]
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {data.layers.mismatches.length === 0 && data.layers.layout.panelCount > 0 && (
+                <div style={{ marginTop: '12px', background: '#052e16', border: '1px solid #059669', borderRadius: '6px', padding: '10px', fontSize: '12px', color: '#34d399' }}>
+                  ✅ Pipeline in sync — layout({data.layers.layout.panelCount} panels) = engineering({data.layers.engineering.panelCount} panels)
+                </div>
+              )}
+            </div>
+
+            {/* Permit Preflight Check */}
+            <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '16px', marginBottom: '16px' }}>
+              <div style={{ fontWeight: 'bold', color: '#f8fafc', marginBottom: '12px', fontSize: '14px' }}>
+                📋 Permit Preflight Check
+              </div>
+              <div style={{ fontSize: '12px', display: 'grid', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Panel positions in layout:</span>
+                  <span style={{ color: data.layers.layout.panelCount > 0 ? '#34d399' : '#f87171', fontWeight: 'bold' }}>
+                    {data.layers.layout.panelCount > 0 ? `✅ ${data.layers.layout.panelCount} panels` : '❌ MISSING'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Roof planes:</span>
+                  <span style={{ color: data.layers.layout.roofPlaneCount > 0 ? '#34d399' : '#fbbf24' }}>
+                    {data.layers.layout.roofPlaneCount > 0 ? `✅ ${data.layers.layout.roofPlaneCount} planes` : '⚠️ none saved'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Engineering panel count:</span>
+                  <span style={{ color: data.layers.engineering.panelCount > 0 ? '#34d399' : '#f87171' }}>
+                    {data.layers.engineering.panelCount > 0 ? `✅ ${data.layers.engineering.panelCount}` : '❌ 0'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>System size (from layout):</span>
+                  <span style={{ color: '#94a3b8' }}>{data.layers.layout.systemSizeKw} kW DC</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Module model:</span>
+                  <span style={{ color: '#94a3b8' }}>{data.layers.engineering.panelModel}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Inverter model:</span>
+                  <span style={{ color: '#94a3b8' }}>{data.layers.engineering.inverterModel}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: '#64748b' }}>Build version:</span>
+                  <span style={{ color: '#f59e0b' }}>{buildVersion}</span>
+                </div>
               </div>
             </div>
 
-            {/* DB Schema */}
-            <Section title="1. DB SCHEMA — layouts table">
-              <Row label="Columns" value={data.db.schema.columns.join(', ')} />
-              <Row label="panels column" value={s(data.db.schema.hasPanels)} />
-              <Row label="roof_planes column" value={s(data.db.schema.hasRoofPlanes)} />
-              <Row label="map_center column" value={s(data.db.schema.hasMapCenter)} />
-              <Row label="Total layouts in DB" value={String(data.db.totalLayouts)} />
-            </Section>
-
-            {/* All Layouts */}
-            <Section title="2. ALL LAYOUTS (most recent 20)">
-              {data.db.allLayouts.length === 0 ? (
-                <div style={{ color: '#ef4444' }}>❌ NO LAYOUTS FOUND — nothing has been saved to DB</div>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                  <thead>
-                    <tr style={{ color: '#64748b', borderBottom: '1px solid #334155' }}>
-                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>Project</th>
-                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>Panels</th>
-                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>Roof Planes</th>
-                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>kW</th>
-                      <th style={{ textAlign: 'left', padding: '4px 8px' }}>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.db.allLayouts.map((l, i) => (
-                      <tr key={i} style={{ borderBottom: '1px solid #1e293b' }}>
-                        <td style={{ padding: '4px 8px' }}>
-                          <div style={{ color: '#94a3b8' }}>{l.project_name || '(unnamed)'}</div>
-                          <div style={{ color: '#475569', fontSize: '10px' }}>{l.project_id}</div>
-                        </td>
-                        <td style={{ padding: '4px 8px', color: l.panel_count > 0 ? '#4ade80' : '#ef4444' }}>
-                          {l.panel_count}
-                        </td>
-                        <td style={{ padding: '4px 8px', color: l.roof_planes_status.includes('planes') ? '#4ade80' : '#ef4444' }}>
-                          {l.roof_planes_status}
-                        </td>
-                        <td style={{ padding: '4px 8px' }}>{l.system_size_kw}</td>
-                        <td style={{ padding: '4px 8px', color: '#64748b' }}>
-                          {new Date(l.updated_at).toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </Section>
-
-            {/* Specific Project */}
-            {data.specificProject && (
-              <Section title="3. SPECIFIC PROJECT">
-                <Row label="ID" value={data.specificProject.id} />
-                <Row label="Name" value={data.specificProject.name} />
-                <Row label="Address" value={data.specificProject.address} />
-                <Row label="System Type" value={data.specificProject.system_type} />
-              </Section>
-            )}
-
-            {/* Specific Layout */}
-            {data.specificLayout ? (
-              <Section title="4. SPECIFIC LAYOUT — DB RAW DATA">
-                <Row label="Layout ID" value={data.specificLayout.id} />
-                <Row label="Panel Count (jsonb)" value={String(data.specificLayout.panelCount)} />
-                <Row label="Total Panels (column)" value={String(data.specificLayout.totalPanels)} />
-                <Row label="System Size kW" value={String(data.specificLayout.systemSizeKw)} />
-                <Row label="Roof Plane Count" value={String(data.specificLayout.roofPlaneCount)} />
-                <Row label="Has Roof Planes" value={s(data.specificLayout.hasRoofPlanes)} />
-                <Row label="Updated At" value={new Date(data.specificLayout.updatedAt).toLocaleString()} />
-
-                {data.specificLayout.samplePanels?.length > 0 && (
-                  <>
-                    <div style={{ marginTop: '12px', color: '#64748b', fontSize: '12px' }}>SAMPLE PANELS (first 3):</div>
-                    {data.specificLayout.samplePanels.map((p: any, i: number) => (
-                      <div key={i} style={{ marginLeft: '16px', fontSize: '12px', color: '#94a3b8' }}>
-                        [{i}] lat={p.lat ?? '❌MISSING'} lng={p.lng ?? '❌MISSING'} tilt={p.tilt} az={p.azimuth}
-                      </div>
-                    ))}
-                  </>
-                )}
-
-                {data.specificLayout.sampleRoofPlane && (
-                  <>
-                    <div style={{ marginTop: '12px', color: '#64748b', fontSize: '12px' }}>SAMPLE ROOF PLANE:</div>
-                    <div style={{ marginLeft: '16px', fontSize: '12px', color: '#94a3b8' }}>
-                      id={data.specificLayout.sampleRoofPlane.id} pitch={data.specificLayout.sampleRoofPlane.pitch} 
-                      az={data.specificLayout.sampleRoofPlane.azimuth} vertices={data.specificLayout.sampleRoofPlane.vertexCount}
-                    </div>
-                  </>
-                )}
-              </Section>
-            ) : projectId ? (
-              <Section title="4. SPECIFIC LAYOUT">
-                <div style={{ color: '#ef4444' }}>❌ No layout found for project ID: {projectId}</div>
-              </Section>
-            ) : null}
-
             {/* Raw JSON */}
-            <Section title="5. RAW API RESPONSE">
-              <pre style={{ fontSize: '11px', color: '#64748b', overflow: 'auto', maxHeight: '300px' }}>
-                {JSON.stringify(data, null, 2)}
+            <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '16px', marginBottom: '16px' }}>
+              <div style={{ fontWeight: 'bold', color: '#f8fafc', marginBottom: '12px', fontSize: '14px' }}>
+                🗄️ Raw Layout Response (from /api/projects/[id]/layout)
+              </div>
+              <pre style={{ fontSize: '10px', color: '#94a3b8', overflow: 'auto', maxHeight: '200px', background: '#0f172a', padding: '10px', borderRadius: '4px', margin: 0 }}>
+                {JSON.stringify(rawLayout ? { ...rawLayout, data: rawLayout.data ? { ...rawLayout.data, panels: `[${rawLayout.data.panels?.length ?? 0} panels — first 2: ${JSON.stringify(rawLayout.data.panels?.slice(0,2))}]`, } : null } : null, null, 2)}
               </pre>
-            </Section>
+            </div>
+
+            <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '16px', marginBottom: '16px' }}>
+              <div style={{ fontWeight: 'bold', color: '#f8fafc', marginBottom: '12px', fontSize: '14px' }}>
+                ⚙️ Raw sync-pipeline Response
+              </div>
+              <pre style={{ fontSize: '10px', color: '#94a3b8', overflow: 'auto', maxHeight: '200px', background: '#0f172a', padding: '10px', borderRadius: '4px', margin: 0 }}>
+                {JSON.stringify(rawEngineering, null, 2)}
+              </pre>
+            </div>
           </>
         )}
 
-        <div style={{ marginTop: '32px', fontSize: '11px', color: '#334155', textAlign: 'center' }}>
-          ⚠️ Debug page — remove app/debug/project/ and app/api/debug/layout/ when done
-        </div>
+        {!data && !loading && (
+          <div style={{ textAlign: 'center', color: '#475569', marginTop: '60px', fontSize: '14px' }}>
+            Enter a Project ID above and click Run Diagnostics
+          </div>
+        )}
       </div>
-    </div>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: '8px', padding: '16px', marginBottom: '12px' }}>
-      <div style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b', marginBottom: '10px', letterSpacing: '0.05em' }}>
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'flex', gap: '16px', marginBottom: '4px', fontSize: '12px' }}>
-      <span style={{ color: '#64748b', minWidth: '200px' }}>{label}:</span>
-      <span style={{ color: '#e2e8f0' }}>{value}</span>
     </div>
   );
 }

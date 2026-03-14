@@ -1,8 +1,8 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.51';
+export const BUILD_VERSION     = 'v47.52';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.51: Fix layout→engineering pipeline: layout overrides seed panel count, direct layout fetch, permit guard';
+export const BUILD_DESCRIPTION = 'v47.52: Pipeline orchestrator — syncProjectPipeline, sync-pipeline API, full diagnostic debug page';
 export const BUILD_FEATURES    = [
   // v47.51 -- Layout → Engineering pipeline fix
   'ENGINEERING: Layout panel count OVERRIDES seed.panel_count — layout is ground truth',
