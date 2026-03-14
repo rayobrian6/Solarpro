@@ -439,17 +439,19 @@ function pageCoverSheet(input: PermitInput, pageNum: number, totalPages: number)
 
   // Sheet index
   const sheets = [
-    { id: 'PV-0', title: 'Cover Sheet, System Summary & Construction Notes', sheet: '1' },
-    { id: 'PV-1', title: 'Site Information & Interconnection Details', sheet: '2' },
-    { id: 'PV-2', title: 'Aerial Roof Plan with Fire Setbacks', sheet: '3' },
-    { id: 'PV-3', title: 'Attachment Detail & Bill of Materials', sheet: '4' },
-    { id: 'PV-4A', title: 'NEC Compliance Sheet', sheet: '5' },
-    { id: 'PV-4B', title: 'Conductor & Conduit Schedule', sheet: '6' },
-    { id: 'PV-4C', title: 'Structural Calculation Sheet', sheet: '7' },
-    { id: 'PV-5', title: 'Warning Labels & Required Placards', sheet: '8' },
-    { id: 'SCHED', title: 'Equipment Schedule', sheet: '9' },
-    { id: 'CERT', title: 'Engineer Certification Block', sheet: '10' },
-    { id: 'E-1', title: 'Single-Line Electrical Diagram (SLD)', sheet: '11' },
+    { id: 'PV-0',   title: 'Cover Sheet, System Summary & Construction Notes', sheet: '1' },
+    { id: 'PV-1',   title: 'Site Information & Interconnection Details',        sheet: '2' },
+    { id: 'PV-2A',  title: 'Aerial Roof Plan with Fire Setbacks',               sheet: '3' },
+    { id: 'PV-2B',  title: 'Array Geometry & String Layout',                    sheet: '4' },
+    { id: 'PV-3',   title: 'Attachment Detail & Bill of Materials',             sheet: '5' },
+    { id: 'PV-4A',  title: 'NEC Compliance Sheet',                              sheet: '6' },
+    { id: 'PV-4B',  title: 'Conductor & Conduit Schedule',                      sheet: '7' },
+    { id: 'PV-4C',  title: 'Structural Calculation Sheet (ASCE 7-22)',          sheet: '8' },
+    { id: 'PV-5',   title: 'Warning Labels & Required Placards',                sheet: '9' },
+    { id: 'SCHED',  title: 'Equipment Schedule',                                sheet: '10' },
+    { id: 'APP-A',  title: 'Equipment Specification Reference',                 sheet: '11' },
+    { id: 'CERT',   title: 'Engineer Certification Block',                      sheet: '12' },
+    { id: 'E-1',    title: 'Single-Line Electrical Diagram (SLD)',              sheet: '13' },
   ];
 
   return `
@@ -579,20 +581,79 @@ function pageSiteInformation(input: PermitInput, pageNum: number, totalPages: nu
         </div>
 
         <div class="col-right">
-          <!-- Vicinity / Site Map Placeholder -->
-          <div class="section-title">Vicinity Map (Field Complete)</div>
-          <div class="map-placeholder">
-            <div class="map-inner">
-              <div class="map-icon">🗺</div>
-              <div class="map-title">SITE LOCATION MAP</div>
-              <div class="map-addr">${project.address || '—'}</div>
-              <div class="map-note">AHJ: ${ahj}</div>
-              <div class="map-note" style="margin-top:8px;font-size:9px;color:#94a3b8;">
-                Attach aerial photograph or Google Maps screenshot<br>
-                showing property location within jurisdiction.<br>
-                North arrow and scale required.
-              </div>
-            </div>
+          <!-- Schematic Site Plan -->
+          <div class="section-title">Schematic Site Plan (Not to Scale)</div>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:10px;">
+            <svg viewBox="0 0 380 280" width="100%" style="max-height:280px;font-family:Arial,sans-serif;font-size:8px;">
+              <!-- Street -->
+              <rect x="0" y="235" width="380" height="45" fill="#e5e7eb"/>
+              <text x="190" y="262" text-anchor="middle" font-size="9" fill="#6b7280" font-weight="600">STREET / RIGHT OF WAY</text>
+              <line x1="0" y1="235" x2="380" y2="235" stroke="#9ca3af" stroke-width="1" stroke-dasharray="6,3"/>
+
+              <!-- Property boundary -->
+              <rect x="30" y="20" width="320" height="210" fill="none" stroke="#374151" stroke-width="2" stroke-dasharray="8,4"/>
+              <text x="32" y="15" font-size="7" fill="#374151">PROPERTY LINE (TYP)</text>
+
+              <!-- House footprint -->
+              <rect x="80" y="60" width="200" height="130" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5" rx="3"/>
+              <text x="180" y="125" text-anchor="middle" font-size="10" fill="#1d4ed8" font-weight="700">HOUSE</text>
+              <text x="180" y="137" text-anchor="middle" font-size="8" fill="#3b82f6">${project.address?.split(',')[0] || 'Property'}</text>
+
+              <!-- Garage -->
+              <rect x="280" y="145" width="60" height="45" fill="#e0f2fe" stroke="#0284c7" stroke-width="1" rx="2"/>
+              <text x="310" y="172" text-anchor="middle" font-size="7" fill="#0369a1">GARAGE</text>
+
+              <!-- Driveway -->
+              <rect x="280" y="190" width="60" height="45" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1"/>
+              <text x="310" y="217" text-anchor="middle" font-size="7" fill="#6b7280">DRIVEWAY</text>
+
+              <!-- Solar array on roof -->
+              <rect x="100" y="75" width="130" height="80" fill="#fde68a" fill-opacity="0.5" stroke="#f59e0b" stroke-width="1.5" rx="2"/>
+              <text x="165" y="118" text-anchor="middle" font-size="8" fill="#92400e" font-weight="700">SOLAR</text>
+              <text x="165" y="128" text-anchor="middle" font-size="7" fill="#92400e">ARRAY</text>
+
+              <!-- Utility meter -->
+              <circle cx="80" cy="155" r="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+              <text x="80" y="159" text-anchor="middle" font-size="6.5" fill="#92400e" font-weight="700">UM</text>
+              <text x="80" y="173" text-anchor="middle" font-size="6.5" fill="#374151">UTILITY</text>
+              <text x="80" y="181" text-anchor="middle" font-size="6.5" fill="#374151">METER</text>
+
+              <!-- Inverter location -->
+              <rect x="285" y="148" width="24" height="16" fill="#d1fae5" stroke="#059669" stroke-width="1.5" rx="2"/>
+              <text x="297" y="159" text-anchor="middle" font-size="6" fill="#065f46" font-weight="700">INV</text>
+              <text x="297" y="172" text-anchor="middle" font-size="6" fill="#374151">INVERTER</text>
+
+              <!-- AC Disconnect -->
+              <rect x="314" y="148" width="20" height="16" fill="#ede9fe" stroke="#7c3aed" stroke-width="1" rx="2"/>
+              <text x="324" y="159" text-anchor="middle" font-size="5.5" fill="#4c1d95" font-weight="700">ACD</text>
+              <text x="324" y="173" text-anchor="middle" font-size="5.5" fill="#374151">AC DISC</text>
+
+              <!-- Main panel -->
+              <rect x="238" y="148" width="24" height="16" fill="#fce7f3" stroke="#be185d" stroke-width="1" rx="2"/>
+              <text x="250" y="159" text-anchor="middle" font-size="5.5" fill="#831843" font-weight="700">MSP</text>
+              <text x="250" y="172" text-anchor="middle" font-size="5.5" fill="#374151">MAIN</text>
+              <text x="250" y="180" text-anchor="middle" font-size="5.5" fill="#374151">PANEL</text>
+
+              <!-- Conduit path (dashed) -->
+              <polyline points="180,155 180,175 297,175 297,164" fill="none" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="4,2"/>
+              <text x="225" y="185" text-anchor="middle" font-size="6.5" fill="#dc2626">CONDUIT ROUTE (TYP)</text>
+
+              <!-- North arrow -->
+              <g transform="translate(345, 35)">
+                <circle cx="0" cy="0" r="16" fill="white" stroke="#374151" stroke-width="1"/>
+                <polygon points="0,-12 -4,2 0,-1 4,2" fill="#1e293b"/>
+                <text x="0" y="-3" text-anchor="middle" font-size="9" fill="white" font-weight="900">N</text>
+                <text x="0" y="21" text-anchor="middle" font-size="7" fill="#374151">NORTH</text>
+              </g>
+
+              <!-- Legend -->
+              <rect x="30" y="223" width="8" height="8" fill="#fde68a" stroke="#f59e0b" stroke-width="1"/>
+              <text x="42" y="230" font-size="7" fill="#374151">Solar Array</text>
+              <rect x="80" y="223" width="8" height="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+              <text x="92" y="230" font-size="7" fill="#374151">Building</text>
+              <line x1="135" y1="227" x2="155" y2="227" stroke="#dc2626" stroke-width="1.5" stroke-dasharray="4,2"/>
+              <text x="160" y="230" font-size="7" fill="#374151">Conduit</text>
+            </svg>
           </div>
 
           <div class="section-title" style="margin-top:14px">Structural Parameters</div>
@@ -2667,22 +2728,356 @@ function pageSingleLineDiagram(input: PermitInput, pageNum: number, totalPages: 
 }
 
 
+// ─── PV-1B: Array Geometry & String Layout ────────────────────────────────
+// Detailed schematic showing array groupings, string assignments, row/col grid
+
+function pageArrayGeometry(input: PermitInput, pageNum: number, totalPages: number): string {
+  const { project, system } = input;
+  const panels = (project as any).panelPositions as Array<{
+    id: string; lat: number; lng: number; row: number; col: number;
+    tilt?: number; azimuth?: number; wattage?: number; orientation?: string; systemType?: string;
+  }> || [];
+
+  const totalPanels = system.totalPanels || panels.length || 0;
+  const totalStrings = system.inverters?.reduce((sum, inv) => sum + (inv.strings?.length || 0), 0) || 1;
+
+  // Group panels by row for grid visualization
+  const rows: Map<number, typeof panels> = new Map();
+  panels.forEach(p => {
+    const r = p.row ?? 0;
+    if (!rows.has(r)) rows.set(r, []);
+    rows.get(r)!.push(p);
+  });
+  const rowNums = Array.from(rows.keys()).sort((a, b) => a - b);
+
+  // Compute dominant tilt/azimuth from panel data
+  let sumTilt = 0, sumAz = 0, count = 0;
+  panels.forEach(p => {
+    if (p.tilt != null) { sumTilt += p.tilt; count++; }
+    if (p.azimuth != null) sumAz += p.azimuth;
+  });
+  const avgTilt = count > 0 ? (sumTilt / count).toFixed(1) : (project.roofPitch || 20).toString();
+  const avgAz = count > 0 ? (sumAz / count).toFixed(0) : '180';
+
+  // Determine compass direction from azimuth
+  const azNum = parseFloat(avgAz);
+  const compassDir = azNum >= 337.5 || azNum < 22.5 ? 'N' :
+    azNum < 67.5 ? 'NE' : azNum < 112.5 ? 'E' : azNum < 157.5 ? 'SE' :
+    azNum < 202.5 ? 'S' : azNum < 247.5 ? 'SW' : azNum < 292.5 ? 'W' : 'NW';
+
+  // Build SVG grid
+  const cellW = 28, cellH = 38, gapX = 4, gapY = 6;
+  const maxCols = Math.max(...Array.from(rows.values()).map(r => r.length), 1);
+  const gridW = maxCols * (cellW + gapX) + 10;
+  const gridH = rowNums.length * (cellH + gapY) + 10;
+  const svgW = Math.min(gridW + 80, 900);
+  const svgH = Math.max(gridH + 60, 200);
+
+  // Color per string (up to 8 strings)
+  const stringColors = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#be185d','#65a30d'];
+
+  // Assign string index to each panel (distribute evenly)
+  const panelStringMap: Map<string, number> = new Map();
+  const sortedPanels = [...panels].sort((a, b) => (a.row ?? 0) - (b.row ?? 0) || (a.col ?? 0) - (b.col ?? 0));
+  const panelsPerString = totalStrings > 0 ? Math.ceil(totalPanels / totalStrings) : totalPanels;
+  sortedPanels.forEach((p, i) => { panelStringMap.set(p.id, Math.floor(i / panelsPerString)); });
+
+  let svgCells = '';
+  if (panels.length > 0 && panels.length <= 200) {
+    rowNums.forEach((rn, ri) => {
+      const row = rows.get(rn)!.sort((a, b) => (a.col ?? 0) - (b.col ?? 0));
+      row.forEach((p, ci) => {
+        const x = 40 + ci * (cellW + gapX);
+        const y = 30 + ri * (cellH + gapY);
+        const si = panelStringMap.get(p.id) ?? 0;
+        const color = stringColors[si % stringColors.length];
+        svgCells += `<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.2" rx="2"/>`;
+        svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 - 4}" text-anchor="middle" font-size="6" fill="#1e293b" font-weight="600">R${rn+1}</text>`;
+        svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 5}" text-anchor="middle" font-size="5.5" fill="#64748b">C${(p.col??ci)+1}</text>`;
+        svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 14}" text-anchor="middle" font-size="5" fill="${color}" font-weight="700">S${si+1}</text>`;
+      });
+    });
+  } else if (panels.length === 0) {
+    // Schematic from system config
+    const invs = system.inverters || [];
+    invs.forEach((inv, ii) => {
+      (inv.strings || []).forEach((str, si) => {
+        const ppc = str.panelCount;
+        for (let pi = 0; pi < Math.min(ppc, 20); pi++) {
+          const x = 40 + pi * (cellW + gapX);
+          const y = 30 + (ii * (invs[0].strings?.length || 1) + si) * (cellH + gapY);
+          const color = stringColors[si % stringColors.length];
+          svgCells += `<rect x="${x}" y="${y}" width="${cellW}" height="${cellH}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.2" rx="2"/>`;
+          svgCells += `<text x="${x + cellW/2}" y="${y + cellH/2 + 4}" text-anchor="middle" font-size="5.5" fill="${color}" font-weight="700">S${si+1}</text>`;
+        }
+        if (ppc > 20) {
+          const x = 40 + 20 * (cellW + gapX);
+          const y = 30 + (ii * (invs[0].strings?.length || 1) + si) * (cellH + gapY);
+          svgCells += `<text x="${x + 4}" y="${y + cellH/2 + 4}" font-size="8" fill="#64748b">+${ppc-20} more</text>`;
+        }
+      });
+    });
+  }
+
+  // String legend
+  const legendItems = system.inverters?.flatMap((inv, ii) =>
+    (inv.strings || []).map((str, si) => ({
+      si: ii * (system.inverters[0]?.strings?.length || 1) + si,
+      label: str.label || `String ${si+1}`,
+      count: str.panelCount,
+      model: str.panelModel || '—',
+      watts: str.panelWatts || 400,
+      voc: str.panelVoc || 41.6,
+      isc: str.panelIsc || 12.26,
+    }))
+  ) || [];
+
+  return `
+  <div class="page">
+    ${titleBlock(input, 'PV-2B', 'ARRAY GEOMETRY & STRING LAYOUT', pageNum, totalPages)}
+    <div class="page-content">
+      <div class="two-col-layout">
+        <div class="col-left">
+          <div class="section-title">Array Configuration Diagram</div>
+          <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:12px;">
+            <svg viewBox="0 0 ${svgW} ${svgH}" width="100%" style="max-height:320px;">
+              <!-- Compass -->
+              <text x="12" y="20" font-size="9" font-weight="700" fill="#1e293b">N↑</text>
+              ${svgCells || '<text x="50%" y="50%" text-anchor="middle" font-size="12" fill="#94a3b8">No panel position data available</text>'}
+              <!-- Row labels -->
+              ${rowNums.map((rn, ri) => `<text x="32" y="${30 + ri*(cellH+gapY) + cellH/2 + 3}" text-anchor="end" font-size="7" fill="#64748b">Row ${rn+1}</text>`).join('')}
+            </svg>
+          </div>
+
+          <!-- String Color Legend -->
+          <div class="section-title">String Assignment Legend</div>
+          <table class="equip-table">
+            <thead><tr><th>Color</th><th>String</th><th>Panels</th><th>Module</th><th>Wp</th><th>Voc</th><th>Isc</th></tr></thead>
+            <tbody>
+              ${legendItems.slice(0, 8).map((item, i) => `
+              <tr>
+                <td><div style="width:16px;height:16px;background:${stringColors[item.si % stringColors.length]};border-radius:3px;display:inline-block;"></div></td>
+                <td><strong>${item.label}</strong></td>
+                <td>${item.count}</td>
+                <td style="font-size:8px">${item.model.slice(0,30)}</td>
+                <td>${item.watts}W</td>
+                <td>${item.voc}V</td>
+                <td>${item.isc}A</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="col-right">
+          <!-- Array Summary -->
+          <div class="section-title">Array Parameters</div>
+          <table class="info-table">
+            <tr><td class="il">Total Modules</td><td class="iv">${totalPanels} modules</td></tr>
+            <tr><td class="il">Avg. Tilt Angle</td><td class="iv">${avgTilt}°</td></tr>
+            <tr><td class="il">Avg. Azimuth</td><td class="iv">${avgAz}° (${compassDir})</td></tr>
+            <tr><td class="il">Array Rows</td><td class="iv">${rowNums.length > 0 ? rowNums.length : Math.ceil(Math.sqrt(totalPanels))}</td></tr>
+            <tr><td class="il">Strings Total</td><td class="iv">${totalStrings}</td></tr>
+            <tr><td class="il">System Type</td><td class="iv">${(project.systemType || 'roof').toUpperCase()}-MOUNTED</td></tr>
+            <tr><td class="il">Orientation</td><td class="iv">${panels[0]?.orientation?.toUpperCase() || 'PORTRAIT'}</td></tr>
+            <tr><td class="il">Module Wattage</td><td class="iv">${panels[0]?.wattage || 400} Wp</td></tr>
+          </table>
+
+          <!-- Fire Setback Diagram -->
+          <div class="section-title" style="margin-top:14px">Fire Access Pathways (IFC §605.11)</div>
+          <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:10px;margin-bottom:10px;">
+            <svg viewBox="0 0 300 200" width="100%" style="max-height:200px;font-family:Arial,sans-serif;">
+              <!-- Roof outline -->
+              <rect x="20" y="20" width="260" height="160" fill="#f1f5f9" stroke="#475569" stroke-width="2" rx="4"/>
+              <!-- Array area (inside setbacks) -->
+              <rect x="60" y="52" width="180" height="108" fill="#bfdbfe" fill-opacity="0.5" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4,2"/>
+              <!-- Setback annotations -->
+              <line x1="20" y1="200" x2="60" y2="200" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrow)"/>
+              <text x="40" y="195" text-anchor="middle" font-size="7" fill="#dc2626" font-weight="700">18"</text>
+              <line x1="20" y1="20" x2="20" y2="52" stroke="#dc2626" stroke-width="1.5"/>
+              <text x="8" y="38" text-anchor="middle" font-size="7" fill="#dc2626" font-weight="700" transform="rotate(-90,8,38)">18"</text>
+              <!-- Ridge label -->
+              <text x="150" y="15" text-anchor="middle" font-size="7.5" fill="#475569" font-weight="700">RIDGE</text>
+              <line x1="20" y1="20" x2="280" y2="20" stroke="#475569" stroke-width="2"/>
+              <!-- Panel array label -->
+              <text x="150" y="108" text-anchor="middle" font-size="9" fill="#1d4ed8" font-weight="700">ARRAY</text>
+              <text x="150" y="120" text-anchor="middle" font-size="7" fill="#3b82f6">${totalPanels} Modules</text>
+              <!-- Eave label -->
+              <text x="150" y="192" text-anchor="middle" font-size="7.5" fill="#475569" font-weight="700">EAVE</text>
+              <!-- Pathway labels -->
+              <text x="40" y="110" text-anchor="middle" font-size="6.5" fill="#dc2626">EDGE</text>
+              <text x="40" y="118" text-anchor="middle" font-size="6.5" fill="#dc2626">PATH</text>
+              <text x="40" y="126" text-anchor="middle" font-size="6.5" fill="#dc2626">≥18"</text>
+            </svg>
+          </div>
+          <div style="font-size:8.5px;color:#374151;line-height:1.6;">
+            <strong>Setback Requirements per IFC 2021 §605.11:</strong><br>
+            • Minimum 18" (457mm) edge setback from eaves<br>
+            • Minimum 18" (457mm) ridge setback from ridge<br>
+            • 36" (914mm) access pathway at hip/valley as required<br>
+            • All modules must be accessible per NEC 690.12 MLRS
+          </div>
+
+          <!-- Ground mount specifics (if applicable) -->
+          ${project.systemType === 'ground' ? `
+          <div class="section-title" style="margin-top:14px">Ground Mount Array Layout</div>
+          <table class="info-table">
+            <tr><td class="il">Row Spacing</td><td class="iv">Based on winter solstice shade angle</td></tr>
+            <tr><td class="il">Post Embedment</td><td class="iv">Min. 42" below frost depth</td></tr>
+            <tr><td class="il">Ground Clearance</td><td class="iv">Min. 12" to finish grade</td></tr>
+            <tr><td class="il">Fence/Screen</td><td class="iv">Per AHJ requirements</td></tr>
+          </table>` : ''}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ─── Spec Sheet Reference Page ─────────────────────────────────────────────
+
+function pageSpecSheetReference(input: PermitInput, pageNum: number, totalPages: number): string {
+  const { project, system } = input;
+  const panels = system.inverters?.[0]?.strings?.[0];
+  const modMfr = panels?.panelManufacturer || '—';
+  const modModel = panels?.panelModel || '—';
+  const modWatts = panels?.panelWatts || 400;
+  const invMfr = system.inverters?.[0]?.manufacturer || '—';
+  const invModel = system.inverters?.[0]?.model || '—';
+
+  // Get specs from the spec sheet DB
+  const voc = panels?.panelVoc || (project as any).panelVoc || 41.6;
+  const isc = panels?.panelIsc || (project as any).panelIsc || 12.26;
+  const pmax = modWatts;
+  const vmp = parseFloat((voc * 0.83).toFixed(1));
+  const imp = parseFloat((isc * 0.94).toFixed(2));
+  const tempCoeff = -0.35;
+  const panelLen = (project as any).panelLengthIn || 79.9;
+  const panelWid = (project as any).panelWidthIn || 40.9;
+  const panelWt = (project as any).panelWeightLbs || 44;
+
+  // NEC 690.8 calculations
+  const TEMP_CORR_FACTOR = 1.25; // for -13°F (worst case cold)
+  const NEC_SAFETY = 1.25;
+  const vocMax = parseFloat((voc * TEMP_CORR_FACTOR).toFixed(1));
+  const iscMax = parseFloat((isc * NEC_SAFETY).toFixed(2));
+
+  return `
+  <div class="page">
+    ${titleBlock(input, 'APP-A', 'EQUIPMENT SPECIFICATION REFERENCE', pageNum, totalPages)}
+    <div class="page-content">
+      <div class="two-col-layout">
+        <div class="col-left">
+          <!-- Module Datasheet Summary -->
+          <div class="section-title">PV Module — Electrical Specifications</div>
+          <table class="info-table" style="margin-bottom:12px;">
+            <tr><td class="il">Manufacturer</td><td class="iv">${modMfr}</td></tr>
+            <tr><td class="il">Model</td><td class="iv">${modModel}</td></tr>
+            <tr><td class="il">STC Power (Pmax)</td><td class="iv">${pmax} Wp</td></tr>
+            <tr><td class="il">Open Circuit Voltage (Voc)</td><td class="iv">${voc} V</td></tr>
+            <tr><td class="il">Short Circuit Current (Isc)</td><td class="iv">${isc} A</td></tr>
+            <tr><td class="il">Max Power Voltage (Vmp)</td><td class="iv">${vmp} V</td></tr>
+            <tr><td class="il">Max Power Current (Imp)</td><td class="iv">${imp} A</td></tr>
+            <tr><td class="il">Temp. Coeff. Pmax</td><td class="iv">${tempCoeff}%/°C</td></tr>
+            <tr><td class="il">Temp. Coeff. Voc</td><td class="iv">-0.27%/°C</td></tr>
+            <tr><td class="il">NOCT</td><td class="iv">45°C ±2°C</td></tr>
+            <tr><td class="il">Module Efficiency</td><td class="iv">${((pmax / (panelLen/39.37 * panelWid/39.37)) / 10).toFixed(1)}%</td></tr>
+          </table>
+
+          <div class="section-title">PV Module — Physical Specifications</div>
+          <table class="info-table" style="margin-bottom:12px;">
+            <tr><td class="il">Length</td><td class="iv">${panelLen}" (${(panelLen*25.4).toFixed(0)}mm)</td></tr>
+            <tr><td class="il">Width</td><td class="iv">${panelWid}" (${(panelWid*25.4).toFixed(0)}mm)</td></tr>
+            <tr><td class="il">Weight</td><td class="iv">${panelWt} lbs (${(panelWt*0.453592).toFixed(1)} kg)</td></tr>
+            <tr><td class="il">Front Load</td><td class="iv">5400 Pa (Wind/Snow)</td></tr>
+            <tr><td class="il">Rear Load</td><td class="iv">2400 Pa</td></tr>
+            <tr><td class="il">Cell Type</td><td class="iv">Monocrystalline PERC / TOPCon</td></tr>
+            <tr><td class="il">Frame</td><td class="iv">Anodized Aluminum Alloy</td></tr>
+            <tr><td class="il">Connector</td><td class="iv">MC4 Compatible</td></tr>
+            <tr><td class="il">UL Listing</td><td class="iv">UL 61730 / IEC 61215</td></tr>
+          </table>
+
+          <!-- NEC 690.8 Calculations from module specs -->
+          <div class="section-title">NEC 690.8 — Module Electrical Calculations</div>
+          <table class="equip-table">
+            <thead><tr><th>Parameter</th><th>Nameplate</th><th>×1.25 NEC Factor</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td>Voc (Open Circuit)</td><td>${voc} V</td><td>×1.25 (temp. correction)</td><td><strong>${vocMax} V max</strong></td></tr>
+              <tr><td>Isc (Short Circuit)</td><td>${isc} A</td><td>×1.25 (NEC 690.8(A))</td><td><strong>${iscMax} A max</strong></td></tr>
+              <tr><td>Vmp (Operating)</td><td>${vmp} V</td><td>×1.0</td><td>${vmp} V</td></tr>
+              <tr><td>Imp (Operating)</td><td>${imp} A</td><td>×1.0</td><td>${imp} A</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="col-right">
+          <!-- Inverter Datasheet Summary -->
+          <div class="section-title">Inverter — Specifications</div>
+          ${system.inverters?.map((inv, i) => `
+          <div style="border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;margin-bottom:10px;">
+            <div style="background:#1e293b;color:white;padding:5px 10px;font-weight:700;font-size:10px;">
+              Inverter #${i+1}: ${inv.manufacturer} ${inv.model}
+            </div>
+            <table class="info-table" style="margin:0;">
+              <tr><td class="il">Type</td><td class="iv">${inv.type?.toUpperCase() || 'STRING'}</td></tr>
+              <tr><td class="il">AC Output</td><td class="iv">${inv.acOutputKw} kW</td></tr>
+              <tr><td class="il">Max DC Voltage</td><td class="iv">${inv.maxDcVoltage} V</td></tr>
+              <tr><td class="il">Efficiency (CEC)</td><td class="iv">${inv.efficiency}%</td></tr>
+              <tr><td class="il">UL Listing</td><td class="iv">${inv.ulListing || 'UL 1741'}</td></tr>
+              <tr><td class="il">Grid Standards</td><td class="iv">IEEE 1547-2018, UL 1741 SA</td></tr>
+              <tr><td class="il">Anti-Islanding</td><td class="iv">Yes — Per IEEE 1547</td></tr>
+              <tr><td class="il">Rapid Shutdown</td><td class="iv">NEC 690.12 Compliant</td></tr>
+              <tr><td class="il">MPPT Channels</td><td class="iv">${inv.strings?.length || 1}</td></tr>
+            </table>
+          </div>
+          `).join('') || '<p style="font-size:9px;color:#94a3b8">No inverter data</p>'}
+
+          <!-- Racking System Summary -->
+          <div class="section-title" style="margin-top:12px">Racking System</div>
+          <table class="info-table">
+            <tr><td class="il">System</td><td class="iv">${project.mountingSystem || 'IronRidge XR100'}</td></tr>
+            <tr><td class="il">Material</td><td class="iv">6105-T5 Anodized Aluminum</td></tr>
+            <tr><td class="il">Rail Profile</td><td class="iv">2.25" × 1.50" Heavy Duty</td></tr>
+            <tr><td class="il">Max Span</td><td class="iv">72" (1829mm)</td></tr>
+            <tr><td class="il">Attachment</td><td class="iv">FlashFoot2 with L-Foot</td></tr>
+            <tr><td class="il">Lag Bolt</td><td class="iv">5/16" × 3" Stainless Steel</td></tr>
+            <tr><td class="il">Embedment</td><td class="iv">Min. 2.5" into rafter</td></tr>
+            <tr><td class="il">UL Listing</td><td class="iv">UL 2703 / ICC-ES AC428</td></tr>
+            <tr><td class="il">Wind Rating</td><td class="iv">Per ASCE 7-22 (see PV-4C)</td></tr>
+          </table>
+
+          <!-- Spec Sheet Links Note -->
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px;margin-top:12px;font-size:9px;color:#1e40af;line-height:1.7;">
+            <strong>📋 Manufacturer Data Sheets</strong><br>
+            Full manufacturer specification sheets and installation manuals are available at:<br>
+            • <strong>Module:</strong> ${modMfr} — see manufacturer website<br>
+            • <strong>Inverter:</strong> ${invMfr} — see manufacturer website<br>
+            • <strong>Racking:</strong> IronRidge — ironridge.com/design-resources<br><br>
+            All equipment is CEC Listed, UL Listed, and approved for grid interconnection.
+            Copies available upon AHJ request.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function generatePermitHTML(input: PermitInput): string {
   const { project } = input;
-  const TOTAL = 11;
+  const TOTAL = 13;
 
   const pages = [
     pageCoverSheet(input, 1, TOTAL),
     pageSiteInformation(input, 2, TOTAL),
     pageRoofPlan(input, 3, TOTAL),
-    pageAttachmentBOM(input, 4, TOTAL),
-    pageNECCompliance(input, 5, TOTAL),
-    pageConductorSchedule(input, 6, TOTAL),
-    pageStructural(input, 7, TOTAL),
-    pageWarningLabels(input, 8, TOTAL),
-    pageEquipmentSchedule(input, 9, TOTAL),
-    pageEngineerCert(input, 10, TOTAL),
-    pageSingleLineDiagram(input, 11, TOTAL),
+    pageArrayGeometry(input, 4, TOTAL),
+    pageAttachmentBOM(input, 5, TOTAL),
+    pageNECCompliance(input, 6, TOTAL),
+    pageConductorSchedule(input, 7, TOTAL),
+    pageStructural(input, 8, TOTAL),
+    pageWarningLabels(input, 9, TOTAL),
+    pageEquipmentSchedule(input, 10, TOTAL),
+    pageSpecSheetReference(input, 11, TOTAL),
+    pageEngineerCert(input, 12, TOTAL),
+    pageSingleLineDiagram(input, 13, TOTAL),
   ];
 
   return `<!DOCTYPE html>

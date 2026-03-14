@@ -449,6 +449,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const lastSavedPanelsRef = useRef<string>('[]');
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
+  const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
 
   const systemSizeKw = calculateSystemSize(panels);
 
@@ -484,6 +485,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   useEffect(() => { mapCenterRef.current = mapCenter; }, [mapCenter]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panelsRef2.current = panels; }, [panels]);
+  useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
 
   // ── Auto-save layout to DB (3-second debounce after panel changes) ──────────
   const saveLayoutToDB = useCallback(async (panelList: PlacedPanel[]) => {
@@ -495,6 +497,8 @@ export default function DesignStudio({ project, onSave }: Props) {
       mapCenter: mapCenterRef.current,
       mapZoom: zoomRef.current,
       systemType: project.systemType,
+      // ✅ Include roofPlanes so permit generator can use exact roof geometry
+      roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
     };
     // ✅ Always save to localStorage first (survives serverless cold starts)
     localSaveLayout(project.id, payload);
@@ -541,6 +545,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         mapCenter: mapCenterRef.current,
         mapZoom: zoomRef.current,
         systemType: project.systemType,
+        roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
       });
       navigator.sendBeacon(
         `/api/projects/${project.id}/layout`,
