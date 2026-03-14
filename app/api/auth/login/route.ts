@@ -124,11 +124,18 @@ export async function POST(req: NextRequest) {
     // string errors during cold start and incorrectly show "Database not configured."
     if (error instanceof DbConfigError) {
       console.error('[AUTH_LOGIN_FAILURE] [AUTH_DB_CONFIG_ERROR] /api/auth/login: DATABASE_URL not configured:', msg);
+      console.error(
+        '[AUTH_DB_CONFIG_ERROR] FIX: Go to Vercel Dashboard → Project → Settings → Environment Variables\n' +
+        '  → Add: DATABASE_URL = <your Neon PostgreSQL connection string>\n' +
+        '  → Add: JWT_SECRET   = <any random 32+ character string>\n' +
+        '  → Then click Redeploy (env vars are NOT hot-reloaded)\n'
+      );
       return NextResponse.json(
         {
           success: false,
-          error: 'Server configuration error. Please contact your administrator.',
+          error: 'Database not configured. Check Vercel environment variables.',
           code: 'DB_CONFIG_ERROR',
+          hint: 'Add DATABASE_URL and JWT_SECRET to Vercel → Project → Settings → Environment Variables, then redeploy.',
         },
         { status: 503 }
       );

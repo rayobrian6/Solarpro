@@ -90,6 +90,40 @@ let _instanceWarm = false;  // true after first successful SELECT 1 on this inst
 // Log server instance start (appears once per cold start in Vercel logs)
 console.log('[SERVER_INSTANCE_STARTED] db-ready.ts module loaded on new function instance');
 
+// Log full env status at module load time so every cold start shows env health
+// in Vercel logs — search for [ENV_COLD_START] to find these entries.
+{
+  const _dbUrl  = process.env.DATABASE_URL;
+  const _jwtSec = process.env.JWT_SECRET;
+  const _dbOk   = !!(_dbUrl && _dbUrl !== 'YOUR_NEON_DATABASE_URL_HERE');
+  const _jwtOk  = !!(_jwtSec && _jwtSec.length > 10);
+  const _icon   = (!_dbOk || !_jwtOk) ? '🔴' : '✅';
+  console.log(
+    `[ENV_COLD_START] ${_icon}` +
+    ` DATABASE_URL=${_dbOk} (len=${_dbUrl?.length ?? 0})` +
+    ` JWT_SECRET=${_jwtOk} (len=${_jwtSec?.length ?? 0})` +
+    ` GOOGLE_MAPS=${!!process.env.GOOGLE_MAPS_API_KEY}` +
+    ` NODE_ENV=${process.env.NODE_ENV ?? 'unknown'}` +
+    ` VERCEL_ENV=${process.env.VERCEL_ENV ?? 'local'}`
+  );
+  if (!_dbOk) {
+    console.error(
+      '\n[ENV_COLD_START] ❌ DATABASE_URL is not set!\n' +
+      '  → Vercel Dashboard → Project → Settings → Environment Variables\n' +
+      '  → Add: DATABASE_URL = <your Neon connection string>\n' +
+      '  → Then redeploy. Env vars are NOT hot-reloaded.\n'
+    );
+  }
+  if (!_jwtOk) {
+    console.error(
+      '\n[ENV_COLD_START] ❌ JWT_SECRET is not set!\n' +
+      '  → Vercel Dashboard → Project → Settings → Environment Variables\n' +
+      '  → Add: JWT_SECRET = <any random 32+ character string>\n' +
+      '  → Then redeploy.\n'
+    );
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {

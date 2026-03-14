@@ -200,3 +200,102 @@ export function isVercelProduction(): boolean {
 export function getMigrateSecret(): string | null {
   return process.env.MIGRATE_SECRET ?? null;
 }
+// ── ENV object + requireEnv() ──────────────────────────────────────────────────
+// Requested pattern: flat object of all env vars + a runtime guard helper.
+// Values default to "" so callers get a string type (not string | undefined).
+// Use requireEnv() to assert a value is present before using it.
+//
+// Example:
+//   import { ENV, requireEnv } from '@/lib/env';
+//   requireEnv('DATABASE_URL', ENV.DATABASE_URL);  // throws if empty
+//   const db = connectTo(ENV.DATABASE_URL);
+
+/**
+ * Flat snapshot of all application environment variables.
+ *
+ * Values are read lazily at import time (not build time) so Next.js builds
+ * succeed even when variables are missing in CI. Empty string ("") means
+ * the variable is not set — use requireEnv() to assert presence at runtime.
+ *
+ * IMPORTANT: Never log or expose ENV.JWT_SECRET or ENV.DATABASE_URL values.
+ */
+export const ENV = {
+  // Required ─ app cannot function without these
+  DATABASE_URL: process.env.DATABASE_URL || '',
+  JWT_SECRET:   process.env.JWT_SECRET   || '',
+
+  // Recommended ─ degraded functionality if missing
+  GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || '',
+  OPENAI_API_KEY:      process.env.OPENAI_API_KEY      || '',
+  RESEND_API_KEY:      process.env.RESEND_API_KEY       || '',
+
+  // Base URL ─ used by email links + Stripe callbacks
+  NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || '',
+} as const;
+
+/**
+ * Asserts that a required environment variable is present (non-empty).
+ *
+ * Throws a descriptive Error if the value is missing, with instructions
+ * on how to fix it in Vercel. Call this at the top of any route handler
+ * or service initializer that depends on a critical env var.
+ *
+ * @param name  - Variable name (for the error message)
+ * @param value - The value from ENV (or process.env directly)
+ *
+ * @example
+ *   requireEnv('DATABASE_URL', ENV.DATABASE_URL);
+ *   requireEnv('JWT_SECRET',   ENV.JWT_SECRET);
+ */
+export function requireEnv(name: string, value?: string): void {
+  if (!value || value === 'YOUR_NEON_DATABASE_URL_HERE' || value.startsWith('YOUR_')) {
+    const vercelInstructions =
+      '\n  → Fix: Vercel Dashboard → Your Project → Settings → Environment Variables' +
+      `\n  → Add: ${name}=<your value>` +
+      '\n  → Then: Redeploy (Vercel does not hot-reload env vars)\n';
+    console.error(`\n[ENV] MISSING REQUIRED VARIABLE: ${name}${vercelInstructions}`);
+    throw new Error(
+      `Missing required environment variable: ${name}. ` +
+      `Add it to your Vercel project environment variables and redeploy.`
+    );
+  }
+}
+
+/**
+ * Logs the status of all critical environment variables.
+ * Call this once per cold start for deployment diagnostics.
+ *
+ * @param context - Optional label (e.g. route name) for log filtering
+ */
+export function logStartupEnvStatus(context = 'startup'): void {
+  const dbOk      = !!(ENV.DATABASE_URL && ENV.DATABASE_URL !== 'YOUR_NEON_DATABASE_URL_HERE');
+  const jwtOk     = !!(ENV.JWT_SECRET);
+  const gmapsOk   = !!(ENV.GOOGLE_MAPS_API_KEY);
+  const openaiOk  = !!(ENV.OPENAI_API_KEY && !ENV.OPENAI_API_KEY.startsWith('sk-YOUR'));
+  const resendOk  = !!(ENV.RESEND_API_KEY && ENV.RESEND_API_KEY !== 're_YOUR_RESEND_API_KEY_HERE');
+  const baseUrlOk = !!(ENV.NEXT_PUBLIC_BASE_URL);
+
+  const required  = { DATABASE_URL: dbOk, JWT_SECRET: jwtOk };
+  const optional  = { GOOGLE_MAPS_API_KEY: gmapsOk, OPENAI_API_KEY: openaiOk, RESEND_API_KEY: resendOk, NEXT_PUBLIC_BASE_URL: baseUrlOk };
+
+  const missingReq = Object.entries(required).filter(([, v]) => !v).map(([k]) => k);
+  const missingOpt = Object.entries(optional).filter(([, v]) => !v).map(([k]) => k);
+
+  const statusIcon = missingReq.length > 0 ? '🔴' : missingOpt.length > 0 ? '⚠️' : '✅';
+  console.log(
+    `[ENV_STATUS][${context}] ${statusIcon}` +
+    ` DATABASE_URL=${dbOk} JWT_SECRET=${jwtOk}` +
+    ` GOOGLE_MAPS=${gmapsOk} OPENAI=${openaiOk} RESEND=${resendOk} BASE_URL=${baseUrlOk}` +
+    (missingReq.length ? ` | MISSING_REQUIRED: ${missingReq.join(', ')}` : '') +
+    (missingOpt.length ? ` | MISSING_OPTIONAL: ${missingOpt.join(', ')}` : '')
+  );
+
+  if (missingReq.length > 0) {
+    console.error(
+      `\n[ENV_STATUS][${context}] ❌ CRITICAL: Required environment variables are not set:\n` +
+      missingReq.map(v => `  • ${v}`).join('\n') + '\n' +
+      '  → Go to: Vercel Dashboard → Project → Settings → Environment Variables\n' +
+      '  → Add each missing variable, then click Redeploy\n'
+    );
+  }
+}
