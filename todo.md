@@ -1,16 +1,27 @@
-# v47.36 — Infrastructure Stabilization
+# SolarPro v47.47 — Deployment Fix + Roof Plan Improvement
 
-## Phase 1: URL Consolidation
-- [x] Fix lib/email.ts — remove private getAppUrl(), use getBaseUrl() from lib/env.ts, change from address
-- [x] Fix lib/stripe.ts — replace process.env.NEXT_PUBLIC_BASE_URL direct access with getBaseUrl()
-- [x] Fix lib/billOcrEngine.ts — remove local getBaseUrl(), use lib/env.ts getBaseUrl()
-- [x] Fix app/api/proposals/[id]/share/route.ts — replace origin||NEXT_PUBLIC_APP_URL||solarpro.app with getBaseUrl()
+## Phase 1 — Fix Version + Verify Deployment
+- [x] Confirm GitHub has v47.46 commits (b863325)
+- [x] Confirm Vercel is auto-deploying from master branch (vercel.json confirmed)
+- [x] Root cause found: lib/version.ts stuck at v47.44 (never bumped in v47.45/v47.46)
+- [ ] Update lib/version.ts to v47.46 with correct feature list
 
-## Phase 2: New Endpoint
-- [x] Create /api/system/health route
+## Phase 2 — Pipeline Audit (Step 5)
+- [ ] Audit layout data flow: DesignStudio → DB → engineering page → permit API
+- [ ] Verify layout.panels, layout.roofPlanes propagate to permit payload
+- [ ] Check engineering page.tsx permit payload construction
 
-## Phase 3: Finalize
-- [x] Update .env.example — consolidate NEXT_PUBLIC_APP_URL guidance, remove NEXT_PUBLIC_BASE_URL duplication
-- [x] TypeScript check
-- [x] Commit + push
-- [ ] Output deployment readiness report
+## Phase 3 — Improve Roof Plan (Steps 6-7)
+- [ ] Audit current pageRoofPlan() implementation
+- [ ] Implement panel overlay using exact lat/lng from design engine
+- [ ] Project panel coordinates to image pixel coordinates
+- [ ] Label each roof face with tilt, azimuth, module count
+- [ ] Derive roof face labels from layout.roofPlanes + layout.panels
+
+## Phase 4 — Test + Deploy
+- [ ] tsc --noEmit (0 errors)
+- [ ] npm run build (all routes compile)
+- [ ] Live permit test (verify roof plan renders with panels)
+- [ ] Commit as v47.47
+- [ ] Push to master → Vercel auto-deploy
+- [ ] Verify production /api/version shows v47.47

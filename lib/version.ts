@@ -1,8 +1,27 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.44';
-export const BUILD_DATE        = '2026-03-15';
-export const BUILD_DESCRIPTION = 'v47.44: Flexible equipment resolver — permit plan set works with any inverter/panel brand and payload shape';
+export const BUILD_VERSION     = 'v47.46';
+export const BUILD_DATE        = '2026-03-14';
+export const BUILD_DESCRIPTION = 'v47.46: Full 13-page permit planset — roofPlanes persistence fix, Array Geometry sheet, Spec Sheet Reference, SVG schematic site plan';
 export const BUILD_FEATURES    = [
+  // v47.46 -- Full 13-page permit planset pipeline
+  'PERMIT: 13-page planset (was 11) — PV-0 through E-1 (sheets 1 of 13 .. 13 of 13)',
+  'PERMIT: pageArrayGeometry() — PV-2B: SVG panel grid, string color-coding, IFC §605.11 fire setback diagram, array parameters table',
+  'PERMIT: pageSpecSheetReference() — APP-A: NEC 690.8 safety factor calcs (×1.25), module/inverter/racking specs, manufacturer data sheet links',
+  'PERMIT: pageSiteInformation() — PV-1: replaced placeholder with full SVG schematic site plan (house, garage, array, meter, inverter, disco, MSP, conduit, north arrow)',
+  'PERMIT: Cover sheet index updated to list all 13 sheets: PV-0 PV-1 PV-2A PV-2B PV-3 PV-4A PV-4B PV-4C PV-5 SCHED APP-A CERT E-1',
+  'EQUIPMENT: lib/equipment/specSheets.ts — new spec sheet database for REC, LG, SunPower, Jinko, LONGi, Q CELLS, Canadian Solar, Silfab, Enphase, SolarEdge, Fronius, SMA, Tesla, IronRidge, Unirac',
+  'EQUIPMENT: findModuleSpec(), findInverterSpec(), findBatterySpec(), findRackingSpec(), getPermitSpecSheets(), getGenericModuleSpecs()',
+  'DATA: DesignStudio.tsx — critical fix: roofPlanes now saved to DB via roofPlanesRef pattern (were only in component state)',
+  'DATA: sendBeacon() on page unload now includes roofPlanes in payload',
+  // v47.45 -- Professional permit planset upgrades
+  'PERMIT: Panel positions from 3D design engine rendered on roof plan',
+  'PERMIT: AHJ auto-lookup from national database by state/county/city',
+  'PERMIT: NEC 220.82 load calculation with actual service panel data',
+  'PERMIT: 11×17 ANSI B page size (279.4mm × 431.8mm)',
+  'PERMIT: Enhanced BOM with per-roof-plane attachment calculations',
+  'PERMIT: Roof plane overlay on aerial imagery',
+  'ENGINEERING: engineering/page.tsx — projectLayout state wiring (projectLayout useState + GET /layout fetch)',
+  'ENGINEERING: zip field added to ProjectConfig interface for AHJ lookup',
   // v47.44 -- Universal equipment resolver
   'PERMIT: resolveEquipment() — 4-tier fallback: strings[] -> modules[] -> project fields -> system totals',
   'PERMIT: BOM table — panelMfr/panelModel now resolved from any payload shape (no more hardcoded fallbacks)',
@@ -10,63 +29,9 @@ export const BUILD_FEATURES    = [
   'PERMIT: SLD builder — all 6 equipment fields resolved from any payload shape (removed Q.PEAK/IQ8M/Enphase hardcodes)',
   'PERMIT: Works with UI strings payload, modules[] array, project-level fields, or system totals only',
   // v47.38 -- Full 11-page permit plan set with SLD
-  'PERMIT: pageSingleLineDiagram() — Sheet 11 (E-1) added to route.ts — IEEE/ANSI SVG SLD renderer',
+  'PERMIT: pageSingleLineDiagram() — Sheet E-1 added to route.ts — IEEE/ANSI SVG SLD renderer',
   'PERMIT: Full MICROINVERTER topology: PV Array → J-Box → AC Combiner → AC Disco → MSP → IQ SC3/BUI → Utility Meter',
   'PERMIT: Battery storage shown (IQ Battery 5P × 2 connected via BUI) — NEC 705.12(B) 120% rule',
-  'PERMIT: TOTAL updated 10 → 11 pages — cover sheet index updated to include E-1 as sheet 11',
-  'PERMIT: statusColor/statusBg/statusBorder/statusLabel — added fail/info cases for full NEC compliance display',
-  'PERMIT: .sld-page CSS class added — reduced padding for SLD page rendering',
-  'PERMIT: Cover sheet E-1 sheet number updated from "E-1" to "11" in sheet index',
-  // v47.28 -- Self-delete + test script fix
-  'TEST: DELETE /api/auth/delete-account?confirm=true — self-delete endpoint for test user cleanup',
-  'TEST: scripts/test_tos_flow.py — pre-test and step 6 cleanup now use self-delete (DELETE method)',
-  'TEST: delete() helper added to test script for proper HTTP DELETE requests',
-  // v47.27 -- ToS enforcement + auth fixes
-  'TOS: register route — 400 TOS_REQUIRED enforced server-side if tosAccepted not true',
-  'TOS: register route — captures x-forwarded-for IP as tos_ip at signup',
-  'TOS: tos-accept POST — captures IP at /terms page acceptance too',
-  'TOS: migration 010 — tos_ip TEXT column added',
-  'AUTH: login SELECT reverted to base columns — no tos_* fields (removed information_schema overhead)',
-  'AUTH: tos-accept GET — simple try/catch on column error instead of catalog scan',
-  // v47.26 -- ToS/NDA integration
-  'TOS: Migration 010 — users.tos_accepted_at (TIMESTAMPTZ) + users.tos_version (TEXT) columns',
-  'TOS: /api/tos-accept POST — records acceptance with timestamp and version (JWT auth required)',
-  'TOS: /api/tos-accept GET  — returns acceptance status, version, needs_reaccept flag',
-  'TOS: /app/terms/page.tsx — full ToS/NDA text, accept button, already-accepted badge',
-  'TOS: /terms?required=1 — mandatory acceptance gate with warning banner',
-  'TOS: Register page — ToS checkbox now links to /terms, passes tosAccepted to API',
-  'TOS: Register API — records tos_accepted_at=NOW() and tos_version=v1.0 on INSERT',
-  'TOS: Login API — returns tos_redirect hint if user has not yet accepted',
-  'TOS: Login page — follows tos_redirect from login response before going to dashboard',
-  'TOS: middleware.ts — /terms and /api/tos-accept added to PUBLIC_PATHS',
-  'TOS: lib/migrations/010_tos_acceptance.sql — standalone SQL migration file',
-  'TOS: /api/migrate — Migration 010 blocks (ALTER TABLE + index) added',
-  // v47.25 -- Production bill parsing fix
-  'OCR: extractImageTextSmart() — Stage 1b (Tesseract.js WASM HTTP) now SKIPPED on Vercel',
-  'OCR: Vercel detection via process.env.VERCEL || VERCEL_ENV || VERCEL_URL',
-  'OCR: On Vercel: CLI attempt (fails) -> direct OpenAI Vision (~5s) — saves 20s WASM timeout',
-  'OCR: On local dev: CLI attempt -> WASM HTTP fallback -> OpenAI Vision (unchanged behavior)',
-  'OCR: [OCR_SKIPPED] log marker when stage=1b is bypassed for observability',
-  'PDF: extractPdfText() — pdftotext CLI now SKIPPED on Vercel (binary not available)',
-  'PDF: On Vercel: pdf-parse npm -> extractPdfTextPure -> pdfjs-dist -> OpenAI Files API -> Google Vision',
-  'PDF: On local dev: pdftotext CLI -> pdf-parse -> pure extract -> ... (unchanged)',
-  'PDF: [PDF_PARSE_STARTED] method=pdftotext now logs isVercel=true/false for observability',
-  'PERF: maxDuration increased 30s -> 60s on bill-upload route for OpenAI Vision headroom',
-  'PERF: Production bill parsing now completes in ~8-12s (was timing out at 30s)',
-  'ROOT_CAUSE: Tesseract CLI binary not available on Vercel serverless Lambda',
-  'ROOT_CAUSE: WASM cold start downloads ~400MB, easily exceeds budget before Vision could run',
-  'ROOT_CAUSE: dangling fetch in Stage 1b was blocking Stage 2 Vision even after timeout',
-  'TEST: TypeScript clean (tsc --noEmit: 0 errors)',
-  'TEST: 67/67 vitest tests passing',
-  // v47.24 -- Full runtime declaration fix
-  'RUNTIME: export const runtime = "nodejs" added to all 102 API routes (96 were missing)',
-  'RUNTIME: app/api/bill-upload/route.ts — critical fix: was missing runtime, may have run as Edge',
-  'RUNTIME: app/api/system-size/route.ts — critical fix: was missing runtime, may have run as Edge',
-  // v47.23 -- Production stabilization
-  'AUTH: All 13 log markers added across login/me/middleware routes',
-  'BILL: POST /api/debug/bill pipeline trace endpoint',
-  'RATE: [RATE_PRIORITY_DECISION] log in system-size route',
-  'TEST: tests/auth-health.test.ts — 33 new vitest tests',
 ];
 
 export function getBuildBadge(): string {

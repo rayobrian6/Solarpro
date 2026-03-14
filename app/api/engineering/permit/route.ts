@@ -1018,9 +1018,10 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
           ${segOverlay}
           <!-- Fire setback boundary -->
           ${setbackBox}
-          <!-- Roof plane outlines from design engine -->
+          <!-- Roof plane outlines from design engine (with tilt/azimuth/count labels) -->
           ${(() => {
-            const rp = (project as any).roofPlanes as Array<{vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number}> | undefined;
+            const rp = (project as any).roofPlanes as Array<{id?:string;vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number}> | undefined;
+            const pp = (project as any).panelPositions as Array<{lat:number;lng:number;id?:string}> | undefined;
             if (!rp || rp.length === 0 || !aerial.lat || !aerial.lng) return '';
             const cLat2 = aerial.lat, cLng2 = aerial.lng;
             const z2 = aerial.zoom || 20;
@@ -1030,16 +1031,75 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
             const MPD2 = 111320;
             const mpdLng2 = 111320 * Math.cos(cLat2 * Math.PI / 180);
             const rpColors = ['#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4'];
+
+            // Point-in-polygon test (ray casting algorithm)
+            function ptInPoly(lat: number, lng: number, poly: Array<{lat:number;lng:number}>): boolean {
+              let inside = false;
+              for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const xi = poly[i].lng, yi = poly[i].lat;
+                const xj = poly[j].lng, yj = poly[j].lat;
+                if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+              }
+              return inside;
+            }
+
+            // Count panels per roof plane
+            function countPanelsInPlane(poly: Array<{lat:number;lng:number}>): number {
+              if (!pp || pp.length === 0) return 0;
+              return pp.filter(p => ptInPoly(p.lat, p.lng, poly)).length;
+            }
+
+            // Azimuth direction label
+            function azDir(az: number): string {
+              if (az < 22.5 || az >= 337.5) return 'N';
+              if (az < 67.5) return 'NE';
+              if (az < 112.5) return 'E';
+              if (az < 157.5) return 'SE';
+              if (az < 202.5) return 'S';
+              if (az < 247.5) return 'SW';
+              if (az < 292.5) return 'W';
+              return 'NW';
+            }
+
             return rp.slice(0,6).map((plane, pi) => {
               if (!plane.vertices || plane.vertices.length < 3) return '';
-              const pts = plane.vertices.map((v) => {
-                const px3 = imgW/2 + (v.lng - cLng2) * mpdLng2 * ppm2;
-                const py3 = imgH/2 - (v.lat - cLat2) * MPD2 * ppm2;
-                return px3.toFixed(1) + ',' + py3.toFixed(1);
-              }).join(' ');
               const c3 = rpColors[pi % rpColors.length];
-              const pitchLabel = plane.pitch ? Math.round(Math.tan(plane.pitch * Math.PI / 180) * 12) + '/12' : '';
-              return '<polygon points="' + pts + '" fill="' + c3 + '18" stroke="' + c3 + '" stroke-width="1.8" stroke-dasharray="6,3" opacity="0.9"/>';
+
+              // Project vertices to pixel space
+              const pxPts = plane.vertices.map((v) => ({
+                x: imgW/2 + (v.lng - cLng2) * mpdLng2 * ppm2,
+                y: imgH/2 - (v.lat - cLat2) * MPD2 * ppm2,
+              }));
+              const ptsStr = pxPts.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+
+              // Centroid of polygon (for label placement)
+              const cx = pxPts.reduce((s,p) => s+p.x, 0) / pxPts.length;
+              const cy = pxPts.reduce((s,p) => s+p.y, 0) / pxPts.length;
+
+              // Label content
+              const pitchStr = plane.pitch != null ? Math.round(Math.tan(plane.pitch * Math.PI / 180) * 12) + '/12' : '?/12';
+              const azStr   = plane.azimuth != null ? plane.azimuth.toFixed(0) + '\u00b0 ' + azDir(plane.azimuth) : '\u2014';
+              const mCount  = countPanelsInPlane(plane.vertices);
+              const faceNum = pi + 1;
+
+              // Label box dimensions and position (clamped to image bounds)
+              const lbW = 52, lbH = 32;
+              const lbX = Math.min(Math.max(cx - lbW/2, 2), imgW - lbW - 2);
+              const lbY = cy;
+
+              return (
+                '<polygon points="' + ptsStr + '" fill="' + c3 + '22" stroke="' + c3 + '" stroke-width="2" stroke-dasharray="7,3" opacity="0.95"/>' +
+                '<text x="' + cx.toFixed(1) + '" y="' + (cy - 10).toFixed(1) + '" text-anchor="middle"' +
+                '  font-family="Arial,sans-serif" font-size="7.5" font-weight="bold" fill="' + c3 + '">Face ' + faceNum + '</text>' +
+                '<rect x="' + lbX.toFixed(1) + '" y="' + lbY.toFixed(1) + '" width="' + lbW + '" height="' + lbH + '" rx="3"' +
+                '  fill="rgba(0,0,0,0.72)" stroke="' + c3 + '" stroke-width="1"/>' +
+                '<text x="' + (lbX + lbW/2).toFixed(1) + '" y="' + (lbY + 10).toFixed(1) + '" text-anchor="middle"' +
+                '  font-family="Arial,sans-serif" font-size="7" font-weight="bold" fill="white">' + pitchStr + ' \u00b7 ' + azStr + '</text>' +
+                '<text x="' + (lbX + lbW/2).toFixed(1) + '" y="' + (lbY + 20).toFixed(1) + '" text-anchor="middle"' +
+                '  font-family="Arial,sans-serif" font-size="7" fill="#93c5fd">' + (mCount > 0 ? mCount + ' modules' : 'no panels') + '</text>' +
+                '<text x="' + (lbX + lbW/2).toFixed(1) + '" y="' + (lbY + 29).toFixed(1) + '" text-anchor="middle"' +
+                '  font-family="Arial,sans-serif" font-size="6" fill="#9ca3af">' + (plane.area != null ? (plane.area * 10.764).toFixed(0) + ' ft\u00b2' : '') + '</text>'
+              );
             }).join('');
           })()}
           <!-- Array footprint box (only when no exact panel positions from design engine) -->
@@ -1077,66 +1137,179 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
   } else {
     // ── SCHEMATIC FALLBACK (no aerial image available) ────────────────
     console.log('[permit/pageRoofPlan] SCHEMATIC FALLBACK — aerial reason:', aerial?.error || (aerial ? 'imageBase64 missing' : 'aerialData not fetched'));
-    const svgW = 520;
-    const svgH = 380;
-    const roofX = 60, roofY = 40, roofW = 400, roofH = 280;
-    const setback = 22;
-    const arrayX = roofX + setback;
-    const arrayY = roofY + setback;
-    const arrayW = roofW - setback * 2;
-    const arrayH = roofH - setback * 2 - 30;
+    const svgW = 540;
+    const svgH = 400;
 
-    const modulesPerRow = Math.ceil(Math.sqrt(totalPanels * 1.7));
-    const rows = Math.ceil(totalPanels / modulesPerRow);
-    const modW = Math.floor((arrayW - 10) / modulesPerRow) - 3;
-    const modH = Math.floor((arrayH - 10) / rows) - 3;
+    // If we have roof plane data from the design engine, render them in a normalized coordinate space
+    const rpSchematic = (project as any).roofPlanes as Array<{id?:string;vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number}> | undefined;
+    const ppSchematic = (project as any).panelPositions as Array<{lat:number;lng:number;orientation?:string}> | undefined;
+    const hasRoofPlanes = !!(rpSchematic && rpSchematic.length > 0 && rpSchematic[0].vertices && rpSchematic[0].vertices.length >= 3);
 
-    let modules = '';
-    let count = 0;
-    for (let r = 0; r < rows && count < totalPanels; r++) {
-      for (let c = 0; c < modulesPerRow && count < totalPanels; c++) {
-        const mx = arrayX + 5 + c * (modW + 3);
-        const my = arrayY + 5 + r * (modH + 3);
-        modules += `<rect x="${mx}" y="${my}" width="${modW}" height="${modH}" fill="#1e40af" stroke="#93c5fd" stroke-width="0.5" rx="1"/>`;
-        count++;
+    let schematicContent = '';
+
+    if (hasRoofPlanes && rpSchematic) {
+      // ── Render actual roof plane polygons in normalized screen space ──
+      // Find bounding box of all vertices
+      const allVerts = rpSchematic.flatMap(rp => rp.vertices || []);
+      const minLat = Math.min(...allVerts.map(v => v.lat));
+      const maxLat = Math.max(...allVerts.map(v => v.lat));
+      const minLng = Math.min(...allVerts.map(v => v.lng));
+      const maxLng = Math.max(...allVerts.map(v => v.lng));
+      const dLat = maxLat - minLat || 0.001;
+      const dLng = maxLng - minLng || 0.001;
+      const pad = 50;
+      const drawW = svgW - pad * 2;
+      const drawH = svgH - pad * 2 - 40;
+
+      // Scale to fit, preserve aspect ratio
+      const scaleX = drawW / dLng;
+      const scaleY = drawH / dLat;
+      const scale = Math.min(scaleX, scaleY);
+      const offX = pad + (drawW - dLng * scale) / 2;
+      const offY = pad + (drawH - dLat * scale) / 2;
+
+      function latLngToPx(lat: number, lng: number): {x: number; y: number} {
+        return {
+          x: offX + (lng - minLng) * scale,
+          y: offY + drawH - (lat - minLat) * scale, // flip Y
+        };
       }
-    }
 
-    let attachments = '';
-    const attSpacing = project.attachmentSpacing || 48;
-    const attPixels = attSpacing * (arrayW / 240);
-    for (let r = 0; r < rows; r++) {
-      const ay = arrayY + 5 + r * (modH + 3) + modH / 2;
-      for (let ax = arrayX + attPixels / 2; ax < arrayX + arrayW; ax += attPixels) {
-        attachments += `<circle cx="${ax}" cy="${ay}" r="3" fill="none" stroke="#ef4444" stroke-width="1.2"/>`;
-        attachments += `<line x1="${ax - 3}" y1="${ay}" x2="${ax + 3}" y2="${ay}" stroke="#ef4444" stroke-width="0.8"/>`;
-        attachments += `<line x1="${ax}" y1="${ay - 3}" x2="${ax}" y2="${ay + 3}" stroke="#ef4444" stroke-width="0.8"/>`;
+      const rpColors2 = ['#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
+
+      // Draw roof planes
+      let rpSvg = '';
+      rpSchematic.slice(0,6).forEach((plane, pi) => {
+        if (!plane.vertices || plane.vertices.length < 3) return;
+        const c = rpColors2[pi % rpColors2.length];
+        const pxPts = plane.vertices.map(v => latLngToPx(v.lat, v.lng));
+        const ptsStr = pxPts.map(p => p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+        const cx = pxPts.reduce((s,p) => s+p.x, 0) / pxPts.length;
+        const cy = pxPts.reduce((s,p) => s+p.y, 0) / pxPts.length;
+
+        const pitchStr = plane.pitch != null ? Math.round(Math.tan(plane.pitch * Math.PI / 180) * 12) + '/12' : '?';
+        const azStr = plane.azimuth != null ? plane.azimuth.toFixed(0) + '°' : '—';
+        // Count panels in this plane
+        let mCount = 0;
+        if (ppSchematic && plane.vertices) {
+          ppSchematic.forEach(p => {
+            let inside = false;
+            const poly = plane.vertices!;
+            for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+              const xi = poly[i].lng, yi = poly[i].lat;
+              const xj = poly[j].lng, yj = poly[j].lat;
+              if (((yi > p.lat) !== (yj > p.lat)) && (p.lng < (xj - xi) * (p.lat - yi) / (yj - yi) + xi)) inside = !inside;
+            }
+            if (inside) mCount++;
+          });
+        }
+
+        rpSvg += `<polygon points="${ptsStr}" fill="${c}33" stroke="${c}" stroke-width="2"/>`;
+        rpSvg += `<text x="${cx.toFixed(1)}" y="${(cy - 14).toFixed(1)}" text-anchor="middle" font-size="9" font-weight="bold" fill="${c}">Face ${pi+1}</text>`;
+        rpSvg += `<text x="${cx.toFixed(1)}" y="${(cy - 3).toFixed(1)}" text-anchor="middle" font-size="8" fill="#374151">${pitchStr} · ${azStr}</text>`;
+        if (mCount > 0) {
+          rpSvg += `<text x="${cx.toFixed(1)}" y="${(cy + 8).toFixed(1)}" text-anchor="middle" font-size="8" fill="#1e40af" font-weight="bold">${mCount} mod.</text>`;
+        }
+      });
+
+      // Draw panels (if available) as small colored rectangles
+      let panelSvg = '';
+      if (ppSchematic && ppSchematic.length > 0) {
+        const pLenM = ((project as any).panelLengthIn || 65) * 0.0254;
+        const pWidM = ((project as any).panelWidthIn || 39) * 0.0254;
+        // approximate panel size in px based on scale (meters per degree lat ≈ 111320)
+        const mPerDegLat = 111320;
+        const pHpx = Math.max(4, pLenM / (dLat * mPerDegLat / drawH) * 0.8);
+        const pWpx = Math.max(2.5, pWidM / (dLat * mPerDegLat / drawH) * 0.8);
+        ppSchematic.slice(0, 600).forEach((pp, idx) => {
+          const {x, y} = latLngToPx(pp.lat, pp.lng);
+          const pw = pp.orientation === 'landscape' ? pHpx : pWpx;
+          const ph = pp.orientation === 'landscape' ? pWpx : pHpx;
+          panelSvg += `<rect x="${(x - pw/2).toFixed(1)}" y="${(y - ph/2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="rgba(30,64,175,0.75)" stroke="#93c5fd" stroke-width="0.5" rx="0.5"/>`;
+          if (idx < 60) panelSvg += `<text x="${x.toFixed(1)}" y="${(y+1.5).toFixed(1)}" text-anchor="middle" font-size="3" fill="white">${idx+1}</text>`;
+        });
       }
+
+      // Fire setback annotation (dashed inset per roof plane)
+      let setbackSvg = '';
+      rpSchematic.slice(0,6).forEach((plane) => {
+        if (!plane.vertices || plane.vertices.length < 3) return;
+        // Simple approach: shrink polygon by ~18" (0.46m) → ~0.0041° lat
+        const shrink = 0.00045; // degrees
+        const pxPts = plane.vertices.map(v => latLngToPx(v.lat + shrink, v.lng + shrink));
+        if (pxPts.length >= 3) {
+          setbackSvg += `<polygon points="${pxPts.map(p => p.x.toFixed(1)+','+p.y.toFixed(1)).join(' ')}" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4,2" opacity="0.7"/>`;
+        }
+      });
+
+      // North arrow
+      const naX = svgW - 35, naY = 35;
+      const northArrow = `<g transform="translate(${naX},${naY})">
+        <circle cx="0" cy="0" r="22" fill="white" stroke="#374151" stroke-width="1.5"/>
+        <polygon points="0,-16 5,8 0,4 -5,8" fill="#374151"/>
+        <text x="0" y="30" text-anchor="middle" font-size="11" fill="#374151" font-weight="bold">N</text>
+      </g>`;
+
+      schematicContent = `${rpSvg}${setbackSvg}${panelSvg}${northArrow}
+        <text x="${svgW/2}" y="${svgH - 12}" text-anchor="middle" font-size="8" fill="#6b7280" font-style="italic">
+          ROOF PLAN FROM 3D DESIGN ENGINE — Field verify all dimensions prior to installation.
+        </text>`;
+
+    } else {
+      // ── Generic schematic (no roof plane data) ──
+      const roofX = 60, roofY = 40, roofW = 400, roofH = 280;
+      const setback = 22;
+      const arrayX = roofX + setback, arrayY = roofY + setback;
+      const arrayW = roofW - setback * 2, arrayH = roofH - setback * 2 - 30;
+      const modulesPerRow = Math.ceil(Math.sqrt(totalPanels * 1.7));
+      const rowCount = Math.ceil(totalPanels / modulesPerRow);
+      const modW = Math.max(4, Math.floor((arrayW - 10) / modulesPerRow) - 3);
+      const modH = Math.max(4, Math.floor((arrayH - 10) / rowCount) - 3);
+      let mods = '', cnt = 0;
+      for (let r = 0; r < rowCount && cnt < totalPanels; r++) {
+        for (let c = 0; c < modulesPerRow && cnt < totalPanels; c++) {
+          mods += `<rect x="${arrayX + 5 + c*(modW+3)}" y="${arrayY + 5 + r*(modH+3)}" width="${modW}" height="${modH}" fill="#1e40af" stroke="#93c5fd" stroke-width="0.5" rx="1"/>`;
+          cnt++;
+        }
+      }
+      const attSpacing = project.attachmentSpacing || 48;
+      const attPx = attSpacing * (arrayW / 240);
+      let atts = '';
+      for (let r = 0; r < rowCount; r++) {
+        const ay = arrayY + 5 + r*(modH+3) + modH/2;
+        for (let ax = arrayX + attPx/2; ax < arrayX + arrayW; ax += attPx) {
+          atts += `<circle cx="${ax.toFixed(0)}" cy="${ay.toFixed(0)}" r="3" fill="none" stroke="#ef4444" stroke-width="1.2"/>`;
+          atts += `<line x1="${(ax-3).toFixed(0)}" y1="${ay.toFixed(0)}" x2="${(ax+3).toFixed(0)}" y2="${ay.toFixed(0)}" stroke="#ef4444" stroke-width="0.8"/>`;
+          atts += `<line x1="${ax.toFixed(0)}" y1="${(ay-3).toFixed(0)}" x2="${ax.toFixed(0)}" y2="${(ay+3).toFixed(0)}" stroke="#ef4444" stroke-width="0.8"/>`;
+        }
+      }
+      schematicContent = `
+        <rect x="${roofX}" y="${roofY}" width="${roofW}" height="${roofH}" fill="none" stroke="#374151" stroke-width="2" stroke-dasharray="8,4"/>
+        <line x1="${roofX}" y1="${roofY+15}" x2="${roofX+roofW}" y2="${roofY+15}" stroke="#6b7280" stroke-width="1.5"/>
+        <text x="${roofX+roofW/2}" y="${roofY+11}" text-anchor="middle" font-size="8" fill="#6b7280" font-style="italic">RIDGE</text>
+        <rect x="${roofX+setback}" y="${roofY+setback}" width="${roofW-setback*2}" height="${roofH-setback*2-15}" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="5,3"/>
+        <rect x="${arrayX}" y="${arrayY}" width="${arrayW}" height="${arrayH}" fill="#dbeafe" stroke="none" rx="2"/>
+        ${mods}${atts}
+        <g transform="translate(${roofX+roofW+20},${roofY+20})">
+          <circle cx="0" cy="0" r="18" fill="none" stroke="#374151" stroke-width="1.5"/>
+          <polygon points="0,-14 5,8 0,4 -5,8" fill="#374151"/>
+          <text x="0" y="28" text-anchor="middle" font-size="10" fill="#374151" font-weight="bold">N</text>
+        </g>
+        <text x="${arrayX+arrayW/2}" y="${arrayY+arrayH+14}" text-anchor="middle" font-size="8" fill="#1e40af" font-weight="bold">${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2) || '—'} kW DC</text>
+        <text x="${roofX}" y="${roofY+roofH+20}" font-size="8" fill="#6b7280" font-style="italic">SCHEMATIC ONLY — NOT TO SCALE. Field verify all dimensions.</text>`;
     }
 
     roofVisualHtml = `
-      <div style="background:white; border:1px solid #e2e8f0; border-radius:6px; padding:12px; display:inline-block;">
+      <div style="background:white; border:1px solid #e2e8f0; border-radius:6px; padding:8px; display:inline-block;">
         <svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg" style="font-family:Arial,sans-serif;">
-          <rect width="${svgW}" height="${svgH}" fill="#f8fafc"/>
-          <rect x="${roofX}" y="${roofY}" width="${roofW}" height="${roofH}" fill="none" stroke="#374151" stroke-width="2" stroke-dasharray="8,4"/>
-          <line x1="${roofX}" y1="${roofY + 15}" x2="${roofX + roofW}" y2="${roofY + 15}" stroke="#6b7280" stroke-width="1.5"/>
-          <text x="${roofX + roofW / 2}" y="${roofY + 11}" text-anchor="middle" font-size="8" fill="#6b7280" font-style="italic">RIDGE</text>
-          <rect x="${roofX + setback}" y="${roofY + setback}" width="${roofW - setback * 2}" height="${roofH - setback * 2 - 15}"
-            fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="5,3"/>
-          <rect x="${arrayX}" y="${arrayY}" width="${arrayW}" height="${arrayH}" fill="#dbeafe" stroke="none" rx="2"/>
-          ${modules}
-          ${attachments}
-          <g transform="translate(${roofX + roofW + 20},${roofY + 20})">
-            <circle cx="0" cy="0" r="18" fill="none" stroke="#374151" stroke-width="1.5"/>
-            <polygon points="0,-14 5,8 0,4 -5,8" fill="#374151"/>
-            <text x="0" y="28" text-anchor="middle" font-size="10" fill="#374151" font-weight="bold">N</text>
-          </g>
-          <text x="${arrayX + arrayW / 2}" y="${arrayY + arrayH + 14}" text-anchor="middle" font-size="8" fill="#1e40af" font-weight="bold">
-            ${totalPanels} MODULES — ${system.totalDcKw?.toFixed(2) || '—'} kW DC
-          </text>
-          <text x="${roofX}" y="${roofY + roofH + 20}" font-size="8" fill="#6b7280" font-style="italic">
-            SCHEMATIC ONLY — NOT TO SCALE. Field verify all dimensions.
-          </text>
+          <rect width="${svgW}" height="${svgH}" fill="${hasRoofPlanes ? '#f0f4f8' : '#f8fafc'}"/>
+          ${schematicContent}
+          <!-- Legend -->
+          <rect x="8" y="${svgH - 28}" width="160" height="20" rx="3" fill="rgba(255,255,255,0.85)" stroke="#e2e8f0" stroke-width="1"/>
+          <rect x="14" y="${svgH - 22}" width="12" height="8" rx="1" fill="#1e40af80" stroke="#93c5fd" stroke-width="0.8"/>
+          <text x="30" y="${svgH - 15}" font-size="7.5" fill="#374151">PV Modules</text>
+          <line x1="65" y1="${svgH - 18}" x2="77" y2="${svgH - 18}" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3,2"/>
+          <text x="80" y="${svgH - 15}" font-size="7.5" fill="#374151">Fire Setback (18")</text>
         </svg>
       </div>`;
   }
@@ -1171,24 +1344,99 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
             <tr><td class="il">Attachment Spacing</td><td class="iv">${project.attachmentSpacing ? `${project.attachmentSpacing}" max O.C.` : '48" max O.C.'}</td></tr>
           </table>
 
-          ${aerial?.roofSegments && aerial.roofSegments.length > 0 ? `
-          <div class="section-title" style="margin-top:14px">Detected Roof Segments</div>
-          <table class="info-table">
-            <tr style="background:#f1f5f9;">
-              <td class="il" style="font-weight:bold;">#</td>
-              <td class="iv" style="font-weight:bold;">Pitch</td>
-              <td class="iv" style="font-weight:bold;">Azimuth</td>
-              <td class="iv" style="font-weight:bold;">Area</td>
-            </tr>
-            ${(aerial.roofSegments || []).slice(0, 8).map((seg, i) => {
-              const pitchRatio = Math.round(Math.tan(seg.pitchDegrees * Math.PI / 180) * 12);
-              const azDir = seg.azimuthDegrees < 45 || seg.azimuthDegrees > 315 ? 'N (↑)'
-                : seg.azimuthDegrees < 135 ? 'E (→)'
-                : seg.azimuthDegrees < 225 ? 'S (↓)' : 'W (←)';
-              const areaSf = seg.areaM2 ? (seg.areaM2 * 10.764).toFixed(0) : '—';
-              return `<tr><td class="il">${i + 1}</td><td class="iv">${pitchRatio}/12 (${seg.pitchDegrees.toFixed(1)}°)</td><td class="iv">${seg.azimuthDegrees.toFixed(0)}° ${azDir}</td><td class="iv">${areaSf} ft²</td></tr>`;
-            }).join('')}
-          </table>` : ''}
+          ${(() => {
+            // ── Roof Face Summary: prefer design-engine roofPlanes, fall back to Google Solar segments ──
+            const rpData = (project as any).roofPlanes as Array<{id?:string;vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number}> | undefined;
+            const ppData = (project as any).panelPositions as Array<{lat:number;lng:number}> | undefined;
+
+            // Azimuth → cardinal label
+            function azLabel(az: number): string {
+              if (az < 22.5 || az >= 337.5) return 'N ↑';
+              if (az < 67.5)  return 'NE ↗';
+              if (az < 112.5) return 'E →';
+              if (az < 157.5) return 'SE ↘';
+              if (az < 202.5) return 'S ↓';
+              if (az < 247.5) return 'SW ↙';
+              if (az < 292.5) return 'W ←';
+              return 'NW ↖';
+            }
+
+            // Point-in-polygon for panel counting
+            function pip(lat: number, lng: number, poly: Array<{lat:number;lng:number}>): boolean {
+              let inside = false;
+              for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                const xi = poly[i].lng, yi = poly[i].lat;
+                const xj = poly[j].lng, yj = poly[j].lat;
+                if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+              }
+              return inside;
+            }
+
+            const rpColors = ['#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4'];
+
+            if (rpData && rpData.length > 0) {
+              // ── Design-engine roof planes ──
+              const rows = rpData.slice(0,6).map((plane, pi) => {
+                const pitchStr = plane.pitch != null ? Math.round(Math.tan(plane.pitch * Math.PI / 180) * 12) + '/12 (' + plane.pitch.toFixed(1) + '°)' : '—';
+                const azStr   = plane.azimuth != null ? plane.azimuth.toFixed(0) + '° ' + azLabel(plane.azimuth) : '—';
+                const areaSf  = plane.area != null ? (plane.area * 10.764).toFixed(0) + ' ft²' : '—';
+                const mCount  = (ppData && plane.vertices && plane.vertices.length >= 3)
+                  ? ppData.filter(p => pip(p.lat, p.lng, plane.vertices!)).length
+                  : 0;
+                const c = rpColors[pi % rpColors.length];
+                return `<tr>
+                  <td class="il"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${c};margin-right:4px;vertical-align:middle;"></span>Face ${pi+1}</td>
+                  <td class="iv">${pitchStr}</td>
+                  <td class="iv">${azStr}</td>
+                  <td class="iv" style="font-weight:bold;color:#1e40af;">${mCount > 0 ? mCount + ' mod.' : '—'}</td>
+                  <td class="iv">${areaSf}</td>
+                </tr>`;
+              }).join('');
+              return `
+              <div class="section-title" style="margin-top:14px">Roof Face Schedule</div>
+              <table class="info-table" style="font-size:8px;">
+                <tr style="background:#f1f5f9;">
+                  <td class="il" style="font-weight:bold;">Face</td>
+                  <td class="iv" style="font-weight:bold;">Pitch</td>
+                  <td class="iv" style="font-weight:bold;">Azimuth</td>
+                  <td class="iv" style="font-weight:bold;">Modules</td>
+                  <td class="iv" style="font-weight:bold;">Area</td>
+                </tr>
+                ${rows}
+              </table>
+              <div style="font-size:7.5px;color:#6b7280;margin-top:3px;font-style:italic;">
+                ★ Roof faces from 3D design engine. Module counts derived from panel GPS coordinates.
+              </div>`;
+            } else if (aerial?.roofSegments && aerial.roofSegments.length > 0) {
+              // ── Google Solar API fallback ──
+              const rows = (aerial.roofSegments || []).slice(0, 8).map((seg, i) => {
+                const pitchRatio = Math.round(Math.tan(seg.pitchDegrees * Math.PI / 180) * 12);
+                const az = azLabel(seg.azimuthDegrees);
+                const areaSf = seg.areaM2 ? (seg.areaM2 * 10.764).toFixed(0) + ' ft²' : '—';
+                return `<tr>
+                  <td class="il">${i + 1}</td>
+                  <td class="iv">${pitchRatio}/12 (${seg.pitchDegrees.toFixed(1)}°)</td>
+                  <td class="iv">${seg.azimuthDegrees.toFixed(0)}° ${az}</td>
+                  <td class="iv">${areaSf}</td>
+                </tr>`;
+              }).join('');
+              return `
+              <div class="section-title" style="margin-top:14px">Detected Roof Segments</div>
+              <table class="info-table" style="font-size:8px;">
+                <tr style="background:#f1f5f9;">
+                  <td class="il" style="font-weight:bold;">#</td>
+                  <td class="iv" style="font-weight:bold;">Pitch</td>
+                  <td class="iv" style="font-weight:bold;">Azimuth</td>
+                  <td class="iv" style="font-weight:bold;">Area</td>
+                </tr>
+                ${rows}
+              </table>
+              <div style="font-size:7.5px;color:#6b7280;margin-top:3px;font-style:italic;">
+                ★ Roof data from Google Solar API. Design roof planes unavailable.
+              </div>`;
+            }
+            return '';
+          })()}
 
           <div class="section-title" style="margin-top:14px">Roof Plan Notes</div>
           <ol class="construction-notes" style="font-size:9px;">

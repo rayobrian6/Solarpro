@@ -122,7 +122,7 @@ const samplePayload = {
 const baseUrl = 'http://localhost:3000';
 
 // Test JWT (signed with JWT_SECRET=test-secret-for-local-permit-testing-only)
-const TEST_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InRlc3QtdXNlci0xIiwiZW1haWwiOiJ0ZXN0QHNvbGFycHJvLnRlc3QiLCJyb2xlIjoidXNlciIsImlhdCI6MTc3MzUwMjMwMCwiZXhwIjoxNzczNTg4NzAwfQ.I2QWnmRH64T78VfSX0RXeR88DdABydQrlt44TVJwm_M';
+const TEST_TOKEN = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6InRlc3QtdXNlci0xIiwiZW1haWwiOiJ0ZXN0QHNvbGFycHJvLnRlc3QiLCJyb2xlIjoidXNlciIsImlhdCI6MTc3MzUwNzA4MywiZXhwIjoxNzczNTkzNDgzfQ.X1r2Clh8o4EZPIav11_IzaDjv7BgWcItjwf7psXBVbo';
 
 async function testPermit() {
   console.log('Testing permit generation with full panel position data...');
