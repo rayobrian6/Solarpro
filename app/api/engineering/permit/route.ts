@@ -73,6 +73,40 @@ interface PermitInput {
     generatorKw?: number;
     interconnectionMethod?: string;
     panelBusRating?: number;
+    // AHJ data (auto-populated server-side from ahj-national.ts)
+    ahjName?: string;
+    ahjWindSpeedMph?: number;
+    ahjGroundSnowPsf?: number;
+    ahjRoofSetbackIn?: number;
+    ahjRidgeSetbackIn?: number;
+    ahjNecVersion?: string;
+    ahjPermitFee?: string;
+    ahjPlanCheckDays?: number;
+    ahjSpecialRequirements?: string[];
+    // Panel positions from 3D design engine (PlacedPanel[])
+    panelPositions?: Array<{
+      id: string; lat: number; lng: number;
+      x?: number; y?: number; tilt?: number; azimuth?: number;
+      wattage?: number; row?: number; col?: number;
+      systemType?: string; orientation?: string;
+    }>;
+    roofPlanes?: Array<{
+      id: string; vertices: Array<{ lat: number; lng: number }>;
+      pitch?: number; azimuth?: number; area?: number;
+    }>;
+    // Panel physical specs
+    panelVoc?: number;
+    panelIsc?: number;
+    panelWeightLbs?: number;
+    panelLengthIn?: number;
+    panelWidthIn?: number;
+    // Location fields for AHJ lookup
+    city?: string;
+    state?: string;
+    zip?: string;
+    county?: string;
+    atsBrand?: string;
+    atsAmpRating?: number;
   };
   system: {
     totalDcKw: number;
@@ -853,7 +887,43 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
     const arrH = Math.round(imgH * 0.28);
     const arrX = Math.round((imgW - arrW) / 2);
     const arrY = Math.round((imgH - arrH) / 2);
+    // Exact panel positions from design engine, or fallback to generic grid
+    const panelPositions = (project as any).panelPositions as Array<{lat:number;lng:number;tilt?:number;azimuth?:number;orientation?:string}> | undefined;
+    const hasExactPositions = !!(panelPositions && panelPositions.length > 0 && aerial.lat && aerial.lng);
     const moduleGrid = (() => {
+      if (hasExactPositions && aerial.lat && aerial.lng) {
+        // Project each panel's lat/lng to pixel coordinates on the 640x640 satellite image
+        const cLat = aerial.lat, cLng = aerial.lng;
+        const z = aerial.zoom || 20;
+        const mppEq = 156543.03392 / Math.pow(2, z);
+        const mpp = mppEq * Math.cos(cLat * Math.PI / 180);
+        const ppm = 1 / mpp; // pixels per meter
+        const MPD_LAT = 111320; // meters per degree lat
+        const mpd_lng = 111320 * Math.cos(cLat * Math.PI / 180); // meters per degree lng
+        // Panel physical size in pixels
+        const pLenM = ((project as any).panelLengthIn || 65) * 0.0254;
+        const pWidM = ((project as any).panelWidthIn || 39) * 0.0254;
+        const pHpx = Math.max(5, pLenM * ppm);
+        const pWpx = Math.max(3, pWidM * ppm);
+        let g = '';
+        panelPositions!.slice(0, 800).forEach((pp, idx) => {
+          const dx = pp.lng - cLng;
+          const dy = pp.lat - cLat;
+          const px2 = imgW / 2 + dx * mpd_lng * ppm;
+          const py2 = imgH / 2 - dy * MPD_LAT * ppm;
+          // Rotate based on orientation
+          const isLandscape = pp.orientation === 'landscape';
+          const pw = isLandscape ? pHpx : pWpx;
+          const ph = isLandscape ? pWpx : pHpx;
+          g += `<rect x="${(px2 - pw/2).toFixed(1)}" y="${(py2 - ph/2).toFixed(1)}" width="${pw.toFixed(1)}" height="${ph.toFixed(1)}" fill="rgba(30,64,175,0.65)" stroke="#93c5fd" stroke-width="0.7" rx="0.5"/>`;
+          // Panel number label for first 60 panels
+          if (idx < 60) {
+            g += `<text x="${px2.toFixed(1)}" y="${(py2 + 2).toFixed(1)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="3.5" fill="white">${idx+1}</text>`;
+          }
+        });
+        return g;
+      }
+      // Fallback: generic grid when no exact positions
       const cols = Math.ceil(Math.sqrt(totalPanels * 1.5));
       const rows2 = Math.ceil(totalPanels / cols);
       const mw = Math.floor((arrW - 8) / cols) - 2;
@@ -887,10 +957,33 @@ function pageRoofPlan(input: PermitInput, pageNum: number, totalPages: number): 
           ${segOverlay}
           <!-- Fire setback boundary -->
           ${setbackBox}
-          <!-- Array footprint outline -->
-          <rect x="${arrX}" y="${arrY}" width="${arrW}" height="${arrH}"
-            fill="rgba(30,64,175,0.25)" stroke="#3b82f6" stroke-width="2" rx="2"/>
-          <!-- Module grid ghost -->
+          <!-- Roof plane outlines from design engine -->
+          ${(() => {
+            const rp = (project as any).roofPlanes as Array<{vertices?:Array<{lat:number;lng:number}>;pitch?:number;azimuth?:number;area?:number}> | undefined;
+            if (!rp || rp.length === 0 || !aerial.lat || !aerial.lng) return '';
+            const cLat2 = aerial.lat, cLng2 = aerial.lng;
+            const z2 = aerial.zoom || 20;
+            const mppEq2 = 156543.03392 / Math.pow(2, z2);
+            const mpp2 = mppEq2 * Math.cos(cLat2 * Math.PI / 180);
+            const ppm2 = 1 / mpp2;
+            const MPD2 = 111320;
+            const mpdLng2 = 111320 * Math.cos(cLat2 * Math.PI / 180);
+            const rpColors = ['#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4'];
+            return rp.slice(0,6).map((plane, pi) => {
+              if (!plane.vertices || plane.vertices.length < 3) return '';
+              const pts = plane.vertices.map((v) => {
+                const px3 = imgW/2 + (v.lng - cLng2) * mpdLng2 * ppm2;
+                const py3 = imgH/2 - (v.lat - cLat2) * MPD2 * ppm2;
+                return px3.toFixed(1) + ',' + py3.toFixed(1);
+              }).join(' ');
+              const c3 = rpColors[pi % rpColors.length];
+              const pitchLabel = plane.pitch ? Math.round(Math.tan(plane.pitch * Math.PI / 180) * 12) + '/12' : '';
+              return '<polygon points="' + pts + '" fill="' + c3 + '18" stroke="' + c3 + '" stroke-width="1.8" stroke-dasharray="6,3" opacity="0.9"/>';
+            }).join('');
+          })()}
+          <!-- Array footprint box (only when no exact panel positions from design engine) -->
+          ${!hasExactPositions ? `<rect x="${arrX}" y="${arrY}" width="${arrW}" height="${arrH}" fill="rgba(30,64,175,0.25)" stroke="#3b82f6" stroke-width="2" rx="2"/>` : ''}
+          <!-- Panel modules (exact GPS positions or generic grid) -->
           ${moduleGrid}
           <!-- Panel count label -->
           <rect x="${arrX}" y="${arrY + arrH + 4}" width="${arrW}" height="16" rx="2" fill="rgba(0,0,0,0.65)"/>
@@ -1162,10 +1255,32 @@ function pageAttachmentBOM(input: PermitInput, pageNum: number, totalPages: numb
     });
   } else {
     // Default BOM items
-    bomRows.push(`<tr><td>Racking System</td><td>${project.mountingSystem?.split(' ')[0] || 'Unirac'}</td><td>${project.mountingSystem || 'NXT Umount'}</td><td>—</td><td style="text-align:right">1</td><td>SYS</td><td>UL 2703</td></tr>`);
-    bomRows.push(`<tr><td>Lag Bolt</td><td>Generic SS</td><td>5/16" × 3" Stainless Steel</td><td>—</td><td style="text-align:right">${Math.ceil(system.totalPanels * 1.5)}</td><td>EA</td><td>—</td></tr>`);
-    bomRows.push(`<tr><td>AC Conduit</td><td>—</td><td>${project.conduitType || 'EMT'} w/ THWN-2 conductors</td><td>—</td><td style="text-align:right">${project.wireLength || 50}</td><td>FT</td><td>—</td></tr>`);
-    bomRows.push(`<tr><td>AC Disconnect</td><td>—</td><td>${project.mainPanelAmps >= 200 ? '60A' : '30A'} Non-fusible AC Disconnect</td><td>—</td><td style="text-align:right">1</td><td>EA</td><td>UL 98</td></tr>`);
+    // Auto-calculate hardware quantities from panel count
+    const nPanels2 = system.totalPanels || 0;
+    const panelsPerRackRow = Math.ceil(Math.sqrt(nPanels2 * 1.6));
+    const numRackRows = Math.max(1, Math.ceil(nPanels2 / panelsPerRackRow));
+    const railQty = numRackRows * 2;  // 2 rails per row
+    const midClamps = nPanels2 * 2;   // 2 mid-clamps per panel (inner)
+    const endClamps = numRackRows * 4; // 2 end-clamps per end per row
+    const lagBolts = Math.max(Math.ceil(nPanels2 * 1.5), railQty * 3);
+    const flashings = lagBolts;
+    const weebClips = midClamps + endClamps;
+    const jBoxCount = Math.ceil(nPanels2 / 16) + 1;
+    const railSplices = Math.max(0, railQty - numRackRows);
+    const rackMfr = project.mountingSystem?.split(' ')[0] || 'IronRidge';
+    const rackModel = project.mountingSystem || 'XR-100 Rail System';
+    bomRows.push(`<tr><td>Rail (12ft)</td><td>${rackMfr}</td><td>${rackModel}</td><td>—</td><td style="text-align:right;font-weight:bold">${railQty}</td><td>EA</td><td>UL 2703</td></tr>`);
+    bomRows.push(`<tr><td>Rail Splice</td><td>${rackMfr}</td><td>Rail Splice Coupler</td><td>—</td><td style="text-align:right;font-weight:bold">${railSplices}</td><td>EA</td><td>UL 2703</td></tr>`);
+    bomRows.push(`<tr><td>Mid Clamp</td><td>${rackMfr}</td><td>UFO Mid Clamp (module width)</td><td>—</td><td style="text-align:right;font-weight:bold">${midClamps}</td><td>EA</td><td>UL 2703</td></tr>`);
+    bomRows.push(`<tr><td>End Clamp</td><td>${rackMfr}</td><td>UFO End Clamp</td><td>—</td><td style="text-align:right;font-weight:bold">${endClamps}</td><td>EA</td><td>UL 2703</td></tr>`);
+    bomRows.push(`<tr><td>L-Foot / Standoff</td><td>—</td><td>Adjustable Flashed L-Foot</td><td>—</td><td style="text-align:right;font-weight:bold">${lagBolts}</td><td>EA</td><td>UL 2703</td></tr>`);
+    bomRows.push(`<tr><td>Lag Bolt 5/16"×3"</td><td>SS Hardware</td><td>Stainless Steel Lag Bolt</td><td>—</td><td style="text-align:right;font-weight:bold">${lagBolts}</td><td>EA</td><td>—</td></tr>`);
+    bomRows.push(`<tr><td>Roof Flashing</td><td>—</td><td>Roofing Penetration Seal</td><td>—</td><td style="text-align:right;font-weight:bold">${flashings}</td><td>EA</td><td>—</td></tr>`);
+    bomRows.push(`<tr><td>WEEB Bonding Clip</td><td>Wiley Electronics</td><td>WEEB 6.7 Bonding Clip</td><td>WEEB-6.7</td><td style="text-align:right;font-weight:bold">${weebClips}</td><td>EA</td><td>UL 2703</td></tr>`);
+    bomRows.push(`<tr><td>AC Junction Box</td><td>—</td><td>NEMA 4X Weatherproof JBox</td><td>—</td><td style="text-align:right;font-weight:bold">${jBoxCount}</td><td>EA</td><td>—</td></tr>`);
+    bomRows.push(`<tr><td>AC Conduit</td><td>—</td><td>${project.conduitType || 'EMT'} w/ THWN-2 conductors</td><td>—</td><td style="text-align:right;font-weight:bold">${project.wireLength || 50}</td><td>FT</td><td>—</td></tr>`);
+    bomRows.push(`<tr><td>AC Disconnect</td><td>—</td><td>${project.mainPanelAmps >= 200 ? '60A' : '30A'} Non-Fusible (NEC 690.14)</td><td>—</td><td style="text-align:right;font-weight:bold">1</td><td>EA</td><td>UL 98</td></tr>`);
+    bomRows.push(`<tr><td>Conduit Fittings Kit</td><td>—</td><td>Connectors, couplings, straps</td><td>—</td><td style="text-align:right;font-weight:bold">1</td><td>LOT</td><td>—</td></tr>`);
   }
 
   return `
@@ -1539,8 +1654,51 @@ function pageConductorSchedule(input: PermitInput, pageNum: number, totalPages: 
           <tr><td style="font-family:monospace;font-size:9px">NEC Ch. 9, Table 1</td><td>Conduit Fill</td><td>Maximum 40% fill for 3+ conductors</td></tr>
           <tr><td style="font-family:monospace;font-size:9px">ASCE 7-22 §26</td><td>Wind Loads</td><td>Components and cladding on roof-mounted arrays</td></tr>
           <tr><td style="font-family:monospace;font-size:9px">ASCE 7-22 §7</td><td>Snow Loads</td><td>Roof snow load with slope reduction factor</td></tr>
+          <tr><td style="font-family:monospace;font-size:9px">NEC 220.82</td><td>Dwelling Load Calcs</td><td>Optional method — existing dwelling unit load calculation</td></tr>
         </tbody>
       </table>
+
+      <div class="section-title" style="margin-top:16px;">Load Calculations — NEC 220.82 Optional Method</div>
+      ${(() => {
+        const busA = project.panelBusRating || project.mainPanelAmps || 200;
+        const mainA = project.mainPanelAmps || 200;
+        const acKw = system.totalAcKw || 0;
+        const acAmps = (acKw * 1000 / 240);
+        const bfAmps = Math.ceil(acAmps * 1.25 / 5) * 5;
+        const busLimit = busA * 1.2;
+        const maxBfAllowed = busLimit - mainA;
+        const passes120 = bfAmps <= maxBfAllowed;
+        const sqft = mainA >= 200 ? 3000 : 2000;
+        const lightingVA = sqft * 3;
+        const smallApplVA = 4500;
+        const totalBeforeDemand = lightingVA + smallApplVA;
+        const demand = totalBeforeDemand <= 10000
+          ? totalBeforeDemand
+          : 10000 + (totalBeforeDemand - 10000) * 0.4;
+        const hvacVA = mainA >= 200 ? 7200 : 4320;
+        const totalLoad = demand + hvacVA;
+        const loadAmps = (totalLoad / 240).toFixed(0);
+        return `
+        <table class="equip-table">
+          <thead><tr>
+            <th style="width:5%">Step</th>
+            <th style="width:28%">Description</th>
+            <th style="width:42%">Calculation</th>
+            <th style="width:25%">Result</th>
+          </tr></thead>
+          <tbody>
+            <tr style="background:#f8fafc;"><td style="font-weight:bold;">1</td><td>General Lighting — NEC 220.82(B)(1)</td><td>${sqft} sqft × 3 VA/sqft</td><td style="font-weight:bold;text-align:right;">${lightingVA.toLocaleString()} VA</td></tr>
+            <tr><td style="font-weight:bold;">2</td><td>Small Appliance + Laundry — NEC 220.52</td><td>3 circuits × 1,500 VA</td><td style="font-weight:bold;text-align:right;">${smallApplVA.toLocaleString()} VA</td></tr>
+            <tr style="background:#f8fafc;"><td style="font-weight:bold;">3</td><td>Demand Factor — NEC 220.82(B)</td><td>First 10 kVA @ 100% + remainder @ 40%</td><td style="font-weight:bold;text-align:right;">${Math.round(demand).toLocaleString()} VA</td></tr>
+            <tr><td style="font-weight:bold;">4</td><td>HVAC / Largest Motor Load</td><td>${mainA >= 200 ? '5-ton' : '3-ton'} AC unit (field verify)</td><td style="font-weight:bold;text-align:right;">${hvacVA.toLocaleString()} VA</td></tr>
+            <tr style="background:#eff6ff;"><td style="font-weight:bold;">5</td><td>Total Calculated Load</td><td>Steps 1–4 ÷ 240V service</td><td style="font-weight:bold;text-align:right;color:#1e40af;">${Math.round(totalLoad).toLocaleString()} VA = ${loadAmps}A</td></tr>
+            <tr style="background:#f0fdf4;"><td style="font-weight:bold;">6</td><td>Service Ampacity</td><td>${mainA}A panel × 240V</td><td style="font-weight:bold;text-align:right;color:#10b981;">${mainA}A available</td></tr>
+            <tr style="background:#fff7ed;"><td style="font-weight:bold;">7</td><td>PV AC Output</td><td>${acKw.toFixed(2)} kW AC ÷ 240V</td><td style="font-weight:bold;text-align:right;color:#d97706;">${acAmps.toFixed(1)}A PV</td></tr>
+            <tr style="background:#fff7ed;"><td style="font-weight:bold;">8</td><td>PV Backfeed Breaker — NEC 690.8(A)(1)</td><td>${acAmps.toFixed(1)}A × 125% → rounded up to next 5A step</td><td style="font-weight:bold;text-align:right;color:#d97706;">${bfAmps}A breaker required</td></tr>
+            <tr style="background:${passes120 ? '#f0fdf4' : '#fef2f2'};outline:2px solid ${passes120 ? '#10b981' : '#ef4444'};"><td style="font-weight:bold;">9</td><td style="font-weight:bold;">120% Busbar Rule — NEC 705.12(B)</td><td>${busA}A bus × 120% = ${busLimit.toFixed(0)}A max; minus ${mainA}A main = ${maxBfAllowed.toFixed(0)}A for PV</td><td style="font-weight:bold;text-align:right;font-size:11px;color:${passes120 ? '#10b981' : '#ef4444'};">${passes120 ? '✓ PASS' : '✗ FAIL — Upgrade panel'}</td></tr>
+          </tbody>
+        </table>`;
+      })()}
     </div>
   </div>`;
 }
@@ -2537,7 +2695,7 @@ function generatePermitHTML(input: PermitInput): string {
   body { font-family:'Arial',sans-serif; font-size:10px; color:#1e293b; background:white; }
 
   /* Page */
-  .page { width:17in; min-height:22in; padding:0.45in; page-break-after:always; display:flex; flex-direction:column; }
+  .page { width:11in; min-height:17in; padding:0.4in; page-break-after:always; display:flex; flex-direction:column; }
   .sld-page { padding:0.2in 0.2in 0.1in 0.2in; }
   .page:last-child { page-break-after:avoid; }
   .page-content { flex:1; margin-top:10px; }
@@ -2662,7 +2820,7 @@ function generatePermitHTML(input: PermitInput): string {
   .cert-footer { font-size:8.5px; color:#94a3b8; text-align:center; border-top:1px solid #e2e8f0; padding-top:10px; margin-top:14px; }
   .notes-box { background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:8px; font-size:9.5px; color:#78350f; }
 
-  @page { size:17in 22in; margin:0; }
+  @page { size:11in 17in; margin:0; }
   @media print { .page { page-break-after:always; } }
 </style>
 </head>
@@ -2722,6 +2880,52 @@ export async function POST(req: NextRequest) {
       (body.system as any).inverters = [];
     }
 
+    // ─── Auto-populate AHJ data from national database ──────────────────────
+    {
+      const stateFromAddr = (body.project?.address || '').match(/,\s*([A-Z]{2})\s+\d{5}/)?.[1] || '';
+      const sc = (body.project as any).state || stateFromAddr;
+      const ct = (body.project as any).city || '';
+      const cn = (body.project as any).county || '';
+      if (sc) {
+        try {
+          // Dynamic import to avoid build-time issues
+          const ahjModule = await import('@/lib/jurisdictions/ahj-national').catch(() => null);
+          const searchAhjFn = (ahjModule as any)?.searchAhj || (ahjModule as any)?.default?.searchAhj;
+          if (typeof searchAhjFn === 'function') {
+            const ahjResults = searchAhjFn({ stateCode: sc, city: ct, county: cn });
+            if (Array.isArray(ahjResults) && ahjResults.length > 0) {
+              const ar = ahjResults[0] as any;
+              console.log('[permit/AHJ] Found:', ar.ahjName, '| wind:', ar.windSpeedMph, 'mph | snow:', ar.groundSnowLoadPsf, 'psf');
+              if (!(body.project as any).ahjName) (body.project as any).ahjName = ar.ahjName;
+              if (!(body.project as any).ahjWindSpeedMph) (body.project as any).ahjWindSpeedMph = ar.windSpeedMph;
+              if (!(body.project as any).ahjGroundSnowPsf) (body.project as any).ahjGroundSnowPsf = ar.groundSnowLoadPsf;
+              if (!(body.project as any).ahjRoofSetbackIn) (body.project as any).ahjRoofSetbackIn = ar.roofSetbackInches;
+              if (!(body.project as any).ahjRidgeSetbackIn) (body.project as any).ahjRidgeSetbackIn = ar.ridgeSetbackInches;
+              if (!(body.project as any).ahjNecVersion) (body.project as any).ahjNecVersion = ar.necVersion;
+              if (!(body.project as any).ahjPermitFee) (body.project as any).ahjPermitFee = ar.typicalPermitFee;
+              if (!(body.project as any).ahjPlanCheckDays) (body.project as any).ahjPlanCheckDays = ar.typicalPlanCheckDays;
+              if (!(body.project as any).ahjSpecialRequirements || (body.project as any).ahjSpecialRequirements.length === 0) {
+                (body.project as any).ahjSpecialRequirements = [
+                  ...(ar.specialRequirements || []),
+                  ...(ar.planSetRequirements || []).slice(0, 4),
+                ];
+              }
+              // Propagate to compliance.jurisdiction
+              if (!body.compliance.jurisdiction) {
+                body.compliance.jurisdiction = { state: sc, necVersion: ar.necVersion, ahj: ar.ahjName };
+              } else {
+                if (!body.compliance.jurisdiction.ahj) body.compliance.jurisdiction.ahj = ar.ahjName;
+                if (!body.compliance.jurisdiction.necVersion) body.compliance.jurisdiction.necVersion = ar.necVersion;
+                if (!body.compliance.jurisdiction.state) body.compliance.jurisdiction.state = sc;
+              }
+            }
+          }
+        } catch (ahjErr: any) {
+          console.log('[permit/AHJ] lookup error (non-critical):', ahjErr?.message);
+        }
+      }
+    }
+
     // Fetch aerial roof data (satellite image + Solar API roof segments)
     // This runs server-side so we can embed the base64 image in the PDF
     console.log('[permit/POST] Starting aerial fetch for address:', body.project?.address || '(none)');
@@ -2765,8 +2969,8 @@ export async function POST(req: NextRequest) {
 
     const cmd = [
       'wkhtmltopdf',
-      '--page-width 17in',
-      '--page-height 22in',
+      '--page-width 11in',
+      '--page-height 17in',
       '--margin-top 0',
       '--margin-bottom 0',
       '--margin-left 0',

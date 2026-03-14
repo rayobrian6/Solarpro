@@ -200,6 +200,7 @@ interface ProjectConfig {
   electricalLicense?: string;    // electrical contractor license number
   ownerPhone?: string;           // owner contact phone
   ownerEmail?: string;           // owner contact email
+  zip?: string;                  // ZIP code — used for AHJ lookup
 }
 
 interface ComplianceResult {
@@ -391,6 +392,8 @@ function EngineeringPageInner() {
         const p = data.data;
         const seed = p.engineeringSeed;
         const layout = p.layout;
+        // Store layout in component state so permit buttons can access panel positions
+        if (layout) setProjectLayout(layout);
 
         console.log('[EngineeringPage] Loaded project engineering_seed:', seed);
 
@@ -2487,6 +2490,7 @@ function EngineeringPageInner() {
   // ── Generate Full Permit Package ──────────────────────────────────────────────
   const [permitLoading, setPermitLoading] = useState(false);
   const [planSetLoading, setPlanSetLoading] = useState(false);
+  const [projectLayout, setProjectLayout] = useState<any>(null); // layout from 3D design engine (panels[], roofPlanes[])
   const [planSetResult, setPlanSetResult] = useState<{ fileName: string; fileId?: string; sheets: number; structuralStatus: string; message: string } | null>(null);
   const [planSetError, setPlanSetError] = useState<string | null>(null);
   const [planSetPreviewSheet, setPlanSetPreviewSheet] = useState<string | null>(null); // sheet id being previewed
@@ -7325,6 +7329,17 @@ function EngineeringPageInner() {
                         generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
                         atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
                         atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
+                        // ─── Location fields for AHJ lookup ───────────────────────────────
+                        city: config.city || '',
+                        state: config.state || '',
+                        zip: config.zip || '',
+                        county: config.county || '',
+                        // ─── Panel physical specs ──────────────────────────────────────────
+                        panelVoc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.voc : undefined; })(),
+                        panelIsc: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.isc : undefined; })(),
+                        panelWeightLbs: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.weightLbs : undefined; })(),
+                        panelLengthIn: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.lengthIn : undefined; })(),
+                        panelWidthIn: (() => { const p0 = config.inverters?.[0]?.strings?.[0]; return p0 ? (getPanelById(p0.panelId) as any)?.widthIn : undefined; })(),
                       },
                       system: {
                         totalDcKw: parseFloat(totalKw), totalAcKw: parseFloat(totalInverterKw),
@@ -7348,6 +7363,31 @@ function EngineeringPageInner() {
                         }),
                       },
                       compliance, rulesResult, bom, overrides,
+                      // ─── Wire panel positions from 3D design engine ───────────────────
+                      // projectLayout.panels[] contains per-panel lat/lng from the design studio
+                      ...(projectLayout?.panels && projectLayout.panels.length > 0 ? {
+                        panelPositions: projectLayout.panels.map((p: any) => ({
+                          id: p.id,
+                          lat: p.lat,
+                          lng: p.lng,
+                          x: p.x,
+                          y: p.y,
+                          tilt: p.tilt,
+                          azimuth: p.azimuth,
+                          wattage: p.wattage,
+                          row: p.row,
+                          col: p.col,
+                          systemType: p.systemType,
+                          orientation: p.orientation,
+                        })),
+                        roofPlanes: (projectLayout?.roofPlanes || []).map((rp: any) => ({
+                          id: rp.id,
+                          vertices: rp.vertices || [],
+                          pitch: rp.pitch,
+                          azimuth: rp.azimuth,
+                          area: rp.area,
+                        })),
+                      } : {}),
                     };
                     const res = await fetch('/api/engineering/permit?format=pdf', {
                       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -7410,6 +7450,30 @@ function EngineeringPageInner() {
                         }),
                       },
                       compliance, rulesResult, bom, overrides,
+                      // ─── Wire panel positions from 3D design engine ───────────────────
+                      ...(projectLayout?.panels && projectLayout.panels.length > 0 ? {
+                        panelPositions: projectLayout.panels.map((p: any) => ({
+                          id: p.id,
+                          lat: p.lat,
+                          lng: p.lng,
+                          x: p.x,
+                          y: p.y,
+                          tilt: p.tilt,
+                          azimuth: p.azimuth,
+                          wattage: p.wattage,
+                          row: p.row,
+                          col: p.col,
+                          systemType: p.systemType,
+                          orientation: p.orientation,
+                        })),
+                        roofPlanes: (projectLayout?.roofPlanes || []).map((rp: any) => ({
+                          id: rp.id,
+                          vertices: rp.vertices || [],
+                          pitch: rp.pitch,
+                          azimuth: rp.azimuth,
+                          area: rp.area,
+                        })),
+                      } : {}),
                     };
                     const res = await fetch('/api/engineering/permit?format=html', {
                       method: 'POST', headers: { 'Content-Type': 'application/json' },
