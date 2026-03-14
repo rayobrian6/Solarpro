@@ -497,10 +497,19 @@ export default function DesignStudio({ project, onSave }: Props) {
       mapCenter: mapCenterRef.current,
       mapZoom: zoomRef.current,
       systemType: project.systemType,
-      // ✅ Include roofPlanes so permit generator can use exact roof geometry
+      // Include roofPlanes so permit generator can use exact roof geometry
       roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
     };
-    // ✅ Always save to localStorage first (survives serverless cold starts)
+    // STEP 1 -- LAYOUT SAVE LOGGING
+    console.log('[LAYOUT SAVE PAYLOAD]', {
+      projectId: project.id,
+      panelCount: panelList.length,
+      roofPlaneCount: roofPlanesRef.current.length,
+      hasRoofPlanes: roofPlanesRef.current.length > 0,
+      panels: panelList.slice(0, 3),
+      roofPlanes: roofPlanesRef.current,
+    });
+    // Always save to localStorage first (survives serverless cold starts)
     localSaveLayout(project.id, payload);
     setSaveStatus('saving');
     try {
@@ -562,10 +571,23 @@ export default function DesignStudio({ project, onSave }: Props) {
       try {
         const res = await fetch(`/api/projects/${project.id}/layout`);
         const data = await res.json();
+        console.log('[LAYOUT RESTORE FROM DB]', {
+          projectId: project.id,
+          success: data.success,
+          panelCount: data.data?.panels?.length ?? 0,
+          roofPlaneCount: data.data?.roofPlanes?.length ?? 0,
+          hasRoofPlanes: !!(data.data?.roofPlanes && data.data.roofPlanes.length > 0),
+        });
         if (data.success && data.data?.panels && data.data.panels.length > 0) {
           setPanels(data.data.panels);
           lastSavedPanelsRef.current = JSON.stringify(data.data.panels);
           console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
+        }
+        // CRITICAL FIX: Also restore roofPlanes so roofPlanesRef stays populated
+        // Without this, auto-save fires with roofPlanesRef.current = [] and roof planes are lost
+        if (data.success && data.data?.roofPlanes && data.data.roofPlanes.length > 0) {
+          setRoofPlanes(data.data.roofPlanes);
+          console.log(`[DesignStudio] Restored ${data.data.roofPlanes.length} roof planes from DB`);
         }
       } catch (e) {
         console.error('Panel restore failed:', e);

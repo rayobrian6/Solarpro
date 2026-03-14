@@ -29,6 +29,16 @@ export async function POST(req: NextRequest, context: RouteContext) {
       changeSummary
     } = body;
 
+    // STEP 2 -- API RECEIVED LAYOUT LOGGING
+    console.log('[API RECEIVED LAYOUT]', {
+      projectId,
+      panelCount: Array.isArray(panels) ? panels.length : 'NOT_ARRAY',
+      roofPlaneCount: Array.isArray(roofPlanes) ? roofPlanes.length : (roofPlanes === undefined ? 'undefined' : 'NOT_ARRAY'),
+      hasRoofPlanes: Array.isArray(roofPlanes) && roofPlanes.length > 0,
+      systemType,
+      mapCenter,
+    });
+
     if (!panels || !Array.isArray(panels)) {
       return NextResponse.json({ success: false, error: 'panels array required' }, { status: 400 });
     }
@@ -58,6 +68,16 @@ export async function POST(req: NextRequest, context: RouteContext) {
       systemSizeKw,
       mapCenter: mapCenter ?? existingLayout?.mapCenter,
       mapZoom: mapZoom ?? existingLayout?.mapZoom,
+    });
+
+    // STEP 3 -- DB WRITE CONFIRMATION LOGGING
+    console.log('[LAYOUT SAVED TO DB]', {
+      projectId,
+      layoutId: savedLayout.id,
+      panelCount: savedLayout.panels?.length ?? 0,
+      roofPlaneCount: savedLayout.roofPlanes?.length ?? 0,
+      hasRoofPlanes: !!(savedLayout.roofPlanes && savedLayout.roofPlanes.length > 0),
+      systemSizeKw,
     });
 
     // Save version snapshot (async, non-blocking for response)

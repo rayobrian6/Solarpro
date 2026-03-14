@@ -3488,6 +3488,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Missing project data' }, { status: 400 });
     }
 
+    // STEP 5 -- PERMIT INPUT LOGGING
+    const _pAny           = project as any;
+    const _panelPositions = _pAny.panelPositions as Array<unknown> | undefined;
+    const _roofPlanes     = _pAny.roofPlanes     as Array<unknown> | undefined;
+    console.log('[PERMIT INPUT]', {
+      projectName:        project.projectName,
+      address:            project.address,
+      panelCount:         _pAny.panelCount ?? _pAny.totalModules,
+      panelPositionCount: Array.isArray(_panelPositions) ? _panelPositions.length : 'MISSING',
+      roofPlaneCount:     Array.isArray(_roofPlanes) ? _roofPlanes.length : 'MISSING',
+      hasPanelPositions:  Array.isArray(_panelPositions) && _panelPositions.length > 0,
+      hasRoofPlanes:      Array.isArray(_roofPlanes) && _roofPlanes.length > 0,
+    });
+
     // ── Normalize compliance: ensure it always has at least a skeleton so
     //    page functions never crash on compliance.jurisdiction?.xxx access
     //    when the frontend omits or sends null/undefined compliance.

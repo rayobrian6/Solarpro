@@ -392,6 +392,15 @@ function EngineeringPageInner() {
         const p = data.data;
         const seed = p.engineeringSeed;
         const layout = p.layout;
+        // STEP 4 -- LOADED PROJECT LAYOUT LOGGING
+        console.log('[LOADED PROJECT LAYOUT]', {
+          hasLayout: !!layout,
+          panelCount: layout?.panels?.length ?? 0,
+          roofPlaneCount: layout?.roofPlanes?.length ?? 0,
+          hasRoofPlanes: !!(layout?.roofPlanes && layout.roofPlanes.length > 0),
+          totalPanels: layout?.totalPanels ?? 0,
+          systemSizeKw: layout?.systemSizeKw ?? 0,
+        });
         // Store layout in component state so permit buttons can access panel positions
         if (layout) setProjectLayout(layout);
 
