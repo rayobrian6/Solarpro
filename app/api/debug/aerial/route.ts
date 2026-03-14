@@ -2,28 +2,43 @@
 // Debug endpoint: GET /api/debug/aerial?address=...
 // Tests the full aerial data pipeline and returns JSON results
 // for inspection without generating a full permit PDF.
-// REMOVE OR RESTRICT IN PRODUCTION
+// RESTRICTED: requires authenticated session (non-production debug only)
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getUserFromRequest } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
+  // Require authenticated session — this is a diagnostic route, not public
+  const user = await getUserFromRequest(req);
+  if (!user) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+  }
+
   const address = req.nextUrl.searchParams.get('address') || '123 Main St, Franklin, TN 37064';
   const latParam = req.nextUrl.searchParams.get('lat');
   const lngParam = req.nextUrl.searchParams.get('lng');
   const lat = latParam ? parseFloat(latParam) : undefined;
   const lng = lngParam ? parseFloat(lngParam) : undefined;
 
-  const GKEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
-  const results: Record<string, any> = {
+  // Use environment variable only — no hardcoded fallback
+  const GKEY = process.env.GOOGLE_MAPS_API_KEY;
+  if (!GKEY) {
+    return NextResponse.json({
+      success: false,
+      error: 'GOOGLE_MAPS_API_KEY is not configured in environment variables',
+    }, { status: 503 });
+  }
+
+  const results: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
     nodeVersion: process.version,
     env: {
-      GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY ? 'SET' : 'NOT SET (using hardcoded fallback)',
+      GOOGLE_MAPS_API_KEY: 'SET',
       DATABASE_URL: process.env.DATABASE_URL ? 'SET' : 'NOT SET',
       OPENAI_API_KEY: process.env.OPENAI_API_KEY ? 'SET' : 'NOT SET',
       runtime: typeof Buffer !== 'undefined' ? 'nodejs (Buffer available)' : 'edge (no Buffer)',
@@ -32,7 +47,7 @@ export async function GET(req: NextRequest) {
     input: { address, lat, lng },
   };
 
-  // ── Step 1: Geocode ──────────────────────────────────────────────────────
+  // ── Step 1: Geocode ──────────────────────────────────────────────────────────
   let finalLat = lat;
   let finalLng = lng;
   const geocodeStart = Date.now();
@@ -41,59 +56,66 @@ export async function GET(req: NextRequest) {
     try {
       const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GKEY}`;
       const geoRes = await fetch(geoUrl, { signal: AbortSignal.timeout(8000) });
-      const geoData = await geoRes.json();
+      const geoData = await geoRes.json() as Record<string, unknown>;
+      const geoResults = geoData.results as Array<Record<string, unknown>> | undefined;
+      const firstResult = geoResults?.[0] as Record<string, unknown> | undefined;
+      const geometry = firstResult?.geometry as Record<string, unknown> | undefined;
+      const location = geometry?.location as { lat?: number; lng?: number } | undefined;
       results.geocode = {
         status_code: geoRes.status,
         api_status: geoData.status,
         error_message: geoData.error_message || null,
-        results_count: geoData.results?.length ?? 0,
-        first_formatted_address: geoData.results?.[0]?.formatted_address || null,
-        lat: geoData.results?.[0]?.geometry?.location?.lat || null,
-        lng: geoData.results?.[0]?.geometry?.location?.lng || null,
+        results_count: geoResults?.length ?? 0,
+        first_formatted_address: (firstResult?.formatted_address as string) || null,
+        lat: location?.lat || null,
+        lng: location?.lng || null,
         duration_ms: Date.now() - geocodeStart,
       };
-      if (geoData.results?.[0]?.geometry?.location) {
-        finalLat = geoData.results[0].geometry.location.lat;
-        finalLng = geoData.results[0].geometry.location.lng;
+      if (location?.lat && location?.lng) {
+        finalLat = location.lat;
+        finalLng = location.lng;
       }
-    } catch(e: any) {
-      results.geocode = { error: e.message, duration_ms: Date.now() - geocodeStart };
+    } catch(e: unknown) {
+      results.geocode = { error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - geocodeStart };
     }
   } else {
     results.geocode = { skipped: 'lat/lng already provided', lat: finalLat, lng: finalLng };
   }
 
-  // ── Step 2: Google Solar API ─────────────────────────────────────────────
+  // ── Step 2: Google Solar API ─────────────────────────────────────────────────
   const solarStart = Date.now();
   if (finalLat && finalLng) {
     try {
       const solarUrl = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${finalLat}&location.longitude=${finalLng}&requiredQuality=LOW&key=${GKEY}`;
       const solarRes = await fetch(solarUrl, { signal: AbortSignal.timeout(10000) });
-      const solarData = await solarRes.json();
-      const segs = solarData.solarPotential?.roofSegmentStats || [];
+      const solarData = await solarRes.json() as Record<string, unknown>;
+      const solarPotential = solarData.solarPotential as Record<string, unknown> | undefined;
+      const segs = (solarPotential?.roofSegmentStats as unknown[]) || [];
+      const firstSeg = segs[0] as Record<string, unknown> | undefined;
+      const firstSegStats = firstSeg?.stats as Record<string, unknown> | undefined;
       results.solar_api = {
         status_code: solarRes.status,
-        error: solarData.error || null,
+        error: (solarData.error as string) || null,
         roof_segments_count: segs.length,
-        max_array_panels: solarData.solarPotential?.maxArrayPanelsCount || null,
-        max_array_area_m2: solarData.solarPotential?.maxArrayAreaMeters2 || null,
-        building_stats: solarData.solarPotential?.wholeRoofStats || null,
-        first_segment: segs[0] ? {
-          pitchDegrees: segs[0].pitchDegrees,
-          azimuthDegrees: segs[0].azimuthDegrees,
-          areaM2: segs[0].stats?.areaMeters2,
-          center: segs[0].center,
+        max_array_panels: solarPotential?.maxArrayPanelsCount || null,
+        max_array_area_m2: solarPotential?.maxArrayAreaMeters2 || null,
+        building_stats: solarPotential?.wholeRoofStats || null,
+        first_segment: firstSeg ? {
+          pitchDegrees: firstSeg.pitchDegrees,
+          azimuthDegrees: firstSeg.azimuthDegrees,
+          areaM2: firstSegStats?.areaMeters2,
+          center: firstSeg.center,
         } : null,
         duration_ms: Date.now() - solarStart,
       };
-    } catch(e: any) {
-      results.solar_api = { error: e.message, duration_ms: Date.now() - solarStart };
+    } catch(e: unknown) {
+      results.solar_api = { error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - solarStart };
     }
   } else {
     results.solar_api = { skipped: 'no lat/lng available after geocode' };
   }
 
-  // ── Step 3: Static Maps ──────────────────────────────────────────────────
+  // ── Step 3: Static Maps ──────────────────────────────────────────────────────
   const staticStart = Date.now();
   if (finalLat && finalLng) {
     try {
@@ -126,22 +148,27 @@ export async function GET(req: NextRequest) {
         error_body: errorBody ? errorBody.substring(0, 300) : null,
         duration_ms: Date.now() - staticStart,
       };
-    } catch(e: any) {
-      results.satellite_image = { error: e.message, duration_ms: Date.now() - staticStart };
+    } catch(e: unknown) {
+      results.satellite_image = { error: e instanceof Error ? e.message : String(e), duration_ms: Date.now() - staticStart };
     }
   } else {
     results.satellite_image = { skipped: 'no lat/lng available' };
   }
 
-  // ── Summary ───────────────────────────────────────────────────────────────
+  // ── Summary ──────────────────────────────────────────────────────────────────
+  const geocodeResult = results.geocode as Record<string, unknown> | undefined;
+  const solarResult = results.solar_api as Record<string, unknown> | undefined;
+  const satelliteResult = results.satellite_image as Record<string, unknown> | undefined;
   results.summary = {
-    geocode_ok: !!(results.geocode?.lat),
-    solar_segments: results.solar_api?.roof_segments_count ?? 0,
-    satellite_image_ok: !!(results.satellite_image?.is_image),
-    satellite_bytes: results.satellite_image?.image_size_bytes ?? 0,
-    base64_length: results.satellite_image?.base64_total_length ?? 0,
-    aerial_would_render: !!(results.geocode?.lat || (lat && lng)) && !!(results.satellite_image?.is_image),
-    total_ms: (results.geocode?.duration_ms || 0) + (results.solar_api?.duration_ms || 0) + (results.satellite_image?.duration_ms || 0),
+    geocode_ok: !!(geocodeResult?.lat),
+    solar_segments: (solarResult?.roof_segments_count as number) ?? 0,
+    satellite_image_ok: !!(satelliteResult?.is_image),
+    satellite_bytes: (satelliteResult?.image_size_bytes as number) ?? 0,
+    base64_length: (satelliteResult?.base64_total_length as number) ?? 0,
+    aerial_would_render: !!(geocodeResult?.lat || (lat && lng)) && !!(satelliteResult?.is_image),
+    total_ms: ((geocodeResult?.duration_ms as number) || 0)
+      + ((solarResult?.duration_ms as number) || 0)
+      + ((satelliteResult?.duration_ms as number) || 0),
   };
 
   return NextResponse.json(results, {

@@ -79,7 +79,7 @@ async function upsertFile(sql: any, params: {
 // ── POST /api/engineering/save-outputs ───────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const user = getUserFromRequest(req);
+    const user = await getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();

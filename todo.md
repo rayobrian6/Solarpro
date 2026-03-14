@@ -1,60 +1,36 @@
-# Second-Pass Full System Audit — v47.61
+# v47.62 — Security Fixes + Pipeline Verification
 
-## Status: COMPLETE ✅
+## Status: IN PROGRESS
 
-### Phase 1 — File Inventory ✓ COMPLETE
-- [x] Count all files in repo
-- [x] List all 330 TS/TSX source files
-- [x] Map all directories
+### Phase 1 — Verify Git State
+- [ ] Check branch + latest commit
+- [ ] Confirm 88ffdf4 exists locally
+- [ ] Check if remote is ahead/behind
+- [ ] Push if needed, confirm remote hash matches
 
-### Phase 2 — Core Library Files ✓ COMPLETE
-- [x] lib/auth.ts — JWT decode, cookie, user extraction
-- [x] lib/dev-auth.ts — VERCEL_ENV guard, dev session logic
-- [x] lib/db-neon.ts — DB connection, getDbReady, query helpers
-- [x] lib/db-ready.ts — cold-start retry logic
-- [x] lib/version.ts — updated to v47.61
-- [x] lib/engineering/syncPipeline.ts — pipeline orchestration
-- [x] lib/engineering/artifactBuilders.ts — 5 artifact builders
+### Phase 2 — Security Fixes
+- [ ] Fix 1: Remove hardcoded Google Maps API key from app/api/debug/aerial/route.ts
+- [ ] Fix 2: Add auth + ownership check to PUT /api/proposals/[id]
+- [ ] Fix 3: Add session auth to POST /api/equipment/save, remove body userId
+- [ ] Fix 4: Remove/restrict app/api/admin/reset-raymond/route.ts
 
-### Phase 3 — Auth System Recheck ✓ COMPLETE
-- [x] middleware.ts — PUBLIC_PATHS, cookie check, VERCEL_ENV comment fixed
-- [x] app/api/auth/login/route.ts
-- [x] app/api/auth/logout/route.ts
-- [x] app/api/auth/me/route.ts
-- [x] app/api/auth/register/route.ts
+### Phase 3 — Build Health
+- [ ] tsc --noEmit → 0 errors
+- [ ] npm run lint → 0 errors
+- [ ] npm run build → success
 
-### Phase 4 — Database Layer Recheck ✓ COMPLETE
-- [x] lib/db-neon.ts full review
-- [x] migrations/001–009 all SQL files reviewed
-- [x] upsertFile() ON CONFLICT target verified against schema constraint
+### Phase 4 — Pipeline Flow Verification
+- [ ] Read syncProjectPipeline in full
+- [ ] Trace: layout load → engineering rebuild → buildAllArtifacts → project_files write → UI
+- [ ] Identify any gaps in the pipeline flow
 
-### Phase 5 — Pipeline Architecture Review ✓ COMPLETE
-- [x] app/api/pipeline/run/route.ts
-- [x] app/api/engineering/save-outputs/route.ts
-- [x] lib/engineering/syncPipeline.ts deep review
-- [x] lib/engineering/artifactBuilders.ts deep review
+### Phase 5 — Pipeline Execution Logging
+- [ ] Add PIPELINE_STAGE_START / PIPELINE_STAGE_COMPLETE / PIPELINE_STAGE_ERROR logs
+- [ ] Include projectId in every log entry
+- [ ] Cover all major stages in syncPipeline.ts and pipeline/run/route.ts
 
-### Phase 6 — Artifact Generation Review ✓ COMPLETE
-- [x] All 5 builders produce real content (Engineering_Report, SLD, BOM, Permit_Packet, System_Estimate)
-- [x] stateCode TS fix (v47.58) confirmed
-
-### Phase 7 — All API Routes Review ✓ COMPLETE
-- [x] All 116 routes batch-checked for runtime declarations + auth guards
-- [x] Security Finding #1: PUT /api/proposals/[id] — no auth (documented)
-- [x] Security Finding #2: POST /api/equipment/save — no auth, body userId (documented)
-- [x] Security Finding #3: debug/aerial hardcoded API key, reset-raymond hardcoded token (documented)
-
-### Phase 8 — Frontend State Flow ✓ COMPLETE
-- [x] store/appStore.ts — Zustand store reviewed
-- [x] contexts/UserContext.tsx — user fetch retry logic reviewed
-- [x] hooks/ — no circular imports or stale closures
-
-### Phase 9 — Build Verification ✓ COMPLETE
-- [x] tsc --noEmit → 0 errors
-- [x] ESLint → 0 errors, 17 warnings (all intentional)
-- [x] next.config.js — no process.exit(), build-time warnings only
-
-### Phase 10 — Final Report ✓ COMPLETE
-- [x] lib/version.ts updated to v47.61
-- [x] SECOND_PASS_AUDIT_REPORT.md written (10 phases, 3 security findings, full checklist)
-- [x] Git commit staged and completed
+### Phase 6 — Final Report + Commit
+- [ ] Update lib/version.ts to v47.62
+- [ ] Commit all changes
+- [ ] Push to origin/master
+- [ ] Confirm remote hash matches local

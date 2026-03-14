@@ -176,7 +176,7 @@ async function upsertFile(sql: any, params: {
 
 export async function POST(req: NextRequest) {
   const startMs = Date.now();
-  const user = getUserFromRequest(req);
+  const user = await getUserFromRequest(req);
   if (!user) {
     return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
   }
@@ -199,16 +199,29 @@ export async function POST(req: NextRequest) {
   let clientFilesResult: PipelineRunResult['clientFiles'] = { artifactRegistryEntries: 0, visibleWorkspaceFiles: 0, fileNames: [] };
   let workflowResult:    PipelineRunResult['workflow']    = { designComplete: false, engineeringComplete: false, permitReady: false, filesReady: false };
 
+  function stageStart(name: string, n: number, meta?: Record<string, unknown>) {
+    console.log('[PIPELINE_STAGE_START]', { stage: name, step: n, projectId, ...meta });
+  }
+
   function step(n: number, name: string, status: PipelineStepResult['status'], msg: string, data?: Record<string, any>) {
     steps.push({ step: n, name, status, message: msg, data });
     if (status === 'error') errors.push(`[Step ${n}] ${name}: ${msg}`);
-    console.log(`[PIPELINE_STEP_${n}] ${name} status=${status} msg=${msg}`, data ?? '');
+    // Emit both granular step log and stage-level log for structured monitoring
+    console.log(`[PIPELINE_STEP_${n}]`, { name, status, message: msg, projectId, ...(data ?? {}) });
+    if (status === 'ok') {
+      console.log('[PIPELINE_STAGE_COMPLETE]', { stage: name, step: n, projectId, message: msg });
+    } else if (status === 'error') {
+      console.error('[PIPELINE_STAGE_ERROR]', { stage: name, step: n, projectId, message: msg });
+    } else if (status === 'warning') {
+      console.warn('[PIPELINE_STAGE_ERROR]', { stage: name, step: n, projectId, message: msg, severity: 'warning' });
+    }
   }
 
   try {
     const sql = await getDbReady();
 
     // ── Step 1: Load project data ──────────────────────────────────────────────
+    stageStart('load_project', 1);
     const project = await getProjectById(projectId, user.id);
     if (!project) {
       step(1, 'Load Project Data', 'error', `Project ${projectId} not found or access denied`);
@@ -217,6 +230,7 @@ export async function POST(req: NextRequest) {
     step(1, 'Load Project Data', 'ok', `Loaded project: ${project.name ?? projectId}`, { projectName: project.name, projectId });
 
     // ── Step 2: Load layout ────────────────────────────────────────────────────
+    stageStart('load_layout', 2);
     console.log('[LAYOUT_LOADED]', { projectId, step: 2 });
     const layout = await getLayoutByProject(projectId, user.id);
     if (!layout || !layout.panels || layout.panels.length === 0) {
@@ -254,6 +268,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Step 4: Rebuild engineering model ─────────────────────────────────────
+    stageStart('engineering_sync', 4, { panelCount });
     console.log('[ENGINEERING_REBUILD_STARTED]', { projectId, panelCount, step: 4 });
     const snapshot    = buildDesignSnapshot(project, layout);
     const isStale     = await isEngineeringReportStale(projectId, snapshot.designVersionId);
@@ -307,6 +322,7 @@ export async function POST(req: NextRequest) {
     // ── Step 6-8: Generate and WRITE all 5 artifact files to project_files ─────
     // v47.58 FIX (BP-3): Previously steps 6-9 only checked boolean flags and
     // wrote nothing. Now we call buildAllArtifacts() and upsert every file.
+    stageStart('artifact_generation', 6);
     console.log('[ARTIFACT_GENERATION_STARTED]', { projectId, step: '6-8' });
 
     // Resolve client name and slug from project data
@@ -422,6 +438,7 @@ export async function POST(req: NextRequest) {
     );
 
     // ── Step 10: Read artifact registry (verify what is now in DB) ────────────
+    stageStart('registry_read', 10);
     console.log('[REGISTRY_READ_STARTED]', { projectId, step: 10 });
     let registryFiles: any[] = [];
     try {

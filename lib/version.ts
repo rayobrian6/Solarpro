@@ -1,9 +1,17 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.61';
+export const BUILD_VERSION     = 'v47.62';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.61: Second-pass full codebase re-audit. TypeScript 0 errors, ESLint 0 errors (main code). All 330 TS/TSX source files systematically inspected. Auth, DB, pipeline, artifacts, API routes, frontend state all verified. Security findings documented. Build clean.';
+export const BUILD_DESCRIPTION = 'v47.62: Security fixes (proposals PUT auth, equipment/save auth, aerial API key, reset-raymond disabled). Pipeline await fix. Structured PIPELINE_STAGE_START/COMPLETE/ERROR logs in syncPipeline + pipeline/run. TypeScript 0 errors, ESLint 0 errors.';
 export const BUILD_FEATURES    = [
+  // v47.62 -- Security fixes + pipeline logging
+  'SECURITY: PUT /api/proposals/[id] added auth check + ownership JOIN',
+  'SECURITY: POST /api/equipment/save added session auth, removed body userId',
+  'SECURITY: GET /api/debug/aerial removed hardcoded API key, added auth guard',
+  'SECURITY: GET /api/admin/reset-raymond permanently disabled (410 Gone)',
+  'PIPELINE: PIPELINE_STAGE_START/COMPLETE/ERROR logs in syncPipeline.ts and pipeline/run',
+  // v47.61 -- Second-pass audit
+  'AUDIT: v47.61 second-pass full codebase re-audit',
   // v47.60 -- Full system audit
   'AUDIT: Phase 1 (Static Analysis) — tsc --noEmit = 0 errors, ESLint 0 errors after .eslintrc.json setup and stray eslint-disable comment cleanup',
   'AUDIT: Phase 2 (Dependency Audit) — jspdf 2.5.2→4.2.0 (critical ReDoS CVE-2025-68428 fixed, browser-only usage, API compatible). Next.js 14.2.3→14.2.35 (9 vulns fixed). minimatch ReDoS fixed via npm audit fix. Remaining 4 HIGH (next DoS needs v16, glob in eslint devDep) documented as accepted risk.',

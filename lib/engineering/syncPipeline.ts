@@ -43,12 +43,26 @@ export interface PipelineMismatch {
   severity: 'ERROR' | 'WARNING';
 }
 
+// ── Structured log helpers ────────────────────────────────────────────────────
+
+function stageStart(stage: string, projectId: string, meta?: Record<string, unknown>) {
+  console.log('[PIPELINE_STAGE_START]', { stage, projectId, ...meta });
+}
+
+function stageComplete(stage: string, projectId: string, meta?: Record<string, unknown>) {
+  console.log('[PIPELINE_STAGE_COMPLETE]', { stage, projectId, ...meta });
+}
+
+function stageError(stage: string, projectId: string, error: string, meta?: Record<string, unknown>) {
+  console.error('[PIPELINE_STAGE_ERROR]', { stage, projectId, error, ...meta });
+}
+
 /**
  * Sync the full project pipeline:
  * 1. Read latest layout from DB
  * 2. Build/rebuild engineering model if stale
  * 3. Return canonical EngineeredProject
- * 
+ *
  * This is the authoritative source of truth for:
  * - panel count
  * - system size
@@ -61,22 +75,38 @@ export async function syncProjectPipeline(
 ): Promise<PipelineResult> {
   const errors: string[] = [];
 
-  // Step 1: Load project
+  // ── Stage 1: Load project ─────────────────────────────────────────────────
+  stageStart('load_project', projectId);
   const project = await getProjectById(projectId, userId);
   if (!project) {
-    throw new Error(`[PIPELINE] Project not found: ${projectId}`);
+    const err = `Project not found: ${projectId}`;
+    stageError('load_project', projectId, err);
+    throw new Error(`[PIPELINE] ${err}`);
   }
+  stageComplete('load_project', projectId, { projectName: project.name });
 
-  // Step 2: Load layout — this is the canonical source
+  // ── Stage 2: Load layout (canonical source) ───────────────────────────────
+  stageStart('load_layout', projectId);
   const layout = await getLayoutByProject(projectId, userId);
   if (!layout || !layout.panels || layout.panels.length === 0) {
-    throw new Error(`[PIPELINE] No layout found for project ${projectId}. Design Studio must be used first.`);
+    const err = `No layout found for project ${projectId}. Design Studio must be used first.`;
+    stageError('load_layout', projectId, err);
+    throw new Error(`[PIPELINE] ${err}`);
   }
 
   const layoutPanelCount = layout.panels.length;
   const layoutRoofPlaneCount = layout.roofPlanes?.length ?? 0;
   const layoutSystemSizeKw = layout.systemSizeKw || parseFloat((layoutPanelCount * 0.4).toFixed(2));
 
+  stageComplete('load_layout', projectId, {
+    panelCount: layoutPanelCount,
+    roofPlaneCount: layoutRoofPlaneCount,
+    systemSizeKw: layoutSystemSizeKw,
+    layoutId: layout.id,
+    updatedAt: layout.updatedAt,
+  });
+
+  // Keep legacy log code for backward compatibility with existing log searches
   console.log('[LAYOUT_LOADED]', {
     projectId,
     panelCount: layoutPanelCount,
@@ -86,19 +116,33 @@ export async function syncProjectPipeline(
     updatedAt: layout.updatedAt,
   });
 
-  // Step 3: Build design snapshot from layout
+  // ── Stage 3: Build design snapshot ───────────────────────────────────────
+  stageStart('build_snapshot', projectId, { panelCount: layoutPanelCount });
   const snapshot = buildDesignSnapshot(project, layout);
+  stageComplete('build_snapshot', projectId, { designVersionId: snapshot.designVersionId });
 
-  // Step 4: Check if engineering report is stale
+  // ── Stage 4: Check staleness + rebuild if needed ──────────────────────────
+  stageStart('engineering_sync', projectId, {
+    designVersionId: snapshot.designVersionId,
+    layoutPanelCount,
+  });
+
   const isStale = await isEngineeringReportStale(projectId, snapshot.designVersionId);
   let existingReport = await getEngineeringReport(projectId);
-
   let wasRebuilt = false;
 
   if (!existingReport || isStale) {
+    const rebuildReason = !existingReport ? 'no_report' : 'stale';
+
+    // Keep legacy log codes for backward compatibility
     console.log('[ENGINEERING_REBUILD_STARTED]', {
       projectId,
-      reason: !existingReport ? 'no_report' : 'stale',
+      reason: rebuildReason,
+      layoutPanelCount,
+      designVersionId: snapshot.designVersionId,
+    });
+    stageStart('engineering_rebuild', projectId, {
+      reason: rebuildReason,
       layoutPanelCount,
       designVersionId: snapshot.designVersionId,
     });
@@ -115,28 +159,62 @@ export async function syncProjectPipeline(
       panelModel: existingReport.systemSummary.panelModel,
       inverterModel: existingReport.systemSummary.inverterModel,
     });
+    stageComplete('engineering_rebuild', projectId, {
+      panelCount: existingReport.systemSummary.panelCount,
+      systemSizeKw: existingReport.systemSummary.systemSizeKw,
+      panelModel: existingReport.systemSummary.panelModel,
+      inverterModel: existingReport.systemSummary.inverterModel,
+    });
+  } else {
+    stageComplete('engineering_sync', projectId, {
+      status: 'current',
+      panelCount: existingReport.systemSummary.panelCount,
+      systemSizeKw: existingReport.systemSummary.systemSizeKw,
+    });
   }
 
   const report = existingReport!;
 
-  // Step 5: Validate — layout must match engineering model
+  // ── Stage 5: Validate pipeline sync ──────────────────────────────────────
+  stageStart('validate_sync', projectId, {
+    layoutPanelCount,
+    engineeringPanelCount: report.systemSummary.panelCount,
+  });
+
   const mismatches = validatePipelineSync(layoutPanelCount, report);
   for (const m of mismatches) {
     const msg = `[PIPELINE_MISMATCH] ${m.field}: layout=${m.layoutValue} engineering=${m.engineeringValue}`;
     if (m.severity === 'ERROR') {
       errors.push(msg);
+      stageError('validate_sync', projectId, msg, { field: m.field, severity: m.severity });
       console.error(msg);
     } else {
       console.warn(msg);
     }
   }
 
-  // Step 6: If mismatch on panel count, force rebuild
+  if (mismatches.length === 0) {
+    stageComplete('validate_sync', projectId, { mismatches: 0 });
+  }
+
+  // ── Stage 6: Force rebuild on panel count mismatch ────────────────────────
   if (mismatches.some(m => m.field === 'panelCount' && m.severity === 'ERROR')) {
+    stageStart('engineering_force_rebuild', projectId, {
+      reason: 'panel_count_mismatch',
+      layoutPanelCount,
+      engineeringPanelCount: report.systemSummary.panelCount,
+    });
     console.error('[PIPELINE] Panel count mismatch — forcing engineering rebuild');
+
     const reportId2 = generateReportId();
     const rebuilt = generateEngineeringReport(snapshot, reportId2);
     await upsertEngineeringReport(rebuilt, projectId);
+
+    stageComplete('engineering_force_rebuild', projectId, {
+      panelCount: layoutPanelCount,
+      systemSizeKw: layoutSystemSizeKw,
+    });
+
     return {
       layoutPanelCount,
       layoutRoofPlaneCount,
