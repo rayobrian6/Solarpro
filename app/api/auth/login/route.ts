@@ -1,63 +1,32 @@
-export const dynamic = 'force-dynamic';
+export const dynamic    = 'force-dynamic';
 export const revalidate = 0;
-export const runtime = 'nodejs';
+export const runtime    = 'nodejs';
+// Explicit maxDuration prevents Vercel from killing this function during
+// DB cold-start retries. Auth routes need up to ~9s for retries + query.
+export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  getDbReady, verifyPassword, signToken, makeSessionCookie, SessionUser
+  getDbReady, verifyPassword, signToken, COOKIE_NAME, COOKIE_MAX_AGE, SessionUser
 } from '@/lib/auth';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
-// v47.9: Explicit maxDuration prevents Vercel from killing this function during
-// DB cold-start retries. Auth routes need up to ~9s for 5 probe retries + query.
-// Default Vercel Hobby timeout is 10s — far too short. 30s is safe for all plans.
-export const maxDuration = 30;
-
 export async function POST(req: NextRequest) {
-  // -- Startup env guard (logged once per cold start) --------------------------
-  const hasDatabaseUrl = !!process.env.DATABASE_URL;
-  const hasJwtSecret   = !!process.env.JWT_SECRET && process.env.JWT_SECRET.length > 10;
-  console.log(`[DATABASE_URL_PRESENT] present=${hasDatabaseUrl} length=${process.env.DATABASE_URL?.length ?? 0}`);
-  console.log(`[JWT_SECRET_PRESENT] present=${hasJwtSecret} length=${process.env.JWT_SECRET?.length ?? 0}`);
-
-  console.log('[AUTH_LOGIN_REQUEST] POST /api/auth/login received');
-
-  // -- Cookie check ------------------------------------------------------------
-  const existingCookie = req.cookies.get('solarpro_session');
-  if (existingCookie) {
-    console.log('[AUTH_COOKIE_PRESENT] Existing session cookie found on login request (will be replaced)');
-  } else {
-    console.log('[AUTH_COOKIE_MISSING] No existing session cookie on login request (expected for fresh login)');
-  }
-
   try {
     const body = await req.json();
     const { email, password } = body;
 
     if (!email?.trim() || !password) {
-      console.warn('[AUTH_LOGIN_FAILURE] Missing email or password in request body');
       return NextResponse.json(
         { success: false, error: 'Email and password are required.' },
         { status: 400 }
       );
     }
 
-    console.log(`[AUTH_LOGIN_REQUEST] Attempting login for: ${email.toLowerCase().trim()}`);
-
-    // -- DB with cold-start retry -----------------------------------------------
-    // v47.9: getDbReady() uses module-level singleton + warm-cache flag.
-    // On warm instances: returns cached executor instantly (~0ms).
-    // On cold start: retries SELECT 1 probe up to 5x with 300ms/600ms/1200ms/2400ms/4800ms backoff.
-    // Total budget ~9s, well under maxDuration=30.
-    console.log('[AUTH_SESSION_CHECK] Acquiring DB connection for login');
+    // ── DB with cold-start retry ──────────────────────────────────────────
     const sql = await getDbReady();
 
-    // -- Fetch user -------------------------------------------------------------
-    // Role is fetched but NOT put in JWT.
-    // NOTE: tos_accepted_at / tos_version intentionally NOT selected here.
-    // They are only needed by /api/tos-accept (called from /terms page).
-    // Fetching them here required information_schema guards that added 3-5s
-    // per login on Neon serverless — causing the DB_STARTING timeout loop.
+    // ── Fetch user ────────────────────────────────────────────────────────
     const rows = await sql`
       SELECT id, name, email, password_hash, company, phone, role
       FROM users
@@ -66,7 +35,6 @@ export async function POST(req: NextRequest) {
     `;
 
     if (rows.length === 0) {
-      console.warn(`[AUTH_LOGIN_FAILURE] No user found for email: ${email.toLowerCase().trim()}`);
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }
@@ -77,14 +45,13 @@ export async function POST(req: NextRequest) {
 
     const valid = await verifyPassword(password, user.password_hash);
     if (!valid) {
-      console.warn(`[AUTH_LOGIN_FAILURE] Password verification failed for userId=${user.id}`);
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }
       );
     }
 
-    // JWT contains ONLY identity -- role is NOT included
+    // JWT contains ONLY identity — role is NOT included
     const sessionUser: SessionUser = {
       id:      user.id,
       name:    user.name,
@@ -93,67 +60,52 @@ export async function POST(req: NextRequest) {
     };
 
     const token = signToken(sessionUser);
-    const cookieHeader = makeSessionCookie(token);
 
-    console.log(`[AUTH_LOGIN_SUCCESS] Login successful for userId=${user.id} email=${user.email}`);
-
-    // Return role in response body for client UI use, but NOT in JWT.
-    // ToS status is checked separately via GET /api/tos-accept (called from /terms page only).
-    return NextResponse.json(
-      {
-        success: true,
-        data: {
-          user: {
-            ...sessionUser,
-            role: user.role || 'user',
-          },
-        },
-      },
-      {
-        status: 200,
-        headers: { 'Set-Cookie': cookieHeader },
-      }
+    // ── FIX: Use response.cookies.set() — the Next.js 14 App Router
+    // canonical API. Using headers: { 'Set-Cookie': string } is unreliable
+    // on Vercel because the edge proxy merges response headers AFTER the
+    // function returns, and the raw Set-Cookie header can be silently
+    // dropped or corrupted during that merge. response.cookies.set() goes
+    // through the Next.js ResponseCookies API which is handled correctly
+    // by the runtime before the proxy layer touches the response.
+    const response = NextResponse.json(
+      { success: true, data: { user: { ...sessionUser, role: user.role || 'user' } } },
+      { status: 200 }
     );
+
+    response.cookies.set(COOKIE_NAME, token, {
+      httpOnly: true,
+      secure:   process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path:     '/',
+      maxAge:   COOKIE_MAX_AGE, // 30 days in seconds
+    });
+
+    console.log(`[AUTH_LOGIN_SUCCESS] user=${sessionUser.email} cookie=${COOKIE_NAME} set via response.cookies.set()`);
+
+    return response;
 
   } catch (error: any) {
     const msg = error?.message || String(error);
 
-    // -- Config error: DATABASE_URL genuinely missing ---------------------------
-    // ONLY DbConfigError (thrown by getDatabaseUrl()) is a true config error.
-    // Do NOT check msg.includes('DATABASE_URL') -- that can match Neon connection
-    // string errors during cold start and incorrectly show "Database not configured."
     if (error instanceof DbConfigError) {
-      console.error('[AUTH_LOGIN_FAILURE] [AUTH_DB_CONFIG_ERROR] /api/auth/login: DATABASE_URL not configured:', msg);
-      console.error(
-        '[AUTH_DB_CONFIG_ERROR] FIX: Go to Vercel Dashboard → Project → Settings → Environment Variables\n' +
-        '  → Add: DATABASE_URL = <your Neon PostgreSQL connection string>\n' +
-        '  → Add: JWT_SECRET   = <any random 32+ character string>\n' +
-        '  → Then click Redeploy (env vars are NOT hot-reloaded)\n'
-      );
+      console.error('[AUTH_DB_CONFIG_ERROR] /api/auth/login: DATABASE_URL not configured:', msg);
       return NextResponse.json(
         {
           success: false,
-          error: 'Database not configured. Check Vercel environment variables.',
+          error: 'Server configuration error. Please contact your administrator.',
           code: 'DB_CONFIG_ERROR',
-          hint: 'Add DATABASE_URL and JWT_SECRET to Vercel → Project → Settings → Environment Variables, then redeploy.',
         },
         { status: 503 }
       );
     }
 
-    // -- All other errors: cold start / network / unknown ----------------------
-    // getDbReady() already retried 5x. Any remaining error is either a transient
-    // Neon cold-start error or an unknown error. In both cases return DB_STARTING
-    // so the login page retries instead of showing an error banner.
-    //
-    // SAFE DEFAULT: returning DB_STARTING for unknown errors is always better
-    // than showing "Login failed" or "Database not configured" for a cold start.
     const classified = isTransientDbError(error) ? 'transient' : 'unknown-defaulting-to-transient';
-    console.warn(`[AUTH_LOGIN_FAILURE] [AUTH_DB_STARTING] /api/auth/login: DB error [${classified}]:`, msg);
+    console.warn(`[AUTH_DB_STARTING] /api/auth/login: DB error [${classified}]:`, msg);
     return NextResponse.json(
       {
         success: false,
-        error: 'Server is starting up -- please wait a moment and try again.',
+        error: 'Server is starting up — please wait a moment and try again.',
         code: 'DB_STARTING',
         retryAfterMs: 3000,
       },

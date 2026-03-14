@@ -1,8 +1,8 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.52';
+export const BUILD_VERSION     = 'v47.53';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
-export const BUILD_DATE        = '2026-03-14';
-export const BUILD_DESCRIPTION = 'v47.52: Pipeline orchestrator — syncProjectPipeline, sync-pipeline API, full diagnostic debug page';
+export const BUILD_DATE        = '2026-06-09';
+export const BUILD_DESCRIPTION = 'v47.53: Auth fix — response.cookies.set() replaces raw Set-Cookie header, removed vercel.json /api cache header override, removed router.refresh() race condition';
 export const BUILD_FEATURES    = [
   // v47.51 -- Layout → Engineering pipeline fix
   'ENGINEERING: Layout panel count OVERRIDES seed.panel_count — layout is ground truth',

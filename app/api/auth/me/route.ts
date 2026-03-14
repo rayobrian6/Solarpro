@@ -3,11 +3,11 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady } from '@/lib/db-neon';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
-// v47.9: Explicit maxDuration prevents Vercel from killing this function during
-// DB cold-start retries. /api/auth/me is called on mount/focus/tab-switch.
-// Without maxDuration, Vercel Hobby (10s default) can kill during retry loop.
+export const dynamic    = 'force-dynamic';
+export const runtime    = 'nodejs';
+// Explicit maxDuration prevents Vercel from killing this function during
+// DB cold-start retries. Without this, Vercel Hobby (10s default) can kill
+// the function during the retry loop.
 export const maxDuration = 30;
 
 /**
@@ -18,56 +18,48 @@ export const maxDuration = 30;
  * Role is NEVER read from the JWT payload.
  *
  * ERROR CODE CONTRACT (used by UserContext and login page):
- *   401                      -- not authenticated (no cookie / expired JWT)
- *   503 + DB_STARTING        -- DB temporarily unreachable (cold start), client MUST retry
- *   503 + DB_CONFIG_ERROR    -- DATABASE_URL missing (genuine misconfiguration)
- *   500 + DB_QUERY_ERROR     -- query ran but returned unexpected results
+ *   401                      — not authenticated (no cookie / expired JWT)
+ *   503 + DB_STARTING        — DB temporarily unreachable (cold start), client MUST retry
+ *   503 + DB_CONFIG_ERROR    — DATABASE_URL missing (genuine misconfiguration)
+ *   500 + DB_QUERY_ERROR     — query ran but returned unexpected results
  *
  * CRITICAL: Only 401 means "log the user out". All other errors mean "wait and retry."
  *
  * LOG CODES (searchable in Vercel function logs):
- *   [AUTH_COOKIE_PRESENT]   -- session cookie found, JWT verification proceeding
- *   [AUTH_COOKIE_MISSING]   -- no session cookie, returning 401
- *   [AUTH_SESSION_CHECK]    -- JWT verified, proceeding to DB fetch
- *   [DATABASE_URL_PRESENT]  -- DATABASE_URL presence logged at cold start
- *   [JWT_SECRET_PRESENT]    -- JWT_SECRET presence logged at cold start
- *   [AUTH_DB_STARTING]      -- transient connection failure
- *   [AUTH_DB_CONFIG_ERROR]  -- DATABASE_URL missing
- *   [AUTH_DB_QUERY_ERROR]   -- unexpected query error
+ *   [AUTH_DB_STARTING]     — transient connection failure
+ *   [AUTH_DB_CONFIG_ERROR] — DATABASE_URL missing
+ *   [AUTH_DB_QUERY_ERROR]  — unexpected query error
  */
 export async function GET(req: NextRequest) {
-  // -- Startup env guard (logged once per cold start) --------------------------
-  const hasDatabaseUrl = !!process.env.DATABASE_URL;
-  const hasJwtSecret   = !!process.env.JWT_SECRET && process.env.JWT_SECRET.length > 10;
-  console.log(`[DATABASE_URL_PRESENT] present=${hasDatabaseUrl} length=${process.env.DATABASE_URL?.length ?? 0}`);
-  console.log(`[JWT_SECRET_PRESENT] present=${hasJwtSecret} length=${process.env.JWT_SECRET?.length ?? 0}`);
+  // ── Step 1: Validate JWT ───────────────────────────────────────────────────
+  // No DB needed. If no valid cookie → 401 (definitive "not authenticated").
 
-  console.log('[AUTH_SESSION_CHECK] GET /api/auth/me received');
-
-  // -- Step 1: Cookie check + JWT validation -----------------------------------
-  // No DB needed. If no valid cookie -> 401 (definitive "not authenticated").
-  const sessionCookie = req.cookies.get('solarpro_session');
-  if (sessionCookie) {
-    console.log('[AUTH_COOKIE_PRESENT] Session cookie found, verifying JWT');
-  } else {
-    console.log('[AUTH_COOKIE_MISSING] No session cookie present, returning 401');
-  }
+  // Diagnostic logging — visible in Vercel function logs
+  const cookieHeader = req.headers.get('cookie') || '';
+  const hasCookie = cookieHeader.includes('solarpro_session');
+  const cookieCount = req.cookies.size;
+  console.log(`[REQUEST_COOKIES] hasSolarproCookie=${hasCookie} totalCookies=${cookieCount} cookieHeader=${cookieHeader.substring(0, 120)}`);
 
   const session = getUserFromRequest(req);
-  if (!session?.id) {
+  const sessionValid = !!(session?.id);
+  console.log(`[SESSION_VALIDATION] valid=${sessionValid} userId=${session?.id ?? 'none'} email=${session?.email ?? 'none'}`);
+
+  if (!sessionValid) {
+    console.log(`[AUTH_COOKIE_MISSING] No valid solarpro_session cookie — returning 401`);
     return NextResponse.json(
       { success: false, error: 'Not authenticated' },
       { status: 401 }
     );
   }
 
-  const userId = session.id;
-  console.log(`[AUTH_SESSION_CHECK] JWT verified, userId=${userId}, fetching from DB`);
+  console.log(`[AUTH_COOKIE_PRESENT] userId=${session.id} email=${session.email}`);
 
-  // -- Step 2: Get DB with cold-start retry ------------------------------------
-  // getDbReady() fires a SELECT 1 probe with up to 5 retries (300ms/600ms/1200ms/2400ms/4800ms backoff).
-  // On genuine config error (missing DATABASE_URL) -> throws DbConfigError.
-  // On transient error (cold start / network) -> throws last error after retries.
+  const userId = session.id;
+
+  // ── Step 2: Get DB with cold-start retry ───────────────────────────────────
+  // getDbReady() fires a SELECT 1 probe with up to 3 retries (1s/2s/4s backoff).
+  // On genuine config error (missing DATABASE_URL) → throws DbConfigError.
+  // On transient error (cold start / network) → throws last error after retries.
   let sql: Awaited<ReturnType<typeof getDbReady>>;
   try {
     sql = await getDbReady();
@@ -75,7 +67,7 @@ export async function GET(req: NextRequest) {
     return handleDbError(err, 'getDbReady');
   }
 
-  // -- Step 3: Fetch user data -------------------------------------------------
+  // ── Step 3: Fetch user data ────────────────────────────────────────────────
   // Try full column set first. If new columns don't exist (migration pending),
   // fall back to base columns. Both queries wrapped individually so a connection
   // error in either path is correctly classified and returned as DB_STARTING.
@@ -105,7 +97,7 @@ export async function GET(req: NextRequest) {
     );
 
     if (isMissingColumn) {
-      // Migration not run yet -- try base columns
+      // Migration not run yet — try base columns
       console.warn('[AUTH_DB_QUERY_ERROR] Full query failed (missing columns), trying fallback:', fullMsg);
       useFallback = true;
       try {
@@ -116,18 +108,18 @@ export async function GET(req: NextRequest) {
           FROM users WHERE id = ${userId} LIMIT 1
         `;
       } catch (fallbackErr: unknown) {
-        // Fallback query also failed -- could be connection error during cold start
+        // Fallback query also failed — could be connection error during cold start
         return handleDbError(fallbackErr, 'fallback-query');
       }
     } else {
-      // Not a missing-column error -- could be connection error, classify properly
+      // Not a missing-column error — could be connection error, classify properly
       return handleDbError(fullErr, 'full-query');
     }
   }
 
-  // -- Step 4: User not found --------------------------------------------------
+  // ── Step 4: User not found ────────────────────────────────────────────────
   if (rows.length === 0) {
-    // The user ID from JWT has no matching row -- deleted account or stale token
+    // The user ID from JWT has no matching row — deleted account or stale token
     return NextResponse.json(
       { success: false, error: 'User not found' },
       { status: 404 }
@@ -136,12 +128,12 @@ export async function GET(req: NextRequest) {
 
   const db = rows[0];
 
-  // -- Step 5: Compute hasAccess -----------------------------------------------
+  // ── Step 5: Compute hasAccess ─────────────────────────────────────────────
   const now = new Date();
   const trialEnd = !useFallback && db.trial_ends_at ? new Date(db.trial_ends_at) : null;
   const role = (db.role || '').toLowerCase();
   const hasAccess = useFallback
-    ? true  // migration not run yet -- allow access so users aren't locked out
+    ? true  // migration not run yet — allow access so users aren't locked out
     : (role === 'super_admin' ||
        role === 'admin' ||
        db.is_free_pass === true ||
@@ -149,7 +141,7 @@ export async function GET(req: NextRequest) {
        db.subscription_status === 'free_pass' ||
        (db.subscription_status === 'trialing' && trialEnd && trialEnd > now));
 
-  // -- Step 6: Return normalized user object -----------------------------------
+  // ── Step 6: Return normalized user object ─────────────────────────────────
   return NextResponse.json({
     success: true,
     data: {
@@ -162,10 +154,10 @@ export async function GET(req: NextRequest) {
       emailVerified: db.email_verified || false,
       createdAt:     db.created_at || null,
 
-      // Role -- ALWAYS from DB, never from JWT
+      // Role — ALWAYS from DB, never from JWT
       role: db.role || 'user',
 
-      // Subscription -- camelCase (frontend canonical)
+      // Subscription — camelCase (frontend canonical)
       plan:               db.plan               || 'starter',
       subscriptionStatus: db.subscription_status || 'trialing',
       trialStartsAt:      db.trial_starts_at    || null,
@@ -174,7 +166,7 @@ export async function GET(req: NextRequest) {
       freePassNote:       db.free_pass_note      || null,
       hasAccess,
 
-      // Subscription -- snake_case (kept for any legacy consumers)
+      // Subscription — snake_case (kept for any legacy consumers)
       subscription_status: db.subscription_status || 'trialing',
       is_free_pass:        db.is_free_pass        === true,
       trial_ends_at:       db.trial_ends_at       || null,
@@ -201,21 +193,21 @@ export async function GET(req: NextRequest) {
  * Centralised DB error handler for /api/auth/me.
  *
  * CRITICAL CONTRACT:
- *   - DbConfigError        -> 503 DB_CONFIG_ERROR (genuine misconfiguration)
- *   - isTransientDbError() -> 503 DB_STARTING     (cold start / network)
- *   - Everything else      -> 503 DB_STARTING     (SAFE DEFAULT -- never 500)
+ *   - DbConfigError        → 503 DB_CONFIG_ERROR (genuine misconfiguration)
+ *   - isTransientDbError() → 503 DB_STARTING     (cold start / network)
+ *   - Everything else      → 503 DB_STARTING     (SAFE DEFAULT — never 500)
  *
  * We default to DB_STARTING (not 500) because:
  *   1. Neon can throw unusual error messages during cold start that don't
  *      match any known pattern. Treating them as transient is always safer
  *      than showing "Database not configured" to a logged-in user.
- *   2. UserContext retries on DB_STARTING -- it does NOT retry on 500.
+ *   2. UserContext retries on DB_STARTING — it does NOT retry on 500.
  *   3. The only true fatal condition is missing DATABASE_URL (DbConfigError).
  */
 function handleDbError(err: unknown, stage: string): NextResponse {
   const msg = err instanceof Error ? err.message : String(err);
 
-  // Genuine misconfiguration -- DATABASE_URL missing
+  // Genuine misconfiguration — DATABASE_URL missing
   if (err instanceof DbConfigError) {
     console.error(`[AUTH_DB_CONFIG_ERROR] [stage=${stage}] DATABASE_URL not configured: ${msg}`);
     return NextResponse.json(
@@ -228,14 +220,14 @@ function handleDbError(err: unknown, stage: string): NextResponse {
     );
   }
 
-  // Transient or unknown error -- always return DB_STARTING so client retries
-  // isTransientDbError() check is informational only -- we return DB_STARTING regardless
+  // Transient or unknown error — always return DB_STARTING so client retries
+  // isTransientDbError() check is informational only — we return DB_STARTING regardless
   const classified = isTransientDbError(err) ? 'transient' : 'unknown-defaulting-to-transient';
   console.warn(`[AUTH_DB_STARTING] [stage=${stage}] [classified=${classified}] DB error: ${msg}`);
   return NextResponse.json(
     {
       success: false,
-      error: 'Server is starting up -- please wait a moment.',
+      error: 'Server is starting up — please wait a moment.',
       code: 'DB_STARTING',
       retryAfterMs: 2000,
     },

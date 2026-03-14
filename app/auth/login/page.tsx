@@ -122,8 +122,15 @@ function LoginForm() {
     if (result === 'success') {
       setStarting(false);
       setLoading(false);
+      // FIX: Do NOT call router.refresh() here. router.refresh() triggers
+      // a new /api/auth/me fetch immediately — before the browser has
+      // finished processing the Set-Cookie header from the login response.
+      // The cookie isn't in the jar yet, so /api/auth/me returns 401 and
+      // UserContext logs the user out. router.push() is sufficient: the
+      // full page navigation to /dashboard will trigger a fresh /api/auth/me
+      // call via UserContext.useEffect on mount, by which time the cookie
+      // is guaranteed to be set.
       router.push(redirect);
-      router.refresh();
       return;
     }
 
@@ -245,21 +252,13 @@ function LoginForm() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
-              <label className="flex items-center gap-3 cursor-pointer group">
-                <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${form.remember ? 'bg-amber-500 border-amber-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
-                  {form.remember && <CheckCircle size={12} className="text-slate-900" />}
-                </div>
-                <input name="remember" type="checkbox" checked={form.remember} onChange={handleChange} className="sr-only" />
-                <span className="text-sm text-slate-400">Remember me for 30 days</span>
-              </label>
-              <Link
-                href="/auth/forgot-password"
-                className="text-xs text-amber-400 hover:text-amber-300 transition-colors font-medium"
-              >
-                Forgot Password?
-              </Link>
-            </div>
+            <label className="flex items-center gap-3 cursor-pointer group">
+              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all ${form.remember ? 'bg-amber-500 border-amber-500' : 'border-slate-600 group-hover:border-slate-500'}`}>
+                {form.remember && <CheckCircle size={12} className="text-slate-900" />}
+              </div>
+              <input name="remember" type="checkbox" checked={form.remember} onChange={handleChange} className="sr-only" />
+              <span className="text-sm text-slate-400">Remember me for 30 days</span>
+            </label>
 
             {/* ── DB cold-start banner ──────────────────────────────────── */}
             {starting && (
