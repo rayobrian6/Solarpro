@@ -52,7 +52,10 @@ const WORKFLOW_STEPS: WorkflowStep[] = [
     label: 'Design Complete',
     shortLabel: 'Design',
     icon: <Map size={13} />,
-    check: p => !!p.layout,
+    // FIX v47.54: check actual panel count from layout, not just truthy layout object.
+    // p.layout exists if a layout row exists in DB. p.layout.panels.length > 0 means
+    // panels were actually placed in Design Studio.
+    check: p => !!(p.layout && (p.layout as any).panels && (p.layout as any).panels.length > 0),
     tab: 'design',
   },
   {
@@ -60,7 +63,13 @@ const WORKFLOW_STEPS: WorkflowStep[] = [
     label: 'Engineering Done',
     shortLabel: 'Eng.',
     icon: <Wrench size={13} />,
-    check: p => p.status === 'proposal' || p.status === 'approved' || p.status === 'installed',
+    // FIX v47.54: engineering complete when layout has panels (engineering model is
+    // auto-generated on layout save via syncProjectPipeline). Do NOT depend on
+    // p.status === 'proposal' which is a manual field never set automatically.
+    // Also accept legacy status-based check for backwards compatibility.
+    check: p =>
+      !!(p.layout && (p.layout as any).panels && (p.layout as any).panels.length > 0) ||
+      p.status === 'proposal' || p.status === 'approved' || p.status === 'installed',
     tab: 'engineering',
   },
   {

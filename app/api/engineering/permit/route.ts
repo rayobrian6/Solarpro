@@ -2534,9 +2534,13 @@ function pageSingleLineDiagram(input: PermitInput, pageNum: number, totalPages: 
     const parts: string[] = [];
     const resolveSegY = makeOverlapGuard();
 
-    const totalDcKw = system?.totalDcKw ?? 9.6;
-    const totalAcKw = system?.totalAcKw ?? 7.68;
-    const totalPanels = system?.totalPanels ?? 24;
+    // FIX v47.54: Do NOT fall back to 9.6 kW / 24 panels defaults.
+    // If system values are missing the SLD will render with 0/null — making
+    // the data gap visible rather than hiding it behind a plausible-looking
+    // default that masks a pipeline failure.
+    const totalDcKw = system?.totalDcKw ?? 0;
+    const totalAcKw = system?.totalAcKw ?? 0;
+    const totalPanels = system?.totalPanels ?? 0;
     const eq_sld = resolveEquipment(input);
     const panelWatts = eq_sld.panelWatts || (system.totalDcKw && system.totalPanels ? Math.round(system.totalDcKw * 1000 / system.totalPanels) : 400);
     const panelModel = eq_sld.panelModel !== '—' ? eq_sld.panelModel : (system.totalPanels ? `${panelWatts}W Module` : 'PV Module');
@@ -3487,6 +3491,23 @@ export async function POST(req: NextRequest) {
 
     if (!project) {
       return NextResponse.json({ success: false, error: 'Missing project data' }, { status: 400 });
+    }
+
+    // FIX v47.54: ENGINEERING_MODEL_STALE guard.
+    // Block permit generation if totalPanels is 0 or missing.
+    // This prevents the permit from silently generating with stale/default values
+    // when the design layout has not been propagated to the engineering model.
+    const guardPanels = body.system?.totalPanels ?? 0;
+    if (guardPanels === 0) {
+      console.error('[PERMIT BLOCKED] ENGINEERING_MODEL_STALE: totalPanels=0 — layout not propagated to engineering model');
+      return NextResponse.json({
+        success: false,
+        error: 'ENGINEERING_MODEL_STALE',
+        message: 'Permit generation blocked: panel count is 0. The design layout has not been propagated to the engineering model. Please open the Engineering page, wait for the pipeline sync to complete, then try again.',
+        code: 'ENGINEERING_MODEL_STALE',
+        layoutPanels: (project as any).panelPositions?.length ?? 0,
+        engineeringPanels: 0,
+      }, { status: 422 });
     }
 
     // STEP 5 -- PERMIT INPUT LOGGING

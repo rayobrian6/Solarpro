@@ -1,38 +1,59 @@
-# SolarPro — Pipeline Verification (v47.49)
+# Full System Audit & Pipeline Fix
 
-## PHASE 1 — Verify Deployment Version
-- [x] Confirmed /api/version returns v47.49 ✅
-- [x] Added fixed version badge to app/layout.tsx (bottom-left, all pages)
+## PHASE 1 — Audit All Subsystems
+- [x] Read database schema (migrations, tables)
+- [x] Read project API routes (get, save, update)
+- [x] Read layout API routes (save, load)
+- [x] Read engineering API routes + engineering page
+- [x] Read permit generator route
+- [x] Read workflow tracker
+- [x] Read client files / artifact registry
+- [x] Read SLD, BOM, structural routes
+- [x] Read syncPipeline orchestrator (existing v47.52)
+- [x] Read debug page (existing v47.52)
 
-## PHASE 2 — Verify Authentication
-- [x] Verified middleware.ts cookie name matches lib/auth.ts ('solarpro_session')
-- [x] Verified /api/auth/me: JWT → DB lookup chain is correct
-- [x] AUTH_COOKIE_MISSING is expected for unauthenticated requests (not a bug)
+## PHASE 2 — Trace Critical Fields
+- [x] Trace panelCount from design → permit (layout → syncPipeline → projectLayout state → permit input)
+- [x] Trace systemSize from design → permit (layout.systemSizeKw → panels.length × 0.4)
+- [x] Trace moduleModel/inverterModel (config.inverters → permit input)
+- [x] Trace projectAddress (config.address → permit input)
+- [x] Document where each field breaks (SYSTEM_AUDIT_v47.54.md)
 
-## PHASE 3 — Verify Layout Persistence
-- [x] DB schema verified in code: panels + roof_planes columns exist in upsertLayout
-- [x] rowToLayout() correctly maps roof_planes → roofPlanes
-- [x] getProjectWithDetails() includes layout via rowToLayout
-- [x] CRITICAL BUG FIXED (v47.48): restorePanels() now calls setRoofPlanes()
-- [x] All 5 pipeline stages instrumented with console.log
+## PHASE 3 — Source of Truth Decision
+- [x] Document canonical source of truth (projectLayout.panels[])
+- [x] Identify duplicate/competing models (engineeringSeed vs layout vs engineering_reports)
 
-## PHASE 4 — Verify Design Round-Trip
-- [x] Save path: DesignStudio → POST /api/projects/[id]/layout → upsertLayout → DB
-- [x] Restore path: GET /api/projects/[id]/layout → setPanels + setRoofPlanes (fixed)
-- [ ] USER MUST TEST: Open Design Studio, place panels, save, reload, verify panels reappear
+## PHASE 4 — Fix Pipeline Integration
+- [x] syncProjectPipeline covers layout → snapshot → engineering report (confirmed)
+- [x] save-outputs triggered by runCalc() → handleGeneratePermitPackage (confirmed)
+- [x] Inline permit tab PDF/HTML buttons: acceptable (user already ran calc before)
+- [ ] Verify layout-save webhook triggers sync correctly
 
-## PHASE 5 — Verify Permit Generator Uses Real Data
-- [x] Engineering page: projectLayout state wired to permit payload (lines 7368-7392)
-- [x] Permit route: [PERMIT INPUT] logging added to verify panelPositions + roofPlanes
-- [ ] USER MUST TEST: Generate permit, check Vercel logs for [PERMIT INPUT] hasPanelPositions/hasRoofPlanes
+## PHASE 5 — Remove Silent Default Fallbacks
+- [x] Fix permit generator to block on ENGINEERING_MODEL_STALE (route guard added)
+- [x] Remove 9.6 kW / 24 panel defaults from buildSLD() (changed to ?? 0)
+- [x] Handle ENGINEERING_MODEL_STALE in engineering page UI (both PDF + HTML fetch blocks)
 
-## PHASE 6 — Debug Page ✅ DEPLOYED
-- [x] Created app/debug/project/page.tsx — live at /debug/project
-- [x] Created app/api/debug/layout/route.ts — queries DB directly
-- [ ] USER MUST USE: Go to /debug/project, paste a project ID, verify layout in DB
+## PHASE 6 — Client Files & Artifact Registry
+- [x] Audit artifact registry: save-outputs saves 5 files after runCalc()
+- [x] Sheet count: permit generates 13 pages (TOTAL=13), cover sheet index lists 13 — CORRECT, no mismatch
 
-## PHASE 7 — Commit + Deploy ✅
-- [x] tsc --noEmit: 0 errors
-- [x] npm run build: passes
-- [x] Committed + pushed as v47.49 (bf64a0b)
-- [x] Production confirmed on v47.49
+## PHASE 7 — Workflow Tracker
+- [x] Fix design step: check layout.panels.length > 0 (not just truthy layout)
+- [x] Fix engineering step: check layout.panels.length > 0 OR status in [proposal/approved/installed]
+
+## PHASE 8 — Auth (already fixed in v47.53)
+- [x] response.cookies.set() fix
+- [x] removed vercel.json /api override
+- [x] removed router.refresh() race
+
+## PHASE 9 — Diagnostics
+- [ ] Verify debug page shows panelCount vs engineeringPanels mismatch correctly
+- [ ] Verify build badge
+
+## PHASE 10 — Tests
+- [ ] Document test results
+
+## Final
+- [ ] Commit all fixes as v47.54
+- [ ] Push to GitHub

@@ -7574,6 +7574,17 @@ function EngineeringPageInner() {
                       const a = document.createElement('a');
                       a.href = url; a.download = `PermitPackage-${config.projectName || 'project'}.pdf`;
                       a.click(); URL.revokeObjectURL(url);
+                    } else if (res.status === 422) {
+                      // FIX v47.54: Handle ENGINEERING_MODEL_STALE — layout not propagated to engineering model
+                      const errData = await res.json().catch(() => ({}));
+                      if (errData.code === 'ENGINEERING_MODEL_STALE') {
+                        alert(`⚠️ Permit Blocked — Stale Engineering Model\n\n${errData.message ?? 'Panel count is 0. Please open the Engineering page, wait for the pipeline sync to complete, then try again.'}`);
+                      } else {
+                        alert(`Permit generation failed (422): ${errData.message ?? 'Unknown error'}`);
+                      }
+                    } else {
+                      const errText = await res.text().catch(() => '');
+                      alert(`Permit generation failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
                     }
                   }}
                   className="btn-primary w-full flex items-center justify-center gap-2"
@@ -7661,6 +7672,17 @@ function EngineeringPageInner() {
                       const html = await res.text();
                       const win = window.open('', '_blank');
                       if (win) { win.document.write(html); win.document.close(); }
+                    } else if (res.status === 422) {
+                      // FIX v47.54: Handle ENGINEERING_MODEL_STALE — layout not propagated to engineering model
+                      const errData = await res.json().catch(() => ({}));
+                      if (errData.code === 'ENGINEERING_MODEL_STALE') {
+                        alert(`⚠️ Permit Blocked — Stale Engineering Model\n\n${errData.message ?? 'Panel count is 0. Please open the Engineering page, wait for the pipeline sync to complete, then try again.'}`);
+                      } else {
+                        alert(`Permit preview failed (422): ${errData.message ?? 'Unknown error'}`);
+                      }
+                    } else {
+                      const errText = await res.text().catch(() => '');
+                      alert(`Permit preview failed (${res.status}). Please check the console for details.\n\n${errText.slice(0, 200)}`);
                     }
                   }}
                   className="btn-secondary w-full flex items-center justify-center gap-2 mt-2"

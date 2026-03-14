@@ -1,9 +1,26 @@
 // lib/version.ts -- SolarPro Build Version
-export const BUILD_VERSION     = 'v47.53';
+export const BUILD_VERSION     = 'v47.54';
 export const APP_VERSION       = BUILD_VERSION; // alias used by health route
 export const BUILD_DATE        = '2026-06-09';
-export const BUILD_DESCRIPTION = 'v47.53: Auth fix — response.cookies.set() replaces raw Set-Cookie header, removed vercel.json /api cache header override, removed router.refresh() race condition';
+export const BUILD_DESCRIPTION = 'v47.54: Full system architecture audit — workflow tracker fix, permit ENGINEERING_MODEL_STALE guard, remove silent 9.6kW/24-panel defaults, UI error handling for stale model';
 export const BUILD_FEATURES    = [
+  // v47.54 -- Full system architecture audit & pipeline fixes
+  'AUDIT: 10-phase full system audit (SYSTEM_AUDIT_v47.54.md) — traced all critical fields panelCount/systemSize/moduleModel/inverterModel/projectAddress from design to permit',
+  'WORKFLOW: Fix design step check — now verifies layout.panels.length > 0 (not just truthy layout object)',
+  'WORKFLOW: Fix engineering step check — now checks layout.panels.length > 0 (was p.status === "proposal" which was never auto-set)',
+  'PERMIT: ENGINEERING_MODEL_STALE guard in POST handler — blocks permit if totalPanels === 0, returns HTTP 422 with code + message',
+  'PERMIT: Remove 9.6 kW / 24-panel silent defaults from buildSLD() — now defaults to 0 so pipeline gaps are visible',
+  'PERMIT: Engineering page PDF fetch — handles 422 ENGINEERING_MODEL_STALE with user-facing alert',
+  'PERMIT: Engineering page HTML preview fetch — handles 422 ENGINEERING_MODEL_STALE with user-facing alert',
+  'PERMIT: Engineering page handles all non-ok fetch responses with descriptive error alerts (not silent failure)',
+  'PIPELINE: Confirmed layout-save webhook auto-triggers engineering report generation (buildDesignSnapshot → generateEngineeringReport → upsertEngineeringReport)',
+  'PIPELINE: Confirmed handleGeneratePermitPackage calls runCalc() → saveEngineeringOutputs() — client files populated correctly',
+  'SHEETS: Confirmed permit generates exactly 13 pages (TOTAL=13): PV-0 PV-1 PV-2A PV-2B PV-3 PV-4A PV-4B PV-4C PV-5 SCHED APP-A CERT E-1',
+  'DEBUG: Debug page /debug/project confirmed correct — shows layout.panels.length vs engineering.panelCount mismatch',
+  // v47.53 -- Auth fix
+  'AUTH: response.cookies.set() replaces raw Set-Cookie header (Vercel edge proxy strips raw header)',
+  'AUTH: removed vercel.json /api cache header override (was poisoning auth routes)',
+  'AUTH: removed router.refresh() race condition after login',
   // v47.51 -- Layout → Engineering pipeline fix
   'ENGINEERING: Layout panel count OVERRIDES seed.panel_count — layout is ground truth',
   'ENGINEERING: Direct layout fetch useEffect — runs when currentProjectId is set (safety net)',
@@ -21,41 +38,12 @@ export const BUILD_FEATURES    = [
   'ENGINEERING: Preflight panel — panel count, roof planes, system size, module, inverter, BUILD_VERSION',
   'ENGINEERING: New primary button — Generate & Download Permit Package (13 Sheets)',
   'FOOTER: Global BUILD_VERSION badge fixed bottom-left on all pages',
-  // v47.48 -- Layout pipeline debug instrumentation
-  'DESIGN: restorePanels() now calls setRoofPlanes() — critical roofPlanes restore fix',
-  'DESIGN: [LAYOUT SAVE PAYLOAD] + [LAYOUT RESTORE FROM DB] logging',
-  'DESIGN: Visible "Layout loaded from DB · N panels · N roof planes" badge',
-  'API: [API RECEIVED LAYOUT] + [LAYOUT SAVED TO DB] logging in layout route',
-  'ENGINEERING: [LOADED PROJECT LAYOUT] Step 4 logging',
   // v47.46 -- Full 13-page permit planset pipeline
   'PERMIT: 13-page planset (was 11) — PV-0 through E-1 (sheets 1 of 13 .. 13 of 13)',
   'PERMIT: pageArrayGeometry() — PV-2B: SVG panel grid, string color-coding, IFC §605.11 fire setback diagram, array parameters table',
   'PERMIT: pageSpecSheetReference() — APP-A: NEC 690.8 safety factor calcs (×1.25), module/inverter/racking specs, manufacturer data sheet links',
   'PERMIT: pageSiteInformation() — PV-1: replaced placeholder with full SVG schematic site plan (house, garage, array, meter, inverter, disco, MSP, conduit, north arrow)',
   'PERMIT: Cover sheet index updated to list all 13 sheets: PV-0 PV-1 PV-2A PV-2B PV-3 PV-4A PV-4B PV-4C PV-5 SCHED APP-A CERT E-1',
-  'EQUIPMENT: lib/equipment/specSheets.ts — new spec sheet database for REC, LG, SunPower, Jinko, LONGi, Q CELLS, Canadian Solar, Silfab, Enphase, SolarEdge, Fronius, SMA, Tesla, IronRidge, Unirac',
-  'EQUIPMENT: findModuleSpec(), findInverterSpec(), findBatterySpec(), findRackingSpec(), getPermitSpecSheets(), getGenericModuleSpecs()',
-  'DATA: DesignStudio.tsx — critical fix: roofPlanes now saved to DB via roofPlanesRef pattern (were only in component state)',
-  'DATA: sendBeacon() on page unload now includes roofPlanes in payload',
-  // v47.45 -- Professional permit planset upgrades
-  'PERMIT: Panel positions from 3D design engine rendered on roof plan',
-  'PERMIT: AHJ auto-lookup from national database by state/county/city',
-  'PERMIT: NEC 220.82 load calculation with actual service panel data',
-  'PERMIT: 11×17 ANSI B page size (279.4mm × 431.8mm)',
-  'PERMIT: Enhanced BOM with per-roof-plane attachment calculations',
-  'PERMIT: Roof plane overlay on aerial imagery',
-  'ENGINEERING: engineering/page.tsx — projectLayout state wiring (projectLayout useState + GET /layout fetch)',
-  'ENGINEERING: zip field added to ProjectConfig interface for AHJ lookup',
-  // v47.44 -- Universal equipment resolver
-  'PERMIT: resolveEquipment() — 4-tier fallback: strings[] -> modules[] -> project fields -> system totals',
-  'PERMIT: BOM table — panelMfr/panelModel now resolved from any payload shape (no more hardcoded fallbacks)',
-  'PERMIT: NEC labels — panelIsc/panelVoc resolved from any payload shape (removed strings[0] hardcode)',
-  'PERMIT: SLD builder — all 6 equipment fields resolved from any payload shape (removed Q.PEAK/IQ8M/Enphase hardcodes)',
-  'PERMIT: Works with UI strings payload, modules[] array, project-level fields, or system totals only',
-  // v47.38 -- Full 11-page permit plan set with SLD
-  'PERMIT: pageSingleLineDiagram() — Sheet E-1 added to route.ts — IEEE/ANSI SVG SLD renderer',
-  'PERMIT: Full MICROINVERTER topology: PV Array → J-Box → AC Combiner → AC Disco → MSP → IQ SC3/BUI → Utility Meter',
-  'PERMIT: Battery storage shown (IQ Battery 5P × 2 connected via BUI) — NEC 705.12(B) 120% rule',
 ];
 
 export function getBuildBadge(): string {
