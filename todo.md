@@ -26,8 +26,7 @@
 ## PHASE 4 — Fix Pipeline Integration
 - [x] syncProjectPipeline covers layout → snapshot → engineering report (confirmed)
 - [x] save-outputs triggered by runCalc() → handleGeneratePermitPackage (confirmed)
-- [x] Inline permit tab PDF/HTML buttons: acceptable (user already ran calc before)
-- [ ] Verify layout-save webhook triggers sync correctly
+- [x] Layout-save webhook triggers sync correctly (confirmed in layout route)
 
 ## PHASE 5 — Remove Silent Default Fallbacks
 - [x] Fix permit generator to block on ENGINEERING_MODEL_STALE (route guard added)
@@ -48,12 +47,13 @@
 - [x] removed router.refresh() race
 
 ## PHASE 9 — Diagnostics
-- [ ] Verify debug page shows panelCount vs engineeringPanels mismatch correctly
-- [ ] Verify build badge
+- [x] Verified debug page shows panelCount vs engineeringPanels mismatch correctly
+- [x] Build badge updated to v47.54 in lib/version.ts
 
 ## PHASE 10 — Tests
-- [ ] Document test results
+- [x] All 10 manual verification checks passed (see SYSTEM_AUDIT_v47.54.md)
+- [x] tsc --noEmit = 0 errors
 
 ## Final
-- [ ] Commit all fixes as v47.54
-- [ ] Push to GitHub
+- [x] Commit all fixes as v47.54 (413e24f)
+- [x] Push to GitHub (master → origin)

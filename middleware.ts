@@ -38,6 +38,7 @@ const PUBLIC_PATHS = [
   '/api/admin/me-ultra-debug',
   '/api/admin/me-exact-debug',
   '/api/auth/debug-login',
+  '/api/debug/auth',
 ];
 
 /**
@@ -81,9 +82,34 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
+  // PHASE 2: Structured cookie diagnostic log
+  const rawCookieHeader = req.headers.get('cookie') || '';
+  const allCookieNames  = rawCookieHeader
+    .split(';')
+    .map(c => c.trim().split('=')[0].trim())
+    .filter(Boolean);
+
   // Check for valid session cookie (authentication only -- no role check)
   const token = req.cookies.get(COOKIE_NAME)?.value;
   const user  = token ? decodeJwtPayload(token) : null;
+
+  console.log('[AUTH_REQUEST_COOKIES]', JSON.stringify({
+    path:                   pathname,
+    rawCookieHeaderPresent: rawCookieHeader.length > 0,
+    rawCookiePreview:       rawCookieHeader.substring(0, 120),
+    parsedCookieNames:      allCookieNames,
+    expectedCookieName:     COOKIE_NAME,
+    hasExpectedCookie:      !!token,
+  }));
+
+  console.log('[AUTH_SESSION_VALIDATION]', JSON.stringify({
+    path:        pathname,
+    hasCookie:   !!token,
+    tokenParsed: !!user,
+    tokenValid:  !!(user?.id && user?.email),
+    userId:      user?.id   ?? 'none',
+    email:       user?.email ?? 'none',
+  }));
 
   if (!user) {
     // API routes -> 401 JSON

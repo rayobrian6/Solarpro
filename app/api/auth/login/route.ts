@@ -11,7 +11,25 @@ import {
 } from '@/lib/auth';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
 
+// PHASE 5: Log auth secret fingerprint on first invocation (not the secret itself)
+// This confirms the secret is stable and consistent across deployments.
+let _secretFingerprintLogged = false;
+function logSecretFingerprint() {
+  if (_secretFingerprintLogged) return;
+  _secretFingerprintLogged = true;
+  try {
+    const secret = process.env.JWT_SECRET || '';
+    // Simple fingerprint: length + first 4 chars + last 4 chars + char sum mod 9999
+    const charSum = secret.split('').reduce((s, c) => s + c.charCodeAt(0), 0) % 9999;
+    const fingerprint = `len=${secret.length}_head=${secret.substring(0,4)}_tail=${secret.slice(-4)}_sum=${charSum}`;
+    console.log(`[AUTH_SECRET_FINGERPRINT] ${fingerprint} env=${process.env.NODE_ENV}`);
+  } catch {
+    console.log('[AUTH_SECRET_FINGERPRINT] ERROR computing fingerprint');
+  }
+}
+
 export async function POST(req: NextRequest) {
+  logSecretFingerprint();
   try {
     const body = await req.json();
     const { email, password } = body;
@@ -73,13 +91,30 @@ export async function POST(req: NextRequest) {
       { status: 200 }
     );
 
-    response.cookies.set(COOKIE_NAME, token, {
+    const cookieOptions = {
       httpOnly: true,
       secure:   process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'lax' as const,
       path:     '/',
       maxAge:   COOKIE_MAX_AGE, // 30 days in seconds
-    });
+      // domain intentionally omitted — let browser derive from request origin
+    };
+
+    response.cookies.set(COOKIE_NAME, token, cookieOptions);
+
+    // PHASE 1: Structured cookie diagnostic log
+    const setCookieHeader = response.headers.get('set-cookie');
+    console.log('[AUTH_COOKIE_SET]', JSON.stringify({
+      cookieName:          COOKIE_NAME,
+      hasSetCookieHeader:  !!setCookieHeader,
+      setCookiePreview:    setCookieHeader ? setCookieHeader.substring(0, 120) : 'MISSING',
+      secure:              cookieOptions.secure,
+      sameSite:            cookieOptions.sameSite,
+      path:                cookieOptions.path,
+      domain:              'omitted',
+      maxAge:              cookieOptions.maxAge,
+      nodeEnv:             process.env.NODE_ENV,
+    }));
 
     console.log(`[AUTH_LOGIN_SUCCESS] user=${sessionUser.email} cookie=${COOKIE_NAME} set via response.cookies.set()`);
 

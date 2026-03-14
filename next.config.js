@@ -129,11 +129,16 @@ const nextConfig = {
   generateBuildId: async () => {
     return `build-${Date.now()}`;
   },
-  // Add no-cache headers to all pages
+  // FIX v47.55: Cache-Control headers must NOT apply to /api routes.
+  // Applying Cache-Control: no-store to /api/auth/login via a catch-all "/(.*)"
+  // source in vercel.json or next.config headers causes Vercel's edge proxy to
+  // strip or interfere with Set-Cookie headers on the login response, breaking auth.
+  // Only apply no-cache to page routes (not /api, not /_next/static).
   async headers() {
     return [
       {
-        source: '/(.*)',
+        // Page routes only -- explicitly exclude /api and /_next
+        source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
         headers: [
           { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate, proxy-revalidate' },
           { key: 'Pragma', value: 'no-cache' },

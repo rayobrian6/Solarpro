@@ -59,6 +59,25 @@ function LoginForm() {
       const data = await res.json();
 
       if (res.ok && data.success) {
+        // PHASE 8: Verify the cookie was actually issued before proceeding.
+        // If Set-Cookie was stripped by a proxy/edge rule, /api/debug/auth will
+        // show hasAuthCookie=false and we can fail loudly instead of silently
+        // bouncing the user back to the login page.
+        try {
+          const debugRes = await fetch('/api/debug/auth', { cache: 'no-store' });
+          if (debugRes.ok) {
+            const debugData = await debugRes.json();
+            console.log('[LOGIN_COOKIE_VERIFY]', debugData);
+            if (!debugData.hasAuthCookie) {
+              console.error('[LOGIN_COOKIE_MISSING] Login succeeded but auth cookie was not set in browser. Set-Cookie header may have been stripped by a proxy or edge rule.');
+              setError('Authentication cookie was not issued. This is a server configuration issue — please contact support or try a different browser. (Debug: cookie missing after 200 OK)');
+              return 'auth_error';
+            }
+          }
+        } catch (debugErr) {
+          // Debug check failed — don't block login, but log it
+          console.warn('[LOGIN_COOKIE_VERIFY_FAILED] Could not verify cookie presence:', debugErr);
+        }
         return 'success';
       }
 
