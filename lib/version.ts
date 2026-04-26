@@ -1,9 +1,11 @@
-export const BUILD_VERSION     = 'v58.9';
+export const BUILD_VERSION     = 'v59.0';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-27'; // v58.9
-export const BUILD_DESCRIPTION = 'v58.9: Brand audit complete — 46 registry entries added (SMA, Fronius, GoodWe, Sungrow, Growatt, Solis, Tesla, Tigo, APsystems, Hoymiles, Enphase IQ8, Sol-Ark) — all 13 brands ✅ in BOM pipeline';
+export const BUILD_DATE        = '2026-04-28'; // v59.0
+export const BUILD_DESCRIPTION = 'v59.0: UI compacted (battery/generator disabled states), engineering logic audit — systemType dropdown fixed (roof/ground/fence), utilityMeter default fixed, batteryEnabled BOM payload fix';
 export const BUILD_FEATURES: string[] = [
-  // v58.9 (newest — must be first for releaseHistory drift-guard)
+  // v59.0 (newest — must be first for releaseHistory drift-guard)
+  'Stage 18.5 (v59.0) — Engineering logic audit: compacted battery/generator disabled states, fixed systemType dropdown (roof/ground/fence), fixed utilityMeter default (Bidirectional Net Meter), fixed batteryEnabled BOM payload to respect UI toggle',
+  // v58.9
   'Stage 18.4 (v58.9) — Brand audit complete: 46 equipment registry entries added for SMA, Fronius, GoodWe, Sungrow, Growatt, Solis, Tesla, Tigo, APsystems, Hoymiles, Enphase IQ8 variants, and Sol-Ark. All 13 brands now pass full pipeline audit (sizing → registry → brand inference → BOM)',
   // v58.8
   'Stage 18.3 (v58.8) — 3-layer deep fix for SolarEdge BOM: (1) API route guard detects optimizer peripheral as inverterId and resolves central inverter from brand profile; (2) BOM engine Stage 1 safeOptimizerEntry guard prevents string_inverter from being used as optimizer, falls back to inverterEntry.requiredAccessories default; (3) page state stores optimizerPeripheralId separately from inverterId',

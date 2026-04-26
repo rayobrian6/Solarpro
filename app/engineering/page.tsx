@@ -3526,7 +3526,7 @@ function EngineeringPageInner() {
           // ── EcoFlow system fields (v47.358) ─────────────────────────
           // These fields only take effect if inverterId starts with 'ecoflow-'.
           // Route handler uses them to derive battery modules + accessories.
-          batteryEnabled:   Boolean((config.batteryId && config.batteryId.length > 0) || config.batteryKwh),
+          batteryEnabled:   batteryEnabled && Boolean((config.batteryId && config.batteryId.length > 0) || config.batteryKwh),
           targetBatteryKwh: (config.batteryKwh && config.batteryKwh > 0) ? Number(config.batteryKwh) : undefined,
           batteryUsePro:    false,  // Pro stack (80 kWh) — future UI toggle
       };
@@ -6141,18 +6141,13 @@ function EngineeringPageInner() {
                         </label>
                       </div>
 
-                      {!batteryEnabled ? (
-                        /* OFF state — collapsed */
-                        <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                          <div className="w-8 h-8 rounded-lg bg-slate-700/60 border border-slate-600/40 flex items-center justify-center">
-                            <Battery size={14} className="text-slate-600" />
+                        {!batteryEnabled ? (
+                          /* OFF state — single compact row, no dead space */
+                          <div className="flex items-center gap-2 py-0.5">
+                            <Battery size={11} className="text-slate-700 shrink-0" />
+                            <span className="text-xs text-slate-600">No battery · toggle above to add</span>
                           </div>
-                          <div>
-                            <div className="text-sm font-bold text-slate-500">Battery Disabled</div>
-                            <div className="text-xs text-slate-600">No battery in BOM · Toggle to enable</div>
-                          </div>
-                        </div>
-                      ) : (
+                        ) : (
                         /* ON state — expanded */
                         <div className="space-y-3">
                           {/* kWh summary strip */}
@@ -6220,21 +6215,20 @@ function EngineeringPageInner() {
                           )}
                         </div>
 
-                        {/* Generator OFF state */}
-                        {!config.generatorId && !config.atsId ? (
-                          <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-800/40 border border-slate-700/40">
-                            <div className="flex items-center gap-3">
-                              <div className="w-7 h-7 rounded-lg bg-slate-700/60 border border-slate-600/40 flex items-center justify-center">
-                                <Wrench size={12} className="text-slate-600" />
+                          {/* Generator OFF state */}
+                          {!config.generatorId && !config.atsId ? (
+                            /* Compact single row — no dead space */
+                            <div className="flex items-center justify-between gap-2 py-0.5">
+                              <div className="flex items-center gap-2">
+                                <Wrench size={11} className="text-slate-700 shrink-0" />
+                                <span className="text-xs text-slate-600">No generator</span>
                               </div>
-                              <div className="text-xs text-slate-600">No generator configured</div>
+                              <button onClick={() => setGenSectionOpen(v => !v)}
+                                className="text-xs px-2 py-0.5 rounded bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors font-semibold leading-none">
+                                {genSectionOpen ? '✕' : '+ Add'}
+                              </button>
                             </div>
-                            <button onClick={() => setGenSectionOpen(v => !v)}
-                              className="text-xs px-2.5 py-1 rounded-lg bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors font-semibold">
-                              {genSectionOpen ? '✕ Cancel' : '+ Add'}
-                            </button>
-                          </div>
-                        ) : (
+                          ) : (
                           /* Generator ON state */
                           _genData && _atsData && (
                             <div className="p-3 rounded-xl bg-orange-500/5 border border-orange-500/20 mb-3">
@@ -7017,16 +7011,15 @@ function EngineeringPageInner() {
                         <div>
                           <label className="eng-label">System Type</label>
                           <select value={config.systemType} onChange={e => updateConfig({ systemType: e.target.value as any })} className="eng-select">
-                            <option value="residential">Residential</option>
-                            <option value="commercial">Commercial</option>
-                            <option value="ground_mount">Ground Mount</option>
-                            <option value="carport">Carport</option>
+                            <option value="roof">Roof Mount</option>
+                            <option value="ground">Ground Mount</option>
+                            <option value="fence">Solar Fence</option>
                           </select>
                         </div>
                         <div>
                           <label className="eng-label">Utility Meter</label>
                           <select value={config.utilityMeter} onChange={e => updateConfig({ utilityMeter: e.target.value })} className="eng-select">
-                            {['Smart Meter', 'Analog Meter', 'Net Meter', 'Production Meter'].map(m => <option key={m}>{m}</option>)}
+                            {['Bidirectional Net Meter', 'Smart Meter', 'Net Meter', 'Analog Meter', 'Production Meter'].map(m => <option key={m}>{m}</option>)}
                           </select>
                         </div>
                         <div className="col-span-2">

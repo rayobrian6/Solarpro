@@ -1,24 +1,19 @@
-# SolarPro BOM Work — Active Session
+# SolarPro UI + Engineering Audit
 
-## v58.6 — Ecosystem Apply Central Inverter Fix ✅ COMPLETE
-- [x] Identify root cause: ecosystem picker stores optimizer peripheral ID (se-p505) as inverterId
-- [x] Fix: resolve central inverter from brand profile supportedInverterModels on apply
-- [x] Add getBrandProfile import to page.tsx
-- [x] All 2570 tests pass
-- [x] Committed as 30590ea + version bump 1650b1b
-- [x] Pushed to master → Vercel auto-deploy in progress
+## Phase 1: UI — Eliminate dead space in System Config tab [center col]
+- [x] Compact Battery disabled state → single slim inline row (no padded box icon)
+- [x] Compact Generator disabled state → single slim inline row (already close but tighten)
 
-## v58.6 — Secondary Safety Net (API Guard 1 formula) ✅ COMPLETE
-- [x] Fix Guard 1 formula in bom/route.ts: now uses physMax = ceil(modules/25) instead of ceil(max(strings,2)/2)
-  - Old: ceil(max(36,2)/2) = 18 (wrong) → New: ceil(36/25) = 2 (correct)
-  - Committed as 3ed317b, pushed to master
+## Phase 2: Engineering Logic Audit
+- [x] Audit systemType options — FIXED: dropdown was using wrong values (residential/commercial/ground_mount/carport) → changed to correct engine values (roof/ground/fence)
+- [x] Audit utilityMeter options — FIXED: default was 'Bidirectional Net Meter' but not in dropdown options → added to dropdown
+- [x] Audit batteryEnabled BOM payload — FIXED: batteryEnabled flag was ignoring the UI toggle → now respects toggle state
+- [x] Check DC/AC ratio display and threshold logic — OK (1.0-1.6 range, green 1.15-1.35)
+- [x] Check string count / MPPT validation warnings in UI — OK (sizingEngine.warnings → validationEngine → UI)
+- [x] Check interconnection method auto-suggest logic — OK (busbar 120% rule detection works)
+- [x] Check battery/generator BOM integration consistency — OK (BOM self-check warnings displayed)
 
-## Remaining Datasheet Audit
-- [ ] Sol-Ark inverters: audit datasheets vs equipment-db
-- [ ] Growatt inverters: audit datasheets vs equipment-db
-- [ ] Solis inverters: audit datasheets vs equipment-db
-- [ ] Tesla inverters: audit datasheets vs equipment-db
-- [ ] Tigo inverters: audit datasheets vs equipment-db
-
-## EcoFlow/SolFence Integration (Phases 1-12)
-- [ ] Phase 1-12 work (deferred — pending user direction)
+## Phase 3: Deploy
+- [ ] Bump version to v59.0
+- [ ] Git commit and push
+- [ ] Verify deploy live
