@@ -1,9 +1,13 @@
-export const BUILD_VERSION     = 'v59.1';
+export const BUILD_VERSION     = 'v60.0';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-28'; // v59.1
-export const BUILD_DESCRIPTION = 'v59.1: Battery Storage card moved to right column (top) to eliminate dead space in center/right area';
+export const BUILD_DATE        = '2026-04-28'; // v60.0
+export const BUILD_DESCRIPTION = 'v60.0: Ratio-aware inverter tier selection — pickRatioAwareTier() scans all brand models, picks closest to 1.25 DC/AC target; fixes systematic under-ratio failures across all brands';
 export const BUILD_FEATURES: string[] = [
-  // v59.1 (newest — must be first for releaseHistory drift-guard)
+  // v60.0 (newest — must be first for releaseHistory drift-guard)
+  'Stage 19.0 (v60.0) — Ratio-aware inverter tier selection: pickRatioAwareTier() replaces blind DC-kW tier lookup — scans ALL brand models, computes DC/AC ratio for each, picks closest to 1.25 target while staying ≥1.00 hard floor — universal fix for all brands and future onboarded brands',
+  'Stage 19.0 (v60.0) — attemptDownsize() Rule 1 relaxed: unit count increase now allowed when current ratio is below MIN_DC_AC_RATIO (1.00) — enables 2× smaller model when that is the only way to reach valid ratio',
+  'Stage 19.0 (v60.0) — Sol-Ark example: 24p/9.6kW now selects 8K-2P ×1 (ratio 1.20) instead of 12K-2P ×1 (ratio 0.80); 36p/14.4kW selects 12K-2P ×1 (ratio 1.20) instead of 15K-2P ×1 (ratio 0.96)',
+  // v59.1
   'Stage 18.6 (v59.1) — Battery Storage panel moved to top of right column — eliminates dead space in 3-col layout when inverter/strings section is shorter than the left column',
   // v59.0
   'Stage 18.5 (v59.0) — Engineering logic audit: compacted battery/generator disabled states, fixed systemType dropdown (roof/ground/fence), fixed utilityMeter default (Bidirectional Net Meter), fixed batteryEnabled BOM payload to respect UI toggle',

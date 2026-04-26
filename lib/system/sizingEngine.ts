@@ -354,6 +354,92 @@ function pickInverterTier(
   return tiers.find(t => totalDcKw >= t.minDcKw && totalDcKw < t.maxDcKw);
 }
 
+/**
+ * Ratio-aware inverter tier selection (v60.0).
+ *
+ * Unlike the legacy pickInverterTier() — which blindly returns the tier whose
+ * DC-kW window contains totalDcKw — this function scans EVERY non-micro model
+ * registered in the brand, computes the DC/AC ratio at the minimum required
+ * unit count, and picks the model that:
+ *
+ *   1. Produces a DC/AC ratio >= MIN_DC_AC_RATIO (1.00) — hard floor.
+ *   2. Is closest to PREFERRED_DC_AC_RATIO_TARGET (1.25) among all candidates
+ *      that pass the hard floor (in-window candidates 1.20–1.40 take priority).
+ *
+ * If NO model satisfies the hard floor (e.g. 4.8 kW DC array with a brand
+ * whose smallest inverter is 8 kW AC), the function falls back to the legacy
+ * tier lookup so the downstream feasibility / validation engine can surface
+ * the constraint violation rather than silently picking a bad model.
+ *
+ * This function uses brand.supportedInverterModels (acKw, dcKwMax) which every
+ * brand profile MUST have — making this logic universal across all brands and
+ * any future onboarded brand.
+ *
+ * @param brand       The resolved brand profile.
+ * @param tiers       The brand's sizing tier table (fallback only).
+ * @param totalDcKw   Total DC array size in kW.
+ * @param panelCount  Total panel count (for unitsRequired calculation).
+ * @param ppu         Panels-per-unit resolver (voltage-aware).
+ */
+function pickRatioAwareTier(
+  brand: BrandProfile,
+  tiers: ReadonlyArray<InverterSizingTier>,
+  totalDcKw: number,
+  panelCount: number,
+  ppu: (m: BrandInverterModelRef) => number,
+): { ref: BrandInverterModelRef; qty: number } | undefined {
+  // Only applies to string / optimizer / hybrid topologies.
+  // Micro topologies are handled separately (qty = ceil(panels / modulesPerDevice)).
+  const stringModels = brand.supportedInverterModels.filter(
+    m => (m.modulesPerDevice ?? 0) === 0,
+  );
+  if (stringModels.length === 0) return undefined;
+
+  // Evaluate every model: compute the minimum qty needed and the resulting ratio.
+  type Candidate = { model: BrandInverterModelRef; qty: number; ratio: number };
+  const candidates: Candidate[] = stringModels.map(m => {
+    const qty   = unitsRequired(m, panelCount, totalDcKw, ppu(m));
+    const ratio = dcAcRatio(m, qty, totalDcKw);
+    return { model: m, qty, ratio };
+  });
+
+  // Step 1: candidates that satisfy the hard floor (ratio >= 1.00).
+  const aboveFloor = candidates.filter(c => c.ratio >= MIN_DC_AC_RATIO);
+
+  if (aboveFloor.length === 0) {
+    // No model in this brand can produce a valid ratio for this array size.
+    // Fall back to legacy tier lookup so the validation engine surfaces the issue.
+    const legacyTier = pickInverterTier(tiers, totalDcKw);
+    if (!legacyTier) return undefined;
+    const legacyRef = brand.supportedInverterModels.find(
+      m => m.equipmentDbId === legacyTier.equipmentDbId,
+    );
+    if (!legacyRef) return undefined;
+    const legacyQty = unitsRequired(legacyRef, panelCount, totalDcKw, ppu(legacyRef));
+    return { ref: legacyRef, qty: legacyQty };
+  }
+
+  // Step 2: among above-floor candidates, prefer those inside the preferred window.
+  const inWindow = aboveFloor.filter(
+    c => c.ratio >= PREFERRED_DC_AC_RATIO_MIN && c.ratio <= PREFERRED_DC_AC_RATIO_MAX,
+  );
+  const pool = inWindow.length > 0 ? inWindow : aboveFloor;
+
+  // Step 3: pick the candidate closest to the target ratio (1.25).
+  // Tie-break: fewer units first, then larger AC rating (more headroom), then
+  // alphabetical by equipmentDbId for determinism.
+  const best = pool.reduce((prev, curr) => {
+    const prevDist = Math.abs(prev.ratio - PREFERRED_DC_AC_RATIO_TARGET);
+    const currDist = Math.abs(curr.ratio - PREFERRED_DC_AC_RATIO_TARGET);
+    if (Math.abs(currDist - prevDist) > 0.001) return currDist < prevDist ? curr : prev;
+    if (curr.qty !== prev.qty) return curr.qty < prev.qty ? curr : prev;
+    if (curr.model.acKw !== prev.model.acKw) return curr.model.acKw > prev.model.acKw ? curr : prev;
+    return curr.model.equipmentDbId < prev.model.equipmentDbId ? curr : prev;
+  });
+
+  return { ref: best.model, qty: best.qty };
+}
+
 function resolveBrand(
   input: SizingInput,
   warnings: SizingWarning[],
@@ -591,8 +677,13 @@ function dcAcRatio(model: BrandInverterModelRef, qty: number, totalDcKw: number)
      const viable: Array<{ model: BrandInverterModelRef; qty: number; ratio: number }> = [];
      for (const candidate of candidates) {
        const qty = unitsRequired(candidate, panelCount, totalDcKw, ppu(candidate));
-       // RULE 1: Never increase unit count.
-       if (qty > currentQty) continue;
+       // RULE 1 (v60.0): Allow unit count increase ONLY when the current selection
+       // is below the hard DC/AC floor (ratio < 1.00). In that case, adding more
+       // units of a smaller model is the correct real-world answer (e.g. 2× Sol-Ark
+       // 8K-2P for a 9.6 kW array gives ratio 1.20 — valid vs. 1× at 0.60 — invalid).
+       // When the current ratio is already >= floor, consolidation still wins (fewer
+       // units = simpler BOS), so the original rule is preserved.
+       if (qty > currentQty && currentRatio >= MIN_DC_AC_RATIO) continue;
        const ratio = dcAcRatio(candidate, qty, totalDcKw);
        // RULE 2: Hard floor.
        if (ratio < MIN_DC_AC_RATIO) continue;
@@ -1029,8 +1120,12 @@ function sizeInverters(
   }
 
   // String / optimizer / hybrid: use sizing tiers
-  const tier = pickInverterTier(brand.sizingTiers, totalDcKw);
-  if (!tier) {
+  // v60.0 — Ratio-aware tier selection: scan all brand models and pick the one
+  // that produces a DC/AC ratio closest to PREFERRED_DC_AC_RATIO_TARGET (1.25)
+  // while staying >= MIN_DC_AC_RATIO (1.00). Falls back to legacy tier lookup
+  // only when no model in the brand can satisfy the hard floor.
+  const ratioAwarePick = pickRatioAwareTier(brand, brand.sizingTiers, totalDcKw, input.panelCount, vaPPU);
+  if (!ratioAwarePick) {
     warnings.push({
       severity: 'error',
       code: 'INVERTER_NO_TIER_MATCH',
@@ -1038,29 +1133,17 @@ function sizeInverters(
     });
     return [];
   }
-  const ref = brand.supportedInverterModels.find(
-    m => m.equipmentDbId === tier.equipmentDbId,
-  );
+  const ref = ratioAwarePick.ref;
   if (!ref) {
     warnings.push({
       severity: 'error',
       code: 'INVERTER_TIER_MODEL_MISSING',
-      message: `Brand ${brand.displayName} tier references ${tier.equipmentDbId} but model is not registered.`,
+      message: `Brand ${brand.displayName} has no model registered for ${totalDcKw.toFixed(1)} kW DC.`,
     });
     return [];
   }
-
-  // For oversized DC arrays, add more inverter units.
-  // Two independent physical constraints:
-  //   (a) DC kW must fit: ceil(totalDcKw / dcKwMax)
-  //   (b) Panels must fit across MPPT slots:
-  //       maxPanelsPerUnit = mpptCount × parallelStringsPerMppt × maxPPS
-  //       qty >= ceil(panelCount / maxPanelsPerUnit)
-  // Phase 13.2 fix: (b) previously used mpptCount × maxPPS and assumed
-  // 1 parallel string per MPPT, which under-stated per-unit capacity by
-  // 2× and forced oversized multi-inverter designs (e.g. 36 panels on
-  // SE-11400H was 2 units at DC/AC 0.63 instead of 1 unit at 1.26).
-  const qty = unitsRequired(ref, input.panelCount, totalDcKw, vaPPU(ref));
+  // qty is already computed by pickRatioAwareTier (ratio-optimised).
+  const qty = ratioAwarePick.qty;
 
   // DC/AC ratio guardrail (STEP 3 of prompt): if the selection is
   // oversized (ratio < 0.9), proactively downsize to the next smaller
