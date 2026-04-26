@@ -1048,8 +1048,20 @@ function sizeInverters(
           const biggerDc = m.dcKwMax > ref.dcKwMax;
           const biggerStrings = vaPPU(m) > panelsPerUnitSelected;
           if (!biggerDc && !biggerStrings) return false;
-          // Phase 14.3: Never upsize to a model the feasibility gate will reject.
-          if (feasibilityRejectedIds.has(m.equipmentDbId)) return false;
+          // Phase 14.3: Never upsize to a model the feasibility gate will reject,
+          // UNLESS the candidate has a valid DC/AC ratio (>= MIN_DC_AC_RATIO at qty=1).
+          // Rationale (v60.2): applyFeasibilityHardGate now has a ratio-regression guard:
+          // if the gate rejects a ratio-valid candidate and would substitute a ratio-invalid
+          // one (e.g. rejects 12K-2P×1 ratio=1.20 → substitutes 2×8K-2P ratio=0.90), it
+          // keeps the original. Pre-filtering a ratio-valid candidate here is counter-productive:
+          // Rule 1 skips 12K-2P (best ratio) and falls to Rule 3 (2×8K-2P, ratio=0.90).
+          // Let ratio-valid candidates through — the gate will preserve them.
+          if (feasibilityRejectedIds.has(m.equipmentDbId)) {
+            const candidateRatioAt1 = dcAcRatio(m, 1, totalDcKw);
+            if (candidateRatioAt1 < MIN_DC_AC_RATIO) return false;
+            // ratio-valid but feasibility-rejected: allow through so applyFeasibilityHardGate
+            // can apply its ratio-regression guard and keep it.
+          }
           return true;
         })
         .map(m => {
@@ -1867,6 +1879,16 @@ function applyFeasibilityWarnings(
 
   // Chosen model is infeasible (but a different model in the same brand is).
   if (report.chosenIsFeasible === false && report.chosenEquipmentDbId) {
+    // v60.2 — If the ratio-regression guard in applyFeasibilityHardGate already emitted
+    // an info-level FEASIBILITY_CHOSEN_INFEASIBLE advisory (meaning it kept the chosen
+    // model because the substitute would degrade DC/AC ratio below MIN_DC_AC_RATIO),
+    // do NOT add a second blocking warning-level advisory here. The user has already
+    // been informed via the info advisory, and the chosen model has a better DC/AC ratio.
+    const alreadyHasInfoAdvisory = warnings.some(
+      w => w.code === 'FEASIBILITY_CHOSEN_INFEASIBLE' && w.severity === 'info',
+    );
+    if (alreadyHasInfoAdvisory) return;
+
     const chosenFailures = report.rejected
       .find(r => r.equipmentDbId === report.chosenEquipmentDbId)
       ?.failures;
@@ -1875,12 +1897,13 @@ function applyFeasibilityWarnings(
       severity: 'warning',
       code: 'FEASIBILITY_CHOSEN_INFEASIBLE',
       message:
-        `Feasibility check: Chosen inverter ${report.chosenEquipmentDbId} ` +
-        `has concerns (${codes}). Recommended alternative in the same brand: ` +
-        `${report.recommendedEquipmentDbId}.`,
+        `Feasibility check: Chosen inverter ${report.chosenEquipmentDbId} `
+        + `has concerns (${codes}). Recommended alternative in the same brand: `
+        + `${report.recommendedEquipmentDbId}.`,
     });
     return;
   }
+
 
   // Chosen model is feasible but not the highest-scoring — surface advisory.
   if (
