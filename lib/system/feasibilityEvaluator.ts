@@ -447,13 +447,37 @@ export function evaluateInverterFeasibility(
     const panelsPerUnit = Math.max(1, inverter.mpptCount * parallelPerMppt * pps);
     const unitsByDc = Math.max(1, Math.ceil(totalDcKw / inverter.dcKwMax));
     const unitsByPanels = Math.max(1, Math.ceil(totalPanels / panelsPerUnit));
-    const minUnits = Math.max(unitsByDc, unitsByPanels);
+    // v60.2 — Also factor MPPT current constraints into minUnits.
+    // If DC/panel capacity says 1 unit but MPPT current requires more channels
+    // (e.g. 4 strings need 4 MPPTs but 1 unit only has 2), the loop must try
+    // additional units. Without this, 12K-2P is rejected for 36-panel arrays
+    // at -10C because 1 unit cannot spread 4 strings across 2 MPPTs within
+    // the 20A cap, while 2x12K-2P (4 MPPTs, 1 string each) passes fine.
+    let unitsByMpptCurrent = 1;
+    if (!isOptimizer && inverter.maxInputCurrentPerMppt && inverter.maxInputCurrentPerMppt > 0) {
+      const numStringsNeeded = stringPanelCounts.length;
+      const strPerMppt1Unit = Math.ceil(numStringsNeeded / inverter.mpptCount);
+      const currPerMppt1Unit = Math.min(strPerMppt1Unit, parallelPerMppt) * designCurrent;
+      if (currPerMppt1Unit > inverter.maxInputCurrentPerMppt + 1e-6) {
+        // Find minimum units where current fits within cap.
+        for (let u = 2; u <= 8; u++) {
+          const mppts = u * inverter.mpptCount;
+          const strPerMppt = Math.ceil(numStringsNeeded / mppts);
+          const curr = Math.min(strPerMppt, parallelPerMppt) * designCurrent;
+          if (curr <= inverter.maxInputCurrentPerMppt + 1e-6) {
+            unitsByMpptCurrent = u;
+            break;
+          }
+        }
+      }
+    }
+    const minUnits = Math.max(unitsByDc, unitsByPanels, unitsByMpptCurrent);
 
     // Try minimum-first; escalate unit count only if allocation fails and
     // DC/AC headroom still permits it. We ALWAYS try at least minUnits
-    // (driven by DC / panel capacity) even if that exceeds maxUnitsByRatio —
-    // the DC/AC gate at the end will reject the candidate if it truly over-
-    // sizes. But we never escalate BEYOND minUnits past the ratio cap.
+    // (driven by DC / panel / MPPT-current capacity) even if that exceeds
+    // maxUnitsByRatio — the DC/AC gate at the end will reject the candidate
+    // if it truly over-sizes. But never escalate BEYOND minUnits past ratio cap.
     const upperUnits = Math.max(minUnits, maxUnitsByRatio);
     for (let units = minUnits; units <= upperUnits; units++) {
       const totalMpptChannels = units * inverter.mpptCount;

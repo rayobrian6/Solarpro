@@ -849,13 +849,14 @@ function sizeInverters(
     // Build the substitute SizedInverter from the recommended CandidateEvaluation.
     const recRef  = bestFit.recommended.modelRef;
     const recResult = bestFit.recommended.result;
+    const substituteQty = recResult.inverterCount ?? 1;
     const substitute: SizedInverter[] = [{
       equipmentDbId: recRef.equipmentDbId,
       brandId:       brand.id,
       acKw:          recRef.acKw,
       dcKwMax:       recRef.dcKwMax,
       mpptCount:     recRef.mpptCount,
-      qty:           recResult.inverterCount ?? 1,
+      qty:           substituteQty,
     }];
 
     // Surface the infeasibility — failures are FeasibilityFailure objects with .code.
@@ -868,17 +869,42 @@ function sizeInverters(
       ? failureCodes.join(', ')
       : 'electrical constraints not met';
 
+    // v60.2 — Do NOT substitute when the replacement degrades DC/AC ratio below MIN.
+    // Scenario: engine picks 12K-2P×1 (ratio=1.20), feasibility rejects it due to
+    // Voc-constrained strings (4 strings on 2 MPPTs > 20A cap), and recommends 2×8K-2P
+    // (ratio=0.90) as substitute — which then triggers DC_AC_RATIO_AC_EXCEEDS_DC error.
+    // The substitute is electrically valid per feasibility but ratio-invalid per the
+    // validation engine. Keep the original model and emit a softer advisory instead.
+    const originalTotalAc = resolved[0].acKw * (resolved[0].qty ?? 1);
+    const substituteTotalAc = recRef.acKw * substituteQty;
+    const originalRatio = totalDcKw / Math.max(originalTotalAc, 0.001);
+    const substituteRatio = totalDcKw / Math.max(substituteTotalAc, 0.001);
+
+    if (originalRatio >= MIN_DC_AC_RATIO && substituteRatio < MIN_DC_AC_RATIO) {
+      warnings.push({
+        severity: 'info',
+        code: 'FEASIBILITY_CHOSEN_INFEASIBLE',
+        message:
+          `String layout advisory: ${chosenId} may have MPPT current concerns `
+          + `(${codesStr}) with this panel combination at cold-temperature Voc. `
+          + `Sizing engine selected ratio-optimal config. Review string layout `
+          + `in the compliance tab.`,
+      });
+      return resolved; // keep original — ratio is better than substitute
+    }
+
     warnings.push({
       severity: 'warning',
       code: 'FEASIBILITY_CHOSEN_INFEASIBLE',
       message:
-        `Feasibility check: Chosen inverter ${chosenId} has concerns ` +
-        `(${codesStr}). Recommended alternative in the same brand: ` +
-        `${recRef.equipmentDbId}.`,
+        `Feasibility check: Chosen inverter ${chosenId} has concerns `
+        + `(${codesStr}). Recommended alternative in the same brand: `
+        + `${recRef.equipmentDbId}.`,
     });
 
     return substitute;
   }
+
 
   // Priority: user's explicit inverter model
   if (input.selectedInverterId) {

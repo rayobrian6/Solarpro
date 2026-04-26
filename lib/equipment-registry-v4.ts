@@ -117,9 +117,15 @@ export interface ElectricalSpecs {
   acOutputVoltage?: number;
   acOutputCurrentMax?: number;
   maxInputCurrent?: number;
+  maxInputCurrentPerMppt?: number;
+  maxParallelStringsPerMppt?: number;
+  mpptChannels?: number;
+  mpptCount?: number;
+  modulesPerDevice?: number;
   mpptVoltageMin?: number;
   mpptVoltageMax?: number;
-  mpptChannels?: number;
+  minMpptVoltage?: number;
+  maxMpptVoltage?: number;
   efficiency?: number;
   rapidShutdownCompliant?: boolean;
   arcFaultProtection?: boolean;
