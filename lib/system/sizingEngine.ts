@@ -387,7 +387,7 @@ function pickRatioAwareTier(
   totalDcKw: number,
   panelCount: number,
   ppu: (m: BrandInverterModelRef) => number,
-): { ref: BrandInverterModelRef; qty: number } | undefined {
+): { ref: BrandInverterModelRef; qty: number; undersized?: boolean } | undefined {
   // Only applies to string / optimizer / hybrid topologies.
   // Micro topologies are handled separately (qty = ceil(panels / modulesPerDevice)).
   const stringModels = brand.supportedInverterModels.filter(
@@ -416,7 +416,7 @@ function pickRatioAwareTier(
     );
     if (!legacyRef) return undefined;
     const legacyQty = unitsRequired(legacyRef, panelCount, totalDcKw, ppu(legacyRef));
-    return { ref: legacyRef, qty: legacyQty };
+    return { ref: legacyRef, qty: legacyQty, undersized: true };
   }
 
   // Step 2: among above-floor candidates, prefer those inside the preferred window.
@@ -1142,6 +1142,28 @@ function sizeInverters(
     });
     return [];
   }
+    // v60.0 — If pickRatioAwareTier fell back to legacy (undersized=true), it means
+    // NO model in this brand can produce a valid DC/AC ratio >= 1.00 for this array.
+    // Surface a clear warning recommending micros or a larger array.
+    if (ratioAwarePick.undersized) {
+      const _smallestAcKw = brand.supportedInverterModels
+        .filter(m => (m.modulesPerDevice ?? 0) === 0)
+        .reduce((min, m) => m.acKw < min ? m.acKw : min, Infinity);
+      const _smallestId = brand.supportedInverterModels
+        .filter(m => (m.modulesPerDevice ?? 0) === 0)
+        .find(m => m.acKw === _smallestAcKw)?.equipmentDbId ?? 'unknown';
+      const _minPanelsNeeded = Math.ceil((_smallestAcKw * 1000) / (input.panelWattage ?? 400));
+      warnings.push({
+        severity: 'warning',
+        code: 'ARRAY_UNDERSIZED_FOR_BRAND',
+        message:
+          `Array (${totalDcKw.toFixed(1)} kW DC, ${input.panelCount} panels) is too small for ${brand.displayName}: ` +
+          `smallest model (${_smallestId}, ${_smallestAcKw} kW AC) gives DC/AC ` +
+          `${(totalDcKw / Math.max(_smallestAcKw, 0.001)).toFixed(2)} — below the 1.00 floor. ` +
+          `Need at least ${_minPanelsNeeded} panels for a valid ratio. ` +
+          `Consider microinverters (Enphase / APsystems) for arrays under ${_minPanelsNeeded} panels.`,
+      });
+    }
   // qty is already computed by pickRatioAwareTier (ratio-optimised).
   const qty = ratioAwarePick.qty;
 

@@ -1,9 +1,11 @@
-export const BUILD_VERSION     = 'v60.0';
+export const BUILD_VERSION     = 'v60.1';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-28'; // v60.0
-export const BUILD_DESCRIPTION = 'v60.0: Ratio-aware inverter tier selection — pickRatioAwareTier() scans all brand models, picks closest to 1.25 DC/AC target; fixes systematic under-ratio failures across all brands';
+export const BUILD_DATE        = '2026-04-28'; // v60.1
+export const BUILD_DESCRIPTION = 'v60.1: ARRAY_UNDERSIZED_FOR_BRAND warning — surfaces clear guidance when array is too small for chosen string brand, recommends micros';
 export const BUILD_FEATURES: string[] = [
-  // v60.0 (newest — must be first for releaseHistory drift-guard)
+  // v60.1 (newest — must be first for releaseHistory drift-guard)
+  'Stage 19.1 (v60.1) — ARRAY_UNDERSIZED_FOR_BRAND warning: when no model in the brand can produce DC/AC ≥1.00, surfaces actionable message with minimum panels needed and micro recommendation',
+  // v60.0
   'Stage 19.0 (v60.0) — Ratio-aware inverter tier selection: pickRatioAwareTier() replaces blind DC-kW tier lookup — scans ALL brand models, computes DC/AC ratio for each, picks closest to 1.25 target while staying ≥1.00 hard floor — universal fix for all brands and future onboarded brands',
   'Stage 19.0 (v60.0) — attemptDownsize() Rule 1 relaxed: unit count increase now allowed when current ratio is below MIN_DC_AC_RATIO (1.00) — enables 2× smaller model when that is the only way to reach valid ratio',
   'Stage 19.0 (v60.0) — Sol-Ark example: 24p/9.6kW now selects 8K-2P ×1 (ratio 1.20) instead of 12K-2P ×1 (ratio 0.80); 36p/14.4kW selects 12K-2P ×1 (ratio 1.20) instead of 15K-2P ×1 (ratio 0.96)',
