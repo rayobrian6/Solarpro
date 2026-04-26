@@ -1,0 +1,333 @@
+{
+  "schemaVersion": "1.0",
+  "category": "battery",
+  "lastUpdated": "2025-01-01",
+  "items": [
+    {
+      "id": "tesla-powerwall-3",
+      "manufacturer": "Tesla",
+      "model": "Powerwall 3",
+      "sku": "PW3-13.5",
+      "category": "battery",
+      "subcategory": "ac_coupled",
+      "certifications": ["UL 9540", "UL 9540A", "IEEE 1547", "IEC 62619"],
+      "specs": {
+        "usableCapacityKwh": 13.5,
+        "peakPowerKw": 11.5,
+        "continuousPowerKw": 11.5,
+        "roundTripEfficiencyPct": 97.5,
+        "voltageNominalV": 50,
+        "chemistry": "LFP",
+        "operatingTempMinC": -20,
+        "operatingTempMaxC": 50,
+        "weightLbs": 287,
+        "dimensionsInches": "43.25 x 24 x 7.6",
+        "ipRating": "IP67",
+        "mountingType": "wall",
+        "outdoorRated": true,
+        "stackable": true,
+        "maxStackUnits": 4,
+        "integratedInverterKw": 11.5,
+        "gridFormingCapable": true,
+        "backupCapable": true,
+        "wholeHomeBackup": true
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "voltageAC": 240,
+        "phaseType": "split_phase",
+        "maxContinuousOutputA": 48,
+        "backfeedBreakerA": 50,
+        "requiresDedicatedCircuit": true,
+        "minBreakerA": 60
+      },
+      "warranty": {
+        "years": 10,
+        "cycleGuarantee": "Unlimited cycles",
+        "capacityRetentionPct": 70
+      },
+      "pricing": {
+        "msrpUsd": 9300,
+        "installationEstimateUsd": 3000,
+        "notes": "Price per unit; does not include installation or gateway"
+      },
+      "compatibility": {
+        "solarInverters": ["Tesla Solar Inverter", "Any grid-tied inverter via AC coupling"],
+        "requiresGateway": true,
+        "gatewayModel": "Tesla Backup Gateway 2"
+      }
+    },
+    {
+      "id": "enphase-iq-battery-5p",
+      "manufacturer": "Enphase",
+      "model": "IQ Battery 5P",
+      "sku": "ENV-IQ-BAT-5P",
+      "category": "battery",
+      "subcategory": "ac_coupled",
+      "certifications": ["UL 9540", "UL 9540A", "IEEE 1547", "IEC 62619"],
+      "specs": {
+        "usableCapacityKwh": 5.0,
+        "peakPowerKw": 3.84,
+        "continuousPowerKw": 3.84,
+        "roundTripEfficiencyPct": 96.0,
+        "voltageNominalV": 48,
+        "chemistry": "LFP",
+        "operatingTempMinC": -20,
+        "operatingTempMaxC": 46,
+        "weightLbs": 114,
+        "dimensionsInches": "42.1 x 17.3 x 8.8",
+        "ipRating": "IP55",
+        "mountingType": "wall",
+        "outdoorRated": true,
+        "stackable": true,
+        "maxStackUnits": 4,
+        "integratedInverterKw": 3.84,
+        "gridFormingCapable": true,
+        "backupCapable": true,
+        "wholeHomeBackup": false
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "voltageAC": 240,
+        "phaseType": "split_phase",
+        "maxContinuousOutputA": 16,
+        "backfeedBreakerA": 20,
+        "requiresDedicatedCircuit": true,
+        "minBreakerA": 20
+      },
+      "warranty": {
+        "years": 15,
+        "cycleGuarantee": "4000 cycles",
+        "capacityRetentionPct": 70
+      },
+      "pricing": {
+        "msrpUsd": 4000,
+        "installationEstimateUsd": 1500,
+        "notes": "Price per unit; IQ System Controller 3 required for backup"
+      },
+      "compatibility": {
+        "solarInverters": ["Enphase IQ8 series microinverters", "Any grid-tied inverter via AC coupling"],
+        "requiresGateway": true,
+        "gatewayModel": "Enphase IQ System Controller 3"
+      }
+    },
+    {
+      "id": "enphase-iq-battery-10t",
+      "manufacturer": "Enphase",
+      "model": "IQ Battery 10T",
+      "sku": "ENV-IQ-BAT-10T",
+      "category": "battery",
+      "subcategory": "ac_coupled",
+      "certifications": ["UL 9540", "UL 9540A", "IEEE 1547", "IEC 62619"],
+      "specs": {
+        "usableCapacityKwh": 10.08,
+        "peakPowerKw": 7.68,
+        "continuousPowerKw": 7.68,
+        "roundTripEfficiencyPct": 96.0,
+        "voltageNominalV": 48,
+        "chemistry": "LFP",
+        "operatingTempMinC": -20,
+        "operatingTempMaxC": 46,
+        "weightLbs": 225,
+        "dimensionsInches": "42.1 x 17.3 x 14.6",
+        "ipRating": "IP55",
+        "mountingType": "wall",
+        "outdoorRated": true,
+        "stackable": true,
+        "maxStackUnits": 2,
+        "integratedInverterKw": 7.68,
+        "gridFormingCapable": true,
+        "backupCapable": true,
+        "wholeHomeBackup": true
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "voltageAC": 240,
+        "phaseType": "split_phase",
+        "maxContinuousOutputA": 32,
+        "backfeedBreakerA": 40,
+        "requiresDedicatedCircuit": true,
+        "minBreakerA": 40
+      },
+      "warranty": {
+        "years": 15,
+        "cycleGuarantee": "4000 cycles",
+        "capacityRetentionPct": 70
+      },
+      "pricing": {
+        "msrpUsd": 7500,
+        "installationEstimateUsd": 2000,
+        "notes": "Price per unit; IQ System Controller 3 required for backup"
+      },
+      "compatibility": {
+        "solarInverters": ["Enphase IQ8 series microinverters", "Any grid-tied inverter via AC coupling"],
+        "requiresGateway": true,
+        "gatewayModel": "Enphase IQ System Controller 3"
+      }
+    },
+    {
+      "id": "generac-pwrcell-9",
+      "manufacturer": "Generac",
+      "model": "PWRcell 9 kWh",
+      "sku": "APKE00009",
+      "category": "battery",
+      "subcategory": "dc_coupled",
+      "certifications": ["UL 9540", "UL 9540A", "IEEE 1547"],
+      "specs": {
+        "usableCapacityKwh": 9.0,
+        "peakPowerKw": 4.5,
+        "continuousPowerKw": 4.5,
+        "roundTripEfficiencyPct": 96.5,
+        "voltageNominalV": 48,
+        "chemistry": "NMC",
+        "operatingTempMinC": -10,
+        "operatingTempMaxC": 45,
+        "weightLbs": 195,
+        "dimensionsInches": "26 x 22 x 12",
+        "ipRating": "IP65",
+        "mountingType": "wall",
+        "outdoorRated": true,
+        "stackable": true,
+        "maxStackUnits": 3,
+        "integratedInverterKw": null,
+        "gridFormingCapable": false,
+        "backupCapable": true,
+        "wholeHomeBackup": true
+      },
+      "interconnection": {
+        "connectionType": "dc_coupled",
+        "voltageAC": 240,
+        "phaseType": "split_phase",
+        "maxContinuousOutputA": null,
+        "backfeedBreakerA": null,
+        "requiresDedicatedCircuit": false,
+        "minBreakerA": null,
+        "notes": "Requires PWRcell Inverter (APKE00006 or APKE00007)"
+      },
+      "warranty": {
+        "years": 10,
+        "cycleGuarantee": "3650 cycles",
+        "capacityRetentionPct": 70
+      },
+      "pricing": {
+        "msrpUsd": 8000,
+        "installationEstimateUsd": 2500,
+        "notes": "Battery module only; PWRcell inverter sold separately (~$3,500)"
+      },
+      "compatibility": {
+        "solarInverters": ["Generac PWRcell Inverter"],
+        "requiresGateway": true,
+        "gatewayModel": "Generac PWRmanager"
+      }
+    },
+    {
+      "id": "franklin-apower-15",
+      "manufacturer": "Franklin Electric",
+      "model": "aPower 15.0",
+      "sku": "FP-15",
+      "category": "battery",
+      "subcategory": "ac_coupled",
+      "certifications": ["UL 9540", "UL 9540A", "IEEE 1547", "IEC 62619"],
+      "specs": {
+        "usableCapacityKwh": 15.0,
+        "peakPowerKw": 10.0,
+        "continuousPowerKw": 10.0,
+        "roundTripEfficiencyPct": 97.0,
+        "voltageNominalV": 51.2,
+        "chemistry": "LFP",
+        "operatingTempMinC": -20,
+        "operatingTempMaxC": 50,
+        "weightLbs": 330,
+        "dimensionsInches": "47.2 x 23.6 x 9.1",
+        "ipRating": "IP65",
+        "mountingType": "wall",
+        "outdoorRated": true,
+        "stackable": true,
+        "maxStackUnits": 3,
+        "integratedInverterKw": 10.0,
+        "gridFormingCapable": true,
+        "backupCapable": true,
+        "wholeHomeBackup": true
+      },
+      "interconnection": {
+        "connectionType": "ac_coupled",
+        "voltageAC": 240,
+        "phaseType": "split_phase",
+        "maxContinuousOutputA": 42,
+        "backfeedBreakerA": 50,
+        "requiresDedicatedCircuit": true,
+        "minBreakerA": 60
+      },
+      "warranty": {
+        "years": 12,
+        "cycleGuarantee": "6000 cycles",
+        "capacityRetentionPct": 70
+      },
+      "pricing": {
+        "msrpUsd": 10500,
+        "installationEstimateUsd": 3000,
+        "notes": "All-in-one unit with integrated inverter"
+      },
+      "compatibility": {
+        "solarInverters": ["Any grid-tied inverter via AC coupling"],
+        "requiresGateway": false,
+        "gatewayModel": null
+      }
+    },
+    {
+      "id": "solaredge-home-battery-10",
+      "manufacturer": "SolarEdge",
+      "model": "Home Battery 10 kWh",
+      "sku": "SEHB-10K-US",
+      "category": "battery",
+      "subcategory": "dc_coupled",
+      "certifications": ["UL 9540", "UL 9540A", "IEEE 1547", "IEC 62619"],
+      "specs": {
+        "usableCapacityKwh": 9.7,
+        "peakPowerKw": 5.0,
+        "continuousPowerKw": 5.0,
+        "roundTripEfficiencyPct": 94.5,
+        "voltageNominalV": 48,
+        "chemistry": "LFP",
+        "operatingTempMinC": -10,
+        "operatingTempMaxC": 50,
+        "weightLbs": 264,
+        "dimensionsInches": "35.8 x 23.6 x 9.4",
+        "ipRating": "IP55",
+        "mountingType": "wall",
+        "outdoorRated": true,
+        "stackable": true,
+        "maxStackUnits": 3,
+        "integratedInverterKw": null,
+        "gridFormingCapable": false,
+        "backupCapable": true,
+        "wholeHomeBackup": false
+      },
+      "interconnection": {
+        "connectionType": "dc_coupled",
+        "voltageAC": 240,
+        "phaseType": "split_phase",
+        "maxContinuousOutputA": null,
+        "backfeedBreakerA": null,
+        "requiresDedicatedCircuit": false,
+        "minBreakerA": null,
+        "notes": "Requires SolarEdge Home Hub inverter"
+      },
+      "warranty": {
+        "years": 10,
+        "cycleGuarantee": "6000 cycles",
+        "capacityRetentionPct": 70
+      },
+      "pricing": {
+        "msrpUsd": 7000,
+        "installationEstimateUsd": 2000,
+        "notes": "Battery only; SolarEdge Home Hub inverter required"
+      },
+      "compatibility": {
+        "solarInverters": ["SolarEdge Home Hub Inverter"],
+        "requiresGateway": false,
+        "gatewayModel": null
+      }
+    }
+  ]
+}

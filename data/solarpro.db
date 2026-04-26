@@ -1,0 +1,88 @@
+{
+  "clients": [
+    {
+      "userId": "user-1",
+      "name": "Personal",
+      "email": "raymond.obrian@yahoo.com",
+      "phone": "",
+      "address": "1010 FRANKLIN ST",
+      "city": "POCAHONTAS",
+      "state": "IL",
+      "zip": "62275",
+      "lat": 38.890536855728,
+      "lng": -89.571266632093,
+      "utilityProvider": "",
+      "monthlyKwh": [
+        3258,
+        3066,
+        3450,
+        3641,
+        4025,
+        4408,
+        4791,
+        4600,
+        4216,
+        3833,
+        3373,
+        3335
+      ],
+      "annualKwh": 46000,
+      "averageMonthlyKwh": 3833,
+      "averageMonthlyBill": 498,
+      "annualBill": 5980,
+      "utilityRate": 0.13,
+      "id": "16598fce-6ba8-4cf1-9f2b-1a84684d7afc",
+      "createdAt": "2026-03-03T04:49:42.120Z",
+      "updatedAt": "2026-03-03T04:49:42.120Z"
+    },
+    {
+      "userId": "fdf4d774-3bf6-435a-a54a-55d259deb999",
+      "name": "John Smith",
+      "email": "john@example.com",
+      "phone": "",
+      "address": "123 Main St",
+      "city": "Austin",
+      "state": "TX",
+      "zip": "78701",
+      "utilityProvider": "",
+      "monthlyKwh": [
+        1000,
+        1000,
+        1000,
+        1000,
+        1000,
+        1000,
+        1000,
+        1000,
+        1000,
+        1000,
+        1000,
+        1000
+      ],
+      "annualKwh": 12000,
+      "averageMonthlyKwh": 1000,
+      "averageMonthlyBill": 180,
+      "annualBill": 1440,
+      "utilityRate": 0.12,
+      "id": "a6847c57-0236-443d-98e5-12791de6baaa",
+      "createdAt": "2026-03-03T04:55:15.289Z",
+      "updatedAt": "2026-03-03T04:55:15.289Z"
+    }
+  ],
+  "projects": [
+    {
+      "userId": "user-1",
+      "clientId": "16598fce-6ba8-4cf1-9f2b-1a84684d7afc",
+      "name": "Personal - Roof Mount",
+      "status": "lead",
+      "systemType": "roof",
+      "notes": "",
+      "id": "7af0b3a9-7135-4481-8043-ad5c51b3c817",
+      "createdAt": "2026-03-03T04:49:53.764Z",
+      "updatedAt": "2026-03-03T04:49:53.764Z"
+    }
+  ],
+  "layouts": [],
+  "productions": [],
+  "proposals": []
+}

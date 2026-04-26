@@ -1,0 +1,16 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Deploy to Vercel
+        run: |
+          npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }}

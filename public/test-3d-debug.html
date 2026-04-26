@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Viewer Debug Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: monospace;
+            background: #0d1117;
+            color: #f1f5f9;
+        }
+        #console {
+            background: #1e293b;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+        .log-entry {
+            margin: 4px 0;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+        .log-info { background: rgba(59, 130, 246, 0.1); color: #93c5fd; }
+        .log-success { background: rgba(34, 197, 94, 0.1); color: #86efac; }
+        .log-error { background: rgba(239, 68, 68, 0.1); color: #fca5a5; }
+        .log-warn { background: rgba(245, 158, 11, 0.1); color: #fcd34d; }
+        #viewer-container {
+            width: 100%;
+            height: 500px;
+            background: #0f172a;
+            border-radius: 8px;
+            border: 2px solid #334155;
+            position: relative;
+        }
+        #loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            z-index: 10;
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #334155;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        #progress-bar {
+            width: 300px;
+            height: 8px;
+            background: #334155;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        #status-text {
+            color: #94a3b8;
+            font-size: 14px;
+        }
+    </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+    <h1>🔍 SolarEngine3D Debug Test</h1>
+    <p>This page tests the 3D viewer initialization with detailed console logging.</p>
+    
+    <div id="viewer-container">
+        <div id="loading-overlay">
+            <div class="spinner"></div>
+            <div id="progress-bar">
+                <div id="progress-fill"></div>
+            </div>
+            <div id="status-text">Initializing...</div>
+        </div>
+    </div>
+
+    <div id="console">
+        <div class="log-entry log-info">📋 Console output will appear below...</div>
+    </div>
+
+    <script>
+        // Override console methods to capture output
+        const consoleDiv = document.getElementById('console');
+        const originalConsole = {
+            log: console.log,
+            error: console.error,
+            warn: console.warn,
+            info: console.info
+        };
+
+        function addLog(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            consoleDiv.appendChild(entry);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+
+        console.log = (...args) => {
+            originalConsole.log(...args);
+            addLog(args.join(' '), 'info');
+        };
+
+        console.error = (...args) => {
+            originalConsole.error(...args);
+            addLog(args.join(' '), 'error');
+        };
+
+        console.warn = (...args) => {
+            originalConsole.warn(...args);
+            addLog(args.join(' '), 'warn');
+        };
+
+        console.info = (...args) => {
+            originalConsole.info(...args);
+            addLog(args.join(' '), 'success');
+        };
+
+        // Test loading Cesium
+        async function testCesiumLoad() {
+            addLog('🚀 Starting CesiumJS load test...', 'info');
+            
+            try {
+                // Load CSS
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = 'https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css';
+                document.head.appendChild(link);
+                addLog('✅ CSS loaded', 'success');
+
+                // Load JS
+                const script = document.createElement('script');
+                script.src = 'https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js';
+                
+                script.onload = () => {
+                    if (window.Cesium) {
+                        addLog('✅ CesiumJS loaded successfully!', 'success');
+                        addLog(`📦 Cesium version: ${window.Cesium.VERSION}`, 'info');
+                        testViewerInit();
+                    } else {
+                        addLog('❌ Cesium not available after load', 'error');
+                    }
+                };
+
+                script.onerror = () => {
+                    addLog('❌ Failed to load CesiumJS from CDN', 'error');
+                };
+
+                document.head.appendChild(script);
+                addLog('⏳ Loading CesiumJS from CDN...', 'info');
+
+            } catch (error) {
+                addLog(`❌ Error loading Cesium: ${error.message}`, 'error');
+            }
+        }
+
+        // Test viewer initialization
+        async function testViewerInit() {
+            addLog('🎬 Initializing Cesium viewer...', 'info');
+            
+            try {
+                const C = window.Cesium;
+                C.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kMWFjYmFkNjc5YzciLCJpZCI6NTc3MzMsImlhdCI6MTYyNzg0NTE4Mn0.XcKpgANiY19MC4bdFUXMVEBToBmqS8kuYpUlxJHYZxk';
+                
+                const viewer = new C.Viewer('viewer-container', {
+                    imageryProvider: false,
+                    baseLayerPicker: false,
+                    geocoder: false,
+                    homeButton: false,
+                    sceneModePicker: false,
+                    navigationHelpButton: false,
+                    animation: false,
+                    timeline: false,
+                    fullscreenButton: false,
+                    vrButton: false,
+                    infoBox: false,
+                    selectionIndicator: false,
+                    shadows: true,
+                    terrainShadows: C.ShadowMode.ENABLED,
+                });
+
+                addLog('✅ Viewer initialized successfully!', 'success');
+                
+                // Hide loading overlay
+                document.getElementById('loading-overlay').style.display = 'none';
+                
+                // Test Google 3D Tiles
+                testGoogleTiles(viewer);
+
+            } catch (error) {
+                addLog(`❌ Error initializing viewer: ${error.message}`, 'error');
+                addLog(`Stack: ${error.stack}`, 'error');
+            }
+        }
+
+        // Test Google 3D Tiles
+        async function testGoogleTiles(viewer) {
+            addLog('🌍 Loading Google Photorealistic 3D Tiles...', 'info');
+            
+            try {
+                const C = window.Cesium;
+                const tileset = await C.Cesium3DTileset.fromUrl(
+                    'https://tile.googleapis.com/v1/3dtiles/root.json?key=AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE',
+                    {
+                        showCreditsOnScreen: true,
+                        maximumScreenSpaceError: 4,
+                    }
+                );
+                
+                viewer.scene.primitives.add(tileset);
+                addLog('✅ Google 3D Tiles loaded successfully!', 'success');
+                
+                // Fly to Phoenix
+                viewer.camera.flyTo({
+                    destination: C.Cartesian3.fromDegrees(-112.074, 33.4484, 500),
+                    orientation: {
+                        heading: C.Math.toRadians(0),
+                        pitch: C.Math.toRadians(-45),
+                        roll: 0
+                    },
+                    duration: 2
+                });
+                
+                addLog('✅ Flew to Phoenix, AZ', 'success');
+                addLog('🎉 All tests passed! 3D viewer is working.', 'success');
+
+            } catch (error) {
+                addLog(`❌ Error loading Google 3D Tiles: ${error.message}`, 'error');
+                addLog(`Stack: ${error.stack}`, 'error');
+            }
+        }
+
+        // Start test
+        window.addEventListener('load', () => {
+            addLog('📄 Page loaded', 'info');
+            setTimeout(testCesiumLoad, 500);
+        });
+    </script>
+</body>
+</html>

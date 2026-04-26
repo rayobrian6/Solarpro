@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partner Outreach DRAFT — v47.434c</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         max-width: 860px; margin: 40px auto; padding: 0 24px;
+         color: #1a1a1a; line-height: 1.6; }
+  h1 { font-size: 1.5rem; border-bottom: 2px solid #2563eb; padding-bottom: 8px; color: #1e3a5f; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; color: #1e3a5f; border-bottom: 1px solid #dde3ef; padding-bottom: 4px; }
+  h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #2563eb; }
+  code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px;
+        overflow-x: auto; font-size: 0.88em; }
+  pre code { background: none; padding: 0; color: inherit; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th { background: #eff6ff; color: #1e3a5f; text-align: left; padding: 8px 12px;
+       border: 1px solid #bfdbfe; font-size: 0.9rem; }
+  td { padding: 8px 12px; border: 1px solid #dde3ef; font-size: 0.9rem; vertical-align: top; }
+  tr:nth-child(even) td { background: #f8faff; }
+  strong { color: #1e3a5f; }
+  hr { border: none; border-top: 1px solid #dde3ef; margin: 2rem 0; }
+  ul { padding-left: 1.4em; }
+  li { margin-bottom: 0.3em; }
+  .draft-banner { background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;
+                  padding: 10px 16px; margin-bottom: 24px; font-size: 0.9rem; color: #78350f; }
+  .footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #dde3ef;
+            font-size: 0.85rem; color: #6b7280; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="draft-banner">⚠️ <strong>DRAFT — pending review before sending.</strong> Fill in <code>[name]</code>, <code>[your name]</code>, and <code><your-staging-url></code> before sending.</div>
+<hr />
+<p><strong>Subject:</strong> SolarPro × Survey Integration — v47.434c shipped, v47.435 unblocked by 4 items</p>
+<hr />
+<p>Hey [name],</p>
+<p>Quick integration update from our side + four items we need to unblock v47.435 (ingest layer).</p>
+<hr />
+<h2>What we shipped (v47.434 series)</h2>
+<p><strong>v47.434a — Wire-format compatibility fix</strong></p>
+<p>We aligned our receiver with your <code>webhookService.ts</code> (commit <code>2cc3537f</code>):</p>
+<ul>
+<li>Accept ISO-8601 timestamps (in addition to Unix epoch)</li>
+<li>Accept <code>sha256=&lt;hex&gt;</code> and raw hex signatures</li>
+<li>Accept missing <code>schemaVersion</code> (default → <code>'1.0'</code>)</li>
+</ul>
+<p><strong>v47.434b — 202 response (stops your retry queue)</strong></p>
+<p>Changed the terminal response on successful HMAC + envelope verification from <code>501 Not Implemented</code> to <code>202 Accepted</code> with reason <code>INGEST_NOT_IMPLEMENTED_BUT_LOGGED</code>. Your delivery worker was treating our 501 as a failure and scheduling retries. 202 stops that cleanly while ingest is still pending.</p>
+<p><strong>v47.434c — Pull-based release signaling (shipped today)</strong></p>
+<p>Added two public endpoints you can poll to stay current on our wire contract and release history without reading our source:</p>
+<pre><code>GET /api/system/capabilities
+GET /api/system/release?limit=N
+</code></pre>
+<p>Full staging state-of-the-union is in the attached staging report: <code>INTEGRATION_STAGING_REPORT_v1.md</code>.</p>
+<hr />
+<h2>What you can do right now (no changes on your side needed)</h2>
+<p>All endpoints are live in staging.</p>
+<h3>1. Capabilities endpoint</h3>
+<pre><code>GET /api/system/capabilities
+</code></pre>
+<p>Returns our current wire contract as structured JSON: inbound endpoint, HMAC config (algorithm, signed-string format, header names, accepted timestamp and signature formats, tolerance window), response code contract (202 on success, 200 on duplicate, 401 on bad sig, 400 on bad envelope, 500 on misconfigured receiver), feature flag snapshots (<code>project_id</code> origin values, delivery status enum), and an advertising block for the outbound handoff JWT contract we haven't shipped yet (so you can plan your side).</p>
+<p>Supports <code>If-None-Match</code> / <code>304 Not Modified</code> — cache the ETag and only reparse on changes. Sample:</p>
+<pre><code class="language-bash"># First call
+curl -i https://&lt;your-staging-url&gt;/api/system/capabilities
+
+# Subsequent calls — 304 if contract unchanged
+curl -i -H 'If-None-Match: &quot;v47.434c-a46a36f8ad9c1c01&quot;' \
+  https://&lt;your-staging-url&gt;/api/system/capabilities
+</code></pre>
+<p>Recommended: poll hourly with the ETag short-circuit. Contract is stable until we ship v47.435+.</p>
+<h3>2. Release history endpoint</h3>
+<pre><code>GET /api/system/release?limit=N        # default limit=10, max=100
+</code></pre>
+<p>Returns structured release history from our version manifest: <code>{ latest, releases[], totalCount }</code>. Each entry has <code>version</code>, <code>stage</code>, <code>title</code>, <code>summary</code>. Newest first.</p>
+<pre><code class="language-bash">curl https://&lt;your-staging-url&gt;/api/system/release?limit=5
+</code></pre>
+<p>Recommended: poll daily. <code>latest.version</code> gives you our current deployed version without parsing anything.</p>
+<h3>3. <code>producerVersion</code> in every webhook response</h3>
+<p>Every response body from <code>POST /api/webhooks/survey-complete</code> now includes:</p>
+<pre><code class="language-json">{ &quot;producerVersion&quot;: &quot;v47.434c&quot;, ... }
+</code></pre>
+<p>Applies to all response paths — 202 success, 200 duplicate, 401 invalid sig, 400 bad envelope, 500 misconfigured. Log it per delivery for your audit trail.</p>
+<hr />
+<h2>Blocking items for v47.435 (ingest pipeline)</h2>
+<p>We cannot safely implement ingest without locking these four items:</p>
+<hr />
+<h3>Q2 — Auth on <code>GET /api/surveys/{id}</code></h3>
+<p>We need to fetch the full survey payload after receiving your thin-event webhook. What auth scheme should we use?</p>
+<ul>
+<li><strong>Option A:</strong> Same bearer JWT your mobile app uses (short-lived — we'd need a service account flow to keep it fresh)</li>
+<li><strong>Option B:</strong> Long-lived service bearer token (simpler — needs a rotation policy)</li>
+<li><strong>Option C:</strong> Something else</li>
+</ul>
+<p>We need the header name, token format, and how we obtain/refresh it.</p>
+<hr />
+<h3>Q3 — Webhook payload: thin-event vs fat-payload final decision</h3>
+<p>Your <code>webhookService.ts</code> currently sends a thin event (<code>event_id</code>, <code>survey_id</code>, <code>completed_at</code>, <code>event</code>, <code>schemaVersion</code>) but actual deliveries also include the fat fields: <code>project_id</code>, <code>project_name</code>, <code>inspector_name</code>, <code>site_name</code>, <code>status</code>, <code>occurred_at</code>.</p>
+<p>We need a final answer on the payload shape for v1:</p>
+<ul>
+<li><strong>Option A (thin-event, confirmed):</strong> Webhook body stays minimal. We always follow up with <code>GET /api/surveys/{id}</code> for the full payload. Fat fields in current deliveries are an implementation detail that will be removed.</li>
+<li><strong>Option B (fat-payload, confirmed):</strong> Webhook body always includes the full set. We can skip the follow-up GET and ingest directly from the webhook body. Fields present today are stable and we should depend on them.</li>
+<li><strong>Option C (thin + fat, both stable):</strong> Both are guaranteed. We use fat fields when present and fall back to the GET otherwise.</li>
+</ul>
+<p>We need a single definitive answer here — ingest implementation depends on it.</p>
+<hr />
+<h3>Q4 — Handoff JWT: launch URL shape</h3>
+<p>We're building the handoff JWT minter for v47.435 (our side mints the HS256 token; you already have the <code>GET /api/handoff/:token</code> receiver). We need:</p>
+<ul>
+<li>The exact launch URL shape — <code>/launch?token=&lt;jwt&gt;</code>, <code>/new-survey?token=&lt;jwt&gt;</code>, or something else?</li>
+<li>Web URL and mobile deep-link scheme both (e.g. <code>yourapp://survey/launch?token=&lt;jwt&gt;</code>)</li>
+<li>Any required query params beyond <code>token=</code></li>
+</ul>
+<hr />
+<h3>Q8 — Surveys with <code>project_id = null</code></h3>
+<p>Walk-in inspections (surveys started directly in your app, not via a SolarPro handoff JWT) will have <code>project_id = null</code>. What should we do when we receive a <code>survey.completed</code> event with <code>project_id = null</code>?</p>
+<ul>
+<li><strong>Option A:</strong> Auto-create an orphan project in SolarPro (<code>origin=survey</code>, no existing project linked). User sees it in their dashboard and can merge/assign later.</li>
+<li><strong>Option B:</strong> Accept the delivery (202), log it, skip ingest entirely. Walk-in surveys are out of scope for v1.</li>
+<li><strong>Option C:</strong> Accept the delivery, log it, route it to a manual-triage queue. Admin UI for triage ships in v47.436.</li>
+</ul>
+<p>We're leaning toward <strong>Option C</strong> as the most operationally safe — but we'll implement whatever you confirm.</p>
+<hr />
+<h2>Additional request: sample webhook POST</h2>
+<p>Can you send a real <code>POST /api/webhooks/survey-complete</code> from your staging environment to our receiver?</p>
+<p><strong>Staging receiver:</strong></p>
+<pre><code>https://&lt;your-staging-url&gt;/api/webhooks/survey-complete
+</code></pre>
+<p>We want to verify end-to-end HMAC under real conditions (your actual signing code, your actual timestamp, your actual payload shape) before writing the ingest transform layer.</p>
+<p>Preferred: raw request (headers + body) copied from your delivery log after a real POST.</p>
+<p>Confirm you have <code>SURVEY_WEBHOOK_SECRET</code> from the previous exchange, or flag if it needs to be regenerated.</p>
+<hr />
+<h2>Outbound release push (optional — flag now, build later)</h2>
+<p>We've designed an outbound <code>system.release</code> push event — SolarPro HMAC-signs and POSTs a notification to a partner endpoint on every deploy. Tells your dashboard our new version + whether the contract changed, without polling.</p>
+<p>Before we build it, we need:</p>
+<ol>
+<li>Do you want push at all, or is polling <code>/api/system/capabilities</code> with ETag short-circuit sufficient for your ops needs?</li>
+<li>If yes: what endpoint should we POST to?</li>
+<li>If yes: we'll need to exchange a second shared secret (<code>PARTNER_RELEASE_WEBHOOK_SECRET</code>).</li>
+</ol>
+<p>No action needed for v47.435 — just flagging now so we can batch it in the same secret-exchange round as <code>SOLARPRO_HANDOFF_SECRET</code> if you want it.</p>
+<hr />
+<h2>Secrets status</h2>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Direction</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SURVEY_WEBHOOK_SECRET</code></td>
+<td>Your app → SolarPro (inbound)</td>
+<td>Should be exchanged — confirm or request regen</td>
+</tr>
+<tr>
+<td><code>SOLARPRO_HANDOFF_SECRET</code></td>
+<td>SolarPro → your handoff receiver (outbound)</td>
+<td><strong>Not yet exchanged — needed for v47.435</strong></td>
+</tr>
+<tr>
+<td><code>PARTNER_RELEASE_WEBHOOK_SECRET</code></td>
+<td>SolarPro → your release receiver (outbound)</td>
+<td>Optional — only if you want push notifications</td>
+</tr>
+</tbody>
+</table>
+<p>We should exchange <code>SOLARPRO_HANDOFF_SECRET</code> in the same round as your Q4 answer. Suggest 1Password secure share or age-encrypted attachment — let us know your preference.</p>
+<hr />
+<h2>Summary of what we need back</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Item</th>
+<th>Blocks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q2</td>
+<td>Auth scheme for <code>GET /api/surveys/{id}</code></td>
+<td>v47.435 ingest pipeline</td>
+</tr>
+<tr>
+<td>Q3</td>
+<td>Thin vs fat payload — final decision</td>
+<td>v47.435 transform layer</td>
+</tr>
+<tr>
+<td>Q4</td>
+<td>Handoff launch URL shape + deep-link scheme</td>
+<td>v47.435 JWT minter</td>
+</tr>
+<tr>
+<td>Q8</td>
+<td>Null <code>project_id</code> handling (walk-in surveys)</td>
+<td>v47.435 ingest branching</td>
+</tr>
+<tr>
+<td>—</td>
+<td>Sample webhook POST from your staging env</td>
+<td>Pre-v47.435 end-to-end verification</td>
+</tr>
+<tr>
+<td>—</td>
+<td>Push vs pull decision for release signaling</td>
+<td>v47.435 scoping (optional)</td>
+</tr>
+<tr>
+<td>—</td>
+<td><code>SOLARPRO_HANDOFF_SECRET</code> exchange</td>
+<td>v47.435 handoff JWT minter</td>
+</tr>
+</tbody>
+</table>
+<p>Once we have these answers, we'll move immediately into v47.435 implementation.</p>
+<p>[your name]</p>
+<hr />
+<p><em>Staging report attached: <code>INTEGRATION_STAGING_REPORT_v1.md</code></em>
+<em>Capabilities endpoint live: <code>GET /api/system/capabilities</code></em>
+<em>Release history live: <code>GET /api/system/release</code></em></p>
+</body>
+</html>

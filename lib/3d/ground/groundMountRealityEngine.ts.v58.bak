@@ -1,0 +1,1457 @@
+/**
+ * groundMountRealityEngine.ts — GROUND MOUNT REALITY ENGINE v4.0
+ * ================================================================
+ *
+ * THE SINGLE SOURCE OF TRUTH for all ground-mount geometry.
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * ARCHITECTURE RULES (ENFORCED)
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *  1. The 3D renderer is NOT allowed to place objects independently.
+ *  2. ALL geometry comes from this engine's output contract.
+ *  3. NO visual-only placement logic.
+ *  4. Roof / fence systems are COMPLETELY UNTOUCHED.
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * BUILD SEQUENCE (MANDATORY)
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *   Step 1 — PILES / PYLONS
+ *     PLP POWER DRIVE™: single I-beam pylon per bay, at N-S midpoint of array
+ *     IronRidge XR: paired N+S round pipe posts per bay
+ *     Spacing ≤ PLP_BAY_SPAN_M or XR_BAY_SPAN_M
+ *     Must be collinear
+ *
+ *   Step 2 — STRONGBACKS
+ *     PLP: ONE N-S tilted strongback per pylon (SP3284 component, mounts TO pylon)
+ *          Runs south-to-north across the array depth (tableDepthM), tilted at array tilt
+ *          Mounted via Strongback Attachment bracket at pylon top
+ *          Support Strut braces south end of strongback to pylon at ~35% height
+ *          Length = totalPanelH (slant length = 2*panelH for 2-row portrait)
+ *          Does NOT span between pylons -- each is independent per-pylon component
+ *     XR:  Two flat E-W cross-pipes at uniform post tops (S + N)
+ *
+ *   Step 3 — RAILS
+ *     PLP: 4 PX Rails (E-W, tilted), positioned at positions derived from PLP_CLAMP_INSET_FRAC (15%/85% per row)
+ *          of totalPanelH (= 2 × panelH) from south end of strongback
+ *     XR:  E-W tilted XR1000 rails, one per row of panels
+ *     Cannot float — must terminate at strongback positions
+ *
+ *   Step 4 — PANELS
+ *     Derived from rail positions
+ *     Cannot exist without rails
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * OUTPUT CONTRACT
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *   GroundSystemOutput {
+ *     piles:       PileSpec[]        // Step 1
+ *     strongbacks: StrongbackSpec[]  // Step 2
+ *     rails:       RailSpec[]        // Step 3
+ *     members:     RackingMember[]   // flat renderable list (all of above as boxes)
+ *     panelAttachPoints: PanelAttachPoint[]  // where panels clip to rails
+ *     valid:       boolean           // false = build failed, do not render
+ *     errors:      string[]          // validation errors
+ *     debugLog:    string[]
+ *     groundZ:     number
+ *     sPostTopZ:   number
+ *     nPostTopZ:   number
+ *     sRailZ:      number
+ *     nRailZ:      number
+ *     tableDepthM: number
+ *     baySpanM:    number
+ *   }
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * PARENT-CHILD HIERARCHY
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *   system
+ *    └── PLP POWER DRIVE™:
+ *         └── pylons[]         ← Step 1 (one I-beam per bay, N-S center)
+ *         └── strongback       ← Step 2 (one tilted E-W beam, spans all bays)
+ *              └── tri_legs[]  ← Step 3a (2 angled legs per pylon = triangle)
+ *              └── px_rails[]  ← Step 3b (4 E-W rails at 15%/85% per-row positions)
+ *                   └── panels[] ← Step 4 (clamp onto rails)
+ *    └── IronRidge XR:
+ *         └── pile_row (south + north per bay)
+ *              └── strongbacks[] ← Step 2 (two flat E-W cross pipes)
+ *                   └── xr_rails[] ← Step 3 (one tilted E-W rail per row)
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * PLP POWER DRIVE™ — REAL STRUCTURE (SP3284-3 manual)
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *   Single I-beam pylon per bay, driven at N-S midpoint of array
+ *   One tilted E-W strongback per pylon (pivots from pylon top)
+ *   Triangular support per bay: 2 legs from pylon top to beam ends (S-leg + N-leg)
+ *   4 PX Rails (E-W): 2 rails per portrait row × 2 rows = 4 total
+ *   tableRise    = 2 × panelH × sin(tilt)   [full 2-row array]
+ *   tableDepthM  = 2 × panelH × cos(tilt)   [N-S ground projection]
+ *   pylonH       = MOUNT_HEIGHT_M + tableRise/2
+ *
+ * SIDE VIEW (looking east):
+ *
+ *    [N2][N1]  [S2][S1]   ← 4 PX Rails (E-W, tilted)
+ *    ══════════════════  ← Strongback (continuous tilted spine)
+ *    N-leg ╱│╲ S-leg    ← 2 angled supports per bay (triangular)
+ *         ╱ │ ╲
+ *    ════════╪══════  ← I-beam pylon top (apex of triangle)
+ *              │
+ *    ─────────────── grade
+ *
+ * FRONT VIEW (looking north):
+ *
+ *    [panel][panel][panel]   ← south row (lower)
+ *    [panel][panel][panel]   ← north row (higher, behind)
+ *    ═════════════════════  Strongback (one E-W beam)
+ *         ║   ║   ║         I-beams (one per bay, centered)
+ *
+ * IRONRIDGE XR1000 — H-FRAME
+ * ══════════════════════════════════════════════════════════════════
+ *
+ *   Uniform post height on both N and S sides
+ *   XR rails run E-W at panel tilt angle, one per row of panels
+ *   Posts connected by diagonal leg braces
+ */
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type GroundSystemStyle = 'pipe' | 'ironridge';
+
+export interface GroundPanel {
+  id: string;
+  lat: number;
+  lng: number;
+  height: number;
+  tilt: number;
+  azimuth: number;
+  arrayRow: number;
+  col?: number;
+  row?: number;
+  systemType: 'ground';
+  orientation: 'portrait' | 'landscape';
+  wattage?: number;
+  heading?: number;
+  pitch?: number;
+  roll?: number;
+}
+
+export interface RackingMember {
+  key: string;
+  name: string;
+  lat: number;
+  lng: number;
+  z: number;
+  headingRad: number;
+  pitchRad: number;
+  dims: [number, number, number];
+  // Cesium HPR box: heading is CW from North. Body axes after heading rotation:
+  //   heading=0°  (North): bodyX=East,  bodyY=North → dims[0]=EW, dims[1]=NS
+  //   heading=90° (East):  bodyX=North, bodyY=West  → dims[0]=NS, dims[1]=EW  ← hEW
+  //   heading=180°(South): bodyX=West,  bodyY=South → dims[0]=EW, dims[1]=NS  ← hNS
+  // RULE: length always goes in dims[1], cross-section in dims[0], height in dims[2]
+  //   E-W members (hEW=90°):  [cross_section, E-W_length, height]
+  //   N-S members (hNS=180°): [cross_section, N-S_length, height]
+  //   Vertical piles:         [D, D, height] (symmetric — dims[0,1] irrelevant)
+  color: RackingColor;
+  memberType: MemberType;
+}
+
+export type MemberType =
+  | 'pile'        // vertical pipe (N or S row)
+  | 'strongback'  // horizontal E-W pipe on top of pile tops (was 'horiz')
+  | 'powerrail'   // tilted N-S Power Rail (PLP) connecting N+S strongbacks
+  | 'xrrail'      // IronRidge XR E-W rail (tilted at panel angle)
+  | 'cap'         // top cap rail
+  | 'brace';      // N-S or diagonal cross-brace
+
+export interface RackingColor { r: number; g: number; b: number; a: number; }
+
+// ── Step 1: Pile spec ─────────────────────────────────────────────────────────
+export interface PileSpec {
+  id: string;
+  lat: number;
+  lng: number;
+  groundZ: number;
+  topZ: number;        // above-grade top of pile
+  height: number;      // total above-grade height
+  row: 'south' | 'north' | 'uniform';
+  bayIndex: number;
+}
+
+// ── Step 2: Strongback spec ───────────────────────────────────────────────────
+export interface StrongbackSpec {
+  id: string;
+  lat: number;
+  lng: number;
+  z: number;           // centerline Z
+  lengthM: number;     // total E-W span
+  row: 'south' | 'north' | 'uniform';
+  pileIds: string[];   // which piles this strongback rests on
+}
+
+// ── Step 3: Rail spec ─────────────────────────────────────────────────────────
+export interface RailSpec {
+  id: string;
+  startLat: number; startLng: number; startZ: number;
+  endLat: number;   endLng: number;   endZ: number;
+  midLat: number;   midLng: number;   midZ: number;
+  lengthM: number;
+  pitchRad: number;
+  headingRad: number;
+  railType: 'powerrail' | 'xrrail';
+  strongbackIds: string[];  // which strongbacks this rail connects
+}
+
+// ── Panel attach point ────────────────────────────────────────────────────────
+export interface PanelAttachPoint {
+  panelId: string;
+  railIds: string[];   // at least 2 rail attachment points required
+  clampZone: 'left' | 'right' | 'center';
+}
+
+// ── Full output contract ──────────────────────────────────────────────────────
+export interface GroundSystemOutput {
+  piles:             PileSpec[];
+  strongbacks:       StrongbackSpec[];
+  rails:             RailSpec[];
+  members:           RackingMember[];   // flat renderable list
+  panelAttachPoints: PanelAttachPoint[];
+  valid:             boolean;
+  errors:            string[];
+  debugLog:          string[];
+  groundZ:           number;
+  sPostTopZ:         number;
+  nPostTopZ:         number;
+  sRailZ:            number;
+  nRailZ:            number;
+  tableDepthM:       number;
+  baySpanM:          number;
+  // v5.4: Grid-corrected panel positions (deterministic, drift-free).
+  // Renderer MUST use these instead of raw planeEngine panel positions.
+  // Only populated for PLP style (pipe). IronRidge returns input panels as-is.
+  correctedPanels:   GroundPanel[];
+  // v5.5: Clearance diagnostics
+  lowSideClearanceM:  number;  // south bottom edge of row 0 above grade
+  highSideClearanceM: number;  // north top edge of back row above grade
+  solvedPlaneZ:       number;  // strongback center Z (solved panel plane)
+  pylonHeightRange:   [number, number]; // [min, max] pylon above-grade height
+}
+
+export interface BuildRackingOptions {
+  style: GroundSystemStyle;
+  panels: GroundPanel[];
+  basePlaneZ: number;
+  tiltDeg: number;
+  azimuthDeg: number;
+  orientation: 'portrait' | 'landscape';
+}
+
+// Legacy alias — renderer uses GroundRackingResult for backward compat
+export type GroundRackingResult = GroundSystemOutput;
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+export const PLP_BAY_SPAN_M = 6.10;   // ~20ft between pile pairs
+export const XR_BAY_SPAN_M  = 3.66;   // ~12ft between pile pairs
+export const PLP_ROW_COUNT  = 2;       // portrait rows per table
+export const XR_ROW_COUNT   = 4;       // landscape rows per array
+export const MOUNT_HEIGHT_M = 1.2;     // south pile height above grade (~4ft) [legacy, kept for XR/IronRidge]
+export const PLP_MIN_PANEL_CLEARANCE_M = 0.6096; // 24 inches — PLP low-side panel bottom edge above grade (v5.5)
+export const PLP_MAX_SPAN_M = 7.32;    // engineering max bay span for PLP
+export const XR_MAX_SPAN_M  = 4.88;    // engineering max bay span for XR
+
+export const PW_PORTRAIT   = 1.134;
+export const PH_PORTRAIT   = 1.722;
+export const PW_LANDSCAPE  = 1.722;
+export const PH_LANDSCAPE  = 1.134;
+export const PANEL_THICKNESS = 0.040;
+export const PLANE_ENGINE_PANEL_OFFSET_M = 0.05;
+
+// Member cross-section sizes (manufacturer spec)
+export const VERT_PIPE_D   = 0.073;  // 2.5" Sch40 OD (~73mm) — vertical pile
+export const HORIZ_PIPE_D  = 0.060;  // 2" Sch40 OD (~60mm) — strongback E-W pipe
+export const POWER_RAIL_H  = 0.065;  // Power Rail height (C-channel)
+export const POWER_RAIL_W  = 0.040;  // Power Rail width
+export const BRACE_D       = 0.038;  // cross-brace tube OD
+export const XR_RAIL_H     = 0.045;
+export const XR_RAIL_W     = 0.030;
+
+// ── PLP POWER DRIVE™ members (SP3284-3) ──────────────────────────────────────
+// I-beam pylon: W6x12 / W6x15 steel, modelled as rectangular box
+// Source: Gerdau Solar Post datasheet (W6x12: bf=102mm EW, d=153mm NS)
+export const PLP_IBEAM_W   = 0.102;   // ~4" EW flange width (W6x12 bf=102mm per Gerdau datasheet)
+export const PLP_IBEAM_D   = 0.152;   // ~6" NS web depth (W6 series) [v5.2: 102->152mm per Gerdau datasheet]
+// Strongback: aluminum C-channel extrusion ~2.5" × 3.5"
+export const PLP_SB_W      = 0.064;   // ~2.5" width
+export const PLP_SB_H      = 0.089;   // ~3.5" height
+// Support Strut: aluminum tube ~1.5" OD
+export const PLP_STRUT_D   = 0.038;
+// PX Rail: UD POWER RAIL™ aluminum C-channel ~1.5" × 2"
+export const PLP_RAIL_W    = 0.038;
+export const PLP_RAIL_H    = 0.051;
+// Strut Attachment position on I-beam as fraction of pylonH from grade
+// Source: SP3284 v2 RevA Step 3 -- position is field-adjustable per site tilt spec
+// 0.35 = ~35% up pylon = reasonable default for visual representation
+export const PLP_STRUT_FRAC = 0.35;
+// Support mode: controls how the strongback is braced per pylon
+// "single_strut_cantilever" = SP3284 spec: one strut (south), north end cantilevered
+// "dual_strut"               = future: symmetric south + north struts
+export type PLPSupportMode = 'single_strut_cantilever' | 'dual_strut';
+export const PLP_SUPPORT_MODE: PLPSupportMode = 'single_strut_cantilever';
+// Rail clamp inset as fraction of panel height from each edge
+// 0.15 = 15% from panel edge (bottom rail), 85% from panel edge (top rail)
+// Source: user spec + SP3284 module frame clamping zone guidance
+export const PLP_CLAMP_INSET_FRAC = 0.15;
+// Maximum strongback cantilever per side beyond outermost pylon (meters)
+// Engineering limit for aluminum C-channel strongback
+export const PLP_MAX_CANTILEVER_M = 1.50;
+// Panel column gap for PLP: 0m (panels share clamp faces, no E-W gap in grid)
+export const PLP_PANEL_COL_GAP_M   = 0.00;
+
+// Colours
+export const COLOR_PILE:       RackingColor = { r: 0.38, g: 0.38, b: 0.40, a: 1.0 }; // medium steel — high contrast against terrain
+export const COLOR_STRONGBACK: RackingColor = { r: 0.72, g: 0.74, b: 0.76, a: 1.0 }; // light aluminium — dominant spine
+export const COLOR_RAIL:       RackingColor = { r: 0.80, g: 0.82, b: 0.84, a: 1.0 }; // bright aluminium — sits above strongback
+export const COLOR_BRACE:      RackingColor = { r: 0.32, g: 0.32, b: 0.34, a: 1.0 }; // mid-tone steel
+export const COLOR_XR:         RackingColor = { r: 0.50, g: 0.55, b: 0.65, a: 1.0 }; // XR blue-grey
+
+// Legacy alias
+export const COLOR_HORIZ = COLOR_STRONGBACK;
+
+// ─── Math helpers ─────────────────────────────────────────────────────────────
+
+const DEG = Math.PI / 180;
+const MPD = 111320; // meters per degree latitude
+
+function mpdLng(lat: number) { return MPD * Math.cos(lat * DEG); }
+
+function distM(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dlat = (lat2 - lat1) * MPD;
+  const dlng = (lng2 - lng1) * mpdLng(lat1);
+  return Math.sqrt(dlat * dlat + dlng * dlng);
+}
+
+function midpt(lat1: number, lng1: number, lat2: number, lng2: number) {
+  return { lat: (lat1 + lat2) / 2, lng: (lng1 + lng2) / 2 };
+}
+
+function panelDims(o: 'portrait' | 'landscape') {
+  return o === 'landscape'
+    ? { pw: PW_LANDSCAPE, ph: PH_LANDSCAPE }
+    : { pw: PW_PORTRAIT,  ph: PH_PORTRAIT  };
+}
+
+function hRad(azDeg: number): number { return azDeg * DEG; }
+
+export function withinTableRowSpacingM(panelH: number, tiltDeg: number): number {
+  return panelH * Math.cos(tiltDeg * DEG);
+}
+
+// ─── Member builder ────────────────────────────────────────────────────────────
+
+function mbr(
+  key: string, name: string,
+  lat: number, lng: number, z: number,
+  heading: number, pitch: number,
+  dims: [number, number, number],
+  color: RackingColor,
+  memberType: MemberType,
+): RackingMember {
+  return { key, name, lat, lng, z, headingRad: heading, pitchRad: pitch, dims, color, memberType };
+}
+
+// ─── Row sort ──────────────────────────────────────────────────────────────────
+
+function sortRows(panels: GroundPanel[]): Array<[number, GroundPanel[]]> {
+  const map = new Map<number, GroundPanel[]>();
+  for (const p of panels) {
+    const r = p.arrayRow ?? 0;
+    if (!map.has(r)) map.set(r, []);
+    map.get(r)!.push(p);
+  }
+  map.forEach(rp => rp.sort((a, b) => (a.col ?? 0) - (b.col ?? 0)));
+  return Array.from(map.entries()).sort((a, b) => {
+    const avgA = a[1].reduce((s, p) => s + p.lat, 0) / a[1].length;
+    const avgB = b[1].reduce((s, p) => s + p.lat, 0) / b[1].length;
+    return avgA - avgB; // south first
+  });
+}
+
+// ─── Bay column selection ──────────────────────────────────────────────────────
+// Returns column indices where piles are placed along E-W row.
+// Always includes first and last panel columns.
+// Adds intermediate piles wherever span exceeds spanM.
+
+function bayColumns(row: GroundPanel[], spanM: number): number[] {
+  const n = row.length;
+  if (n === 0) return [];
+  if (n === 1) return [0];
+  const set = new Set<number>([0, n - 1]);
+  if (n > 2) {
+    const f = row[0];
+    const posM = row.map(p => distM(f.lat, f.lng, p.lat, p.lng));
+    let last = 0;
+    for (let i = 1; i < n - 1; i++) {
+      if (posM[i] - last >= spanM) { set.add(i); last = posM[i]; }
+    }
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+// ─── Validation Engine ─────────────────────────────────────────────────────────
+
+interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+function validateBuildOutput(
+  piles: PileSpec[],
+  strongbacks: StrongbackSpec[],
+  rails: RailSpec[],
+  members: RackingMember[],
+  maxSpanM: number,
+  debugLog: string[],
+): ValidationResult {
+  const errors: string[] = [];
+
+  // Rule 1: Must have at least 1 pile
+  if (piles.length === 0) {
+    errors.push('FAIL: No piles generated');
+  }
+
+  // Rule 2: Must have at least 1 strongback
+  if (strongbacks.length === 0) {
+    errors.push('FAIL: No strongbacks generated');
+  }
+
+  // Rule 3: Must have at least 1 rail
+  if (rails.length === 0) {
+    errors.push('FAIL: No rails generated');
+  }
+
+  // Rule 4: All piles must be within max span of adjacent pile
+  const southPiles = piles.filter(p => p.row === 'south' || p.row === 'uniform');
+  for (let i = 0; i < southPiles.length - 1; i++) {
+    const p0 = southPiles[i];
+    const p1 = southPiles[i + 1];
+    const span = distM(p0.lat, p0.lng, p1.lat, p1.lng);
+    if (span > maxSpanM * 1.05) { // 5% tolerance
+      errors.push(`WARN: Bay span ${span.toFixed(2)}m exceeds max ${maxSpanM}m between pile ${i} and ${i+1}`);
+    }
+  }
+
+  // Rule 5: No floating rails (each rail must reference valid strongback ids)
+  const sbIds = new Set(strongbacks.map(s => s.id));
+  for (const rail of rails) {
+    for (const sbId of rail.strongbackIds) {
+      if (!sbIds.has(sbId)) {
+        errors.push(`FAIL: Rail ${rail.id} references unknown strongback ${sbId}`);
+      }
+    }
+  }
+
+  // Rule 6: Rails must have positive length
+  for (const rail of rails) {
+    if (rail.lengthM < 0.1) {
+      errors.push(`FAIL: Rail ${rail.id} has near-zero length ${rail.lengthM.toFixed(3)}m`);
+    }
+  }
+
+
+  // -- PLP v5.2 structural checks (spec-driven) --------------------------------
+  // Rule 7: PLP pylons must have positive height (not buried)
+  for (const pile of piles) {
+    if (pile.height < 0.3) {
+      errors.push(`FAIL: PLP pylon ${pile.id} height ${pile.height.toFixed(3)}m < 0.3m (below minimum)`);
+    }
+  }
+
+  // Rule 8 (v5.7): PLP strongback count must equal pylon count — one per pylon/bay
+  // GUARD: strongback spanning multiple pylons is a fail; miscount is a fail.
+  if (strongbacks.length > 0 && piles.length > 0) {
+    const uniformPiles = piles.filter(p => p.row === 'uniform');
+    if (uniformPiles.length > 0 && strongbacks.length !== uniformPiles.length) {
+      errors.push(`FAIL: Strongback count (${strongbacks.length}) !== PLP pylon count (${uniformPiles.length}) — must be one strongback per pylon (v5.7)`);
+    }
+    // GUARD: no strongback may reference more than one pylon
+    for (const sb of strongbacks) {
+      if (sb.pileIds && sb.pileIds.length > 1) {
+        errors.push(`FAIL: Strongback ${sb.id} spans ${sb.pileIds.length} pylons — must be exactly 1 (v5.7)`);
+      }
+    }
+  }
+
+  // Rule 9: PLP rail count must be multiple of 4 (4 rails per structure: S1,S2,N1,N2)
+  if (rails.length > 0 && rails.length % 4 !== 0) {
+    errors.push(`WARN: PLP rail count ${rails.length} is not a multiple of 4 (expected 4 per structure)`);
+  }
+
+  // Rule 10: Each strongback must have at least one pile reference
+  for (const sb of strongbacks) {
+    if (!sb.pileIds || sb.pileIds.length === 0) {
+      errors.push(`WARN: Strongback ${sb.id} has no pile references`);
+    }
+  }
+
+
+  // Rule 11: strut members must have midZ in (groundZ, pylonTopZ) and positive pitch
+  // This validates that the strut is physically anchored (not floating, not inverted)
+  for (const m of members) {
+    if (typeof m.key === 'string' && m.key.includes('__gnd__strut_')) {
+      const pylonTopZ = piles.length > 0
+        ? Math.max(...piles.map(p => p.topZ))
+        : m.z + 1;
+      const gZ = piles.length > 0 ? piles[0].groundZ : 0;
+      if (m.z <= gZ || m.z >= pylonTopZ) {
+        errors.push(`FAIL: Strut ${m.key} midZ=${m.z.toFixed(3)} not in (groundZ=${gZ.toFixed(3)}, pylonTopZ=${pylonTopZ.toFixed(3)})`);
+      }
+      if (typeof m.pitchRad === 'number' && (m.pitchRad <= 0 || m.pitchRad > Math.PI / 2)) {
+        errors.push(`WARN: Strut ${m.key} pitchRad=${m.pitchRad.toFixed(4)} outside expected range (0, pi/2)`);
+      }
+    }
+  }
+
+  // Rule 12: strongback cantilever beyond outermost pylon must not exceed PLP_MAX_CANTILEVER_M
+  // cantilever = (sbLen - rowSpanM) / 2  where rowSpanM ~ sbLen - (panelW + 0.30)
+  // Approximation: sbLen is stored in strongback.lengthM
+  for (const sb of strongbacks) {
+    if (sb.pileIds && sb.pileIds.length > 0) {
+      // Estimate rowSpanM from pile spacing
+      const sbPiles = piles.filter(p => sb.pileIds!.includes(p.id));
+      if (sbPiles.length >= 2) {
+        const ewSpans = sbPiles.map(p => p.lng);
+        const minLng = Math.min(...ewSpans);
+        const maxLng = Math.max(...ewSpans);
+        const rowSpanApprox = (maxLng - minLng) * 111320 * Math.cos(sbPiles[0].lat * Math.PI / 180);
+        const cantilever = (sb.lengthM - rowSpanApprox) / 2;
+        if (cantilever > PLP_MAX_CANTILEVER_M * 1.1) {  // 10% tolerance
+          errors.push(`WARN: Strongback ${sb.id} cantilever ${cantilever.toFixed(2)}m exceeds PLP_MAX_CANTILEVER_M=${PLP_MAX_CANTILEVER_M}m`);
+        }
+      }
+    }
+  }
+
+  // Rule 13 (v5.8): All per-pylon strongback members must share the same center Z
+  // (they are all mounted at pylonTopZ = sbCenterZ). Z spread > 5mm = grid drift.
+  const sbMbrs = members.filter(m => m.memberType === 'strongback');
+  if (sbMbrs.length > 1) {
+    const sbZs = sbMbrs.map(m => m.z);
+    const sbZSpread = Math.max(...sbZs) - Math.min(...sbZs);
+    if (sbZSpread > 0.005) {
+      errors.push(`WARN: Strongback Z spread ${sbZSpread.toFixed(4)}m (${sbMbrs.length} members) — panel grid drift suspected`);
+    }
+  }
+
+
+  // Rule 14 (v5.5): Panel plane must not bend — all corrected panel centers
+  // must follow a single tilted plane (zero Z-spread after grid correction).
+  // This is checked via strongback Z-spread sentinel (Rule 13 already does this).
+  // Rule 15 (v5.5): All pile heights must be ≥ PLP_MIN_PANEL_CLEARANCE_M
+  // (pylon must always be taller than the minimum clearance itself)
+  for (const pile of piles) {
+    if (pile.row === 'uniform' && pile.height < PLP_MIN_PANEL_CLEARANCE_M) {
+      errors.push(`FAIL: PLP pylon ${pile.id} height ${pile.height.toFixed(3)}m < clearance ${PLP_MIN_PANEL_CLEARANCE_M}m`);
+    }
+  }
+
+  // Rule 16 (v5.5): Log clearance diagnostics
+  const pylonHeights = piles.filter(p => p.row === 'uniform').map(p => p.height);
+  if (pylonHeights.length > 0) {
+    const minH = Math.min(...pylonHeights);
+    const maxH = Math.max(...pylonHeights);
+    debugLog.push(`[CLEARANCE v5.5] pylon height range: ${minH.toFixed(3)}m – ${maxH.toFixed(3)}m`);
+  }
+
+  const hasFatalErrors = errors.some(e => e.startsWith('FAIL'));
+  if (errors.length > 0) {
+    errors.forEach(e => debugLog.push(`[VALIDATE] ${e}`));
+  } else {
+    debugLog.push(`[VALIDATE] PASS — ${piles.length} piles, ${strongbacks.length} strongbacks, ${rails.length} rails`);
+  }
+
+  return { valid: !hasFatalErrors, errors };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════
+// PLP POWER DRIVE™ — BUILD SEQUENCE (SP3284-3) — v5.1 triangular support
+// ══════════════════════════════════════════════════════════════════════════════════
+
+
+// --- solveClearancePlane (v5.5) -------------------------------------------
+//
+// Solves the complete panel plane from a minimum ground clearance rule.
+//
+// Invariant: the south bottom edge of the front row (row 0) must sit at
+//   exactly PLP_MIN_PANEL_CLEARANCE_M above local grade (groundZ).
+//
+// Derivation (tilt angle measured from horizontal, south-side lower):
+//   panelBotEdgeZ  = groundZ + clearanceM
+//   row0CenterZ    = panelBotEdgeZ + rowDepth/2 * tan(tilt)
+//                  = groundZ + clearanceM + (panelH*cos(tilt)/2)*tan(tilt)
+//                  = groundZ + clearanceM + panelH*sin(tilt)/2
+//   sbCenterZ      = row0CenterZ + 0.25*totalPanelH*sin(tilt)
+//                  [row 0 center is at frac=0.25 of totalPanelH from SB center]
+//   tableRise      = totalPanelH * sin(tilt)
+//   sbSouthZ       = sbCenterZ - tableRise/2
+//   sbNorthZ       = sbCenterZ + tableRise/2
+//   pylonH         = sbCenterZ - groundZ
+//
+// panelOriginZ for buildPanelGrid:
+//   Grid formula: height(row=0) = originZ + rowDepth/2 * tan(tilt)
+//   row0BotEdge  = height(row=0) - panelH/2 * sin(tilt)
+//                = originZ + rowDepth/2*tan(tilt) - panelH/2*sin(tilt)
+//                = originZ + panelH*sin(tilt)/2 - panelH*sin(tilt)/2
+//                = originZ
+//   => originZ = panelBotEdgeZ = groundZ + clearanceM
+//
+// The grid formula and panel bottom edge relationship give:
+//   panelOriginZ = groundZ + clearanceM (exactly)
+//
+interface ClearancePlane {
+  sbSouthZ:      number;
+  sbNorthZ:      number;
+  sbCenterZ:     number;
+  pylonH:        number;
+  pylonTopZ:     number;
+  panelOriginZ:  number;  // for buildPanelGrid forcedOriginZ
+  tableRise:     number;
+}
+
+function solveClearancePlane(
+  groundZ:    number,
+  tiltRad:    number,
+  panelH:     number,
+  clearanceM: number,
+): ClearancePlane {
+  const sinT        = Math.sin(tiltRad);
+  const totalPanelH = PLP_ROW_COUNT * panelH;
+  const tableRise   = totalPanelH * sinT;
+
+  // Low-side anchor
+  const panelBotEdgeZ = groundZ + clearanceM;
+
+  // Row 0 center Z (panel center, not rail)
+  const row0CenterZ = panelBotEdgeZ + (panelH / 2) * sinT;
+
+  // Strongback center: row 0 is at frac 0.25 of totalPanelH from SB center
+  // fracFromCenter = 0.25 - 0.5 = -0.25
+  const sbCenterZ = row0CenterZ + 0.25 * totalPanelH * sinT;
+
+  const sbSouthZ  = sbCenterZ - tableRise / 2;
+  const sbNorthZ  = sbCenterZ + tableRise / 2;
+  const pylonH    = sbCenterZ - groundZ;
+  const pylonTopZ = groundZ + pylonH;
+
+  // panelOriginZ = SW corner of grid = groundZ + clearanceM
+  const panelOriginZ = panelBotEdgeZ;
+
+  return { sbSouthZ, sbNorthZ, sbCenterZ, pylonH, pylonTopZ, panelOriginZ, tableRise };
+}
+
+// ─── Panel Grid Authority (v5.4) ─────────────────────────────────────────────
+//
+// buildPanelGrid(): replaces every incoming panel's lat/lng/height with a
+// value computed from a single deterministic grid origin, eliminating
+// per-panel drift that accumulates when planeEngine constructs independent
+// ECEF frames from user click vectors.
+//
+// Grid origin = SW corner of the array (south edge of row=0, west edge of col=0).
+// Derived from anchor panel (smallest arrayRow, smallest col) center position.
+//
+//   lat    = originLat + (row * rowDepthM + rowDepthM/2) / MPD
+//   lng    = originLng + (col * colStepM  + colStepM/2)  / (MPD * cos(originLat))
+//   height = originZ   + (row * rowDepthM + rowDepthM/2) * tan(tiltRad)
+//
+// Called ONCE at the top of buildPLPStructure(), BEFORE any structure geometry.
+// Structure follows grid — not vice versa.
+
+interface GridPanel extends GroundPanel {
+  gridRow: number;
+  gridCol: number;
+}
+
+function buildPanelGrid(
+  panels:        GroundPanel[],
+  panelW:        number,
+  panelH:        number,
+  tiltRad:       number,
+  colGapM:       number,
+  forcedOriginZ?: number,  // v5.5: override origin Z (clearance anchor)
+): GridPanel[] {
+  if (panels.length === 0) return [];
+
+  const cosT     = Math.cos(tiltRad);
+  const tanT     = Math.tan(tiltRad);
+  const colStepM = panelW + colGapM;   // E-W step (panel + gap)
+  const rowDepthM = panelH * cosT;     // N-S ground projection per row
+
+  // Anchor = panel with minimum arrayRow, then minimum col
+  const anchor = panels.reduce((best, p) => {
+    const ar = p.arrayRow ?? 0, ac = p.col ?? 0;
+    const br = best.arrayRow ?? 0, bc = best.col ?? 0;
+    if (ar < br) return p;
+    if (ar === br && ac < bc) return p;
+    return best;
+  }, panels[0]);
+
+  const anchorRow    = anchor.arrayRow ?? 0;
+  const anchorCol    = anchor.col      ?? 0;
+  const anchorNS     = anchorRow * rowDepthM + rowDepthM / 2;
+  const anchorEW     = anchorCol * colStepM  + colStepM  / 2;
+  const cosOriginLat = Math.cos(anchor.lat * Math.PI / 180);
+
+  // SW corner of entire array
+  const originLat = anchor.lat    - anchorNS / MPD;
+  const originLng = anchor.lng    - anchorEW / (MPD * cosOriginLat);
+  const originZ   = forcedOriginZ !== undefined
+    ? forcedOriginZ  // v5.5: clearance-anchored origin
+    : anchor.height - anchorNS * tanT;
+
+  const cosOLat = Math.cos(originLat * Math.PI / 180);
+
+  return panels.map(p => {
+    const gr       = p.arrayRow ?? 0;
+    const gc       = p.col      ?? 0;
+    const nsCenterM = gr * rowDepthM + rowDepthM / 2;
+    const ewCenterM = gc * colStepM  + colStepM  / 2;
+
+    return {
+      ...p,
+      lat:     originLat + nsCenterM / MPD,
+      lng:     originLng + ewCenterM / (MPD * cosOLat),
+      height:  originZ   + nsCenterM * tanT,
+      gridRow: gr,
+      gridCol: gc,
+    };
+  });
+}
+
+function buildPLPStructure(
+  frontRow: GroundPanel[],   // south (lower-lat) panel row
+  backRow:  GroundPanel[],   // north (higher-lat) panel row
+  basePlaneZ: number,
+  tiltDeg: number,
+  azimuthDeg: number,
+  panelH: number,            // height of one panel in portrait (1.722m)
+  panelW: number,            // width of one panel in portrait (1.134m)
+  debugLog: string[],
+): { members: RackingMember[]; piles: PileSpec[]; strongbacks: StrongbackSpec[]; rails: RailSpec[] } {
+
+  const members:     RackingMember[]  = [];
+  const piles:       PileSpec[]       = [];
+  const strongbacks: StrongbackSpec[] = [];
+  const rails:       RailSpec[]       = [];
+
+  const tiltRad  = tiltDeg * DEG;
+  const groundZ  = basePlaneZ;
+
+  // -- v5.5: Solve panel plane from minimum clearance rule ----------------
+  const cp = solveClearancePlane(groundZ, tiltRad, panelH, PLP_MIN_PANEL_CLEARANCE_M);
+
+  // -- STEP 0: PANEL GRID AUTHORITY (v5.4) ─────────────────────────────────
+  // Recompute ALL panel positions from single deterministic grid origin.
+  // Eliminates per-row drift from independent planeEngine ECEF frames.
+  // MUST precede all structure geometry derivations.
+  // v5.7: Build grid from frontRow ONLY (the real panels).
+  // backRow may be a synthesized virtual row (arrayRow=0 copies offset northward).
+  // Never pass synthesized panels into buildPanelGrid — they carry wrong arrayRow.
+  const _gridFront = buildPanelGrid(
+    frontRow, panelW, panelH, tiltRad, PLP_PANEL_COL_GAP_M,
+    cp.panelOriginZ,  // v5.5: clearance-anchored grid origin
+  );
+  const gFrontRow = _gridFront.sort((a, b) => (a.col ?? 0) - (b.col ?? 0));
+
+  // Build real backRow grid only if backRow has distinct arrayRow panels
+  const hasRealBackRow = backRow.some(p => (p.arrayRow ?? 0) !== 0);
+  let gBackRow: GridPanel[];
+  if (hasRealBackRow) {
+    const _gridBack = buildPanelGrid(
+      backRow, panelW, panelH, tiltRad, PLP_PANEL_COL_GAP_M,
+      cp.panelOriginZ,
+    );
+    gBackRow = _gridBack.sort((a, b) => (a.col ?? 0) - (b.col ?? 0));
+  } else {
+    // Single-row array: derive virtual backRow from gridded frontRow, offset northward
+    // by tableDepthM (the full 2-row N-S ground projection).
+    const cosT = Math.cos(tiltRad);
+    const tableDepthM = PLP_ROW_COUNT * panelH * cosT;
+    const latOffPerM  = 1 / MPD;
+    gBackRow = gFrontRow.map(p => ({
+      ...p,
+      lat: p.lat + tableDepthM * latOffPerM,
+    }));
+  }
+
+  // Panel grid is absolute authority — no fallback to raw rows
+  const _fr = gFrontRow.length > 0 ? gFrontRow : frontRow;
+  const _br = gBackRow.length  > 0 ? gBackRow  : backRow;
+  debugLog.push(`[PANEL-GRID v5.7] anchor=${_fr[0]?.id} front=${_fr.length} back=${_br.length} realBack=${hasRealBackRow}`);
+
+  // ── Array geometry ──────────────────────────────────────────────────────────
+  // Full 2-row portrait array:  totalPanelH = 2 × panelH = 3.444m typical
+  const totalPanelH = PLP_ROW_COUNT * panelH;
+
+  // N-S ground projection and height rise of the full array
+  const tableDepthM = totalPanelH * Math.cos(tiltRad);
+
+  // v5.5: All height geometry from clearance plane (not MOUNT_HEIGHT_M)
+  const tableRise   = cp.tableRise;
+  const sbSouthZ    = cp.sbSouthZ;
+  const sbNorthZ    = cp.sbNorthZ;
+  const sbCenterZ   = cp.sbCenterZ;
+  const pylonH      = cp.pylonH;
+  const pylonTopZ   = cp.pylonTopZ;
+
+  debugLog.push(`[PLP v5.5] groundZ=${groundZ.toFixed(3)} tilt=${tiltDeg}° clearance=${PLP_MIN_PANEL_CLEARANCE_M}m`);
+  debugLog.push(`[PLP v5.5] totalPanelH=${totalPanelH.toFixed(3)}m tableDepth=${tableDepthM.toFixed(3)}m tableRise=${tableRise.toFixed(3)}m`);
+  debugLog.push(`[PLP v5.5] pylonH=${pylonH.toFixed(3)}m sbSouthZ=${sbSouthZ.toFixed(3)} sbNorthZ=${sbNorthZ.toFixed(3)} panelOriginZ=${cp.panelOriginZ.toFixed(3)}`);
+
+  // ── Row geometry ────────────────────────────────────────────────────────────
+  const frontFirst = _fr[0];
+  const frontLast  = _fr[_fr.length - 1];
+  const backFirst  = _br[0];
+  const backLast   = _br[_br.length - 1];
+  const nCols      = _fr.length;
+
+  // E-W span of the panel row
+  const rowSpanM = nCols > 1
+    ? distM(frontFirst.lat, frontFirst.lng, frontLast.lat, frontLast.lng) : 0;
+
+  // Strongback length = full E-W panel span + overhang each end
+  const sbLen = rowSpanM + panelW + 0.30;
+
+  // E-W center of the row (for strongback placement)
+  const rowCenterLat = (frontFirst.lat + frontLast.lat) / 2;
+  const rowCenterLng = (frontFirst.lng + frontLast.lng) / 2;
+
+  // Headings
+  const hEW = hRad(azimuthDeg - 90);   // E-W along row
+  const hNS = hRad(azimuthDeg);         // N-S toward north
+
+  // Bay columns
+  const bayCols = bayColumns(_fr, PLP_BAY_SPAN_M);
+  debugLog.push(`[PLP v5] bays=${bayCols.length} sbLen=${sbLen.toFixed(2)}m`);
+
+  const pylonIds: string[] = [];
+
+  // ── STEP 1: SINGLE I-BEAM PYLON PER BAY ────────────────────────────────────
+  // One pylon per bay column at the N-S midpoint between frontRow and backRow.
+  // From front view: directly in line with (centered on) the strongback.
+  bayCols.forEach((ci, pi) => {
+    const fp = _fr[ci];
+    const bp = _br[Math.min(ci, _br.length - 1)];
+
+    // Pylon N-S position = midpoint between south and north panel rows
+    const pylonLat = (fp.lat + bp.lat) / 2;
+    const pylonLng = (fp.lng + bp.lng) / 2;
+
+    const pid = `__gnd__pylon_${pi}_${fp.id}`;
+    pylonIds.push(pid);
+
+    piles.push({
+      id: pid,
+      lat: pylonLat, lng: pylonLng,
+      groundZ, topZ: pylonTopZ,
+      height: pylonH,
+      row: 'uniform', bayIndex: pi,
+    });
+
+    // I-beam rendered as rectangular box
+    // heading=hNS (180°): bodyX=West(EW), bodyY=South(NS)
+    // dims[0]=EW flange width, dims[1]=NS web depth, dims[2]=height
+    members.push(mbr(
+      pid, `[PD-PYLON] b${pi}`,
+      pylonLat, pylonLng,
+      groundZ + pylonH / 2,
+      hNS, 0,
+      [PLP_IBEAM_W, PLP_IBEAM_D, pylonH],
+      COLOR_PILE, 'pile',
+    ));
+  });
+  debugLog.push(`[PYLONS] count=${bayCols.length} height=${pylonH.toFixed(3)}m`);
+
+  // ── STEP 2: STRONGBACK ASSEMBLY — ONE N-S COMPONENT PER PYLON (v5.8) ──────
+  //
+  // SOURCE: SP3284 RevE / SP3284-3 (PLP Power Peak AL assembly manual)
+  //
+  // PHYSICAL REALITY:
+  //   The Strongback is a discrete aluminum C-channel component that mounts
+  //   to ONE I-beam pylon via a Strongback Attachment bracket at pylon top.
+  //   It runs N-S (perpendicular to the E-W panel row), tilted at the array
+  //   tilt angle, spanning the full N-S depth of the 2-row portrait array.
+  //   It is NOT an E-W beam. It does NOT connect pylons to each other.
+  //
+  // ORIENTATION:
+  //   heading = hNS (azimuthDeg): body runs south-to-north
+  //   pitch   = -tiltRad:         south end lower, north end higher
+  //   length  = sbNSLen:          N-S slant length = tableDepthM / cos(tiltRad)
+  //   center  = pylonTop (sbCenterZ), directly above pylon at N-S midpoint of array
+  //
+  // RAIL BASES are pre-mounted on the Strongback at the 4 rail positions.
+  // Rails (E-W) rest on these Rail Bases and are clamped by Rail Clamps.
+  // Rails span continuously across ALL pylons — independent of strongback length.
+  //
+  // GUARD: strongbacks.length must equal pylonIds.length (one per pylon, no more).
+
+  // N-S slant length of the strongback = full 2-row array depth along the tilt plane
+  // tableDepthM = totalPanelH * cos(tilt) = N-S ground projection
+  // sbNSLen = slant length along tilt plane = tableDepthM / cos(tilt) = totalPanelH
+  const sbNSLen = totalPanelH;  // slant length = totalPanelH (= 2 * panelH for portrait)
+
+  const allSbIds: string[] = [];
+
+  bayCols.forEach((ci, pi) => {
+    const fp = _fr[ci];
+    const bp = _br[Math.min(ci, _br.length - 1)];
+
+    // Pylon E-W position (same as STEP 1)
+    const pylonLat = (fp.lat + bp.lat) / 2;
+    const pylonLng = (fp.lng + bp.lng) / 2;
+
+    // Strongback center = sbCenterZ directly above pylon top
+    // N-S center = N-S midpoint of array (between front and back rows at this column)
+    // This is already pylonLat (midpoint of front/back panel)
+
+    const sbId = `__gnd__sb_${pi}_${fp.id}`;
+    allSbIds.push(sbId);
+
+    strongbacks.push({
+      id: sbId,
+      lat: pylonLat, lng: pylonLng,
+      z: sbCenterZ,
+      lengthM: sbNSLen,
+      row: 'uniform',
+      pileIds: [pylonIds[pi]],  // GUARD: each SB owns exactly one pylon
+    });
+
+    // heading=hNS (azimuthDeg): body runs south-to-north
+    // dims[0]=EW width (flange), dims[1]=NS slant length, dims[2]=height (web)
+    // pitch=-tiltRad: south end lower, north end higher
+    members.push(mbr(
+      sbId, `[PD-STRONGBACK b${pi}]`,
+      pylonLat, pylonLng, sbCenterZ,
+      hNS, -tiltRad,
+      [PLP_SB_W, sbNSLen, PLP_SB_H],
+      COLOR_STRONGBACK, 'strongback',
+    ));
+  });
+
+  // GUARD: strongback count must equal pylon count
+  if (strongbacks.length !== pylonIds.length) {
+    debugLog.push(`[GUARD FAIL v5.8] strongbacks=${strongbacks.length} !== pylons=${pylonIds.length}`);
+  } else {
+    debugLog.push(`[STRONGBACK v5.8] ${strongbacks.length} N-S components per pylon len=${sbNSLen.toFixed(3)}m centerZ=${sbCenterZ.toFixed(3)} pitch=${(-tiltDeg).toFixed(1)}°`);
+  }
+
+  // -- STEP 3: SUPPORT STRUTS per pylon (v5.3 -- supportMode-conditional) ----------
+  //
+  // Source: SP3284 Version 2 Rev A, Steps 3 + 6
+  // Mode is controlled by PLP_SUPPORT_MODE constant:
+  //
+  // 'single_strut_cantilever' (default, SP3284 spec):
+  //   ONE strut per pylon: south SB end -> Strut Attachment on I-beam south flange
+  //   North end of strongback cantilevers freely -- no brace
+  //
+  // 'dual_strut' (future):
+  //   TWO struts per pylon: south strut (same as above) + north strut (mirror)
+  //   North strut: from north SB end -> symmetric attachment on north I-beam flange
+  //
+  // Strut geometry (verified by geometry_v53.py -- all assertions passed):
+  //   South strut upper: (NS = pylonCenter - tableDepthM/2,  Z = sbSouthZ)
+  //   South strut lower: (NS = pylonCenter,                  Z = strutZ = PLP_STRUT_FRAC x pylonH)
+  //   North strut upper: (NS = pylonCenter + tableDepthM/2,  Z = sbNorthZ)  [dual_strut only]
+  //   North strut lower: (NS = pylonCenter,                  Z = strutZ)    [dual_strut only]
+  //   strutLen = sqrt( (tableDepthM/2)^2 + (sbEndZ - strutZ)^2 )
+  //   Pitch (S-strut): arcsin( (sbSouthZ - strutMidZ) / (strutLen/2) )  [+ve = south end higher]
+  //   Pitch (N-strut): arcsin( (sbNorthZ - strutMidZ) / (strutLen/2) )  [+ve = north end higher]
+
+  const supportMode: PLPSupportMode = PLP_SUPPORT_MODE;
+
+  bayCols.forEach((ci, pi) => {
+    const fp = _fr[ci];
+    const bp = _br[Math.min(ci, _br.length - 1)];
+    const pylonLat = (fp.lat + bp.lat) / 2;
+    const pylonLng = (fp.lng + bp.lng) / 2;
+
+    // Strut Attachment Z on I-beam (common to both modes)
+    const strutZ = groundZ + PLP_STRUT_FRAC * pylonH;
+
+    if (supportMode === 'single_strut_cantilever' || supportMode === 'dual_strut') {
+      // -- South strut (both modes) ------------------------------------------
+      const sDNS      = tableDepthM / 2;            // horizontal N-S distance
+      const sDZ       = sbSouthZ - strutZ;           // vertical drop (sbSouth is higher)
+      const sStrutLen = Math.sqrt(sDNS * sDNS + sDZ * sDZ);
+      const sMidLat   = pylonLat - (tableDepthM / 4) / MPD;
+      const sMidZ     = (sbSouthZ + strutZ) / 2;
+      // Pitch: +ve = south end higher (Cesium hNS box: south end Z = midZ + (len/2)*sin(pitch))
+      const sPitch    = Math.asin((sbSouthZ - sMidZ) / (sStrutLen / 2));
+
+      members.push(mbr(
+        `__gnd__strut_s_${pi}_${fp.id}`, `[PD-S-STRUT] b${pi}`,
+        sMidLat, pylonLng, sMidZ,
+        hNS, sPitch,
+        [PLP_STRUT_D, sStrutLen, PLP_STRUT_D],
+        COLOR_BRACE, 'brace',
+      ));
+    }
+
+    if (supportMode === 'dual_strut') {
+      // -- North strut (dual_strut only) -------------------------------------
+      // Mirror of south strut: from north SB end DOWN to strut attachment
+      // North SB end is HIGHER than strut attachment (sbNorthZ > strutZ)
+      const nDNS      = tableDepthM / 2;
+      const nDZ       = sbNorthZ - strutZ;           // vertical drop (sbNorth is higher)
+      const nStrutLen = Math.sqrt(nDNS * nDNS + nDZ * nDZ);
+      const nMidLat   = pylonLat + (tableDepthM / 4) / MPD;  // north of pylon
+      const nMidZ     = (sbNorthZ + strutZ) / 2;
+      // Pitch: +ve = north end higher (hNS box: north end Z = midZ + (len/2)*sin(pitch))
+      const nPitch    = Math.asin((sbNorthZ - nMidZ) / (nStrutLen / 2));
+
+      members.push(mbr(
+        `__gnd__strut_n_${pi}_${fp.id}`, `[PD-N-STRUT] b${pi}`,
+        nMidLat, pylonLng, nMidZ,
+        hNS, nPitch,
+        [PLP_STRUT_D, nStrutLen, PLP_STRUT_D],
+        COLOR_BRACE, 'brace',
+      ));
+    }
+  });
+  debugLog.push(`[SUPPORT-STRUT] mode=${supportMode} bays=${bayCols.length} (v5.3)`);
+
+  // -- STEP 4: PX RAILS (E-W, tilted, on top of strongback) v5.3 ------------------
+  // Rail count: PLP_ROW_COUNT rows x 2 rails per row = 4 total (for 2-row portrait)
+  //
+  // Rail positions derived from PLP_CLAMP_INSET_FRAC (not hardcoded fractions):
+  //   For each portrait row r (0 = south, 1 = north):
+  //     Bottom rail: r*panelH + PLP_CLAMP_INSET_FRAC*panelH  (15% from bottom edge)
+  //     Top rail:    r*panelH + (1-PLP_CLAMP_INSET_FRAC)*panelH  (85% from bottom = 15% from top)
+  //
+  //   As fractions of totalPanelH:
+  //     S1 (row 0 bottom): 0.0750  (15% from south edge)
+  //     S2 (row 0 top):    0.4250  (85% from south = 15% from mid)
+  //     N1 (row 1 bottom): 0.5750  (15% from mid)
+  //     N2 (row 1 top):    0.9250  (85% from north = 15% from north edge)
+  //
+  //   Scales correctly with panelH, orientation, and any future PLP_CLAMP_INSET_FRAC override.
+  //   Rail sits on top of strongback: z-offset += PLP_SB_H/2 + PLP_RAIL_H/2
+
+  // Build rail frac list dynamically from panel geometry
+  const railDefs: { frac: number; name: string }[] = [];
+  for (let ri = 0; ri < PLP_ROW_COUNT; ri++) {
+    const rowBaseFrac  = (ri * panelH) / totalPanelH;
+    const rowSpanFrac  = panelH / totalPanelH;
+    const bottomFrac   = rowBaseFrac + PLP_CLAMP_INSET_FRAC * rowSpanFrac;
+    const topFrac      = rowBaseFrac + (1 - PLP_CLAMP_INSET_FRAC) * rowSpanFrac;
+    const rowLabel     = ri === 0 ? 'S' : 'N';
+    railDefs.push({ frac: bottomFrac, name: `${rowLabel}1-RAIL` });
+    railDefs.push({ frac: topFrac,    name: `${rowLabel}2-RAIL` });
+  }
+  // Sort south-to-north (ascending frac)
+  railDefs.sort((a, b) => a.frac - b.frac);
+
+  railDefs.forEach(({ frac, name }, ri) => {
+    const fracFromCenter = frac - 0.5;
+
+    // N-S and Z offset from strongback center
+    const nsHorizM = fracFromCenter * totalPanelH * Math.cos(tiltRad);
+    const zOff     = fracFromCenter * totalPanelH * Math.sin(tiltRad);
+
+    const railLat  = rowCenterLat + nsHorizM / MPD;
+    const railLng  = rowCenterLng;
+    const railZ    = sbCenterZ + zOff + PLP_SB_H / 2 + PLP_RAIL_H / 2;
+
+    const railId = `__gnd__pxrail_${ri}_${frontFirst.id}`;
+
+    rails.push({
+      id: railId,
+      startLat: railLat, startLng: frontFirst.lng, startZ: railZ,
+      endLat:   railLat, endLng:   frontLast.lng,  endZ:   railZ,
+      midLat:   railLat, midLng:   rowCenterLng,   midZ:   railZ,
+      lengthM:  sbLen,
+      pitchRad: -tiltRad,
+      headingRad: hEW,
+      railType: 'powerrail',
+      strongbackIds: allSbIds,  // v5.7: rail references all per-pylon SB segments
+    });
+
+    // heading=hEW (90deg): bodyX=North(NS), bodyY=West(EW)
+    // dims[0]=NS width, dims[1]=EW length, dims[2]=height
+    members.push(mbr(
+      railId, `[PD-${name}]`,
+      railLat, railLng, railZ,
+      hEW, -tiltRad,
+      [PLP_RAIL_W, sbLen, PLP_RAIL_H],
+      COLOR_RAIL, 'powerrail',
+    ));
+  });
+  debugLog.push(`[PX-RAILS] ${railDefs.length} rails placed via PLP_CLAMP_INSET_FRAC=${PLP_CLAMP_INSET_FRAC} (v5.3)`);
+
+  // ── STEP 5: E-W BRACING BETWEEN ADJACENT PYLONS ────────────────────────────
+  // Horizontal E-W brace at ~35% pylon height connecting adjacent pylons
+  if (bayCols.length >= 2) {
+    for (let bi = 0; bi < bayCols.length - 1; bi++) {
+      const ci0 = bayCols[bi];
+      const ci1 = bayCols[bi + 1];
+      const fp0 = _fr[ci0];
+      const fp1 = _fr[Math.min(ci1, _fr.length - 1)];
+      const bp0 = _br[Math.min(ci0, _br.length - 1)];
+      const bp1 = _br[Math.min(ci1, _br.length - 1)];
+
+      const p0Lat = (fp0.lat + bp0.lat) / 2;
+      const p0Lng = (fp0.lng + bp0.lng) / 2;
+      const p1Lat = (fp1.lat + bp1.lat) / 2;
+      const p1Lng = (fp1.lng + bp1.lng) / 2;
+
+      const baySpan = distM(p0Lat, p0Lng, p1Lat, p1Lng) || 0.1;
+      const brMid   = midpt(p0Lat, p0Lng, p1Lat, p1Lng);
+      const braceZ  = groundZ + pylonH * 0.35;
+
+      members.push(mbr(
+        `__gnd__EWbrace_${bi}_${fp0.id}`, `[PD-EW-BRACE] b${bi}`,
+        brMid.lat, brMid.lng, braceZ,
+        hEW, 0,
+        // heading=hEW (90°): bodyX=North(NS), bodyY=West(EW)
+        // dims[0]=NS cross-section, dims[1]=EW span, dims[2]=cross-section
+        [PLP_STRUT_D, baySpan, PLP_STRUT_D],
+        COLOR_BRACE, 'brace',
+      ));
+    }
+    debugLog.push(`[EW-BRACES] count=${bayCols.length - 1}`);
+  }
+
+  debugLog.push(`[PLP v5] TOTAL members=${members.length} piles=${piles.length} sbs=${strongbacks.length} rails=${rails.length}`);
+  return { members, piles, strongbacks, rails };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// IRONRIDGE XR STRUCTURE BUILDER
+// ══════════════════════════════════════════════════════════════════════════════
+
+function buildXRStructure(
+  sortedRows: Array<[number, GroundPanel[]]>,
+  frontRow: GroundPanel[],
+  backRow:  GroundPanel[],
+  basePlaneZ: number,
+  tiltDeg: number,
+  azimuthDeg: number,
+  panelH: number,
+  panelW: number,
+  panelBotOffset: number,
+  debugLog: string[],
+): { members: RackingMember[]; piles: PileSpec[]; strongbacks: StrongbackSpec[]; rails: RailSpec[] } {
+
+  const members:     RackingMember[]  = [];
+  const piles:       PileSpec[]       = [];
+  const strongbacks: StrongbackSpec[] = [];
+  const rails:       RailSpec[]       = [];
+
+  const tiltRad = tiltDeg * DEG;
+  const nRows   = sortedRows.length;
+  const groundZ = basePlaneZ;
+
+  const backAvgH = backRow.reduce((s, p) => s + p.height, 0) / backRow.length;
+  const nRailZ   = backAvgH - panelBotOffset;
+  const postH    = Math.max(MOUNT_HEIGHT_M, nRailZ - groundZ);
+  const crossZ   = groundZ + postH;
+
+  const frontFirst = frontRow[0];
+  const frontLast  = frontRow[frontRow.length - 1];
+  const backFirst  = backRow[0];
+  const backLast   = backRow[backRow.length - 1];
+  const nCols      = frontRow.length;
+  const rowSpanM   = nCols > 1 ? distM(frontFirst.lat, frontFirst.lng, frontLast.lat, frontLast.lng) : 0;
+  const railLen    = rowSpanM + panelW + 0.20;
+
+  const sLat = (frontFirst.lat + frontLast.lat) / 2;
+  const sLng = (frontFirst.lng + frontLast.lng) / 2;
+  const nLat = (backFirst.lat  + backLast.lat)  / 2;
+  const nLng = (backFirst.lng  + backLast.lng)  / 2;
+
+  const hEW = hRad(azimuthDeg - 90);
+  const hNS = hRad(azimuthDeg);
+
+  const bCols = bayColumns(frontRow, XR_BAY_SPAN_M);
+  debugLog.push(`[XR v4] postH=${postH.toFixed(3)} rows=${nRows} bays=${bCols.length}`);
+
+  // ── STEP 1: POSTS (S + N per bay, uniform height) ──────────────────────────
+  const sPileIds: string[] = [];
+  const nPileIds: string[] = [];
+  bCols.forEach((ci, pi) => {
+    const fp = frontRow[ci];
+    const bp = backRow[Math.min(ci, backRow.length - 1)];
+    const sPid = `__gnd__Spile_${pi}_${fp.id}`;
+    const nPid = `__gnd__Npile_${pi}_${bp.id}`;
+    sPileIds.push(sPid);
+    nPileIds.push(nPid);
+
+    piles.push({ id: sPid, lat: fp.lat, lng: fp.lng, groundZ, topZ: crossZ, height: postH, row: 'south', bayIndex: pi });
+    piles.push({ id: nPid, lat: bp.lat, lng: bp.lng, groundZ, topZ: crossZ, height: postH, row: 'north', bayIndex: pi });
+
+    members.push(mbr(`${sPid}`, `[XR-S-POST] b${pi}`, fp.lat, fp.lng, groundZ + postH / 2, hNS, 0, [VERT_PIPE_D, VERT_PIPE_D, postH], COLOR_PILE, 'pile'));
+    members.push(mbr(`${nPid}`, `[XR-N-POST] b${pi}`, bp.lat, bp.lng, groundZ + postH / 2, hNS, 0, [VERT_PIPE_D, VERT_PIPE_D, postH], COLOR_PILE, 'pile'));
+  });
+
+  // ── STEP 2: STRONGBACKS (cross members at post tops) ──────────────────────
+  const sSBId = `__gnd__cross_S_${frontFirst.id}`;
+  const nSBId = `__gnd__cross_N_${frontFirst.id}`;
+  strongbacks.push({ id: sSBId, lat: sLat, lng: sLng, z: crossZ, lengthM: railLen, row: 'south', pileIds: sPileIds });
+  strongbacks.push({ id: nSBId, lat: nLat, lng: nLng, z: crossZ, lengthM: railLen, row: 'north', pileIds: nPileIds });
+  // heading=90°(East): bodyX=North(NS), bodyY=West(EW) → dims[0]=NS cross-section, dims[1]=EW length
+  members.push(mbr(sSBId, `[XR-CROSS-S]`, sLat, sLng, crossZ, hEW, 0, [VERT_PIPE_D, railLen, VERT_PIPE_D], COLOR_STRONGBACK, 'strongback'));
+  members.push(mbr(nSBId, `[XR-CROSS-N]`, nLat, nLng, crossZ, hEW, 0, [VERT_PIPE_D, railLen, VERT_PIPE_D], COLOR_STRONGBACK, 'strongback'));
+
+  // ── STEP 3: XR RAILS (one per row, tilted E-W) ────────────────────────────
+  sortedRows.forEach(([ri, rowPanels], idx) => {
+    const rFirst = rowPanels[0], rLast = rowPanels[rowPanels.length - 1];
+    const rLat = (rFirst.lat + rLast.lat) / 2;
+    const rLng = (rFirst.lng + rLast.lng) / 2;
+    const rAvgH  = rowPanels.reduce((s, p) => s + p.height, 0) / rowPanels.length;
+    const rRailZ = rAvgH - panelBotOffset;
+    const railId = `__gnd__xr_${idx}_${frontFirst.id}`;
+    rails.push({
+      id: railId,
+      startLat: rFirst.lat, startLng: rFirst.lng, startZ: rRailZ,
+      endLat:   rLast.lat,  endLng:   rLast.lng,  endZ:   rRailZ,
+      midLat: rLat, midLng: rLng, midZ: rRailZ,
+      lengthM: railLen, pitchRad: -tiltRad, headingRad: hEW,
+      railType: 'xrrail',
+      strongbackIds: [sSBId, nSBId],
+    });
+    // heading=90°(East): bodyX=North(NS), bodyY=West(EW) → dims[0]=NS width, dims[1]=EW length
+    members.push(mbr(railId, `[XR-RAIL] r${ri}`, rLat, rLng, rRailZ, hEW, -tiltRad, [XR_RAIL_W, railLen, XR_RAIL_H], COLOR_XR, 'xrrail'));
+  });
+
+  // ── Cap rail ───────────────────────────────────────────────────────────────
+  const lr    = sortedRows[nRows - 1][1];
+  const lAvgH = lr.reduce((s, p) => s + p.height, 0) / lr.length;
+  const capZ  = lAvgH + (panelH / 2) * Math.sin(tiltRad);
+  // heading=90°(East): bodyX=North(NS), bodyY=West(EW) → dims[0]=NS width, dims[1]=EW length
+  members.push(mbr(`__gnd__cap_${frontFirst.id}`, `[XR-CAP]`,
+    (lr[0].lat + lr[lr.length-1].lat) / 2,
+    (lr[0].lng + lr[lr.length-1].lng) / 2,
+    capZ, hEW, -tiltRad,
+    [XR_RAIL_W, railLen, XR_RAIL_H], COLOR_XR, 'cap'));
+
+  // ── Diagonal braces between bays ──────────────────────────────────────────
+  if (bCols.length >= 2) {
+    for (let bi = 0; bi < bCols.length - 1; bi++) {
+      const fp0 = frontRow[bCols[bi]];
+      const fp1 = frontRow[Math.min(bCols[bi + 1], frontRow.length - 1)];
+      const span = distM(fp0.lat, fp0.lng, fp1.lat, fp1.lng) || 0.1;
+      const mid  = midpt(fp0.lat, fp0.lng, fp1.lat, fp1.lng);
+      // heading=90°(East): bodyX=North(NS), bodyY=West(EW) → dims[0]=NS cross-section, dims[1]=EW span
+      members.push(mbr(`__gnd__brace_${bi}_${fp0.id}`, `[XR-BRACE] b${bi}`,
+        mid.lat, mid.lng, crossZ, hEW, 0,
+        [BRACE_D, span, BRACE_D], COLOR_BRACE, 'brace'));
+    }
+  }
+
+  debugLog.push(`[XR v4] TOTAL members=${members.length} piles=${piles.length} sbs=${strongbacks.length} rails=${rails.length}`);
+  return { members, piles, strongbacks, rails };
+}
+
+// ─── MAIN ENTRY POINT ──────────────────────────────────────────────────────────
+
+export function buildGroundRacking(opts: BuildRackingOptions): GroundSystemOutput {
+  const { style, panels, basePlaneZ, tiltDeg, azimuthDeg, orientation } = opts;
+  const debugLog: string[] = [];
+  const { pw: panelW, ph: panelH } = panelDims(orientation);
+
+  const emptyOutput: GroundSystemOutput = {
+    piles: [], strongbacks: [], rails: [], members: [], panelAttachPoints: [],
+    valid: false,
+    errors: ['No panels provided'],
+    debugLog,
+    groundZ: basePlaneZ,
+    sPostTopZ: basePlaneZ + MOUNT_HEIGHT_M,
+    nPostTopZ: basePlaneZ + MOUNT_HEIGHT_M,
+    sRailZ: basePlaneZ + MOUNT_HEIGHT_M,
+    nRailZ: basePlaneZ + MOUNT_HEIGHT_M,
+    tableDepthM: 0,
+    baySpanM: style === 'ironridge' ? XR_BAY_SPAN_M : PLP_BAY_SPAN_M,
+    correctedPanels: [],
+    lowSideClearanceM:  PLP_MIN_PANEL_CLEARANCE_M,
+    highSideClearanceM: PLP_MIN_PANEL_CLEARANCE_M,
+    solvedPlaneZ:       basePlaneZ + MOUNT_HEIGHT_M,
+    pylonHeightRange:   [MOUNT_HEIGHT_M, MOUNT_HEIGHT_M] as [number, number],
+  };
+
+  if (panels.length === 0) {
+    debugLog.push('[WARN] 0 panels');
+    return emptyOutput;
+  }
+
+  const sortedRows = sortRows(panels);
+  const nRows = sortedRows.length;
+  if (nRows === 0) {
+    debugLog.push('[WARN] 0 rows');
+    return { ...emptyOutput, errors: ['No rows detected'] };
+  }
+
+  const [, frontRow] = sortedRows[0];
+  let [, backRow]    = sortedRows[nRows - 1];
+  if (frontRow.length === 0) {
+    debugLog.push('[WARN] empty front row');
+    return { ...emptyOutput, errors: ['Empty front row'] };
+  }
+
+  debugLog.push(`[ENGINE v4.0] style=${style} rows=${nRows} cols=${frontRow.length} tilt=${tiltDeg}° az=${azimuthDeg}°`);
+
+  const tiltRad     = tiltDeg * DEG;
+  const panelBotOffset = (panelH / 2) * Math.sin(tiltRad) + PLANE_ENGINE_PANEL_OFFSET_M;
+  const frontAvgH   = frontRow.reduce((s, p) => s + p.height, 0) / frontRow.length;
+  const backAvgH    = backRow.reduce((s, p)  => s + p.height, 0) / backRow.length;
+  const sRailZ      = frontAvgH - panelBotOffset;
+  const nRailZ      = backAvgH  - panelBotOffset;
+  const groundZ     = basePlaneZ;
+
+  // ENG-4: When only 1 row exists, synthesize a virtual backRow offset northward
+  // by tableDepthM so buildPLPStructure has valid pylon N-S positions.
+  // PLP uses PLP_ROW_COUNT (2) rows in portrait — full array depth = 2 × panelH.
+  const tableDepthM = (style === 'pipe' ? PLP_ROW_COUNT : 1) * panelH * Math.cos(tiltRad);
+  if (nRows === 1) {
+    const latOffPerM = 1 / MPD;
+    backRow = frontRow.map(p => ({
+      ...p,
+      lat: p.lat + tableDepthM * latOffPerM,
+    }));
+    debugLog.push(`[ENG-4] single-row: synthesized backRow +${tableDepthM.toFixed(3)}m north`);
+  }
+
+  // Build structure
+  let result: { members: RackingMember[]; piles: PileSpec[]; strongbacks: StrongbackSpec[]; rails: RailSpec[] };
+
+  if (style === 'pipe') {
+    result = buildPLPStructure(
+      frontRow, backRow,
+      basePlaneZ, tiltDeg, azimuthDeg,
+      panelH, panelW, debugLog,
+    );
+  } else {
+    result = buildXRStructure(
+      sortedRows, frontRow, backRow,
+      basePlaneZ, tiltDeg, azimuthDeg,
+      panelH, panelW, panelBotOffset, debugLog,
+    );
+  }
+
+  // ── Validation Engine ──────────────────────────────────────────────────────
+  const maxSpan = style === 'ironridge' ? XR_MAX_SPAN_M : PLP_MAX_SPAN_M;
+  const validation = validateBuildOutput(
+    result.piles, result.strongbacks, result.rails, result.members, maxSpan, debugLog,
+  );
+
+  if (!validation.valid) {
+    debugLog.push(`[ENGINE v4.0] VALIDATION FAILED — ${validation.errors.length} errors — DO NOT RENDER`);
+  }
+
+  // ── Panel attach points ────────────────────────────────────────────────────
+  const panelAttachPoints: PanelAttachPoint[] = panels.map(p => ({
+    panelId: p.id,
+    railIds: result.rails.map(r => r.id),
+    clampZone: 'center' as const,
+  }));
+
+  const tableRise   = tableDepthM * Math.tan(tiltRad);
+  const sPostTopZ   = groundZ + MOUNT_HEIGHT_M;
+  const nPostTopZ   = sPostTopZ + tableRise;
+
+  // ── v5.4: Corrected panel positions ────────────────────────────────────────
+  // For PLP (pipe) style, run buildPanelGrid() here so the caller can render
+  // panels at deterministic grid positions instead of raw planeEngine positions.
+  // This is the missing link: structure uses grid internally, now panels do too.
+  let correctedPanels: GroundPanel[];
+  if (style === 'pipe') {
+    // v5.5: clearance-anchored originZ so correctedPanels match structural plane
+    const cpSolve = solveClearancePlane(groundZ, tiltRad, panelH, PLP_MIN_PANEL_CLEARANCE_M);
+    correctedPanels = buildPanelGrid(panels, panelW, panelH, tiltRad, PLP_PANEL_COL_GAP_M, cpSolve.panelOriginZ);
+    debugLog.push('[CORRECTED-PANELS v5.5] ' + correctedPanels.length + ' panels corrected originZ=' + cpSolve.panelOriginZ.toFixed(3));
+  } else {
+    // IronRidge / other: return panels as-is (no grid authority needed)
+    correctedPanels = panels;
+  }
+
+  // v5.5: Clearance diagnostics
+  let lowSideClearanceM  = PLP_MIN_PANEL_CLEARANCE_M;
+  let highSideClearanceM = PLP_MIN_PANEL_CLEARANCE_M;
+  let solvedPlaneZ       = groundZ + MOUNT_HEIGHT_M;
+  let pylonHeightRange: [number, number] = [MOUNT_HEIGHT_M, MOUNT_HEIGHT_M];
+
+  if (style === 'pipe' && correctedPanels.length > 0) {
+    // Low-side: minimum Z - (panelH/2)*sin(tilt) across all row-0 panels
+    const row0Panels = correctedPanels.filter(p => (p.arrayRow ?? 0) === 0);
+    const backPanels = correctedPanels.filter(p => (p.arrayRow ?? 0) !== 0);
+    if (row0Panels.length > 0) {
+      const minRow0Z   = Math.min(...row0Panels.map(p => p.height));
+      lowSideClearanceM = minRow0Z - (panelH / 2) * Math.sin(tiltRad) - groundZ;
+    }
+    if (backPanels.length > 0) {
+      const maxBackZ    = Math.max(...backPanels.map(p => p.height));
+      highSideClearanceM = maxBackZ + (panelH / 2) * Math.sin(tiltRad) - groundZ;
+    }
+    solvedPlaneZ = groundZ + MOUNT_HEIGHT_M;  // legacy field
+    const plpPylons = result.piles.filter(p => p.row === 'uniform');
+    if (plpPylons.length > 0) {
+      const hs = plpPylons.map(p => p.height);
+      pylonHeightRange = [Math.min(...hs), Math.max(...hs)];
+    }
+    debugLog.push(`[CLEARANCE v5.5] low=${lowSideClearanceM.toFixed(4)}m (${(lowSideClearanceM*39.3701).toFixed(1)}in) high=${highSideClearanceM.toFixed(4)}m (${(highSideClearanceM*39.3701).toFixed(1)}in)`);
+    debugLog.push(`[CLEARANCE v5.5] pylonH range=[${pylonHeightRange[0].toFixed(3)}, ${pylonHeightRange[1].toFixed(3)}]m`);
+  }
+
+  debugLog.push(`[DONE v4.0] members=${result.members.length} piles=${result.piles.length} sbs=${result.strongbacks.length} rails=${result.rails.length} valid=${validation.valid}`);
+
+  return {
+    piles:             result.piles,
+    strongbacks:       result.strongbacks,
+    rails:             result.rails,
+    members:           result.members,
+    panelAttachPoints,
+    valid:             validation.valid,
+    errors:            validation.errors,
+    debugLog,
+    groundZ, sPostTopZ, nPostTopZ,
+    sRailZ, nRailZ, tableDepthM,
+    baySpanM: style === 'ironridge' ? XR_BAY_SPAN_M : PLP_BAY_SPAN_M,
+    correctedPanels,
+    lowSideClearanceM,
+    highSideClearanceM,
+    solvedPlaneZ,
+    pylonHeightRange,
+  };
+}
+
+// ─── Utility exports ──────────────────────────────────────────────────────────
+
+export function getMaxRows(style: GroundSystemStyle): number {
+  return style === 'ironridge' ? XR_ROW_COUNT : PLP_ROW_COUNT;
+}
+
+export function getWithinTableSpacing(
+  style: GroundSystemStyle,
+  orientation: 'portrait' | 'landscape',
+  tiltDeg: number,
+): number {
+  const { ph } = panelDims(orientation);
+  return withinTableRowSpacingM(ph, tiltDeg);
+}
+
+export interface GroundClickTrace {
+  screenX: number; screenY: number; pickMethod: string;
+  intersectionLat: number; intersectionLng: number; intersectionZ: number;
+  basePlaneZ: number; mountPlaneZ: number; finalPanelZ: number;
+}
+
+export function formatClickTrace(t: GroundClickTrace): string {
+  return [
+    `[GROUND_CLICK_DEBUG]`,
+    `  screen=(${t.screenX.toFixed(1)},${t.screenY.toFixed(1)}) method=${t.pickMethod}`,
+    `  intersection=(${t.intersectionLat.toFixed(6)},${t.intersectionLng.toFixed(6)},${t.intersectionZ.toFixed(2)})`,
+    `  basePlaneZ=${t.basePlaneZ.toFixed(2)} [LOCKED] mountPlaneZ=${t.mountPlaneZ.toFixed(2)} finalPanelZ=${t.finalPanelZ.toFixed(2)}`,
+  ].join('\n');
+}

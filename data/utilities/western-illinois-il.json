@@ -1,0 +1,48 @@
+{
+  "id": "western-illinois-il",
+  "name": "Western Illinois Electrical Coop",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "Adams, Brown, Pike, and Schuyler counties, western Illinois",
+  "website": "https://www.wiec.coop",
+  "phone": "217-285-4021",
+  "interconnectionEmail": "office@wiec.coop",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies; western IL near Missouri border"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Standard residential fee for systems ≤ 10 kW; engineering study for larger systems",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R",
+    "avgRetailRatePerKwh": 0.1183,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 26.00,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines (ABP) available; western IL rural territory"
+  },
+  "eia": {
+    "utilityId": "20382",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}

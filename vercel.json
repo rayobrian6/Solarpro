@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "name": "solarpro-v31",
+  "alias": ["solarpro-v31.vercel.app"],
+
+  "git": {
+    "deploymentEnabled": {
+      "master": true,
+      "underthesunsolar24-6883": false
+    }
+  },
+
+  "headers": [
+    {
+      "source": "/_next/static/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+vent
+skylight
+hvac_unit
+chimney
+pipe
+meter
+main_panel
+disconnect

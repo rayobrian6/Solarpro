@@ -1,0 +1,1064 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// Roadmap to November RE+ 2026 — Las Vegas Convention Center, Nov 16–19, 2026
+// lib/roadmapRE26.ts
+//
+// Single source of truth for all the engineering, product, sales, and go-to-market
+// deliverables we want shipped by the time doors open at RE+ 2026. Rendered at
+// /admin/roadmap.
+//
+// To add a todo: paste a new entry into ROADMAP_ITEMS. To update status, flip the
+// `status` field and bump `updatedAt`. To link a commit, add the commit hash to
+// `commits[]`. This file is the database.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Target show dates (LVCC): https://www.re-plus.com/about/future-dates/ */
+export const RE_PLUS_2026 = {
+  name: 'RE+ 2026',
+  venue: 'Las Vegas Convention Center',
+  startDate: '2026-11-16',
+  endDate: '2026-11-19',
+  tagline: 'Largest clean-energy event in North America',
+  website: 'https://www.re-plus.com',
+} as const;
+
+// ─── Status / Priority / Track enums ─────────────────────────────────────
+export type RoadmapStatus =
+  | 'idea'        // captured, not yet planned
+  | 'planned'     // accepted, on the board, not started
+  | 'in-progress' // actively being worked
+  | 'blocked'     // waiting on external input
+  | 'done';       // shipped + verified
+
+export type RoadmapPriority = 'p0' | 'p1' | 'p2' | 'p3';
+//   p0 = release-critical   p1 = important   p2 = nice-to-have   p3 = future
+
+export type RoadmapTrack =
+  | 'brand-onboarding'
+  | 'engineering-core'
+  | 'compliance'
+  | 'bom-pricing'
+  | 'ui-ux'
+  | 'proposal-flow'
+  | 'api-integrations'
+  | 'admin-ops'
+  | 'go-to-market'
+  | 'infrastructure';
+
+export interface RoadmapItem {
+  id: string;               // stable slug
+  title: string;
+  summary: string;          // 1-2 sentences
+  track: RoadmapTrack;
+  priority: RoadmapPriority;
+  status: RoadmapStatus;
+  /** Optional effort estimate for capacity planning. */
+  effort?: 's' | 'm' | 'l' | 'xl';
+  /** Git commit hashes that landed work on this item. */
+  commits?: string[];
+  /** Related filepaths for fast jump-to-source. */
+  files?: string[];
+  /** Free-form notes / decisions / context the next dev will need. */
+  notes?: string;
+  /** Dependencies on other roadmap ids. */
+  dependsOn?: string[];
+  /** ISO date strings. */
+  createdAt: string;
+  updatedAt: string;
+  /** If `status === 'done'`, the target version/build that shipped it. */
+  shippedIn?: string;
+}
+
+// ═══ Track metadata ═════════════════════════════════════════════════════
+export const TRACK_META: Record<RoadmapTrack, { label: string; color: string; description: string }> = {
+  'brand-onboarding': {
+    label: 'Brand Onboarding',
+    color: 'emerald',
+    description: 'Adding new inverter / battery / panel brands to the registry with CI-enforced datasheet auditing.',
+  },
+  'engineering-core': {
+    label: 'Engineering Core',
+    color: 'blue',
+    description: 'Sizing engine, string generator, compliance evaluator, auto-heal, panel compatibility gate.',
+  },
+  'compliance': {
+    label: 'Compliance & NEC',
+    color: 'amber',
+    description: 'NEC 690.x / 705.x / 710.x compliance, permit packages, AHJ-specific rulesets.',
+  },
+  'bom-pricing': {
+    label: 'BOM & Pricing',
+    color: 'violet',
+    description: 'Bill of materials generation, pricing, margin, proposal financials.',
+  },
+  'ui-ux': {
+    label: 'UI / UX',
+    color: 'pink',
+    description: 'Engineering page, design page, proposal viewer, marketing polish.',
+  },
+  'proposal-flow': {
+    label: 'Proposal Flow',
+    color: 'sky',
+    description: 'Customer-facing proposal rendering, signatures, handoff to install.',
+  },
+  'api-integrations': {
+    label: 'API & Integrations',
+    color: 'cyan',
+    description: 'External APIs — Google Maps, SolarReviews, NREL PVWatts, utility rate feeds.',
+  },
+  'admin-ops': {
+    label: 'Admin & Ops',
+    color: 'slate',
+    description: 'Admin portal, company management, activity log, system health.',
+  },
+  'go-to-market': {
+    label: 'Go-to-Market',
+    color: 'rose',
+    description: 'Demo booth, marketing site, pricing page, onboarding docs, RE+ booth prep.',
+  },
+  'infrastructure': {
+    label: 'Infrastructure',
+    color: 'zinc',
+    description: 'Build system, test suite, deployment, observability.',
+  },
+};
+
+// ═══ Roadmap data ═══════════════════════════════════════════════════════
+// Edit this list directly. Keep entries concise — this is a board, not a wiki.
+export const ROADMAP_ITEMS: RoadmapItem[] = [
+  // ─── DONE ────────────────────────────────────────────────────────────
+  {
+    id: 'v47.424-panel-auto-heal-pipeline',
+    title: 'Panel auto-heal: advisory → authoritative',
+    summary: 'When a panel is electrically incompatible with the selected brand, the compliance pipeline auto-rewrites config.inverters[].strings[].panelId so the engine sees a compliant design.',
+    track: 'engineering-core',
+    priority: 'p0',
+    status: 'done',
+    effort: 'l',
+    commits: ['6f89817'],
+    files: ['app/engineering/page.tsx', 'lib/system/panelAutoHeal.test.ts'],
+    shippedIn: 'v47.424',
+    createdAt: '2026-05-07',
+    updatedAt: '2026-05-07',
+  },
+  {
+    id: 'v47.425-onboarding-smoke-suite',
+    title: 'Brand Onboarding Smoke Suite',
+    summary: '317 CI-blocking tests that validate every registered brand end-to-end. Every future brand addition inherits all v47.418-v47.424 protections automatically.',
+    track: 'brand-onboarding',
+    priority: 'p0',
+    status: 'done',
+    effort: 'xl',
+    commits: ['70b5b2f'],
+    files: ['lib/system/brandOnboardingSmoke.test.ts', 'lib/system/brandOnboardingSmoke.helpers.ts', 'docs/BRAND-ONBOARDING.md'],
+    shippedIn: 'v47.425',
+    createdAt: '2026-05-08',
+    updatedAt: '2026-05-09',
+  },
+  {
+    id: 'v47.426-solis-tesla-tigo',
+    title: 'Batch Brand Onboarding: Solis + Tesla + Tigo',
+    summary: '13 new inverter SKUs across 3 brands in one commit, proving the onboarding model works. 317/317 smoke tests passed on first run.',
+    track: 'brand-onboarding',
+    priority: 'p0',
+    status: 'done',
+    effort: 'l',
+    commits: ['6e35b0a'],
+    files: [
+      'lib/system/brandProfiles/solis.ts',
+      'lib/system/brandProfiles/tesla.ts',
+      'lib/system/brandProfiles/tigo.ts',
+      'lib/solis-datasheet.test.ts',
+      'lib/tesla-datasheet.test.ts',
+      'lib/tigo-datasheet.test.ts',
+    ],
+    shippedIn: 'v47.426',
+    createdAt: '2026-05-09',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'v47.428-battery-ecosystem-smoke',
+    title: 'Battery Ecosystem Smoke Suite + 6 battery SKUs',
+    summary: '120 CI-blocking battery tests + 6 new datasheet-verified battery SKUs (Tigo EI/GO, BYD HVM, Pylontech Force-H2, EG4 PowerPro, HomeGrid Stackd). Dangling-recommendation tokens across 4 BrandProfiles trimmed.',
+    track: 'brand-onboarding',
+    priority: 'p1',
+    status: 'done',
+    effort: 'l',
+    commits: ['028abfc', '4af6a27'],
+    files: [
+      'lib/system/batteryEcosystemSmoke.test.ts',
+      'lib/system/batteryEcosystemSmoke.helpers.ts',
+      'lib/equipment-db.ts',
+    ],
+    shippedIn: 'v47.428',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-11',
+  },
+  {
+    id: 'v47.429-stage6-racking-visibility',
+    title: 'Stage 6 — Racking Visibility in UI',
+    summary: 'Racking becomes a first-class citizen of the ecosystem story: compatibleRacking in ResolvedBrandEquipment, new Racking section in EcosystemKitPanel, 174 CI-blocking tests (154 smoke + 20 audit lock), recommendedRackingBrands populated conservatively on 9 brand profiles.',
+    track: 'ui-ux',
+    priority: 'p1',
+    status: 'done',
+    effort: 'l',
+    commits: ['120300c'],
+    files: [
+      'lib/system/brandProfiles/types.ts',
+      'lib/system/brandProfiles/resolveBrandEquipment.ts',
+      'lib/system/rackingEcosystemSmoke.test.ts',
+      'lib/system/rackingEcosystemSmoke.helpers.ts',
+      'lib/racking-database.test.ts',
+      'components/engineering/EcosystemPicker.tsx',
+    ],
+    shippedIn: 'v47.429',
+    notes: 'Conservative mapping: only 9 profiles got recommendedRackingBrands (tesla, enphase, solaredge, sma, fronius, apsystems, hoymiles, ecoflow — generac/solis/sol-ark/growatt/tigo/sungrow/goodwe left empty until industry evidence). Dangling-token invariant (Global 2) mirrors the v47.428 battery pattern. Two racking DBs still coexist (mounting-hardware-db = UI, racking-database = structural engine) — consolidation is Stage 7/8.',
+    createdAt: '2026-05-11',
+    updatedAt: '2026-05-11',
+  },
+
+  {
+    id: 'v47.430-solaredge-allocation-regression',
+    title: 'v47.430 — SolarEdge Inverter Allocation Regression Fix (Optimizer Voltage-Clamp Bypass)',
+    summary: 'User-reported regression: SolarEdge auto-generated 4 inverters where Sol-Ark correctly sized 2 for the same panel count. Root cause: voltageAwarePanelsPerUnit() in lib/system/sizingEngine.ts applied the NEC 690.7 cold-Voc clamp unconditionally, collapsing SolarEdge SE7600H panelsPerUnit from 1×2×25=50 to 1×2×10=20 and forcing ceil(72/20)=4 inverters instead of the correct ceil(72/50)=2. The optimizer bypass already existed in feasibilityEvaluator.ts (v47.411) and in the inner voltageAwareMaxPPS closure — but was missed in the top-level voltageAwarePanelsPerUnit() used by sizeInverters() for unit-count determination. Fix: topology parameter on voltageAwarePanelsPerUnit(); optimizer topology bypasses the cold-Voc clamp and returns mpptCount × maxParallelStringsPerMppt × brandMaxPPS (hardware ceiling). String/hybrid/micro retain the voltage clamp. vaPPU closure forwards brand.topology at every call site. Plus test-incompleteness fix in brandOnboardingSmoke.test.ts (nominalDcVoltage forwarded so operating current uses actual 400V bus instead of mpptCenter 340V). 4 new regression-lock tests. Brand-agnostic: any future optimizer-topology brand inherits the correct ceiling automatically.',
+    track: 'engineering-core',
+    priority: 'p0',
+    status: 'done',
+    effort: 's',
+    files: [
+      'lib/system/sizingEngine.ts',
+      'lib/system/sizingEngine.test.ts',
+      'lib/system/brandOnboardingSmoke.test.ts',
+    ],
+    shippedIn: 'v47.430',
+    notes: 'Hotfix between v47.429 (Stage 6 racking) and Stage 5 continuation. Full suite 1808/1808 pass (+4 regression-locks). TC=0, build clean. Zero API changes — topology parameter is optional.',
+    createdAt: '2026-04-22',
+    updatedAt: '2026-04-22',
+  },
+
+  {
+    id: 'v47.431-stage7-consolidation-assessment',
+    title: 'v47.431 — Stage 7 Consolidation Assessment (READ-ONLY)',
+    summary: 'Read-only audit producing docs/STAGE7_CONSOLIDATION_ASSESSMENT.md per UPGRADE_ROADMAP_v47.399.md mandate. Three audit areas: (1) BOM engine proliferation — identified ~2,228 lines of dead code across bom-engine.ts / bom-v2-engine.ts / bom-unified.ts / bom-merge.ts + orphan /api/engineering/bom-v2 route; one live engine is bom-engine-v4.ts. Recommended Stage 8.1 atomic deletion. (2) Racking DB duality — racking-database.ts (14 rows, 1 consumer: structural-engine-v3) vs mounting-hardware-db.ts (42 rows, 8 consumers including structural-engine-v4 and the entire UI/BOM/permit surface); 14/14 IDs overlap but fields differ. Both structural routes are live. Three options documented; recommended Option B (drift-fence CI test). (3) equipment-db vs brandProfiles spec duplication — ~360 drift points across 6 fields duplicated per SKU; recommended drift-fence CI test with overridesEquipmentDb opt-out rather than full refactor. Stage 8 scope recommendation: 8.1 (BOM deletion -2,228 lines) + 8.2 (drift-fence tests); defer 8.3 (racking unification) and 8.4 (brand-profile centralization). Zero code changes.',
+    track: 'infrastructure',
+    priority: 'p1',
+    status: 'done',
+    effort: 'm',
+    files: [
+      'docs/STAGE7_CONSOLIDATION_ASSESSMENT.md',
+      'docs/UPGRADE_ROADMAP_v47.399.md',
+      'lib/version.ts',
+      'lib/roadmapRE26.ts',
+    ],
+    shippedIn: 'v47.431',
+    notes: 'Pure read-only audit. Full test suite unchanged (1808/1808 pass). Exit criteria: user chooses Stage 8 scope from the three documented options.',
+    createdAt: '2026-04-22',
+    updatedAt: '2026-04-22',
+  },
+
+  {
+    id: 'v47.432-stage8-bom-deletion-drift-guards',
+    title: 'v47.432 — Stage 8.1 + 8.2: BOM Dead-Code Deletion + Drift-Fence CI Tests',
+    summary: 'Executes the Stage 7 recommended scope per user directive (low-risk: pure deletion + additive tests only). STAGE 8.1: deletes 7 orphan BOM files totalling -3,278 lines (lib/bom-engine.ts / bom-v2-engine.ts / bom-unified.ts / bom-merge.ts + app/api/engineering/bom-v2/route.ts + 2 dead test files bom-merge.test.ts + bom-unified.test.ts). The one live engine that remains is bom-engine-v4.ts. 21 dangling comment pointers across bom-system-profiles.ts (16), app/engineering/page.tsx (4), bom-engine-v4.ts (1) rewritten as v47.432-tagged historical attribution. STAGE 8.2: +273 CI tests across 2 new drift-guard files. rackingDatabaseDriftGuard.test.ts (45 tests) enforces manufacturer + systemType coarse-bucket + compatibleRoofTypes overlap for the 14 IDs shared by racking-database.ts and mounting-hardware-db.ts; 2 pre-existing divergences documented in EXPECTED_DIVERGENCES allowlist (ecofasten-rockit, esdec-flatfix). brandProfileDriftGuard.test.ts (228 tests) enforces acKw/dcKwMax/mpptCount/maxParallelStringsPerMppt equality between every BrandInverterModelRef and its canonical STRING_INVERTERS row, with new overridesEquipmentDb opt-out flag added to the BrandInverterModelRef type. 5 SKUs tagged with the opt-out (sungrow-sg15rs, sma-sb-10.0 intentional; sma-sb-7.7, goodwe-gw10k-ms, generic-string::se-7600h/se-10000h stale — TODO Stage 8.4). Test suite grows 1808 → 2075 net (+267 after -67 dead + 273 new). TC=0, npm run build clean (46/46 pages). Zero API changes, zero value changes to existing data.',
+    track: 'infrastructure',
+    priority: 'p1',
+    status: 'done',
+    effort: 'm',
+    files: [
+      // Stage 8.1 deletions
+      'lib/bom-engine.ts',
+      'lib/bom-v2-engine.ts',
+      'lib/bom-unified.ts',
+      'lib/bom-merge.ts',
+      'lib/bom-merge.test.ts',
+      'lib/bom-unified.test.ts',
+      'app/api/engineering/bom-v2/route.ts',
+      // Stage 8.1 comment rewrites
+      'lib/bom-system-profiles.ts',
+      'lib/bom-engine-v4.ts',
+      'app/engineering/page.tsx',
+      // Stage 8.2 new drift-guards
+      'lib/system/rackingDatabaseDriftGuard.test.ts',
+      'lib/system/brandProfileDriftGuard.test.ts',
+      // Stage 8.2 type flag + per-brand opt-out tags
+      'lib/system/brandProfiles/types.ts',
+      'lib/system/brandProfiles/sungrow.ts',
+      'lib/system/brandProfiles/sma.ts',
+      'lib/system/brandProfiles/goodwe.ts',
+      'lib/system/brandProfiles/generic-string.ts',
+      // Release artifacts
+      'docs/UPGRADE_ROADMAP_v47.399.md',
+      'lib/version.ts',
+      'lib/roadmapRE26.ts',
+    ],
+    shippedIn: 'v47.432',
+    notes: 'Stage 8.3 (racking unification) and Stage 8.4 (brand-profile centralization + reconcile 3 documented stale profile drifts) remain deferred per user directive. Drift-guard audit log surfaces the full override list on every CI run for review visibility.',
+    createdAt: '2026-04-22',
+    updatedAt: '2026-04-22',
+  },
+
+  // v47.433 — Stage 8.4 Brand-Profile Centralization
+  {
+    id: 'v47.433-stage8_4-brand-profile-centralization',
+    title: 'v47.433 — Stage 8.4: Brand-Profile Centralization',
+    summary: 'Closes the brand-profile drift backlog surfaced by the v47.432 drift-guard. Per user directive: fix the 3 stale drifts, align the 2 intentional overrides to registry, leave zero overridesEquipmentDb=true flags remaining. Six value corrections across 4 brand profiles (no code-logic changes): (1) generic-string.ts se-7600h and se-10000h mpptCount 2 → 1 (SolarEdge HD-Wave is single-MPPT per optimizer inverter); (2) sma.ts sma-sb-7.7 mpptCount 2 → 3 (v47.417 US-41 datasheet correction now propagated); (3) sma.ts sma-sb-10.0 maxParallel 1 → 6 (TL-US external combiner per datasheet; active:false SKU so zero live-project impact); (4) goodwe.ts goodwe-gw10k-ms acKw/dcKwMax/mpptCount 10.0/15.0/2 → 9.6/14.4/3 (v47.417 remap to GW9600-MS-US); (5) sungrow.ts sungrow-sg15rs maxParallel 1 → 2 (SG15RS datasheet; active:false SKU so zero live-project impact). ALL 6 overridesEquipmentDb=true flags removed; the drift-guard audit log now reports zero overrides on every CI run. The overridesEquipmentDb?:boolean field on BrandInverterModelRef is retained so future legitimate overrides have a documented mechanism. BOM accuracy impact: direct sizing improvement for three live-brand SKUs (SMA SB-7.7, GoodWe GW10K-MS, SolarEdge catch-all via generic-string). Every BOM, string-allocation, and compliance path downstream of BRAND_PROFILES inherits the fix automatically. Full suite 2075/2075 pass (same count as v47.432 — the drift-guard tests pass cleanly on the corrected values, confirming the corrections ARE the canonical registry values). TC=0, npm run build clean (46/46 pages). Stage 8.3 (racking unification) remains deferred.',
+    track: 'infrastructure',
+    priority: 'p1',
+    status: 'done',
+    effort: 's',
+    files: [
+      'lib/system/brandProfiles/generic-string.ts',
+      'lib/system/brandProfiles/sma.ts',
+      'lib/system/brandProfiles/goodwe.ts',
+      'lib/system/brandProfiles/sungrow.ts',
+      'docs/UPGRADE_ROADMAP_v47.399.md',
+      'docs/stage8_4-todo.md',
+      'lib/version.ts',
+      'lib/roadmapRE26.ts',
+    ],
+    shippedIn: 'v47.433',
+    notes: 'Stage 8.3 (racking unification) remains deferred. With Stage 8.4 complete, the core sizing + BOM layer is fully aligned with canonical equipment-db values. Next: site survey app integration.',
+    createdAt: '2026-04-23',
+    updatedAt: '2026-04-23',
+  },
+
+  // v47.434 — Stage 9.1 Survey Integration Schema + HMAC + Admin Log
+  {
+    id: 'v47.434-stage9_1-survey-integration-schema-hmac',
+    title: 'v47.434 — Stage 9.1: Survey Integration Schema + HMAC Verifier + Admin Webhook Log',
+    summary: 'First release of the in-house survey tool integration pipeline. v1 is inbound-only (survey backend → SolarPro, never reverse), thin-event webhook architecture per partner doc: survey tool POSTs minimal envelope { event, schemaVersion, event_id, survey_id, completed_at, survey_url? } with HMAC-SHA256(`${timestamp}.${rawBody}`, secret) signature; SolarPro verifies + logs + (in v47.435+) fetches full payload. v47.434 SHIPS the contract + auth skeleton, DEFERS the ingest pipeline to v47.435 (blocked on survey-team thin-event body confirmation + sample POST). Seven new files + one migration: (1) migrations/011_survey_ingest.sql adds projects.survey_external_id/origin/survey_category/survey_meta columns, project_files.external_id/status, and webhook_deliveries table with 4 indexes + 2 partial-unique idempotency indexes. (2) lib/survey/types.ts frozen v1.0 contract: SchemaVersion=1.0 literal, SurveyEventType=survey.completed literal, SurveyCompletedEvent, WebhookSignatureVerification with 5 reason codes, WebhookDeliveryStatus 6-member union, ProjectOrigin closed enum manual|bill_upload|survey|api. (3) lib/survey/verifyWebhookSignature.ts pure-function HMAC verifier, 5-min timestamp tolerance, constant-time compare via crypto.timingSafeEqual with length-mismatch short-circuit, injectable nowSeconds for deterministic tests. (4) app/api/webhooks/survey-complete/route.ts POST receiver: reads raw body (bytes-exact), verifies HMAC, narrow envelope validator, idempotency check on event_id, logs every delivery (valid or invalid) to webhook_deliveries, returns 501 INGEST_NOT_IMPLEMENTED on success path. (5) app/api/admin/survey-webhook-log/route.ts admin GET with status/source/limit filters. (6) app/api/admin/survey-webhook-log/[id]/replay/route.ts 501 stub (full impl v47.437). (7) app/api/migrate/route.ts inline migration block 011. Tests (+26 across 2 new files): verifyWebhookSignature.test.ts (18 tests covering valid, all 5 failure reason codes, length-mismatch short-circuit, replay defence via timestamp mismatch, byte-exactness, determinism, custom tolerance); contractDriftGuard.test.ts (8 tests locking CURRENT_SCHEMA_VERSION=1.0, SUPPORTED_SURVEY_EVENT_TYPES, PROJECT_ORIGIN_VALUES order + no duplicates + lowercase snake_case DB-text invariant, WebhookDeliveryStatus 6-member snapshot). Full suite 2101/2101 pass across 49 test files (+26 from v47.433 2075). TC=0, npm run build clean (46/46 pages + 3 new API routes registered). ZERO behavioural changes to existing projects/engineering/BOM/proposal paths — entirely additive surface.',
+    track: 'api-integrations',
+    priority: 'p1',
+    status: 'done',
+    effort: 'm',
+    files: [
+      'migrations/011_survey_ingest.sql',
+      'app/api/migrate/route.ts',
+      'lib/survey/types.ts',
+      'lib/survey/verifyWebhookSignature.ts',
+      'lib/survey/verifyWebhookSignature.test.ts',
+      'lib/survey/contractDriftGuard.test.ts',
+      'app/api/webhooks/survey-complete/route.ts',
+      'app/api/admin/survey-webhook-log/route.ts',
+      'app/api/admin/survey-webhook-log/[id]/replay/route.ts',
+      'docs/SURVEY_INTEGRATION_PROPOSAL_v1.md',
+      'docs/stage9_v47434-todo.md',
+      'docs/UPGRADE_ROADMAP_v47.399.md',
+      'lib/version.ts',
+      'lib/roadmapRE26.ts',
+    ],
+    shippedIn: 'v47.434',
+    notes: 'Blocked on survey team for v47.435: thin-event body shape confirmation, sample webhook POST, and access to GET /api/surveys/{id} on survey backend. Stage 9.2 will ship the ingest/transform layer; 9.3 photos+notes; 9.4 contract doc + replay impl. Partner contract pivoted mid-design from pull (SolarPro initiates) to receive-then-fetch (survey pushes webhook, SolarPro fetches full payload) after partner shared actual survey-tool doc — architecture and implementation updated before any code shipped. Single-tenant v1 (SURVEY_INGEST_DEFAULT_USER_ID env var owns survey-origin rows).',
+    createdAt: '2026-04-23',
+    updatedAt: '2026-04-23',
+  },
+
+  // v47.435 — Stage 9.2 Ingest Pipeline Skeleton
+  {
+    id: 'v47.435-stage9_2-ingest-pipeline-skeleton',
+    title: 'v47.435 — Stage 9.2: Ingest Pipeline Skeleton (Live DB Writes, Q2/Q3 Stubs)',
+    summary: 'Wires the ingest pipeline into POST /api/webhooks/survey-complete with live DB writes. After HMAC verification + delivery INSERT, the route now calls runIngestPipeline() and returns 202 INGEST_OK (project upserted) or 202 INGEST_FAILED_BUT_LOGGED (pipeline error, delivery still accepted). NEVER throws. Partner never retries on pipeline-only failures — delivery is always logged; replay is the v47.437 recovery path. NEW MODULES (4 files in lib/survey/ingest/): (1) types.ts — IngestContext (clean context, no NextRequest), IngestResult discriminated union (ingested|failed), IngestStatus, IngestErrorCode 6-member enum (MISSING_OWNER_ID/LINK_RESOLUTION_FAILED/TRANSFORM_FAILED/DB_WRITE_FAILED/DELIVERY_UPDATE_FAILED/UNKNOWN), SurveyProjectLinkStrategy 3-member enum (CREATE_ORPHAN/ATTACH_TO_EXISTING/TRIAGE_QUEUE), LinkResolution discriminated union (attach/create/triage/error), TransformInput/Output/Summary/File, SurveyRawPayload opaque type (Q3 pending). (2) projectLinkResolver.ts — resolveProjectLink() pure function, no DB calls. Reads SURVEY_PROJECT_LINK_STRATEGY env var (case-insensitive, whitespace-trimmed, fallback CREATE_ORPHAN + console.warn). CREATE_ORPHAN: create with surveyExternalId=event.survey_id. ATTACH_TO_EXISTING: attach with partnerProjectId, degrades to triage when partnerProjectId=null. TRIAGE_QUEUE: triage all deliveries for ops review. (3) transformLayer.ts — pluggable transformer registry (registerTransformer/getTransformer/listRegisteredTransformers). Built-in v1.0/survey.completed transformer registered at module load. rawPayload=null stub: projectName="Survey <survey_id>", address/lat/lng=null, files=[]. rawPayload non-null: defensive candidate-key extraction. buildTransformSummary() for delivery row + response body. (4) ingestPipeline.ts — runIngestPipeline() orchestrator. Steps: A validate ownerId → B resolveProjectLink → C fetch payload STUB (rawPayload=null, Q2 blocked) → D transform → E upsert project + insert files → F UPDATE webhook_deliveries. Project upsert: INSERT ... ON CONFLICT (user_id, survey_external_id) WHERE survey_external_id IS NOT NULL DO UPDATE; xmax=0 → created=true. File insert: ON CONFLICT DO NOTHING. _markDeliveryFailed() best-effort. TRIAGE creates placeholder project with [TRIAGE] reason + requiresManualLinkage=true. TypeScript fix: if (transformResult.ok === false) required for discriminated union narrowing (not !transformResult.ok). MIGRATION 012 (migrations/012_survey_ingest_v2.sql + app/api/migrate/route.ts): webhook_deliveries.ingest_version TEXT, webhook_deliveries.ingest_summary JSONB, projects.survey_triage_reason TEXT, project_files.fetch_error TEXT, project_files.fetch_attempts INTEGER DEFAULT 0, project_files.mime_type TEXT; 3 new indexes. TESTS (+91 across 6 files, 4 new + 2 updated): types.test.ts (14), projectLinkResolver.test.ts (21), transformLayer.test.ts (37), ingestPipeline.test.ts (17 with vi.mock DB isolation), webhookResponseContract.test.ts updated (18), producerVersionContract.test.ts updated (12). Full suite: 2291/2291 pass across 59 files (+91 from v47.434c 2200). TC=0, npm run build clean (all 6 routes registered). ZERO CONTRACT-DRIFT-GUARD BREAKS.',
+    track: 'api-integrations',
+    priority: 'p1',
+    status: 'done',
+    effort: 'm',
+    files: [
+      'lib/survey/ingest/types.ts',
+      'lib/survey/ingest/projectLinkResolver.ts',
+      'lib/survey/ingest/transformLayer.ts',
+      'lib/survey/ingest/ingestPipeline.ts',
+      'lib/survey/ingest/types.test.ts',
+      'lib/survey/ingest/projectLinkResolver.test.ts',
+      'lib/survey/ingest/transformLayer.test.ts',
+      'lib/survey/ingest/ingestPipeline.test.ts',
+      'migrations/012_survey_ingest_v2.sql',
+      'app/api/migrate/route.ts',
+      'app/api/webhooks/survey-complete/route.ts',
+      'lib/survey/webhookResponseContract.test.ts',
+      'lib/survey/producerVersionContract.test.ts',
+      'docs/UPGRADE_ROADMAP_v47.399.md',
+      'lib/version.ts',
+      'lib/roadmapRE26.ts',
+      'scripts/bump_version_v47435.py',
+    ],
+    shippedIn: 'v47.435',
+    notes: 'All field mappings are Q3 stubs (SurveyRawPayload = Record<string, unknown>). Project linkage strategy is env-var-controlled (SURVEY_PROJECT_LINK_STRATEGY, default CREATE_ORPHAN) until Q8 answered. Full payload fetch from GET /api/surveys/{id} deferred until Q2 bearer auth answered. Async photo fetch worker deferred to v47.436. Handoff JWT minter deferred to Stage 9.2b. Replay admin action deferred to v47.437.',
+    createdAt: '2026-04-23',
+    updatedAt: '2026-04-23',
+  },
+
+  // ─── IN PROGRESS ─────────────────────────────────────────────────────
+  {
+    id: 'admin-roadmap-page',
+    title: 'Admin roadmap page — "Road to RE+ 2026"',
+    summary: 'This page. Centralizes every to-do with priority/track filters and a live countdown to the Nov 16 show.',
+    track: 'admin-ops',
+    priority: 'p1',
+    status: 'in-progress',
+    effort: 's',
+    files: ['app/admin/roadmap/page.tsx', 'lib/roadmapRE26.ts'],
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — BRAND ONBOARDING BATCHES ──────────────────────────────
+  {
+    id: 'brand-batch-residential-string',
+    title: 'Residential string-inverter batch (Chint + Delta + Yaskawa Solectria)',
+    summary: 'Three proper grid-tie PV string inverter brands with US market presence. Clean pattern repeat from v47.426.',
+    track: 'brand-onboarding',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    notes: 'Path 2 decision from v47.427 research — avoids the inverter/charger architectural detour that Schneider/Victron/OutBack would require.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'brand-batch-inverter-chargers',
+    title: 'Inverter/charger ecosystem (Schneider + OutBack + their MPPT controllers)',
+    summary: 'Off-grid / whole-home backup specialists. Requires new BrandProfile variant where "inverter" is a paired PV charge controller. Victron probably skipped (marine/RV focus).',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'xl',
+    notes: 'Architectural wrinkle — XW Pro / MultiPlus-II / Radian are battery-based inverter/chargers with no PV MPPT on the unit. PV enters via Conext MPPT 100-600 / Victron SmartSolar RS / OutBack FLEXmax. Need to decide: model the charge controller as the "inverter" SKU, or extend BrandProfile with an optional `pairedMpptController` field.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'brand-batch-commercial-3phase',
+    title: 'Commercial 3-phase string inverters (Chint CPS SCA/SCE + Solectria commercial + Delta M-series)',
+    summary: 'Breaks us out of residential-only. Essential for RE+ commercial-leaning attendees.',
+    track: 'brand-onboarding',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    notes: 'Of our current brands only Sungrow, SolarEdge, Fronius, and Sol-Ark 30K-3P-208V are 208/480V 3φ. Commercial is a huge growth vector.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'brand-sma-sunny-boy-smart-energy',
+    title: 'Expand SMA with Sunny Boy Smart Energy hybrid line',
+    summary: 'SMA has new hybrid inverters (SBSE 3.0-US / 3.8-US / 5.0-US / 6.0-US / 7.7-US) we should carry — our SMA entry is pure grid-tie.',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'brand-fronius-gen24',
+    title: 'Expand Fronius with Primo GEN24 Plus',
+    summary: 'Fronius Primo GEN24 Plus (3.0/3.8/5.0/6.0/7.6/10.0) is the current-gen residential hybrid.',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — BATTERY ECOSYSTEM ─────────────────────────────────────
+  {
+    id: 'battery-ecosystem-smoke-suite',
+    title: 'Battery Ecosystem Smoke Suite',
+    summary: 'Parallel of the v47.425 brand-onboarding suite — CI-blocking tests enforcing schema, plausibility, chemistry allowlist, warranty minimums, datasheet traceability, and brand-to-battery recommendation integrity (no dangling tokens). 120 CI-blocking tests.',
+    track: 'brand-onboarding',
+    priority: 'p1',
+    status: 'done',
+    effort: 'l',
+    shippedIn: 'v47.428',
+    commits: ['028abfc'],
+    files: ['lib/system/batteryEcosystemSmoke.test.ts', 'lib/system/batteryEcosystemSmoke.helpers.ts'],
+    notes: 'Discovered & fixed 6 dangling recommendation tokens across Solis/Sol-Ark/Growatt/EcoFlow BrandProfiles. Global 2 invariant now permanently prevents regression.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'battery-tigo-ei-battery',
+    title: 'Tigo EI Battery + GO Battery SKUs',
+    summary: 'Both Tigo battery families (EI DC-coupled HV @ 400V / GO modular HV @ 400V) added to registry with full datasheet audit tests. Paired with v47.426 Tigo EI Inverter onboarding.',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'done',
+    effort: 'm',
+    shippedIn: 'v47.428',
+    commits: ['028abfc'],
+    files: ['lib/equipment-db.ts', 'lib/tigo-battery-datasheet.test.ts'],
+    dependsOn: ['v47.426-solis-tesla-tigo'],
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'battery-byd-pylontech-hv',
+    title: 'BYD HVM 11.0 + Pylontech Force-H2 HV batteries',
+    summary: 'Third-party HV batteries (BYD 204.8V, Pylontech 384V) paired with Solis S6-EH1P HV ecosystem. Datasheet-audited and registered.',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'done',
+    effort: 'm',
+    shippedIn: 'v47.428',
+    commits: ['028abfc'],
+    files: ['lib/equipment-db.ts', 'lib/byd-pylontech-datasheet.test.ts'],
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'battery-eg4-homegrid-lv',
+    title: "EG4 PowerPro + HomeGrid Stack'd LV batteries",
+    summary: "Third-party 48V LV batteries paired with Sol-Ark and Growatt hybrid ecosystems. EG4 PowerPro WallMount (14.3 kWh) and HomeGrid Stack'd 9.6 kWh both registered with datasheet audits.",
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'done',
+    effort: 'm',
+    shippedIn: 'v47.428',
+    commits: ['028abfc'],
+    files: ['lib/equipment-db.ts', 'lib/eg4-homegrid-datasheet.test.ts'],
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'battery-solax-hv',
+    title: 'SolaX Triple Power HV battery SKUs',
+    summary: 'SolaX Triple Power HV (T-BAT-SYS-HV-5.8/11.6) pairs with Solis S6-EH1P. Deferred from v47.428 until we can source an authoritative US datasheet.',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'planned',
+    effort: 's',
+    notes: 'Trimmed from solis BrandProfile.recommendedBatteryBrands in v47.428. Re-add token once SKU lands.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'battery-pytes-fortress-lv',
+    title: 'Pytes eFLEX + Fortress LV batteries',
+    summary: '48V LV batteries popular in Sol-Ark installs. Deferred from v47.428. Fortress eFLEX and Pytes E-BOX/V48 SKUs with datasheet audits.',
+    track: 'brand-onboarding',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    notes: 'Trimmed from sol-ark BrandProfile.recommendedBatteryBrands in v47.428. Re-add tokens once SKUs land.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'battery-growatt-apx-lg',
+    title: 'Growatt APX HV + LG enblock/Prime batteries',
+    summary: 'Native Growatt APX (5 kWh modules, 5-30 kWh HV stack) and LG Energy Solution Prime/enblock. Deferred from v47.428.',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'm',
+    notes: 'Trimmed from growatt BrandProfile.recommendedBatteryBrands in v47.428. EG4 PowerPro fills the gap per manufacturer datasheet cross-compatibility.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — ENGINEERING CORE ──────────────────────────────────────
+  {
+    id: 'engineering-cold-temp-correction',
+    title: 'Site-specific cold-temp Voc correction (ASHRAE 2% data)',
+    summary: 'Currently using a conservative -10°C across the board. Should pull ASHRAE 2% extreme minimum by zip/lat-long for more accurate Voc_cold and looser/tighter string limits.',
+    track: 'engineering-core',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'engineering-shade-analysis',
+    title: 'Roof shade analysis + per-panel derate',
+    summary: 'Import roof model + sun path, compute per-panel shade factor, feed into sizing and production estimate.',
+    track: 'engineering-core',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'xl',
+    notes: 'Could leverage Google Solar API shade data as a starting point.',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — COMPLIANCE ────────────────────────────────────────────
+  {
+    id: 'compliance-nec-2023-rollup',
+    title: 'NEC 2023 rollup (690.12 Article update, 705.12 changes)',
+    summary: 'Audit all rule references, confirm every violation code cites the 2023 edition clauses. Some states still use 2020.',
+    track: 'compliance',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'compliance-ahj-ruleset-matrix',
+    title: 'AHJ-specific ruleset matrix',
+    summary: 'Some AHJs (CA Rule 21, HECO 14H, PREPA, NYC) impose tighter constraints than NEC alone. Add a per-AHJ overlay to the compliance engine.',
+    track: 'compliance',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — BOM & PRICING ─────────────────────────────────────────
+  {
+    id: 'bom-wire-run-length-derivation',
+    title: 'Derive wire run lengths from roof model',
+    summary: 'Currently BOM uses a flat default per-string run. Real installs vary 30–150ft. Pull from roof topology + racking layout.',
+    track: 'bom-pricing',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'bom-labor-cost-model',
+    title: 'Regional labor cost model',
+    summary: 'Labor is $X/panel-installed + $Y/kW-AC + $Z base, adjusted by state and roof complexity. Currently flat.',
+    track: 'bom-pricing',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'bom-distributor-pricing-feed',
+    title: 'Live distributor pricing feed (CED Greentech / Soligent / KWh)',
+    summary: 'BOM line items now carry unitCost + totalCost from a 3-tier price catalog (catalog -> DB overrides -> category fallback). Admin CRUD API at /api/admin/distributor-prices. DB migration 015 seeds 21 platform defaults.',
+    track: 'bom-pricing',
+    priority: 'p1',
+    status: 'done',
+    effort: 'xl',
+    commits: ['TBD'],
+    files: [
+      'lib/bom/distributorPricing.ts',
+      'lib/migrations/015_distributor_prices.sql',
+      'app/api/admin/distributor-prices/route.ts',
+      'app/api/engineering/bom/route.ts',
+      'lib/bom/distributorPricing.test.ts',
+    ],
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-23',
+    shippedIn: 'v49.0',
+  },
+
+  // ─── PLANNED — UI/UX ─────────────────────────────────────────────────
+  {
+    id: 'ui-ecosystem-picker-audit',
+    title: 'Ecosystem picker audit — surface all new brands',
+    summary: 'Walk every UI surface that filters or lists brands to ensure v47.426 (Solis/Tesla/Tigo) and future brands appear automatically.',
+    track: 'ui-ux',
+    priority: 'p2',
+    status: 'planned',
+    effort: 's',
+    dependsOn: ['v47.426-solis-tesla-tigo'],
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'ui-proposal-polish',
+    title: 'Proposal viewer polish — demo-ready',
+    summary: 'Clean up /proposals/view/[id] for the RE+ demo booth. Should be screenshot-ready.',
+    track: 'ui-ux',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'engineering-ui-overhaul-v50',
+    title: 'Engineering page — world-class UI overhaul (v50.0)',
+    summary: 'Full UX overhaul: sticky glassy command bar with live KPI chips, project identity strip, animated compliance gauge, conductor flow diagram, system overview hero cards on Config/Compliance/Electrical/Schedule tabs, admin distributor prices UI.',
+    track: 'ui-ux',
+    priority: 'p1',
+    status: 'done',
+    effort: 'xl',
+    commits: ['TBD'],
+    files: [
+      'app/engineering/page.tsx',
+      'app/admin/distributor-prices/page.tsx',
+      'app/admin/AdminShell.tsx',
+      'lib/version.ts',
+    ],
+    createdAt: '2026-05-23',
+    updatedAt: '2026-05-23',
+    shippedIn: 'v50.0',
+  },
+
+  {
+    id: 'ui-elevation-v52',
+    title: 'Real Content Elevation v52.0 — Card Grids & Premium Components',
+    summary: 'Projects flat list → elevated card grid (per-status glow, pipeline progress bar, KPI tiles, grid/list toggle). Clients premium cards (hue avatar, sparkline, contact pills). Dashboard WorkQueueRow elevated with status stripe & glow.',
+    status: 'done',
+    priority: 'p1',
+    track: 'ui-ux',
+    createdAt: '2026-04-25',
+    updatedAt: '2026-04-25',
+    shippedIn: 'v52.0',
+  },
+  {
+    id: 'ui-elevation-v51',
+    title: 'Full-Stack UI Elevation v51.0',
+    summary: 'Engineering tab heroes (structural/SLD/permit/files), AppShell glassmorphism, glass command headers across all major pages (dashboard, projects, clients, analytics, proposals, settings)',
+    status: 'done',
+    priority: 'p1',
+    track: 'ui-ux',
+    createdAt: '2026-04-25',
+    updatedAt: '2026-04-25',
+    shippedIn: 'v51.0',
+  },
+
+    // ── Shipped: v53–v56 Engineering Overhaul ─────────────────────────────────
+    {
+      id: 'engineering-audit-v54',
+      title: 'Engineering page machine-level audit & rebuild (v54.0)',
+      summary: 'buildCalcPayload() now pulls real panel dimensions/weight from equipment DB (was hardcoded). rackingWeight wired to rail spec. meanRoofHeight wired to ASCE 7-22 Kz calc. panelOrientation wired to structural calc. Roof attachment diagram full rebuild: 3-view SVG (Top-Down, Cross-Section, Isometric). Structural tab Site & Wind Parameters section added.',
+      track: 'engineering-core',
+      priority: 'p0',
+      status: 'done',
+      effort: 'l',
+      commits: ['cd8e29c'],
+      files: ['app/engineering/page.tsx', 'lib/structural-engine-v4.ts'],
+      createdAt: '2026-04-25',
+      updatedAt: '2026-04-25',
+      shippedIn: 'v54.0',
+    },
+    {
+      id: 'engineering-config-tab-v55',
+      title: 'Config tab full UX overhaul (v55.0)',
+      summary: '3-col responsive grid, SystemFlowBar flow diagram (Array→Inverter→AC→Disconnect→Panel + Battery/Generator), ENABLE_CONFIG_V2_UI feature flag, branch visualization bars, Battery/Generator collapsible cards, Engineering Summary panel with 6 KPI tiles + health grid, segmented topology control.',
+      track: 'ui-ux',
+      priority: 'p0',
+      status: 'done',
+      effort: 'xl',
+      commits: ['1bd75c1'],
+      files: ['app/engineering/page.tsx', 'lib/version.ts'],
+      createdAt: '2026-04-25',
+      updatedAt: '2026-04-25',
+      shippedIn: 'v55.0',
+    },
+    {
+      id: 'engineering-tab-overhaul-v56',
+      title: 'Full tab UX overhaul — all 9 engineering tabs (v56.0)',
+      summary: 'Compliance: rule accordion (FAIL/WARNING/PASS groups), severity heat map, pass rate ring, jurisdiction panel, auto-resolutions panel, 2-col layout. Electrical: conductor cards (AC conductor, conduit, disconnect, grounding), conduit schedule table, wire runs panel. Structural/Diagram/Schedule/Files: max-w-none. Permit: readiness ring + sheet status grid. BOM: hero strip with gradient. Field name regressions fixed post-ship.',
+      track: 'ui-ux',
+      priority: 'p0',
+      status: 'done',
+      effort: 'xl',
+      commits: ['7208868', '9d93895', '247a9e7', 'f07ccac'],
+      files: ['app/engineering/page.tsx', 'lib/version.ts'],
+      createdAt: '2026-04-25',
+      updatedAt: '2026-04-25',
+      shippedIn: 'v56.0',
+    },
+
+    // ── Shipped: YOLO Vision Pipeline ─────────────────────────────────────────
+    {
+      id: 'vision-yolo-replace-roboflow',
+      title: 'In-house YOLOv8 pipeline — replaces Roboflow (zero recurring API cost)',
+      summary: 'Full YOLOv8 microservice: FastAPI POST /vision/infer + /health + /vision/model. infer.py core inference (URL or local → VisionDetection[]). train.py ultralytics training script (yolov8n.pt base). validate.py post-training metrics. Dockerfile + start.sh for containerized deploy. 8-class solar dataset structure (dataset.yaml, classes.txt, LABELING_GUIDE.md, split + validate scripts). ingestPipeline._runVisionPipelineAsync now calls VISION_SERVICE_URL/vision/infer instead of Roboflow API. Removes ROBOFLOW_API_KEY / ROBOFLOW_MODEL_ID dependencies. VisionDetection / VisionBoundingBox / VisionInferenceResult types (backward-compat @deprecated aliases kept).',
+      track: 'infrastructure',
+      priority: 'p1',
+      status: 'done',
+      effort: 'xl',
+      commits: ['2bef0e8'],
+      files: [
+        'services/vision/server.py',
+        'services/vision/infer.py',
+        'services/vision/train.py',
+        'services/vision/validate.py',
+        'services/vision/Dockerfile',
+        'services/vision/start.sh',
+        'services/vision/requirements.txt',
+        'datasets/solarvision/dataset.yaml',
+        'datasets/solarvision/classes.txt',
+        'datasets/solarvision/LABELING_GUIDE.md',
+        'lib/vision/types.ts',
+        'lib/vision/visionAggregator.ts',
+        'lib/survey/ingest/ingestPipeline.ts',
+      ],
+      notes: 'VISION_SERVICE_URL env var must be set to the deployed FastAPI service URL (e.g. https://vision.yourdomain.com). Model weights not committed — train with train.py on labeled solar dataset or provide a pre-trained .pt file. 8 classes: panel, inverter, conduit, disconnect, meter, service_panel, attic_access, roof_vent.',
+      createdAt: '2026-04-25',
+      updatedAt: '2026-04-25',
+      shippedIn: 'v48.x',
+    },
+
+  {
+    id: 'ui-dark-mode-pass',
+    title: 'Dark mode pass on engineering page',
+    summary: 'Engineering page is the flagship screen — should look great in both themes.',
+    track: 'ui-ux',
+    priority: 'p2',
+    status: 'done',
+    effort: 's',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-23',
+    shippedIn: 'v50.0',
+  },
+  {
+    id: 'stage7-racking-db-consolidation-assessment',
+    title: 'Stage 7 — Racking DB consolidation assessment (READ-ONLY)',
+    summary: 'Two racking DBs coexist: mounting-hardware-db.ts (42 systems, UI-wired) and racking-database.ts (12 systems, structural engine only). Produce a written KEEP/MERGE/DEPRECATE recommendation. No code changes.',
+    track: 'ui-ux',
+    priority: 'p2',
+    status: 'planned',
+    effort: 's',
+    dependsOn: ['v47.429-stage6-racking-visibility'],
+    notes: 'Goal: decide whether consolidation is worth the risk before touching imports. v47.429 proved both DBs can coexist with guardrails — Stage 7 decides if that is good enough long-term.',
+    createdAt: '2026-05-11',
+    updatedAt: '2026-05-11',
+  },
+  {
+    id: 'stage8-racking-db-consolidation-execution',
+    title: 'Stage 8 — Racking DB consolidation execution (CONDITIONAL)',
+    summary: 'Only executes if Stage 7 says consolidation is worth it. One DB file merged at a time, old file becomes re-export shim for one release, then removed.',
+    track: 'ui-ux',
+    priority: 'p3',
+    status: 'planned',
+    effort: 'l',
+    dependsOn: ['stage7-racking-db-consolidation-assessment'],
+    notes: 'Holds until Stage 7 delivers its verdict. If Stage 7 says KEEP, this item gets closed without execution.',
+    createdAt: '2026-05-11',
+    updatedAt: '2026-05-11',
+  },
+  {
+    id: 'racking-brand-evidence-pass',
+    title: 'Racking brand-pairing evidence pass (fill remaining BrandProfiles)',
+    summary: 'Eight BrandProfiles currently have empty recommendedRackingBrands (generac, solis, sol-ark, growatt, tigo, sungrow, goodwe, generic-string). Research installer docs + certified-compatibility lists and populate where evidence is strong.',
+    track: 'brand-onboarding',
+    priority: 'p2',
+    status: 'planned',
+    effort: 'm',
+    dependsOn: ['v47.429-stage6-racking-visibility'],
+    notes: 'The Racking Ecosystem Smoke Suite (v47.429 Global 2) will automatically catch any dangling token the moment one is added without a backing manufacturer in mounting-hardware-db.',
+    createdAt: '2026-05-11',
+    updatedAt: '2026-05-11',
+  },
+
+  // ─── PLANNED — API & INTEGRATIONS ────────────────────────────────────
+  {
+    id: 'api-nrel-pvwatts',
+    title: 'NREL PVWatts integration',
+    summary: 'Replace static production estimate with a PVWatts call keyed by site lat/long, tilt, azimuth, shade factor.',
+    track: 'api-integrations',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'api-google-solar-api',
+    title: 'Google Solar API — roof geometry + shade',
+    summary: 'Replace manual roof sketching with Google Solar API roof-segment data for any US address with coverage.',
+    track: 'api-integrations',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'api-utility-rate-feed',
+    title: 'Utility rate feed (Genability or OpenEI)',
+    summary: 'Auto-populate tariff, TOU schedule, and NEM rules by utility + zip. Currently manual.',
+    track: 'api-integrations',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — PROPOSAL FLOW ─────────────────────────────────────────
+  {
+    id: 'proposal-digital-signature',
+    title: 'Digital signature on proposals (DocuSign or native)',
+    summary: 'Customer should be able to e-sign the proposal from the proposal-viewer page. Triggers contract state + install handoff.',
+    track: 'proposal-flow',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'proposal-pdf-export',
+    title: 'PDF export of proposal',
+    summary: 'One-click "Download as PDF" for sharing via email when the customer isn\'t ready to sign in-portal.',
+    track: 'proposal-flow',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — GO-TO-MARKET ──────────────────────────────────────────
+  {
+    id: 'gtm-replus-booth-prep',
+    title: 'RE+ 2026 booth prep — demo script + fallback flows',
+    summary: 'Rehearsed 5-minute and 15-minute demos with known-good project fixtures. Screenshot-ready pages. Offline mode in case LVCC wifi tanks.',
+    track: 'go-to-market',
+    priority: 'p0',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'gtm-marketing-site',
+    title: 'Marketing site (solarpro.com landing pages)',
+    summary: 'Public-facing site — hero, features, pricing, signup. Separate from the app.',
+    track: 'go-to-market',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'l',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'gtm-pricing-page-live',
+    title: 'Pricing page — Stripe subscription wiring',
+    summary: 'Currently a static display. Wire to Stripe subscriptions for real plan changes.',
+    track: 'go-to-market',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'gtm-demo-account-seeder',
+    title: 'Demo-account seeder (reset-to-golden-state)',
+    summary: 'One-click "reset demo account" that drops in 3 golden projects (residential retrofit, new-construction, commercial) for booth demos.',
+    track: 'go-to-market',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — ADMIN / OPS ───────────────────────────────────────────
+  {
+    id: 'admin-company-self-serve',
+    title: 'Company self-serve onboarding',
+    summary: 'Installer companies should be able to sign up without an admin invite. Logo upload, crew roster, default pricing, first project wizard.',
+    track: 'admin-ops',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'xl',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'admin-activity-log-search',
+    title: 'Activity log search + filters',
+    summary: 'Current activity log is a firehose. Needs search by user/company/action and a date range.',
+    track: 'admin-ops',
+    priority: 'p2',
+    status: 'planned',
+    effort: 's',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── PLANNED — INFRASTRUCTURE ────────────────────────────────────────
+  {
+    id: 'infra-ci-cd-pipeline',
+    title: 'CI/CD pipeline — auto-deploy on merge to master',
+    summary: 'Currently manual deploys. Hook a GitHub Action to run the full vitest suite + tsc + build, then deploy on green.',
+    track: 'infrastructure',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'infra-observability',
+    title: 'Observability — error tracking + perf monitoring',
+    summary: 'Sentry for errors, Vercel Analytics or similar for perf. Essential before RE+ so we can see live booth-demo errors in real time.',
+    track: 'infrastructure',
+    priority: 'p1',
+    status: 'planned',
+    effort: 'm',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+
+  // ─── IDEAS (parking lot) ─────────────────────────────────────────────
+  {
+    id: 'idea-ev-charger-ecosystem',
+    title: 'EV charger ecosystem (Tesla Wall Connector, Enphase IQ EV, ChargePoint)',
+    summary: 'Add EVSE as a first-class BOM line item with brand-based ecosystem pairing.',
+    track: 'brand-onboarding',
+    priority: 'p3',
+    status: 'idea',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'idea-heat-pump-sizing',
+    title: 'Heat-pump sizing module',
+    summary: 'Solar + storage + heat-pump electrification package pricing.',
+    track: 'engineering-core',
+    priority: 'p3',
+    status: 'idea',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+  {
+    id: 'idea-mobile-app',
+    title: 'Mobile crew app (installer-facing)',
+    summary: 'Strip install-crew workflow out of the desktop app. Punch-list, photo capture, commissioning sign-off on iOS/Android.',
+    track: 'ui-ux',
+    priority: 'p3',
+    status: 'idea',
+    createdAt: '2026-05-10',
+    updatedAt: '2026-05-10',
+  },
+];
+
+// ═══ Derived helpers ════════════════════════════════════════════════════
+
+export function getRoadmapCounts() {
+  const by = {
+    byStatus:   {} as Record<RoadmapStatus, number>,
+    byPriority: {} as Record<RoadmapPriority, number>,
+    byTrack:    {} as Record<RoadmapTrack, number>,
+    total: ROADMAP_ITEMS.length,
+  };
+  for (const item of ROADMAP_ITEMS) {
+    by.byStatus[item.status]     = (by.byStatus[item.status] ?? 0) + 1;
+    by.byPriority[item.priority] = (by.byPriority[item.priority] ?? 0) + 1;
+    by.byTrack[item.track]       = (by.byTrack[item.track] ?? 0) + 1;
+  }
+  return by;
+}
+
+/** Milliseconds remaining until RE+ 2026 doors open (Nov 16, 2026 08:00 PT). */
+export function msUntilReplus(now: Date = new Date()): number {
+  // Show opens Monday Nov 16, 2026. Use 09:00 PT (= 17:00 UTC) as anchor.
+  const target = Date.UTC(2026, 10, 16, 17, 0, 0); // month is 0-indexed
+  return target - now.getTime();
+}
+
+export function formatCountdown(ms: number): { days: number; hours: number; minutes: number; seconds: number; past: boolean } {
+  const past = ms < 0;
+  const abs = Math.abs(ms);
+  const days    = Math.floor(abs / 86_400_000);
+  const hours   = Math.floor((abs % 86_400_000) / 3_600_000);
+  const minutes = Math.floor((abs % 3_600_000) / 60_000);
+  const seconds = Math.floor((abs % 60_000) / 1000);
+  return { days, hours, minutes, seconds, past };
+}

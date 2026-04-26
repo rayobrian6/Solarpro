@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>v47.434a Contract Delta Map</title>
+  
+<style>
+  :root {
+    --ink: #1a1f2e;
+    --muted: #5a6478;
+    --line: #e3e7ee;
+    --bg: #ffffff;
+    --bg-alt: #f7f9fc;
+    --accent: #2e5bff;
+    --green: #1d9a5a;
+    --yellow: #b48a00;
+    --red: #c8372d;
+    --mono: 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Roboto Mono', Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 48px 120px;
+    line-height: 1.58;
+    font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  h1 + p, h1 + p + p { color: var(--muted); margin: 4px 0; }
+  h2 {
+    font-size: 22px;
+    font-weight: 650;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 650;
+    margin: 32px 0 12px;
+    color: var(--ink);
+  }
+  h4 {
+    font-size: 15px;
+    font-weight: 650;
+    margin: 24px 0 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); }
+  a:hover { border-bottom-style: solid; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+  code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg-alt);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--bg-alt);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: 13px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-alt);
+    font-weight: 650;
+    color: var(--ink);
+  }
+  tbody tr:nth-child(even) { background: #fafbfd; }
+  ul, ol { padding-left: 22px; margin: 10px 0; }
+  li { margin: 4px 0; }
+  blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 16px 0;
+    padding: 4px 16px;
+    background: var(--bg-alt);
+    color: var(--muted);
+  }
+  /* Callouts */
+  .header-bar {
+    background: linear-gradient(135deg, #2e5bff, #1e3f99);
+    color: white;
+    margin: -40px -48px 32px;
+    padding: 36px 48px;
+    border-radius: 0 0 4px 4px;
+  }
+  .header-bar h1 { color: white; font-size: 30px; }
+  .header-bar p { color: rgba(255,255,255,0.9); }
+  /* Traffic-light emoji sizing inside tables */
+  td, th { font-size: 14px; }
+  /* Code inside table cells */
+  td code, th code { font-size: 12.5px; padding: 1px 5px; }
+  /* Print */
+  @media print {
+    body { max-width: none; padding: 20px; font-size: 11pt; }
+    h2 { page-break-after: avoid; }
+    table, pre { page-break-inside: avoid; }
+    .header-bar { background: #2e5bff; color: white; -webkit-print-color-adjust: exact; }
+  }
+</style>
+
+</head>
+<body>
+  <h1 id="stage-9-v47434a-contract-delta-map-partner-actual-vs-solarpro-expected">Stage 9 — v47.434a Contract Delta Map: Partner Actual vs SolarPro Expected</h1>
+<p><strong>Source of truth for partner's implementation:</strong> <code>github.com/kilby8/site_survey-app</code> @ commit <code>2cc3537f</code>
+<strong>Files inspected:</strong> <code>backend/src/services/webhookService.ts</code>, <code>backend/src/routes/surveys.ts</code> (<code>POST /api/surveys/:id/complete</code>), <code>backend/src/routes/handoff.ts</code>, <code>backend/src/routes/openapi.ts</code>, <code>backend/src/services/metrics.ts</code>, <code>backend/.env.example</code></p>
+<hr />
+<h2 id="1-executive-summary">1. Executive Summary</h2>
+<p>The partner has shipped a working webhook producer with queue-based delivery, exponential retry, and a background worker. <strong>However, three of their wire-format choices are incompatible with the v47.434 receiver we shipped on disk.</strong> Every real webhook they send WILL fail HMAC verification at our end until we patch.</p>
+<p>Additionally, the partner sends a <em>fatter</em> event than the "thin event" spec implied — the payload includes <code>project_id</code>, <code>project_name</code>, <code>inspector_name</code>, <code>site_name</code>, <code>status</code>. This is good news for v47.435 (more context without a second GET).</p>
+<p>There is ALSO a symmetric outbound contract we hadn't thought about: the partner expects SolarPro to <strong>mint HS256 JWT handoff tokens</strong> with specific claims (<code>jti</code> + <code>project_id</code> required) when opening a survey from a project. This is a NEW v47.435 (or 9.2) scope item.</p>
+<hr />
+<h2 id="2-webhook-contract-deltas-inbound-to-solarpro">2. Webhook Contract Deltas (Inbound to SolarPro)</h2>
+<h3 id="21-breaking-must-fix-before-first-real-webhook">2.1 Breaking — MUST fix before first real webhook</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Field / Mechanism</th>
+<th>Partner sends</th>
+<th>SolarPro expects</th>
+<th>Effect if unfixed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>X-Survey-Timestamp</code> header</td>
+<td>ISO-8601 (<code>"2026-04-23T18:25:43.000Z"</code>) via <code>new Date().toISOString()</code></td>
+<td>Unix epoch seconds integer string (<code>"1745432743"</code>)</td>
+<td><code>Number(timestampHeader)</code> → <code>NaN</code> → <code>MALFORMED_TIMESTAMP</code> → 401 on every call</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>X-Survey-Signature</code> header</td>
+<td><code>sha256=&lt;64 hex&gt;</code> (prefixed, 71 chars total)</td>
+<td>Raw <code>&lt;64 hex&gt;</code> (64 chars)</td>
+<td>Length-mismatch short-circuit → <code>SIGNATURE_MISMATCH</code> → 401 on every call</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>schemaVersion</code> field</td>
+<td>Not sent (field absent)</td>
+<td>Required, must equal <code>'1.0'</code></td>
+<td><code>Unsupported schemaVersion: undefined</code> → 400 on every call</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-compatible-no-action-required">2.2 Compatible — no action required</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Field</th>
+<th>Partner sends</th>
+<th>Our validator</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4</td>
+<td><code>event</code></td>
+<td><code>"survey.completed"</code></td>
+<td>✓ matches <code>SUPPORTED_SURVEY_EVENT_TYPES</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>event_id</code></td>
+<td><code>randomUUID()</code> string</td>
+<td>✓ accepts any non-empty string</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>survey_id</code></td>
+<td>UUID string</td>
+<td>✓ accepts any non-empty string</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>completed_at</code></td>
+<td>ISO-8601 string</td>
+<td>✓ accepts any non-empty string</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Signed string format</td>
+<td><code>${timestamp}.${payloadText}</code></td>
+<td>✓ matches (ours uses same, just with different timestamp encoding)</td>
+</tr>
+<tr>
+<td>9</td>
+<td>HMAC algorithm</td>
+<td>HMAC-SHA256 (hex digest)</td>
+<td>✓ matches</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Idempotency key</td>
+<td><code>X-Survey-Event-Id</code> header</td>
+<td>✓ we already read this header</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-extra-fields-ignored-today-useful-in-v47435">2.3 Extra fields — ignored today, useful in v47.435</h3>
+<p>The partner's <code>SurveyCompletePayload</code> includes fields beyond the thin-event spec:</p>
+<pre><code class="language-ts">interface SurveyCompletePayload {
+  event: &quot;survey.completed&quot;;
+  event_id: string;
+  occurred_at: string;       // NEW — distinct from completed_at
+  survey_id: string;
+  status: string;            // NEW — e.g. &quot;submitted&quot;
+  project_id: string | null; // NEW — null means survey had no handoff context
+  project_name: string;      // NEW
+  inspector_name: string;    // NEW
+  site_name: string;         // NEW
+  completed_at: string;
+}
+</code></pre>
+<p><strong>v47.434 behaviour today:</strong> <code>validateEnvelope()</code> checks required fields by name but does NOT reject unknown fields. All extra fields are silently dropped on parse. <strong>Safe.</strong></p>
+<p><strong>v47.435 opportunity:</strong> these fields let us correlate to an existing project (<code>project_id</code>) and short-circuit the full GET for display metadata (<code>project_name</code>, <code>inspector_name</code>, <code>site_name</code>). The full payload fetch is still needed for photos + measurements.</p>
+<hr />
+<h2 id="3-partners-actual-signed-string-reproduced-from-webhookservicets159163">3. Partner's Actual Signed String (reproduced from <code>webhookService.ts:159–163</code>)</h2>
+<pre><code class="language-ts">function buildSignature(payloadText: string, timestamp: string, secret: string): string {
+  const digest = createHmac(&quot;sha256&quot;, secret)
+    .update(`${timestamp}.${payloadText}`)
+    .digest(&quot;hex&quot;);
+  return `sha256=${digest}`;
+}
+
+// Caller context (webhookService.ts:175–184):
+const timestamp = new Date().toISOString();       // ISO-8601 UTC, ms precision
+const payloadText = row.payload;                  // exact JSON string stored at enqueue time
+// ...
+headers: {
+  &quot;X-Survey-Signature&quot;:  buildSignature(payloadText, timestamp, secret),
+  &quot;X-Survey-Timestamp&quot;:  timestamp,
+  &quot;X-Survey-Event-Id&quot;:   row.event_id,
+}
+</code></pre>
+<p>Implication: our verifier MUST:
+1. Accept ISO-8601 timestamps in <code>X-Survey-Timestamp</code>, parse to ms, convert to seconds for tolerance math
+2. Strip <code>sha256=</code> prefix from <code>X-Survey-Signature</code> before compare (but keep rejection for non-prefixed if strict mode desired later)
+3. Make <code>schemaVersion</code> OPTIONAL in the validator (default to <code>'1.0'</code> when absent — the contract is still v1.0, partner just doesn't echo it)</p>
+<hr />
+<h2 id="4-partners-retry-delivery-semantics-operational-context">4. Partner's Retry + Delivery Semantics (operational context)</h2>
+<ul>
+<li><strong>Queue table:</strong> <code>webhook_deliveries</code> on THEIR side (not to be confused with ours)</li>
+<li><strong>Retry schedule:</strong> 1 min, 5 min, 30 min, 2 h, 12 h (5 attempts, then permanent failure)</li>
+<li><strong>Worker interval:</strong> 30 s poll, batch of 25</li>
+<li><strong>Success criteria:</strong> HTTP 2xx response body</li>
+<li><strong>Timeout:</strong> ~30 s per request</li>
+</ul>
+<p><strong>Implication for us:</strong> we must respond within ~30 s. <code>maxDuration = 30</code> is already set. We must return 2xx for genuine duplicates (already doing this) and 2xx for successful ingest. The current 501 return on a valid/verified delivery will trigger THEIR retry logic forever — but since we haven't gone live yet, this only bites when v47.435 ships. For the v47.434a patch we keep the 501.</p>
+<hr />
+<h2 id="5-handoff-token-contract-outbound-from-solarpro-new-v92-scope">5. Handoff Token Contract (Outbound from SolarPro — NEW v9.2 scope)</h2>
+<p>Partner's <code>GET /api/handoff/:token</code> expects:
+- <strong>Token format:</strong> JWT signed with HS256
+- <strong>Secret env:</strong> <code>SOLARPRO_HANDOFF_SECRET</code> on THEIR side — matching secret on OUR side
+- <strong>Required claims:</strong> <code>jti</code> (replay defence), <code>project_id</code>
+- <strong>Optional claims:</strong> <code>project_name</code>, <code>site_name</code>, <code>site_address</code>, <code>inspector_name</code>, <code>category_id</code>, <code>category_name</code>, <code>notes</code>, <code>latitude</code>, <code>longitude</code>, <code>gps_accuracy</code>, <code>metadata</code> (object)
+- <strong>Replay protection:</strong> <code>jti</code> is inserted into <code>used_handoff_tokens</code> table on first consumption; <code>23505</code> unique-violation → 409 <code>HANDOFF_TOKEN_REPLAYED</code></p>
+<p><strong>v47.434 implication:</strong> none (outbound work). <strong>v47.435 or v47.436 scope:</strong> ship handoff token minter + deep-link builder. NOT a blocker for inbound webhook pipeline.</p>
+<hr />
+<h2 id="6-partners-env-contract-both-sides-need-to-coordinate">6. Partner's Env Contract (both sides need to coordinate)</h2>
+<p>From <code>backend/.env.example</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Role</th>
+<th>Our env equivalent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SURVEY_WEBHOOK_SECRET</code></td>
+<td>HMAC key for signing outbound webhooks</td>
+<td><code>SURVEY_WEBHOOK_SECRET</code> (same name — ✓)</td>
+</tr>
+<tr>
+<td><code>SOLARPRO_WEBHOOK_URL</code></td>
+<td>Where partner POSTs webhooks</td>
+<td>n/a (partner-side config)</td>
+</tr>
+<tr>
+<td><code>SOLARPRO_HANDOFF_SECRET</code></td>
+<td>HS256 key to verify our handoff JWT</td>
+<td><code>SOLARPRO_HANDOFF_SECRET</code> (we'll mint with same secret)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Secret coordination required:</strong> before go-live we must exchange two shared secrets with partner ops, one per direction.</p>
+<hr />
+<h2 id="7-v47434a-patch-plan-minimal-just-unblock-the-wire">7. v47.434a Patch Plan (minimal — just unblock the wire)</h2>
+<p>Six surgical edits. All in existing files, no new modules.</p>
+<h3 id="71-libsurveyverifywebhooksignaturets">7.1 <code>lib/survey/verifyWebhookSignature.ts</code></h3>
+<ol>
+<li><strong>Accept ISO-8601 timestamps.</strong> New helper <code>parseTimestampHeader(h)</code> → <code>{ epochSeconds, originalFormat }</code> that tries integer parse first, falls back to <code>Date.parse()</code>. Returns <code>null</code> only when BOTH fail.</li>
+<li><strong>Accept <code>sha256=</code> prefix on signature.</strong> Strip leading <code>sha256=</code> (case-insensitive) before length/timing compare. Also accept raw hex (no prefix) so internal-origin signers stay working.</li>
+</ol>
+<h3 id="72-appapiwebhookssurvey-completeroutets-validator-only">7.2 <code>app/api/webhooks/survey-complete/route.ts</code> (validator only)</h3>
+<ol start="3">
+<li><strong>Make <code>schemaVersion</code> optional.</strong> When absent, treat as <code>'1.0'</code>. When present, require exact match.</li>
+<li><strong>Relax unknown-field check (already relaxed — document it).</strong></li>
+</ol>
+<h3 id="73-libsurveytypests">7.3 <code>lib/survey/types.ts</code></h3>
+<ol start="5">
+<li><strong>Type doc update only</strong> — clarify <code>schemaVersion</code> is logically v1.0 even when the wire omits it.</li>
+</ol>
+<h3 id="74-tests">7.4 Tests</h3>
+<ol start="6">
+<li><strong>New test file: <code>lib/survey/verifyWebhookSignature.partnerContract.test.ts</code></strong> (reproduces the partner's exact signed-string format with ISO timestamp + <code>sha256=</code> prefix, verifies valid + all 5 failure reasons against the real wire shape). ~8 new tests.</li>
+<li><strong>Extend validator tests:</strong> 3 new cases in an existing file for the "schemaVersion absent → valid" path.</li>
+</ol>
+<p><strong>Total: +11 tests, ~150 LOC changed, zero breaking changes for our existing test suite (legacy Unix-epoch + raw-hex signers continue to work).</strong></p>
+<h3 id="75-out-of-scope-for-v47434a-defer-to-v47435">7.5 Out of scope for v47.434a (defer to v47.435)</h3>
+<ul>
+<li>Extracting <code>project_id</code> / <code>project_name</code> / <code>inspector_name</code> / <code>site_name</code> from the envelope into the transform layer</li>
+<li>Ingest pipeline (fetch full survey payload, upsert project/layout/files)</li>
+<li>Handoff JWT minter</li>
+<li>Admin-UI visibility for the new fields</li>
+</ul>
+<hr />
+<h2 id="8-post-patch-verification-plan">8. Post-patch verification plan</h2>
+<ol>
+<li><code>npx vitest run</code> → expect 2101 + 11 = 2112 pass, zero regressions</li>
+<li><code>npx tsc --noEmit</code> → TC=0</li>
+<li><code>npm run build</code> → 46/46 pages clean</li>
+<li><strong>Integration sanity (manual):</strong> from <code>/tmp/kilby-site-survey-app</code>, configure <code>SOLARPRO_WEBHOOK_URL=http://localhost:3000/api/webhooks/survey-complete</code> + matching <code>SURVEY_WEBHOOK_SECRET</code>, start their backend, <code>POST /api/surveys/:id/complete</code>, confirm our endpoint returns <code>501 INGEST_NOT_IMPLEMENTED</code> (not 401/400).</li>
+</ol>
+<hr />
+<p><em>Delta map frozen at v47.434a scoping — 2026-04-23.</em>
+<em>Next doc: <code>stage9_v47434a-todo.md</code> once implementation starts.</em></p>
+</body>
+</html>

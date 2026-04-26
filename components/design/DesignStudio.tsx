@@ -1,0 +1,4273 @@
+'use client';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import type {
+  Project, Layout, PlacedPanel, SolarPanel, Inverter, Battery,
+  SystemType, DrawingMode, RoofPlane, BillAnalysis, BatteryRecommendation
+} from '@/types';
+import { generateFenceLayout, calculateSystemSize, polygonAreaM2 } from '@/lib/panelLayout';
+import { generateRoofLayoutOptimized, generateGroundLayoutOptimized, clearGridCache } from '@/lib/panelLayoutOptimized';
+import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
+import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
+import {
+  FEET_PER_METER, METERS_PER_FOOT,
+  STANDARD_PANEL_WIDTH_FEET, STANDARD_PANEL_HEIGHT_FEET,
+} from '@/lib/localProjection';
+import {
+  type PanelOrientation,
+  type FireSetbackConfig,
+  type SetbackZone,
+  DEFAULT_FIRE_SETBACKS,
+  generateSetbackZones,
+  calcEffectiveSetback,
+  getPerEdgeSetbacks,
+  generateMultipleRows,
+  calcMinRowSpacing,
+} from '@/lib/placementEngine';
+import { v4 as uuidv4 } from 'uuid';
+import SolarEngine3D, { type PlacementMode } from '../3d/SolarEngine3D';
+import { useToast } from '@/components/ui/Toast';
+import { localSaveLayout } from '@/lib/clientStorage';
+import { SaveStatusBar } from '@/components/ui/SaveStatusBar';
+import {
+  Layers, Zap, Sun, RotateCcw, Save, Play, ChevronDown, ChevronUp,
+  CheckCircle, Loader, Settings, DollarSign, Battery as BatteryIcon,
+  FileText, ArrowRight, MousePointer2, Home, Square, Minus, Ruler,
+  Trash2, CheckSquare, Fence, Plus, Minus as MinusIcon, Search,
+  TrendingUp, Leaf, BarChart2, AlertCircle, X, Upload, Calculator,
+  Info, ChevronRight, Eye, EyeOff
+} from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+interface Props {
+  project: Project;
+  onSave?: (layout: Layout) => void;
+}
+
+const TILE_SIZE = 256;
+
+// ─── Utility: lat/lng ↔ world/canvas ─────────────────────────
+function latLngToWorld(lat: number, lng: number, zoom: number) {
+  const scale = Math.pow(2, zoom);
+  const x = (lng + 180) / 360 * scale * TILE_SIZE;
+  const sinLat = Math.sin(lat * Math.PI / 180);
+  const y = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale * TILE_SIZE;
+  return { x, y };
+}
+function worldToLatLng(wx: number, wy: number, zoom: number) {
+  const scale = Math.pow(2, zoom);
+  const lng = wx / (scale * TILE_SIZE) * 360 - 180;
+  const n = Math.PI - 2 * Math.PI * wy / (scale * TILE_SIZE);
+  const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+  return { lat, lng };
+}
+function latLngToCanvas(lat: number, lng: number, mapCenter: { lat: number; lng: number }, zoom: number, canvasW: number, canvasH: number) {
+  const center = latLngToWorld(mapCenter.lat, mapCenter.lng, zoom);
+  const point = latLngToWorld(lat, lng, zoom);
+  return { x: canvasW / 2 + (point.x - center.x), y: canvasH / 2 + (point.y - center.y) };
+}
+function canvasToLatLng(cx: number, cy: number, mapCenter: { lat: number; lng: number }, zoom: number, canvasW: number, canvasH: number) {
+  const center = latLngToWorld(mapCenter.lat, mapCenter.lng, zoom);
+  return worldToLatLng(center.x + (cx - canvasW / 2), center.y + (cy - canvasH / 2), zoom);
+}
+function metersPerPixel(lat: number, zoom: number) {
+  const scale = Math.pow(2, zoom);
+  const metersPerDegLng = 111320 * Math.cos(lat * Math.PI / 180);
+  return (metersPerDegLng * 360) / (scale * TILE_SIZE);
+}
+
+// ─── Sidebar Section ──────────────────────────────────────────
+function Section({ title, icon, children, defaultOpen = true, badge }: {
+  title: string; icon: React.ReactNode; children: React.ReactNode;
+  defaultOpen?: boolean; badge?: string;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-b border-slate-700/50">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-700/30 transition-colors"
+      >
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 uppercase tracking-wide">
+          {icon}{title}
+          {badge && <span className="ml-1 px-1.5 py-0.5 bg-amber-500/20 text-amber-400 rounded text-xs normal-case font-normal">{badge}</span>}
+        </div>
+        {open ? <ChevronUp size={12} className="text-slate-500" /> : <ChevronDown size={12} className="text-slate-500" />}
+      </button>
+      {open && <div className="px-4 pb-4 space-y-3">{children}</div>}
+    </div>
+  );
+}
+
+function SliderRow({ label, value, min, max, step, unit, onChange }: {
+  label: string; value: number; min: number; max: number; step: number; unit: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-1">
+        <label className="text-xs text-slate-400">{label}</label>
+        <span className="text-xs font-semibold text-white">{value}{unit}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step} value={value}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer accent-amber-500"
+      />
+    </div>
+  );
+}
+
+const AZIMUTH_LABELS: Record<number, string> = {
+  0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW', 360: 'N'
+};
+function azimuthLabel(az: number) {
+  const nearest = Object.keys(AZIMUTH_LABELS).map(Number).reduce((a, b) => Math.abs(b - az) < Math.abs(a - az) ? b : a);
+  return AZIMUTH_LABELS[nearest];
+}
+
+// ─── Bill Analysis Calculator ─────────────────────────────────
+function BillCalculator({ onAnalysis, project }: {
+  onAnalysis: (analysis: BillAnalysis) => void;
+  project: Project;
+}) {
+  const [mode, setMode] = useState<'monthly' | 'annual' | 'bill'>('monthly');
+  const [annualKwh, setAnnualKwh] = useState(project.client?.annualKwh || 12000);
+  const [avgMonthlyBill, setAvgMonthlyBill] = useState(project.client?.averageMonthlyBill || 180);
+  const [utilityRate, setUtilityRate] = useState(project.client?.utilityRate || 0.15);
+  const [offsetTarget, setOffsetTarget] = useState(100);
+  const [monthlyKwh, setMonthlyKwh] = useState<number[]>(
+    project.client?.monthlyKwh || Array(12).fill(1000)
+  );
+  const [wantBattery, setWantBattery] = useState(false);
+  const [peakDemandHours, setPeakDemandHours] = useState(6);
+
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const calculate = () => {
+    let kwh12: number[];
+    let rate = utilityRate;
+
+    if (mode === 'annual') {
+      const avg = annualKwh / 12;
+      kwh12 = Array(12).fill(0).map((_, i) => {
+        const seasonal = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87];
+        return Math.round(avg * seasonal[i]);
+      });
+    } else if (mode === 'bill') {
+      const estKwh = avgMonthlyBill / rate;
+      kwh12 = Array(12).fill(0).map((_, i) => {
+        const seasonal = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87];
+        return Math.round(estKwh * seasonal[i]);
+      });
+    } else {
+      kwh12 = monthlyKwh;
+    }
+
+    const totalKwh = kwh12.reduce((a, b) => a + b, 0);
+    const avgMonthly = totalKwh / 12;
+    const peakMonth = kwh12.indexOf(Math.max(...kwh12));
+    const peakKwh = kwh12[peakMonth];
+
+    // System size: account for losses (~14%), offset target
+    const systemKw = (totalKwh * (offsetTarget / 100)) / (1400); // ~1400 kWh/kW/yr avg
+    const panelCount = Math.ceil((systemKw * 1000) / 400); // assume 400W panels
+
+    let batteryRec: BatteryRecommendation | undefined;
+    if (wantBattery) {
+      const dailyKwh = totalKwh / 365;
+      const nighttimeKwh = dailyKwh * 0.4; // ~40% used at night
+      const recCapacity = Math.ceil(nighttimeKwh * 1.2); // 20% buffer
+      batteryRec = {
+        recommended: true,
+        reason: 'Based on your usage pattern, battery storage will cover nighttime usage and provide backup power.',
+        dailyUsageKwh: Math.round(dailyKwh * 10) / 10,
+        nighttimeUsageKwh: Math.round(nighttimeKwh * 10) / 10,
+        recommendedCapacityKwh: recCapacity,
+        recommendedUnits: Math.ceil(recCapacity / 13.5),
+        suggestedBatteries: [],
+        backupHours: Math.round((recCapacity / (dailyKwh / 24)) * 10) / 10,
+        selfConsumptionRate: 85,
+      };
+    }
+
+    onAnalysis({
+      monthlyKwh: kwh12,
+      annualKwh: totalKwh,
+      averageMonthlyKwh: Math.round(avgMonthly),
+      averageMonthlyBill: Math.round(avgMonthly * rate),
+      annualBill: Math.round(totalKwh * rate),
+      utilityRate: rate,
+      peakMonthKwh: peakKwh,
+      peakMonth,
+      recommendedSystemKw: Math.round(systemKw * 100) / 100,
+      recommendedPanelCount: panelCount,
+      offsetTarget,
+      batteryRecommendation: batteryRec,
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Mode selector */}
+      <div className="flex gap-1 bg-slate-800/60 rounded-lg p-1">
+        {(['monthly', 'annual', 'bill'] as const).map(m => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={`flex-1 text-xs py-1.5 rounded-md transition-colors ${
+              mode === m ? 'bg-amber-500 text-black font-semibold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {m === 'monthly' ? 'Monthly' : m === 'annual' ? 'Annual kWh' : 'Avg Bill'}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'monthly' && (
+        <div>
+          <div className="text-xs text-slate-400 mb-2">Enter monthly kWh usage:</div>
+          <div className="grid grid-cols-3 gap-1">
+            {MONTHS.map((month, i) => (
+              <div key={i}>
+                <div className="text-xs text-slate-500 mb-0.5">{month}</div>
+                <input
+                  type="number"
+                  value={monthlyKwh[i]}
+                  onChange={e => {
+                    const v = [...monthlyKwh];
+                    v[i] = parseInt(e.target.value) || 0;
+                    setMonthlyKwh(v);
+                  }}
+                  className="w-full bg-slate-800 border border-slate-600 rounded px-1.5 py-1 text-xs text-white"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mode === 'annual' && (
+        <div>
+          <label className="text-xs text-slate-400">Annual kWh Usage</label>
+          <input
+            type="number"
+            value={annualKwh}
+            onChange={e => setAnnualKwh(parseInt(e.target.value) || 0)}
+            className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+          />
+        </div>
+      )}
+
+      {mode === 'bill' && (
+        <div className="space-y-2">
+          <div>
+            <label className="text-xs text-slate-400">Average Monthly Bill ($)</label>
+            <input
+              type="number"
+              value={avgMonthlyBill}
+              onChange={e => setAvgMonthlyBill(parseInt(e.target.value) || 0)}
+              className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-400">Utility Rate ($/kWh)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={utilityRate}
+              onChange={e => setUtilityRate(parseFloat(e.target.value) || 0)}
+              className="w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white"
+            />
+          </div>
+        </div>
+      )}
+
+      <SliderRow
+        label="Offset Target"
+        value={offsetTarget} min={50} max={150} step={5} unit="%"
+        onChange={setOffsetTarget}
+      />
+
+      <div className="flex items-center justify-between">
+        <label className="text-xs text-slate-400">Include Battery Storage?</label>
+        <button
+          onClick={() => setWantBattery(!wantBattery)}
+          className={`w-10 h-5 rounded-full transition-colors relative ${wantBattery ? 'bg-amber-500' : 'bg-slate-600'}`}
+        >
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${wantBattery ? 'translate-x-5' : 'translate-x-0.5'}`} />
+        </button>
+      </div>
+
+      <button
+        onClick={calculate}
+        className="btn-primary w-full text-sm"
+      >
+        <Calculator size={14} /> Calculate System Size
+      </button>
+    </div>
+  );
+}
+
+// ─── Main Design Studio ───────────────────────────────────────
+export default function DesignStudio({ project, onSave }: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const toast = useToast();
+  const router = useRouter();
+
+  // ── Resolve initial map center ──────────────────────────────────────────────
+  // Priority: project.lat/lng (geocoded at creation) → client.lat/lng → geocode on load
+  // Never default to Phoenix (33.4484, -112.0740) — that was a hardcoded placeholder
+  const PHOENIX_LAT = 33.4484;
+  const PHOENIX_LNG = -112.0740;
+  function isPhoenixDefault(lat?: number, lng?: number) {
+    return lat === PHOENIX_LAT && lng === PHOENIX_LNG;
+  }
+  function hasValidCoords(lat?: number, lng?: number): boolean {
+    return typeof lat === 'number' && typeof lng === 'number' &&
+      isFinite(lat) && isFinite(lng) &&
+      Math.abs(lat) <= 90 && Math.abs(lng) <= 180 &&
+      !isPhoenixDefault(lat, lng);
+  }
+
+  const initialLat = hasValidCoords(project.lat, project.lng)
+    ? project.lat!
+    : hasValidCoords(project.client?.lat, project.client?.lng)
+      ? project.client!.lat!
+      : PHOENIX_LAT; // Will be replaced by geocoding in useEffect below
+  const initialLng = hasValidCoords(project.lat, project.lng)
+    ? project.lng!
+    : hasValidCoords(project.client?.lat, project.client?.lng)
+      ? project.client!.lng!
+      : PHOENIX_LNG;
+
+  // Map state
+  const [mapCenter, setMapCenter] = useState({
+    lat: initialLat,
+    lng: initialLng,
+  });
+  const [zoom, setZoom] = useState(19);
+  // Tile provider: 'auto' tries Google first, falls back to ESRI on error.
+  // 'google' forces Google only. 'esri' forces ESRI only (caps at zoom 19).
+  // 'auto' is the default — Google primary for zoom 20+, ESRI for zoom <=19 if Google fails.
+  const [tileProvider, setTileProvider] = useState<'auto' | 'google' | 'esri'>('auto');
+  // Track which zoom levels ESRI has run out of imagery (variance too low)
+  const esriBlankZoomsRef = React.useRef<Set<number>>(new Set());
+  // Current active provider per tile batch (for the badge)
+  const [activeTileSource, setActiveTileSource] = useState<'google' | 'esri'>('google');
+  const [mapTiles, setMapTiles] = useState<Map<string, HTMLImageElement>>(new Map());
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const [addressSearch, setAddressSearch] = useState(
+    // Priority: project address → client address
+    project.address
+      ? project.address
+      : project.client
+        ? [project.client.address, project.client.city, project.client.state].filter(Boolean).join(', ')
+        : ''
+  );
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<'idle' | 'locating' | 'found' | 'failed'>('idle');
+  const [addressSuggestions, setAddressSuggestions] = useState<Array<{ short_name: string; display_name: string; lat: number; lng: number }>>([]);
+  const [showAddressSuggestions, setShowAddressSuggestions] = useState(false);
+  const [addressSuggestionsLoading, setAddressSuggestionsLoading] = useState(false);
+  const addressDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Drawing state
+  const [drawingMode, setDrawingMode] = useState<DrawingMode>('select');
+  const [drawnPoints, setDrawnPoints] = useState<{ x: number; y: number; lat: number; lng: number }[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragStartCenter, setDragStartCenter] = useState({ lat: 0, lng: 0 });
+  const [measurePoints, setMeasurePoints] = useState<{ x: number; y: number; lat: number; lng: number }[]>([]);
+  const [measureDistance, setMeasureDistance] = useState<number | null>(null);
+
+  // Layout state
+  const [panels, setPanels] = useState<PlacedPanel[]>([]);
+  const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([]);
+  const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
+  
+  // Google Solar API data
+  const [roofSegments, setRoofSegments] = useState<any[]>([]);
+  const [solarApiData, setSolarApiData] = useState<any>(null);
+  const [solarDataLoading, setSolarDataLoading] = useState(false);
+  const [solarDataError, setSolarDataError] = useState<string | null>(null);
+  // Solar API roof plane auto-detection status
+  const [solarApiStatus, setSolarApiStatus] = useState<'idle' | 'loading' | 'loaded' | 'unavailable'>('idle');
+  // Pending plane: drawn vertices awaiting azimuth/pitch tagging before panels are placed
+  const [pendingPlane, setPendingPlane] = useState<{ vertices: {lat:number;lng:number}[]; area: number } | null>(null);
+  const [pendingPlaneAzimuth, setPendingPlaneAzimuth] = useState<number>(180);
+  const [pendingPlanePitch, setPendingPlanePitch] = useState<number>(20);
+  const [fenceLine, setFenceLine] = useState<{ lat: number; lng: number }[]>([]);
+
+  // Mixed system support - active drawing zone type
+  const [activeZoneType, setActiveZoneType] = useState<SystemType>(project.systemType);
+  const [selectedPanelIds, setSelectedPanelIds] = useState<Set<string>>(new Set());
+
+  // 3D placement mode
+  const [placementMode3D, setPlacementMode3D] = useState<PlacementMode>('select');
+  const [showShade3D, setShowShade3D] = useState(false);
+
+  // Equipment state
+  const [availablePanels, setAvailablePanels] = useState<SolarPanel[]>([]);
+  const [availableInverters, setAvailableInverters] = useState<Inverter[]>([]);
+  const [availableBatteries, setAvailableBatteries] = useState<any[]>([]);
+  const [selectedPanel, setSelectedPanel] = useState<SolarPanel>(
+    project.selectedPanel || {
+      // v47.109: Standard 440W default (Jinko Eagle Neo 440W)
+      // width: 44.49" = 1.130m = 3.708ft, height: 69.4" = 1.762m = 5.781ft
+      id: 'panel-std440', manufacturer: 'Jinko Solar', model: 'Eagle Neo N-type 440W',
+      wattage: 440,
+      width:  1.130,   // 44.49" = 1.130m (standard 440W residential width)
+      height: 1.762,   // 69.4"  = 1.762m (standard 440W residential height)
+      efficiency: 22.0,
+      bifacial: false, bifacialFactor: 1.0, temperatureCoeff: -0.30, pricePerWatt: 0.28,
+    }
+  );
+  const [selectedInverter, setSelectedInverter] = useState<Inverter | null>(project.selectedInverter || null);
+  const [selectedBattery, setSelectedBattery] = useState<any | null>(null);
+  const [batteryCount, setBatteryCount] = useState(1);
+  const [panelFilter, setPanelFilter] = useState('');
+  const [inverterFilter, setInverterFilter] = useState('');
+
+  // Config state
+  const [tilt, setTilt] = useState(project.systemType === 'fence' ? 90 : 20);
+  const [azimuth, setAzimuth] = useState(180);
+  const [rowSpacing, setRowSpacing] = useState(0.02); // v47.96: flush roof mount -- clip gap only (was 1.5m ground-mount)
+  const [panelSpacing, setPanelSpacing] = useState(0.006); // v47.98: 0.006m = ¼" clamp gap (was 0.02m)
+  const [setback, setSetback] = useState(0);    // v47.95: fire setbacks handle clearances
+  const [bifacialOptimized, setBifacialOptimized] = useState(true);
+  const [fenceHeight, setFenceHeight] = useState(2.0);
+  const [groundHeight, setGroundHeight] = useState(0.6);
+  const [panelsPerRow, setPanelsPerRow] = useState(10);
+  const [show3D, setShow3D] = useState(true);  // Default to 3D view
+  const [showPanels, setShowPanels] = useState(true);
+
+  // v30.9: Panel orientation (portrait/landscape)
+  const [orientation, setOrientation] = useState<PanelOrientation>('portrait');
+
+  // v30.9: Fire setback configuration (AHJ-configurable)
+  const [fireSetbacks, setFireSetbacks] = useState<FireSetbackConfig>(DEFAULT_FIRE_SETBACKS);
+  const [showSetbackZones, setShowSetbackZones] = useState(false);
+  const [showCADDebug, setShowCADDebug] = useState(false); // CAD debug overlay: usable polygon + row lines
+  // v47.118: Align panel grid to longest roof edge (instead of pure azimuth)
+  const [alignToEdge, setAlignToEdge] = useState(true);  // default ON for best visual alignment
+  const [setbackZones, setSetbackZones] = useState<SetbackZone[]>([]);
+
+  // v30.9: Multi-row placement tool
+  const [multiRowMode, setMultiRowMode] = useState(false);
+  const [multiRowCount, setMultiRowCount] = useState(3);
+  const [multiRowStart, setMultiRowStart] = useState<{lat: number; lng: number} | null>(null);
+  const [multiRowEnd, setMultiRowEnd] = useState<{lat: number; lng: number} | null>(null);
+  const [hoverPos, setHoverPos] = useState<{lat: number; lng: number} | null>(null); // v30.9: cursor tracking
+
+  // Bill analysis state
+  const [billAnalysis, setBillAnalysis] = useState<BillAnalysis | null>(null);
+  const [activeTab, setActiveTab] = useState<'design' | 'bill' | 'equipment' | 'battery'>('design');
+
+  // Calculation state
+  const [calculating, setCalculating] = useState(false);
+  const [production, setProduction] = useState<any>(null);
+  const [costEstimate, setCostEstimate] = useState<any>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [calcMessage, setCalcMessage] = useState<string>('');
+  // Restore indicators — show what was loaded from DB on mount
+  const [restoredPanelCount, setRestoredPanelCount] = useState<number>(0);
+  const [restoredRoofPlaneCount, setRestoredRoofPlaneCount] = useState<number>(0);
+  const [layoutLoadedFromDB, setLayoutLoadedFromDB] = useState<boolean>(false);
+
+  // Auto-save refs — use refs for mapCenter/zoom so the debounce callback
+  // doesn't get recreated on every map pan (which would reset the 3-second timer)
+  const mapCenterRef = useRef(mapCenter);
+  const zoomRef = useRef(zoom);
+  const lastSavedPanelsRef = useRef<string>('[]');
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const panelsRef2 = useRef<PlacedPanel[]>(panels);
+  const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
+
+  const systemSizeKw = calculateSystemSize(panels);
+
+  // Quick production estimate (shown before full PVWatts calculation)
+  const quickEstimate = useMemo(() => {
+    if (panels.length === 0 || systemSizeKw === 0) return null;
+    // Regional sun-hours lookup by latitude (rough estimate)
+    const lat = mapCenter.lat;
+    let peakSunHours = 4.5; // national average
+    if (lat >= 25 && lat <= 35) peakSunHours = 5.8;       // Southwest (AZ, NM, TX, FL)
+    else if (lat > 35 && lat <= 40) peakSunHours = 5.2;   // Mid-South (CA, CO, NC)
+    else if (lat > 40 && lat <= 45) peakSunHours = 4.8;   // Mid-North (OH, PA, OR)
+    else if (lat > 45) peakSunHours = 4.2;                 // Northwest/Northeast
+    else if (lat < 25) peakSunHours = 5.5;                 // Hawaii/Puerto Rico
+
+    // Tilt adjustment factor (optimal ~latitude angle)
+    const tiltDiff = Math.abs(tilt - lat);
+    const tiltFactor = 1 - (tiltDiff / 180) * 0.15;
+
+    // System losses: ~14% (wiring, inverter, soiling, temp)
+    const systemLoss = 0.86;
+    const annualKwh = Math.round(systemSizeKw * peakSunHours * 365 * tiltFactor * systemLoss);
+    const monthlyAvg = Math.round(annualKwh / 12);
+
+    // Savings estimate at $0.15/kWh average
+    const utilityRate = 0.15;
+    const annualSavings = Math.round(annualKwh * utilityRate);
+
+    return { annualKwh, monthlyAvg, annualSavings, peakSunHours };
+  }, [panels.length, systemSizeKw, mapCenter.lat, tilt]);
+
+  // Keep refs in sync with state
+  useEffect(() => { mapCenterRef.current = mapCenter; }, [mapCenter]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { panelsRef2.current = panels; }, [panels]);
+  useEffect(() => { roofPlanesRef.current = roofPlanes; }, [roofPlanes]);
+
+  // ── Auto-save layout to DB (3-second debounce after panel changes) ──────────
+  const saveLayoutToDB = useCallback(async (panelList: PlacedPanel[]) => {
+    const panelsJson = JSON.stringify(panelList);
+    if (panelsJson === lastSavedPanelsRef.current) return; // nothing changed
+    lastSavedPanelsRef.current = panelsJson;
+    const payload = {
+      panels: panelList,
+      mapCenter: mapCenterRef.current,
+      mapZoom: zoomRef.current,
+      systemType: project.systemType,
+      // Include roofPlanes so permit generator can use exact roof geometry
+      roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
+    };
+    // STEP 1 -- LAYOUT SAVE LOGGING
+    console.log('[LAYOUT SAVE PAYLOAD]', {
+      projectId: project.id,
+      panelCount: panelList.length,
+      roofPlaneCount: roofPlanesRef.current.length,
+      hasRoofPlanes: roofPlanesRef.current.length > 0,
+      panels: panelList.slice(0, 3),
+      roofPlanes: roofPlanesRef.current,
+    });
+    // Always save to localStorage first (survives serverless cold starts)
+    localSaveLayout(project.id, payload);
+    setSaveStatus('saving');
+    try {
+      const res = await fetch(`/api/projects/${project.id}/layout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        setLastSavedAt(new Date());
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus(s => s === 'saved' ? 'idle' : s), 3000);
+      } else {
+        setSaveStatus('error');
+        setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
+      }
+    } catch (e) {
+      console.error('Auto-save failed:', e);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus(s => s === 'error' ? 'idle' : s), 5000);
+    }
+  }, [project.id, project.systemType]);
+
+  // Trigger auto-save 3 seconds after panels change
+  useEffect(() => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      saveLayoutToDB(panels);
+    }, 3000);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [panels, saveLayoutToDB]);
+
+  // Save on page exit using sendBeacon (reliable even during unload)
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const panelList = panelsRef2.current;
+      if (JSON.stringify(panelList) === lastSavedPanelsRef.current) return;
+      const payload = JSON.stringify({
+        panels: panelList,
+        mapCenter: mapCenterRef.current,
+        mapZoom: zoomRef.current,
+        systemType: project.systemType,
+        roofPlanes: roofPlanesRef.current.length > 0 ? roofPlanesRef.current : undefined,
+      });
+      navigator.sendBeacon(
+        `/api/projects/${project.id}/layout`,
+        new Blob([payload], { type: 'application/json' })
+      );
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [project.id, project.systemType]);
+
+  // ── Restore panels from DB on mount ─────────────────────────────────────────
+  useEffect(() => {
+    const restorePanels = async () => {
+      try {
+        const res = await fetch(`/api/projects/${project.id}/layout`);
+        const data = await res.json();
+        console.log('[LAYOUT RESTORE FROM DB]', {
+          projectId: project.id,
+          success: data.success,
+          panelCount: data.data?.panels?.length ?? 0,
+          roofPlaneCount: data.data?.roofPlanes?.length ?? 0,
+          hasRoofPlanes: !!(data.data?.roofPlanes && data.data.roofPlanes.length > 0),
+        });
+        if (data.success && data.data?.panels && data.data.panels.length > 0) {
+          setPanels(data.data.panels);
+          lastSavedPanelsRef.current = JSON.stringify(data.data.panels);
+          setRestoredPanelCount(data.data.panels.length);
+          setLayoutLoadedFromDB(true);
+          console.log(`[DesignStudio] Restored ${data.data.panels.length} panels from DB`);
+        }
+        // CRITICAL FIX: Also restore roofPlanes so roofPlanesRef stays populated
+        // Without this, auto-save fires with roofPlanesRef.current = [] and roof planes are lost
+        // Only restore planes that have actual vertices — ignore placeholder planes with empty vertices
+        const savedPlanes = (data.data?.roofPlanes ?? []).filter(
+          (rp: RoofPlane) => rp.vertices && rp.vertices.length >= 3
+        );
+        if (data.success && savedPlanes.length > 0) {
+          setRoofPlanes(savedPlanes);
+          setRestoredRoofPlaneCount(savedPlanes.length);
+          console.log(`[DesignStudio] Restored ${savedPlanes.length} roof planes from DB (filtered ${(data.data?.roofPlanes?.length ?? 0) - savedPlanes.length} empty planes)`);
+        } else {
+          // Solar API auto-detect: no valid saved roof planes, call POST /api/solar
+          const lat = project.lat ?? project.client?.lat;
+          const lng = project.lng ?? project.client?.lng;
+          if (lat && lng) {
+            console.log('[DesignStudio] No saved roof planes — auto-detecting via Solar API');
+            setSolarApiStatus('loading');
+            try {
+              const solarRes = await fetch('/api/solar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat, lng, quality: 'HIGH' }),
+              });
+              const solarData = await solarRes.json();
+              if (solarData.success && solarData.roofPlanes && solarData.roofPlanes.length > 0) {
+                const unconfirmedPlanes = solarData.roofPlanes.map((p: RoofPlane) => ({
+                  ...p,
+                  confirmed: false,
+                  source: 'solar_api' as const,
+                }));
+                setRoofPlanes(unconfirmedPlanes);
+                setSolarApiStatus('loaded');
+                console.log(`[DesignStudio] Solar API auto-detected ${unconfirmedPlanes.length} roof planes`);
+                toast.info(
+                  '🛰️ Roof planes auto-detected',
+                  `${unconfirmedPlanes.length} planes found via Solar API — review and confirm below`
+                );
+              } else {
+                setSolarApiStatus('unavailable');
+                console.log('[DesignStudio] Solar API returned no planes:', solarData.error ?? 'unknown');
+              }
+            } catch (solarErr) {
+              setSolarApiStatus('unavailable');
+              console.error('[DesignStudio] Solar API auto-detect failed:', solarErr);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Panel restore failed:', e);
+      }
+    };
+    restorePanels();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
+
+  // Load hardware
+  useEffect(() => {
+    fetch('/api/hardware').then(r => r.json()).then(d => {
+      if (d.success) {
+        setAvailablePanels(d.data.panels);
+        setAvailableInverters(d.data.inverters);
+        setAvailableBatteries(d.data.batteries || []);
+        if (d.data.panels.length > 0 && !project.selectedPanel) {
+          setSelectedPanel(d.data.panels[0]);
+        }
+        if (d.data.inverters.length > 0 && !project.selectedInverter) {
+          setSelectedInverter(d.data.inverters[3]); // SolarEdge default
+        }
+      }
+    });
+  }, []);
+
+  // ── Address geocoding ──────────────────────────────────────
+  const geocodeAddress = async (address: string) => {
+    if (!address.trim()) return;
+    setSearchLoading(true);
+    // Clear panels from old address before flying to new location
+    setPanels([]);
+    lastSavedPanelsRef.current = '[]';
+    setProduction(null);
+    setCostEstimate(null);
+    setCalcMessage('');
+    const toastId = toast.loading('Finding address...', address);
+    try {
+      // Use server-side proxy to avoid CORS/rate-limit issues with Nominatim
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(address)}&mode=search`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        const newLat = data.data.lat;
+        const newLng = data.data.lng;
+        setMapCenter({ lat: newLat, lng: newLng });
+        setZoom(19);
+        setMapTiles(new Map()); // clear tiles to force reload at new location
+        setLocationStatus('found');
+        fetchSolarData(newLat, newLng);
+        toast.update(toastId, {
+          type: 'success',
+          title: 'Location found!',
+          message: `${newLat.toFixed(5)}, ${newLng.toFixed(5)} · Loading 3D site model...`,
+        });
+        // Phase 6: Save resolved coords back to project so next load is instant
+        if (project.id && (!project.lat || !project.lng)) {
+          fetch(`/api/projects/${project.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: newLat, lng: newLng, address }),
+          }).catch(() => {}); // non-fatal
+        }
+      } else {
+        setLocationStatus('failed');
+        toast.update(toastId, {
+          type: 'error',
+          title: 'Address not found',
+          message: 'Try a more specific address or include city and state',
+        });
+      }
+    } catch (e) {
+      console.error('Geocoding failed:', e);
+      setLocationStatus('failed');
+      toast.update(toastId, {
+        type: 'error',
+        title: 'Geocoding failed',
+        message: 'Network error — please try again',
+      });
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  // ── Address autocomplete ──────────────────────────────────
+  const handleAddressSearchInput = useCallback((value: string) => {
+    setAddressSearch(value);
+    setLocationStatus('idle');
+    if (addressDebounceRef.current) clearTimeout(addressDebounceRef.current);
+    if (value.length < 3) {
+      setAddressSuggestions([]);
+      setShowAddressSuggestions(false);
+      return;
+    }
+    addressDebounceRef.current = setTimeout(async () => {
+      setAddressSuggestionsLoading(true);
+      try {
+        const res = await fetch(`/api/geocode?q=${encodeURIComponent(value)}&mode=autocomplete`);
+        const data = await res.json();
+        if (data.success && data.data.length > 0) {
+          setAddressSuggestions(data.data);
+          setShowAddressSuggestions(true);
+        } else {
+          setAddressSuggestions([]);
+          setShowAddressSuggestions(false);
+        }
+      } catch {
+        setAddressSuggestions([]);
+      } finally {
+        setAddressSuggestionsLoading(false);
+      }
+    }, 350);
+  }, []);
+
+  const handleSelectAddressSuggestion = useCallback((s: { short_name: string; lat: number; lng: number }) => {
+    setAddressSearch(s.short_name);
+    setShowAddressSuggestions(false);
+    setAddressSuggestions([]);
+    // Clear panels from old address before flying to new location
+    setPanels([]);
+    lastSavedPanelsRef.current = '[]';
+    setProduction(null);
+    setCostEstimate(null);
+    setCalcMessage('');
+    setMapCenter({ lat: s.lat, lng: s.lng });
+    setZoom(19);
+    setMapTiles(new Map());
+    fetchSolarData(s.lat, s.lng);
+    setLocationStatus('found');
+    toast.info('Loading site model...', `${s.short_name} · Resetting 3D scene`);
+  }, [toast]);
+
+  // Fetch Google Solar API data
+  const fetchSolarData = useCallback(async (lat: number, lng: number) => {
+    setSolarDataLoading(true);
+    setSolarDataError(null);
+    try {
+      const response = await fetch(
+        `/api/solar?endpoint=buildingInsights&lat=${lat}&lng=${lng}&quality=HIGH`
+      );
+      if (!response.ok) {
+        throw new Error(`Solar API error: ${response.status}`);
+      }
+      const data = await response.json();
+      setSolarApiData(data);
+      if (data.solarPotential?.roofSegmentStats) {
+        setRoofSegments(data.solarPotential.roofSegmentStats);
+        console.log("Google Solar API: Roof segments loaded", data.solarPotential.roofSegmentStats.length);
+      }
+    } catch (error: unknown) {
+      console.error("Failed to fetch solar data:", error);
+      setSolarDataError((error as Error).message || "Failed to load solar data");
+    } finally {
+      setSolarDataLoading(false);
+    }
+  }, []);
+
+  // ── Handle house pick from 3D view ──────────────────────────────────
+  // Called when user clicks a house in Pick House mode.
+  // Updates the map center, fetches new Solar API data, and updates the address bar.
+  const handleLocationPick = useCallback(async (pickedLat: number, pickedLng: number, pickedAddress: string) => {
+    // Clear existing panels — new house, fresh start
+    setPanels([]);
+    lastSavedPanelsRef.current = '[]';
+    setProduction(null);
+    setCostEstimate(null);
+    setCalcMessage('');
+    setSolarApiData(null);
+    setRoofSegments([]);
+
+    // Update map center and address bar
+    setMapCenter({ lat: pickedLat, lng: pickedLng });
+    setAddressSearch(pickedAddress);
+    setLocationStatus('found');
+
+    // Show toast
+    toast.info('🏡 House selected', `Loading solar data for ${pickedAddress}`);
+
+    // Fetch Solar API data for the new location
+    fetchSolarData(pickedLat, pickedLng);
+
+    // Save resolved coords back to project (non-fatal)
+    if (project.id) {
+      fetch(`/api/projects/${project.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: pickedLat, lng: pickedLng, address: pickedAddress }),
+      }).catch(() => {});
+    }
+  }, [fetchSolarData, project.id, toast]);
+
+  // ── Resolve location on load ─────────────────────────────────────────
+  // Phase 3-6: Priority chain:
+  //   1. project.lat/lng (saved at creation — fastest, no async needed)
+  //   2. project.client.lat/lng (client geocoded coords)
+  //   3. Geocode project.address
+  //   4. Geocode client address
+  // Camera flies immediately to resolved coords — no wrong-location flash.
+  useEffect(() => {
+    // Phase 3: Project has its own geocoded coords (set at creation)
+    if (hasValidCoords(project.lat, project.lng)) {
+      setMapCenter({ lat: project.lat!, lng: project.lng! });
+      setLocationStatus('found');
+      fetchSolarData(project.lat!, project.lng!);
+      if (project.address) setAddressSearch(project.address);
+      return;
+    }
+
+    // Phase 6 fallback: try client coords
+    if (hasValidCoords(project.client?.lat, project.client?.lng)) {
+      setMapCenter({ lat: project.client!.lat!, lng: project.client!.lng! });
+      setLocationStatus('found');
+      fetchSolarData(project.client!.lat!, project.client!.lng!);
+      if (project.client?.address) {
+        setAddressSearch([project.client.address, project.client.city, project.client.state].filter(Boolean).join(', '));
+      }
+      return;
+    }
+
+    // Phase 6 fallback: geocode project address
+    const projectAddr = project.address?.trim();
+    if (projectAddr) {
+      setLocationStatus('locating');
+      setAddressSearch(projectAddr);
+      geocodeAddress(projectAddr);
+      return;
+    }
+
+    // Phase 6 fallback: geocode client address
+    if (project.client?.address) {
+      setLocationStatus('locating');
+      const fullAddress = [
+        project.client.address,
+        project.client.city,
+        project.client.state,
+        project.client.zip,
+      ].filter(Boolean).join(', ');
+      setAddressSearch(fullAddress);
+      geocodeAddress(fullAddress);
+      return;
+    }
+
+    // No address at all — stay at default, let user search manually
+    setLocationStatus('failed');
+  }, [project.id]); // Only run once when project loads
+
+  // ── Load map tiles ──────────────────────────────────────────────────────────
+  // Provider priority (v47.87):
+  //   'auto'   — Google primary (zoom 21), ESRI fallback on error or blank tile
+  //   'google' — Google only (forced)
+  //   'esri'   — ESRI only, capped at zoom 19
+  // Smart quality detection: ESRI tiles with pixel variance <80 are flagged as blank
+  // (ESRI stops real imagery above zoom 19 for rural areas, returns solid grey tile)
+  const GOOGLE_MAX_ZOOM = 21;
+  const ARCGIS_MAX_ZOOM = 19;
+
+  // Cache Google Maps session token at component scope
+  const googleSessionRef = React.useRef<{ token: string; key: string } | null>(null);
+  const googleSessionFetchedRef = React.useRef(false);
+
+  // Fetch Google Maps session token once on mount
+  useEffect(() => {
+    if (googleSessionFetchedRef.current) return;
+    googleSessionFetchedRef.current = true;
+    fetch('/api/maps-session')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.session && data?.key) {
+          googleSessionRef.current = { token: data.session, key: data.key };
+          setActiveTileSource('google');
+        }
+      })
+      .catch(() => { setActiveTileSource('esri'); });
+  }, []);
+
+  /** Detect if a canvas tile image is blank/solid-colour (low pixel variance).
+   *  ESRI returns a ~2.5KB grey placeholder when it has no imagery at that zoom. */
+  const detectBlankTile = (img: HTMLImageElement): boolean => {
+    try {
+      const offscreen = document.createElement('canvas');
+      offscreen.width  = 16;
+      offscreen.height = 16;
+      const oc = offscreen.getContext('2d');
+      if (!oc) return false;
+      oc.drawImage(img, 0, 0, 16, 16);
+      const d = oc.getImageData(0, 0, 16, 16).data;
+      let sum = 0, sum2 = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        sum += lum; sum2 += lum * lum; n++;
+      }
+      const mean = sum / n;
+      const variance = sum2 / n - mean * mean;
+      return variance < 80;
+    } catch { return false; }
+  };
+
+  const loadTiles = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const hasGoogle = !!googleSessionRef.current;
+    const forceEsri   = tileProvider === 'esri';
+    const forceGoogle = tileProvider === 'google';
+
+    // Determine fetch zoom based on provider capabilities
+    const MAX_ZOOM  = (!forceEsri && hasGoogle) ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
+    const fetchZoom = Math.min(zoom, MAX_ZOOM);
+    const scale     = Math.pow(2, zoom - fetchZoom);
+
+    const center = latLngToWorld(mapCenter.lat, mapCenter.lng, fetchZoom);
+    const tileX  = Math.floor(center.x / TILE_SIZE);
+    const tileY  = Math.floor(center.y / TILE_SIZE);
+
+    const tilesX = Math.ceil((canvas.width  / (TILE_SIZE * scale))) + 3;
+    const tilesY = Math.ceil((canvas.height / (TILE_SIZE * scale))) + 3;
+
+    const needed: string[] = [];
+    for (let dx = -Math.floor(tilesX / 2); dx <= Math.floor(tilesX / 2); dx++) {
+      for (let dy = -Math.floor(tilesY / 2); dy <= Math.floor(tilesY / 2); dy++) {
+        needed.push(`${fetchZoom}/${tileX + dx}/${tileY + dy}`);
+      }
+    }
+
+    const esriUrl = (fz: number, ftx: number, fty: number) =>
+      `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${fz}/${fty}/${ftx}`;
+    const googleUrl = (fz: number, ftx: number, fty: number) => {
+      const sess = googleSessionRef.current!;
+      return `https://tile.googleapis.com/v1/2dtiles/${fz}/${ftx}/${fty}?session=${sess.token}&key=${sess.key}`;
+    };
+
+    needed.forEach(key => {
+      if (mapTiles.has(key) && (mapTiles.get(key) as any)._loaded) return;
+      const [fz, ftx, fty] = key.split('/').map(Number);
+
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+
+      const commitTile = (source: 'google' | 'esri') => {
+        (img as any)._loaded  = true;
+        (img as any)._source  = source;
+        setActiveTileSource(source);
+        setMapTiles(prev => { const m = new Map(prev); m.set(key, img); return m; });
+        setMapLoaded(true);
+      };
+
+      const tryEsri = () => {
+        img.onerror = () => { (img as any)._loaded = false; };
+        img.onload  = () => {
+          if (detectBlankTile(img)) {
+            // ESRI has no imagery here — auto-switch to Google if available
+            esriBlankZoomsRef.current.add(fz);
+            if (hasGoogle && googleSessionRef.current) {
+              img.onload  = () => commitTile('google');
+              img.onerror = () => {};
+              img.src = googleUrl(fz, ftx, fty);
+              return;
+            }
+          }
+          commitTile('esri');
+        };
+        img.src = esriUrl(fz, ftx, fty);
+      };
+
+      if (forceEsri) {
+        img.onload  = () => commitTile('esri');
+        img.onerror = () => {};
+        img.src = esriUrl(Math.min(fz, ARCGIS_MAX_ZOOM), ftx, fty);
+      } else if (forceGoogle || hasGoogle) {
+        // Google primary — fall back to ESRI on HTTP error
+        img.onload  = () => commitTile('google');
+        img.onerror = () => { img.onerror = null; tryEsri(); };
+        img.src = googleUrl(fz, ftx, fty);
+      } else {
+        tryEsri();
+      }
+
+      setMapTiles(prev => {
+        if (prev.has(key)) return prev;
+        const m = new Map(prev); m.set(key, img); return m;
+      });
+    });
+  }, [mapCenter, zoom, tileProvider]);
+
+  useEffect(() => { if (!show3D) loadTiles(); }, [mapCenter, zoom, show3D]);
+
+  // ── Draw canvas ────────────────────────────────────────────
+  const drawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const W = canvas.width, H = canvas.height;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw map tiles
+    // Tiles are stored at fetchZoom — clamped to GOOGLE_MAX_ZOOM=21 (or ARCGIS_MAX_ZOOM=19 fallback)
+    // If display zoom > max, tiles are scaled up on canvas
+    const _tileMaxZoom = googleSessionRef.current ? GOOGLE_MAX_ZOOM : ARCGIS_MAX_ZOOM;
+    const fetchZoom = Math.min(zoom, _tileMaxZoom);
+    const tileScale = Math.pow(2, zoom - fetchZoom); // 1 at zoom<=max, 2 at +1, 4 at +2
+    const displayTileSize = TILE_SIZE * tileScale;
+
+    // Center position in fetch-zoom world coords
+    const fetchCenter = latLngToWorld(mapCenter.lat, mapCenter.lng, fetchZoom);
+
+    mapTiles.forEach((img, key) => {
+      if (!(img as any)._loaded || img.naturalWidth === 0) return;
+      const [fz, ftx, fty] = key.split('/').map(Number);
+      if (fz !== fetchZoom) return;
+
+      // World position of this tile at fetch zoom
+      const wx = ftx * TILE_SIZE;
+      const wy = fty * TILE_SIZE;
+
+      // Canvas position: offset from center, scaled up
+      const cx = W / 2 + (wx - fetchCenter.x) * tileScale;
+      const cy = H / 2 + (wy - fetchCenter.y) * tileScale;
+
+      ctx.drawImage(img, cx, cy, displayTileSize, displayTileSize);
+    });
+
+    const mpp = metersPerPixel(mapCenter.lat, zoom);
+    const pxPerM = 1 / mpp;
+
+    // Draw roof planes — confirmed=solid amber, unconfirmed=dashed amber with edge-type coloring
+    roofPlanes.forEach(plane => {
+      if (plane.vertices.length < 2) return;
+      const isUnconfirmed = plane.confirmed === false;
+      const isSolarApi = plane.source === 'solar_api';
+
+      // Build path
+      ctx.beginPath();
+      plane.vertices.forEach((v, i) => {
+        const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      });
+      ctx.closePath();
+
+      // Fill
+      ctx.fillStyle = isUnconfirmed
+        ? 'rgba(251, 191, 36, 0.07)'
+        : 'rgba(251, 191, 36, 0.15)';
+      ctx.fill();
+
+      // Draw each edge with its edge type color/style
+      if (plane.edgeTypes && plane.edgeTypes.length === plane.vertices.length) {
+        const edgeColors: Record<string, string> = {
+          ridge:   '#ef4444', // red — peak
+          eave:    '#fbbf24', // amber — bottom edge
+          hip:     '#f97316', // orange — diagonal
+          valley:  '#60a5fa', // blue — valley
+          rake:    '#a3e635', // lime — gable end
+          wall:    '#94a3b8', // slate — wall
+          unknown: '#fbbf24', // amber — default
+        };
+        for (let i = 0; i < plane.vertices.length; i++) {
+          const v1 = plane.vertices[i];
+          const v2 = plane.vertices[(i + 1) % plane.vertices.length];
+          const p1 = latLngToCanvas(v1.lat, v1.lng, mapCenter, zoom, W, H);
+          const p2 = latLngToCanvas(v2.lat, v2.lng, mapCenter, zoom, W, H);
+          const edgeType = plane.edgeTypes[i] ?? 'unknown';
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.strokeStyle = edgeColors[edgeType] ?? '#fbbf24';
+          ctx.lineWidth = edgeType === 'ridge' ? 3.5 : edgeType === 'eave' ? 2.5 : 2;
+          ctx.setLineDash(isUnconfirmed ? [5, 4] : edgeType === 'valley' ? [4, 3] : []);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      } else {
+        // Fallback: uniform stroke
+        ctx.strokeStyle = isUnconfirmed ? '#fbbf24' : '#f59e0b';
+        ctx.lineWidth = 2;
+        ctx.setLineDash(isUnconfirmed ? [6, 4] : []);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Label: pitch/azimuth at centroid
+      if (plane.vertices.length >= 3) {
+        const cx = plane.vertices.reduce((s, v) => s + v.lng, 0) / plane.vertices.length;
+        const cy = plane.vertices.reduce((s, v) => s + v.lat, 0) / plane.vertices.length;
+        const cp = latLngToCanvas(cy, cx, mapCenter, zoom, W, H);
+        const azDir = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round((plane.azimuth ?? 180) / 45) % 8];
+        const label = `${(plane.pitch ?? 0).toFixed(0)}° ${azDir}`;
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // Background pill
+        const tw = ctx.measureText(label).width + 8;
+        ctx.fillStyle = isUnconfirmed ? 'rgba(251,191,36,0.80)' : 'rgba(245,158,11,0.90)';
+        ctx.beginPath();
+        const rx = cp.x - tw / 2, ry = cp.y - 7;
+        ctx.roundRect(rx, ry, tw, 14, 4);
+        ctx.fill();
+        ctx.fillStyle = '#1e293b';
+        ctx.fillText(label, cp.x, cp.y);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+
+        // Unconfirmed badge
+        if (isUnconfirmed) {
+          ctx.font = 'bold 9px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = 'rgba(251,191,36,0.95)';
+          ctx.fillText('⚠ Unconfirmed', cp.x, cp.y + 14);
+          ctx.textAlign = 'left';
+        }
+      }
+    });
+
+    // ─── CAD Debug Overlay (v47.89) ──────────────────────────────────────────
+    // Draws: (1) usable roof polygon after setback shrink, (2) row alignment lines
+    // Toggle with showCADDebug state (default: off — see toolbar)
+    if (showCADDebug && roofPlanes.length > 0) {
+      roofPlanes.forEach(plane => {
+        if (!plane.vertices || plane.vertices.length < 3) return;
+        // v47.94: Use stored centroid -- same origin as CAD engine.
+        // Fall back to vertex average only for legacy planes without stored centroid.
+        const origin = {
+          lat: plane.centroidLat ?? plane.vertices.reduce((s: number, v: {lat:number;lng:number}) => s + v.lat, 0) / plane.vertices.length,
+          lng: plane.centroidLng ?? plane.vertices.reduce((s: number, v: {lat:number;lng:number}) => s + v.lng, 0) / plane.vertices.length,
+        };
+        const METERS_PER_DEG_LAT_D = 111320;
+        const cosLatD = Math.cos(origin.lat * Math.PI / 180);
+
+        // Convert vertices to local metric
+        const localVerts = plane.vertices.map((v: {lat:number;lng:number}) => ({
+          x: (v.lng - origin.lng) * cosLatD * METERS_PER_DEG_LAT_D,
+          y: (v.lat - origin.lat) * METERS_PER_DEG_LAT_D,
+        }));
+
+        // Simple inward shrink for display (approximate — mirrors shrinkPolygon logic)
+        const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+        const signedAreaDebug = (pts: {x:number;y:number}[]) => {
+          let a = 0;
+          for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            a += (pts[j].x + pts[i].x) * (pts[j].y - pts[i].y);
+          }
+          return a / 2;
+        };
+        const ccwVerts = signedAreaDebug(localVerts) < 0 ? [...localVerts].reverse() : [...localVerts];
+        const n = ccwVerts.length;
+        const shrunkVerts: {x:number;y:number}[] = [];
+        for (let i = 0; i < n; i++) {
+          const prev = ccwVerts[(i + n - 1) % n];
+          const curr = ccwVerts[i];
+          const next = ccwVerts[(i + 1) % n];
+          const e1x = curr.x - prev.x, e1y = curr.y - prev.y;
+          const e2x = next.x - curr.x, e2y = next.y - curr.y;
+          const len1 = Math.hypot(e1x, e1y), len2 = Math.hypot(e2x, e2y);
+          if (len1 < 1e-9 || len2 < 1e-9) { shrunkVerts.push({...curr}); continue; }
+          const n1x = e1y / len1, n1y = -e1x / len1;
+          const n2x = e2y / len2, n2y = -e2x / len2;
+          const bx = n1x + n2x, by = n1y + n2y;
+          const blen = Math.hypot(bx, by);
+          if (blen < 1e-9) {
+            shrunkVerts.push({ x: curr.x + n1x * fireSetbackM, y: curr.y + n1y * fireSetbackM });
+          } else {
+            const bn = { x: bx / blen, y: by / blen };
+            const dot = bn.x * n1x + bn.y * n1y;
+            const miter = Math.min(fireSetbackM / Math.max(dot, 0.1), fireSetbackM * 3);
+            shrunkVerts.push({ x: curr.x + bn.x * miter, y: curr.y + bn.y * miter });
+          }
+        }
+
+        // Convert shrunk verts back to canvas coords
+        const shrunkCanvas = shrunkVerts.map((v: {x:number;y:number}) => {
+          const lat = origin.lat + v.y / METERS_PER_DEG_LAT_D;
+          const lng = origin.lng + v.x / (cosLatD * METERS_PER_DEG_LAT_D);
+          return latLngToCanvas(lat, lng, mapCenter, zoom, W, H);
+        });
+
+        if (shrunkCanvas.length >= 3) {
+          // Draw usable polygon (cyan dashed)
+          ctx.beginPath();
+          shrunkCanvas.forEach((p: {x:number;y:number}, i: number) => {
+            i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+          });
+          ctx.closePath();
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.90)'; // cyan
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([6, 3]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = 'rgba(34, 211, 238, 0.06)';
+          ctx.fill();
+
+          // Draw row alignment lines (azimuth-perpendicular lines across usable polygon)
+          // Rotate usable polygon to azimuth frame to find row Y positions
+          const az = plane.azimuth ?? 180;
+          const rotAngle = (90 - az) * Math.PI / 180;
+          const cosR = Math.cos(rotAngle), sinR = Math.sin(rotAngle);
+          const rotated = shrunkVerts.map((v: {x:number;y:number}) => ({
+            x: v.x * cosR - v.y * sinR,
+            y: v.x * sinR + v.y * cosR,
+          }));
+          let minY_r = Infinity, maxY_r = -Infinity;
+          let minX_r = Infinity, maxX_r = -Infinity;
+          for (const rv of rotated) {
+            if (rv.x < minX_r) minX_r = rv.x;
+            if (rv.x > maxX_r) maxX_r = rv.x;
+            if (rv.y < minY_r) minY_r = rv.y;
+            if (rv.y > maxY_r) maxY_r = rv.y;
+          }
+          // v47.98: use CAD frame panelY (up-slope dimension) for row step
+          const planeOrient = orientation;
+          const cadPanelY = planeOrient === 'landscape' ? selectedPanel.width : selectedPanel.height;
+          const rowStep = cadPanelY + rowSpacing;
+          const pxPerM = 1 / metersPerPixel(mapCenter.lat, zoom);
+
+          ctx.strokeStyle = 'rgba(34, 211, 238, 0.40)';
+          ctx.lineWidth = 0.75;
+          ctx.setLineDash([3, 4]);
+
+          for (let y = minY_r; y <= maxY_r; y += rowStep) {
+            // Row line in rotated metric frame: horizontal line at y, from minX_r to maxX_r
+            // Rotate back two endpoints
+            const cosRBack = Math.cos(-rotAngle), sinRBack = Math.sin(-rotAngle);
+            const lx1 = minX_r * cosRBack - y * sinRBack;
+            const ly1 = minX_r * sinRBack + y * cosRBack;
+            const lx2 = maxX_r * cosRBack - y * sinRBack;
+            const ly2 = maxX_r * sinRBack + y * cosRBack;
+
+            const lat1 = origin.lat + ly1 / METERS_PER_DEG_LAT_D;
+            const lng1 = origin.lng + lx1 / (cosLatD * METERS_PER_DEG_LAT_D);
+            const lat2 = origin.lat + ly2 / METERS_PER_DEG_LAT_D;
+            const lng2 = origin.lng + lx2 / (cosLatD * METERS_PER_DEG_LAT_D);
+
+            const p1c = latLngToCanvas(lat1, lng1, mapCenter, zoom, W, H);
+            const p2c = latLngToCanvas(lat2, lng2, mapCenter, zoom, W, H);
+            ctx.beginPath();
+            ctx.moveTo(p1c.x, p1c.y);
+            ctx.lineTo(p2c.x, p2c.y);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+        }
+      });
+    }
+    // ─── End CAD Debug Overlay ──────────────────────────────────────────────
+
+    // v47.94: Validation Overlay -- roof polygon + CAD bbox + panel centers
+    // When showCADDebug is ON, draw three layers that must all align:
+    //   1. Roof polygon outline (orange -- same as roof plane)
+    //   2. CAD grid bounding box (blue rect from min/max of panel lat/lng)
+    //   3. Panel center dots (yellow)
+    // All three must overlap exactly to confirm coordinate frame alignment.
+    if (showCADDebug && panels.length > 0) {
+      // Group panels by their plane (approximate: use nearest plane centroid)
+      roofPlanes.forEach(plane => {
+        if (!plane.vertices || plane.vertices.length < 3) return;
+
+        // Panels belonging to this plane (filter by proximity to centroid)
+        const cLat = plane.centroidLat ?? plane.vertices.reduce((s: number, v: {lat:number;lng:number}) => s + v.lat, 0) / plane.vertices.length;
+        const cLng = plane.centroidLng ?? plane.vertices.reduce((s: number, v: {lat:number;lng:number}) => s + v.lng, 0) / plane.vertices.length;
+
+        // Use panels with ROOF placementType (or all roof panels if no placementType)
+        const planePanels = panels.filter(p =>
+          (p.placementType === 'ROOF' || p.systemType === 'roof') &&
+          p.layoutSource !== 'MANUAL'
+        );
+
+        if (planePanels.length === 0) return;
+
+        // 1. CAD bbox: min/max lat/lng of all panel centers
+        let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+        for (const p of planePanels) {
+          if (p.lat < minLat) minLat = p.lat;
+          if (p.lat > maxLat) maxLat = p.lat;
+          if (p.lng < minLng) minLng = p.lng;
+          if (p.lng > maxLng) maxLng = p.lng;
+        }
+
+        // Draw CAD bounding box (blue)
+        const bbTL = latLngToCanvas(maxLat, minLng, mapCenter, zoom, W, H);
+        const bbTR = latLngToCanvas(maxLat, maxLng, mapCenter, zoom, W, H);
+        const bbBR = latLngToCanvas(minLat, maxLng, mapCenter, zoom, W, H);
+        const bbBL = latLngToCanvas(minLat, minLng, mapCenter, zoom, W, H);
+
+        ctx.beginPath();
+        ctx.moveTo(bbTL.x, bbTL.y);
+        ctx.lineTo(bbTR.x, bbTR.y);
+        ctx.lineTo(bbBR.x, bbBR.y);
+        ctx.lineTo(bbBL.x, bbBL.y);
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(59, 130, 246, 0.90)'; // blue
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // 2. Panel center dots (yellow)
+        ctx.fillStyle = 'rgba(253, 224, 71, 0.85)';
+        for (const p of planePanels) {
+          const pc = latLngToCanvas(p.lat, p.lng, mapCenter, zoom, W, H);
+          ctx.beginPath();
+          ctx.arc(pc.x, pc.y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // 3. Centroid dot (red) -- the coordinate origin
+        const cc = latLngToCanvas(cLat, cLng, mapCenter, zoom, W, H);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+        ctx.beginPath();
+        ctx.arc(cc.x, cc.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.70)';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText('origin', cc.x + 5, cc.y - 3);
+      });
+    }
+    // v47.94 End Validation Overlay
+
+    // v30.9: Draw fire setback zones (red restricted / green buildable)
+    if (showSetbackZones && setbackZones.length > 0) {
+      setbackZones.forEach(zone => {
+        if (zone.vertices.length < 3) return;
+        ctx.beginPath();
+        zone.vertices.forEach((v, i) => {
+          const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+        if (zone.type === 'restricted') {
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.18)';
+          ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+        } else {
+          ctx.fillStyle = 'rgba(34, 197, 94, 0.12)';
+          ctx.strokeStyle = 'rgba(34, 197, 94, 0.5)';
+        }
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash(zone.type === 'restricted' ? [4, 3] : []);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+    }
+
+    // Draw ground area
+    if (groundArea.length >= 2) {
+      ctx.beginPath();
+      groundArea.forEach((v, i) => {
+        const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      });
+      if (groundArea.length >= 3) ctx.closePath();
+      ctx.fillStyle = 'rgba(20, 184, 166, 0.12)';
+      ctx.strokeStyle = '#14b8a6';
+      ctx.lineWidth = 2;
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Draw fence line
+    if (fenceLine.length >= 2) {
+      ctx.beginPath();
+      fenceLine.forEach((v, i) => {
+        const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      });
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 4;
+      ctx.setLineDash([10, 5]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Draw fence posts
+      fenceLine.forEach(v => {
+        const p = latLngToCanvas(v.lat, v.lng, mapCenter, zoom, W, H);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#a855f7';
+        ctx.fill();
+      });
+    }
+
+    // Draw panels
+    if (showPanels) {
+      // v47.105: Corner-based panel rendering — no canvas rotation needed.
+      // Compute the 4 geographic corners of each panel from its center lat/lng,
+      // azimuth, widthFeet (along-ridge), and heightFeet (up-slope).
+      // This is correct for ALL azimuth values without any rotation formula hacks.
+      //
+      // Ridge direction = azimuth - 90° (perpendicular to slope, rightward)
+      // Slope direction = azimuth (up the slope)
+      // hW = widthFeet/2 * METERS_PER_FOOT  (half along-ridge)
+      // hH = heightFeet/2 * METERS_PER_FOOT (half up-slope)
+      // Corner offsets in meters from center:
+      //   BL: -hW along ridge, -hH up slope
+      //   BR: +hW along ridge, -hH up slope
+      //   TR: +hW along ridge, +hH up slope
+      //   TL: -hW along ridge, +hH up slope
+      const METERS_PER_DEG_LAT = 111320.0;
+      const DEG_TO_RAD_PANEL = Math.PI / 180;
+
+      panels.forEach(panel => {
+        const orient = panel.orientation ?? 'portrait';
+        // Determine along-ridge and up-slope dimensions in meters
+        let hW: number, hH: number;
+        if (panel.widthFeet !== undefined && panel.heightFeet !== undefined) {
+          hW = (panel.widthFeet  * METERS_PER_FOOT) / 2;  // half along-ridge
+          hH = (panel.heightFeet * METERS_PER_FOOT) / 2;  // half up-slope
+        } else {
+          // Legacy fallback
+          const pXm = orient === 'landscape' ? selectedPanel.height : selectedPanel.width;
+          const pYm = orient === 'landscape' ? selectedPanel.width  : selectedPanel.height;
+          hW = pXm / 2;
+          hH = pYm / 2;
+        }
+
+        const panelAz = panel.azimuth ?? 180;
+        const azRad   = panelAz * DEG_TO_RAD_PANEL;
+        const ridgeRad = (panelAz - 90) * DEG_TO_RAD_PANEL;
+
+        // Unit vectors
+        const ridgeNorth = Math.cos(ridgeRad);
+        const ridgeEast  = Math.sin(ridgeRad);
+        const slopeNorth = Math.cos(azRad);
+        const slopeEast  = Math.sin(azRad);
+
+        const metersPerDegLng = METERS_PER_DEG_LAT * Math.cos(panel.lat * DEG_TO_RAD_PANEL);
+
+        // Compute 4 corners in canvas pixels: BL, BR, TR, TL
+        const cornerSigns = [[-1,-1],[+1,-1],[+1,+1],[-1,+1]] as const;
+        const cornerPx = cornerSigns.map(([sr, ss]) => {
+          const northM = sr * hW * ridgeNorth + ss * hH * slopeNorth;
+          const eastM  = sr * hW * ridgeEast  + ss * hH * slopeEast;
+          const cLat = panel.lat + northM / METERS_PER_DEG_LAT;
+          const cLng = panel.lng + eastM  / metersPerDegLng;
+          return latLngToCanvas(cLat, cLng, mapCenter, zoom, W, H);
+        });
+
+        const isSelected = selectedPanelIds.has(panel.id);
+        const sType = panel.systemType ?? project.systemType;
+        const color = sType === 'roof' ? '#f59e0b' :
+                      sType === 'ground' ? '#14b8a6' : '#a855f7';
+
+        ctx.save();
+
+        // Build polygon path from corners
+        ctx.beginPath();
+        ctx.moveTo(cornerPx[0].x, cornerPx[0].y);
+        for (let i = 1; i < 4; i++) ctx.lineTo(cornerPx[i].x, cornerPx[i].y);
+        ctx.closePath();
+
+        // ── Panel rendering: shadow → gradient fill → grid lines → border ──────────
+        // Panel dimensions in pixels (for gradient and grid)
+        const dxRidge = cornerPx[1].x - cornerPx[0].x;
+        const dyRidge = cornerPx[1].y - cornerPx[0].y;
+        const gridRot = Math.atan2(dyRidge, dxRidge);
+        const pwPx = Math.hypot(dxRidge, dyRidge);   // along-ridge pixel size
+        const dxSlope = cornerPx[2].x - cornerPx[1].x;
+        const dySlope = cornerPx[2].y - cornerPx[1].y;
+        const phPx = Math.hypot(dxSlope, dySlope);   // up-slope pixel size
+        const pCtr = latLngToCanvas(panel.lat, panel.lng, mapCenter, zoom, W, H);
+
+        // 1. Drop shadow (stronger, more professional)
+        ctx.shadowColor = 'rgba(0,0,0,0.55)';
+        ctx.shadowBlur  = Math.max(2, pwPx * 0.08);
+        ctx.shadowOffsetX = Math.max(1, pwPx * 0.03);
+        ctx.shadowOffsetY = Math.max(1, phPx * 0.03);
+
+        // 2. Panel body with subtle gradient for depth
+        // Gradient runs from top-left (lighter) to bottom-right (darker) in screen space
+        if (isSelected) {
+          ctx.fillStyle   = '#ffffff';
+          ctx.globalAlpha = 0.95;
+          ctx.fill();
+        } else {
+          // Build gradient aligned with panel slope direction (BL→TR)
+          const gx1 = cornerPx[0].x, gy1 = cornerPx[0].y;  // BL
+          const gx2 = cornerPx[2].x, gy2 = cornerPx[2].y;  // TR
+          // Parse base color to rgb for gradient stops with explicit alpha
+          // color is '#rrggbb' hex — extract components for rgba()
+          const _r = parseInt(color.slice(1,3),16);
+          const _g = parseInt(color.slice(3,5),16);
+          const _b = parseInt(color.slice(5,7),16);
+          try {
+            const grad = ctx.createLinearGradient(gx1, gy1, gx2, gy2);
+            // Subtle gradient: top-left slightly lighter, bottom-right slightly darker
+            grad.addColorStop(0,   `rgba(${Math.min(255,_r+18)},${Math.min(255,_g+14)},${Math.min(255,_b+8)},0.92)`);
+            grad.addColorStop(0.5, `rgba(${_r},${_g},${_b},0.88)`);
+            grad.addColorStop(1,   `rgba(${Math.max(0,_r-20)},${Math.max(0,_g-18)},${Math.max(0,_b-10)},0.82)`);
+            ctx.fillStyle   = grad;
+            ctx.globalAlpha = 1.0;  // alpha is in the gradient stops
+          } catch {
+            ctx.fillStyle   = color;
+            ctx.globalAlpha = 0.85;
+          }
+          ctx.fill();
+        }
+        ctx.shadowColor = 'transparent';
+
+        // 3. Cell grid lines — very low opacity, clipped to polygon
+        ctx.save();
+        ctx.globalAlpha = isSelected ? 0.22 : 0.18;  // very subtle
+        ctx.strokeStyle = isSelected ? '#f59e0b' : 'rgba(255,255,255,0.9)';
+        ctx.lineWidth   = 0.4;
+        ctx.beginPath();
+        ctx.moveTo(cornerPx[0].x, cornerPx[0].y);
+        for (let i = 1; i < 4; i++) ctx.lineTo(cornerPx[i].x, cornerPx[i].y);
+        ctx.closePath();
+        ctx.clip();
+        ctx.translate(pCtr.x, pCtr.y);
+        ctx.rotate(gridRot);
+        const cols = 6, rows = 10;
+        for (let c = 1; c < cols; c++) {
+          ctx.beginPath();
+          ctx.moveTo(-pwPx / 2 + (pwPx / cols) * c, -phPx / 2);
+          ctx.lineTo(-pwPx / 2 + (pwPx / cols) * c,  phPx / 2);
+          ctx.stroke();
+        }
+        for (let r = 1; r < rows; r++) {
+          ctx.beginPath();
+          ctx.moveTo(-pwPx / 2, -phPx / 2 + (phPx / rows) * r);
+          ctx.lineTo( pwPx / 2, -phPx / 2 + (phPx / rows) * r);
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        // 4. Outer border — thicker, crisper
+        ctx.globalAlpha = isSelected ? 1.0 : 0.95;
+        ctx.strokeStyle = isSelected ? '#fbbf24' : 'rgba(255,255,255,0.92)';
+        ctx.lineWidth   = isSelected ? 2.5 : 1.5;  // thicker outer border
+        ctx.beginPath();
+        ctx.moveTo(cornerPx[0].x, cornerPx[0].y);
+        for (let i = 1; i < 4; i++) ctx.lineTo(cornerPx[i].x, cornerPx[i].y);
+        ctx.closePath();
+        ctx.stroke();
+
+        // v47.100: Strategy debug label
+        if (showCADDebug && panel.layoutStrategy) {
+          const labelText = panel.layoutStrategy === 'PORTRAIT' ? 'P'
+                          : panel.layoutStrategy === 'MIXED'    ? 'M'
+                          : 'L';
+          const labelColor = panel.layoutStrategy === 'PORTRAIT' ? '#22d3ee'
+                           : panel.layoutStrategy === 'MIXED'    ? '#a78bfa'
+                           : '#fb923c';
+          ctx.globalAlpha = 0.95;
+          ctx.font = `bold ${Math.max(7, Math.min(11, pwPx * 0.28))}px monospace`;
+          ctx.fillStyle = labelColor;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(labelText, pCtr.x, pCtr.y);
+        }
+
+        ctx.restore();
+      });
+    }
+
+    // v30.9: Draw multi-row placement guide line
+    if (multiRowMode && multiRowStart) {
+      const startPx = latLngToCanvas(multiRowStart.lat, multiRowStart.lng, mapCenter, zoom, W, H);
+      // Draw start point marker
+      ctx.beginPath();
+      ctx.arc(startPx.x, startPx.y, 6, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // Draw guide line to hover position
+      if (hoverPos) {
+        const endPx = latLngToCanvas(hoverPos.lat, hoverPos.lng, mapCenter, zoom, W, H);
+        ctx.beginPath();
+        ctx.moveTo(startPx.x, startPx.y);
+        ctx.lineTo(endPx.x, endPx.y);
+        ctx.strokeStyle = 'rgba(251, 191, 36, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Label
+        ctx.fillStyle = 'rgba(15,23,42,0.85)';
+        ctx.fillRect(endPx.x + 8, endPx.y - 14, 90, 18);
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = '10px Inter, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${multiRowCount} rows — click end`, endPx.x + 12, endPx.y - 2);
+      }
+    }
+
+    // Draw current drawing points
+    if (drawnPoints.length > 0) {
+      ctx.beginPath();
+      drawnPoints.forEach((p, i) => {
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      });
+      const color = drawingMode === 'draw_roof' ? '#fbbf24' :
+                    drawingMode === 'draw_ground' ? '#14b8a6' : '#a855f7';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      drawnPoints.forEach((p, i) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, i === 0 ? 7 : 5, 0, Math.PI * 2);
+        ctx.fillStyle = i === 0 ? 'white' : color;
+        ctx.fill();
+        ctx.strokeStyle = i === 0 ? color : 'white';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      });
+
+      // v47.96: Snap-to-close indicator -- green ring on first point when 3+ points drawn
+      if (drawnPoints.length >= 3 && hoverPos) {
+        const first = drawnPoints[0];
+        const hpx = latLngToCanvas(hoverPos.lat, hoverPos.lng, mapCenter, zoom, W, H);
+        const nearFirst = Math.abs(hpx.x - first.x) < 18 && Math.abs(hpx.y - first.y) < 18;
+        // Always show subtle green ring on first point when polygon can be closed
+        ctx.beginPath();
+        ctx.arc(first.x, first.y, nearFirst ? 14 : 10, 0, Math.PI * 2);
+        ctx.strokeStyle = nearFirst ? '#22c55e' : 'rgba(34,197,94,0.5)';
+        ctx.lineWidth = nearFirst ? 2.5 : 1.5;
+        ctx.setLineDash(nearFirst ? [] : [3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (nearFirst) {
+          // Label: 'Click to close'
+          ctx.fillStyle = 'rgba(15,23,42,0.9)';
+          ctx.fillRect(first.x + 16, first.y - 14, 88, 18);
+          ctx.fillStyle = '#22c55e';
+          ctx.font = 'bold 11px Inter, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.fillText('Click to close', first.x + 20, first.y - 1);
+        }
+      }
+    }
+
+    // Draw measure tool
+    if (drawingMode === 'measure' && measurePoints.length > 0) {
+      ctx.beginPath();
+      measurePoints.forEach((p, i) => {
+        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      });
+      ctx.strokeStyle = '#22d3ee';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      measurePoints.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#22d3ee';
+        ctx.fill();
+      });
+      if (measureDistance !== null) {
+        const last = measurePoints[measurePoints.length - 1];
+        ctx.fillStyle = 'rgba(15,23,42,0.85)';
+        ctx.fillRect(last.x + 8, last.y - 14, 80, 20);
+        ctx.fillStyle = '#22d3ee';
+        ctx.font = 'bold 11px Inter, sans-serif';
+        ctx.fillText(`${measureDistance.toFixed(1)}m`, last.x + 12, last.y + 1);
+      }
+    }
+
+    // Compass
+    drawCompass(ctx, W - 50, 50);
+    // Scale bar
+    drawScaleBar(ctx, W, H, mpp);
+    // Tile source badge (bottom-left, above scale bar)
+    drawTileSourceBadge(ctx, W, H, activeTileSource, zoom);
+    // Panel dimension legend (bottom-right corner) — only when panels exist
+    if (panels.length > 0) {
+      drawPanelDimensionLegend(ctx, W, H, mpp, selectedPanel, orientation);
+    }
+
+  }, [mapCenter, zoom, mapTiles, panels, roofPlanes, groundArea, fenceLine,
+      drawnPoints, selectedPanelIds, selectedPanel, drawingMode, showPanels,
+      measurePoints, measureDistance, showSetbackZones, setbackZones, showCADDebug,
+      multiRowMode, multiRowStart, hoverPos, multiRowCount, activeTileSource, orientation]);
+
+  function drawCompass(ctx: CanvasRenderingContext2D, x: number, y: number) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.arc(0, 0, 20, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -13); ctx.lineTo(5, 4); ctx.lineTo(0, 0); ctx.lineTo(-5, 4);
+    ctx.closePath();
+    ctx.fillStyle = '#ef4444';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(0, 13); ctx.lineTo(5, -4); ctx.lineTo(0, 0); ctx.lineTo(-5, -4);
+    ctx.closePath();
+    ctx.fillStyle = 'white';
+    ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 9px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('N', 0, -16);
+    ctx.restore();
+  }
+
+  function drawTileSourceBadge(
+    ctx: CanvasRenderingContext2D,
+    W: number, H: number,
+    source: 'google' | 'esri',
+    currentZoom: number
+  ) {
+    const label = source === 'google'
+      ? `📷 Google z${currentZoom}`
+      : `🌍 ESRI z${Math.min(currentZoom, 19)}`;
+    const color = source === 'google' ? '#60a5fa' : '#fbbf24';
+    ctx.save();
+    ctx.font = 'bold 9px Inter, sans-serif';
+    const tw = ctx.measureText(label).width;
+    const x = 20, y = H - 52;
+    ctx.fillStyle = 'rgba(15,23,42,0.85)';
+    ctx.fillRect(x - 4, y - 11, tw + 10, 16);
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.fillText(label, x, y);
+    ctx.restore();
+  }
+
+  function drawScaleBar(ctx: CanvasRenderingContext2D, W: number, H: number, mpp: number) {
+    const scaleMeters = 10;
+    const scalePixels = scaleMeters / mpp;
+    const x = 20, y = H - 30;
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+    ctx.fillRect(x - 4, y - 14, scalePixels + 8, 22);
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x + scalePixels, y);
+    ctx.moveTo(x, y - 5); ctx.lineTo(x, y + 5);
+    ctx.moveTo(x + scalePixels, y - 5); ctx.lineTo(x + scalePixels, y + 5);
+    ctx.stroke();
+    ctx.fillStyle = 'white';
+    ctx.font = '10px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${scaleMeters}m`, x + scalePixels / 2, y - 2);
+    ctx.restore();
+  }
+
+  function drawPanelDimensionLegend(
+    ctx: CanvasRenderingContext2D,
+    W: number, H: number, mpp: number,
+    panel: { id?: string; manufacturer?: string; model?: string; width: number; height: number; wattage: number },
+    orientation: 'portrait' | 'landscape'
+  ) {
+    const pW = orientation === 'landscape' ? panel.height : panel.width;  // meters (along-ridge visual)
+    const pH = orientation === 'landscape' ? panel.width  : panel.height; // meters (up-slope visual)
+    const pWpx = pW / mpp;
+    const pHpx = pH / mpp;
+    const x = W - pWpx - 16;
+    const y = H - pHpx - 36;
+
+    // Count rows and cols from placed panels
+    const rowSet = new Set(panels.map(p => p.row ?? 0));
+    const colSet = new Set(panels.map(p => p.col ?? 0));
+    const rowCount = rowSet.size;
+    const colCount = colSet.size;
+
+    ctx.save();
+    // ── MODULE DEBUG BADGE (top-left corner) ─────────────────────────────────
+    const badgeLines = [
+      `MODULE: ${panel.manufacturer ?? ''} ${panel.model ?? ''}`,
+      `ID: ${panel.id ?? 'unknown'}`,
+      `RAW: ${(panel.width * 100).toFixed(1)}cm × ${(panel.height * 100).toFixed(1)}cm`,
+      `     (${(panel.width * 39.3701).toFixed(1)}" × ${(panel.height * 39.3701).toFixed(1)}")`,
+      `ORIENT: ${orientation.toUpperCase()}`,
+      `VISUAL: ${(pW * 100).toFixed(1)}cm × ${(pH * 100).toFixed(1)}cm`,
+      `        (${(pW * 39.3701).toFixed(1)}" × ${(pH * 39.3701).toFixed(1)}")`,
+      `ROWS: ${rowCount}  COLS: ${colCount}  TOTAL: ${panels.length}`,
+    ];
+    const badgeX = 8;
+    const badgeY = 8;
+    const lineH = 13;
+    const badgeW = 240;
+    const badgeH = badgeLines.length * lineH + 10;
+    ctx.fillStyle = 'rgba(0,0,0,0.80)';
+    ctx.fillRect(badgeX, badgeY, badgeW, badgeH);
+    ctx.strokeStyle = 'rgba(251,191,36,0.6)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(badgeX, badgeY, badgeW, badgeH);
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'left';
+    badgeLines.forEach((line, i) => {
+      ctx.fillStyle = i === 0 ? '#fbbf24' : i === 7 ? '#34d399' : '#e2e8f0';
+      ctx.fillText(line, badgeX + 6, badgeY + lineH * (i + 1));
+    });
+
+    // ── PANEL BOX (bottom-right, actual scale) ────────────────────────────────
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+    ctx.fillRect(x - 8, y - 20, pWpx + 50, pHpx + 48);
+    ctx.fillStyle = 'rgba(245,158,11,0.75)';
+    ctx.fillRect(x, y, pWpx, pHpx);
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, y, pWpx, pHpx);
+    ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = 0.5;
+    const cellCols = 6, cellRows = 10;
+    for (let c = 1; c < cellCols; c++) {
+      ctx.beginPath();
+      ctx.moveTo(x + (pWpx / cellCols) * c, y);
+      ctx.lineTo(x + (pWpx / cellCols) * c, y + pHpx);
+      ctx.stroke();
+    }
+    for (let r = 1; r < cellRows; r++) {
+      ctx.beginPath();
+      ctx.moveTo(x, y + (pHpx / cellRows) * r);
+      ctx.lineTo(x + pWpx, y + (pHpx / cellRows) * r);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = 'bold 9px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${(pW * 100).toFixed(0)}cm`, x + pWpx / 2, y - 6);
+    ctx.save();
+    ctx.translate(x + pWpx + 12, y + pHpx / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.fillText(`${(pH * 100).toFixed(0)}cm`, 0, 0);
+    ctx.restore();
+    ctx.fillStyle = 'white';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${panel.wattage}W`, x + pWpx / 2, y + pHpx + 12);
+    ctx.fillText(orientation === 'landscape' ? 'Landscape' : 'Portrait', x + pWpx / 2, y + pHpx + 23);
+    ctx.restore();
+  }
+
+  useEffect(() => { drawCanvas(); }, [drawCanvas]);
+
+  // ── Canvas resize ──────────────────────────────────────────
+  useEffect(() => {
+    // Re-run when switching to 2D so canvas gets sized correctly
+    if (show3D) return; // canvas not in DOM when 3D is active
+    const resize = () => {
+      const canvas = canvasRef.current;
+      const container = containerRef.current;
+      if (!canvas || !container) return;
+      const w = container.offsetWidth || container.clientWidth;
+      const h = container.offsetHeight || container.clientHeight;
+      if (w > 0 && h > 0) { canvas.width = w; canvas.height = h; }
+      drawCanvas();
+    };
+    // Small delay to let React finish rendering the canvas into the DOM
+    const t1 = setTimeout(resize, 100);
+    const t2 = setTimeout(resize, 300);
+    const t3 = setTimeout(resize, 800);
+    window.addEventListener('resize', resize);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); window.removeEventListener('resize', resize); };
+  }, [drawCanvas, show3D]);
+
+  // v31.1: Global keyboard shortcuts — tool switching + panel deletion + escape
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept when typing in an input/textarea/select
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+      switch (e.key) {
+        case 'v': case 'V':
+          e.preventDefault();
+          setDrawingMode('select');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'r': case 'R':
+          e.preventDefault();
+          setDrawingMode('draw_roof'); setActiveZoneType('roof');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'g': case 'G':
+          e.preventDefault();
+          setDrawingMode('draw_ground'); setActiveZoneType('ground');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'f': case 'F':
+          e.preventDefault();
+          setDrawingMode('draw_fence'); setActiveZoneType('fence');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'm': case 'M':
+          e.preventDefault();
+          setDrawingMode('measure');
+          setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          break;
+        case 'Delete': case 'Backspace':
+          if (selectedPanelIds.size > 0) {
+            e.preventDefault();
+            setPanels(prev => prev.filter(p => !selectedPanelIds.has(p.id)));
+            setSelectedPanelIds(new Set());
+          }
+          break;
+        case 'Escape':
+          if (multiRowMode) {
+            setMultiRowMode(false); setMultiRowStart(null); setMultiRowEnd(null);
+          } else if (drawingMode !== 'select') {
+            setDrawingMode('select');
+            setDrawnPoints([]);
+          }
+          setSelectedPanelIds(new Set());
+          break;
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedPanelIds, multiRowMode, drawingMode]);
+
+  // ── Mouse handlers ─────────────────────────────────────────
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (drawingMode === 'select') {
+      setIsDragging(true);
+      setDragStart({ x: e.clientX, y: e.clientY });
+      setDragStartCenter({ ...mapCenter });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const pos = canvasToLatLng(cx, cy, mapCenter, zoom, canvas.width, canvas.height);
+      setHoverPos(pos);
+    }
+    if (!isDragging || drawingMode !== 'select') return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    const mpp = metersPerPixel(mapCenter.lat, zoom);
+    const degPerPixelLat = mpp / 111320;
+    const degPerPixelLng = mpp / (111320 * Math.cos(mapCenter.lat * Math.PI / 180));
+    setMapCenter({
+      lat: dragStartCenter.lat - dy * degPerPixelLat,
+      lng: dragStartCenter.lng - dx * degPerPixelLng,
+    });
+  };
+
+  const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const { lat, lng } = canvasToLatLng(x, y, mapCenter, zoom, canvas.width, canvas.height);
+
+    const wasDrag = isDragging && (Math.abs(e.clientX - dragStart.x) > 5 || Math.abs(e.clientY - dragStart.y) > 5);
+    setIsDragging(false);
+
+    if (!wasDrag) {
+      handleCanvasClick(x, y, lat, lng, canvas);
+    }
+  };
+
+  // ── Multi-row placement handler ──────────────────────────────────────────────
+  const handleMultiRowClick = (lat: number, lng: number) => {
+    if (!multiRowStart) {
+      setMultiRowStart({ lat, lng });
+      toast.info('Multi-Row Tool', 'First point set — click end of row to place panels');
+    } else {
+      const layoutId = uuidv4();
+      const minSpacing = calcMinRowSpacing(tilt, selectedPanel.height, mapCenter.lat);
+      const newPanels = generateMultipleRows({
+        layoutId,
+        startLat: multiRowStart.lat, startLng: multiRowStart.lng,
+        endLat: lat, endLng: lng,
+        rowCount: multiRowCount,
+        rowSpacingM: Math.max(rowSpacing, minSpacing),
+        panel: selectedPanel, orientation, tilt, azimuth,
+        panelSpacingM: panelSpacing, systemType: activeZoneType,
+      });
+      if (newPanels.length > 0) {
+        setPanels(prev => [...prev, ...newPanels]);
+        toast.success('Multi-Row placed', `${multiRowCount} rows · ${newPanels.length} panels · ${(calculateSystemSize(newPanels)).toFixed(2)} kW`);
+      }
+      setMultiRowStart(null);
+      setMultiRowEnd(null);
+      setMultiRowMode(false);
+    }
+  };
+
+  const handleCanvasClick = (x: number, y: number, lat: number, lng: number, canvas: HTMLCanvasElement) => {
+    // v31.1: Multi-row placement mode takes priority
+    if (multiRowMode) {
+      handleMultiRowClick(lat, lng);
+      return;
+    }
+    // v31.1: Placement safety guard — only place geometry when a draw tool is active
+    // Select mode NEVER places panels (prevents accidental placement)
+    if (drawingMode === 'draw_roof' || drawingMode === 'draw_ground' || drawingMode === 'draw_fence') {
+      // v47.96: Snap-to-first-point -- if 3+ points drawn and click is near first point, close polygon
+      if (drawnPoints.length >= 3) {
+        const first = drawnPoints[0];
+        const snapDist = 18; // pixels -- generous snap radius
+        if (Math.abs(x - first.x) < snapDist && Math.abs(y - first.y) < snapDist) {
+          finalizeDrawing();
+          return;
+        }
+      }
+      setDrawnPoints(prev => [...prev, { x, y, lat, lng }]);
+    } else if (drawingMode === 'measure') {
+      const newPts = [...measurePoints, { x, y, lat, lng }];
+      setMeasurePoints(newPts);
+      if (newPts.length >= 2) {
+        const p1 = newPts[newPts.length - 2];
+        const p2 = newPts[newPts.length - 1];
+        const dlat = (p2.lat - p1.lat) * 111320;
+        const dlng = (p2.lng - p1.lng) * 111320 * Math.cos(p1.lat * Math.PI / 180);
+        setMeasureDistance(Math.sqrt(dlat * dlat + dlng * dlng));
+      }
+    } else if (drawingMode === 'select') {
+      const mpp = metersPerPixel(mapCenter.lat, zoom);
+      const pxPerM = 1 / mpp;
+
+      let clicked = false;
+      // v47.99: use LECS feet dims for hit box (matches actual drawn rectangle)
+      panels.forEach(panel => {
+        const orient = panel.orientation ?? 'portrait';
+        let panelXm: number, panelYm: number;
+        if (panel.widthFeet !== undefined && panel.heightFeet !== undefined) {
+          panelXm = panel.widthFeet  * METERS_PER_FOOT;
+          panelYm = panel.heightFeet * METERS_PER_FOOT;
+        } else {
+          panelXm = orient === 'landscape' ? selectedPanel.height : selectedPanel.width;
+          panelYm = orient === 'landscape' ? selectedPanel.width  : selectedPanel.height;
+        }
+        const pw = panelXm * pxPerM;
+        const ph = panelYm * pxPerM;
+        const p = latLngToCanvas(panel.lat, panel.lng, mapCenter, zoom, canvas.width, canvas.height);
+        // Use generous hit tolerance (+4px) to make panels easier to click
+        if (Math.abs(x - p.x) < pw / 2 + 4 && Math.abs(y - p.y) < ph / 2 + 4) {
+          setSelectedPanelIds(prev => {
+            const next = new Set(prev);
+            next.has(panel.id) ? next.delete(panel.id) : next.add(panel.id);
+            return next;
+          });
+          clicked = true;
+        }
+      });
+      if (!clicked) setSelectedPanelIds(new Set());
+    }
+  };
+
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    setZoom(prev => Math.max(14, Math.min(21, prev + (e.deltaY < 0 ? 1 : -1))));
+  };
+
+  const handleDoubleClick = () => {
+    if (drawnPoints.length >= 3) finalizeDrawing(); // v47.96: need 3+ points for valid polygon
+    if (drawingMode === 'measure') {
+      setMeasurePoints([]);
+      setMeasureDistance(null);
+    }
+  };
+
+  // ── Finalize drawing ───────────────────────────────────────
+  const finalizeDrawing = () => {
+    if (drawnPoints.length < 3) return; // v47.96: need at least 3 points for a valid polygon
+    const latLngs = drawnPoints.map(p => ({ lat: p.lat, lng: p.lng }));
+
+    if (drawingMode === 'draw_roof') {
+      // Instead of immediately placing panels, show the plane-tagging modal
+      // so user can specify which direction this roof face slopes
+      const area = polygonAreaM2(latLngs);
+      setPendingPlane({ vertices: latLngs, area });
+      setPendingPlaneAzimuth(azimuth); // default to current global azimuth
+      setPendingPlanePitch(tilt);      // default to current global pitch
+      setDrawnPoints([]);
+      setDrawingMode('select');
+      return; // don't place panels yet — wait for tagging confirmation
+    } else if (drawingMode === 'draw_ground') {
+      setGroundArea(latLngs);
+      autoPlacePanels('ground', latLngs);
+    } else if (drawingMode === 'draw_fence') {
+      setFenceLine(latLngs);
+      autoPlacePanels('fence', latLngs);
+    }
+
+    setDrawnPoints([]);
+    setDrawingMode('select');
+  };
+
+  // Confirm pending plane with chosen azimuth + pitch, then place panels
+  const confirmPendingPlane = () => {
+    if (!pendingPlane) return;
+
+    // v47.99: enrichRoofPlaneWithLECS computes centroid ONCE and attaches
+    // LECS (feet) local coordinates. This is the single coordinate reference
+    // origin for the CAD engine, 2D debug overlay, and 3D Cesium rendering.
+    const basePlane: RoofPlane = {
+      id: uuidv4(),
+      vertices: pendingPlane.vertices,
+      pitch: pendingPlanePitch,
+      azimuth: pendingPlaneAzimuth,
+      area: pendingPlane.area,
+      usableArea: pendingPlane.area * 0.75,
+      source: 'manual' as const,
+      confirmed: true,
+      orientation,   // v47.96: store orientation at plane creation
+    };
+    const lecsPlane = enrichRoofPlaneWithLECS(basePlane);
+    const plane = enrichRoofPlaneWith3DFrame(lecsPlane);
+    setRoofPlanes(prev => [...prev, plane]);
+
+    // [CAD-LECS] v47.99
+    console.log('[CAD-LECS] RoofPlane confirmed', {
+      id: plane.id,
+      centroidLat: plane.centroidLat,
+      centroidLng: plane.centroidLng,
+      centroidLocal: plane.centroidLocal,
+      pitch: plane.pitch,
+      azimuth: plane.azimuth,
+      vertexCount: plane.vertices.length,
+      verticesLocalCount: plane.verticesLocal?.length,
+    });
+
+    // Place panels using THIS plane's azimuth + pitch — temporarily override global tilt/azimuth
+    // by using the plane object which autoLayoutAll already respects via plane.pitch/plane.azimuth
+    const layoutId = uuidv4();
+    const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+    const newPanels = generateRoofLayoutOptimized({
+      layoutId, roofPlane: plane, panel: selectedPanel,
+      setback, panelSpacing, rowSpacing,
+      tilt: pendingPlanePitch,
+      azimuth: pendingPlaneAzimuth,
+      orientation, fireSetbackM,
+      pathwayWidthM: fireSetbacks.pathwayWidthM,
+      enforcePathway: fireSetbacks.enforcePathway,
+      ...getPerEdgeSetbacks(fireSetbacks),
+      alignToEdge,
+    });
+    setPanels(prev => [...prev, ...newPanels]);
+    if (showSetbackZones) {
+      setSetbackZones(generateSetbackZones(pendingPlane.vertices, fireSetbacks));
+    }
+    setPendingPlane(null);
+    toast.success('Roof plane added', `${newPanels.length} panels placed · ${pendingPlaneAzimuth}° azimuth · ${pendingPlanePitch}° pitch`);
+  };
+
+  // ── Re-layout panels for an existing plane (after azimuth/pitch change) ──
+  const relayoutPlane = (plane: RoofPlane) => {
+    // Inline point-in-polygon (ray casting) to filter panels inside this plane
+    const pipTest = (lat: number, lng: number, verts: {lat:number;lng:number}[]): boolean => {
+      let inside = false;
+      for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+        const xi = verts[i].lng, yi = verts[i].lat;
+        const xj = verts[j].lng, yj = verts[j].lat;
+        if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) {
+          inside = !inside;
+        }
+      }
+      return inside;
+    };
+    setPanels(prev => {
+      const remaining = prev.filter(panel => {
+        if (!plane.vertices || plane.vertices.length < 3) return true;
+        return !pipTest(panel.lat, panel.lng, plane.vertices);
+      });
+      const layoutId = uuidv4();
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId,
+        roofPlane: plane,
+        panel: selectedPanel,
+        setback,
+        panelSpacing,
+        rowSpacing,
+        tilt: plane.pitch ?? tilt,
+        azimuth: plane.azimuth ?? azimuth,
+        orientation: orientation, // v47.96: per-plane orientation
+        fireSetbackM,
+        pathwayWidthM: fireSetbacks.pathwayWidthM,
+        enforcePathway: fireSetbacks.enforcePathway,
+        ...getPerEdgeSetbacks(fireSetbacks),
+        alignToEdge,
+      });
+      toast.success('Panels re-laid out', `${newPanels.length} panels · ${plane.azimuth ?? azimuth}° azimuth · ${plane.pitch ?? tilt}° pitch`);
+      return [...remaining, ...newPanels];
+    });
+  };
+
+  // ── Auto-place panels ──────────────────────────────────────
+  const autoPlacePanels = (type: SystemType, points: { lat: number; lng: number }[]) => {
+    const layoutId = uuidv4();
+    let newPanels: PlacedPanel[] = [];
+
+    if (type === 'roof') {
+      const plane: RoofPlane = {
+        id: uuidv4(), vertices: points, pitch: tilt, azimuth,
+        area: polygonAreaM2(points), usableArea: polygonAreaM2(points) * 0.75,
+      };
+      // v30.9: pass orientation + fire setback
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback, panelSpacing, rowSpacing, tilt, azimuth,
+        orientation, fireSetbackM,
+       pathwayWidthM: fireSetbacks.pathwayWidthM,
+       enforcePathway: fireSetbacks.enforcePathway,
+       ...getPerEdgeSetbacks(fireSetbacks),
+       alignToEdge,
+      });
+      // Update setback zone overlay
+      if (showSetbackZones) {
+        setSetbackZones(generateSetbackZones(points, fireSetbacks));
+      }
+    } else if (type === 'ground') {
+      newPanels = generateGroundLayoutOptimized({
+        layoutId, area: points, panel: selectedPanel,
+        tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
+        orientation,
+      });
+    } else if (type === 'fence') {
+      newPanels = generateFenceLayout({ layoutId, fenceLine: points, panel: selectedPanel, azimuth, panelSpacing, fenceHeight, bifacialOptimized });
+    }
+
+    setPanels(prev => [...prev, ...newPanels]);
+  };
+
+  // ── Auto Layout: fill all existing zones with current settings ────────────────
+  const [autoLayoutRunning, setAutoLayoutRunning] = useState(false);
+
+  // v47.103: Re-layout all AUTO panels immediately when orientation toggle changes.
+  // Called with the NEW orientation value directly (before React state update settles).
+  const relayoutWithOrientation = useCallback((newOrientation: 'portrait' | 'landscape') => {
+    const hasZones = roofPlanes.length > 0 || groundArea.length > 0;
+    if (!hasZones) return; // no zones yet, nothing to re-layout
+    const hasAutoPanels = panels.some(p => p.layoutSource === 'AUTO');
+    if (!hasAutoPanels) return; // no auto panels to refresh
+
+    clearGridCache();
+    const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
+    let allNew: PlacedPanel[] = [];
+
+    roofPlanes.forEach(plane => {
+      const layoutId = uuidv4();
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback, panelSpacing, rowSpacing,
+        tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+        orientation: newOrientation,
+        fireSetbackM,
+        pathwayWidthM: fireSetbacks.pathwayWidthM,
+        enforcePathway: fireSetbacks.enforcePathway,
+        ...getPerEdgeSetbacks(fireSetbacks),
+        alignToEdge,
+      });
+      allNew = [...allNew, ...newPanels];
+    });
+
+    if (groundArea.length >= 3) {
+      const layoutId = uuidv4();
+      const newPanels = generateGroundLayoutOptimized({
+        layoutId, area: groundArea, panel: selectedPanel,
+        tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
+        orientation: newOrientation,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    setPanels([...manualPanels, ...allNew]);
+    toast.success(
+      `Orientation: ${newOrientation}`,
+      `${allNew.length} panels re-laid out`
+    );
+  }, [panels, roofPlanes, groundArea, selectedPanel, setback, panelSpacing, rowSpacing,
+      tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks]);
+
+  const autoLayoutAll = useCallback(() => {
+    const hasZones = roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0;
+    if (!hasZones) {
+      toast.error('No zones defined', 'Draw a roof, ground, or fence zone first, then click Auto Layout.');
+      return;
+    }
+    setAutoLayoutRunning(true);
+
+    // v47.93: Preserve MANUAL panels — only replace AUTO-generated panels
+    const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
+    let allNew: PlacedPanel[] = [];
+
+    roofPlanes.forEach(plane => {
+      const layoutId = uuidv4();
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback, panelSpacing, rowSpacing,
+        tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+        orientation: orientation, // v47.96: per-plane orientation
+        fireSetbackM,
+       pathwayWidthM: fireSetbacks.pathwayWidthM,
+       enforcePathway: fireSetbacks.enforcePathway,
+       ...getPerEdgeSetbacks(fireSetbacks),
+       alignToEdge,
+      });
+      allNew = [...allNew, ...newPanels];
+    });
+
+    if (groundArea.length >= 3) {
+      const layoutId = uuidv4();
+      const newPanels = generateGroundLayoutOptimized({
+        layoutId, area: groundArea, panel: selectedPanel,
+        tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
+        orientation,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    if (fenceLine.length >= 2) {
+      const layoutId = uuidv4();
+      const newPanels = generateFenceLayout({
+        layoutId, fenceLine, panel: selectedPanel,
+        azimuth, panelSpacing, fenceHeight, bifacialOptimized,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    // Combine: manual panels first (preserved), then new auto panels
+    setPanels([...manualPanels, ...allNew]);
+    setAutoLayoutRunning(false);
+    toast.success(
+      'Auto Layout complete',
+      `${allNew.length} panels placed · ${(calculateSystemSize(allNew)).toFixed(2)} kW`
+    );
+  }, [panels, roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation]);
+
+  // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
+  const fillRoof = useCallback(() => {
+    if (roofPlanes.length === 0 && groundArea.length === 0) {
+      toast.error('No zones defined', 'Draw a roof or ground zone first.');
+      return;
+    }
+    setAutoLayoutRunning(true);
+    const minSetback = 0;    // v47.95: no minimum -- AHJ fire setbacks handle clearances
+    const tightSpacing = 0.006; // v47.98: ¼" clamp gap
+    let allNew: PlacedPanel[] = [];
+
+    roofPlanes.forEach(plane => {
+      const layoutId = uuidv4();
+      // v30.9: fire setback takes precedence over minSetback
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      const effectiveSetback = Math.max(minSetback, fireSetbackM);
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback: effectiveSetback, panelSpacing: tightSpacing,
+        rowSpacing: 0.02,  // v47.95: flush roof mount -- panels touch row-to-row
+        tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+        orientation: orientation, // v47.96: per-plane orientation
+        fireSetbackM,
+       pathwayWidthM: fireSetbacks.pathwayWidthM,
+       enforcePathway: fireSetbacks.enforcePathway,
+       ...getPerEdgeSetbacks(fireSetbacks),
+       alignToEdge,
+      });
+      allNew = [...allNew, ...newPanels];
+    });
+
+    if (groundArea.length >= 3) {
+      const layoutId = uuidv4();
+      const newPanels = generateGroundLayoutOptimized({
+        layoutId, area: groundArea, panel: selectedPanel,
+        tilt, azimuth,
+        rowSpacing: Math.max(rowSpacing * 0.85, selectedPanel.height + 0.05),
+        panelSpacing: tightSpacing, panelsPerRow, groundHeight,
+        orientation,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
+    setPanels([...manualPanels, ...allNew]);
+    setAutoLayoutRunning(false);
+    toast.success(
+      'Fill Roof complete',
+      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW (max density)`
+    );
+  }, [roofPlanes, groundArea, selectedPanel, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation]);
+
+  // ── Optimize Layout: best production/cost ratio (wider row spacing) ──────────
+  const optimizeLayout = useCallback(() => {
+    if (roofPlanes.length === 0 && groundArea.length === 0) {
+      toast.error('No zones defined', 'Draw a roof or ground zone first.');
+      return;
+    }
+    setAutoLayoutRunning(true);
+    // v47.95: Roof panels are flush-mount -- use user rowSpacing directly
+    // Ground mount: calculate shadow clearance to avoid inter-row shading
+    const tiltRad = (tilt * Math.PI) / 180;
+    const shadowLength = tiltRad > 0.05 ? selectedPanel.height * Math.cos(tiltRad) / Math.tan(tiltRad) : selectedPanel.height;
+    const optRowSpacingRoof   = rowSpacing; // roof: user-controlled, no shadow calc
+    const optRowSpacingGround = Math.max(rowSpacing, selectedPanel.height + shadowLength * 0.5); // ground: shade avoidance
+    const optSetback = setback; // v47.95: AHJ fire setbacks handle clearances
+    let allNew: PlacedPanel[] = [];
+
+    roofPlanes.forEach(plane => {
+      const layoutId = uuidv4();
+      const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      const newPanels = generateRoofLayoutOptimized({
+        layoutId, roofPlane: plane, panel: selectedPanel,
+        setback: optSetback, panelSpacing: 0.006, rowSpacing: optRowSpacingRoof, // v47.98: ¼" clamp gap
+        tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
+        orientation: orientation, // v47.96: per-plane orientation
+        fireSetbackM,
+       pathwayWidthM: fireSetbacks.pathwayWidthM,
+       enforcePathway: fireSetbacks.enforcePathway,
+       ...getPerEdgeSetbacks(fireSetbacks),
+       alignToEdge,
+      });
+      allNew = [...allNew, ...newPanels];
+    });
+
+    if (groundArea.length >= 3) {
+      const layoutId = uuidv4();
+      const newPanels = generateGroundLayoutOptimized({
+        layoutId, area: groundArea, panel: selectedPanel,
+        tilt, azimuth, rowSpacing: optRowSpacingGround, panelSpacing: 0.006, // v47.98: ¼" clamp gap
+        panelsPerRow, groundHeight,
+        orientation,
+      });
+      allNew = [...allNew, ...newPanels];
+    }
+
+    const manualPanels2 = panels.filter(p => p.layoutSource === 'MANUAL');
+    setPanels([...manualPanels2, ...allNew]);
+    setAutoLayoutRunning(false);
+    toast.success(
+      'Optimized Layout complete',
+      `${allNew.length} panels · ${(calculateSystemSize(allNew)).toFixed(2)} kW · min shading`
+    );
+  }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation]);
+
+  // ── Calculate production ───────────────────────────────────
+  const calculateProduction = async () => {
+    if (panels.length === 0) return;
+    setCalculating(true);
+    setCalcMessage('');
+    const toastId = toast.loading('Running production simulation...', `PVWatts · ${panels.length} panels · ${systemSizeKw.toFixed(2)} kW`);
+    try {
+      const layout = buildLayout();
+      const res = await fetch('/api/production', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, layout }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProduction(data.data.production);
+        setCostEstimate(data.data.costEstimate);
+        const annualKwh = data.data.production?.annualProductionKwh ?? 0;
+        const sizeKw = data.data.layout?.systemSizeKw ?? layout.systemSizeKw;
+        setCalcMessage(`✅ ${annualKwh.toLocaleString()} kWh/yr · ${sizeKw.toFixed(2)} kW system`);
+        toast.update(toastId, {
+          type: 'success',
+          title: 'Production calculated!',
+          message: `${annualKwh.toLocaleString()} kWh/yr · ${sizeKw.toFixed(2)} kW`,
+        });
+      } else {
+        setCalcMessage(`❌ ${data.error || 'Calculation failed'}`);
+        toast.update(toastId, {
+          type: 'error',
+          title: 'Calculation failed',
+          message: data.error || 'Please try again',
+        });
+      }
+    } catch (e: unknown) {
+      setCalcMessage(`❌ ${(e as Error)?.message || 'Network error'}`);
+      toast.update(toastId, {
+        type: 'error',
+        title: 'Network error',
+        message: (e as Error)?.message || 'Could not connect to server',
+      });
+    } finally {
+      setCalculating(false);
+    }
+  };
+
+  const buildLayout = (): Omit<Layout, 'id' | 'createdAt' | 'updatedAt'> => {
+    // Extract tilt/azimuth from actual placed panels (3D placement data)
+    // This ensures production calculation uses real panel orientations
+    let effectiveTilt = tilt;
+    let effectiveAzimuth = azimuth;
+    
+    if (panels.length > 0) {
+      // Use the most common tilt/azimuth from placed panels
+      const tilts = panels.map((p: any) => p.tilt ?? tilt).filter((t: number) => t > 0);
+      const azimuths = panels.map((p: any) => p.azimuth ?? azimuth).filter((a: number) => a > 0);
+      
+      if (tilts.length > 0) {
+        effectiveTilt = tilts.reduce((a: number, b: number) => a + b, 0) / tilts.length;
+      }
+      if (azimuths.length > 0) {
+        effectiveAzimuth = azimuths.reduce((a: number, b: number) => a + b, 0) / azimuths.length;
+      }
+    }
+
+    // Build roof planes from placed panels if no manual roof planes drawn
+    const effectiveRoofPlanes = roofPlanes.length > 0 ? roofPlanes : 
+      (panels.length > 0 && project.systemType === 'roof' ? [{
+        id: 'auto-plane-1',
+        vertices: [],
+        pitch: effectiveTilt,
+        azimuth: effectiveAzimuth,
+        area: panels.length * 1.134 * 1.722,
+        usableArea: panels.length * 1.134 * 1.722 * 0.85,
+      }] : undefined);
+
+    return {
+      projectId: project.id,
+      systemType: project.systemType,
+      panels,
+      roofPlanes: effectiveRoofPlanes,
+      groundTilt: effectiveTilt,
+      groundAzimuth: effectiveAzimuth,
+      rowSpacing, groundHeight,
+      fenceAzimuth: effectiveAzimuth,
+      fenceHeight,
+      fenceLine: fenceLine.length > 0 ? fenceLine : undefined,
+      bifacialOptimized,
+      totalPanels: panels.length,
+      systemSizeKw,
+      mapCenter, mapZoom: zoom,
+    };
+  };
+
+  const handleSave = async () => {
+    setSaveStatus('saving');
+    const toastId = toast.loading('Calculating production...', `${panels.length} panels · ${systemSizeKw.toFixed(2)} kW system`);
+    try {
+      const layout = buildLayout();
+      // Save to localStorage immediately before server call
+      localSaveLayout(project.id, { panels, mapCenter: mapCenterRef.current, mapZoom: zoomRef.current, systemType: project.systemType });
+      const res = await fetch('/api/production', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: project.id, layout }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProduction(data.data.production);
+        setCostEstimate(data.data.costEstimate);
+        setSaveStatus('saved');
+        setLastSavedAt(new Date());
+        onSave?.(data.data.layout);
+        const annualKwh = data.data.production?.annualProductionKwh ?? 0;
+        const sizeKw = data.data.layout?.systemSizeKw ?? layout.systemSizeKw;
+        toast.update(toastId, {
+          type: 'success',
+          title: 'Design saved & calculated!',
+          message: `${annualKwh.toLocaleString()} kWh/yr · ${sizeKw.toFixed(2)} kW · ${panels.length} panels`,
+        });
+        setTimeout(() => setSaveStatus('idle'), 3000);
+      } else {
+        setSaveStatus('error');
+        toast.update(toastId, {
+          type: 'error',
+          title: 'Calculation failed',
+          message: data.error || 'Please try again',
+        });
+      }
+    } catch (e: unknown) {
+      setSaveStatus('error');
+      toast.update(toastId, {
+        type: 'error',
+        title: 'Save failed',
+        message: (e as Error)?.message || 'Network error',
+      });
+    }
+  };
+
+  const clearAll = () => {
+    setPanels([]); setRoofPlanes([]); setGroundArea([]); setFenceLine([]);
+    setDrawnPoints([]); setProduction(null); setCostEstimate(null);
+    setSelectedPanelIds(new Set()); setMeasurePoints([]); setMeasureDistance(null);
+  };
+
+  const systemTypeLabel = { roof: 'Roof Mount', ground: 'Ground Mount', fence: 'Sol Fence' }[project.systemType];
+  const systemTypeColor = { roof: 'text-amber-400', ground: 'text-teal-400', fence: 'text-purple-400' }[project.systemType];
+  const systemTypeBg = { roof: 'bg-amber-500/10 border-amber-500/20', ground: 'bg-teal-500/10 border-teal-500/20', fence: 'bg-purple-500/10 border-purple-500/20' }[project.systemType];
+
+  const filteredPanels = availablePanels.filter(p =>
+    !panelFilter || `${p.manufacturer} ${p.model}`.toLowerCase().includes(panelFilter.toLowerCase())
+  );
+  const filteredInverters = availableInverters.filter(i =>
+    !inverterFilter || `${i.manufacturer} ${i.model}`.toLowerCase().includes(inverterFilter.toLowerCase())
+  );
+
+  const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
+
+  return (
+    <div className="flex flex-col h-full bg-slate-950">
+      {/* ── Studio Header ── */}
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-900 border-b border-slate-700/50 flex-shrink-0">
+        <div className={`px-2.5 py-1 rounded-lg border text-xs font-semibold ${systemTypeBg} ${systemTypeColor}`}>
+          {systemTypeLabel}
+        </div>
+        <span className="font-semibold text-white text-sm truncate">{project.name}</span>
+        {project.client && (
+          <span className="text-xs text-slate-500 truncate hidden md:block">— {project.client.name}</span>
+        )}
+
+        {/* Address search with autocomplete */}
+        <div className="flex items-center gap-2 ml-2 flex-1 max-w-sm">
+          <div className="relative flex-1">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 z-10" />
+            <input
+              type="text"
+              value={addressSearch}
+              onChange={e => handleAddressSearchInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { setShowAddressSuggestions(false); geocodeAddress(addressSearch); }
+                if (e.key === 'Escape') setShowAddressSuggestions(false);
+              }}
+              onBlur={() => setTimeout(() => setShowAddressSuggestions(false), 150)}
+              onFocus={() => addressSuggestions.length > 0 && setShowAddressSuggestions(true)}
+              placeholder="Search any address..."
+              autoComplete="off"
+              className={`w-full bg-slate-800 border rounded-lg pl-7 pr-7 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none transition-colors ${
+                locationStatus === 'found' ? 'border-emerald-500/50' :
+                locationStatus === 'failed' ? 'border-red-500/50' :
+                locationStatus === 'locating' ? 'border-amber-500/50' :
+                'border-slate-600 focus:border-amber-500'
+              }`}
+            />
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
+              {addressSuggestionsLoading || searchLoading ? (
+                <Loader size={11} className="animate-spin text-slate-400" />
+              ) : locationStatus === 'found' ? (
+                <CheckCircle size={11} className="text-emerald-400" />
+              ) : null}
+            </div>
+
+            {/* Autocomplete dropdown */}
+            {showAddressSuggestions && addressSuggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-50 overflow-hidden">
+                {addressSuggestions.map((s, i) => (
+                  <button
+                    key={i}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-700 transition-colors border-b border-slate-700/50 last:border-0"
+                    onMouseDown={e => { e.preventDefault(); handleSelectAddressSuggestion(s); }}
+                  >
+                    <div className="flex items-start gap-1.5">
+                      <Search size={10} className="text-amber-400 mt-0.5 shrink-0" />
+                      <div>
+                        <div className="text-xs text-white font-medium">{s.short_name}</div>
+                        <div className="text-xs text-slate-500 truncate max-w-xs">{s.display_name}</div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => { setShowAddressSuggestions(false); geocodeAddress(addressSearch); }}
+            disabled={searchLoading || locationStatus === 'locating'}
+            className="btn-secondary btn-sm px-2.5 flex-shrink-0"
+          >
+            {searchLoading || locationStatus === 'locating' ? <Loader size={12} className="animate-spin" /> : 'Go'}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 ml-auto">
+          {/* Automation buttons */}
+          {(roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0) && (
+            <div className="flex items-center gap-1 bg-slate-800/60 rounded-lg px-2 py-1">
+              <button
+                onClick={autoLayoutAll}
+                disabled={autoLayoutRunning}
+                className="btn-sm btn-secondary flex items-center gap-1 text-xs"
+                title="Auto Layout: fill all zones with current settings"
+              >
+                {autoLayoutRunning ? <Loader size={11} className="animate-spin" /> : <Zap size={11} className="text-amber-400" />}
+                Auto Layout
+              </button>
+              <button
+                onClick={fillRoof}
+                disabled={autoLayoutRunning}
+                className="btn-sm btn-secondary flex items-center gap-1 text-xs"
+                title="Fill Roof: maximize panel count with minimal setback"
+              >
+                <Layers size={11} className="text-teal-400" />
+                Fill Roof
+              </button>
+              <button
+                onClick={optimizeLayout}
+                disabled={autoLayoutRunning}
+                className="btn-sm btn-secondary flex items-center gap-1 text-xs"
+                title="Optimize: best production/cost ratio with inter-row shading avoidance"
+              >
+                <TrendingUp size={11} className="text-purple-400" />
+                Optimize
+              </button>
+            </div>
+          )}
+          {panels.length > 0 && (
+            <div className="flex items-center gap-3 text-xs bg-slate-800/60 rounded-lg px-3 py-1.5">
+              <span className="text-slate-400">{panels.length} panels</span>
+              <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
+            </div>
+          )}
+          <button
+            onClick={() => setShowPanels(!showPanels)}
+            className={`btn-sm ${showPanels ? 'btn-secondary' : 'btn-ghost'}`}
+            title="Toggle panel visibility"
+          >
+            {showPanels ? <Eye size={13} /> : <EyeOff size={13} />}
+          </button>
+          <button
+            onClick={() => setShowShade3D(!showShade3D)}
+            className={`btn-sm ${showShade3D ? 'btn-primary' : 'btn-secondary'}`}
+            title="Toggle shade analysis"
+          >
+            🌡️ Shade
+          </button>
+          <button
+            onClick={() => setShow3D(!show3D)}
+            className={`btn-sm ${show3D ? 'btn-primary' : 'btn-secondary'}`}
+            title="Toggle 3D Digital Twin"
+          >
+            {show3D ? '🌐 3D View' : '🗺️ 2D Map'}
+          </button>
+          {/* Tile provider toggle — only shown in 2D mode */}
+          {!show3D && (
+            <div className="flex items-center gap-0.5 bg-slate-800 border border-slate-600 rounded-lg overflow-hidden">
+              {(['auto', 'google', 'esri'] as const).map(p => (
+                <button
+                  key={p}
+                  onClick={() => {
+                    setTileProvider(p);
+                    setMapTiles(new Map());
+                  }}
+                  className={`px-2 py-1 text-[10px] font-semibold transition-colors ${
+                    tileProvider === p
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+                  }`}
+                  title={
+                    p === 'auto'   ? 'Auto: Google primary, ESRI fallback on blank tile' :
+                    p === 'google' ? 'Force Google Maps satellite (zoom 21)' :
+                                     'Force ESRI World Imagery (zoom 19 max)'
+                  }
+                >
+                  {p === 'auto' ? '🔍 Auto' : p === 'google' ? 'Google' : 'ESRI'}
+                </button>
+              ))}
+              <span className={`px-1.5 py-1 text-[9px] font-bold border-l border-slate-600 ${
+                activeTileSource === 'google' ? 'text-blue-400' : 'text-amber-400'
+              }`}>
+                {activeTileSource === 'google' ? '✓G' : '✓E'}
+              </span>
+            </div>
+          )}
+          <button onClick={clearAll} className="btn-secondary btn-sm">
+            <RotateCcw size={13} /> Clear
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={panels.length === 0 || saveStatus === 'saving'}
+            className="btn-primary btn-sm"
+          >
+            {saveStatus === 'saving' ? <><Loader size={13} className="animate-spin" /> Saving...</> :
+             saveStatus === 'saved' ? <><CheckCircle size={13} /> Saved</> :
+             <><Save size={13} /> Save &amp; Calculate</>}
+          </button>
+          <SaveStatusBar
+            status={saveStatus}
+            lastSavedAt={lastSavedAt}
+            className="ml-1"
+          />
+          {/* Restore indicators — visible proof that layout was loaded from DB */}
+          {layoutLoadedFromDB && (
+            <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1">
+              <CheckCircle size={10} /> Layout loaded from DB · {restoredPanelCount} panels{restoredRoofPlaneCount > 0 ? ` · ${restoredRoofPlaneCount} roof planes` : ''}
+            </span>
+          )}
+          {/* Proceed to Engineering CTA — shown once panels are placed */}
+          {panels.length > 0 && (
+            <button
+              onClick={() => router.push(`/engineering?projectId=${project.id}`)}
+              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-400 hover:bg-blue-500/25 hover:text-blue-300 transition-all text-xs font-semibold flex-shrink-0"
+              title="Open Engineering with this project"
+            >
+              Engineering <ArrowRight size={11} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+        {/* ── Left Toolbar ── */}
+        <div className="w-14 bg-slate-900 border-r border-slate-700/50 flex flex-col items-center py-3 gap-1 flex-shrink-0">
+          {/* Active zone type badge */}
+          <div className={`w-9 h-9 rounded-xl border flex items-center justify-center mb-2 text-sm ${
+            activeZoneType === 'roof' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' :
+            activeZoneType === 'ground' ? 'bg-teal-500/10 border-teal-500/20 text-teal-400' :
+            'bg-purple-500/10 border-purple-500/20 text-purple-400'
+          }`}>
+            {activeZoneType === 'roof' ? '🏠' : activeZoneType === 'ground' ? '🌱' : '🔲'}
+          </div>
+          <div className="w-8 border-t border-slate-700/50 mb-1" />
+
+          {/* Tools - ALL system types always available */}
+          {[
+            { id: 'select' as DrawingMode, icon: <MousePointer2 size={16} />, label: 'Select / Pan', key: 'V', color: '' },
+            { id: 'draw_roof' as DrawingMode, icon: <Home size={16} />, label: 'Draw Roof Zone', key: 'R', color: 'text-amber-400', activeColor: 'bg-amber-500/20 border-amber-500/40 text-amber-400' },
+            { id: 'draw_ground' as DrawingMode, icon: <Square size={16} />, label: 'Draw Ground Zone', key: 'G', color: 'text-teal-400', activeColor: 'bg-teal-500/20 border-teal-500/40 text-teal-400' },
+            { id: 'draw_fence' as DrawingMode, icon: <Minus size={16} />, label: 'Draw Fence Line', key: 'F', color: 'text-purple-400', activeColor: 'bg-purple-500/20 border-purple-500/40 text-purple-400' },
+            { id: 'measure' as DrawingMode, icon: <Ruler size={16} />, label: 'Measure Distance', key: 'M', color: '' },
+          ].map(tool => (
+            <button
+              key={tool.id}
+              onClick={() => {
+                setDrawingMode(tool.id);
+                setMeasurePoints([]);
+                setMeasureDistance(null);
+                // v31.1: deactivate multi-row mode when switching tools
+                setMultiRowMode(false);
+                setMultiRowStart(null);
+                setMultiRowEnd(null);
+                // Set active zone type based on tool
+                if (tool.id === 'draw_roof') setActiveZoneType('roof');
+                else if (tool.id === 'draw_ground') setActiveZoneType('ground');
+                else if (tool.id === 'draw_fence') setActiveZoneType('fence');
+              }}
+              title={`${tool.label} (${tool.key})`}
+              className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all group relative ${
+                drawingMode === tool.id
+                  ? ((tool as any).activeColor || 'bg-amber-500/20 border border-amber-500/40 text-amber-400')
+                  : `text-slate-500 hover:text-slate-300 hover:bg-slate-700/60 ${(tool as any).color || ''}`
+              } border border-transparent`}
+            >
+              {tool.icon}
+              <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50 transition-opacity">
+                {tool.label} <span className="text-slate-500">{tool.key}</span>
+              </div>
+            </button>
+          ))}
+
+          <div className="w-8 border-t border-slate-700/50 my-1" />
+
+          {/* v30.9: Multi-Row Tool */}
+          <button
+            onClick={() => { setMultiRowMode(v => !v); setMultiRowStart(null); setMultiRowEnd(null); }}
+            title={`Multi-Row Placement (${multiRowCount} rows)`}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all group relative border ${
+              multiRowMode
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                : 'border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-700/60'
+            }`}
+          >
+            <span className="text-sm font-bold leading-none">⊞</span>
+            <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50 transition-opacity">
+              Multi-Row ({multiRowCount} rows)
+            </div>
+          </button>
+
+          {drawnPoints.length >= 2 && (
+            <button
+              onClick={finalizeDrawing}
+              title="Finish Drawing"
+              className="w-10 h-10 rounded-xl flex items-center justify-center bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/30 transition-all group relative"
+            >
+              <CheckSquare size={16} />
+              <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50">
+                Finish Drawing
+              </div>
+            </button>
+          )}
+
+          {selectedPanelIds.size > 0 && (
+            <button
+              onClick={() => { setPanels(prev => prev.filter(p => !selectedPanelIds.has(p.id))); setSelectedPanelIds(new Set()); }}
+              title="Delete Selected"
+              className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/20 border border-red-500/40 text-red-400 hover:bg-red-500/30 transition-all group relative"
+            >
+              <Trash2 size={16} />
+              <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none z-50">
+                Delete Selected
+              </div>
+            </button>
+          )}
+
+          {drawnPoints.length > 0 && (
+            <div className="mt-auto mb-2 w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 text-xs font-bold">
+              {drawnPoints.length}
+            </div>
+          )}
+        </div>
+
+        {/* ── Map Canvas ── */}
+        <div className="flex-1 relative min-w-0" ref={containerRef}>
+          {show3D ? (
+            <SolarEngine3D
+              lat={mapCenter.lat}
+              lng={mapCenter.lng}
+              panels={panels as any}
+              onPanelsChange={(p) => setPanels(p as any)}
+              systemType={activeZoneType as any}
+              tilt={tilt}
+              azimuth={azimuth}
+              fenceHeight={fenceHeight}
+              selectedPanel={selectedPanel}
+              roofPlanes={roofPlanes as any}
+              projectAddress={
+                project.address ||
+                (project.client ? [project.client.address, project.client.city, project.client.state].filter(Boolean).join(', ') : '')
+              }
+              placementMode={placementMode3D}
+              onPlacementModeChange={setPlacementMode3D}
+              showShade={showShade3D}
+              fireSetbacks={fireSetbacks}
+              onTwinLoaded={(twin) => {
+                if (twin.solarData) setSolarApiData(twin.solarData);
+                if (twin.roofSegments) setRoofSegments(twin.roofSegments);
+              }}
+              onError={(error) => {
+                // v47.120: Log the error but do NOT hide the 3D view.
+                // SolarEngine3D shows its own error overlay with a Retry button.
+                // Calling setShow3D(false) here would permanently destroy the
+                // 3D component on any transient boot failure (network, Cesium CDN, etc.)
+                // and leave the user with no way to recover without a full page refresh.
+                console.error('[DesignStudio] 3D engine error (keeping 3D view visible for retry):', error);
+              }}
+              onLocationPick={handleLocationPick}
+              onRoofPlaneCreated={(plane) => {
+                // v47.121: 3D Plane Tool — receive a plane created by clicking in 3D
+                // enrich with LECS + 3D frame and add to roofPlanes state
+                const lecsPlane = enrichRoofPlaneWithLECS(plane);
+                const enrichedPlane = enrichRoofPlaneWith3DFrame(lecsPlane);
+                setRoofPlanes(prev => [...prev, enrichedPlane]);
+                console.log('[DesignStudio] 3D plane added:', enrichedPlane.id,
+                  `az=${enrichedPlane.azimuth.toFixed(1)}° tilt=${enrichedPlane.pitch.toFixed(1)}°`);
+              }}
+            />
+          ) : (
+            <>
+              <canvas
+                ref={canvasRef}
+                className="w-full h-full"
+                style={{ cursor: drawingMode === 'select' ? (isDragging ? 'grabbing' : 'grab') : 'crosshair' }}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={() => setIsDragging(false)}
+                onWheel={handleWheel}
+                onDoubleClick={handleDoubleClick}
+              />
+
+              {/* ── Plane Tagging Modal ─────────────────────────────────────────
+                  Appears after user finishes drawing a roof plane.
+                  Lets them specify which direction the roof face slopes (azimuth)
+                  and pitch before panels are placed. */}
+              {pendingPlane && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/70 z-50">
+                  <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-5 w-80 shadow-2xl">
+                    <div className="text-amber-400 font-bold text-sm mb-1">🏠 Tag This Roof Plane</div>
+                    <div className="text-slate-400 text-xs mb-4 leading-relaxed">
+                      Which direction does this roof face slope <span className="text-white">downward</span>? (Where water runs off)
+                    </div>
+
+                    {/* Compass rose */}
+                    <div className="relative w-44 h-44 mx-auto mb-4">
+                      {/* Outer ring */}
+                      <div className="absolute inset-0 rounded-full border-2 border-slate-700 bg-slate-800/80" />
+                      {/* Cardinal direction buttons */}
+                      {[
+                        { label: 'N',  az: 0,   x: 50, y: 2  },
+                        { label: 'NE', az: 45,  x: 78, y: 10 },
+                        { label: 'E',  az: 90,  x: 86, y: 41 },
+                        { label: 'SE', az: 135, x: 78, y: 72 },
+                        { label: 'S',  az: 180, x: 50, y: 80 },
+                        { label: 'SW', az: 225, x: 18, y: 72 },
+                        { label: 'W',  az: 270, x: 8,  y: 41 },
+                        { label: 'NW', az: 315, x: 18, y: 10 },
+                      ].map(({ label, az, x, y }) => {
+                        const isSelected = Math.abs(pendingPlaneAzimuth - az) < 23;
+                        return (
+                          <button
+                            key={label}
+                            onClick={() => setPendingPlaneAzimuth(az)}
+                            style={{ left: `${x}%`, top: `${y}%` }}
+                            className={`absolute text-xs font-bold w-8 h-8 rounded-full flex items-center justify-center transition-all -translate-x-1/2 -translate-y-1/2 ${
+                              isSelected
+                                ? 'bg-amber-500 text-slate-900 shadow-lg scale-110'
+                                : 'bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                      {/* Center label */}
+                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                        <div className="text-center">
+                          <div className="text-amber-400 font-bold text-lg leading-none">{pendingPlaneAzimuth}°</div>
+                          <div className="text-slate-500 text-[10px]">azimuth</div>
+                        </div>
+                      </div>
+                      {/* Arrow pointing in selected direction */}
+                      <div
+                        className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                        style={{ transform: `rotate(${pendingPlaneAzimuth}deg)` }}
+                      >
+                        <div className="w-0.5 h-14 bg-amber-400/50 rounded-full" style={{ marginTop: '-28px' }} />
+                      </div>
+                    </div>
+
+                    {/* Fine azimuth slider */}
+                    <div className="mb-4">
+                      <div className="flex justify-between text-xs text-slate-500 mb-1">
+                        <span>Fine adjust azimuth</span>
+                        <span className="text-amber-400 font-mono">{pendingPlaneAzimuth}° {['N','NE','E','SE','S','SW','W','NW','N'][Math.round(pendingPlaneAzimuth/45)%8]}</span>
+                      </div>
+                      <input
+                        type="range" min={0} max={359} step={1}
+                        value={pendingPlaneAzimuth}
+                        onChange={e => setPendingPlaneAzimuth(Number(e.target.value))}
+                        className="w-full h-1.5 accent-amber-400"
+                      />
+                    </div>
+
+                    {/* Pitch slider */}
+                    <div className="mb-5">
+                      <div className="flex justify-between text-xs text-slate-500 mb-1">
+                        <span>Roof pitch</span>
+                        <span className="text-amber-400 font-mono">{pendingPlanePitch}° ({Math.round(Math.tan(pendingPlanePitch*Math.PI/180)*12)}/12)</span>
+                      </div>
+                      <input
+                        type="range" min={0} max={45} step={1}
+                        value={pendingPlanePitch}
+                        onChange={e => setPendingPlanePitch(Number(e.target.value))}
+                        className="w-full h-1.5 accent-amber-400"
+                      />
+                      <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
+                        <span>Flat 0°</span><span>Low 5°</span><span>Med 20°</span><span>Steep 45°</span>
+                      </div>
+                    </div>
+
+                    {/* Area info */}
+                    <div className="text-xs text-slate-500 mb-4 bg-slate-800/60 rounded-lg p-2">
+                      Area: <span className="text-white font-medium">{(pendingPlane.area * 10.764).toFixed(0)} ft²</span>
+                      &nbsp;·&nbsp; Vertices: <span className="text-white font-medium">{pendingPlane.vertices.length}</span>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setPendingPlane(null)}
+                        className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl text-xs font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={confirmPendingPlane}
+                        className="flex-2 flex-grow py-2 bg-amber-500 hover:bg-amber-400 text-slate-900 rounded-xl text-xs font-bold transition-colors"
+                      >
+                        ✅ Confirm & Place Panels
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {!mapLoaded && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80">
+                  <div className="text-center">
+                    <div className="spinner w-8 h-8 mx-auto mb-3" />
+                    <p className="text-slate-400 text-sm">Loading satellite imagery...</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Location finding overlay */}
+              {(locationStatus === 'locating' || searchLoading) && (
+                <div className="absolute inset-0 flex items-center justify-center bg-slate-900/60 pointer-events-none">
+                  <div className="glass rounded-2xl px-6 py-4 text-center">
+                    <div className="spinner w-8 h-8 mx-auto mb-3" />
+                    <p className="text-white font-semibold text-sm">Finding address...</p>
+                    <p className="text-slate-400 text-xs mt-1">{addressSearch}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Location found toast */}
+              {locationStatus === 'found' && !searchLoading && (
+                <div className="absolute top-4 right-16 glass rounded-xl px-3 py-2 flex items-center gap-2 pointer-events-none">
+                  <CheckCircle size={14} className="text-emerald-400" />
+                  <span className="text-xs text-emerald-400 font-medium">Location found</span>
+                </div>
+              )}
+
+              {/* Location failed toast */}
+              {locationStatus === 'failed' && (
+                <div className="absolute top-4 right-16 glass rounded-xl px-3 py-2 flex items-center gap-2 pointer-events-none">
+                  <AlertCircle size={14} className="text-red-400" />
+                  <span className="text-xs text-red-400 font-medium">Address not found — try a different search</span>
+                </div>
+              )}
+
+              {/* Drawing instructions */}
+              {drawingMode !== 'select' && drawingMode !== 'measure' && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-white pointer-events-none flex items-center gap-2">
+                  <span>
+                    {drawingMode === 'draw_roof' && '🏠 Click to draw roof outline'}
+                    {drawingMode === 'draw_ground' && '🌱 Click to draw ground area'}
+                    {drawingMode === 'draw_fence' && '🔲 Click to draw fence line'}
+                  </span>
+                  <span className="text-slate-400">• Double-click to finish</span>
+                  {drawnPoints.length > 0 && <span className="text-amber-400 font-semibold">{drawnPoints.length} pts</span>}
+                </div>
+              )}
+              {drawingMode === 'measure' && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-cyan-300 pointer-events-none">
+                  📏 Click to measure distance • Double-click to clear
+                  {measureDistance !== null && <span className="ml-2 font-bold">{measureDistance.toFixed(1)}m</span>}
+                </div>
+              )}
+
+              {/* v30.9: Multi-row mode hint */}
+              {multiRowMode && (
+                <div className="absolute top-4 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-2 text-sm text-amber-300 pointer-events-none flex items-center gap-2">
+                  <span>⊞ Multi-Row Tool ({multiRowCount} rows)</span>
+                  <span className="text-slate-400">•</span>
+                  <span>{multiRowStart ? '📍 Click end of first row' : '📍 Click start of first row'}</span>
+                </div>
+              )}
+
+              {/* v31.1: Active Tool Indicator */}
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 glass rounded-xl px-3 py-1.5 pointer-events-none">
+                <span className={`w-2 h-2 rounded-full ${
+                  multiRowMode ? 'bg-amber-400 animate-pulse' :
+                  drawingMode === 'select' ? 'bg-emerald-400' :
+                  drawingMode === 'draw_roof' ? 'bg-amber-400' :
+                  drawingMode === 'draw_ground' ? 'bg-teal-400' :
+                  drawingMode === 'draw_fence' ? 'bg-purple-400' :
+                  drawingMode === 'measure' ? 'bg-cyan-400' : 'bg-slate-400'
+                }`} />
+                <span className="text-xs text-slate-300 font-medium">
+                  {multiRowMode ? `⊞ Multi-Row (${multiRowCount} rows)` :
+                   drawingMode === 'select' ? '↖ Select' :
+                   drawingMode === 'draw_roof' ? '🏠 Draw Roof Zone' :
+                   drawingMode === 'draw_ground' ? '🌱 Draw Ground Zone' :
+                   drawingMode === 'draw_fence' ? '🔲 Draw Fence Line' :
+                   drawingMode === 'measure' ? '📏 Measure' : drawingMode}
+                </span>
+                {selectedPanelIds.size > 0 && (
+                  <span className="text-xs text-amber-400 font-semibold ml-1">
+                    · {selectedPanelIds.size} selected
+                  </span>
+                )}
+                <span className="text-xs text-slate-600 ml-1">V/R/G/F/M</span>
+              </div>
+
+              {/* Zoom controls */}
+              <div className="absolute bottom-10 right-4 flex flex-col gap-1">
+                <button onClick={() => setZoom(z => Math.min(21, z + 1))} className="w-8 h-8 bg-slate-800 border border-slate-600 rounded-lg text-white hover:bg-slate-700 flex items-center justify-center font-bold text-lg">+</button>
+                <div className="w-8 h-6 bg-slate-800/60 border border-slate-700 rounded flex items-center justify-center text-xs text-slate-400">{zoom}</div>
+                <button onClick={() => setZoom(z => Math.max(14, z - 1))} className="w-8 h-8 bg-slate-800 border border-slate-600 rounded-lg text-white hover:bg-slate-700 flex items-center justify-center font-bold text-lg">−</button>
+              </div>
+
+              {/* Panel count overlay */}
+              {panels.length > 0 && (
+                <div className="absolute bottom-10 left-4 glass rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-3 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <Layers size={12} className="text-amber-400" />
+                      <span className="text-white font-semibold">{panels.length} panels</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Zap size={12} className="text-amber-400" />
+                      <span className="text-amber-400 font-bold">{systemSizeKw.toFixed(2)} kW</span>
+                    </div>
+                    {selectedPanelIds.size > 0 && (
+                      <span className="text-blue-400">{selectedPanelIds.size} selected</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Bill analysis recommendation banner */}
+              {billAnalysis && panels.length === 0 && (
+                <div className="absolute top-16 left-1/2 -translate-x-1/2 glass rounded-xl px-4 py-3 text-sm pointer-events-none max-w-sm text-center">
+                  <div className="text-amber-400 font-semibold">Recommended System Size</div>
+                  <div className="text-white text-lg font-bold">{billAnalysis.recommendedSystemKw} kW</div>
+                  <div className="text-slate-400 text-xs">~{billAnalysis.recommendedPanelCount} panels • Draw your {activeZoneType === 'roof' ? 'roof' : activeZoneType === 'ground' ? 'ground area' : 'fence line'} to place panels</div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* ── Right Sidebar ── */}
+        <div className="w-80 bg-slate-900 border-l border-slate-700/50 flex flex-col flex-shrink-0 min-h-0">
+          {/* Tab bar */}
+          <div className="flex border-b border-slate-700/50 flex-shrink-0">
+            {[
+              { id: 'design', label: 'Design', icon: <Settings size={12} /> },
+              { id: 'bill', label: 'Bill', icon: <Calculator size={12} /> },
+              { id: 'equipment', label: 'Equipment', icon: <Zap size={12} /> },
+              { id: 'battery', label: 'Battery', icon: <BatteryIcon size={12} /> },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`flex-1 flex items-center justify-center gap-1 py-2.5 text-xs font-medium transition-colors ${
+                  activeTab === tab.id
+                    ? 'text-amber-400 border-b-2 border-amber-400 bg-amber-500/5'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                {tab.icon}{tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+
+            {/* ── DESIGN TAB ── */}
+            {activeTab === 'design' && (
+              <>
+                {/* System Configuration */}
+                <Section title="Configuration" icon={<Settings size={12} />}>
+                  {/* Active Zone Type Switcher */}
+                  <div className="mb-3">
+                    <div className="text-xs text-slate-500 mb-1.5">Active Drawing Zone</div>
+                    <div className="grid grid-cols-3 gap-1">
+                      {[
+                        { type: 'roof' as SystemType, label: '🏠 Roof', color: 'border-amber-500/40 bg-amber-500/10 text-amber-400' },
+                        { type: 'ground' as SystemType, label: '🌱 Ground', color: 'border-teal-500/40 bg-teal-500/10 text-teal-400' },
+                        { type: 'fence' as SystemType, label: '⚡ Fence', color: 'border-purple-500/40 bg-purple-500/10 text-purple-400' },
+                      ].map(({ type, label, color }) => (
+                        <button
+                          key={type}
+                          onClick={() => {
+                            setActiveZoneType(type);
+                            if (type === 'roof') setDrawingMode('draw_roof');
+                            else if (type === 'ground') setDrawingMode('draw_ground');
+                            else setDrawingMode('draw_fence');
+                          }}
+                          className={`px-1 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                            activeZoneType === type ? color : 'border-slate-700 text-slate-500 hover:text-slate-300'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {activeZoneType !== 'fence' && (
+                    <SliderRow label="Tilt Angle" value={tilt} min={0} max={45} step={1} unit="°" onChange={setTilt} />
+                  )}
+                  {activeZoneType === 'fence' && (
+                    <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-2 text-xs text-purple-300">
+                      ⚡ Vertical mount (90°) — Sol Fence bifacial optimized
+                    </div>
+                  )}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs text-slate-400">Azimuth</label>
+                      <span className="text-xs font-semibold text-white">{azimuth}° ({azimuthLabel(azimuth)})</span>
+                    </div>
+                    <input
+                      type="range" min={0} max={360} step={5} value={azimuth}
+                      onChange={e => setAzimuth(parseInt(e.target.value))}
+                      className="w-full h-1.5 bg-slate-700 rounded-full appearance-none cursor-pointer accent-amber-500"
+                    />
+                    <div className="flex justify-between text-xs text-slate-600 mt-0.5">
+                      <span>N</span><span>E</span><span>S</span><span>W</span><span>N</span>
+                    </div>
+                  </div>
+
+                  {activeZoneType === 'roof' && (
+                    <SliderRow label="Roof Setback" value={setback} min={0} max={2.0} step={0.05} unit="m" onChange={v => { clearGridCache(); setSetback(v); }} />
+                  )}
+                  {(activeZoneType === 'roof' || activeZoneType === 'ground') && (
+                    <SliderRow label="Row Spacing" value={rowSpacing} min={0.01} max={3.0} step={0.01} unit="m" onChange={v => { clearGridCache(); setRowSpacing(v); }} />
+                  )}
+                  <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
+
+                  {/* v30.9: Panel Orientation Toggle */}
+                  <div className="flex items-center justify-between py-1">
+                    <label className="text-xs text-slate-400">Panel Orientation</label>
+                    <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                      <button
+                        onClick={() => { setOrientation('portrait'); relayoutWithOrientation('portrait'); }}
+                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'portrait' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                      >
+                        ▯ Portrait
+                      </button>
+                      <button
+                        onClick={() => { setOrientation('landscape'); relayoutWithOrientation('landscape'); }}
+                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'landscape' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                      >
+                        ▭ Landscape
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* v30.9: Fire Setback Controls (roof only) */}
+                  {activeZoneType === 'roof' && (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-red-400">🔥 Fire Setbacks</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setShowCADDebug(v => !v)}
+                            className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${showCADDebug ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                            title="Show CAD debug overlay: usable polygon + row alignment lines"
+                          >
+                            📐 {showCADDebug ? 'CAD On' : 'CAD'}
+                          </button>
+                          <button
+                            onClick={() => setShowSetbackZones(v => !v)}
+                            className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${showSetbackZones ? 'border-red-500/50 bg-red-500/10 text-red-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                          >
+                            {showSetbackZones ? <Eye size={10} /> : <EyeOff size={10} />}
+                            {showSetbackZones ? 'Zones On' : 'Zones Off'}
+                          </button>
+                          {/* v47.118: Align panels to longest roof edge */}
+                          <button
+                            onClick={() => setAlignToEdge(v => !v)}
+                            className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-colors ${alignToEdge ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                            title="Align panel grid to longest roof edge (recommended)"
+                          >
+                            📐 {alignToEdge ? 'Edge ✓' : 'Edge'}
+                          </button>
+                        </div>
+                      </div>
+                      <SliderRow
+                        label="Edge Setback"
+                        value={Math.round(fireSetbacks.edgeSetbackM * 39.37)}
+                        min={12} max={36} step={1} unit="in"
+                        onChange={v => setFireSetbacks(prev => ({ ...prev, edgeSetbackM: v / 39.37 }))}
+                      />
+                      <SliderRow
+                        label="Ridge Setback"
+                        value={Math.round(fireSetbacks.ridgeSetbackM * 39.37)}
+                        min={12} max={36} step={1} unit="in"
+                        onChange={v => setFireSetbacks(prev => ({ ...prev, ridgeSetbackM: v / 39.37 }))}
+                      />
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-slate-400">Pathway (36″)</label>
+                        <button
+                          onClick={() => setFireSetbacks(prev => ({ ...prev, enforcePathway: !prev.enforcePathway }))}
+                          className={`w-10 h-5 rounded-full transition-colors relative ${fireSetbacks.enforcePathway ? 'bg-red-500' : 'bg-slate-600'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${fireSetbacks.enforcePathway ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                        </button>
+                      </div>
+                      {fireSetbacks.enforcePathway && (
+                        <div className="text-xs text-red-400/80 bg-red-500/10 rounded-lg p-2">
+                          36″ side-edge pathway enforced — rake/hip edge setback includes pathway clearance
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* v30.9: Multi-Row Placement Tool */}
+                  <div className="mt-2 pt-2 border-t border-slate-700/50">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-slate-300">Multi-Row Tool</span>
+                      <button
+                        onClick={() => { setMultiRowMode(v => !v); setMultiRowStart(null); setMultiRowEnd(null); }}
+                        className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border transition-colors ${multiRowMode ? 'border-amber-500/50 bg-amber-500/10 text-amber-400' : 'border-slate-600 text-slate-500 hover:text-slate-300'}`}
+                      >
+                        {multiRowMode ? '✓ Active' : '⊞ Activate'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-slate-400 flex-1">Row Count</label>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setMultiRowCount(v => Math.max(2, v - 1))} className="w-6 h-6 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center justify-center text-xs">−</button>
+                        <span className="text-xs font-semibold text-white w-5 text-center">{multiRowCount}</span>
+                        <button onClick={() => setMultiRowCount(v => Math.min(20, v + 1))} className="w-6 h-6 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 flex items-center justify-center text-xs">+</button>
+                      </div>
+                    </div>
+                    {multiRowMode && (
+                      <div className="mt-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2">
+                        {multiRowStart ? '📍 Click end of first row to generate all rows' : '📍 Click start of first row on the map'}
+                      </div>
+                    )}
+                  </div>
+
+                  {activeZoneType === 'ground' && (
+                    <>
+                      <SliderRow label="Mount Height" value={groundHeight} min={0.3} max={2.0} step={0.1} unit="m" onChange={setGroundHeight} />
+                      <SliderRow label="Panels Per Row" value={panelsPerRow} min={2} max={30} step={1} unit="" onChange={setPanelsPerRow} />
+                    </>
+                  )}
+
+                  {activeZoneType === 'fence' && (
+                    <>
+                      <SliderRow label="Fence Height" value={fenceHeight} min={1.0} max={4.0} step={0.1} unit="m" onChange={setFenceHeight} />
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs text-slate-400">Bifacial E-W Optimization</label>
+                        <button
+                          onClick={() => setBifacialOptimized(!bifacialOptimized)}
+                          className={`w-10 h-5 rounded-full transition-colors relative ${bifacialOptimized ? 'bg-amber-500' : 'bg-slate-600'}`}
+                        >
+                          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${bifacialOptimized ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                        </button>
+                      </div>
+                      {bifacialOptimized && (
+                        <div className="text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2">
+                          +20% bifacial gain applied for E-W facing panels
+                        </div>
+                      )}
+                    </>
+                  )}
+                </Section>
+
+                {/* 3D Auto-Place Panels */}
+                {show3D && (
+                  <Section title="3D Panel Placement" icon={<Layers size={12} />} defaultOpen={true}>
+                    <div className="space-y-2">
+                      <div className="text-xs text-slate-400 leading-relaxed">
+                        Use the toolbar in the 3D view to place panels. Click <strong className="text-amber-400">✨ Auto</strong> to automatically fill all roof segments with optimal panel placement.
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 text-xs">
+                        {[
+                          { mode: 'select' as PlacementMode, icon: '↖', label: 'Select', desc: 'Select / pan' },
+                          { mode: 'roof' as PlacementMode, icon: '🏠', label: 'Place Roof', desc: 'Click to place panel' },
+                          { mode: 'ground' as PlacementMode, icon: '🌍', label: 'Place Ground', desc: 'Click to place panel' },
+                          { mode: 'auto_roof' as PlacementMode, icon: '✨', label: 'Auto Fill', desc: 'Fill all roofs' },
+                        ].map(({ mode, icon, label, desc }) => (
+                          <button
+                            key={mode}
+                            onClick={() => setPlacementMode3D(mode)}
+                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-left transition-all ${
+                              placementMode3D === mode
+                                ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
+                                : 'border-slate-700 text-slate-400 hover:text-slate-300 hover:border-slate-600'
+                            }`}
+                          >
+                            <span>{icon}</span>
+                            <div>
+                              <div className="font-medium">{label}</div>
+                              <div className="text-slate-500 text-xs">{desc}</div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                      {roofSegments.length > 0 && (
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 text-xs text-emerald-300">
+                          <div className="font-semibold mb-0.5">✅ Solar API Ready</div>
+                          <div>{roofSegments.length} roof segments detected</div>
+                          <div>Max capacity: {((solarApiData?.solarPotential?.maxArrayPanelsCount ?? 0) * 400 / 1000).toFixed(1)} kW</div>
+                        </div>
+                      )}
+                    </div>
+                  </Section>
+                )}
+
+                {/* Roof Analysis - Google Solar API */}
+                {roofSegments.length > 0 && (
+                  <Section title="Roof Analysis" icon={<Sun size={12} />} badge={`${roofSegments.length} segments`}>
+                    <div className="space-y-1.5">
+                      {roofSegments.map((segment, idx) => {
+                        const area = segment.areaM2 ?? segment.stats?.areaMeters2 ?? 0;
+                        const pitch = segment.pitchDegrees ?? 0;
+                        const az = segment.azimuthDegrees ?? 180;
+                        const sunshine = segment.sunshineHours ?? segment.stats?.sunshineQuantiles?.[5] ?? 0;
+                        const maxSunshine = Math.max(...roofSegments.map((s: any) => s.sunshineHours ?? s.stats?.sunshineQuantiles?.[5] ?? 0));
+                        const sunPct = maxSunshine > 0 ? (sunshine / maxSunshine) * 100 : 0;
+                        const azLabel = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round(az / 45) % 8];
+                        return (
+                          <div key={idx} className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40 hover:border-amber-500/30 transition-colors">
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="text-xs font-bold text-white">Segment {idx + 1}</span>
+                              <span className="text-xs text-slate-400 font-mono">{(area * 10.7639).toFixed(0)} ft²</span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1 text-xs mb-1.5">
+                              <div className="text-center bg-slate-900/60 rounded p-1">
+                                <div className="text-slate-500 text-[10px]">Pitch</div>
+                                <div className="text-amber-400 font-bold">{pitch.toFixed(0)}°</div>
+                              </div>
+                              <div className="text-center bg-slate-900/60 rounded p-1">
+                                <div className="text-slate-500 text-[10px]">Azimuth</div>
+                                <div className="text-blue-400 font-bold">{azLabel}</div>
+                              </div>
+                              <div className="text-center bg-slate-900/60 rounded p-1">
+                                <div className="text-slate-500 text-[10px]">Sun hrs</div>
+                                <div className="text-yellow-400 font-bold">{sunshine > 0 ? sunshine.toFixed(0) : '—'}</div>
+                              </div>
+                            </div>
+                            {sunshine > 0 && (
+                              <div className="mt-1">
+                                <div className="h-1 bg-slate-700 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full transition-all"
+                                    style={{
+                                      width: `${sunPct}%`,
+                                      background: `linear-gradient(90deg, #f59e0b, #fbbf24)`,
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {solarApiData?.solarPotential && (
+                      <div className="mt-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-xs">
+                        <div className="text-amber-400 font-semibold mb-1">☀️ Solar Potential</div>
+                        <div className="grid grid-cols-2 gap-1 text-slate-300">
+                          <div>Max panels: <span className="text-white font-bold">{solarApiData.solarPotential.maxArrayPanelsCount}</span></div>
+                          <div>Max kW: <span className="text-white font-bold">{((solarApiData.solarPotential.maxArrayPanelsCount * 400) / 1000).toFixed(1)}</span></div>
+                          <div>Sunshine: <span className="text-white font-bold">{solarApiData.solarPotential.maxSunshineHoursPerYear?.toFixed(0)} hrs/yr</span></div>
+                          <div>Roof area: <span className="text-white font-bold">{((solarApiData.solarPotential.wholeRoofStats?.areaMeters2 ?? 0) * 10.7639).toFixed(0)} ft²</span></div>
+                        </div>
+                      </div>
+                    )}
+                  </Section>
+                )}
+
+                {/* ── Roof Planes Section ─────────────────────────────── */}
+                <Section
+                    title="Roof Planes"
+                    icon={<Home size={12} />}
+                    badge={roofPlanes.length > 0 ? `${roofPlanes.length} planes` : undefined}
+                    defaultOpen={true}
+                  >
+                    <div className="space-y-2">
+
+                      {/* Idle state - no planes yet, no detection run */}
+                      {solarApiStatus === 'idle' && roofPlanes.length === 0 && (
+                        <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
+                          <div className="font-semibold text-slate-300 mb-1">No Roof Planes</div>
+                          <div className="leading-relaxed">Use the <span className="text-amber-400 font-medium">Draw Roof Zone</span> tool (R) to trace each roof plane, or navigate to a new address to trigger auto-detection.</div>
+                        </div>
+                      )}
+
+                      {/* Loading state */}
+                      {solarApiStatus === 'loading' && (
+                        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2.5 border border-amber-500/20">
+                          <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                          <span>Auto-detecting roof planes via Solar API…</span>
+                        </div>
+                      )}
+
+                      {/* Unavailable state */}
+                      {solarApiStatus === 'unavailable' && roofPlanes.length === 0 && (
+                        <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
+                          <div className="font-semibold text-slate-300 mb-1">⚠ Solar API Unavailable</div>
+                          <div>Use the <span className="text-amber-400 font-medium">Draw Roof Zone</span> tool (R) to manually trace each roof plane on the map.</div>
+                        </div>
+                      )}
+
+                      {/* Unconfirmed planes banner */}
+                      {roofPlanes.some(p => p.confirmed === false) && (
+                        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs">
+                          <div className="text-amber-300 font-semibold mb-1.5">🛰️ Auto-detected — Review Required</div>
+                          <div className="text-slate-300 mb-2 leading-relaxed">
+                            Roof planes were detected from satellite data. Edge colors show type: <span className="text-red-400">ridge</span>, <span className="text-amber-400">eave</span>, <span className="text-orange-400">hip</span>, <span className="text-blue-400">valley</span>, <span className="text-lime-400">rake</span>.
+                          </div>
+                          <button
+                            onClick={() => {
+                              setRoofPlanes(prev => prev.map(p => ({ ...p, confirmed: true })));
+                              toast.success('✅ Roof planes confirmed', `${roofPlanes.length} planes locked in for permit generation`);
+                            }}
+                            className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-lg text-xs transition-colors"
+                          >
+                            ✅ Confirm All Roof Planes
+                          </button>
+                          <button
+                            onClick={() => {
+                              setRoofPlanes([]);
+                              setSolarApiStatus('idle');
+                              setDrawingMode('draw_roof');
+                              toast.info('✏️ Draw mode activated', 'Use R key or toolbar to draw each roof plane');
+                            }}
+                            className="w-full mt-1.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-300 font-medium rounded-lg text-xs transition-colors"
+                          >
+                            ✏️ Draw Manually Instead
+                          </button>
+                        </div>
+                      )}
+
+                      {/* All confirmed banner */}
+                      {roofPlanes.length > 0 && roofPlanes.every(p => p.confirmed !== false) && (
+                        <div className="flex items-center gap-2 text-xs text-emerald-300 bg-emerald-500/10 rounded-lg p-2 border border-emerald-500/20">
+                          <span>✅</span>
+                          <span className="font-semibold">{roofPlanes.length} roof planes confirmed</span>
+                          <span className="text-slate-500 ml-auto">Ready for permit</span>
+                        </div>
+                      )}
+
+                      {/* Individual plane list */}
+                      {roofPlanes.map((plane, idx) => {
+                        const azDir = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round((plane.azimuth ?? 180) / 45) % 8];
+                        const isUnconfirmed = plane.confirmed === false;
+                        const edgeTypeCounts: Record<string, number> = {};
+                        plane.edgeTypes?.forEach(et => { edgeTypeCounts[et] = (edgeTypeCounts[et] ?? 0) + 1; });
+                        return (
+                          <div
+                            key={plane.id}
+                            className={`rounded-lg p-2.5 border text-xs transition-colors ${
+                              isUnconfirmed
+                                ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50'
+                                : 'bg-slate-800/60 border-slate-700/40 hover:border-emerald-500/30'
+                            }`}
+                          >
+                            <div className="flex justify-between items-center mb-1.5">
+                              <span className="font-bold text-white">
+                                {isUnconfirmed ? '⚠ ' : '✅ '}Plane {idx + 1}
+                                {plane.source === 'solar_api' && (
+                                  <span className="ml-1 text-[10px] text-slate-500 font-normal">satellite</span>
+                                )}
+                              </span>
+                              <div className="flex gap-1">
+                                {isUnconfirmed && (
+                                  <button
+                                    onClick={() => setRoofPlanes(prev => prev.map(p => p.id === plane.id ? { ...p, confirmed: true } : p))}
+                                    className="px-1.5 py-0.5 bg-emerald-600/80 hover:bg-emerald-500 text-white rounded text-[10px] font-medium transition-colors"
+                                    title="Confirm this plane"
+                                  >
+                                    ✓
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => setRoofPlanes(prev => prev.filter(p => p.id !== plane.id))}
+                                  className="px-1.5 py-0.5 bg-red-600/60 hover:bg-red-500 text-white rounded text-[10px] transition-colors"
+                                  title="Delete this plane"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1 mb-1.5">
+                              <div className="text-center bg-slate-900/60 rounded p-1">
+                                <div className="text-slate-500 text-[10px]">Pitch</div>
+                                <div className="text-amber-400 font-bold">{(plane.pitch ?? 0).toFixed(0)}°</div>
+                              </div>
+                              <div className="text-center bg-slate-900/60 rounded p-1">
+                                <div className="text-slate-500 text-[10px]">Azimuth</div>
+                                <div className="text-blue-400 font-bold">{azDir}</div>
+                              </div>
+                              <div className="text-center bg-slate-900/60 rounded p-1">
+                                <div className="text-slate-500 text-[10px]">Area</div>
+                                <div className="text-slate-300 font-bold">{((plane.area ?? 0) * 10.764).toFixed(0)} ft²</div>
+                              </div>
+                            </div>
+                            {/* Edge type legend */}
+                            {plane.edgeTypes && plane.edgeTypes.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {Object.entries(edgeTypeCounts).map(([et, count]) => {
+                                  const etColors: Record<string, string> = {
+                                    ridge: 'bg-red-500/20 text-red-400 border-red-500/30',
+                                    eave: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+                                    hip: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+                                    valley: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                                    rake: 'bg-lime-500/20 text-lime-400 border-lime-500/30',
+                                    wall: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
+                                    unknown: 'bg-slate-600/20 text-slate-500 border-slate-600/30',
+                                  };
+                                  return (
+                                    <span key={et} className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${etColors[et] ?? etColors.unknown}`}>
+                                      {et}{count > 1 ? ` ×${count}` : ''}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {/* Pitch editor */}
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <span className="text-slate-500 text-[10px] flex-shrink-0">Pitch:</span>
+                              <input
+                                type="range"
+                                min={0}
+                                max={45}
+                                step={1}
+                                value={plane.pitch ?? 0}
+                                onChange={e => setRoofPlanes(prev => prev.map(p =>
+                                  p.id === plane.id ? { ...p, pitch: Number(e.target.value) } : p
+                                ))}
+                                className="flex-1 h-1 accent-amber-400"
+                              />
+                              <span className="text-amber-400 font-mono text-[10px] w-6">{(plane.pitch ?? 0).toFixed(0)}°</span>
+                            </div>
+                            {/* Azimuth direction selector */}
+                            <div className="mt-1.5">
+                              <span className="text-slate-500 text-[10px]">Face direction (slope down toward):</span>
+                              <div className="grid grid-cols-8 gap-0.5 mt-1">
+                                {[
+                                  {label:'N', az:0}, {label:'NE', az:45}, {label:'E', az:90}, {label:'SE', az:135},
+                                  {label:'S', az:180}, {label:'SW', az:225}, {label:'W', az:270}, {label:'NW', az:315},
+                                ].map(({label, az}) => {
+                                  const isSel = Math.abs((plane.azimuth ?? 180) - az) < 23;
+                                  return (
+                                    <button
+                                      key={label}
+                                      onClick={() => setRoofPlanes(prev => prev.map(p =>
+                                        p.id === plane.id ? { ...p, azimuth: az } : p
+                                      ))}
+                                      className={`py-0.5 rounded text-[9px] font-bold transition-all ${
+                                        isSel
+                                          ? 'bg-amber-500 text-slate-900'
+                                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-white'
+                                      }`}
+                                    >
+                                      {label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            {/* Re-layout button */}
+                            <button
+                              onClick={() => relayoutPlane(plane)}
+                              className="w-full mt-2 py-1.5 bg-blue-600/80 hover:bg-blue-500 text-white rounded-lg text-[10px] font-semibold transition-colors flex items-center justify-center gap-1"
+                              title="Remove existing panels and re-place with updated azimuth & pitch"
+                            >
+                              ↺ Re-layout Panels with This Orientation
+                            </button>
+                          </div>
+                        );
+                      })}
+
+                      {/* Add new plane button */}
+                      <button
+                        onClick={() => { setDrawingMode('draw_roof'); setActiveZoneType('roof'); }}
+                        className="w-full py-2 border border-dashed border-slate-600 hover:border-amber-500/50 hover:text-amber-400 text-slate-500 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        <Home size={11} />
+                        Draw Additional Roof Plane (R)
+                      </button>
+
+                    </div>
+                  </Section>
+
+                {/* System Summary */}
+                {panels.length > 0 && (
+                  <Section title="System Summary" icon={<Zap size={12} />}>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        { label: 'Panels', value: panels.length.toString(), color: 'text-white' },
+                        { label: 'System Size', value: `${systemSizeKw.toFixed(2)} kW`, color: 'text-amber-400' },
+                        { label: 'Panel Wattage', value: `${selectedPanel.wattage}W`, color: 'text-white' },
+                        { label: 'Array Area', value: `${(panels.length * selectedPanel.width * selectedPanel.height * FEET_PER_METER * FEET_PER_METER).toFixed(0)} ft²`, color: 'text-white' },
+                      ].map(item => (
+                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
+                          <div className="text-slate-400">{item.label}</div>
+                          <div className={`font-semibold ${item.color}`}>{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Quick production estimate preview */}
+                    {quickEstimate && !production && (
+                      <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <Sun size={11} className="text-amber-400" />
+                          <span className="text-xs text-slate-400 font-medium">Quick Estimate</span>
+                          <span className="text-xs text-slate-600 ml-auto">(pre-calculation)</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-xs">
+                          <div className="text-center">
+                            <div className="text-amber-400 font-bold">{quickEstimate.annualKwh.toLocaleString()}</div>
+                            <div className="text-slate-500">kWh/yr</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-emerald-400 font-bold">${quickEstimate.annualSavings.toLocaleString()}</div>
+                            <div className="text-slate-500">est. savings</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-blue-400 font-bold">{quickEstimate.peakSunHours}</div>
+                            <div className="text-slate-500">sun hrs/day</div>
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
+                      </div>
+                    )}
+                    <button
+                      onClick={calculateProduction}
+                      disabled={calculating}
+                      className="btn-primary w-full mt-1"
+                    >
+                      {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
+                    </button>
+                    {calcMessage && (
+                      <div className={`text-xs mt-1 px-2 py-1.5 rounded-lg ${
+                        calcMessage.startsWith('✅')
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                      }`}>
+                        {calcMessage}
+                      </div>
+                    )}
+                  </Section>
+                )}
+
+                {/* Production Results */}
+                {production && (
+                  <Section title="Production Results" icon={<BarChart2 size={12} />}>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        { label: 'Annual Production', value: `${production.annualProductionKwh.toLocaleString()} kWh`, color: 'text-amber-400' },
+                        { label: 'Offset', value: `${production.offsetPercentage}%`, color: production.offsetPercentage >= 100 ? 'text-emerald-400' : 'text-blue-400' },
+                        { label: 'Specific Yield', value: `${production.specificYield} kWh/kWp`, color: 'text-white' },
+                        { label: 'CO₂ Offset', value: `${production.co2OffsetTons} tons/yr`, color: 'text-emerald-400' },
+                      ].map(item => (
+                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
+                          <div className="text-slate-400 text-xs">{item.label}</div>
+                          <div className={`font-semibold text-xs ${item.color}`}>{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500 mb-1.5">Monthly Production (kWh)</div>
+                      <div className="flex items-end gap-0.5 h-12">
+                        {production.monthlyProductionKwh.map((kwh: number, i: number) => {
+                          const max = Math.max(...production.monthlyProductionKwh);
+                          return (
+                            <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                              <div
+                                className="w-full bg-amber-500/70 rounded-sm hover:bg-amber-400 transition-colors"
+                                style={{ height: `${(kwh / max) * 40}px` }}
+                                title={`${MONTHS[i]}: ${kwh.toLocaleString()} kWh`}
+                              />
+                              <span className="text-slate-600" style={{ fontSize: '7px' }}>{MONTHS[i]}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-400">Energy Offset</span>
+                        <span className="font-semibold text-white">{production.offsetPercentage}%</span>
+                      </div>
+                      <div className="progress-bar">
+                        <div className="progress-fill bg-gradient-to-r from-amber-500 to-emerald-500" style={{ width: `${Math.min(100, production.offsetPercentage)}%` }} />
+                      </div>
+                    </div>
+                  </Section>
+                )}
+
+                {/* Cost Estimate */}
+                {costEstimate && (
+                  <Section title="Cost Estimate" icon={<DollarSign size={12} />}>
+                    <div className="space-y-2 text-xs">
+                      {[
+                        { label: 'Gross System Cost', value: `$${costEstimate.grossCost.toLocaleString()}` },
+                        { label: 'Est. Incentives / ITC*', value: costEstimate.taxCredit > 0 ? `-$${costEstimate.taxCredit.toLocaleString()}` : 'See proposal', color: 'text-emerald-400' },
+                      ].map(item => (
+                        <div key={item.label} className="flex justify-between">
+                          <span className="text-slate-400">{item.label}</span>
+                          <span className={`font-semibold ${(item as any).color || 'text-white'}`}>{item.value}</span>
+                        </div>
+                      ))}
+                      <div className="border-t border-slate-700 pt-2 flex justify-between">
+                        <span className="text-slate-300 font-semibold">Net Cost</span>
+                        <span className="font-bold text-amber-400">${costEstimate.netCost.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Annual Savings</span>
+                        <span className="font-semibold text-emerald-400">${costEstimate.annualSavings.toLocaleString()}/yr</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Payback Period</span>
+                        <span className="font-semibold text-white">{costEstimate.paybackYears} years</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">25-Year Savings</span>
+                        <span className="font-semibold text-emerald-400">${costEstimate.lifetimeSavings.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">ROI</span>
+                        <span className="font-semibold text-emerald-400">{costEstimate.roi}%</span>
+                      </div>
+                    </div>
+                    <Link href={`/proposals?projectId=${project.id}`} className="btn-primary w-full mt-2 text-xs">
+                      Generate Proposal <ArrowRight size={12} />
+                    </Link>
+                  </Section>
+                )}
+              </>
+            )}
+
+            {/* ── BILL ANALYSIS TAB ── */}
+            {activeTab === 'bill' && (
+              <>
+                <Section title="Bill Analysis" icon={<Calculator size={12} />} defaultOpen={true}>
+                  <BillCalculator onAnalysis={setBillAnalysis} project={project} />
+                </Section>
+
+                {billAnalysis && (
+                  <Section title="Recommendation" icon={<TrendingUp size={12} />} defaultOpen={true}>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        { label: 'Annual Usage', value: `${billAnalysis.annualKwh.toLocaleString()} kWh`, color: 'text-white' },
+                        { label: 'Annual Bill', value: `$${billAnalysis.annualBill.toLocaleString()}`, color: 'text-red-400' },
+                        { label: 'Recommended Size', value: `${billAnalysis.recommendedSystemKw} kW`, color: 'text-amber-400' },
+                        { label: 'Est. Panels', value: `~${billAnalysis.recommendedPanelCount}`, color: 'text-white' },
+                        { label: 'Offset Target', value: `${billAnalysis.offsetTarget}%`, color: 'text-emerald-400' },
+                        { label: 'Utility Rate', value: `$${billAnalysis.utilityRate}/kWh`, color: 'text-white' },
+                      ].map(item => (
+                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
+                          <div className="text-slate-400">{item.label}</div>
+                          <div className={`font-semibold ${item.color}`}>{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Monthly usage chart */}
+                    <div>
+                      <div className="text-xs text-slate-500 mb-1.5">Monthly Usage (kWh)</div>
+                      <div className="flex items-end gap-0.5 h-12">
+                        {billAnalysis.monthlyKwh.map((kwh, i) => {
+                          const max = Math.max(...billAnalysis.monthlyKwh);
+                          return (
+                            <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                              <div
+                                className="w-full bg-blue-500/60 rounded-sm hover:bg-blue-400 transition-colors"
+                                style={{ height: `${(kwh / max) * 40}px` }}
+                                title={`${MONTHS[i]}: ${kwh.toLocaleString()} kWh`}
+                              />
+                              <span className="text-slate-600" style={{ fontSize: '7px' }}>{MONTHS[i]}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-xs">
+                      <div className="text-amber-400 font-semibold mb-1">💡 Design Tip</div>
+                      <div className="text-slate-300">
+                        Draw your {activeZoneType === 'roof' ? 'roof outline' : activeZoneType === 'ground' ? 'ground area' : 'fence line'} on the map.
+                        The system will auto-place panels to reach your {billAnalysis.recommendedSystemKw} kW target.
+                      </div>
+                    </div>
+
+                    {billAnalysis.batteryRecommendation && (
+                      <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 text-xs">
+                        <div className="text-purple-400 font-semibold mb-1">🔋 Battery Recommendation</div>
+                        <div className="text-slate-300 mb-2">{billAnalysis.batteryRecommendation.reason}</div>
+                        <div className="grid grid-cols-2 gap-1">
+                          <div><span className="text-slate-500">Daily Usage:</span> <span className="text-white">{billAnalysis.batteryRecommendation.dailyUsageKwh} kWh</span></div>
+                          <div><span className="text-slate-500">Night Usage:</span> <span className="text-white">{billAnalysis.batteryRecommendation.nighttimeUsageKwh} kWh</span></div>
+                          <div><span className="text-slate-500">Rec. Capacity:</span> <span className="text-amber-400 font-semibold">{billAnalysis.batteryRecommendation.recommendedCapacityKwh} kWh</span></div>
+                          <div><span className="text-slate-500">Backup:</span> <span className="text-white">{billAnalysis.batteryRecommendation.backupHours}h</span></div>
+                        </div>
+                        <button onClick={() => setActiveTab('battery')} className="btn-secondary w-full mt-2 text-xs">
+                          View Battery Options →
+                        </button>
+                      </div>
+                    )}
+                  </Section>
+                )}
+              </>
+            )}
+
+            {/* ── EQUIPMENT TAB ── */}
+            {activeTab === 'equipment' && (
+              <>
+                {/* Panel Selection */}
+                <Section title="Solar Panels" icon={<Sun size={12} />} badge={`${availablePanels.length} models`}>
+                  <div className="relative">
+                    <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      value={panelFilter}
+                      onChange={e => setPanelFilter(e.target.value)}
+                      placeholder="Search panels..."
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg pl-7 pr-3 py-1.5 text-xs text-white placeholder-slate-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {filteredPanels.map(p => (
+                      <button
+                        key={p.id}
+                        onClick={() => { clearGridCache(); setSelectedPanel(p); }}
+                        className={`w-full text-left p-2.5 rounded-lg border transition-all ${
+                          selectedPanel.id === p.id
+                            ? 'bg-amber-500/15 border-amber-500/40'
+                            : 'bg-slate-800/40 border-slate-700/50 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-white truncate">{p.manufacturer}</div>
+                            <div className="text-xs text-slate-400 truncate">{p.model}</div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-xs font-bold text-amber-400">{p.wattage}W</div>
+                            <div className="text-xs text-slate-500">{p.efficiency}%</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className="text-xs text-slate-500">{(p.width * FEET_PER_METER).toFixed(2)}×{(p.height * FEET_PER_METER).toFixed(2)}ft</span>
+                          {p.bifacial && <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Bifacial</span>}
+                          {p.cellType && <span className="text-xs text-slate-600">{p.cellType}</span>}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {selectedPanel && (
+                    <div className="bg-slate-800/60 rounded-lg p-3 text-xs space-y-1.5">
+                      <div className="text-slate-300 font-semibold">Selected: {selectedPanel.manufacturer} {selectedPanel.model}</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        <div><span className="text-slate-500">Wattage:</span> <span className="text-amber-400 font-semibold">{selectedPanel.wattage}W</span></div>
+                        <div><span className="text-slate-500">Efficiency:</span> <span className="text-white">{selectedPanel.efficiency}%</span></div>
+                        <div><span className="text-slate-500">Size:</span> <span className="text-white">{(selectedPanel.width * FEET_PER_METER).toFixed(2)}×{(selectedPanel.height * FEET_PER_METER).toFixed(2)}ft</span></div>
+                        <div><span className="text-slate-500">Temp Coeff:</span> <span className="text-white">{selectedPanel.temperatureCoeff}%/°C</span></div>
+                        <div><span className="text-slate-500">Bifacial:</span> <span className={selectedPanel.bifacial ? 'text-emerald-400' : 'text-slate-400'}>{selectedPanel.bifacial ? `Yes (×${selectedPanel.bifacialFactor})` : 'No'}</span></div>
+                        <div><span className="text-slate-500">Warranty:</span> <span className="text-white">{selectedPanel.warranty || 25}yr</span></div>
+                      </div>
+                    </div>
+                  )}
+                </Section>
+
+                {/* Inverter Selection */}
+                <Section title="Inverters" icon={<Zap size={12} />} badge={`${availableInverters.length} models`} defaultOpen={false}>
+                  <div className="relative">
+                    <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                    <input
+                      type="text"
+                      value={inverterFilter}
+                      onChange={e => setInverterFilter(e.target.value)}
+                      placeholder="Search inverters..."
+                      className="w-full bg-slate-800 border border-slate-600 rounded-lg pl-7 pr-3 py-1.5 text-xs text-white placeholder-slate-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    {filteredInverters.map(inv => (
+                      <button
+                        key={inv.id}
+                        onClick={() => setSelectedInverter(inv)}
+                        className={`w-full text-left p-2.5 rounded-lg border transition-all ${
+                          selectedInverter?.id === inv.id
+                            ? 'bg-blue-500/15 border-blue-500/40'
+                            : 'bg-slate-800/40 border-slate-700/50 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-white truncate">{inv.manufacturer}</div>
+                            <div className="text-xs text-slate-400 truncate">{inv.model}</div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-xs font-bold text-blue-400">{inv.capacity}kW</div>
+                            <div className="text-xs text-slate-500">{inv.efficiency}%</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            inv.type === 'micro' ? 'bg-emerald-500/20 text-emerald-400' :
+                            inv.type === 'optimizer' ? 'bg-blue-500/20 text-blue-400' :
+                            'bg-slate-700 text-slate-400'
+                          }`}>{inv.type}</span>
+                          {inv.batteryCompatible && <span className="text-xs bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">Battery Ready</span>}
+                          <span className="text-xs text-slate-600">${inv.pricePerUnit.toLocaleString()}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </Section>
+              </>
+            )}
+
+            {/* ── BATTERY TAB ── */}
+            {activeTab === 'battery' && (
+              <>
+                <Section title="Battery Storage" icon={<BatteryIcon size={12} />} badge={`${availableBatteries.length} models`}>
+                  <div className="text-xs text-slate-400 bg-slate-800/40 rounded-lg p-2.5">
+                    Battery storage provides backup power, maximizes self-consumption, and protects against outages.
+                  </div>
+
+                  <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                    {availableBatteries.map((bat: any) => (
+                      <button
+                        key={bat.id}
+                        onClick={() => setSelectedBattery(selectedBattery?.id === bat.id ? null : bat)}
+                        className={`w-full text-left p-2.5 rounded-lg border transition-all ${
+                          selectedBattery?.id === bat.id
+                            ? 'bg-purple-500/15 border-purple-500/40'
+                            : 'bg-slate-800/40 border-slate-700/50 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-white truncate">{bat.manufacturer}</div>
+                            <div className="text-xs text-slate-400 truncate">{bat.model}</div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-xs font-bold text-purple-400">{bat.capacityKwh} kWh</div>
+                            <div className="text-xs text-slate-500">{bat.powerKw}kW</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            bat.chemistry === 'LFP' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
+                          }`}>{bat.chemistry}</span>
+                          <span className="text-xs text-slate-500">{bat.roundTripEfficiency}% RTE</span>
+                          {bat.cycles && <span className="text-xs text-slate-600">{bat.cycles.toLocaleString()} cycles</span>}
+                          <span className="text-xs text-slate-500">${bat.pricePerUnit.toLocaleString()}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </Section>
+
+                {selectedBattery && (
+                  <Section title="Battery Configuration" icon={<Settings size={12} />}>
+                    <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3 text-xs">
+                      <div className="font-semibold text-purple-300 mb-2">{selectedBattery.manufacturer} {selectedBattery.model}</div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <div><span className="text-slate-500">Capacity:</span> <span className="text-purple-400 font-semibold">{selectedBattery.capacityKwh} kWh</span></div>
+                        <div><span className="text-slate-500">Power:</span> <span className="text-white">{selectedBattery.powerKw} kW</span></div>
+                        <div><span className="text-slate-500">Chemistry:</span> <span className="text-white">{selectedBattery.chemistry}</span></div>
+                        <div><span className="text-slate-500">Warranty:</span> <span className="text-white">{selectedBattery.warranty}yr</span></div>
+                        {selectedBattery.dimensions && <div className="col-span-2"><span className="text-slate-500">Dimensions:</span> <span className="text-white">{selectedBattery.dimensions}</span></div>}
+                        {selectedBattery.weight && <div><span className="text-slate-500">Weight:</span> <span className="text-white">{selectedBattery.weight}kg</span></div>}
+                      </div>
+                    </div>
+
+                    {selectedBattery.stackable && (
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="text-xs text-slate-400">Number of Units</label>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setBatteryCount(Math.max(1, batteryCount - 1))}
+                              className="w-6 h-6 rounded bg-slate-700 text-white flex items-center justify-center hover:bg-slate-600"
+                            >
+                              <MinusIcon size={12} />
+                            </button>
+                            <span className="text-white font-semibold w-6 text-center">{batteryCount}</span>
+                            <button
+                              onClick={() => setBatteryCount(Math.min(selectedBattery.maxUnits || 4, batteryCount + 1))}
+                              className="w-6 h-6 rounded bg-slate-700 text-white flex items-center justify-center hover:bg-slate-600"
+                            >
+                              <Plus size={12} />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-slate-800/60 rounded-lg p-2">
+                            <div className="text-slate-400">Total Capacity</div>
+                            <div className="font-bold text-purple-400">{(selectedBattery.capacityKwh * batteryCount).toFixed(1)} kWh</div>
+                          </div>
+                          <div className="bg-slate-800/60 rounded-lg p-2">
+                            <div className="text-slate-400">Total Cost</div>
+                            <div className="font-bold text-white">${(selectedBattery.pricePerUnit * batteryCount).toLocaleString()}</div>
+                          </div>
+                          <div className="bg-slate-800/60 rounded-lg p-2">
+                            <div className="text-slate-400">Total Power</div>
+                            <div className="font-bold text-white">{(selectedBattery.powerKw * batteryCount).toFixed(1)} kW</div>
+                          </div>
+                          <div className="bg-slate-800/60 rounded-lg p-2">
+                            <div className="text-slate-400">After Tax Credit</div>
+                            <div className="font-bold text-emerald-400">${Math.round(selectedBattery.pricePerUnit * batteryCount * 0.7).toLocaleString()}</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Backup estimate */}
+                    {billAnalysis && (
+                      <div className="bg-slate-800/60 rounded-lg p-3 text-xs">
+                        <div className="text-slate-300 font-semibold mb-1.5">Backup Estimate</div>
+                        <div className="space-y-1">
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Daily Usage</span>
+                            <span className="text-white">{(billAnalysis.annualKwh / 365).toFixed(1)} kWh/day</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-slate-400">Battery Capacity</span>
+                            <span className="text-purple-400">{(selectedBattery.capacityKwh * batteryCount).toFixed(1)} kWh</span>
+                          </div>
+                          <div className="flex justify-between border-t border-slate-700 pt-1">
+                            <span className="text-slate-300 font-semibold">Backup Duration</span>
+                            <span className="text-emerald-400 font-bold">
+                              {((selectedBattery.capacityKwh * batteryCount) / (billAnalysis.annualKwh / 365) * 24).toFixed(1)}h
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </Section>
+                )}
+
+                {!selectedBattery && (
+                  <div className="p-4 text-center text-slate-500 text-xs">
+                    Select a battery above to configure storage
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

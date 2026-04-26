@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Job 1: Unit tests
+  # ─────────────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:ci
+        env:
+          # Stub values — allow env-check.ts to pass without real secrets
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          JWT_SECRET: ci-test-secret-do-not-use-in-production
+          OPENAI_API_KEY: sk-test-placeholder
+          GOOGLE_MAPS_API_KEY: test-placeholder
+          RESEND_API_KEY: re_test_placeholder
+          NEXT_PUBLIC_BASE_URL: https://localhost:3000
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 2: TypeScript type check
+  # ─────────────────────────────────────────────────────────────────
+  type-check:
+    name: TypeScript Type Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run type-check
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 3: ESLint
+  # ─────────────────────────────────────────────────────────────────
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 4: Environment variable audit
+  #
+  # Runs scripts/check-env.js which verifies:
+  #   • All required vars are referenced in lib/ and app/
+  #   • All required vars are documented in .env.example
+  #   • All recommended vars are documented in .env.example
+  #
+  # This job does NOT check actual runtime values (no real secrets
+  # needed). It validates that the codebase is correctly wired up
+  # so that a Vercel deployment without env vars will fail fast
+  # instead of silently serving broken responses.
+  # ─────────────────────────────────────────────────────────────────
+  env-audit:
+    name: Env Var Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Run env audit script
+        run: node scripts/check-env.js
+
+  # ─────────────────────────────────────────────────────────────────
+  # Job 5: Build gate (deployment blocker)
+  #
+  # Runs only on push to master after test + type-check + lint pass.
+  # Uses stub env vars — the validateBuildEnv() in next.config.js
+  # uses process.exit(1) if REQUIRED vars are absent, so the build
+  # job acts as a gate: if someone removes a required var from
+  # next.config.js this job would break and catch it before deploy.
+  #
+  # NOTE: Real production env vars are set in Vercel, not here.
+  # Stub values are intentional — the build validates structure,
+  # not runtime connectivity.
+  # ─────────────────────────────────────────────────────────────────
+  build:
+    name: Build Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [env-audit]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          # Stub values for CI build — next.config.js validateBuildEnv() allows
+          # stubs so CI builds succeed; Vercel must have real values set.
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          JWT_SECRET: ci-build-secret-do-not-use-in-production
+          OPENAI_API_KEY: sk-test-placeholder
+          GOOGLE_MAPS_API_KEY: test-placeholder
+          RESEND_API_KEY: re_test_placeholder
+          NEXT_PUBLIC_BASE_URL: https://localhost:3000
+          # Silence Next.js telemetry in CI
+          NEXT_TELEMETRY_DISABLED: '1'
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: nextjs-build-${{ github.sha }}
+          path: .next/
+          retention-days: 3
+
+  # ─────────────────────────────────────────────────────────────────
+  # Summary job — always runs last, fails CI if any required job failed
+  # ─────────────────────────────────────────────────────────────────
+  ci-complete:
+    name: CI Complete
+    runs-on: ubuntu-latest
+    needs: [test, type-check, lint, env-audit]
+    if: always()
+
+    steps:
+      - name: Report CI status
+        run: |
+          echo "=== CI Summary ==="
+          echo "test:        ${{ needs.test.result }}"
+          echo "type-check:  ${{ needs.type-check.result }}"
+          echo "lint:        ${{ needs.lint.result }}"
+          echo "env-audit:   ${{ needs.env-audit.result }}"
+          echo ""
+          if [ "${{ needs.test.result }}"       != "success" ] || \
+             [ "${{ needs.type-check.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}"        != "success" ] || \
+             [ "${{ needs.env-audit.result }}"   != "success" ]; then
+            echo "STATUS: FAILED — one or more CI jobs did not succeed"
+            exit 1
+          fi
+          echo "STATUS: PASSED — all CI gates green"

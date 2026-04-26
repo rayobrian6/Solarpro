@@ -1,0 +1,1351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Integration Staging Report v1 — SolarPro × Site Survey App</title>
+  
+<style>
+  :root {
+    --ink: #1a1f2e;
+    --muted: #5a6478;
+    --line: #e3e7ee;
+    --bg: #ffffff;
+    --bg-alt: #f7f9fc;
+    --accent: #2e5bff;
+    --green: #1d9a5a;
+    --yellow: #b48a00;
+    --red: #c8372d;
+    --mono: 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Roboto Mono', Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 48px 120px;
+    line-height: 1.58;
+    font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  h1 + p, h1 + p + p { color: var(--muted); margin: 4px 0; }
+  h2 {
+    font-size: 22px;
+    font-weight: 650;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 650;
+    margin: 32px 0 12px;
+    color: var(--ink);
+  }
+  h4 {
+    font-size: 15px;
+    font-weight: 650;
+    margin: 24px 0 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); }
+  a:hover { border-bottom-style: solid; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+  code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg-alt);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--bg-alt);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: 13px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-alt);
+    font-weight: 650;
+    color: var(--ink);
+  }
+  tbody tr:nth-child(even) { background: #fafbfd; }
+  ul, ol { padding-left: 22px; margin: 10px 0; }
+  li { margin: 4px 0; }
+  blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 16px 0;
+    padding: 4px 16px;
+    background: var(--bg-alt);
+    color: var(--muted);
+  }
+  /* Callouts */
+  .header-bar {
+    background: linear-gradient(135deg, #2e5bff, #1e3f99);
+    color: white;
+    margin: -40px -48px 32px;
+    padding: 36px 48px;
+    border-radius: 0 0 4px 4px;
+  }
+  .header-bar h1 { color: white; font-size: 30px; }
+  .header-bar p { color: rgba(255,255,255,0.9); }
+  /* Traffic-light emoji sizing inside tables */
+  td, th { font-size: 14px; }
+  /* Code inside table cells */
+  td code, th code { font-size: 12.5px; padding: 1px 5px; }
+  /* Print */
+  @media print {
+    body { max-width: none; padding: 20px; font-size: 11pt; }
+    h2 { page-break-after: avoid; }
+    table, pre { page-break-inside: avoid; }
+    .header-bar { background: #2e5bff; color: white; -webkit-print-color-adjust: exact; }
+  }
+</style>
+
+</head>
+<body>
+  <h1 id="solarpro-site-survey-app-integration-staging-report-v1">SolarPro ⇄ Site Survey App — Integration Staging Report v1</h1>
+<p><strong>Report date:</strong> 2026-04-23
+<strong>SolarPro build:</strong> v47.434a (shipped on disk, pending git push)
+<strong>Partner build:</strong> <code>kilby8/site_survey-app</code> @ <code>2cc3537f</code> ("Complete phases 1-7: UUID contract, handoff/webhooks, retention/GDPR, observability")
+<strong>Report owner:</strong> SolarPro engineering
+<strong>Distribution:</strong> both engineering teams, ops/secrets custodian on both sides</p>
+<hr />
+<h2 id="0-how-to-read-this-document">0. How to read this document</h2>
+<p>This is a <strong>shared state of the union</strong> between the two systems. It's meant to be the single source of truth that both teams look at before writing code, shipping a release, or updating secrets. Every section has a <strong>SolarPro column</strong> and a <strong>Partner column</strong> so either side can see the counterparty commitment.</p>
+<p>Sections:
+1. Executive summary + traffic light
+2. Architecture snapshot (both sides)
+3. Inbound webhook contract (partner → SolarPro)
+4. Outbound handoff contract (SolarPro → partner)
+5. Delivery semantics (retries, timeouts, idempotency, observability)
+6. Secrets + environment variables
+7. Release alignment roadmap
+8. Shared test plan — unit / contract / staging / production smoke
+9. Open questions (owner + due date)
+10. Change log</p>
+<hr />
+<h2 id="1-executive-summary">1. Executive Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>SolarPro</th>
+<th>Partner</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Webhook receiver endpoint</td>
+<td>✅ v47.434 shipped</td>
+<td>✅ Producer shipped</td>
+<td>🟢</td>
+</tr>
+<tr>
+<td>HMAC wire-format compatibility</td>
+<td>✅ v47.434a shipped</td>
+<td>✅</td>
+<td>🟢</td>
+</tr>
+<tr>
+<td>Idempotency (by <code>event_id</code>)</td>
+<td>✅</td>
+<td>✅</td>
+<td>🟢</td>
+</tr>
+<tr>
+<td>Delivery log / observability</td>
+<td>✅ admin endpoint live</td>
+<td>✅ admin endpoint live</td>
+<td>🟢</td>
+</tr>
+<tr>
+<td><strong>Full ingest pipeline (fetch + transform)</strong></td>
+<td>⏳ v47.435 planned</td>
+<td>✅ <code>GET /api/surveys/{id}</code> live</td>
+<td>🟡</td>
+</tr>
+<tr>
+<td><strong>Handoff JWT minter (outbound)</strong></td>
+<td>⏳ v47.435 or v47.436</td>
+<td>✅ <code>GET /api/handoff/:token</code> live</td>
+<td>🟡</td>
+</tr>
+<tr>
+<td>Photos / notes / checklist ingest</td>
+<td>⏳ v47.436</td>
+<td>✅ stored in survey DB</td>
+<td>🟡</td>
+</tr>
+<tr>
+<td>Shared secret exchanged</td>
+<td>❌ pending</td>
+<td>❌ pending</td>
+<td>🔴</td>
+</tr>
+<tr>
+<td>Staging environments networked</td>
+<td>❌ pending</td>
+<td>❌ pending</td>
+<td>🔴</td>
+</tr>
+<tr>
+<td>End-to-end smoke passing</td>
+<td>❌ pending</td>
+<td>❌ pending</td>
+<td>🔴</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Legend:</strong> 🟢 aligned — 🟡 one side ready, waiting on counterparty — 🔴 blocker</p>
+<p><strong>Single most important next step:</strong> exchange the two shared secrets (<code>SURVEY_WEBHOOK_SECRET</code> inbound, <code>SOLARPRO_HANDOFF_SECRET</code> outbound) and wire staging deployments together. Everything else can proceed in parallel on both sides.</p>
+<hr />
+<h2 id="2-architecture-snapshot">2. Architecture Snapshot</h2>
+<h3 id="21-data-flow-at-a-glance">2.1 Data flow at a glance</h3>
+<pre><code>┌──────────────────┐       (1) User opens survey from       ┌──────────────────┐
+│                  │  ────── project detail with JWT ─────► │                  │
+│    SolarPro      │                                        │   Site Survey    │
+│   (Next.js 15)   │◄──── (2) Partner redirects inspector ──│   App backend    │
+│                  │         (survey launches on mobile)    │   (Express/Pg)   │
+│                  │                                        │                  │
+│                  │  ◄── (3) survey.completed webhook ─────│                  │
+│                  │          (HMAC-signed thin-ish event)  │                  │
+│                  │                                        │                  │
+│                  │  ───── (4) GET /api/surveys/{id} ─────►│                  │
+│                  │          (fetch full payload)          │                  │
+│                  │                                        │                  │
+│                  │  ◄─── full survey JSON + photo URLs ───│                  │
+│                  │                                        │                  │
+│                  │  ───── (5) GET each photo URL ────────►│                  │
+│                  │                                        │                  │
+└──────────────────┘                                        └──────────────────┘
+</code></pre>
+<p><strong>Steps 1–2 = outbound from SolarPro</strong> (handoff JWT + deep-link). Ships v47.435+.
+<strong>Steps 3–5 = inbound to SolarPro</strong> (webhook + full fetch + photos). Step 3 receiver shipped v47.434a; steps 4–5 ship v47.435+.</p>
+<h3 id="22-solarpro-side-us">2.2 SolarPro side (us)</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Status</th>
+<th>Files</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DB schema</td>
+<td>✅ <code>projects.survey_external_id</code>, <code>projects.origin</code>, <code>projects.survey_category</code>, <code>projects.survey_meta</code>, <code>project_files.external_id</code>, <code>project_files.status</code>, <code>webhook_deliveries</code></td>
+<td><code>migrations/011_survey_ingest.sql</code></td>
+</tr>
+<tr>
+<td>HMAC verifier</td>
+<td>✅ dual-mode (ISO + Unix epoch), optional <code>sha256=</code> prefix</td>
+<td><code>lib/survey/verifyWebhookSignature.ts</code></td>
+</tr>
+<tr>
+<td>Envelope validator</td>
+<td>✅ v1.0 contract, <code>schemaVersion</code> optional</td>
+<td><code>lib/survey/envelopeValidator.ts</code></td>
+</tr>
+<tr>
+<td>Webhook receiver</td>
+<td>✅ verifies + logs + returns 501 (ingest TODO)</td>
+<td><code>app/api/webhooks/survey-complete/route.ts</code></td>
+</tr>
+<tr>
+<td>Admin delivery log</td>
+<td>✅ GET with filters</td>
+<td><code>app/api/admin/survey-webhook-log/route.ts</code></td>
+</tr>
+<tr>
+<td>Admin replay</td>
+<td>⏳ 501 stub</td>
+<td><code>app/api/admin/survey-webhook-log/[id]/replay/route.ts</code></td>
+</tr>
+<tr>
+<td>Ingest pipeline</td>
+<td>⏳ <strong>v47.435</strong></td>
+<td><code>lib/survey/ingest/</code> (not yet created)</td>
+</tr>
+<tr>
+<td>Handoff JWT minter</td>
+<td>⏳ <strong>v47.435/v47.436</strong></td>
+<td><code>lib/survey/handoff/</code> (not yet created)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="23-partner-side-inferred-from-kilby8site_survey-app-2cc3537f">2.3 Partner side (inferred from <code>kilby8/site_survey-app</code> @ <code>2cc3537f</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Status</th>
+<th>File / endpoint</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Survey completion trigger</td>
+<td>✅ <code>POST /api/surveys/:id/complete</code></td>
+<td><code>backend/src/routes/surveys.ts:1135</code></td>
+</tr>
+<tr>
+<td>Outbound webhook signer</td>
+<td>✅ HMAC-SHA256, <code>sha256=&lt;hex&gt;</code> prefix, ISO timestamp</td>
+<td><code>backend/src/services/webhookService.ts:159</code></td>
+</tr>
+<tr>
+<td>Webhook queue + worker</td>
+<td>✅ exponential retry 1/5/30min · 2h · 12h, 30s poll, batch 25</td>
+<td><code>backend/src/services/webhookService.ts</code></td>
+</tr>
+<tr>
+<td>Handoff JWT consumer</td>
+<td>✅ <code>GET /api/handoff/:token</code> with HS256 verify + <code>jti</code> replay defence</td>
+<td><code>backend/src/routes/handoff.ts</code></td>
+</tr>
+<tr>
+<td>Full survey GET</td>
+<td>✅ <code>GET /api/surveys/:id</code> (bearer JWT auth)</td>
+<td><code>backend/src/routes/surveys.ts</code></td>
+</tr>
+<tr>
+<td>Admin delivery log</td>
+<td>✅ <code>GET /api/surveys/admin/webhook-deliveries</code></td>
+<td><code>backend/src/routes/surveys.ts:1233</code></td>
+</tr>
+<tr>
+<td>Metrics snapshot</td>
+<td>✅ <code>GET /api/metrics</code> (admin)</td>
+<td><code>backend/src/services/metrics.ts</code></td>
+</tr>
+<tr>
+<td>OpenAPI spec</td>
+<td>✅ <code>GET /api/openapi.json</code></td>
+<td><code>backend/src/routes/openapi.ts</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-inbound-webhook-contract-partner-solarpro">3. Inbound Webhook Contract (Partner → SolarPro)</h2>
+<h3 id="31-endpoint">3.1 Endpoint</h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL</td>
+<td><code>POST ${SOLARPRO_BASE_URL}/api/webhooks/survey-complete</code></td>
+</tr>
+<tr>
+<td>Content-Type</td>
+<td><code>application/json</code></td>
+</tr>
+<tr>
+<td>Auth</td>
+<td>HMAC headers (see below), no bearer</td>
+</tr>
+<tr>
+<td>Max body size</td>
+<td>&lt;1 MB (thin-ish event; fat fields bring it to ~600 bytes)</td>
+</tr>
+<tr>
+<td>Response timeout (partner side)</td>
+<td>~30 s per attempt</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-required-headers">3.2 Required headers</h3>
+<table>
+<thead>
+<tr>
+<th>Header</th>
+<th>Format</th>
+<th>Example</th>
+<th>Origin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>X-Survey-Signature</code></td>
+<td><code>sha256=&lt;64 lowercase hex&gt;</code></td>
+<td><code>sha256=a1b2c3...</code></td>
+<td><code>HMAC-SHA256(secret, "${timestamp}.${rawBody}")</code></td>
+</tr>
+<tr>
+<td><code>X-Survey-Timestamp</code></td>
+<td>ISO-8601 from <code>new Date().toISOString()</code></td>
+<td><code>2026-04-23T18:25:43.000Z</code></td>
+<td>partner clock</td>
+</tr>
+<tr>
+<td><code>X-Survey-Event-Id</code></td>
+<td>UUID v4</td>
+<td><code>7c6f2e2e-9b4a-4d1f-8a1c-...</code></td>
+<td>idempotency key</td>
+</tr>
+</tbody>
+</table>
+<p><strong>SolarPro verifier tolerance:</strong> 5 minutes (±300 s). Legacy Unix-epoch integer timestamps are also accepted to keep internal signing paths open, but <strong>partner signs with ISO-8601</strong>.</p>
+<p><strong>SolarPro verifier prefix tolerance:</strong> <code>sha256=</code> (case-insensitive) is stripped before comparison; raw hex is also accepted.</p>
+<h3 id="33-body-schema">3.3 Body schema</h3>
+<pre><code class="language-json">{
+  &quot;event&quot;: &quot;survey.completed&quot;,
+  &quot;event_id&quot;: &quot;7c6f2e2e-9b4a-4d1f-8a1c-0123456789ab&quot;,
+  &quot;occurred_at&quot;: &quot;2026-04-23T18:25:43.000Z&quot;,
+  &quot;survey_id&quot;: &quot;a1b2c3d4-5e6f-7890-abcd-ef0123456789&quot;,
+  &quot;status&quot;: &quot;submitted&quot;,
+  &quot;project_id&quot;: &quot;11111111-2222-3333-4444-555555555555&quot;,
+  &quot;project_name&quot;: &quot;Smith Residence&quot;,
+  &quot;inspector_name&quot;: &quot;Jane Doe&quot;,
+  &quot;site_name&quot;: &quot;123 Solar Way, Austin TX&quot;,
+  &quot;completed_at&quot;: &quot;2026-04-23T18:25:43.000Z&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required?</th>
+<th>SolarPro v47.434a treatment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>event</code></td>
+<td><code>"survey.completed"</code></td>
+<td>yes</td>
+<td>validated against <code>SUPPORTED_SURVEY_EVENT_TYPES</code></td>
+</tr>
+<tr>
+<td><code>event_id</code></td>
+<td>UUID string</td>
+<td>yes</td>
+<td>idempotency key; stored in <code>webhook_deliveries.event_id</code></td>
+</tr>
+<tr>
+<td><code>occurred_at</code></td>
+<td>ISO-8601</td>
+<td>yes (partner)</td>
+<td>silently dropped today; <strong>v47.435 will store</strong></td>
+</tr>
+<tr>
+<td><code>survey_id</code></td>
+<td>UUID string</td>
+<td>yes</td>
+<td>stored as <code>projects.survey_external_id</code> in v47.435</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>yes (partner)</td>
+<td>silently dropped today; <strong>v47.435 may use for completeness check</strong></td>
+</tr>
+<tr>
+<td><code>project_id</code></td>
+<td>UUID string | null</td>
+<td>yes (partner)</td>
+<td>silently dropped today; <strong>v47.435 will use for correlation if non-null</strong></td>
+</tr>
+<tr>
+<td><code>project_name</code></td>
+<td>string</td>
+<td>yes (partner)</td>
+<td>silently dropped today; <strong>v47.435 will use for display metadata</strong></td>
+</tr>
+<tr>
+<td><code>inspector_name</code></td>
+<td>string</td>
+<td>yes (partner)</td>
+<td>silently dropped today; <strong>v47.435 will store in <code>projects.survey_meta.inspector_name</code></strong></td>
+</tr>
+<tr>
+<td><code>site_name</code></td>
+<td>string</td>
+<td>yes (partner)</td>
+<td>silently dropped today; <strong>v47.435 may use for project name default</strong></td>
+</tr>
+<tr>
+<td><code>completed_at</code></td>
+<td>ISO-8601</td>
+<td>yes</td>
+<td>stored for audit; surfaced in admin log</td>
+</tr>
+<tr>
+<td><code>schemaVersion</code></td>
+<td><code>"1.0"</code></td>
+<td>optional</td>
+<td>coerced to <code>"1.0"</code> when absent; explicit mismatch rejected</td>
+</tr>
+<tr>
+<td><code>survey_url</code></td>
+<td>URL string</td>
+<td>optional</td>
+<td>will be used by v47.435 if present, else derive from <code>${SURVEY_BACKEND_URL}/api/surveys/${survey_id}</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="34-response-contract-solarpro-partner">3.4 Response contract (SolarPro → Partner)</h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>HTTP</th>
+<th>Body shape</th>
+<th>Partner's retry behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Duplicate <code>event_id</code></td>
+<td><code>200</code></td>
+<td><code>{ success: true, data: { duplicate: true, existingDeliveryId, existingStatus } }</code></td>
+<td>stops retrying ✅</td>
+</tr>
+<tr>
+<td>Verified + validated, ingest not yet implemented</td>
+<td><code>501</code></td>
+<td><code>{ success: false, reason: "INGEST_NOT_IMPLEMENTED", deliveryId, event: {...} }</code></td>
+<td>⚠️ <strong>will retry up to 5 times</strong> per their schedule — see §3.5</td>
+</tr>
+<tr>
+<td>Verified + validated, ingest succeeds (v47.435+)</td>
+<td><code>200</code></td>
+<td><code>{ success: true, data: { deliveryId, projectId, status: "ingested" } }</code></td>
+<td>stops retrying ✅</td>
+</tr>
+<tr>
+<td>HMAC / timestamp failure</td>
+<td><code>401</code></td>
+<td><code>{ success: false, error: "Signature verification failed", reason, deliveryId }</code></td>
+<td>retries per partner policy</td>
+</tr>
+<tr>
+<td>Envelope validation failure</td>
+<td><code>400</code></td>
+<td><code>{ success: false, error, deliveryId }</code></td>
+<td>retries per partner policy</td>
+</tr>
+<tr>
+<td>DB unavailable</td>
+<td><code>503</code></td>
+<td><code>{ success: false, error: "Database unavailable" }</code></td>
+<td>retries per partner policy</td>
+</tr>
+<tr>
+<td>Receiver misconfigured (no <code>SURVEY_WEBHOOK_SECRET</code>)</td>
+<td><code>500</code></td>
+<td><code>{ success: false, error: "Webhook receiver not configured" }</code></td>
+<td>retries per partner policy</td>
+</tr>
+</tbody>
+</table>
+<h3 id="35-known-friction-point-501-during-v47434a">3.5 Known friction point — 501 during v47.434a</h3>
+<p><strong>Problem:</strong> SolarPro v47.434a returns <code>501</code> on successful HMAC + envelope validation because ingest isn't implemented. Partner's queue treats this as a retryable failure → every webhook will consume all 5 retry slots over ~16h until it hits <code>permanent_failure</code>.</p>
+<p><strong>Options:</strong></p>
+<ul>
+<li><strong>Option A (recommended, defer to v47.435):</strong> We ship v47.435 ingest pipeline before any real webhooks start flowing. Until then, don't enable the partner → SolarPro webhook in staging. Zero friction.</li>
+<li><strong>Option B (quick patch, optional):</strong> SolarPro ships <strong>v47.434b</strong> that returns <code>202 Accepted</code> on successful HMAC + validation (instead of <code>501</code>). Body carries <code>reason: "INGEST_NOT_IMPLEMENTED_BUT_LOGGED"</code>. Partner's worker stops retrying; we still get the delivery logged. <strong>Risk:</strong> gives a false positive impression the integration works end-to-end.</li>
+<li><strong>Option C:</strong> Partner configures a retry backoff exemption for 501 status codes. Small config change on their side.</li>
+</ul>
+<p><strong>Decision needed from both teams.</strong> See §9 Open Questions.</p>
+<hr />
+<h2 id="4-outbound-handoff-contract-solarpro-partner">4. Outbound Handoff Contract (SolarPro → Partner)</h2>
+<h3 id="41-purpose">4.1 Purpose</h3>
+<p>When a SolarPro user clicks <strong>"Start site survey"</strong> on a project detail page, we mint a short-lived JWT and redirect the inspector's mobile/web browser to the partner's survey launcher with the token in the URL. The partner's <code>GET /api/handoff/:token</code> consumes it and pre-fills the new-survey form.</p>
+<h3 id="42-token-format">4.2 Token format</h3>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Algorithm</td>
+<td>HS256 (HMAC-SHA256)</td>
+</tr>
+<tr>
+<td>Secret</td>
+<td><code>SOLARPRO_HANDOFF_SECRET</code> (same value on both sides)</td>
+</tr>
+<tr>
+<td>TTL (recommended)</td>
+<td>10 minutes</td>
+</tr>
+<tr>
+<td>Replay defence</td>
+<td><code>jti</code> claim; partner upserts into <code>used_handoff_tokens</code>; second presentation returns <code>409 HANDOFF_TOKEN_REPLAYED</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="43-jwt-claims">4.3 JWT claims</h3>
+<table>
+<thead>
+<tr>
+<th>Claim</th>
+<th>Type</th>
+<th>Required?</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>jti</code></td>
+<td>UUID v4</td>
+<td><strong>yes</strong></td>
+<td>replay defence</td>
+</tr>
+<tr>
+<td><code>project_id</code></td>
+<td>UUID</td>
+<td><strong>yes</strong></td>
+<td>partner's <code>project_id</code> column — correlates back to SolarPro project</td>
+</tr>
+<tr>
+<td><code>project_name</code></td>
+<td>string</td>
+<td>optional</td>
+<td>display header in survey UI</td>
+</tr>
+<tr>
+<td><code>site_name</code></td>
+<td>string</td>
+<td>optional</td>
+<td>display subheader</td>
+</tr>
+<tr>
+<td><code>site_address</code></td>
+<td>string</td>
+<td>optional</td>
+<td>pre-filled address field</td>
+</tr>
+<tr>
+<td><code>inspector_name</code></td>
+<td>string</td>
+<td>optional</td>
+<td>pre-filled inspector field</td>
+</tr>
+<tr>
+<td><code>category_id</code></td>
+<td>UUID</td>
+<td>optional</td>
+<td>partner's category table reference</td>
+</tr>
+<tr>
+<td><code>category_name</code></td>
+<td>string</td>
+<td>optional</td>
+<td>display name</td>
+</tr>
+<tr>
+<td><code>notes</code></td>
+<td>string</td>
+<td>optional</td>
+<td>pre-filled notes field</td>
+</tr>
+<tr>
+<td><code>latitude</code></td>
+<td>number</td>
+<td>optional</td>
+<td>pre-filled GPS</td>
+</tr>
+<tr>
+<td><code>longitude</code></td>
+<td>number</td>
+<td>optional</td>
+<td>pre-filled GPS</td>
+</tr>
+<tr>
+<td><code>gps_accuracy</code></td>
+<td>number</td>
+<td>optional</td>
+<td>pre-filled GPS accuracy (meters)</td>
+</tr>
+<tr>
+<td><code>metadata</code></td>
+<td>object</td>
+<td>optional</td>
+<td>arbitrary extra context</td>
+</tr>
+<tr>
+<td><code>exp</code></td>
+<td>Unix seconds</td>
+<td><strong>yes</strong> (standard JWT)</td>
+<td>enforce TTL</td>
+</tr>
+<tr>
+<td><code>iat</code></td>
+<td>Unix seconds</td>
+<td><strong>yes</strong> (standard JWT)</td>
+<td>issued-at audit</td>
+</tr>
+</tbody>
+</table>
+<h3 id="44-launch-url-shape">4.4 Launch URL shape</h3>
+<pre><code>https://&lt;partner-mobile-host&gt;/launch?token=&lt;JWT&gt;
+</code></pre>
+<p>or (web fallback):</p>
+<pre><code>https://&lt;partner-web-host&gt;/new-survey?token=&lt;JWT&gt;
+</code></pre>
+<p><strong>Partner to confirm final URL shape.</strong> See §9 Open Questions.</p>
+<h3 id="45-example-jwt-payload">4.5 Example JWT payload</h3>
+<pre><code class="language-json">{
+  &quot;jti&quot;: &quot;8a1b2c3d-4e5f-6789-abcd-ef0123456789&quot;,
+  &quot;project_id&quot;: &quot;11111111-2222-3333-4444-555555555555&quot;,
+  &quot;project_name&quot;: &quot;Smith Residence&quot;,
+  &quot;site_name&quot;: &quot;Smith Residence — Main House&quot;,
+  &quot;site_address&quot;: &quot;123 Solar Way, Austin TX 78701&quot;,
+  &quot;inspector_name&quot;: &quot;Jane Doe&quot;,
+  &quot;latitude&quot;: 30.2672,
+  &quot;longitude&quot;: -97.7431,
+  &quot;gps_accuracy&quot;: 5,
+  &quot;metadata&quot;: { &quot;solarpro_user_id&quot;: &quot;42&quot;, &quot;solarpro_build&quot;: &quot;v47.435&quot; },
+  &quot;iat&quot;: 1745432700,
+  &quot;exp&quot;: 1745433300
+}
+</code></pre>
+<hr />
+<h2 id="5-delivery-semantics">5. Delivery Semantics</h2>
+<h3 id="51-retry-policy">5.1 Retry policy</h3>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Schedule</th>
+<th>Total attempts</th>
+<th>Max window</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Partner webhook queue</td>
+<td>1 min, 5 min, 30 min, 2 h, 12 h</td>
+<td>5</td>
+<td>~14.5 h</td>
+</tr>
+<tr>
+<td>Partner worker cadence</td>
+<td>30 s poll, batch 25</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>SolarPro response timeout</td>
+<td>30 s (<code>maxDuration</code>)</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="52-idempotency">5.2 Idempotency</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Key</th>
+<th>Backing storage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SolarPro</td>
+<td><code>event_id</code> from envelope (or <code>X-Survey-Event-Id</code> header)</td>
+<td><code>webhook_deliveries (source='survey', event_id)</code> — partial unique index</td>
+</tr>
+<tr>
+<td>Partner</td>
+<td><code>event_id</code> on enqueue</td>
+<td>their <code>webhook_deliveries</code> table</td>
+</tr>
+<tr>
+<td>Downstream ingest (v47.435+)</td>
+<td><code>(user_id, survey_external_id)</code> — project upsert</td>
+<td><code>projects</code> unique constraint</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53-observability">5.3 Observability</h3>
+<table>
+<thead>
+<tr>
+<th>Metric / log</th>
+<th>SolarPro</th>
+<th>Partner</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Delivery attempt log row</td>
+<td>✅ <code>webhook_deliveries</code> every call (valid + invalid)</td>
+<td>✅ their <code>webhook_deliveries</code></td>
+</tr>
+<tr>
+<td>Admin UI / endpoint</td>
+<td>✅ <code>GET /api/admin/survey-webhook-log?status=...&amp;limit=...</code></td>
+<td>✅ <code>GET /api/surveys/admin/webhook-deliveries</code></td>
+</tr>
+<tr>
+<td>Structured console log on success</td>
+<td>✅</td>
+<td>✅ <code>{ type: "survey_completed", ... }</code> JSON line</td>
+</tr>
+<tr>
+<td>Counters</td>
+<td>⏳ (v47.437 backlog)</td>
+<td>✅ <code>webhook_enqueued_total</code>, <code>webhook_delivered_total</code>, <code>webhook_failed_total</code>, <code>handoff_replay_total</code></td>
+</tr>
+<tr>
+<td>Replay action</td>
+<td>⏳ 501 stub (v47.437)</td>
+<td>n/a (partner doesn't replay, just retries queue)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-secrets-environment-variables">6. Secrets + Environment Variables</h2>
+<h3 id="61-shared-secrets-must-match-on-both-sides">6.1 Shared secrets (must match on both sides)</h3>
+<table>
+<thead>
+<tr>
+<th>Secret</th>
+<th>Used by partner for</th>
+<th>Used by SolarPro for</th>
+<th>Exchanged?</th>
+<th>Rotation policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SURVEY_WEBHOOK_SECRET</code></td>
+<td>signing outbound webhooks</td>
+<td>verifying inbound webhooks</td>
+<td>❌ <strong>pending</strong></td>
+<td>90 days, coordinated; double-signed window during rotation (both old and new secret accepted for 5 min)</td>
+</tr>
+<tr>
+<td><code>SOLARPRO_HANDOFF_SECRET</code></td>
+<td>verifying our JWT on their side</td>
+<td>signing JWTs on our side</td>
+<td>❌ <strong>pending</strong></td>
+<td>90 days, coordinated; same double-signed window</td>
+</tr>
+</tbody>
+</table>
+<h3 id="62-solarpro-env-vars-our-side">6.2 SolarPro env vars (our side)</h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Scope</th>
+<th>Required in production</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SURVEY_WEBHOOK_SECRET</code></td>
+<td>HMAC verification</td>
+<td>✅</td>
+<td>must match partner's</td>
+</tr>
+<tr>
+<td><code>SOLARPRO_HANDOFF_SECRET</code></td>
+<td>JWT signing (v47.435+)</td>
+<td>✅ (when v47.435 ships)</td>
+<td>must match partner's</td>
+</tr>
+<tr>
+<td><code>SURVEY_BACKEND_URL</code></td>
+<td>base URL for full-survey GET fallback</td>
+<td>✅ (when v47.435 ships)</td>
+<td>e.g. <code>https://survey.solarpro.partner.com</code></td>
+</tr>
+<tr>
+<td><code>SURVEY_BACKEND_BEARER</code></td>
+<td>bearer token for full-survey GET</td>
+<td>✅ (when v47.435 ships)</td>
+<td><strong>OPEN QUESTION §9</strong> — JWT vs long-lived token</td>
+</tr>
+<tr>
+<td><code>SURVEY_INGEST_DEFAULT_USER_ID</code></td>
+<td>owns survey-origin project rows in single-tenant v1</td>
+<td>✅ (when v47.435 ships)</td>
+<td>a real SolarPro user UUID</td>
+</tr>
+</tbody>
+</table>
+<h3 id="63-partner-env-vars-their-side-reference-only">6.3 Partner env vars (their side, reference only)</h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SURVEY_WEBHOOK_SECRET</code></td>
+<td>HMAC signing</td>
+</tr>
+<tr>
+<td><code>SOLARPRO_WEBHOOK_URL</code></td>
+<td>where to POST webhooks (our <code>/api/webhooks/survey-complete</code>)</td>
+</tr>
+<tr>
+<td><code>SOLARPRO_HANDOFF_SECRET</code></td>
+<td>HS256 verify for handoff JWT</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="7-release-alignment-roadmap">7. Release Alignment Roadmap</h2>
+<h3 id="71-solarpro-release-timeline">7.1 SolarPro release timeline</h3>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>Scope</th>
+<th>Status</th>
+<th>Partner dependency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>v47.434</td>
+<td>Schema + HMAC verifier + admin log + 501 stub</td>
+<td>✅ on disk</td>
+<td>—</td>
+</tr>
+<tr>
+<td>v47.434a</td>
+<td>Wire-format compat (ISO ts, <code>sha256=</code> prefix, optional schemaVersion)</td>
+<td>✅ on disk</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>v47.435 (Stage 9.2)</strong></td>
+<td><strong>Ingest pipeline: extract fat-payload fields + GET full survey + transform to projects/Layout/project_files</strong></td>
+<td>⏳ planned</td>
+<td><strong>partner's <code>GET /api/surveys/:id</code> must be stable + bearer auth scheme confirmed</strong></td>
+</tr>
+<tr>
+<td>v47.435 or v47.436 (Stage 9.2b)</td>
+<td>Handoff JWT minter + deep-link builder</td>
+<td>⏳ planned</td>
+<td>partner's <code>SOLARPRO_HANDOFF_SECRET</code> provisioned</td>
+</tr>
+<tr>
+<td>v47.436 (Stage 9.3)</td>
+<td>Photos + notes + checklist full ingest</td>
+<td>⏳ planned</td>
+<td>partner's photo URL scheme finalised (public-signed URLs? bearer-required?)</td>
+</tr>
+<tr>
+<td>v47.437 (Stage 9.4)</td>
+<td>Contract doc, admin replay impl, end-to-end drift-guard test</td>
+<td>⏳ planned</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h3 id="72-partner-release-checkpoints-as-observed">7.2 Partner release checkpoints (as observed)</h3>
+<table>
+<thead>
+<tr>
+<th>Commit</th>
+<th>Scope</th>
+<th>Status</th>
+<th>Blocker for us?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>2cc3537f</code></td>
+<td>Phases 1–7: UUID contract, handoff, webhooks, retention/GDPR, observability</td>
+<td>✅ shipped</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>279f2126</code></td>
+<td>Webhook implementer guide v1</td>
+<td>✅ shipped</td>
+<td>no</td>
+</tr>
+<tr>
+<td><code>380f7780</code></td>
+<td>Inline checklist item photo capture</td>
+<td>✅ shipped</td>
+<td>no (enhances payload richness)</td>
+</tr>
+<tr>
+<td>—</td>
+<td>Photo public URL scheme finalised</td>
+<td>⏳ unknown</td>
+<td><strong>yes for v47.436</strong></td>
+</tr>
+<tr>
+<td>—</td>
+<td>Bearer token rotation policy documented</td>
+<td>⏳ unknown</td>
+<td><strong>yes for v47.435</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="73-joint-milestones">7.3 Joint milestones</h3>
+<table>
+<thead>
+<tr>
+<th>Milestone</th>
+<th>SolarPro exit criteria</th>
+<th>Partner exit criteria</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>M0 — Secrets exchanged</strong></td>
+<td>Both secrets in our prod secret store</td>
+<td>Both secrets in their prod secret store</td>
+<td><strong>ASAP</strong></td>
+</tr>
+<tr>
+<td><strong>M1 — Staging networked</strong></td>
+<td>Staging deployment reachable from partner staging</td>
+<td>Staging deployment reachable from our staging</td>
+<td>+3 days after M0</td>
+</tr>
+<tr>
+<td><strong>M2 — First webhook reaches 501</strong></td>
+<td>Partner POST lands, HMAC passes, row in <code>webhook_deliveries</code> with <code>status='failed'</code> + <code>error_message='HMAC...'</code> absent (i.e. validation passed, just 501 on ingest)</td>
+<td>Partner worker logs a 501 response</td>
+<td>+1 day after M1</td>
+</tr>
+<tr>
+<td><strong>M3 — First ingest succeeds (v47.435)</strong></td>
+<td>Row in <code>projects</code> with <code>origin='survey'</code> + <code>survey_external_id</code> matching</td>
+<td>Partner sees <code>webhook_deliveries.status='delivered'</code></td>
+<td>mid-May</td>
+</tr>
+<tr>
+<td><strong>M4 — Handoff round-trip works (v47.435/9.2b)</strong></td>
+<td>SolarPro mints JWT → partner consumes → new survey in partner DB with correct <code>project_id</code></td>
+<td>Partner's <code>GET /api/handoff/:token</code> returns <code>200</code> with decoded claims</td>
+<td>end-May</td>
+</tr>
+<tr>
+<td><strong>M5 — Production go-live</strong></td>
+<td>All above + runbook + on-call setup</td>
+<td>All above + runbook + on-call setup</td>
+<td>June</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-shared-test-plan">8. Shared Test Plan</h2>
+<h3 id="81-solarpro-owned-tests-already-passing">8.1 SolarPro-owned tests (already passing)</h3>
+<table>
+<thead>
+<tr>
+<th>Test file</th>
+<th>Count</th>
+<th>What it locks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lib/survey/verifyWebhookSignature.test.ts</code></td>
+<td>18</td>
+<td>Legacy Unix-epoch + raw-hex signers continue to work</td>
+</tr>
+<tr>
+<td><code>lib/survey/verifyWebhookSignature.partnerContract.test.ts</code></td>
+<td>28</td>
+<td>Partner's exact wire format: ISO ts + <code>sha256=</code> prefix + tolerance behaviour</td>
+</tr>
+<tr>
+<td><code>lib/survey/envelopeValidator.test.ts</code></td>
+<td>13</td>
+<td>schemaVersion dual-mode, partner fat-payload tolerance, required-field rejections</td>
+</tr>
+<tr>
+<td><code>lib/survey/contractDriftGuard.test.ts</code></td>
+<td>8</td>
+<td><code>CURRENT_SCHEMA_VERSION</code>, <code>SUPPORTED_SURVEY_EVENT_TYPES</code>, <code>PROJECT_ORIGIN_VALUES</code>, <code>WebhookDeliveryStatus</code> values are frozen</td>
+</tr>
+</tbody>
+</table>
+<h3 id="82-partner-owned-tests-reference-from-backendsrc__tests__apitestts">8.2 Partner-owned tests (reference from <code>backend/src/__tests__/api.test.ts</code>)</h3>
+<ul>
+<li>HMAC signing is deterministic</li>
+<li>Queue retry ordering respects <code>next_attempt_at</code></li>
+<li>JWT issuance includes <code>jti</code></li>
+<li>Replay rejection returns 409 (already passing per their OpenAPI)</li>
+</ul>
+<h3 id="83-contract-tests-to-be-added-v47435">8.3 Contract tests to be added (v47.435+)</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Owner</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sample webhook envelope in <code>docs/fixtures/survey-webhook-sample.json</code> loaded into our validator → passes</td>
+<td>SolarPro</td>
+<td><strong>to add with v47.435</strong></td>
+</tr>
+<tr>
+<td>Sample full survey payload in <code>docs/fixtures/survey-full-sample.json</code> loaded into our transformer → emits expected project shape</td>
+<td>SolarPro</td>
+<td><strong>to add with v47.435</strong></td>
+</tr>
+<tr>
+<td>Round-trip JWT test: mint on our side, decode on partner side (in CI via test fixture)</td>
+<td>both</td>
+<td><strong>to add with v47.435/9.2b</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="84-staging-smoke-manual-two-person">8.4 Staging smoke (manual, two-person)</h3>
+<p>Run after <strong>M1 — Staging networked</strong>. Checklist for a video call walkthrough:</p>
+<ol>
+<li>☐ Partner runs <code>POST /api/surveys/{test_survey_id}/complete</code></li>
+<li>☐ Partner logs show <code>type: "survey_completed"</code> with <code>event_id</code></li>
+<li>☐ Partner's <code>webhook_deliveries</code> row appears with <code>status='pending'</code></li>
+<li>☐ Within 60 s, partner worker POSTs to SolarPro staging</li>
+<li>☐ SolarPro log shows <code>[webhook:survey-complete]</code> and a row in <code>webhook_deliveries</code> with <code>signature_valid=true</code></li>
+<li>☐ Response to partner is <code>501 INGEST_NOT_IMPLEMENTED</code> (until v47.435 ships)</li>
+<li>☐ Partner's delivery row moves to <code>status='failed'</code> with <code>error_message='HTTP 501...'</code></li>
+<li>☐ Second identical POST from partner produces duplicate detection: SolarPro returns <code>200 { duplicate: true }</code>, partner stops retrying ✅</li>
+<li>☐ Tamper test: SolarPro ops rewrites <code>SURVEY_WEBHOOK_SECRET</code> to a wrong value, partner POST returns <code>401 SIGNATURE_MISMATCH</code>, partner log captures the error</li>
+<li>☐ Reset secret, smoke passes again</li>
+</ol>
+<h3 id="85-post-v47435-staging-smoke">8.5 Post-v47.435 staging smoke</h3>
+<p>Same as 8.4 but step 6 becomes:</p>
+<ol start="6">
+<li>☐ SolarPro response is <code>200 { success: true, data: { deliveryId, projectId, status: 'ingested' } }</code></li>
+<li>☐ <code>projects</code> row appears in SolarPro DB with <code>origin='survey'</code>, <code>survey_external_id=&lt;survey_id&gt;</code>, <code>survey_meta.inspector_name='Jane Doe'</code></li>
+<li>☐ <code>project_files</code> rows appear with <code>status='pending'</code> (v47.436 moves to <code>ready</code> after async photo fetch)</li>
+</ol>
+<hr />
+<h2 id="9-open-questions">9. Open Questions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Question</th>
+<th>Owner</th>
+<th>Blocks</th>
+<th>Due</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q1</td>
+<td>Should SolarPro ship <strong>v47.434b</strong> returning <code>202</code> instead of <code>501</code> on successful validation, to avoid partner's 5-retry churn during the window before v47.435? Or keep 501 and just not enable the webhook in partner staging until v47.435 ships?</td>
+<td>Both</td>
+<td>partner's staging webhook config</td>
+<td>within 1 week</td>
+</tr>
+<tr>
+<td>Q2</td>
+<td>What auth scheme should SolarPro use on <code>GET /api/surveys/{id}</code>? JWT (same as mobile app's bearer) or a long-lived service bearer token?</td>
+<td>Partner</td>
+<td><strong>v47.435 ingest pipeline</strong></td>
+<td>before v47.435 starts</td>
+</tr>
+<tr>
+<td>Q3</td>
+<td>What is the public URL scheme for photos returned inside the full survey payload? Signed URLs (time-limited, no auth needed)? Or bearer-required on the photo endpoint too?</td>
+<td>Partner</td>
+<td><strong>v47.436 photo ingest</strong></td>
+<td>before v47.436 starts</td>
+</tr>
+<tr>
+<td>Q4</td>
+<td>Confirm the <strong>launch URL shape</strong> for handoff: <code>/launch?token=...</code>, <code>/new-survey?token=...</code>, or something else? Mobile deep-link scheme + web fallback URL both needed.</td>
+<td>Partner</td>
+<td><strong>v47.435/9.2b handoff minter</strong></td>
+<td>before v47.435/9.2b starts</td>
+</tr>
+<tr>
+<td>Q5</td>
+<td>JWT TTL for handoff tokens — proposed 10 min. Agree?</td>
+<td>Both</td>
+<td>minor, defaults to 10 min if no response</td>
+<td>before v47.435/9.2b starts</td>
+</tr>
+<tr>
+<td>Q6</td>
+<td>Secret rotation protocol — 90 days with 5-min double-signed window on both sides. Agree?</td>
+<td>Both</td>
+<td>production go-live</td>
+<td>before M5</td>
+</tr>
+<tr>
+<td>Q7</td>
+<td>Should partner's fat payload (<code>project_name</code>, <code>site_name</code>, <code>inspector_name</code>) be considered authoritative for SolarPro project display, or should SolarPro always re-query via <code>GET /api/surveys/{id}</code> for canonical values?</td>
+<td>Both</td>
+<td>v47.435 design</td>
+<td>before v47.435 starts</td>
+</tr>
+<tr>
+<td>Q8</td>
+<td>For surveys with <code>project_id = null</code> (surveys not launched via handoff — e.g. walk-in inspection), what's the expected SolarPro behaviour? Auto-create orphan project? Skip ingest? Route to a queue for manual triage?</td>
+<td>Both</td>
+<td>v47.435 design</td>
+<td>before v47.435 starts</td>
+</tr>
+<tr>
+<td>Q9</td>
+<td>OpenAPI spec delta — partner's <code>backend/src/routes/openapi.ts</code> describes 17 endpoints. Do we want a SolarPro-side OpenAPI doc too, or is this staging report enough?</td>
+<td>SolarPro</td>
+<td>observability/onboarding</td>
+<td>M5</td>
+</tr>
+<tr>
+<td>Q10</td>
+<td>Observability alignment — should we emit the same counter names partner uses (<code>webhook_enqueued_total</code> etc.) or SolarPro-native names? Affects joint dashboards.</td>
+<td>Both</td>
+<td>Stage 9.4 (v47.437)</td>
+<td>before v47.437</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="10-change-log">10. Change Log</h2>
+<table>
+<thead>
+<tr>
+<th>Date</th>
+<th>Version</th>
+<th>Change</th>
+<th>Author</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2026-04-23</td>
+<td>v1.0</td>
+<td>Initial staging report. Captures v47.434a shipped state + partner <code>2cc3537f</code> state.</td>
+<td>SolarPro</td>
+</tr>
+<tr>
+<td><em>pending</em></td>
+<td>v1.1</td>
+<td>Partner review + answers to Q1–Q10</td>
+<td>Partner</td>
+</tr>
+<tr>
+<td><em>pending</em></td>
+<td>v1.2</td>
+<td>Post-M1 update after staging networked</td>
+<td>Both</td>
+</tr>
+<tr>
+<td><em>pending</em></td>
+<td>v2.0</td>
+<td>Post-v47.435 update: ingest pipeline live</td>
+<td>SolarPro</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="appendix-a-canonical-code-references">Appendix A — Canonical code references</h2>
+<h3 id="a1-partner-signing-primitive">A.1 Partner signing primitive</h3>
+<p><code>/tmp/kilby-site-survey-app/backend/src/services/webhookService.ts</code> lines 159–163 + 175–185:</p>
+<pre><code class="language-ts">function buildSignature(payloadText: string, timestamp: string, secret: string): string {
+  const digest = createHmac(&quot;sha256&quot;, secret)
+    .update(`${timestamp}.${payloadText}`)
+    .digest(&quot;hex&quot;);
+  return `sha256=${digest}`;
+}
+
+// delivery:
+const timestamp = new Date().toISOString();
+const payloadText = row.payload;
+headers: {
+  &quot;X-Survey-Signature&quot;:  buildSignature(payloadText, timestamp, secret),
+  &quot;X-Survey-Timestamp&quot;:  timestamp,
+  &quot;X-Survey-Event-Id&quot;:   row.event_id,
+}
+</code></pre>
+<h3 id="a2-solarpro-verifier-primitive">A.2 SolarPro verifier primitive</h3>
+<p><code>lib/survey/verifyWebhookSignature.ts</code> (v47.434a):</p>
+<pre><code class="language-ts">const timestampSeconds = parseTimestampHeaderToSeconds(timestampHeader);
+// ... tolerance check ...
+
+const rawHexSignature = normaliseSignatureHeader(signatureHeader);
+// ... presence check ...
+
+const signedString = `${timestampHeader}.${rawBody}`;  // uses raw header, not parsed seconds
+const expectedHex  = crypto.createHmac('sha256', secret)
+                           .update(signedString, 'utf8')
+                           .digest('hex');
+// ... length + timingSafeEqual compare ...
+</code></pre>
+<h3 id="a3-partner-handoff-consumer">A.3 Partner handoff consumer</h3>
+<p><code>/tmp/kilby-site-survey-app/backend/src/routes/handoff.ts</code> — verifies HS256, inserts <code>jti</code> into <code>used_handoff_tokens</code> with <code>ON CONFLICT → 409</code>.</p>
+<h3 id="a4-partners-openapi-surface">A.4 Partner's OpenAPI surface</h3>
+<p>17 endpoints. Full spec fetchable at <code>${SURVEY_BACKEND_URL}/api/openapi.json</code> — see <code>/tmp/kilby-site-survey-app/backend/src/routes/openapi.ts</code>.</p>
+<hr />
+<h2 id="appendix-b-how-to-regenerate-this-report">Appendix B — How to regenerate this report</h2>
+<pre><code class="language-bash"># Partner side — refresh source of truth
+cd /tmp/kilby-site-survey-app &amp;&amp; git fetch &amp;&amp; git checkout main
+git log --oneline -20  # confirm HEAD matches §0 metadata
+
+# SolarPro side
+cd /workspace/Solarpro-git-v5
+grep &quot;^export const BUILD_VERSION&quot; lib/version.ts
+
+# Inspect partner's signed-string format
+grep -n &quot;buildSignature\|X-Survey-\|createHmac&quot; \
+  /tmp/kilby-site-survey-app/backend/src/services/webhookService.ts
+
+# Sync this report
+# Update §0 metadata, §1 traffic light, §9 open questions
+</code></pre>
+<hr />
+<p><em>End of report. Next review: after partner response to Q1–Q10, OR after M1 staging-networked milestone, whichever is sooner.</em></p>
+</body>
+</html>

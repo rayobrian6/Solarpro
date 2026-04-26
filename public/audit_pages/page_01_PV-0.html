@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta charset="UTF-8">
+<title>Permit Package â Smith Residence Solar Fence</title>
+<style>
+  /* âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+     SOLARPRO ENGINEERING DOCUMENT SYSTEM â CANONICAL STYLESHEET v47.270
+     CAD-standard. Rigid grid. Zero rounded corners. Zero UI colors.
+     Shared across ALL 14 sheets for absolute visual consistency.
+     ONE section system (.sec only). ALL data in tables. No tier variants.
+
+     SPACING SCALE (use ONLY these values):
+       --xs:  8px   (tight gaps, table cell padding)
+       --sm: 12px   (section internal padding)
+       --md: 16px   (between sections)
+       --lg: 24px   (column gaps)
+       --xl: 32px   (page margins)
+
+     GRID SYSTEM:
+       - 2-column: grid-template-columns: 1fr 1fr
+       - 3-column: grid-template-columns: 1fr 1fr 1fr
+       - Wide (full-width): grid-template-columns: 1fr
+       - All grids use gap: var(--md)
+       - All page margins: var(--xl) on all sides
+
+     SECTION BLOCK STANDARD:
+       <div class="sec">
+         <div class="sec-hdr">SECTION TITLE</div>
+         <div class="sec-body"> ... </div>
+       </div>
+  âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+
+  /* ââ Reset âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ââ Design tokens ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  :root {
+    --xs:  8px;
+    --sm: 12px;
+    --md: 16px;
+    --lg: 24px;
+    --xl: 32px;
+
+    --border:     1px solid #000;
+    --border-hvy: 2px solid #000;
+    --border-med: 1.5px solid #000;
+
+    --f-xs:  6.2px;
+    --f-sm:  6.6px;
+    --f-md:  7px;
+    --f-lg:  8px;
+    --f-xl:  9px;
+    --f-2xl:10px;
+    --f-3xl:12px;
+    --f-4xl:16px;
+
+    --mono: 'Courier New', Courier, monospace;
+    --sans: Arial, 'Helvetica Neue', sans-serif;
+
+    /* Vertical rhythm â space between major content blocks */
+    --gap-section: var(--md);   /* default gap between .sec blocks */
+  }
+
+  body {
+    font-family: var(--sans);
+    font-size: var(--f-md);
+    color: #000;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ââ Page container âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .page {
+    width: 17in;
+    height: 11in;
+    padding: var(--xl);
+    page-break-after: always;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    background: #fff;
+  }
+  .page:last-child { page-break-after: avoid; }
+
+  /* ââ Page body grid variants ââââââââââââââââââââââââââââââââââââââââââââââ */
+  /* All page-body variants: fill remaining height, gap = --md */
+  .page-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  .page-body-wide {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  .page-body-3col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  /* span helpers */
+  .span-2 { grid-column: span 2; }
+  .span-3 { grid-column: span 3; }
+
+  /* Column stack: vertical flex with canonical gap */
+  .col-stack       { display: flex; flex-direction: column; gap: var(--gap-section); }
+
+  /* ââ Page footer ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .page-footer {
+    font-size: var(--f-xs);
+    color: #555;
+    border-top: var(--border);
+    padding-top: var(--xs);
+    margin-top: var(--xs);
+    flex-shrink: 0;
+  }
+
+  /* ââ Page content area (fills grid row 2 â used by non-cover pages) âââââââ */
+  .page-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-section);
+    overflow: hidden;
+    margin-top: var(--md);
+    flex: 1;
+  }
+  /* 2-column variant for pages with left/right panels */
+  .page-content-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--gap-section);
+    overflow: hidden;
+    margin-top: var(--md);
+    flex: 1;
+  }
+
+  /* ââ Section block (canonical) ââââââââââââââââââââââââââââââââââââââââââââ */
+  /*
+     Standard section pattern:
+       <div class="sec">
+         <div class="sec-hdr">SECTION TITLE</div>
+         <div class="sec-body"> ... </div>
+       </div>
+  */
+  .sec {
+    border: var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+    box-sizing: border-box;
+  }
+  .sec-hdr {
+    font-size: var(--f-sm);
+    font-weight: 900;
+    color: #fff;
+    background: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px var(--xs);
+    flex-shrink: 0;
+    font-family: var(--sans);
+    border-bottom: var(--border);
+  }
+  .sec-body {
+    flex-grow: 1;
+    padding: var(--xs);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* sec-body-np: no padding (for flush tables) */
+  .sec-body-np {
+    flex-grow: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* sec-scroll: allow internal scroll (for long tables) */
+  .sec-scroll {
+    flex-grow: 1;
+    overflow: auto;
+  }
+
+  /* -- Drawing-package layout (v47.273) -- */
+  .page-draw {
+    display: flex; flex-direction: column; gap: 0;
+    overflow: hidden; margin-top: var(--md); flex: 1;
+  }
+  .draw-zone {
+    flex: 0 0 82%; overflow: hidden;
+    display: flex; flex-direction: column;
+    border: var(--border); background: #fff;
+  }
+  .draw-zone-hdr {
+    background: #000; color: #fff;
+    font-size: var(--f-sm); font-weight: 900;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    padding: 3px var(--xs); flex-shrink: 0;
+  }
+  .draw-zone-body {
+    flex: 1; display: flex; align-items: center;
+    justify-content: center; overflow: hidden; padding: 6px;
+    background: #fff;
+  }
+  .draw-zone-body svg {
+    width: auto; height: auto;
+    max-width: 100%; max-height: 100%;
+    display: block;
+  }
+  .data-zone {
+    flex: 0 0 18%; overflow: hidden;
+    display: flex; flex-direction: column; gap: 0;
+    border: var(--border); border-top: none;
+  }
+  .data-zone-2col {
+    display: flex; flex-direction: column;
+    gap: 0; flex: 1; overflow: hidden;
+  }
+  .data-zone-2col > * { border-bottom: var(--border); overflow: hidden; }
+  .data-zone-2col > *:last-child { border-bottom: none; }
+  .callout-bubble {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border: 1.5px solid #000; border-radius: 50%;
+    font-size: 8px; font-weight: 900; background: #fff; color: #000; flex-shrink: 0;
+  }
+  .callout-row {
+    display: flex; align-items: flex-start; gap: 3px;
+    padding: 2px 4px; font-size: var(--f-xs);
+    border-bottom: 1px solid #eee; line-height: 1.6;
+  }
+  .callout-row:last-child { border-bottom: none; }
+
+  /* -- CAD line weight system (v47.280) -- */
+  .line-struct { stroke: #000; stroke-width: 3.0; fill: none; }
+  .line-panel  { stroke: #2255aa; stroke-width: 1.5; fill: none; }
+  .line-dim    { stroke: #0055aa; stroke-width: 0.7; fill: none; stroke-dasharray: none; }
+  .line-grade  { stroke: #5C4A20; stroke-width: 2.5; fill: none; }
+  .line-hidden { stroke: #888; stroke-width: 0.8; fill: none; stroke-dasharray: 4,3; }
+  .line-wind   { stroke: #cc0000; stroke-width: 1.8; fill: none; }
+  .line-setbk  { stroke: #cc0000; stroke-width: 1.0; fill: none; stroke-dasharray: 6,3; }
+  .line-conduit { stroke: #ff8800; stroke-width: 1.5; fill: none; stroke-dasharray: 8,4; }
+
+  /* Legacy aliases â map old class names to new sec system */
+  .section     { border: var(--border); display: flex; flex-direction: column; overflow: hidden; height: 100%; box-sizing: border-box; }
+  .section-hdr { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); }
+  .section-content { flex-grow: 1; padding: var(--xs); overflow: hidden; display: flex; flex-direction: column; }
+  .section-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
+  .section-title:first-child { margin-top: 0; }
+
+  /* ââ Utility: dark header bar (reused across pages) âââââââââââââââââââââââ */
+  .sec-hdr-dark {
+    background: #000; color: #fff;
+    padding: 3px var(--xs);
+    font-size: var(--f-xs); font-weight: 900;
+    text-transform: uppercase; letter-spacing: 1px;
+    width: 100%; box-sizing: border-box;
+  }
+
+  /* ââ Warning label card âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .lbl-card { border: var(--border-med); overflow: hidden; width: 100%; box-sizing: border-box; }
+  .lbl-hdr {
+    background: #000; color: #fff;
+    padding: 3px 6px;
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; box-sizing: border-box;
+  }
+  .lbl-hdr-id  { font-weight: 900; font-size: 9px; font-family: var(--mono); letter-spacing: 1px; color: #fff; }
+  .lbl-hdr-ref { font-size: 7.5px; font-family: var(--mono); color: #ccc; }
+  .lbl-footer  { background: #f5f5f5; border-top: var(--border); padding: 3px 6px; font-size: 7.5px; color: #000; }
+
+  /* ââ Note / callout bar ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .note-bar {
+    border: var(--border);
+    padding: 4px var(--sm);
+    background: #fff;
+    font-size: var(--f-xs);
+    color: #000;
+    line-height: 1.5;
+  }
+  .note-bar-label {
+    font-weight: 900; font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-right: 6px;
+  }
+
+  /* ââ Table header row (black) ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .tbl-hdr-row th {
+    background: #000; color: #fff;
+    padding: 2px 3px;
+    font-size: var(--f-xs); text-align: left;
+    font-weight: 700;
+  }
+  .tbl-hdr-row th.center { text-align: center; }
+
+  /* ââ PE Letter: signature / stamp ââââââââââââââââââââââââââââââââââââââââââ */
+  .sig-grid {
+    display: grid; grid-template-columns: 3fr 2fr; gap: 0;
+    padding: var(--xs);
+  }
+  .sig-col { padding-right: var(--sm); }
+  .sig-col-stamp {
+    border-left: var(--border);
+    padding-left: var(--sm);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .sig-field { margin-bottom: var(--xs); font-size: var(--f-xs); }
+  .sig-line     { border-bottom: var(--border);     display: inline-block; }
+  .sig-line-hvy { border-bottom: var(--border-hvy); display: inline-block; }
+  .stamp-box {
+    width: 90px; height: 90px;
+    border: var(--border-hvy);
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ââ SVG / diagram wrapper âââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .svg-wrap { background: #fff; border: var(--border); padding: 4px; overflow: hidden; }
+  .svg-wrap img, .svg-wrap svg { display: block; width: 100%; height: auto; }
+
+  /* ââ Aerial/map image wrapper ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .aerial-wrap { position: relative; display: block; width: 100%; overflow: hidden; border: 1.5px solid #374151; }
+  .aerial-wrap img { display: block; width: 100%; height: auto; }
+  .aerial-wrap svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  .aerial-pin-label { background: #fff; border: var(--border); padding: 2px 5px; white-space: nowrap; margin-top: 1px; }
+  .aerial-nts { position: absolute; bottom: 3px; right: 3px; background: #fff; border: var(--border); padding: 1px 4px; }
+
+  /* ââ Sec-body table (table fills sec-body, no internal padding) ââââââââââââ */
+  .sec-body-table { padding: 0; }
+  .sec-body-table table { width: 100%; border-collapse: collapse; }
+
+  /* ââ Cover: 2-col grid layout ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cover-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--md); }
+
+  /* ââ Inline sub-header (within sec-body, not a full sec-hdr) âââââââââââââââ */
+  .sub-hdr {
+    font-size: var(--f-xs); font-weight: 900; text-transform: uppercase; color: #000;
+    border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 4px;
+  }
+  .sub-hdr-hvy { border-bottom: var(--border-hvy) !important; }
+
+  /* ââ Sig line underlines (PE letter) âââââââââââââââââââââââââââââââââââââââ */
+  .sig-underline-sm  { border-bottom: var(--border);     display: inline-block; width: 130px; }
+  .sig-underline-md  { border-bottom: var(--border);     display: inline-block; width: 160px; }
+  .sig-underline-xl  { border-bottom: var(--border-hvy); display: inline-block; width: 200px; }
+  .sig-underline-110 { border-bottom: var(--border);     display: inline-block; width: 110px; }
+
+  /* ââ Centered callout block (e.g. "no data" placeholder) âââââââââââââââââââ */
+  .callout-center {
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; width: 100%;
+  }
+
+  /* ââ Title block (bottom strip on every sheet) ââââââââââââââââââââââââââââ */
+  .title-block {
+    display: table;
+    width: 100%;
+    border: var(--border-hvy);
+    background: #fff;
+    border-collapse: collapse;
+    flex-shrink: 0;
+    margin-bottom: var(--xs);
+  }
+  .tb-left {
+    display: table-cell;
+    width: 30%;
+    padding: var(--xs);
+    border-right: var(--border);
+    vertical-align: top;
+  }
+  .tb-center {
+    display: table-cell;
+    width: 40%;
+    padding: var(--xs);
+    border-right: var(--border);
+    vertical-align: middle;
+    text-align: center;
+  }
+  .tb-right {
+    display: table-cell;
+    width: 30%;
+    padding: 0;
+    vertical-align: top;
+  }
+  .tb-company     { font-size: var(--f-xl); font-weight: 900; color: #000; letter-spacing: 2px; text-transform: uppercase; border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 2px; }
+  .tb-project     { font-size: var(--f-xl); font-weight: 700; color: #000; margin-top: 2px; text-transform: uppercase; }
+  .tb-address     { font-size: var(--f-sm); color: #333; margin-top: 1px; }
+  .tb-client      { font-size: var(--f-sm); color: #333; margin-top: 1px; }
+  .tb-meta        { font-size: var(--f-xs); color: #555; margin-top: 1px; }
+  .tb-sheet-id    { font-size: var(--f-4xl); font-weight: 900; color: #000; font-family: var(--mono); letter-spacing: 4px; border-bottom: var(--border-hvy); padding-bottom: 3px; margin-bottom: 2px; }
+  .tb-sheet-title { font-size: var(--f-2xl); font-weight: 900; color: #000; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
+  .tb-codes       { font-size: var(--f-xs); color: #555; margin-top: 3px; }
+  .tb-size        { font-size: var(--f-xs); color: #777; margin-top: 1px; }
+
+  /* Title block right column â meta table */
+  .tb-table { width: 100%; border-collapse: collapse; font-size: var(--f-sm); }
+  .tb-table tr { border-bottom: var(--border); }
+  .tb-table tr:last-child { border-bottom: none; }
+  .tbl {
+    color: #000;
+    padding: 2px var(--xs);
+    white-space: nowrap;
+    font-weight: 700;
+    width: 38%;
+    font-size: var(--f-xs);
+    border-right: var(--border);
+    text-transform: uppercase;
+    background: #f0f0f0;
+  }
+  .tbv {
+    font-weight: 500;
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-sm);
+  }
+  .pe-seal-box {
+    font-size: var(--f-xs);
+    color: #555;
+    text-align: center;
+    border: var(--border);
+    padding: 2px var(--xs);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  /* ââ Info table (label / value pairs) âââââââââââââââââââââââââââââââââââââ */
+  .info-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .info-table tr { border-bottom: var(--border); }
+  .info-table tr:last-child { border-bottom: none; }
+  .il {
+    font-weight: 900;
+    padding: 2px var(--xs);
+    width: 38%;
+    white-space: nowrap;
+    border-right: var(--border);
+    font-size: var(--f-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: #f0f0f0;
+    vertical-align: top;
+  }
+  .iv {
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-md);
+    vertical-align: top;
+    line-height: 1.4;
+  }
+  /* Emphasized value â key metrics (system size, module count) */
+  .iv-em {
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-lg);
+    font-weight: 900;
+    font-family: var(--mono);
+    vertical-align: top;
+    line-height: 1.4;
+    letter-spacing: 0.3px;
+  }
+
+  /* ââ Equipment / BOM tables âââââââââââââââââââââââââââââââââââââââââââââââ */
+  .equip-table, .bom-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--f-md);
+    border: var(--border);
+  }
+  .equip-table th, .bom-table th {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    text-align: left;
+    font-weight: 900;
+    font-size: var(--f-xs);
+    letter-spacing: 0.5px;
+    border-right: 1px solid #444;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .equip-table th:last-child, .bom-table th:last-child { border-right: none; }
+  .equip-table td, .bom-table td {
+    padding: 2px var(--xs);
+    border-bottom: var(--border);
+    border-right: 1px solid #ddd;
+    vertical-align: middle;
+    color: #000;
+    font-size: var(--f-md);
+  }
+  .equip-table td:last-child, .bom-table td:last-child { border-right: none; }
+  .equip-table tbody tr:last-child td,
+  .bom-table   tbody tr:last-child td { border-bottom: var(--border-hvy); }
+  .equip-table tr:nth-child(even) td,
+  .bom-table   tr:nth-child(even) td { background: #f8f8f8; }
+  .bom-note { font-size: var(--f-xs); color: #444; margin-top: var(--xs); flex-shrink: 0; }
+
+  /* ââ Calc / structural tables âââââââââââââââââââââââââââââââââââââââââââââ */
+  .calc-table { width: 100%; border-collapse: collapse; }
+  .calc-table tr { border-bottom: var(--border); }
+  .calc-table tr:last-child { border-bottom: none; }
+  .calc-table td { padding: 2px var(--xs); font-size: var(--f-md); color: #000; }
+  .cv { text-align: right; font-weight: 700; font-family: var(--mono); }
+
+  /* ââ Sheet index table ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .sheet-index-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .sheet-index-table th {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    text-align: left;
+    font-weight: 900;
+    font-size: var(--f-xs);
+    text-transform: uppercase;
+    border-right: 1px solid #444;
+    letter-spacing: 0.5px;
+  }
+  .sheet-index-table th:last-child { border-right: none; }
+  .sheet-index-table td {
+    padding: 2px var(--xs);
+    border-bottom: var(--border);
+    color: #000;
+    font-size: var(--f-md);
+    border-right: 1px solid #ddd;
+  }
+  .sheet-index-table td:last-child { border-right: none; }
+  .si-id { font-weight: 900; font-family: var(--mono); color: #000; width: 64px; }
+
+  /* ââ Structural cards âââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .struct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; }
+  .struct-card { border: var(--border); overflow: hidden; }
+  .sct {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    font-weight: 900;
+    font-size: var(--f-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ââ NEC rules summary bar ââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .rules-summary { display: flex; flex-direction: row; border: var(--border); border-bottom: none; margin-bottom: var(--xs); overflow: hidden; }
+  .rs { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--xs) var(--sm); border-right: var(--border); flex: 1; }
+  .rs:last-child { border-right: none; }
+  .rs-val { font-size: var(--f-3xl); font-weight: 900; color: #000; font-family: var(--mono); }
+  .rs-lbl { font-size: var(--f-xs); color: #444; text-transform: uppercase; letter-spacing: 0.3px; }
+
+  /* ââ Warning labels âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .label-intro {
+    font-size: var(--f-md);
+    color: #000;
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-bottom: var(--xs);
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+  .labels-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--md); width: 100%; }
+  .label-card { border: var(--border); overflow: hidden; display: flex; flex-direction: column; }
+  .label-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #000;
+    padding: 3px var(--xs);
+    flex-shrink: 0;
+  }
+  .label-id  { font-weight: 900; font-size: var(--f-md); color: #fff; text-transform: uppercase; }
+  .label-nec { font-size: var(--f-xs); color: #ccc; font-family: var(--mono); }
+  .label-visual { padding: var(--xs); flex-grow: 1; display: block; }
+  .label-warning-line { font-size: var(--f-lg); font-weight: 900; letter-spacing: 0.5px; margin-bottom: 3px; }
+  .label-body-line { font-size: var(--f-md); line-height: 1.5; }
+  .label-placement {
+    font-size: var(--f-sm);
+    color: #000;
+    padding: var(--xs);
+    border-top: var(--border);
+    background: #f8f8f8;
+    flex-shrink: 0;
+  }
+
+  /* ââ Map / aerial placeholder âââââââââââââââââââââââââââââââââââââââââââââ */
+  .map-placeholder {
+    border: var(--border-hvy);
+    flex-grow: 1;
+    display: flex;
+    width: 100%;
+    background: #e8e8e8;
+  }
+  .map-inner {
+    text-align: center;
+    padding: var(--sm);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+  }
+  .map-icon  { font-size: 28px; opacity: 0.4; }
+  .map-title { font-size: var(--f-xl); font-weight: 900; color: #333; margin-top: var(--xs); text-transform: uppercase; }
+  .map-addr  { font-size: var(--f-lg); color: #555; margin-top: var(--xs); }
+  .map-note  { font-size: var(--f-md); color: #777; margin-top: var(--xs); }
+
+  /* ââ Rapid shutdown box âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .rapid-shutdown-box { background: #fff; border: var(--border); padding: var(--xs); margin-top: var(--xs); }
+  .rs-title { font-size: var(--f-lg); font-weight: 900; color: #cc0000; margin-bottom: var(--xs); text-transform: uppercase; }
+  .rs-body  { font-size: var(--f-md); color: #000; line-height: 1.5; }
+
+  /* ââ Attachment note ââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .attach-note {
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-top: var(--xs);
+    font-size: var(--f-sm);
+    color: #000;
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+
+  /* ââ Certification page âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cert-header {
+    font-size: var(--f-2xl);
+    font-weight: 900;
+    text-align: center;
+    color: #000;
+    border-bottom: var(--border-hvy);
+    padding-bottom: var(--xs);
+    margin-bottom: var(--xs);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    flex-shrink: 0;
+  }
+  .cert-statement {
+    font-size: var(--f-md);
+    line-height: 1.5;
+    color: #000;
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-bottom: var(--xs);
+  }
+  .cert-statement li { margin-bottom: 2px; margin-left: var(--md); }
+  .cert-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; margin-bottom: var(--xs); }
+  .cert-block-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
+  .cert-block-title:first-child { margin-top: 0; }
+  .cert-field { margin-bottom: var(--xs); }
+  .cf-val { font-size: var(--f-xl); font-weight: 600; color: #000; border-bottom: var(--border-hvy); padding-bottom: 3px; min-height: 22px; }
+  .cf-lbl { font-size: var(--f-sm); color: #555; margin-top: 2px; text-transform: uppercase; }
+  .stamp-box { border: var(--border-hvy); min-height: 96px; display: flex; align-items: center; justify-content: center; width: 100%; text-align: center; }
+  .cert-footer {
+    font-size: var(--f-sm);
+    color: #555;
+    text-align: center;
+    border-top: var(--border);
+    padding-top: var(--xs);
+    margin-top: var(--md);
+  }
+  .notes-box { background: #fff; border: var(--border); padding: var(--xs); font-size: var(--f-lg); color: #000; }
+
+  /* ââ Construction notes list ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .construction-notes { padding-left: var(--md); font-size: var(--f-md); line-height: 1.5; color: #000; }
+  .construction-notes li { margin-bottom: 2px; }
+
+  /* ââ Cover sheet specific âââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cover-section-hdr {
+    font-size: var(--f-md);
+    font-weight: 900;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: var(--border-hvy);
+    padding-bottom: 2px;
+    margin-bottom: var(--xs);
+  }
+  .cover-list-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .cover-list-table tr td { padding: 2px var(--xs); vertical-align: top; color: #000; border-bottom: var(--border); }
+  .cover-list-table tr:last-child td { border-bottom: none; }
+  .cli { width: 64px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
+
+  /* cv0 = cover sheet data rows */
+  .cv0-hdr {
+    font-size: var(--f-md);
+    font-weight: 900;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    border-bottom: var(--border-hvy);
+    padding-bottom: 2px;
+    margin-bottom: var(--xs);
+  }
+  .cv0-tbl { width: 100%; border-collapse: collapse; font-size: var(--f-md); line-height: 1.5; }
+  .cv0-tbl tr td { padding: 2px var(--xs); vertical-align: top; color: #000; border-bottom: var(--border); }
+  .cv0-tbl tr:last-child td { border-bottom: none; }
+  .cv0-tag { width: 28px; font-weight: 900; color: #000; white-space: nowrap; font-family: var(--mono); border-right: var(--border); }
+  .cv0-key { width: 110px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
+
+  /* ââ SLD page âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .sld-page { padding: var(--xl); height: 11in; }
+  .sld-page .title-block { margin-bottom: var(--xs); }
+  .sld-page svg { max-width: 100%; max-height: calc(11in - 1.8in); object-fit: contain; }
+
+  /* ââ Two-column layout helper (legacy) ââââââââââââââââââââââââââââââââââââ */
+  .two-col-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-section); width: 100%; overflow: hidden; }
+  .col-left  { overflow: hidden; }
+  .col-right { overflow: hidden; }
+
+  /* ââ NEC 120% rule box ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .nec-rule-box {
+    border: var(--border-hvy);
+    padding: var(--xs);
+    font-size: var(--f-md);
+    font-family: var(--mono);
+    font-weight: 700;
+    color: #000;
+    background: #fff;
+    line-height: 1.6;
+  }
+
+  /* ââ Utility classes ââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .mono { font-family: var(--mono); }
+  .bold { font-weight: 900; }
+  .caps { text-transform: uppercase; }
+  .center { text-align: center; }
+  .right  { text-align: right; }
+  .muted  { color: #555; }
+  .danger { color: #cc0000; font-weight: 900; }
+  .w100   { width: 100%; }
+
+  /* ââ Inline-style replacement utility classes ââââââââââââââââââââââââââââ */
+  /* These replace the most common inline style patterns across page functions */
+  .tr   { text-align: right; }
+  .tc   { text-align: center; }
+  .tl   { text-align: left; }
+  .fw9  { font-weight: 900; }
+  .fw7  { font-weight: 700; }
+  .fw6  { font-weight: 600; }
+  .fw4  { font-weight: 400; }
+  .mono { font-family: var(--mono); }
+  .f-xs { font-size: var(--f-xs); }
+  .f-sm { font-size: var(--f-sm); }
+  .f-md { font-size: var(--f-md); }
+  .f-lg { font-size: var(--f-lg); }
+  /* ââ Flex helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .df  { display: flex; }
+  .aic { align-items: center; }
+  .jcc { justify-content: center; }
+  .jsb { justify-content: space-between; }
+  .f1  { flex: 1; }
+  .fs0 { flex-shrink: 0; }
+
+  .mt-xs { margin-top: var(--xs); }
+  .mt-sm { margin-top: var(--sm); }
+  .mt-md { margin-top: var(--md); }
+  .mb-xs { margin-bottom: var(--xs); }
+  .mb-sm { margin-bottom: var(--sm); }
+  .mb-md { margin-bottom: var(--md); }
+  .pt-xs { padding-top: var(--xs); }
+  .pt-sm { padding-top: var(--sm); }
+  .pb-xs { padding-bottom: var(--xs); }
+  .pb-sm { padding-bottom: var(--sm); }
+  .p-xs  { padding: var(--xs); }
+  .bb-1   { border-bottom: var(--border); }
+  .bb-hvy { border-bottom: var(--border-hvy); }
+  .bt-1   { border-top: var(--border); }
+  .bl-1   { border-left: var(--border); }
+  .c000  { color: #000; }
+  .c555  { color: #555; }
+  .c999  { color: #999; }
+  .c444  { color: #444; }
+  .c666  { color: #666; }
+  .bg000 { background: #000; color: #fff; }
+  .bg-lt { background: #f8f8f8; }
+  /* Inline section header bar (no outer .sec container needed) */
+  .blk-hdr {
+    font-size: var(--f-sm);
+    font-weight: 900;
+    color: #fff;
+    background: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px var(--xs);
+    font-family: var(--sans);
+  }
+  /* Inline content box (border, padding) */
+  .blk-body {
+    border: var(--border);
+    border-top: none;
+    padding: var(--xs);
+  }
+  /* NEC note / code reference line */
+  .code-ref {
+    font-size: var(--f-xs);
+    font-family: var(--mono);
+    color: #555;
+    margin-top: 2px;
+  }
+  /* Numbered note row */
+  .note-row { display: table; width: 100%; margin-bottom: 2px; }
+  .note-num { display: table-cell; width: var(--md); font-family: var(--mono); font-weight: 900; font-size: var(--f-md); vertical-align: top; color: #000; }
+  .note-txt { display: table-cell; font-size: var(--f-md); line-height: 1.5; color: #000; font-family: var(--sans); }
+
+  /* ââ Print ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  @page { size: 17in 11in landscape; margin: 0; }
+  @media print { .page { page-break-after: always; } }
+</style>
+</head>
+<body>
+
+  
+<body style="margin:0;padding:0;background:#ccc;">
+<div class="page">
+
+    
+  <div class="title-block">
+    <div class="tb-left">
+      <div class="tb-company">SOLARPRO ENGINEERING</div>
+      <div class="tb-project">Smith Residence Solar Fence</div>
+      <div class="tb-address">1234 Solar Way, Austin, TX 78701</div>
+      <div class="tb-client">CLIENT: John & Jane Smith</div>
+      <div class="tb-meta">APN: â &nbsp;|&nbsp; UTILITY: Austin Energy</div>
+      <div class="tb-meta">AHJ: City of Austin &nbsp;|&nbsp; TX</div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-sheet-id">PV-0</div>
+      <div class="tb-sheet-title">COVER SHEET</div>
+      <div class="tb-codes">NEC 2023 &middot; IBC 2021 &middot; IRC 2021 &middot; IFC 2024 &middot; ASCE 7-22</div>
+      <div class="tb-size">SHEET SIZE: ANSI B &mdash; 11&Prime; &times; 17&Prime;</div>
+    </div>
+    <div class="tb-right">
+      <table class="tb-table">
+        <tr><td class="tbl">DESIGNER</td><td class="tbv">Sarah L. Nguyen, PE â TX-PE-54321</td></tr>
+        <tr><td class="tbl">DATE</td><td class="tbv">2026-04-06</td></tr>
+        <tr><td class="tbl">SHEET</td><td class="tbv">1 OF 14</td></tr>
+        <tr><td class="tbl">SYSTEM</td><td class="tbv">19.20 kW DC / 48 modules</td></tr>
+        <tr><td class="tbl">MODULE</td><td class="tbv">Silfab SIL-400-HV</td></tr>
+        <tr><td class="tbl">INVERTER</td><td class="tbv">Enphase IQ8M-72-2-US</td></tr>
+        <tr><td class="tbl">UTILITY</td><td class="tbv">Austin Energy</td></tr>
+        <tr><td class="tbl">AHJ</td><td class="tbv">City of Austin</td></tr>
+        <tr class="tb-rev-hdr"><td class="tbl" colspan="2" style="text-align:center;font-weight:900;background:#000;color:#fff;letter-spacing:0.5px;">REVISIONS</td></tr>
+        <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; 2026-04-06</td></tr>
+        <tr><td class="tbl">SCALE</td><td class="tbv">NTS</td></tr>
+        <tr><td class="tbl">PE SEAL</td><td class="tbv"><div class="pe-seal-box">SEAL / STAMP REQUIRED</div></td></tr>
+      </table>
+    </div>
+  </div>
+
+    <!-- âââ MAIN BODY: 2fr left | 1fr right âââ -->
+    <div class="page-body" style="grid-template-columns:2fr 1fr;">
+
+      <!-- âââ LEFT COLUMN (2fr): system + design data âââ -->
+      <div class="col-stack">
+
+        <!-- PROJECT OVERVIEW -->
+        
+        <div class="sec">
+          <div class="sec-hdr">PHOTOVOLTAIC SOLAR FENCE SYSTEM â PROJECT OVERVIEW</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr><td class="il">SYSTEM SIZE (DC)</td><td class="iv-em">19.20 kW DC</td></tr>
+              <tr><td class="il">SOLAR MODULES</td><td class="iv-em">48 MODULES</td></tr>
+              <tr><td class="il">AC OUTPUT</td><td class="iv-em">17.50 kW AC</td></tr>
+              <tr><td class="il">MODULE TYPE</td><td class="iv">Silfab SIL-400-HV</td></tr>
+              <tr><td class="il">TOPOLOGY</td><td class="iv">MICROINVERTER</td></tr>
+              <tr><td class="il">MOUNT TYPE</td><td class="iv">SOLAR FENCE INSTALLATION</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- SCOPE OF WORK -->
+        <div class="sec">
+          <div class="sec-hdr">SCOPE OF WORK</div>
+          <div class="sec-body">
+            <div class="note-row"><div class="note-num">1.</div><div class="note-txt">FURNISH AND INSTALL 48 PHOTOVOLTAIC SOLAR MODULES ON SOLAR FENCE SYSTEM.</div></div>
+            <div class="note-row"><div class="note-num">2.</div><div class="note-txt">INSTALL MICROINVERTER POWER CONVERSION EQUIPMENT PER NEC 2023 ARTICLE 690.</div></div>
+            <div class="note-row"><div class="note-num">3.</div><div class="note-txt">INSTALL ALL DC AND AC CONDUCTORS, CONDUIT, AND RACEWAYS PER NEC 2023.</div></div>
+            <div class="note-row"><div class="note-num">4.</div><div class="note-txt">INSTALL EQUIPMENT GROUNDING CONDUCTORS AND BONDING PER NEC 250 AND 690.43.</div></div>
+            <div class="note-row"><div class="note-num">5.</div><div class="note-txt">INTERCONNECT PV SYSTEM TO EXISTING 200A SERVICE PANEL PER NEC 705.12.</div></div>
+            <div class="note-row"><div class="note-num">6.</div><div class="note-txt">INSTALL ALL NEC-REQUIRED WARNING LABELS, PLACARDS, AND RAPID SHUTDOWN SIGNAGE.</div></div>
+            <div class="note-row"><div class="note-num">7.</div><div class="note-txt">COORDINATE UTILITY INTERCONNECTION AND NET METERING APPLICATION.</div></div>
+            
+          </div>
+        </div>
+
+        <!-- SYSTEM SUMMARY -->
+        
+        <div class="sec">
+          <div class="sec-hdr">SYSTEM SUMMARY</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr>
+      <td class="il" style="width:28px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">(N)</td>
+      <td class="iv">48 Ã Silfab SIL-400-HV (400W)</td>
+    </tr><tr>
+      <td class="il" style="width:28px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">(N)</td>
+      <td class="iv">1 Ã Enphase IQ8M-72-2-US â MICROINVERTER</td>
+    </tr><tr>
+      <td class="il" style="width:28px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">(E)</td>
+      <td class="iv">200A MAIN SERVICE PANEL â Square D</td>
+    </tr><tr>
+      <td class="il" style="width:28px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">(N)</td>
+      <td class="iv">92A BACKFEED BREAKER (NEC 705.12(B))</td>
+    </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- DESIGN CRITERIA -->
+        
+        <div class="sec">
+          <div class="sec-hdr">DESIGN CRITERIA</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr>
+      <td class="il">SYSTEM TYPE</td>
+      <td class="iv">SOLAR FENCE</td>
+    </tr><tr>
+      <td class="il">WIND SPEED</td>
+      <td class="iv">115 MPH</td>
+    </tr><tr>
+      <td class="il">GROUND SNOW LOAD</td>
+      <td class="iv">5 PSF</td>
+    </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- GOVERNING CODES -->
+        <div class="sec">
+          <div class="sec-hdr">GOVERNING CODES</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr><td class="il" style="width:100px;white-space:nowrap;">IBC 2021</td><td class="iv">INTERNATIONAL BUILDING CODE</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">IRC 2021</td><td class="iv">INTERNATIONAL RESIDENTIAL CODE</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">IFC 2024</td><td class="iv">INTERNATIONAL FIRE CODE â CH. 6 Â§605</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">NEC 2023</td><td class="iv">NATIONAL ELECTRICAL CODE (NFPA 70)</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">ASCE 7-22</td><td class="iv">MINIMUM DESIGN LOADS & ASSOCIATED CRITERIA</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">IEEE 1547</td><td class="iv">INTERCONNECTION & INTEROPERABILITY OF DER</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">UL 1741 SA</td><td class="iv">INVERTERS, CONVERTERS, CONTROLLERS (SMART INVERTER)</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">UL 2703</td><td class="iv">MOUNTING SYSTEMS, RACKING â BONDING & GROUNDING</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">UL 61730</td><td class="iv">PV MODULE SAFETY QUALIFICATION</td></tr><tr><td class="il" style="width:100px;white-space:nowrap;">TX AMENDMENTS</td><td class="iv">STATE-ADOPTED LOCAL CODE AMENDMENTS</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- SHEET INDEX -->
+        <div class="sec" style="margin-bottom:var(--xs);">
+          <div class="sec-hdr">ENGINEERING SUMMARY</div>
+          <div class="sec-body" style="font-size:var(--f-md);line-height:1.5;padding:var(--xs);">
+            This permit package documents the design and engineering analysis for a 19.20 kW DC
+            grid-tied photovoltaic system at 1234 Solar Way, Austin, TX 78701. The system has been designed and evaluated in accordance with
+            NEC 2023, ASCE 7-22, IBC 2021, and all applicable local amendments.
+            All calculations, equipment selections, and installation details contained herein have been prepared for permit submission
+            and are intended to demonstrate full compliance with governing codes and standards.
+            This document is issued for permit review and requires professional engineer (PE) review and wet stamp before AHJ submission.
+          </div>
+        </div>
+      <div class="sec">
+          <div class="sec-hdr">SHEET INDEX</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              
+    <tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;background:#000;color:#fff;white-space:nowrap;">SHEET</td>
+      <td class="iv" style="background:#000;color:#fff;">DESCRIPTION</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-0</td>
+      <td class="iv">COVER SHEET â PROJECT OVERVIEW & GENERAL NOTES</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-1</td>
+      <td class="iv">SITE PLAN â EQUIPMENT LAYOUT & VICINITY</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-2</td>
+      <td class="iv">SOLAR FENCE ELEVATION & PLAN</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-2B</td>
+      <td class="iv">ARRAY GEOMETRY â STRING LAYOUT & CONFIGURATION</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-3</td>
+      <td class="iv">FENCE STRUCTURAL DETAILS</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-4A</td>
+      <td class="iv">NEC COMPLIANCE â ELECTRICAL CODE ANALYSIS</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-4B</td>
+      <td class="iv">CONDUCTOR SCHEDULE â WIRE SIZING & VOLTAGE DROP</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-4C</td>
+      <td class="iv">STRUCTURAL CALCULATIONS â ASCE 7-22 ANALYSIS</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PV-5</td>
+      <td class="iv">WARNING LABELS & PLACARDS â NEC REQUIRED SIGNAGE</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">SCHED</td>
+      <td class="iv">EQUIPMENT SCHEDULE â MODULES, INVERTERS & BOM</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">APP-A</td>
+      <td class="iv">SPECIFICATION REFERENCE â EQUIPMENT DATA SHEETS</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">CERT</td>
+      <td class="iv">ENGINEER CERTIFICATION â PROFESSIONAL REVIEW</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">PE-1</td>
+      <td class="iv">PE STRUCTURAL LETTER â LETTER OF COMPLIANCE</td>
+    </tr><tr>
+      <td class="il" style="width:44px;border-right:var(--border);font-family:var(--mono);font-weight:900;white-space:nowrap;">E-1</td>
+      <td class="iv">SINGLE-LINE DIAGRAM â ELECTRICAL SCHEMATIC</td>
+    </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- CONSTRUCTION NOTES â 2-column grid -->
+        <div class="sec f1">
+          <div class="sec-hdr">CONSTRUCTION NOTES</div>
+          <div class="sec-body" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--xs);align-items:start;">
+            
+                <div>
+                <div class="mb-xs">
+                  <div class="blk-hdr" style="background:#444;">ELECTRICAL</div>
+                  <div class="blk-body">
+                    <div class="note-row"><div class="note-num">1.</div><div class="note-txt">Solar PV wiring shall comply with NEC Article 690. DC wiring methods shall be per NEC 690.31. PV source and output circuit conductors shall be identified at all access points per NEC 690.31(B).</div></div><div class="note-row"><div class="note-num">2.</div><div class="note-txt">System shall comply with NEC 705.12 for interconnected power production equipment. Backfeed breaker shall be sized per NEC 705.12(B)(2)(3)(b). Sum of all supply breakers shall not exceed 120% of bus rating.</div></div><div class="note-row"><div class="note-num">3.</div><div class="note-txt">All conductors shall be sized per NEC 310.15. Temperature correction (NEC 310.15(B)(1)) and conduit fill derating (NEC 310.15(C)(1)) shall be applied. PV conductor ampacity minimum 125% of maximum circuit current per NEC 690.8(B).</div></div><div class="note-row"><div class="note-num">4.</div><div class="note-txt">Conduit type: EMT. All conduit supports per NEC 358.30 (EMT) or NEC 352.30 (PVC). Conduit fill shall not exceed 40% per NEC Chapter 9, Table 1.</div></div><div class="note-row"><div class="note-num">5.</div><div class="note-txt">AC disconnect switch required and shown on SLD. Disconnect shall be within sight of inverter, accessible, and rated for available fault current per NEC 690.15.</div></div><div class="note-row"><div class="note-num">6.</div><div class="note-txt">Photovoltaic source circuit conductors shall be marked or tagged "PHOTOVOLTAIC POWER SOURCE" at all accessible locations per NEC 690.31(B). Markings shall be sunlight-resistant and moisture-resistant.</div></div><div class="note-row"><div class="note-num">7.</div><div class="note-txt">All metallic fence posts and frames shall be bonded to the equipment grounding conductor (EGC) per NEC 250.169 and NEC 690.43. Minimum #6 AWG copper bonding conductor required throughout fence structure.</div></div>
+                  </div>
+                </div>
+                <div class="mb-xs">
+                  <div class="blk-hdr" style="background:#444;">STRUCTURAL / ATTACHMENT</div>
+                  <div class="blk-body">
+                    <div class="note-row"><div class="note-num">1.</div><div class="note-txt">Equipment grounding conductor (EGC) shall be sized per NEC 250.122. All metallic racking, module frames, and enclosures shall be bonded per NEC 690.43. DC EGC minimum: 10 AWG per NEC 690.45.</div></div><div class="note-row"><div class="note-num">2.</div><div class="note-txt">Solar fence post foundations shall be installed per structural engineer specifications and attachment detail on sheet PV-3. Minimum embedment depth 3.5 ft below finish grade. Concrete footing min. 3,000 psi, 12" diameter min.</div></div><div class="note-row"><div class="note-num">3.</div><div class="note-txt">Module-to-rail torque shall be per rail manufacturer specification. Rail splices installed per manufacturer details. All exposed hardware shall be stainless steel or corrosion-resistant equivalent per NEC 110.3(B).</div></div>
+                  </div>
+                </div></div>
+                <div>
+                <div class="mb-xs">
+                  <div class="blk-hdr" style="background:#444;">INSTALLATION</div>
+                  <div class="blk-body">
+                    <div class="note-row"><div class="note-num">1.</div><div class="note-txt">Rapid shutdown system required per NEC 690.12. Module-level rapid shutdown (MLRS) shall reduce array conductors to â¤ 30V within 30 seconds. Initiator shall be located at utility meter per NEC 690.56(B).</div></div><div class="note-row"><div class="note-num">2.</div><div class="note-txt">Electrical contractor shall obtain all required permits prior to beginning work. Work shall be inspected by the AHJ before concealment per NEC 110.13. Maintain as-built drawings on-site during installation.</div></div><div class="note-row"><div class="note-num">3.</div><div class="note-txt">Installer shall verify utility interconnection requirements with Austin Energy prior to energization. Utility NEM/interconnection agreement required. Obtain AHJ final inspection and utility PTO before energizing.</div></div>
+                  </div>
+                </div>
+                <div class="mb-xs">
+                  <div class="blk-hdr" style="background:#444;">CODE COMPLIANCE</div>
+                  <div class="blk-body">
+                    <div class="note-row"><div class="note-num">1.</div><div class="note-txt">All work shall conform to NEC 2023, 2021 IBC, 2021 IRC, 2024 IFC, ASCE 7-22, applicable state amendments, and AHJ requirements. All equipment shall be listed and labeled per NEC 110.3(B).</div></div><div class="note-row"><div class="note-num">2.</div><div class="note-txt">Inverter(s) shall be UL 1741-listed and comply with IEEE 1547 for grid interconnection. Anti-islanding protection required per NEC 705.40. Inverter output circuit rated per NEC 705.12 and manufacturer requirements.</div></div><div class="note-row"><div class="note-num">3.</div><div class="note-txt">GFDI (Ground Fault Detection and Interruption) shall be provided as integrated in the listed inverter(s) per NEC 690.41. DC arc-fault circuit interrupter (AFCI) shall be provided per NEC 690.11.</div></div><div class="note-row"><div class="note-num">4.</div><div class="note-txt">Warning labels and placards shall be installed per NEC 690.54, NEC 690.56(C), NEC 705.12(B)(2)(3)(e), and IFC 2024 Â§605.11.6. See sheet PV-5 for complete label schedule and placement diagram.</div></div><div class="note-row"><div class="note-num">5.</div><div class="note-txt">All junction boxes, combiner boxes, and conduit bodies shall be accessible per NEC 314.29. Cover plates shall be secured and labeled. Box fill calculated per NEC 314.16.</div></div><div class="note-row"><div class="note-num">6.</div><div class="note-txt">All equipment shall be installed per manufacturer installation instructions. Field modifications to listed equipment are prohibited per NEC 110.3(B). Substitutions require engineer approval and AHJ re-submission.</div></div><div class="note-row"><div class="note-num">7.</div><div class="note-txt">System annual production estimate: 26880 kWh/yr (estimated at 1,400 kWh/kW DC â site-specific irradiance not included). Production estimate does not constitute a performance guarantee.</div></div>
+                  </div>
+                </div></div>
+          </div>
+        </div>
+
+      </div><!-- end left column -->
+
+      <!-- âââ RIGHT COLUMN (1fr): project info + stamps âââ -->
+      <div class="col-stack">
+
+        <!-- PROJECT INFORMATION -->
+        
+        <div class="sec">
+          <div class="sec-hdr">PROJECT INFORMATION</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr>
+      <td class="il">PROJECT</td>
+      <td class="iv">Smith Residence Solar Fence</td>
+    </tr><tr>
+      <td class="il">CLIENT</td>
+      <td class="iv">John & Jane Smith</td>
+    </tr><tr>
+      <td class="il">ADDRESS</td>
+      <td class="iv">1234 Solar Way, Austin, TX 78701</td>
+    </tr><tr>
+      <td class="il">CITY/STATE</td>
+      <td class="iv">TX</td>
+    </tr><tr>
+      <td class="il">AHJ</td>
+      <td class="iv">City of Austin</td>
+    </tr><tr>
+      <td class="il">UTILITY</td>
+      <td class="iv">Austin Energy</td>
+    </tr><tr>
+      <td class="il">DESIGNER</td>
+      <td class="iv">Sarah L. Nguyen, PE â TX-PE-54321</td>
+    </tr><tr>
+      <td class="il">DATE</td>
+      <td class="iv">2026-04-06</td>
+    </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- SYSTEM INFORMATION -->
+        
+        <div class="sec">
+          <div class="sec-hdr">SYSTEM INFORMATION</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr>
+      <td class="il">DC SYSTEM SIZE</td>
+      <td class="iv">19.200 kW DC</td>
+    </tr><tr>
+      <td class="il">AC SYSTEM SIZE</td>
+      <td class="iv">17.500 kW AC</td>
+    </tr><tr>
+      <td class="il">MODULE</td>
+      <td class="iv">48 Ã Silfab SIL-400-HV</td>
+    </tr><tr>
+      <td class="il">INVERTER</td>
+      <td class="iv">Enphase IQ8M-72-2-US â MICROINVERTER</td>
+    </tr><tr>
+      <td class="il">MOUNTING</td>
+      <td class="iv">SOLAR FENCE</td>
+    </tr><tr>
+      <td class="il">NEC 705.12(B)</td>
+      <td class="iv">REQUIRES REVIEW</td>
+    </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- REVISIONS -->
+        <div class="sec">
+          <div class="sec-hdr">REVISIONS</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr>
+                <td class="il" style="width:28px;border-right:var(--border);font-family:var(--mono);font-weight:900;">REV</td>
+                <td class="iv" style="border-right:var(--border);">DESCRIPTION</td>
+                <td class="iv" style="width:54px;">DATE</td>
+              </tr>
+              <tr>
+                <td class="il" style="width:28px;border-right:var(--border);font-family:var(--mono);font-weight:900;">A</td>
+                <td class="iv" style="border-right:var(--border);">ISSUED FOR PERMIT</td>
+                <td class="iv">2026-04-06</td>
+              </tr>
+              <tr><td colspan="3" class="iv">&nbsp;</td></tr>
+              <tr><td colspan="3" class="iv">&nbsp;</td></tr>
+              <tr><td colspan="3" class="iv">&nbsp;</td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- ENGINEER OF RECORD -->
+        <div class="sec">
+          <div class="sec-hdr">ENGINEER OF RECORD</div>
+          <div class="sec-body">
+          <div class="stamp-box" style="min-height:88px;">
+              <span class="f-xs c555 fw7" style="line-height:1.8;">
+                AFFIX PE STAMP HERE<br/>LICENSE NO. ____________<br/>STATE: ____________
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SHEET IDENTIFICATION -->
+        <div class="sec">
+          <div class="sec-hdr">SHEET IDENTIFICATION</div>
+          <div class="sec-body sec-body-table">
+            <table class="info-table">
+              <tr>
+      <td class="il">SHEET NAME</td>
+      <td class="iv">COVER SHEET</td>
+    </tr>
+              <tr>
+      <td class="il">SHEET NO.</td>
+      <td class="iv">PV-0</td>
+    </tr>
+              <tr>
+      <td class="il">SHEET SIZE</td>
+      <td class="iv">ANSI B â 11â³ Ã 17â³</td>
+    </tr>
+              <tr>
+      <td class="il">TOTAL SHEETS</td>
+      <td class="iv">14</td>
+    </tr>
+              <tr>
+      <td class="il">PAGE</td>
+      <td class="iv">1 OF 14</td>
+    </tr>
+              <tr>
+      <td class="il">SCALE</td>
+      <td class="iv">NOT TO SCALE</td>
+    </tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- GENERAL NOTES -->
+        <div class="sec">
+          <div class="sec-hdr">GENERAL NOTES</div>
+          <div class="sec-body">
+            <div class="note-row"><div class="note-num">1.</div><div class="note-txt">ALL DIMENSIONS ARE NOMINAL. FIELD VERIFY PRIOR TO INSTALLATION.</div></div>
+            <div class="note-row"><div class="note-num">2.</div><div class="note-txt">DO NOT SCALE FROM DRAWINGS.</div></div>
+            <div class="note-row"><div class="note-num">3.</div><div class="note-txt">CONTRACTOR RESPONSIBLE FOR VERIFICATION OF ALL SITE CONDITIONS.</div></div>
+            <div class="note-row"><div class="note-num">4.</div><div class="note-txt">PE STAMP REQUIRED FOR PERMIT SUBMISSION PER AHJ.</div></div>
+            <div class="note-row"><div class="note-num">5.</div><div class="note-txt">SUBSTITUTIONS REQUIRE WRITTEN ENGINEER APPROVAL.</div></div>
+          </div>
+        </div>
+
+        <!-- VICINITY MAP -->
+        <div class="sec f1">
+          <div class="sec-hdr">VICINITY MAP &mdash; NTS &mdash; FIELD VERIFY ALL CONDITIONS</div>
+          <div class="sec-body sec-body-table" style="overflow:hidden;position:relative;">
+            
+      <div style="background:#e8e8e8;width:100%;height:180px;display:flex;align-items:center;justify-content:center;text-align:center;">
+        <div class="f-sm fw7" style="letter-spacing:0.5px;">
+          VICINITY MAP â ATTACH SITE PHOTOGRAPH OR SATELLITE IMAGE<br/>
+          <span class="f-xs muted">1234 Solar Way, Austin, TX 78701</span>
+        </div>
+      </div>
+        <div class="df aic bt-1" style="padding:2px var(--xs);gap:var(--xs);">
+              <span class="f-sm fw7 f1">
+                1234 Solar Way, Austin, TX 78701, TX
+              </span>
+              <svg viewBox="0 0 40 40" width="28" height="28" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="20" cy="20" r="18" fill="#fff" stroke="#000" stroke-width="1.5"/>
+                <polygon points="20,4 23,16 20,14 17,16" fill="#000"/>
+                <polygon points="20,36 23,24 20,26 17,24" fill="#888"/>
+                <polygon points="4,20 16,17 14,20 16,23" fill="#888"/>
+                <polygon points="36,20 24,17 26,20 24,23" fill="#888"/>
+                <text x="20" y="3.5" text-anchor="middle" font-size="7" font-weight="900" fill="#000" font-family="Arial">N</text>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- end right column -->
+
+    </div><!-- end page-body -->
+
+  </div>
+  
+</body>
+</html>

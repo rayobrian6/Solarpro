@@ -1,0 +1,54 @@
+# ============================================================
+# SolarVision Dataset — YOLOv8 Object Detection
+# ============================================================
+#
+# Dataset: solar panel survey photo detection
+# Task: object detection (bounding boxes)
+# Format: YOLO v8 (normalized xywh)
+#
+# CLASS DEFINITIONS:
+#   Roof obstructions that affect panel placement and fire setbacks.
+#   Electrical components that inform conduit routing.
+#
+# DIRECTORY STRUCTURE:
+#   datasets/solarvision/
+#   ├── images/
+#   │   ├── train/   ← training images (.jpg, .png, .webp)
+#   │   └── val/     ← validation images
+#   ├── labels/
+#   │   ├── train/   ← YOLO label .txt files (same stem as image)
+#   │   └── val/
+#   └── dataset.yaml ← this file
+#
+# LABEL FORMAT (one detection per line):
+#   <class_id> <x_center> <y_center> <width> <height>
+#   All values normalized 0.0–1.0 relative to image dimensions.
+#
+# EXAMPLE:
+#   0 0.512 0.334 0.045 0.062   ← vent at center-ish, small
+#   6 0.850 0.712 0.120 0.180   ← main_panel, bottom-right, larger
+#
+# LABELING TOOL: LabelImg (https://github.com/HumanSignal/labelImg)
+#   1. Install: pip install labelImg
+#   2. Run: labelImg
+#   3. Set format to YOLO
+#   4. Open image directory: datasets/solarvision/images/train/
+#   5. Set label save directory: datasets/solarvision/labels/train/
+#   6. Use class list below (classes.txt also provided)
+# ============================================================
+
+path: ../datasets/solarvision  # dataset root (relative to train.py location)
+train: images/train
+val:   images/val
+
+nc: 8  # number of classes
+
+names:
+  0: vent           # plumbing/exhaust vent pipe — small round metal flashing
+  1: skylight        # roof skylight — rectangular glass panel in roof
+  2: hvac_unit       # HVAC condenser/rooftop unit — large box on roof
+  3: chimney         # brick or metal chimney stack — vertical protrusion
+  4: pipe            # pipe jack / soil stack / metal pipe with boot
+  5: meter           # utility electric meter — round/square box on wall
+  6: main_panel      # main electrical service panel — metal box, breakers visible
+  7: disconnect      # AC disconnect switch — small metal box near meter
