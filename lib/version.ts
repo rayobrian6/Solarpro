@@ -1,9 +1,11 @@
-export const BUILD_VERSION     = 'v60.1';
+export const BUILD_VERSION     = 'v60.2';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-28'; // v60.1
-export const BUILD_DESCRIPTION = 'v60.1: ARRAY_UNDERSIZED_FOR_BRAND warning — surfaces clear guidance when array is too small for chosen string brand, recommends micros';
+export const BUILD_DATE        = '2026-04-28'; // v60.2
+export const BUILD_DESCRIPTION = 'v60.2: Fix selectedInverterId path DC/AC ratio logic — sort candidates by ratio proximity (not AC kW), filter Rule 1 to valid-ratio candidates (>=1.00), use pickRatioAwareTier for tierRec. Sol-Ark 8K-2P + 36 panels now correctly upsizes to 12K-2P×1 (ratio=1.20) instead of falling back to 2×8K-2P (ratio=0.90).';
 export const BUILD_FEATURES: string[] = [
-  // v60.1 (newest — must be first for releaseHistory drift-guard)
+  // v60.2 (newest — must be first for releaseHistory drift-guard)
+  'v60.2: Fix selectedInverterId DC/AC logic: sort candidates by ratio proximity, filter Rule 1 to valid-ratio candidates, use pickRatioAwareTier for tierRec. Sol-Ark 8K-2P+36p → 12K-2P×1 (1.20) not 2×8K-2P (0.90)',
+  // v60.1 — must be first for releaseHistory drift-guard)
   'Stage 19.1 (v60.1) — ARRAY_UNDERSIZED_FOR_BRAND warning: when no model in the brand can produce DC/AC ≥1.00, surfaces actionable message with minimum panels needed and micro recommendation',
   // v60.0
   'Stage 19.0 (v60.0) — Ratio-aware inverter tier selection: pickRatioAwareTier() replaces blind DC-kW tier lookup — scans ALL brand models, computes DC/AC ratio for each, picks closest to 1.25 target while staying ≥1.00 hard floor — universal fix for all brands and future onboarded brands',

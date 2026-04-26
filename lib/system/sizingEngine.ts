@@ -950,14 +950,29 @@ function sizeInverters(
       // become "1×se-11400h or 2×se-11400h" rather than "2×se-7600h": the
       // tier for 14.4 kW DC is se-11400h, so the user's se-7600h is
       // engineer-undersized regardless of the qty calculation.
-      const tierRec = pickInverterTier(brand.sizingTiers, totalDcKw);
-      const tierRecModel = tierRec
-        ? brand.supportedInverterModels.find(m => m.equipmentDbId === tierRec.equipmentDbId)
-        : undefined;
+      // v60.2 — Use pickRatioAwareTier (not blind pickInverterTier) for tierRec
+      // so Rule 2's "brand-recommended model" comparison target is ratio-optimal.
+      // pickInverterTier(14.4 kW) → 15K-2P (ratio=0.96, BELOW floor).
+      // pickRatioAwareTier(14.4 kW) → 12K-2P (ratio=1.20, above floor).
+      // Using the blind tier model as the target caused Rule 2 to upsize to a
+      // model that still violated the ratio floor, then fell to Rule 3 returning
+      // 2x8K-2P (ratio=0.90) — the same broken result.
+      const tierRatioRec = pickRatioAwareTier(brand, brand.sizingTiers, totalDcKw, input.panelCount, vaPPU);
+      const tierRecModel = tierRatioRec?.ref;
+      // Fallback tier reference for qty calculation in Rule 2.
+      const tierRec = tierRecModel
+        ? brand.sizingTiers.find(t => t.equipmentDbId === tierRecModel.equipmentDbId)
+        : pickInverterTier(brand.sizingTiers, totalDcKw);
       const userIsUndersizedVsTier =
         tierRecModel !== undefined &&
         tierRecModel.equipmentDbId !== ref.equipmentDbId &&
-        tierRecModel.dcKwMax > ref.dcKwMax;
+        // v60.2: compare ratio-validity, not just dcKwMax. The ratio-aware tier
+        // model may have a smaller or equal AC rating but a valid ratio while the
+        // user's selection is below the floor.
+        (tierRecModel.dcKwMax > ref.dcKwMax ||
+         (tierRatioRec !== undefined && !tierRatioRec.undersized &&
+          dcAcRatio(tierRecModel, tierRatioRec.qty, totalDcKw) >= MIN_DC_AC_RATIO &&
+          dcAcRatio(ref, qtySelected, totalDcKw) < MIN_DC_AC_RATIO));
 
       // Phase 14.3 — Pre-compute the feasibility-rejected set so Rules 1 and 2
       // never upsize to a model the hard gate would immediately reverse.
@@ -1011,17 +1026,32 @@ function sizeInverters(
           if (feasibilityRejectedIds.has(m.equipmentDbId)) return false;
           return true;
         })
-        .map(m => ({ model: m, qty: unitsRequired(m, input.panelCount, totalDcKw, vaPPU(m)) }))
-        // Prefer fewer units first, then larger AC rating (best headroom),
-        // deterministic tie-break by equipmentDbId.
+        .map(m => {
+          const qty   = unitsRequired(m, input.panelCount, totalDcKw, vaPPU(m));
+          const ratio = dcAcRatio(m, qty, totalDcKw);
+          return { model: m, qty, ratio };
+        })
+        // v60.2 — Sort by: (1) fewer units first, (2) ratio closest to
+        // PREFERRED_DC_AC_RATIO_TARGET (1.25). Previous sort used biggest-AC-kW
+        // as tiebreak which caused 30K-3P-208V (ratio=0.48) to beat 12K-2P
+        // (ratio=1.20) for a 14.4 kW residential array. Ratio-proximity ensures
+        // the most electrically balanced candidate wins. Deterministic final
+        // tie-break: alphabetical equipmentDbId.
         .sort((a, b) => {
           if (a.qty !== b.qty) return a.qty - b.qty;
-          if (a.model.acKw !== b.model.acKw) return b.model.acKw - a.model.acKw;
+          const aDist = Math.abs(a.ratio - PREFERRED_DC_AC_RATIO_TARGET);
+          const bDist = Math.abs(b.ratio - PREFERRED_DC_AC_RATIO_TARGET);
+          if (Math.abs(aDist - bDist) > 0.001) return aDist - bDist;
           return a.model.equipmentDbId.localeCompare(b.model.equipmentDbId);
         });
 
       // Rule 1: fewer-unit candidate available → upsize to it.
-      const fewerUnitsCandidate = candidates.find(c => c.qty < qtySelected);
+      // v60.2: only consider candidates with ratio >= MIN_DC_AC_RATIO (1.00).
+      // Oversized candidates (e.g. 30K-3P at ratio=0.48) that merely need fewer
+      // units are not improvements — the feasibility gate rejects them and falls
+      // back to the broken original config. Filter to valid-ratio candidates.
+      const validCandidates = candidates.filter(c => c.ratio >= MIN_DC_AC_RATIO);
+      const fewerUnitsCandidate = validCandidates.find(c => c.qty < qtySelected);
       if (fewerUnitsCandidate) {
         warnings.push({
           severity: 'info',
