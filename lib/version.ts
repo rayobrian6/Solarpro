@@ -1,9 +1,11 @@
-export const BUILD_VERSION     = 'v59.0';
+export const BUILD_VERSION     = 'v59.1';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-28'; // v59.0
-export const BUILD_DESCRIPTION = 'v59.0: UI compacted (battery/generator disabled states), engineering logic audit — systemType dropdown fixed (roof/ground/fence), utilityMeter default fixed, batteryEnabled BOM payload fix';
+export const BUILD_DATE        = '2026-04-28'; // v59.1
+export const BUILD_DESCRIPTION = 'v59.1: Battery Storage card moved to right column (top) to eliminate dead space in center/right area';
 export const BUILD_FEATURES: string[] = [
-  // v59.0 (newest — must be first for releaseHistory drift-guard)
+  // v59.1 (newest — must be first for releaseHistory drift-guard)
+  'Stage 18.6 (v59.1) — Battery Storage panel moved to top of right column — eliminates dead space in 3-col layout when inverter/strings section is shorter than the left column',
+  // v59.0
   'Stage 18.5 (v59.0) — Engineering logic audit: compacted battery/generator disabled states, fixed systemType dropdown (roof/ground/fence), fixed utilityMeter default (Bidirectional Net Meter), fixed batteryEnabled BOM payload to respect UI toggle',
   // v58.9
   'Stage 18.4 (v58.9) — Brand audit complete: 46 equipment registry entries added for SMA, Fronius, GoodWe, Sungrow, Growatt, Solis, Tesla, Tigo, APsystems, Hoymiles, Enphase IQ8 variants, and Sol-Ark. All 13 brands now pass full pipeline audit (sizing → registry → brand inference → BOM)',

@@ -5738,7 +5738,7 @@ function EngineeringPageInner() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">
 
                   {/* ─────────────────────────────────────────────────────────
-                      LEFT COLUMN: Project Info + Electrical + Battery + Generator
+                      LEFT COLUMN: Project Info + Electrical
                   ──────────────────────────────────────────────────────────── */}
                   <div className="space-y-5">
 
@@ -6122,166 +6122,6 @@ function EngineeringPageInner() {
                               <span className="text-[10px] text-purple-400">(N/A — micro)</span>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Battery Card — Toggleable Module */}
-                    <div className="eng-panel">
-                      {/* Battery header with ON/OFF toggle */}
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-extrabold text-slate-100 flex items-center gap-2 tracking-tight">
-                          <Battery size={14} className="text-emerald-400" /> Battery Storage
-                          <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+5 Models</span>
-                        </h3>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input type="checkbox" checked={batteryEnabled} onChange={e => setBatteryEnabled(e.target.checked)}
-                            className="sr-only peer" data-testid="battery-enabled-toggle" />
-                          <div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-emerald-500 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
-                        </label>
-                      </div>
-
-                        {!batteryEnabled ? (
-                          /* OFF state — single compact row, no dead space */
-                          <div className="flex items-center gap-2 py-0.5">
-                            <Battery size={11} className="text-slate-700 shrink-0" />
-                            <span className="text-xs text-slate-600">No battery · toggle above to add</span>
-                          </div>
-                        ) : (
-                        /* ON state — expanded */
-                        <div className="space-y-3">
-                          {/* kWh summary strip */}
-                          {_batTotalKwh > 0 && (
-                            <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                              <div className="text-center">
-                                <div className="text-lg font-black text-emerald-400 tabular-nums">{_batTotalKwh.toFixed(1)}</div>
-                                <div className="text-[10px] text-slate-500">Total kWh</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="text-lg font-black text-emerald-400 tabular-nums">~{_backupPct}%</div>
-                                <div className="text-[10px] text-slate-500">Est. Backup</div>
-                              </div>
-                              <div className="text-center">
-                                <div className="text-lg font-black text-emerald-400 tabular-nums">
-                                  {_batTotalKwh > 0 ? `~${(_batTotalKwh / Math.max(0.5, _totalKwNum * 0.15)).toFixed(1)}h` : '—'}
-                                </div>
-                                <div className="text-[10px] text-slate-500">Est. Runtime</div>
-                              </div>
-                            </div>
-                          )}
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="col-span-2">
-                              <label className="eng-label">Battery Model</label>
-                              <select value={config.batteryId} onChange={e => {
-                                const bat = getBatteryById(e.target.value);
-                                updateConfig({ batteryId: e.target.value, batteryBrand: bat?.manufacturer ?? '', batteryModel: bat?.model ?? '', batteryKwh: bat?.usableCapacityKwh ?? 0 });
-                              }} className="eng-select">
-                                <option value="">None</option>
-                                {BATTERIES.map(b => (
-                                  <option key={b.id} value={b.id}>{b.isNew ? '🆕 ' : ''}{b.manufacturer} {b.model} ({b.usableCapacityKwh} kWh){b.subcategory === 'ac_coupled' ? ` · AC` : ` · DC`}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="eng-label">Units</label>
-                              <input type="number" min={0} max={10} value={config.batteryCount} onChange={e => updateConfig({ batteryCount: +e.target.value })} className="eng-input" />
-                            </div>
-                            <div>
-                              <label className="eng-label">kWh / Unit</label>
-                              <input type="number" min={0} step={0.1} value={config.batteryKwh} onChange={e => updateConfig({ batteryKwh: +e.target.value })} className="eng-input" />
-                            </div>
-                          </div>
-                          {config.batteryId && (() => {
-                            const bat = getBatteryById(config.batteryId);
-                            return bat?.backfeedBreakerA ? (
-                              <div className="text-xs text-orange-400 text-center">
-                                +{bat.backfeedBreakerA}A bus load (NEC 705.12B)
-                              </div>
-                            ) : null;
-                          })()}
-                        </div>
-                      )}
-
-                      {/* Generator & ATS — v57.5: collapsed to chip when no generator selected */}
-                      <div className="mt-4 pt-4 border-t border-slate-700/30">
-                        <div className="flex items-center gap-2 mb-3">
-                          <Wrench size={12} className="text-orange-400" />
-                          <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">Generator & Transfer Switch</span>
-                          {!config.generatorId && <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">+4 Models</span>}
-                          {config.generatorId && _genData && (
-                            <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-orange-500/20 text-orange-300 border border-orange-500/30">
-                              {_genData.ratedOutputKw}kW {_genData.manufacturer}
-                            </span>
-                          )}
-                        </div>
-
-                          {/* Generator OFF state */}
-                          {!config.generatorId && !config.atsId ? (
-                            /* Compact single row — no dead space */
-                            <div className="flex items-center justify-between gap-2 py-0.5">
-                              <div className="flex items-center gap-2">
-                                <Wrench size={11} className="text-slate-700 shrink-0" />
-                                <span className="text-xs text-slate-600">No generator</span>
-                              </div>
-                              <button onClick={() => setGenSectionOpen(v => !v)}
-                                className="text-xs px-2 py-0.5 rounded bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors font-semibold leading-none">
-                                {genSectionOpen ? '✕' : '+ Add'}
-                              </button>
-                            </div>
-                          ) : (
-                          /* Generator ON state */
-                          _genData && _atsData && (
-                            <div className="p-3 rounded-xl bg-orange-500/5 border border-orange-500/20 mb-3">
-                              <div className="flex items-center gap-2">
-                                <CheckCircle size={12} className="text-emerald-400" />
-                                <span className="text-xs font-bold text-emerald-400">{_genData.ratedOutputKw}kW gen + {_atsData.ampRating}A ATS</span>
-                                {_atsData.neutralSwitched ? <span className="text-xs text-emerald-400"> · Neutral switched ✓</span> : <span className="text-xs text-amber-400"> · ⚠ Check neutral bonding</span>}
-                              </div>
-                            </div>
-                          )
-                        )}
-
-                        {(config.generatorId || config.atsId || genSectionOpen) && (
-                        <div className="grid grid-cols-1 gap-3 mt-3">
-                          <div>
-                            <label className="eng-label">Generator</label>
-                            <select value={config.generatorId} onChange={e => { updateConfig({ generatorId: e.target.value }); if (e.target.value) setGenSectionOpen(false); }} className="eng-select">
-                              <option value="">None</option>
-                              {GENERATORS.map(g => (
-                                <option key={g.id} value={g.id}>{g.isNew ? '🆕 ' : ''}{g.manufacturer} {g.model} ({g.ratedOutputKw} kW · {g.fuelType.replace('_', ' ')})</option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="eng-label">Transfer Switch (ATS)</label>
-                            <select value={config.atsId} onChange={e => updateConfig({ atsId: e.target.value })} className="eng-select">
-                              <option value="">None</option>
-                              {ATS_UNITS.map(a => (
-                                <option key={a.id} value={a.id}>{a.isNew ? '🆕 ' : ''}{a.manufacturer} {a.model} ({a.ampRating}A · {a.transferType}{a.serviceEntranceRated ? ' · SE-rated' : ''})</option>
-                              ))}
-                            </select>
-                          </div>
-                          {config.generatorId && (
-                            <div>
-                              <label className="eng-label flex items-center gap-1">Generator → ATS Wire Length <span className="text-slate-500">(ft)</span></label>
-                              <input type="number" min={5} max={500} step={5}
-                                value={config.generatorWireLength ?? 50}
-                                onChange={e => updateConfig({ generatorWireLength: Math.max(5, +e.target.value) })}
-                                className="eng-input" />
-                              {config.generatorWireLength && (() => {
-                                const genRun = cs.runs?.find((r: any) => r.id === 'GENERATOR_TO_ATS_RUN');
-                                if (!genRun) return null;
-                                return (
-                                  <div className="mt-1.5 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 flex flex-wrap gap-3">
-                                    <span className="font-bold text-amber-400">{genRun.wireGauge}</span>
-                                    <span>{genRun.conduitSize} {genRun.conduitType}</span>
-                                    <span className="text-slate-500">{config.generatorWireLength}ft · {genRun.ocpdAmps}A OCPD</span>
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          )}
-                        </div>
                         )}
                       </div>
                     </div>
@@ -7000,6 +6840,166 @@ function EngineeringPageInner() {
                           )}
                         </div>
                       )}
+                    </div>
+
+                    {/* Battery Card — Toggleable Module */}
+                    <div className="eng-panel">
+                      {/* Battery header with ON/OFF toggle */}
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-extrabold text-slate-100 flex items-center gap-2 tracking-tight">
+                          <Battery size={14} className="text-emerald-400" /> Battery Storage
+                          <span className="ml-1 px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase tracking-wide">+5 Models</span>
+                        </h3>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" checked={batteryEnabled} onChange={e => setBatteryEnabled(e.target.checked)}
+                            className="sr-only peer" data-testid="battery-enabled-toggle" />
+                          <div className="w-11 h-6 bg-slate-700 rounded-full peer peer-checked:bg-emerald-500 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5"></div>
+                        </label>
+                      </div>
+
+                        {!batteryEnabled ? (
+                          /* OFF state — single compact row, no dead space */
+                          <div className="flex items-center gap-2 py-0.5">
+                            <Battery size={11} className="text-slate-700 shrink-0" />
+                            <span className="text-xs text-slate-600">No battery · toggle above to add</span>
+                          </div>
+                        ) : (
+                        /* ON state — expanded */
+                        <div className="space-y-3">
+                          {/* kWh summary strip */}
+                          {_batTotalKwh > 0 && (
+                            <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+                              <div className="text-center">
+                                <div className="text-lg font-black text-emerald-400 tabular-nums">{_batTotalKwh.toFixed(1)}</div>
+                                <div className="text-[10px] text-slate-500">Total kWh</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-lg font-black text-emerald-400 tabular-nums">~{_backupPct}%</div>
+                                <div className="text-[10px] text-slate-500">Est. Backup</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="text-lg font-black text-emerald-400 tabular-nums">
+                                  {_batTotalKwh > 0 ? `~${(_batTotalKwh / Math.max(0.5, _totalKwNum * 0.15)).toFixed(1)}h` : '—'}
+                                </div>
+                                <div className="text-[10px] text-slate-500">Est. Runtime</div>
+                              </div>
+                            </div>
+                          )}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="col-span-2">
+                              <label className="eng-label">Battery Model</label>
+                              <select value={config.batteryId} onChange={e => {
+                                const bat = getBatteryById(e.target.value);
+                                updateConfig({ batteryId: e.target.value, batteryBrand: bat?.manufacturer ?? '', batteryModel: bat?.model ?? '', batteryKwh: bat?.usableCapacityKwh ?? 0 });
+                              }} className="eng-select">
+                                <option value="">None</option>
+                                {BATTERIES.map(b => (
+                                  <option key={b.id} value={b.id}>{b.isNew ? '🆕 ' : ''}{b.manufacturer} {b.model} ({b.usableCapacityKwh} kWh){b.subcategory === 'ac_coupled' ? ` · AC` : ` · DC`}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="eng-label">Units</label>
+                              <input type="number" min={0} max={10} value={config.batteryCount} onChange={e => updateConfig({ batteryCount: +e.target.value })} className="eng-input" />
+                            </div>
+                            <div>
+                              <label className="eng-label">kWh / Unit</label>
+                              <input type="number" min={0} step={0.1} value={config.batteryKwh} onChange={e => updateConfig({ batteryKwh: +e.target.value })} className="eng-input" />
+                            </div>
+                          </div>
+                          {config.batteryId && (() => {
+                            const bat = getBatteryById(config.batteryId);
+                            return bat?.backfeedBreakerA ? (
+                              <div className="text-xs text-orange-400 text-center">
+                                +{bat.backfeedBreakerA}A bus load (NEC 705.12B)
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
+                      )}
+
+                      {/* Generator & ATS — v57.5: collapsed to chip when no generator selected */}
+                      <div className="mt-4 pt-4 border-t border-slate-700/30">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Wrench size={12} className="text-orange-400" />
+                          <span className="text-xs font-bold text-slate-300 uppercase tracking-wide">Generator & Transfer Switch</span>
+                          {!config.generatorId && <span className="px-1.5 py-0.5 rounded text-xs font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">+4 Models</span>}
+                          {config.generatorId && _genData && (
+                            <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                              {_genData.ratedOutputKw}kW {_genData.manufacturer}
+                            </span>
+                          )}
+                        </div>
+
+                          {/* Generator OFF state */}
+                          {!config.generatorId && !config.atsId ? (
+                            /* Compact single row — no dead space */
+                            <div className="flex items-center justify-between gap-2 py-0.5">
+                              <div className="flex items-center gap-2">
+                                <Wrench size={11} className="text-slate-700 shrink-0" />
+                                <span className="text-xs text-slate-600">No generator</span>
+                              </div>
+                              <button onClick={() => setGenSectionOpen(v => !v)}
+                                className="text-xs px-2 py-0.5 rounded bg-orange-500/15 border border-orange-500/30 text-orange-400 hover:bg-orange-500/25 transition-colors font-semibold leading-none">
+                                {genSectionOpen ? '✕' : '+ Add'}
+                              </button>
+                            </div>
+                          ) : (
+                          /* Generator ON state */
+                          _genData && _atsData && (
+                            <div className="p-3 rounded-xl bg-orange-500/5 border border-orange-500/20 mb-3">
+                              <div className="flex items-center gap-2">
+                                <CheckCircle size={12} className="text-emerald-400" />
+                                <span className="text-xs font-bold text-emerald-400">{_genData.ratedOutputKw}kW gen + {_atsData.ampRating}A ATS</span>
+                                {_atsData.neutralSwitched ? <span className="text-xs text-emerald-400"> · Neutral switched ✓</span> : <span className="text-xs text-amber-400"> · ⚠ Check neutral bonding</span>}
+                              </div>
+                            </div>
+                          )
+                        )}
+
+                        {(config.generatorId || config.atsId || genSectionOpen) && (
+                        <div className="grid grid-cols-1 gap-3 mt-3">
+                          <div>
+                            <label className="eng-label">Generator</label>
+                            <select value={config.generatorId} onChange={e => { updateConfig({ generatorId: e.target.value }); if (e.target.value) setGenSectionOpen(false); }} className="eng-select">
+                              <option value="">None</option>
+                              {GENERATORS.map(g => (
+                                <option key={g.id} value={g.id}>{g.isNew ? '🆕 ' : ''}{g.manufacturer} {g.model} ({g.ratedOutputKw} kW · {g.fuelType.replace('_', ' ')})</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="eng-label">Transfer Switch (ATS)</label>
+                            <select value={config.atsId} onChange={e => updateConfig({ atsId: e.target.value })} className="eng-select">
+                              <option value="">None</option>
+                              {ATS_UNITS.map(a => (
+                                <option key={a.id} value={a.id}>{a.isNew ? '🆕 ' : ''}{a.manufacturer} {a.model} ({a.ampRating}A · {a.transferType}{a.serviceEntranceRated ? ' · SE-rated' : ''})</option>
+                              ))}
+                            </select>
+                          </div>
+                          {config.generatorId && (
+                            <div>
+                              <label className="eng-label flex items-center gap-1">Generator → ATS Wire Length <span className="text-slate-500">(ft)</span></label>
+                              <input type="number" min={5} max={500} step={5}
+                                value={config.generatorWireLength ?? 50}
+                                onChange={e => updateConfig({ generatorWireLength: Math.max(5, +e.target.value) })}
+                                className="eng-input" />
+                              {config.generatorWireLength && (() => {
+                                const genRun = cs.runs?.find((r: any) => r.id === 'GENERATOR_TO_ATS_RUN');
+                                if (!genRun) return null;
+                                return (
+                                  <div className="mt-1.5 bg-slate-800/60 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 flex flex-wrap gap-3">
+                                    <span className="font-bold text-amber-400">{genRun.wireGauge}</span>
+                                    <span>{genRun.conduitSize} {genRun.conduitType}</span>
+                                    <span className="text-slate-500">{config.generatorWireLength}ft · {genRun.ocpdAmps}A OCPD</span>
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+                        </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* ── System Configuration ── */}
