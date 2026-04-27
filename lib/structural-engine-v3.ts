@@ -18,7 +18,8 @@
 // ============================================================
 
 import { computeArrayGeometry, autoLayout, type ArrayGeometry, type ArrayLayoutInput } from './array-geometry';
-import { getRackingById, type RackingSystemSpec } from './racking-database';
+// Phase B1: switched from racking-database.ts to mounting-hardware-db via adapter
+import { getRackingSpecById as getRackingById, type RackingSystemSpec } from './mounting/adapter';
 
 // ─── INPUT TYPES ─────────────────────────────────────────────────────────────
 
