@@ -765,20 +765,23 @@ function getConductorStyle(
       : envOrOpenAir;
   const isOA = env === 'OPEN_AIR';
   switch (type) {
+    // AC signal — solid in raceway, long-dash in open air
     case 'L1':
-      return { stroke: BLK,      sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'L1' };
+      return { stroke: BLK,       sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'L1' };
     case 'L2':
-      return { stroke: BLK,      sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'L2' };
+      return { stroke: BLK,       sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'L2' };
     case 'N':
-      return { stroke: '#444444', sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'N'  };
+      return { stroke: '#555555',  sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'N'  };
+    // Ground — always dashed green
     case 'G':
-      return { stroke: GRN,      sw: SW_THIN, dash: undefined,                  label: 'G'  };
+      return { stroke: GRN,       sw: SW_THIN, dash: '4,3',                     label: 'G'  };
+    // DC — red for +, blue for −; dashed in OPEN_AIR, solid in conduit (RACEWAY)
     case 'DC_POS':
-      return { stroke: BLK,      sw: SW_THIN, dash: isOA ? '10,5' : '4,2',     label: '+'  };
+      return { stroke: '#C62828',  sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: '+'  };
     case 'DC_NEG':
-      return { stroke: BLK,      sw: SW_THIN, dash: isOA ? '10,5' : '4,2',     label: '−'  };
+      return { stroke: '#1565C0',  sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: '−'  };
     default:
-      return { stroke: BLK,      sw: SW_MED,  label: '' };
+      return { stroke: BLK,       sw: SW_MED,  label: '' };
   }
 }
 
@@ -916,80 +919,55 @@ function renderWireRun(
   opts: { above?: boolean } = {}
 ): string {
   const { from, to, conductors, isOpenAir } = wr;
-  // Phase 1: use environment field when available, fall back to isOpenAir
   const env: WireEnvironment = wr.environment ?? (isOpenAir ? 'OPEN_AIR' : 'RACEWAY');
   const x1 = from.x, x2 = to.x, baseY = from.y;
   const cx = (x1 + x2) / 2;
   const above = opts.above ?? true;
   const parts: string[] = [];
 
-  const sigConductors = conductors.filter(c => c.type !== 'G');
-  const gndConductors = conductors.filter(c => c.type === 'G');
-
-  // Signal conductors — DC: group + above baseline, - below with gap.
-  // AC: evenly spread. This matches how a multi-string conduit bundle is drawn on an SLD.
-  const posGroup = sigConductors.filter(c => c.type === 'DC_POS');
-  const negGroup = sigConductors.filter(c => c.type === 'DC_NEG');
-  const isDCRun  = posGroup.length > 0 || negGroup.length > 0;
-  const sigCount = sigConductors.length;
-
-  if (isDCRun) {
-    // DC multi-string: + group clustered above, - group below, 5px gap between groups
-    const lineGap  = 2;  // px between parallel lines within a polarity group
-    const groupGap = 5;  // px between the + cluster and - cluster
-    const posGroupH = Math.max(0, (posGroup.length - 1)) * lineGap;
-    const negGroupH = Math.max(0, (negGroup.length - 1)) * lineGap;
-    const totalH    = posGroupH + (posGroup.length > 0 && negGroup.length > 0 ? groupGap : 0) + negGroupH;
-    const startY    = baseY - totalH / 2;
-
-    posGroup.forEach((conductor, i) => {
-      const style = getConductorStyle(conductor.type, env);
-      const cy = startY + i * lineGap;
-      if (typeof console !== 'undefined') {
-        console.log(`[RENDER LINE: DC_POS_${i + 1}] ${wr.id} y=${cy.toFixed(1)}`);
-      }
-      parts.push(ln(x1, cy, x2, cy, { stroke: style.stroke, sw: style.sw, dash: style.dash }));
-    });
-    negGroup.forEach((conductor, i) => {
-      const style = getConductorStyle(conductor.type, env);
-      const cy = startY + posGroupH + (posGroup.length > 0 ? groupGap : 0) + i * lineGap;
-      if (typeof console !== 'undefined') {
-        console.log(`[RENDER LINE: DC_NEG_${i + 1}] ${wr.id} y=${cy.toFixed(1)}`);
-      }
-      parts.push(ln(x1, cy, x2, cy, { stroke: style.stroke, sw: style.sw, dash: style.dash }));
-    });
-  } else {
-    // AC / single-conductor: evenly spread
-    const sigSpread = sigCount > 1 ? Math.min((sigCount - 1) * 3, 8) : 0;
-    const sigBase   = baseY - sigSpread / 2;
-    sigConductors.forEach((conductor, i) => {
-      const style = getConductorStyle(conductor.type, env);
-      const cy = sigCount > 1
-        ? sigBase + i * (sigSpread / (sigCount - 1))
-        : baseY;
-      if (typeof console !== 'undefined') {
-        console.log(`[RENDER LINE: ${conductor.type}] ${wr.id} y=${cy.toFixed(1)}`);
-      }
-      parts.push(ln(x1, cy, x2, cy, { stroke: style.stroke, sw: style.sw, dash: style.dash }));
-    });
-  }
-
-  // Ground conductor — routed 6px below for visual separation
-  gndConductors.forEach((conductor) => {
-    const style = getConductorStyle(conductor.type, 'RACEWAY');  // Phase 1: ground always solid
-    const gy = baseY + 6;
-    if (typeof console !== 'undefined') {
-      console.log(`[RENDER LINE: ${conductor.type}] ${wr.id} y=${gy.toFixed(1)} (ground)`);
+  // ── One line per conductor TYPE (not per string).
+  // DC:  DC_POS (solid red)  +  DC_NEG (solid blue)
+  // AC:  L1 (solid)  +  L2 (solid)  +  N if present (solid)
+  // GND: always dashed green, 6px below base
+  const seenTypes = new Set<string>();
+  const dedupedSig: typeof conductors = [];
+  for (const c of conductors) {
+    if (c.type !== 'G' && !seenTypes.has(c.type)) {
+      seenTypes.add(c.type);
+      dedupedSig.push(c);
     }
-    parts.push(ln(x1, gy, x2, gy, { stroke: style.stroke, sw: style.sw }));
+  }
+  const hasGnd = conductors.some(c => c.type === 'G');
+
+  // Vertical placement: 3px between signal lines, centered on baseY
+  const sigCount  = dedupedSig.length;
+  const sigSpread = (sigCount - 1) * 3;
+  const sigTop    = baseY - sigSpread / 2;
+
+  dedupedSig.forEach((conductor, i) => {
+    const style = getConductorStyle(conductor.type, env);
+    const cy = sigTop + i * 3;
+    if (typeof console !== 'undefined') {
+      console.log(`[RENDER LINE: ${conductor.type}] ${wr.id} y=${cy.toFixed(1)}`);
+    }
+    parts.push(ln(x1, cy, x2, cy, { stroke: style.stroke, sw: style.sw, dash: style.dash }));
   });
 
-  // Inline label (wire gauge, conduit info) — centered on segment
-  // Phase 2: prefer wr.calloutLines when available, fall back to passed-in labelLines
+  // Ground — dashed green, 6px below base
+  if (hasGnd) {
+    const gndStyle = getConductorStyle('G', env);
+    const gy = baseY + 6;
+    if (typeof console !== 'undefined') {
+      console.log(`[RENDER LINE: G] ${wr.id} y=${gy.toFixed(1)} (ground)`);
+    }
+    parts.push(ln(x1, gy, x2, gy, { stroke: gndStyle.stroke, sw: gndStyle.sw, dash: '4,3' }));
+  }
+
+  // ── Inline callout label centered on segment ──
   const activeLabels = (wr.calloutLines && wr.calloutLines.length > 0) ? wr.calloutLines : labelLines;
   if (activeLabels.length > 0) {
-    const primaryColor = sigConductors.length > 0
-      ? getConductorStyle(sigConductors[0].type, env).stroke
+    const primaryColor = dedupedSig.length > 0
+      ? getConductorStyle(dedupedSig[0].type, env).stroke
       : BLK;
     const lh = Math.round(F.seg * 1.35);
     const th = activeLabels.length * lh;
@@ -997,47 +975,9 @@ function renderWireRun(
     parts.push(tspan(cx, ty, activeLabels, { sz: F.seg, anc: 'middle', fill: primaryColor }));
   }
 
-  // Conductor type micro-labels — DC: group-center +/- labels. AC: per-conductor labels.
-  if (isDCRun) {
-    // Label + and - groups at their respective vertical centers
-    if (posGroup.length > 0 || negGroup.length > 0) {
-      const _lineGap  = 2;
-      const _groupGap = 5;
-      const _posH  = Math.max(0, (posGroup.length - 1)) * _lineGap;
-      const _negH  = Math.max(0, (negGroup.length - 1)) * _lineGap;
-      const _totalH = _posH + (posGroup.length > 0 && negGroup.length > 0 ? _groupGap : 0) + _negH;
-      const _startY = baseY - _totalH / 2;
-      const _labelX = cx + 8;
-      if (posGroup.length > 0) {
-        const posStyle = getConductorStyle('DC_POS', env);
-        const posCY = _startY + _posH / 2;
-        const posLabel = posGroup.length > 1 ? `${posGroup.length}×+` : '+';
-        parts.push(`<text x="${_labelX.toFixed(1)}" y="${(posCY + 3).toFixed(1)}" font-family="Arial,sans-serif" font-size="5" fill="${posStyle.stroke}" text-anchor="start" dominant-baseline="auto">${posLabel}</text>`);
-      }
-      if (negGroup.length > 0) {
-        const negStyle = getConductorStyle('DC_NEG', env);
-        const negCY = _startY + _posH + (posGroup.length > 0 ? _groupGap : 0) + _negH / 2;
-        const negLabel = negGroup.length > 1 ? `${negGroup.length}×-` : '-';
-        parts.push(`<text x="${_labelX.toFixed(1)}" y="${(negCY + 3).toFixed(1)}" font-family="Arial,sans-serif" font-size="5" fill="${negStyle.stroke}" text-anchor="start" dominant-baseline="auto">${negLabel}</text>`);
-      }
-    }
-  } else if (sigCount > 1) {
-    const _sigSpread = Math.min((sigCount - 1) * 3, 8);
-    const _sigBase   = baseY - _sigSpread / 2;
-    sigConductors.forEach((conductor, i) => {
-      const style = getConductorStyle(conductor.type, env);
-      const cy = _sigBase + i * (_sigSpread / (sigCount - 1));
-      const labelX = cx + 8;
-      parts.push(
-        `<text x="${labelX.toFixed(1)}" y="${(cy + 3).toFixed(1)}" ` +
-        `font-family="Arial,sans-serif" font-size="5" fill="${style.stroke}" ` +
-        `text-anchor="start" dominant-baseline="auto">${style.label}</text>`
-      );
-    });
-  }
-
   return parts.join('');
 }
+
 
 function wireSeg(
   x1: number, x2: number, y: number,
