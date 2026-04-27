@@ -2132,26 +2132,27 @@ export const RACKING_SYSTEMS: RackingSystem[] = [
     installNotes: 'No roof penetrations. Clamp directly to seam. Verify seam profile.',
     datasheetUrl: 'https://www.s-5.com/products/pvkit/',
   },
-  // FIX: Roof Tech Mini — discrete load model (dual-lag per attachment)
+  // Roof Tech Mini — flashed pad standoff, L-foot, rail-based system
+  // Assembly: RT-MINI flashed pad (2 lag screws into rafter) → bolt through pad → L-foot → standard rail (IronRidge / Pegasus / compatible)
   {
     id: 'rooftech-mini',
     manufacturer: 'Roof Tech',
-    model: 'RT-MINI Rail-Less',
+    model: 'RT-MINI Flush Mount',
     category: 'racking',
     systemType: 'roof',
     roofTypes: ['shingle', 'tile'],
     maxWindSpeed: 150, maxSnowLoad: 45,
-    railSpanMax: 0, attachmentSpacingMax: 48,
+    railSpanMax: 72, attachmentSpacingMax: 48,
     weight: 0.6, material: 'Aluminum / EPDM',
     warranty: '20yr', ulListing: 'ICC-ES ESR-3575 / UL 2703',
-    attachmentMethod: 'Direct attachment — 2 lag bolts per RT-MINI foot (no rail)',
-    hardware: 'RT-MINI mount, integrated EPDM flashing, 5/16" × 3" lag bolts (×2 per mount)',
-    installNotes: 'Rail-less direct attachment. 2 lag bolts per mount. ICC-ES ESR-3575 rated.',
+    attachmentMethod: 'Flashed pad with 2 lag bolts into rafter → L-foot bolt → compatible rail (IronRidge XR100/XR1000, Pegasus, or equivalent)',
+    hardware: 'RT-MINI flashed pad, integrated EPDM flashing, 5/16" × 3" lag bolts (×2 per pad), L-foot, compatible rail',
+    installNotes: 'Rail-based system. 2 lag bolts per RT-MINI pad into rafter. L-foot mounts to pad bolt. Standard rail (IronRidge, Pegasus, or compatible) attaches to L-foot. ICC-ES ESR-3575 rated.',
     // v47.406 datasheet fix: Roof Tech RT Mini II brochure (design.roof-tech.us manufacturer design portal)
     datasheetUrl: 'https://design.roof-tech.us/PDF/Brochures/Mini_II_Brochure.pdf',
-    // Discrete load model: uplift evaluated per attachment point
+    // Discrete load model: uplift evaluated per attachment point (each RT-MINI pad)
     loadModel: 'discrete',
-    fastenersPerAttachment: 2,   // 2 lag bolts per RT-MINI foot
+    fastenersPerAttachment: 2,   // 2 lag bolts per RT-MINI pad
     upliftCapacity: 450,         // lbf per lag bolt (ICC-ES ESR-3575)
     tributaryArea: 8.5,          // ft² per attachment point
   },

@@ -2544,61 +2544,99 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
   },
 
   // ══════════════════════════════════════════════════════════════════════════
-  // RACKING — ROOFTECH RT-MINI (Rail-Less)
+  // RACKING — ROOFTECH RT-MINI (Rail-Based Standoff System)
+  // Assembly: RT-MINI flashed pad (2 lag screws into rafter) → bolt through pad
+  //           → L-foot → standard rail (IronRidge XR100/XR1000, Pegasus, or compatible)
+  // ICC-ES ESR-3575 / UL 2703 | ASCE 7-22 | 150 mph wind | 45 psf snow
   // ══════════════════════════════════════════════════════════════════════════
 
   {
     id: 'rooftech-mini',
-    manufacturer: 'RoofTech',
-    model: 'RT-MINI Rail-Less Mount',
+    manufacturer: 'Roof Tech',
+    model: 'RT-MINI Flush Mount',
     partNumber: 'RT-MINI-01',
     category: 'racking',
-    topologyType: 'ROOF_RAIL_LESS',
-    mountTopology: 'ROOF_RAIL_LESS',
+    topologyType: 'ROOF_RAIL_BASED',
+    mountTopology: 'ROOF_RAIL_BASED',
     electricalSpecs: {},
     structuralSpecs: {
       maxWindSpeed: 150,
       maxSnowLoad: 45,
-      railSpanMax: 0,
-      attachmentSpacingMax: 48,
-      requiresRail: false,
+      railSpanMax: 72,              // max L-foot to L-foot spacing (inches) along rail
+      attachmentSpacingMax: 48,     // max pad spacing perpendicular to rail (inches)
+      requiresRail: true,           // RT-MINI pad mounts L-foot → rail → clamps → modules
       foundationType: 'lag_bolt',
       minEmbedmentDepth: 2.5,
-      upliftCapacityLbs: 800,
+      upliftCapacityLbs: 900,       // 2 lag bolts × 450 lbf/bolt (ICC-ES ESR-3575)
       shearCapacityLbs: 600,
-      modulesPerAttachment: 0.5,  // 2 mounts per module
-      iccEsReport: 'ESR-4575',
+      // Discrete load model: each RT-MINI pad is independently evaluated
+      loadModel: 'discrete',
+      fastenersPerAttachment: 2,    // 2 lag bolts per RT-MINI pad
+      upliftCapacity: 450,          // lbf per lag bolt (ICC-ES ESR-3575)
+      tributaryArea: 8.5,           // ft² per attachment point
+      iccEsReport: 'ESR-3575',
       asceEdition: 'ASCE 7-22',
     },
     requiredAccessories: [
       {
         category: 'attachment',
-        description: 'RT-MINI mount — 4 per module (2 per short side)',
-        required: true, quantityRule: 'formula',
-        quantityFormula: 'modules * 4',
-        defaultManufacturer: 'RoofTech', defaultModel: 'RT-MINI Mount Assembly',
-        defaultPartNumber: 'RT-MINI-ASSY', necReference: 'ASCE 7-22',
-        notes: '4 mounts per module — 2 on each short side',
+        description: 'RT-MINI flashed pad — 2 per module row (1 per rafter, min 2 per module)',
+        required: true, quantityRule: 'perAttachment',
+        defaultManufacturer: 'Roof Tech', defaultModel: 'RT-MINI Pad Assembly',
+        defaultPartNumber: 'RT-MINI-ASSY', necReference: 'ASCE 7-22 / ICC-ES ESR-3575',
+        notes: 'Flashed pad with integrated EPDM seal. 2 lag bolts per pad into rafter.',
       },
       {
         category: 'flashing',
-        description: 'RT-MINI integrated flashing — 1 per mount (shingle roofs)',
+        description: 'RT-MINI integrated EPDM flashing — 1 per pad (shingle/tile roofs)',
         required: true,
-        conditional: 'roofType === shingle',
-        quantityRule: 'formula',
-        quantityFormula: 'modules * 4',
-        defaultManufacturer: 'RoofTech', defaultModel: 'RT-MINI Flashing Kit',
+        conditional: 'roofType === shingle || roofType === tile',
+        quantityRule: 'perAttachment',
+        defaultManufacturer: 'Roof Tech', defaultModel: 'RT-MINI Flashing Kit',
         defaultPartNumber: 'RT-MINI-FLASH', necReference: 'IBC 2021',
-        notes: 'Integrated flashing included with RT-MINI for shingle roofs',
+        notes: 'Integrated EPDM flashing included with RT-MINI pad for shingle/tile roofs',
       },
       {
         category: 'lag_bolt',
-        description: '5/16" × 3" lag bolt — 1 per mount into rafter',
+        description: '5/16" × 3" lag bolt — 2 per RT-MINI pad into rafter',
         required: true, quantityRule: 'formula',
-        quantityFormula: 'modules * 4',
+        quantityFormula: 'attachments * 2',
         defaultManufacturer: 'Generic', defaultModel: '5/16" × 3" Lag Bolt SS',
         defaultPartNumber: 'LAG-516-3-SS', necReference: 'ASCE 7-22',
-        notes: 'Stainless steel lag bolt, min 2.5" embedment into rafter',
+        notes: 'Stainless steel lag bolt, min 2.5" embedment into rafter (ICC-ES ESR-3575)',
+      },
+      {
+        category: 'l_foot',
+        description: 'L-foot — 1 per RT-MINI pad (attaches to pad bolt, receives rail)',
+        required: true, quantityRule: 'perAttachment',
+        defaultManufacturer: 'IronRidge', defaultModel: 'L-Foot Universal',
+        defaultPartNumber: 'LFT-001-B', necReference: 'ASCE 7-22',
+        notes: 'L-foot bolts to RT-MINI pad stud. Compatible with IronRidge, Pegasus, UniRac, and most standard rails.',
+      },
+      {
+        category: 'rail',
+        description: 'Rail — 2 rails per module row (IronRidge XR100/XR1000, Pegasus, or compatible)',
+        required: true, quantityRule: 'formula',
+        quantityFormula: 'strings * 2',
+        defaultManufacturer: 'IronRidge', defaultModel: 'XR100 Rail 168"',
+        defaultPartNumber: 'XR-100-168B', necReference: 'IBC 2021',
+        notes: '2 rails per string row (portrait). Compatible: IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent aluminum extruded rail.',
+      },
+      {
+        category: 'mid_clamp',
+        description: 'Mid clamp — 2 per interior module',
+        required: true, quantityRule: 'formula',
+        quantityFormula: '(modules - strings) * 2',
+        defaultManufacturer: 'IronRidge', defaultModel: 'UFO Mid Clamp',
+        defaultPartNumber: 'UFO-MID-01', necReference: 'IBC 2021',
+      },
+      {
+        category: 'end_clamp',
+        description: 'End clamp — 4 per string (2 rails × 2 ends)',
+        required: true, quantityRule: 'formula',
+        quantityFormula: 'strings * 4',
+        defaultManufacturer: 'IronRidge', defaultModel: 'UFO End Clamp',
+        defaultPartNumber: 'UFO-END-01', necReference: 'IBC 2021',
       },
       {
         category: 'grounding',
@@ -2610,11 +2648,13 @@ export const EQUIPMENT_REGISTRY_V4: EquipmentRegistryEntry[] = [
     ],
     compatibilityRules: [],
     notesTemplates: [
-      'RoofTech RT-MINI — rail-less direct attachment, 4 mounts per module',
-      'ICC-ES ESR-4575, ASCE 7-22 compliant, max 48" attachment spacing',
-      'No rail required — direct module-to-roof attachment',
+      'Roof Tech RT-MINI — flashed pad standoff system, rail-based attachment',
+      'Assembly: RT-MINI pad (2 lag bolts into rafter) → L-foot → standard rail → mid/end clamps',
+      'Compatible rails: IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent',
+      'ICC-ES ESR-3575 / UL 2703, ASCE 7-22 compliant, 150 mph wind, 45 psf snow',
+      'Max 48" pad spacing, max 72" rail span (L-foot to L-foot)',
     ],
-    iccEsReport: 'ESR-4575',
+    iccEsReport: 'ESR-3575',
     warranty: '20-year product',
   },
 
