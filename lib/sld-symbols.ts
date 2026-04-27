@@ -170,6 +170,12 @@ function sineWave(cx: number, cy: number, w: number, amp: number,
   return p_path(d, { stroke, sw });
 }
 
+// ─── SVG Wrapper ──────────────────────────────────────────────────────────────
+// Wraps inner SVG content in a full <svg> element for direct HTML embedding
+function wrapSVG(w: number, h: number, inner: string): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${inner}</svg>`;
+}
+
 // ─── Connection Point Dot ──────────────────────────────────────────────────────
 function cpDot(x: number, y: number, domain: string): string {
   const clr = domain === 'DC' ? T.DC_CLR : domain === 'GND' ? T.GND : T.AC_CLR;
@@ -259,7 +265,7 @@ const symPVArray: SLDSymbol = {
     parts.push(cpDot(200, 60, 'DC'));
     parts.push(cpDot(200, 100, 'DC'));
     parts.push(cpDot(100, 160, 'GND'));
-    return parts.join('');
+    return wrapSVG(200, 160, parts.join(''));
   },
 };
 
@@ -333,7 +339,7 @@ const symInverter: SLDSymbol = {
     parts.push(cpDot(200, 75, 'AC'));
     parts.push(cpDot(200, 100, 'AC'));
     parts.push(cpDot(100, 170, 'GND'));
-    return parts.join('');
+    return wrapSVG(200, 170, parts.join(''));
   },
 };
 
@@ -386,7 +392,7 @@ const symBatteryDC: SLDSymbol = {
     parts.push(cpDot(180, 55, 'DC'));
     parts.push(cpDot(180, 80, 'DC'));
     parts.push(cpDot(90, 170, 'GND'));
-    return parts.join('');
+    return wrapSVG(180, 170, parts.join(''));
   },
 };
 
@@ -431,7 +437,7 @@ const symBatteryAC: SLDSymbol = {
     parts.push(cpDot(180, 55, 'AC'));
     parts.push(cpDot(180, 80, 'AC'));
     parts.push(cpDot(90, 170, 'GND'));
-    return parts.join('');
+    return wrapSVG(180, 170, parts.join(''));
   },
 };
 
@@ -485,7 +491,7 @@ const symBUI: SLDSymbol = {
     parts.push(cpDot(0, 65, 'AC'));
     parts.push(cpDot(180, 65, 'AC'));
     parts.push(cpDot(90, 130, 'GND'));
-    return parts.join('');
+    return wrapSVG(180, 130, parts.join(''));
   },
 };
 
@@ -542,7 +548,7 @@ const symGenerator: SLDSymbol = {
     parts.push(cpDot(180, 105, 'AC'));
     parts.push(cpDot(180, 130, 'AC'));
     parts.push(cpDot(90, 200, 'GND'));
-    return parts.join('');
+    return wrapSVG(180, 200, parts.join(''));
   },
 };
 
@@ -594,7 +600,7 @@ const symACCombiner: SLDSymbol = {
     parts.push(cpDot(0, 105, 'AC'));
     parts.push(cpDot(180, 80, 'AC'));
     parts.push(cpDot(90, 160, 'GND'));
-    return parts.join('');
+    return wrapSVG(180, 160, parts.join(''));
   },
 };
 
@@ -632,7 +638,7 @@ const symDCDisconnect: SLDSymbol = {
     parts.push(cpDot(0, CY, 'DC'));
     parts.push(cpDot(120, CY, 'DC'));
     parts.push(cpDot(CX, 100, 'GND'));
-    return parts.join('');
+    return wrapSVG(120, 100, parts.join(''));
   },
 };
 
@@ -665,7 +671,7 @@ const symACDisconnect: SLDSymbol = {
     parts.push(cpDot(0, CY, 'AC'));
     parts.push(cpDot(120, CY, 'AC'));
     parts.push(cpDot(CX, 100, 'GND'));
-    return parts.join('');
+    return wrapSVG(120, 100, parts.join(''));
   },
 };
 
@@ -702,7 +708,7 @@ const symFusedDisconnect: SLDSymbol = {
     parts.push(cpDot(0, CY, 'DC'));
     parts.push(cpDot(140, CY, 'DC'));
     parts.push(cpDot(CX, 100, 'GND'));
-    return parts.join('');
+    return wrapSVG(140, 100, parts.join(''));
   },
 };
 
@@ -731,7 +737,7 @@ const symGround: SLDSymbol = {
     parts.push(p_line(CX - 12, 76, CX + 12, 76, { stroke: T.GND, sw: 1 }));
     parts.push(p_text(CX, 85, 'EARTH', { sz: 9, fill: T.GND, bold: true }));
     parts.push(cpDot(CX, 0, 'GND'));
-    return parts.join('');
+    return wrapSVG(80, 90, parts.join(''));
   },
 };
 
@@ -758,7 +764,7 @@ const symFuse: SLDSymbol = {
     parts.push(p_text(CX, CY, 'FUSE', { sz: 10, fill: T.BLACK, bold: true }));
     parts.push(cpDot(0, CY, 'DC'));
     parts.push(cpDot(100, CY, 'DC'));
-    return parts.join('');
+    return wrapSVG(100, 70, parts.join(''));
   },
 };
 
@@ -787,7 +793,7 @@ const symBreaker: SLDSymbol = {
     parts.push(p_text(CX, CY + 18, 'CB', { sz: 9, fill: T.AC_CLR, bold: true }));
     parts.push(cpDot(0, CY, 'AC'));
     parts.push(cpDot(100, CY, 'AC'));
-    return parts.join('');
+    return wrapSVG(100, 80, parts.join(''));
   },
 };
 
@@ -820,7 +826,7 @@ const symJunctionBox: SLDSymbol = {
     parts.push(cpDot(100, CY, 'AC'));
     parts.push(cpDot(CX, 0, 'AC'));
     parts.push(cpDot(CX, 100, 'AC'));
-    return parts.join('');
+    return wrapSVG(100, 100, parts.join(''));
   },
 };
 
@@ -881,7 +887,7 @@ const symMSP: SLDSymbol = {
     parts.push(cpDot(0, 90, 'AC'));
     parts.push(cpDot(160, 72, 'AC'));
     parts.push(cpDot(CX, 180, 'GND'));
-    return parts.join('');
+    return wrapSVG(160, 180, parts.join(''));
   },
 };
 
@@ -925,7 +931,7 @@ const symSubPanel: SLDSymbol = {
     parts.push(cpDot(0, 50, 'AC'));
     parts.push(cpDot(140, 50, 'AC'));
     parts.push(cpDot(CX, 150, 'GND'));
-    return parts.join('');
+    return wrapSVG(140, 150, parts.join(''));
   },
 };
 
@@ -963,7 +969,7 @@ const symUtilityMeter: SLDSymbol = {
     parts.push(cpDot(0, CY, 'AC'));
     parts.push(cpDot(120, CY, 'AC'));
     parts.push(cpDot(CX, 120, 'GND'));
-    return parts.join('');
+    return wrapSVG(120, 120, parts.join(''));
   },
 };
 
@@ -1016,7 +1022,7 @@ const symATS: SLDSymbol = {
     parts.push(cpDot(0, 90, 'AC'));
     parts.push(cpDot(160, 70, 'AC'));
     parts.push(cpDot(CX, 140, 'GND'));
-    return parts.join('');
+    return wrapSVG(160, 140, parts.join(''));
   },
 };
 
