@@ -43,13 +43,13 @@ const DH = H - MAR * 2;
 const SCH_X = DX;
 const SCH_Y = DY + 30;
 const SCH_W = DW;
-const SCH_H = Math.round(DH * 0.50);
+const SCH_H = Math.round(DH * 0.62);  // SOT: expanded for symbol height
 
 // Main horizontal bus line Y
-const BUS_Y = SCH_Y + Math.round(SCH_H * 0.46);
+const BUS_Y = SCH_Y + Math.round(SCH_H * 0.40);  // SOT: adjusted for larger symbols
 
 // Ground rail
-const GND_Y = BUS_Y + 100;
+const GND_Y = BUS_Y + 140;  // SOT: increased for taller symbols
 
 // Bottom panels
 const CALC_Y  = SCH_Y + SCH_H + 8;
@@ -342,6 +342,45 @@ function busbar(x1: number, x2: number, y: number, label?: string): string {
   return parts.join('');
 }
 
+
+// ── getAnchorPoint(): SOT anchor resolver ────────────────────────────────────
+// Resolves a named anchor from SLD_SYMBOL_MAP to absolute canvas coordinates.
+// The symbol is rendered at (cx, cy) at slotW×slotH.
+// Anchor coords in SLD_SYMBOL_MAP are defined at native symbol size (nW×nH).
+// We scale them proportionally to the slot size used in the renderer.
+//
+// Usage:  const pt = getAnchorPoint('inverter', 'ac_out', cx, cy, W2, H2);
+//         → { x: <absolute canvas x>, y: <absolute canvas y> }
+//
+// [SLD ANCHOR CONNECTED] logs are emitted for each resolved anchor.
+function getAnchorPoint(
+  symbolId: string,
+  anchorId: string,
+  cx: number, cy: number,
+  slotW: number, slotH: number
+): { x: number; y: number } {
+  const sym = SLD_SYMBOL_MAP[symbolId];
+  if (!sym) {
+    console.warn(`[SLD ANCHOR CONNECTED] symbol not found: ${symbolId}`);
+    return { x: cx, y: cy };
+  }
+  const anchor = sym.connections?.find((a: {id:string}) => a.id === anchorId);
+  if (!anchor) {
+    console.warn(`[SLD ANCHOR CONNECTED] anchor not found: ${symbolId}.${anchorId}`);
+    return { x: cx, y: cy };
+  }
+  // Native symbol origin is top-left; cx/cy is center of slot
+  const originX = cx - slotW / 2;
+  const originY = cy - slotH / 2;
+  // Scale anchor coords from native size to slot size
+  const scaleX = slotW / sym.width;
+  const scaleY = slotH / sym.height;
+  const ax = originX + anchor.x * scaleX;
+  const ay = originY + anchor.y * scaleY;
+  console.log(`[SLD ANCHOR CONNECTED] ${symbolId}.${anchorId} → (${ax.toFixed(1)}, ${ay.toFixed(1)})`);
+  return { x: ax, y: ay };
+}
+
 // Battery Storage Symbol (IEEE/ANSI)
 // Drawn as a stack of cells (IEC 60617 battery symbol) with AC connection
 // Terminal BAT_AC_OUT: bottom center — AC output lug connecting to BUI BATTERY port
@@ -351,7 +390,10 @@ function renderBattery(
   model: string, kwh: number, backfeedA: number, calloutN: number
 ): {svg: string; lx: number; rx: number; ty: number; by: number;
     acOutX: number; acOutY: number} {
-  const W2 = 88, H2 = 72;
+  // SOT: symbol size from SLD_SYMBOL_MAP['battery-ac'] = 180×170
+  const W2 = SLD_SYMBOL_MAP['battery-ac'].width;   // 180
+  const H2 = SLD_SYMBOL_MAP['battery-ac'].height;  // 170
+  console.log(`[SLD SYMBOL SIZE USED] battery-ac: ${W2}×${H2}`);
   const bx = cx - W2/2, by2 = cy - H2/2;
   const p: string[] = [];
   const BAT_HDR = '#1565C0';
@@ -366,10 +408,12 @@ function renderBattery(
     p.push(txt(cx, by2 + H2 + 34, `${backfeedA}A BACKFEED — NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_HDR}));
   }
 
-  // BAT_AC_OUT terminal — bottom center wire stub
-  const acOutX = cx;
-  const acOutY = by2 + H2;
-  p.push(ln(acOutX, acOutY, acOutX, acOutY + 8, {stroke: BAT_HDR, sw: SW_MED}));
+  // SOT: BAT_AC_OUT terminal via anchor 'ac_l1' (right side: native 180,55)
+  const acPt = getAnchorPoint('battery-ac', 'ac_l1', cx, cy, W2, H2);
+  const acOutX = acPt.x;
+  const acOutY = acPt.y;
+  p.push(ln(acOutX, acOutY, acOutX + 10, acOutY, {stroke: BAT_HDR, sw: SW_MED}));
+  console.log(`[SLD WIRE TYPE: AC] battery-ac.ac_l1 → (${acOutX.toFixed(1)},${acOutY.toFixed(1)})`);
 
   p.push(callout(bx + W2 + 14, by2 - 5, calloutN));
   return {svg: p.join(''), lx: bx, rx: bx + W2, ty: by2, by: by2 + H2,
@@ -416,7 +460,9 @@ function renderATS(
 ): {svg: string; lx: number; rx: number; ty: number; by: number;
     utilInX: number; utilInY: number; genInX: number; genInY: number;
     loadOutX: number; loadOutY: number} {
-  const W2 = 90, H2 = 68;
+  // SOT: ATS is custom-drawn (no sld-symbols emblem); slot expanded to 160×120
+  const W2 = 160, H2 = 120;
+  console.log(`[SLD SYMBOL SIZE USED] ats (custom): ${W2}×${H2}`);
   const bx = cx - W2/2, by2 = cy - H2/2;
   const ATS_CLR = '#E65100';
   const p: string[] = [];
@@ -477,7 +523,9 @@ function renderBackupPanel(
   cx: number, cy: number,
   brand: string, ampRating: number, calloutN: number
 ): {svg: string; lx: number; rx: number; ty: number; by: number} {
-  const W2 = 80, H2 = 72;
+  // SOT: Backup Panel is custom-drawn; slot expanded to 140×120
+  const W2 = 140, H2 = 120;
+  console.log(`[SLD SYMBOL SIZE USED] backup-panel (custom): ${W2}×${H2}`);
   const bx = cx - W2/2, by2 = cy - H2/2;
   const BP_CLR = '#6A1B9A';
   const p: string[] = [];
@@ -523,7 +571,10 @@ function renderBUI(
     loadPortX: number; loadPortY: number;
     gridPortX: number; gridPortY: number;
     genPortX: number; genPortY: number} {
-  const W2 = 100, H2 = 90;
+  // SOT: symbol size from SLD_SYMBOL_MAP['bui-enphase'] = 180×130
+  const W2 = SLD_SYMBOL_MAP['bui-enphase'].width;   // 180
+  const H2 = SLD_SYMBOL_MAP['bui-enphase'].height;  // 130
+  console.log(`[SLD SYMBOL SIZE USED] bui-enphase: ${W2}×${H2}`);
   const bx = cx - W2/2, by2 = cy - H2/2;
   const BUI_CLR = isEnphase ? '#0D47A1' : isTesla ? '#CC0000' : '#1565C0';
   const p: string[] = [];
@@ -621,7 +672,10 @@ function renderInverterBox(
   calloutN: number
 ): {svg: string; lx: number; rx: number;
     dcInX: number; dcInY: number; acOutX: number; acOutY: number} {
-  const W2 = 96, H2 = 80;
+  // SOT: symbol size from SLD_SYMBOL_MAP['inverter'] = 200×170
+  const W2 = SLD_SYMBOL_MAP['inverter'].width;   // 200
+  const H2 = SLD_SYMBOL_MAP['inverter'].height;  // 170
+  console.log(`[SLD SYMBOL SIZE USED] inverter: ${W2}×${H2}`);
   const bx = cx - W2/2, by2 = cy - H2/2;
   const p: string[] = [];
 
@@ -641,18 +695,24 @@ function renderInverterBox(
   // Topology label above
   p.push(txt(cx, by2-10, topologyLabel, {sz: F.hdr, bold: true, anc: 'middle'}));
 
-  // Wire stubs for terminal connections
-  p.push(ln(bx-10, cy, bx, cy, {sw: SW_MED}));
-  p.push(ln(bx+W2, cy, bx+W2+10, cy, {sw: SW_MED}));
+  // SOT: anchor-based terminals
+  // dc_in_pos: native (0, 60) left side — DC input from DC disco
+  // ac_out:    native (200, 75) right side — AC output to AC disco
+  const _dcPt = getAnchorPoint('inverter', 'dc_in_pos', cx, cy, W2, H2);
+  const _acPt = getAnchorPoint('inverter', 'ac_out',    cx, cy, W2, H2);
+  p.push(ln(_dcPt.x - 10, _dcPt.y, _dcPt.x, _dcPt.y, {sw: SW_MED}));
+  p.push(ln(_acPt.x, _acPt.y, _acPt.x + 10, _acPt.y, {sw: SW_MED}));
+  console.log(`[SLD WIRE TYPE: DC] inverter.dc_in → (${_dcPt.x.toFixed(1)},${_dcPt.y.toFixed(1)})`);
+  console.log(`[SLD WIRE TYPE: AC] inverter.ac_out → (${_acPt.x.toFixed(1)},${_acPt.y.toFixed(1)})`);
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  // Terminal coordinates — same as before
-  const dcInX  = bx - 10;
-  const dcInY  = cy;
-  const acOutX2 = bx + W2 + 10;
-  const acOutY2 = cy;
+  // Terminal coordinates — anchor-driven
+  const dcInX  = _dcPt.x - 10;
+  const dcInY  = _dcPt.y;
+  const acOutX2 = _acPt.x + 10;
+  const acOutY2 = _acPt.y;
   return {svg: p.join(''), lx: bx-10, rx: bx+W2+10,
           dcInX, dcInY, acOutX: acOutX2, acOutY: acOutY2};
 }
@@ -921,7 +981,10 @@ function renderCombiner(
   label: string, calloutN: number
 ): {svg:string; lx:number; rx:number; ty:number; by:number;
     feederOutX:number; feederOutY:number} {
-  const W2 = 80, H2 = 90;
+  // SOT: symbol size from SLD_SYMBOL_MAP['ac-combiner'] = 180×160
+  const W2 = SLD_SYMBOL_MAP['ac-combiner'].width;   // 180
+  const H2 = SLD_SYMBOL_MAP['ac-combiner'].height;  // 160
+  console.log(`[SLD SYMBOL SIZE USED] ac-combiner: ${W2}×${H2}`);
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
 
@@ -971,9 +1034,12 @@ function renderCombiner(
   // Input wire stub (left side at bus Y)
   p.push(ln(bx-10, busY, bx, busY, {sw:SW_MED}));
 
-  // Terminal coordinates for segment routing
-  const feederOutX = bx + W2 + 10;  // Feeder lug output — right edge
-  const feederOutY = cy + 8;         // busY inside combiner
+  // SOT: feeder terminal via anchor 'out' (native 180, 80)
+  const _cOutPt = getAnchorPoint('ac-combiner', 'out', cx, cy, W2, H2);
+  const feederOutX = _cOutPt.x + 10;
+  const feederOutY = _cOutPt.y;
+  console.log(`[SLD ANCHOR CONNECTED] ac-combiner.out → feederOut (${feederOutX.toFixed(1)},${feederOutY.toFixed(1)})`);
+  console.log(`[SLD WIRE TYPE: AC] ac-combiner.out → ac-disconnect`);
   return {svg:p.join(''), lx:bx-10, rx:bx+W2+10, ty:by2, by:by2+H2,
           feederOutX, feederOutY};
 }
@@ -984,7 +1050,10 @@ function renderDisco(
   ocpd: number, calloutN: number
 ): {svg:string; lx:number; rx:number;
     loadInX:number; loadInY:number; lineOutX:number; lineOutY:number} {
-  const W2 = 90, H2 = 70;
+  // SOT: symbol size from SLD_SYMBOL_MAP['ac-disconnect'] = 120×100
+  const W2 = SLD_SYMBOL_MAP['ac-disconnect'].width;   // 120
+  const H2 = SLD_SYMBOL_MAP['ac-disconnect'].height;  // 100
+  console.log(`[SLD SYMBOL SIZE USED] ac-disconnect: ${W2}×${H2}`);
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
 
@@ -1042,11 +1111,15 @@ function renderDisco(
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  // Terminal coordinates for segment routing
-  const loadInX  = bx;          // LOAD terminals — left edge (PV/combiner side)
-  const loadInY  = cy;           // midpoint between poleY1 and poleY2
-  const lineOutX = bx + W2;     // LINE terminals — right edge (utility/MSP side)
-  const lineOutY = cy;
+  // SOT: terminals via anchors ac_in (0,50) left and ac_out (120,50) right
+  const _dInPt  = getAnchorPoint('ac-disconnect', 'ac_in',  cx, cy, W2, H2);
+  const _dOutPt = getAnchorPoint('ac-disconnect', 'ac_out', cx, cy, W2, H2);
+  const loadInX  = _dInPt.x;
+  const loadInY  = _dInPt.y;
+  const lineOutX = _dOutPt.x;
+  const lineOutY = _dOutPt.y;
+  console.log(`[SLD ANCHOR CONNECTED] ac-disconnect: loadIn=(${loadInX.toFixed(1)},${loadInY.toFixed(1)}) lineOut=(${lineOutX.toFixed(1)},${lineOutY.toFixed(1)})`);
+  console.log(`[SLD WIRE TYPE: AC] ac-disconnect.ac_out → msp`);
   return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
           loadInX, loadInY, lineOutX, lineOutY};
 }
@@ -1057,7 +1130,10 @@ function renderMSPLoad(
   mainAmps: number, pvAmps: number, calloutN: number
 ): {svg:string; lx:number; rx:number;
     bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number} {
-  const W2 = 96, H2 = 120;
+  // SOT: symbol size from SLD_SYMBOL_MAP['msp'] = 160×180
+  const W2 = SLD_SYMBOL_MAP['msp'].width;   // 160
+  const H2 = SLD_SYMBOL_MAP['msp'].height;  // 180
+  console.log(`[SLD SYMBOL SIZE USED] msp (load-side): ${W2}×${H2}`);
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
 
@@ -1115,11 +1191,16 @@ function renderMSPLoad(
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  // Terminal coordinates for segment routing
-  const bkfdInX = bx;           // Backfed breaker input — left edge (from AC disco)
-  const bkfdInY = cy;
-  const busOutX = bx + W2;      // Main bus output — right edge (to utility meter)
-  const busOutY = mbY + 20;     // busY inside MSP
+  // SOT: terminals via anchors solar_in (0,90) left and load_out (160,72) right
+  const _mspInPt  = getAnchorPoint('msp', 'solar_in', cx, cy, W2, H2);
+  const _mspOutPt = getAnchorPoint('msp', 'load_out',  cx, cy, W2, H2);
+  const bkfdInX = _mspInPt.x;
+  const bkfdInY = _mspInPt.y;
+  const busOutX = _mspOutPt.x;
+  const busOutY = _mspOutPt.y;
+  console.log(`[SLD ANCHOR CONNECTED] msp.solar_in → bkfdIn (${bkfdInX.toFixed(1)},${bkfdInY.toFixed(1)})`);
+  console.log(`[SLD ANCHOR CONNECTED] msp.load_out → busOut (${busOutX.toFixed(1)},${busOutY.toFixed(1)})`);
+  console.log(`[SLD WIRE TYPE: AC] msp.load_out → utility-meter`);
   return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
           bkfdInX, bkfdInY, busOutX, busOutY};
 }
@@ -1131,7 +1212,10 @@ function renderMSPSupply(
   isSupply: boolean, calloutN: number
 ): {svg:string; lx:number; rx:number;
     bkfdInX:number; bkfdInY:number; busOutX:number; busOutY:number} {
-  const W2 = 96, H2 = 110;
+  // SOT: symbol size from SLD_SYMBOL_MAP['msp'] = 160×180
+  const W2 = SLD_SYMBOL_MAP['msp'].width;   // 160
+  const H2 = SLD_SYMBOL_MAP['msp'].height;  // 180
+  console.log(`[SLD SYMBOL SIZE USED] msp (supply-side): ${W2}×${H2}`);
   const bx = cx-W2/2, by2 = cy-H2/2;
   const p: string[] = [];
 
@@ -1190,11 +1274,16 @@ function renderMSPSupply(
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  // Terminal coordinates for segment routing
-  const bkfdInX = bx;           // Input — left edge (from AC disco or ATS)
-  const bkfdInY = cy;
-  const busOutX = bx + W2;      // Main bus output — right edge (to utility meter)
-  const busOutY = by2 + 38;     // busY inside MSP supply
+  // SOT: terminals via anchors utility_in (0,55) left and load_out (160,72) right
+  const _mspsInPt  = getAnchorPoint('msp', 'utility_in', cx, cy, W2, H2);
+  const _mspsOutPt = getAnchorPoint('msp', 'load_out',   cx, cy, W2, H2);
+  const bkfdInX = _mspsInPt.x;
+  const bkfdInY = _mspsInPt.y;
+  const busOutX = _mspsOutPt.x;
+  const busOutY = _mspsOutPt.y;
+  console.log(`[SLD ANCHOR CONNECTED] msp.utility_in → bkfdIn (${bkfdInX.toFixed(1)},${bkfdInY.toFixed(1)})`);
+  console.log(`[SLD ANCHOR CONNECTED] msp.load_out → busOut (${busOutX.toFixed(1)},${busOutY.toFixed(1)})`);
+  console.log(`[SLD WIRE TYPE: AC] msp.load_out → utility-meter`);
   return {svg:p.join(''), lx:bx-10, rx:bx+W2+10,
           bkfdInX, bkfdInY, busOutX, busOutY};
 }
@@ -1270,23 +1359,26 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   if (isMicro) {
     xPV   = SCH_X + xPad;
-    xJBox = SCH_X + xPad + uW*0.17;
-    xComb = SCH_X + xPad + uW*0.36;
-    xDisco= SCH_X + xPad + uW*0.56;
-    xMSP  = SCH_X + xPad + uW*0.75;
+    xJBox = SCH_X + xPad + uW*0.18;  // SOT: wider spacing for 100px j-box
+    xComb = SCH_X + xPad + uW*0.38;  // SOT: wider for 180px combiner
+    xDisco= SCH_X + xPad + uW*0.57;  // SOT: wider for 120px ac-disco
+    xMSP  = SCH_X + xPad + uW*0.76;  // SOT: adjusted
     xUtil = SCH_X + xPad + uW;
   } else {
     xPV   = SCH_X + xPad;
-    xJBox = SCH_X + xPad + uW*0.13;
-    xComb = SCH_X + xPad + uW*0.27; // DC Disco
-    xInv  = SCH_X + xPad + uW*0.43; // Inverter
-    xDisco= SCH_X + xPad + uW*0.60; // AC Disco
-    xMSP  = SCH_X + xPad + uW*0.78;
+    xJBox = SCH_X + xPad + uW*0.14;  // SOT: wider for 100px j-box
+    xComb = SCH_X + xPad + uW*0.28;  // SOT: DC Disco at wider spacing
+    xInv  = SCH_X + xPad + uW*0.44;  // SOT: wider for 200px inverter
+    xDisco= SCH_X + xPad + uW*0.60;  // SOT: AC Disco
+    xMSP  = SCH_X + xPad + uW*0.77;  // SOT: adjusted
     xUtil = SCH_X + xPad + uW;
   }
 
   // ── NODE 1: PV ARRAY ──────────────────────────────────────────────────────
-  const pvW = 80, pvH = 68;
+  // SOT: symbol size from SLD_SYMBOL_MAP['pv-array'] = 200×160
+  const pvW = SLD_SYMBOL_MAP['pv-array'].width;   // 200
+  const pvH = SLD_SYMBOL_MAP['pv-array'].height;  // 160
+  console.log(`[SLD SYMBOL SIZE USED] pv-array: ${pvW}×${pvH}`);
   const pvCX = xPV, pvCY = BUS_Y;
 
   // PV array: embed sld-symbols.ts hybrid realism emblem
@@ -1303,19 +1395,29 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push(txt(pvCX, pvCY+pvH/2+18, `${ns} string${ns>1?'s':''} × ${pps} panels`, {sz:F.tiny, anc:'middle'}));
   }
   parts.push(callout(pvCX+pvW/2+14, pvCY-pvH/2-5, 1));
-  const pvOutX = pvCX+pvW/2;
+  // SOT: pvOutX via anchor 'dc_pos' (native x=200, right side)
+  const _pvPt = getAnchorPoint('pv-array', 'dc_pos', pvCX, pvCY, pvW, pvH);
+  const pvOutX = _pvPt.x;
+  const pvOutY = _pvPt.y;
+  console.log(`[SLD ANCHOR CONNECTED] pv-array.dc_pos → pvOut (${pvOutX.toFixed(1)},${pvOutY.toFixed(1)})`);
+  console.log(`[SLD WIRE TYPE: DC] pv-array.dc_pos → junction-box`);
 
   // ── NODE 2: ROOF J-BOX ────────────────────────────────────────────────────
-  const jbW = 40, jbH = 40;
+  // SOT: symbol size from SLD_SYMBOL_MAP['junction-box'] = 100×100
+  const jbW = SLD_SYMBOL_MAP['junction-box'].width;   // 100
+  const jbH = SLD_SYMBOL_MAP['junction-box'].height;  // 100
+  console.log(`[SLD SYMBOL SIZE USED] junction-box: ${jbW}×${jbH}`);
   const jbCX = xJBox, jbCY = BUS_Y;
 
-  parts.push(rect(jbCX-jbW/2, jbCY-jbH/2, jbW, jbH, {fill:WHT, sw:SW_MED}));
-  // X symbol
-  parts.push(ln(jbCX-jbW/2+5, jbCY-jbH/2+5, jbCX+jbW/2-5, jbCY+jbH/2-5, {sw:SW_HAIR}));
-  parts.push(ln(jbCX+jbW/2-5, jbCY-jbH/2+5, jbCX-jbW/2+5, jbCY+jbH/2-5, {sw:SW_HAIR}));
-  // Terminal lugs
-  parts.push(lug(jbCX-jbW/2+6, jbCY));
-  parts.push(lug(jbCX+jbW/2-6, jbCY));
+  // Embed junction-box emblem (replaces raw rect+cross)
+  parts.push(embedSymbol('junction-box', jbCX, jbCY, jbW, jbH));
+
+  // SOT: jbox terminals via anchors 'left' (0,50) and 'right' (100,50)
+  const _jbInPt  = getAnchorPoint('junction-box', 'left',  jbCX, jbCY, jbW, jbH);
+  const _jbOutPt = getAnchorPoint('junction-box', 'right', jbCX, jbCY, jbW, jbH);
+  console.log(`[SLD ANCHOR CONNECTED] junction-box.left/right → (${_jbInPt.x.toFixed(1)},${_jbInPt.y.toFixed(1)})/(${_jbOutPt.x.toFixed(1)},${_jbOutPt.y.toFixed(1)})`);
+  console.log(`[SLD WIRE TYPE: DC] pv-array → junction-box.left`);
+  console.log(`[SLD WIRE TYPE: DC] junction-box.right → dc-disconnect`);
   parts.push(txt(jbCX, jbCY-jbH/2-15, 'ROOF J-BOX', {sz:F.sub, bold:true, anc:'middle'}));
   parts.push(txt(jbCX, jbCY-jbH/2-7, isMicro?'AC JUNCTION':'DC JUNCTION', {sz:F.tiny, anc:'middle'}));
   if (isMicro) {
@@ -1339,7 +1441,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);
     console.log('[WIRE RUN CREATED] SEGMENT_1_PV_TO_JBOX: DC open-air');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, jbCX-jbW/2, _s1Y, run, lines, true, true),
+      buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, _jbInPt.x, _s1Y, run, lines, true, true),  // SOT: anchor jbox.left
       lines));
   }
 
@@ -1364,47 +1466,44 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
       console.log('[WIRE RUN CREATED] SEGMENT_2A_JBOX_TO_COMBINER: AC branch');
       parts.push(renderWireRun(
-        buildWireRun('SEGMENT_2A_JBOX_TO_COMBINER', jbCX+jbW/2, _s2aY, cr.lx, _s2aY, run, lines, false, false),
+        buildWireRun('SEGMENT_2A_JBOX_TO_COMBINER', _jbOutPt.x, _s2aY, cr.lx, _s2aY, run, lines, false, false),  // SOT: anchor jbox.right
         lines));
     }
   } else {
     // DC DISCONNECT with fuse symbols
-    const dW = 72, dH = 48;
+    // SOT: symbol size from SLD_SYMBOL_MAP['dc-disconnect'] = 120×100
+    const dW = SLD_SYMBOL_MAP['dc-disconnect'].width;   // 120
+    const dH = SLD_SYMBOL_MAP['dc-disconnect'].height;  // 100
+    console.log(`[SLD SYMBOL SIZE USED] dc-disconnect: ${dW}×${dH}`);
     const dcX = xComb, dcY = BUS_Y;
-    parts.push(rect(dcX-dW/2, dcY-dH/2, dW, dH, {fill:WHT, sw:SW_MED}));
-    parts.push(ln(dcX-dW/2, dcY-dH/2+13, dcX+dW/2, dcY-dH/2+13, {sw:SW_THIN}));
-    parts.push(txt(dcX, dcY-dH/2+9, 'DC DISCONNECT', {sz:5.5, bold:true, anc:'middle'}));
+    // Embed dc-disconnect symbol (replaces raw rect rendering)
+    parts.push(embedSymbol('dc-disconnect', dcX, dcY, dW, dH));
+    parts.push(txt(dcX, dcY-dH/2-8, 'DC DISCONNECT', {sz:5.5, bold:true, anc:'middle'}));
     // Line lugs
-    parts.push(lug(dcX-dW/2+6, dcY-7));
-    parts.push(lug(dcX-dW/2+6, dcY+7));
-    // Fuses
-    parts.push(fuseSymbol(dcX, dcY-7));
-    parts.push(fuseSymbol(dcX, dcY+7));
-    // Load lugs
-    parts.push(lug(dcX+dW/2-6, dcY-7));
-    parts.push(lug(dcX+dW/2-6, dcY+7));
-    // Wires inside
-    parts.push(ln(dcX-dW/2+9, dcY-7, dcX-8, dcY-7, {sw:SW_THIN}));
-    parts.push(ln(dcX-dW/2+9, dcY+7, dcX-8, dcY+7, {sw:SW_THIN}));
-    parts.push(ln(dcX+8, dcY-7, dcX+dW/2-9, dcY-7, {sw:SW_THIN}));
-    parts.push(ln(dcX+8, dcY+7, dcX+dW/2-9, dcY+7, {sw:SW_THIN}));
+    // SOT: internal wiring handled by dc-disconnect emblem
+    // SOT: dc-disconnect emblem handles all internal rendering (fuses/lugs/wires removed)
     parts.push(txt(dcX, dcY-dH/2-15, '(N) DC DISCONNECT', {sz:F.sub, bold:true, anc:'middle'}));
     parts.push(txt(dcX, dcY+dH/2+9, `${input.dcOCPD}A FUSED`, {sz:F.tiny, anc:'middle'}));
     if (input.rapidShutdownIntegrated) {
       parts.push(txt(dcX, dcY+dH/2+18, 'RAPID SHUTDOWN — NEC 690.12', {sz:F.tiny, anc:'middle', italic:true}));
     }
     parts.push(callout(dcX+dW/2-4, dcY-dH/2-5, 3));
-    node3RX = dcX+dW/2;
+    // SOT: dc-disconnect terminals via anchors 'dc_in' and 'dc_out'
+    const _dcInPt  = getAnchorPoint('dc-disconnect', 'dc_in',  dcX, dcY, dW, dH);
+    const _dcOutPt = getAnchorPoint('dc-disconnect', 'dc_out', dcX, dcY, dW, dH);
+    node3RX = _dcOutPt.x;
+    console.log(`[SLD ANCHOR CONNECTED] dc-disconnect.dc_out → node3RX (${node3RX.toFixed(1)})`);
+    console.log(`[SLD WIRE TYPE: DC] dc-disconnect → inverter`);
 
     // SEGMENT 2: J-Box → DC Disco
     {
       const run = dcStringRun;
       const fb = [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
-      const _s2bY = resolveSegY(jbCX+jbW/2, dcX-dW/2, BUS_Y);
+      const _s2bY = resolveSegY(_jbOutPt.x, _dcInPt.x, BUS_Y);  // SOT: anchor coords
       console.log('[WIRE RUN CREATED] SEGMENT_2B_JBOX_TO_DCDISCO: DC string run');
       parts.push(renderWireRun(
-        buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', jbCX+jbW/2, _s2bY, dcX-dW/2, _s2bY, run, lines, true, false),
+        buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', _jbOutPt.x, _s2bY, _dcInPt.x, _s2bY, run, lines, true, false),  // SOT: anchors jbox.right→dc_in
         lines));
     }
   }
@@ -1717,7 +1816,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   // ── NODE 7: UTILITY METER ─────────────────────────────────────────────────
   const utilCX = xUtil, utilCY = BUS_Y;
-  const mR = 24;
+  const mR = 40;  // SOT: enlarged meter circle for readability
+  console.log(`[SLD SYMBOL SIZE USED] utility-meter (custom circle): r=${mR}`);
 
   // SEGMENT: MSP busOut terminal → Utility Meter (terminal-to-terminal routing)
   // Source: mspResult.busOutX/Y  Dest: utility meter left edge
