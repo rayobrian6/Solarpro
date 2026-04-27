@@ -16,7 +16,7 @@ import {
   FolderOpen, Upload, File, Image, FileBadge, ExternalLink,
   DollarSign, Power, Battery, GitBranch
 } from 'lucide-react';
-import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from '@/lib/equipment-db';
+import { SOLAR_PANELS, STRING_INVERTERS, MICROINVERTERS, RACKING_SYSTEMS, OPTIMIZERS, BATTERIES, GENERATORS, ATS_UNITS, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById, getMonitoringGatewayById, getEVChargerById, getOptimizerById, getMicroinverterById, getInverterById } from '@/lib/equipment-db';
 import { getAllMountingSystems, getMountingSystemsByCategory, getMountingSystemsByRoofType, type MountingSystemSpec, type SystemCategory as MountingCategory } from '@/lib/mounting-hardware-db';
 
 // ── Mounting systems from the canonical mounting-hardware-db (38 systems, 24 manufacturers) ──
@@ -1782,6 +1782,49 @@ function EngineeringPageInner() {
     config.batteryKwh,
   ]);
 
+
+     // Phase C1 — Single Source of Truth: derive displayedEcosystemComponents from
+     // sizingRecommendation.requiredComponents (engine truth). The UI never computes
+     // component quantities locally; it always reflects what sizeSystemFromBrand()
+     // returned for the current brand + panel count + topology.
+     const displayedEcosystemComponents = useMemo(() => {
+       const comps = sizingRecommendation?.requiredComponents;
+       if (!comps || comps.length === 0) return [];
+       return comps
+         .filter(c => c.qty > 0)
+         .map(c => {
+           // Enrich with manufacturer/model from equipment-db when equipmentDbId is present.
+           const id = c.equipmentDbId;
+           let manufacturer = sizingRecommendation?.brand?.manufacturer ?? '';
+           let model = id ?? c.category;
+           let partNumber: string | undefined;
+
+           if (id) {
+             const gateway = getMonitoringGatewayById(id);
+             if (gateway) { manufacturer = gateway.manufacturer; model = gateway.model; }
+             const opt = getOptimizerById(id);
+             if (opt) { manufacturer = opt.manufacturer; model = opt.model; partNumber = (opt as any).partNumber; }
+             const micro = getMicroinverterById(id);
+             if (micro) { manufacturer = micro.manufacturer; model = micro.model; }
+             const inv = getInverterById(id);
+             if (inv) { manufacturer = inv.manufacturer; model = inv.model; }
+             const ev = getEVChargerById(id);
+             if (ev) { manufacturer = ev.manufacturer; model = ev.model; partNumber = (ev as any).partNumber; }
+             const bat = getBatteryById(id);
+             if (bat) { manufacturer = bat.manufacturer; model = bat.model; }
+           }
+
+           return {
+             category: c.category,
+             manufacturer,
+             model,
+             partNumber,
+             quantity: c.qty,
+             reason: c.note ?? c.qtyPolicy,
+             required: c.required,
+           };
+         });
+     }, [sizingRecommendation]);
   // Snapshot of current config for diffing.
     // v58.0 — Canonical AC output kW.
     // Always prefer sizingRecommendation (engine truth) over totalInverterKw
@@ -6159,7 +6202,7 @@ function EngineeringPageInner() {
                         <Package size={12} className="text-amber-400 flex-shrink-0" />
                         <span className="text-xs text-slate-300">
                           <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span> ecosystem applied
-                          {ecosystemComponents.length > 0 && <span className="text-slate-500 ml-1">({ecosystemComponents.length} components)</span>}
+                          {displayedEcosystemComponents.length > 0 && <span className="text-slate-500 ml-1">({displayedEcosystemComponents.length} components)</span>}
                         </span>
                         <button
                           className="ml-auto text-[10px] text-slate-500 hover:text-amber-400 transition-colors"
@@ -6751,15 +6794,15 @@ function EngineeringPageInner() {
                     </div>
 
                     {/* Ecosystem Propagation Panel */}
-                    {ecosystemComponents.length > 0 && (
+                    {displayedEcosystemComponents.length > 0 && (
                       <div className="card p-5 border border-emerald-500/20 bg-emerald-500/5">
                         <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
                           <Package size={14} className="text-emerald-400" />
                           Auto-Added Ecosystem Components
-                          <span className="ml-auto text-xs text-emerald-400 font-normal">{ecosystemComponents.length} component{ecosystemComponents.length !== 1 ? 's' : ''}</span>
+                          <span className="ml-auto text-xs text-emerald-400 font-normal">{displayedEcosystemComponents.length} component{displayedEcosystemComponents.length !== 1 ? 's' : ''}</span>
                         </h3>
                         <div className="space-y-2">
-                          {ecosystemComponents.map((comp: any, i: number) => (
+                          {displayedEcosystemComponents.map((comp: any, i: number) => (
                             <div key={i} className="flex items-start gap-3 p-2.5 bg-slate-800/40 rounded-lg border border-emerald-500/10">
                               <div className="w-6 h-6 rounded bg-emerald-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
                                 <CheckCircle size={12} className="text-emerald-400" />
@@ -12282,20 +12325,20 @@ function EngineeringPageInner() {
               </div>
 
               {/* ── Ecosystem Components ── */}
-              {ecosystemComponents.length > 0 && (
+              {displayedEcosystemComponents.length > 0 && (
                 <div className="bg-slate-800/60 rounded-xl border border-emerald-500/20 p-3">
                   <div className="text-xs font-bold text-emerald-400 mb-2 flex items-center gap-1.5">
-                    <Package size={11} /> Auto-Resolved Ecosystem ({ecosystemComponents.length})
+                    <Package size={11} /> Auto-Resolved Ecosystem ({displayedEcosystemComponents.length})
                   </div>
                   <div className="space-y-1">
-                    {ecosystemComponents.slice(0, 6).map((comp: any, i: number) => (
+                    {displayedEcosystemComponents.slice(0, 6).map((comp: any, i: number) => (
                       <div key={i} className="flex items-center justify-between text-xs">
                         <span className="text-slate-300 truncate flex-1 mr-2">{comp.manufacturer} {comp.model}</span>
                         <span className="text-emerald-400 font-bold flex-shrink-0">×{comp.quantity}</span>
                       </div>
                     ))}
-                    {ecosystemComponents.length > 6 && (
-                      <div className="text-xs text-slate-500">+{ecosystemComponents.length - 6} more…</div>
+                    {displayedEcosystemComponents.length > 6 && (
+                      <div className="text-xs text-slate-500">+{displayedEcosystemComponents.length - 6} more…</div>
                     )}
                   </div>
                 </div>
