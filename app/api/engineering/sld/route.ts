@@ -32,6 +32,8 @@ import {
 } from '@/lib/equipment-db';
 import { requireAuth } from '@/lib/security';
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
+import { sizeSystemFromBrand, type SystemSizingResult } from '@/lib/system/sizingEngine';
+import type { LayoutCandidate } from '@/lib/system/inverterCapabilities';
 
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
@@ -52,7 +54,8 @@ export async function POST(req: NextRequest) {
 
     // Handle both old field names (inverterKw, inverterModel as combined string)
     // and new field names (acOutputKw, inverterManufacturer + inverterModel separate)
-    const acOutputKw = Number(body.acOutputKw || body.inverterKw || (body.acOutputW ? body.acOutputW / 1000 : 0) || 8.2);
+    // NOTE: acOutputKw is re-declared below after B3 sizing — this value is the body fallback.
+    const _bodyAcOutputKw = Number(body.acOutputKw || body.inverterKw || (body.acOutputW ? body.acOutputW / 1000 : 0) || 8.2);
 
     // If inverterModel contains manufacturer (e.g. "Fronius Primo 8.2-1"), split it
     let inverterManufacturer = String(body.inverterManufacturer ?? '');
@@ -71,8 +74,9 @@ export async function POST(req: NextRequest) {
       inverterModel = topoForDefault === 'MICROINVERTER' ? 'IQ8+' : 'Primo 8.2-1';
     }
 
-    // Derive AC output amps if not provided
-    const acOutputAmps = Number(body.acOutputAmps) || Math.round(acOutputKw * 1000 / 240);
+    // Derive AC output amps if not provided — uses _bodyAcOutputKw here since acOutputKw
+    // is resolved later (after B3 sizing engine call). Re-resolved after B3 block if needed.
+    const acOutputAmps = Number(body.acOutputAmps) || Math.round(_bodyAcOutputKw * 1000 / 240);
 
     // Wire length
     const acWireLength = Number(body.acWireLength || body.wireLength) || 60;
@@ -110,6 +114,64 @@ export async function POST(req: NextRequest) {
     const tempCoeffVmp      = Number(body.tempCoeffVmp)      || undefined;
     const maxSeriesFuse     = Number(body.maxSeriesFuse)     || 20;
     const deviceCount       = Number(body.deviceCount)       || totalModules;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Phase B3 — SLD Truth Alignment
+    // Call sizeSystemFromBrand() using the same inputs as the UI so the SLD
+    // reflects the SAME LayoutCandidate the engineering page already shows.
+    // When a valid layoutCandidate is obtained its inverter count, string
+    // layout, and AC output override the independently-derived body values.
+    // Falls back transparently to the existing generateStringConfig() path.
+    // ─────────────────────────────────────────────────────────────────────────
+    let sizingResult: SystemSizingResult | null = null;
+    let layoutCandidate: LayoutCandidate | null = null;
+    let sldDegraded = false;
+
+    const _selectedBrand     = body.selectedBrand      ? String(body.selectedBrand)      : undefined;
+    const _selectedInvId     = body.selectedInverterId  ? String(body.selectedInverterId)  : undefined;
+    const _panelId           = body.panelId             ? String(body.panelId)             : undefined;
+    const _systemType        = body.systemType          ? String(body.systemType)          : 'roof';
+
+    if (totalModules > 0 && (_selectedBrand || _selectedInvId)) {
+      try {
+        sizingResult = sizeSystemFromBrand({
+          systemType:         _systemType as any,
+          panelCount:         totalModules,
+          panelWattage:       panelWatts,
+          panelVoc:           panelVoc,
+          panelIsc:           panelIsc,
+          panelVmp:           panelVmp,
+          panelTempCoeffVoc:  Number(body.panelTempCoeffVoc ?? body.tempCoeffVoc ?? -0.27),
+          designTempMin:      designTempMin,
+          selectedBrand:      _selectedBrand,
+          selectedInverterId: _selectedInvId,
+          panelId:            _panelId,
+        });
+        layoutCandidate = sizingResult.selectedLayoutCandidate ?? null;
+        console.log('[SLD B3] sizeSystemFromBrand success:', {
+          inverterCount:  sizingResult.inverterCount,
+          strings:        sizingResult.strings.length,
+          totalAcKw:      layoutCandidate?.totalAcKw ?? sizingResult.inverterModels.reduce((s, m) => s + m.acKw * m.qty, 0),
+          hasCandidate:   !!layoutCandidate,
+        });
+      } catch (szErr) {
+        sldDegraded = true;
+        console.warn('[SLD B3] sizeSystemFromBrand failed — falling back to body values:', szErr);
+      }
+    } else {
+      sldDegraded = true;
+      console.warn('[SLD B3] No selectedBrand/selectedInverterId in request — SLD layout derived from body only');
+    }
+
+    // Resolved layout values: prefer sizing-engine truth, fall back to body
+    const layoutInverterCount = sizingResult?.inverterCount ?? null;
+    const layoutStrings       = sizingResult?.strings        ?? null;
+    const layoutTotalAcKw     = layoutCandidate?.totalAcKw
+      ?? (sizingResult ? sizingResult.inverterModels.reduce((s, m) => s + m.acKw * m.qty, 0) : null);
+    const layoutMicroCount    = sizingResult?.microDeviceCount ?? null;
+
+    // Override acOutputKw when the sizing engine gives a cleaner value
+    const acOutputKw: number = layoutTotalAcKw ?? _bodyAcOutputKw;
 
     let stringResult: ReturnType<typeof generateStringConfig> | null = null;
     let mpptAllocation = '';
@@ -162,9 +224,38 @@ export async function POST(req: NextRequest) {
       // Determine panels per string (may vary for last string)
       panelsPerString = stringResult.strings[0]?.panelsInString ?? Math.round(totalModules / Math.max(stringResult.totalStrings, 1));
       lastStringPanels = stringResult.strings[stringResult.strings.length - 1]?.panelsInString ?? panelsPerString;
+
+      // Phase B3: Override layout-count fields from sizing engine.
+      // generateStringConfig() above is kept for NEC 690.7 Voc/current math.
+      // But the STRING COUNT and PANELS-PER-STRING come from the sizing engine
+      // (the same source the UI uses) when a valid sizingResult is available.
+      if (layoutStrings && layoutStrings.length > 0) {
+        const panelCounts = layoutStrings.map(s => s.panelCount);
+        panelsPerString  = panelCounts[0] ?? panelsPerString;
+        lastStringPanels = panelCounts[panelCounts.length - 1] ?? panelsPerString;
+
+        // Rebuild mpptAllocation from sizing engine strings
+        const mpptGroups: Record<number, number> = {};
+        for (const s of layoutStrings) {
+          mpptGroups[s.mpptIndex] = (mpptGroups[s.mpptIndex] ?? 0) + 1;
+        }
+        mpptAllocation = Object.entries(mpptGroups)
+          .sort(([a], [b]) => Number(a) - Number(b))
+          .map(([ch, cnt]) => `CH${Number(ch) + 1}:${cnt}str`)
+          .join(' ');
+      }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
+    // Resolved device count: prefer sizing engine for both string and micro
+    const resolvedDeviceCount = isMicro
+      ? (layoutMicroCount ?? layoutInverterCount ?? Number(body.deviceCount) ?? totalModules)
+      : (layoutInverterCount ?? Number(body.deviceCount) ?? 1);
+
+    // Resolved total strings: prefer sizing engine string count
+    const resolvedTotalStrings = !isMicro
+      ? (layoutStrings ? layoutStrings.length : (stringResult?.totalStrings ?? 1))
+      : 0;
+
     // SINGLE SOURCE OF TRUTH: computeSystem() → PermitSystemModel
     // All NEC electrical values (OCPD, wire gauges, backfeed, EGC) come from
     // the engine. No duplicate calculations below this point.
@@ -320,7 +411,7 @@ export async function POST(req: NextRequest) {
       revision:                String(body.revision                ?? 'A'),
       topologyType:            String(body.topologyType            ?? 'STRING_INVERTER'),
       totalModules,
-      totalStrings:            isMicro ? 0 : (stringResult?.totalStrings ?? 1),
+      totalStrings:            resolvedTotalStrings,
       panelModel:              String(body.panelModel              ?? 'Q.PEAK DUO BLK ML-G10+ 400W'),
       panelWatts,
       panelVoc,
@@ -374,8 +465,8 @@ export async function POST(req: NextRequest) {
       hasEnphaseIQSC3:         _hasEnphaseIQSC3 || undefined,
       scale:                   String(body.scale                   ?? 'NOT TO SCALE'),
 
-      // Micro-specific
-      deviceCount:             isMicro ? deviceCount : undefined,
+      // Micro-specific — use resolvedDeviceCount (sizing engine truth when available)
+      deviceCount:             isMicro ? resolvedDeviceCount : undefined,
       microBranches:           isMicro ? (body.microBranches ?? undefined) : undefined,
       branchWireGauge:         isMicro ? (body.branchWireGauge ?? undefined) : undefined,
       branchConduitSize:       isMicro ? (body.branchConduitSize ?? undefined) : undefined,
@@ -424,6 +515,8 @@ export async function POST(req: NextRequest) {
           'Content-Type':        'image/svg+xml',
           'Content-Disposition': 'inline; filename="sld.svg"',
           'X-System-Model':      systemModel ? 'computed' : 'fallback',
+          'X-Layout-Source':     sizingResult ? (layoutCandidate ? 'layoutCandidate' : 'sizingResult') : 'body',
+          'X-Sld-Degraded':      sldDegraded ? 'true' : 'false',
         },
       });
     }
@@ -432,9 +525,12 @@ export async function POST(req: NextRequest) {
       success: true,
       svg,
       systemModelUsed: systemModel ? 'computed' : 'fallback',
+      // Phase B3: report layout source in API response for debugging
+      layoutSource: sizingResult ? (layoutCandidate ? 'layoutCandidate' : 'sizingResult') : 'body',
+      sldDegraded,
       topology: input.topologyType,
       stringConfig: isMicro ? null : (stringResult ? {
-        totalStrings:         stringResult.totalStrings,
+        totalStrings:         resolvedTotalStrings,
         panelsPerString,
         lastStringPanels,
         maxPanelsPerString:   stringResult.maxPanelsPerString,
@@ -451,9 +547,9 @@ export async function POST(req: NextRequest) {
         isValid:              stringResult.isValid,
       } : null),
       microConfig: isMicro ? {
-        deviceCount,
+        deviceCount:      resolvedDeviceCount,
         topology: 'MICROINVERTER',
-        acBranchCircuits: Math.ceil(deviceCount / 16),
+        acBranchCircuits: Math.ceil(resolvedDeviceCount / 16),
         note: 'Microinverters convert DC to AC at each panel. No DC strings.',
       } : null,
       // Resolved electrical values (from engine)

@@ -3151,6 +3151,14 @@ function EngineeringPageInner() {
             voc:         s.voc ?? 0,
             isc:         s.isc ?? 0,
           })) : undefined,
+          // Phase B3 — SLD Truth Alignment: forward sizing-engine inputs so
+          // the SLD route can call sizeSystemFromBrand() and use the same
+          // LayoutCandidate that the UI already displays.
+          selectedBrand:      config.selectedBrand,
+          selectedInverterId: firstInv?.inverterId,
+          panelId:            firstStr?.panelId,
+          systemType:         config.systemType ?? 'roof',
+          panelTempCoeffVoc:  panelData?.tempCoeffVoc ?? -0.27,
         }),
       });
       if (res.ok) {
