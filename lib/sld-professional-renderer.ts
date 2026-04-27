@@ -22,6 +22,7 @@ import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SLD_SYMBOL_MAP } from './sld-symbols';
+import type { Conductor, WireRun, ConductorType } from './sld-types';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
@@ -682,6 +683,168 @@ function makeOverlapGuard() {
   };
 }
 
+// ── Phase 6: getConductorStyle ───────────────────────────────────────────────
+// Returns consistent SVG line style per conductor type.
+// AC: solid medium line. DC: slightly thinner + dashed. Ground: green + thin.
+function getConductorStyle(type: ConductorType, isOpenAir = false): {
+  stroke: string; sw: number; dash?: string; label: string;
+} {
+  switch (type) {
+    case 'L1':
+      return { stroke: BLK,      sw: SW_MED,  dash: isOpenAir ? '10,5' : undefined, label: 'L1' };
+    case 'L2':
+      return { stroke: BLK,      sw: SW_MED,  dash: isOpenAir ? '10,5' : undefined, label: 'L2' };
+    case 'N':
+      return { stroke: '#444444', sw: SW_MED,  dash: isOpenAir ? '10,5' : undefined, label: 'N'  };
+    case 'G':
+      return { stroke: GRN,      sw: SW_THIN, dash: undefined,                       label: 'G'  };
+    case 'DC_POS':
+      return { stroke: BLK,      sw: SW_THIN, dash: isOpenAir ? '10,5' : '4,2',     label: '+'  };
+    case 'DC_NEG':
+      return { stroke: BLK,      sw: SW_THIN, dash: isOpenAir ? '10,5' : '4,2',     label: '−'  };
+    default:
+      return { stroke: BLK,      sw: SW_MED,  label: '' };
+  }
+}
+
+// ── Phase 3: buildWireRun ─────────────────────────────────────────────────────
+// Maps a RunSegment → WireRun with one Conductor per electrical conductor.
+// DO NOT infer new electrical logic — only maps what exists in segment data.
+// AC split-phase: L1 + L2 + (optional N) + G
+// DC:             DC_POS + DC_NEG + G
+function buildWireRun(
+  runId: string,
+  x1: number, y1: number,
+  x2: number, y2: number,
+  run: import('./computed-system').RunSegment | undefined,
+  fallbackLabel: string[],
+  isDC: boolean,
+  isOpenAir: boolean
+): WireRun {
+  const conductors: Conductor[] = [];
+
+  if (isDC) {
+    const gauge = run?.wireGauge ?? '#10 AWG';
+    const ins   = run?.insulation ?? 'USE-2';
+    conductors.push({ id: `${runId}_POS`, type: 'DC_POS', gauge, insulation: ins });
+    conductors.push({ id: `${runId}_NEG`, type: 'DC_NEG', gauge, insulation: ins });
+    const egc = run?.egcGauge ?? '#10 AWG';
+    conductors.push({ id: `${runId}_G`,   type: 'G',      gauge: egc, insulation: 'GRN' });
+  } else {
+    const gauge = run?.wireGauge ?? '#10 AWG';
+    const ins   = run?.insulation ?? 'THWN-2';
+    conductors.push({ id: `${runId}_L1`, type: 'L1', gauge, insulation: ins });
+    conductors.push({ id: `${runId}_L2`, type: 'L2', gauge, insulation: ins });
+    if (run?.neutralRequired) {
+      conductors.push({ id: `${runId}_N`, type: 'N', gauge, insulation: ins });
+    }
+    const egc = run?.egcGauge ?? '#10 AWG';
+    conductors.push({ id: `${runId}_G`, type: 'G', gauge: egc, insulation: 'GRN' });
+  }
+
+  let conduitLabel = '';
+  if (run?.conductorCallout) {
+    const lines2 = run.conductorCallout.split('\n').filter((l: string) => l.trim());
+    conduitLabel = lines2[lines2.length - 1] ?? '';
+  } else if (fallbackLabel.length > 0) {
+    conduitLabel = fallbackLabel[fallbackLabel.length - 1] ?? '';
+  }
+
+  if (typeof console !== 'undefined') {
+    console.log(`[CONDUCTOR MAP BUILT] ${runId}: ${conductors.map(c => c.type).join(', ')}`);
+    console.log(`[WIRE RUN CREATED] ${runId} from (${x1.toFixed(0)},${y1.toFixed(0)}) to (${x2.toFixed(0)},${y2.toFixed(0)})`);
+  }
+
+  const wireRun: WireRun = {
+    id: runId,
+    from: { x: x1, y: y1 },
+    to:   { x: x2, y: y2 },
+    conductors,
+    isOpenAir,
+    conduitLabel,
+  };
+  return wireRun;
+}
+
+// ── Phase 4: renderWireRun ────────────────────────────────────────────────────
+// THE CORE FIX: one SVG line per electrical conductor — no parallel duplication.
+//
+//  BEFORE (❌ OLD):
+//    for (i = 0; i < wireCount; i++) drawParallelLine()
+//
+//  AFTER  (✅ NEW):
+//    for each conductor in WireRun.conductors: drawSingleLine(conductor)
+//
+// Ground routed 6px below main bus Y for visual separation.
+// Signal conductors get a slight vertical spread for readability (max ±4px).
+function renderWireRun(
+  wr: WireRun,
+  labelLines: string[],
+  opts: { above?: boolean } = {}
+): string {
+  const { from, to, conductors, isOpenAir } = wr;
+  const x1 = from.x, x2 = to.x, baseY = from.y;
+  const cx = (x1 + x2) / 2;
+  const above = opts.above ?? true;
+  const parts: string[] = [];
+
+  const sigConductors = conductors.filter(c => c.type !== 'G');
+  const gndConductors = conductors.filter(c => c.type === 'G');
+
+  // Signal conductors — slight vertical spread so each is visually distinct
+  const sigCount = sigConductors.length;
+  const sigSpread = sigCount > 1 ? Math.min((sigCount - 1) * 3, 8) : 0;
+  const sigBase = baseY - sigSpread / 2;
+
+  sigConductors.forEach((conductor, i) => {
+    const style = getConductorStyle(conductor.type, isOpenAir);
+    const cy = sigCount > 1
+      ? sigBase + i * (sigSpread / (sigCount - 1))
+      : baseY;
+    if (typeof console !== 'undefined') {
+      console.log(`[RENDER LINE: ${conductor.type}] ${wr.id} y=${cy.toFixed(1)}`);
+    }
+    parts.push(ln(x1, cy, x2, cy, { stroke: style.stroke, sw: style.sw, dash: style.dash }));
+  });
+
+  // Ground conductor — routed 6px below for visual separation
+  gndConductors.forEach((conductor) => {
+    const style = getConductorStyle(conductor.type, false);
+    const gy = baseY + 6;
+    if (typeof console !== 'undefined') {
+      console.log(`[RENDER LINE: ${conductor.type}] ${wr.id} y=${gy.toFixed(1)} (ground)`);
+    }
+    parts.push(ln(x1, gy, x2, gy, { stroke: style.stroke, sw: style.sw }));
+  });
+
+  // Inline label (wire gauge, conduit info) — centered on segment
+  if (labelLines.length > 0) {
+    const primaryColor = sigConductors.length > 0
+      ? getConductorStyle(sigConductors[0].type, isOpenAir).stroke
+      : BLK;
+    const lh = Math.round(F.seg * 1.35);
+    const th = labelLines.length * lh;
+    const ty = above ? baseY - 7 - th + lh : baseY + 11;
+    parts.push(tspan(cx, ty, labelLines, { sz: F.seg, anc: 'middle', fill: primaryColor }));
+  }
+
+  // Conductor type micro-labels (L1, L2, +, -) near midpoint when spread > 2px
+  if (sigCount > 1 && sigSpread > 2) {
+    sigConductors.forEach((conductor, i) => {
+      const style = getConductorStyle(conductor.type, isOpenAir);
+      const cy = sigBase + i * (sigSpread / (sigCount - 1));
+      const labelX = cx + 8;
+      parts.push(
+        `<text x="${labelX.toFixed(1)}" y="${(cy + 3).toFixed(1)}" ` +
+        `font-family="Arial,sans-serif" font-size="5" fill="${style.stroke}" ` +
+        `text-anchor="start" dominant-baseline="auto">${style.label}</text>`
+      );
+    });
+  }
+
+  return parts.join('');
+}
+
 function wireSeg(
   x1: number, x2: number, y: number,
   lines: string[],
@@ -696,19 +859,11 @@ function wireSeg(
   const above = opts.above ?? true;
   const parts: string[] = [];
 
-  // Draw wire(s)
-  if (cnt <= 1) {
-    parts.push(ln(x1, y, x2, y, {stroke:color, sw, dash}));
-  } else {
-    const sp = 3;
-    const span = (cnt-1)*sp;
-    const sy = y - span/2;
-    for (let i = 0; i < cnt; i++) {
-      parts.push(ln(x1, sy+i*sp, x2, sy+i*sp, {stroke:color, sw:SW_THIN, dash}));
-    }
-    parts.push(ln(x1, sy, x1, sy+span, {stroke:color, sw:SW_HAIR}));
-    parts.push(ln(x2, sy, x2, sy+span, {stroke:color, sw:SW_HAIR}));
-  }
+  // [SLD MULTI-LINE SOURCE FIXED] — conductor-based rendering
+  // wireSeg() is now a single-line helper (used for ground rail, stubs, equipment wires).
+  // All main wiring segments use renderWireRun() via buildWireRun().
+  // Phase 4: EXACTLY ONE LINE PER CONDUCTOR — no parallel duplication.
+  parts.push(ln(x1, y, x2, y, {stroke:color, sw, dash}));
 
   // Inline label
   if (lines.length > 0) {
@@ -1181,7 +1336,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       ? [`${input.branchWireGauge??'#10 AWG'} THWN-2`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31']
       : [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, 'OPEN AIR — NEC 690.31'];
     const {lines, cnt} = runLines(run, fb);
-    parts.push(wireSeg(pvOutX, jbCX-jbW/2, resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y), lines, {openAir:true, bundleCount:cnt}));
+    const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);
+    console.log('[WIRE RUN CREATED] SEGMENT_1_PV_TO_JBOX: DC open-air');
+    parts.push(renderWireRun(
+      buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, jbCX-jbW/2, _s1Y, run, lines, true, true),
+      lines));
   }
 
   // ── NODE 3: AC COMBINER (micro) or DC DISCONNECT (string) ─────────────────
@@ -1202,7 +1361,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const run = branchRun;
       const fb = [`${input.branchWireGauge??'#10 AWG'} THWN-2`, `1×#${egcNum} GRN EGC`, `IN ${input.branchConduitSize??'3/4"'} EMT`];
       const {lines, cnt} = runLines(run, fb);
-      parts.push(wireSeg(jbCX+jbW/2, cr.lx, resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y), lines, {bundleCount:cnt}));
+      const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
+      console.log('[WIRE RUN CREATED] SEGMENT_2A_JBOX_TO_COMBINER: AC branch');
+      parts.push(renderWireRun(
+        buildWireRun('SEGMENT_2A_JBOX_TO_COMBINER', jbCX+jbW/2, _s2aY, cr.lx, _s2aY, run, lines, false, false),
+        lines));
     }
   } else {
     // DC DISCONNECT with fuse symbols
@@ -1238,7 +1401,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const run = dcStringRun;
       const fb = [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
-      parts.push(wireSeg(jbCX+jbW/2, dcX-dW/2, resolveSegY(jbCX+jbW/2, dcX-dW/2, BUS_Y), lines, {bundleCount:cnt}));
+      const _s2bY = resolveSegY(jbCX+jbW/2, dcX-dW/2, BUS_Y);
+      console.log('[WIRE RUN CREATED] SEGMENT_2B_JBOX_TO_DCDISCO: DC string run');
+      parts.push(renderWireRun(
+        buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', jbCX+jbW/2, _s2bY, dcX-dW/2, _s2bY, run, lines, true, false),
+        lines));
     }
   }
 
@@ -1265,7 +1432,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const {lines, cnt} = runLines(run, fb);
       // Use inverter dcInX/Y terminal for precise routing
       const segY = invBox.dcInY;
-      parts.push(wireSeg(node3RX, invBox.dcInX, resolveSegY(node3RX, invBox.dcInX, segY), lines, {bundleCount:cnt}));
+      const _s3Y = resolveSegY(node3RX, invBox.dcInX, segY);
+      console.log('[WIRE RUN CREATED] SEGMENT_3_DCDISCO_TO_INV: DC run');
+      parts.push(renderWireRun(
+        buildWireRun('SEGMENT_3_DCDISCO_TO_INV', node3RX, _s3Y, invBox.dcInX, _s3Y, run, lines, true, false),
+        lines));
     }
   }
 
@@ -1287,7 +1458,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const {lines, cnt} = runLines(run, fb);
     // Route from source right edge to disco LOAD terminal using terminal Y coordinate
     const segY = discoResult.loadInY;  // disco loadIn is at BUS_Y center
-    parts.push(wireSeg(invRX, discoResult.loadInX, resolveSegY(invRX, discoResult.loadInX, segY), lines, {bundleCount:cnt}));
+    const _s4Y = resolveSegY(invRX, discoResult.loadInX, segY);
+    console.log('[WIRE RUN CREATED] SEGMENT_4_INV_TO_ACDISCO: AC feeder');
+    parts.push(renderWireRun(
+      buildWireRun('SEGMENT_4_INV_TO_ACDISCO', invRX, _s4Y, discoResult.loadInX, _s4Y, run, lines, false, false),
+      lines));
   }
 
   // ── NODE 6: MSP ───────────────────────────────────────────────────────────
@@ -1328,7 +1503,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const {lines, cnt} = runLines(run, fb);
     // Use disco lineOut terminal Y and MSP bkfdIn terminal Y (both at BUS_Y center)
     const segY = discoResult.lineOutY;
-    parts.push(wireSeg(discoResult.lineOutX, mspResult.bkfdInX, resolveSegY(discoResult.lineOutX, mspResult.bkfdInX, segY), lines, {bundleCount:cnt}));
+    const _s5Y = resolveSegY(discoResult.lineOutX, mspResult.bkfdInX, segY);
+    console.log('[WIRE RUN CREATED] SEGMENT_5_ACDISCO_TO_MSP: AC feeder');
+    parts.push(renderWireRun(
+      buildWireRun('SEGMENT_5_ACDISCO_TO_MSP', discoResult.lineOutX, _s5Y, mspResult.bkfdInX, _s5Y, run, lines, false, false),
+      lines));
   }
 
 
@@ -1552,7 +1731,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const {lines, cnt} = runLines(run, fb);
     // Use MSP busOut terminal Y for precise routing; buiRX is the rightmost equipment edge
     const segY = mspResult.busOutY;
-    parts.push(wireSeg(buiRX, utilCX-mR-10, resolveSegY(buiRX, utilCX-mR-10, segY), lines, {bundleCount:cnt}));
+    const _s6Y = resolveSegY(buiRX, utilCX-mR-10, segY);
+    console.log('[WIRE RUN CREATED] SEGMENT_6_MSP_TO_METER: AC service run');
+    parts.push(renderWireRun(
+      buildWireRun('SEGMENT_6_MSP_TO_METER', buiRX, _s6Y, utilCX-mR-10, _s6Y, run, lines, false, false),
+      lines));
   }
 
   // Meter symbol

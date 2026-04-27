@@ -29,6 +29,35 @@ export interface SLDTitleBlock {
   scale: string;                // e.g. "NTS" (not to scale)
 }
 
+// ─── Conductor Model (conductor-based SLD rendering) ──────────────────
+// Canonical per-conductor structure: one SVG line per electrical conductor
+// DO NOT modify NEC sizing, BOM, or calculation logic — rendering only
+
+export type ConductorType = 'L1' | 'L2' | 'N' | 'G' | 'DC_POS' | 'DC_NEG';
+
+export interface Conductor {
+  id: string;
+  type: ConductorType;
+  color?: string;       // optional override; getConductorStyle() provides defaults
+  gauge?: string;       // e.g. '#10 AWG'
+  insulation?: string;  // e.g. 'THWN-2'
+}
+
+export interface AnchorRef {
+  x: number;
+  y: number;
+  label?: string;
+}
+
+export interface WireRun {
+  id: string;
+  from: AnchorRef;
+  to: AnchorRef;
+  conductors: Conductor[];
+  isOpenAir?: boolean;
+  conduitLabel?: string;  // e.g. 'IN 3/4" EMT'
+}
+
 // ─── Conductor Callout ────────────────────────────────────────────────────────
 
 export interface ConductorCallout {
