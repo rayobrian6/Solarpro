@@ -22,12 +22,20 @@
 
 // ── Types: imported from canonical source ─────────────────────────────────
 // @deprecated V1 engine — use structural-engine-v4.ts for new code
-export type {
+import type {
   WindExposure,
-  WindExposureCategory,   // alias for WindExposure — backward compat
+  WindExposureCategory,
   RoofType,
   WoodSpecies,
-  RafterSpecies,          // alias for WoodSpecies — backward compat
+  RafterSpecies,
+  StructuralIssue,
+} from './structural/types';
+export type {
+  WindExposure,
+  WindExposureCategory,
+  RoofType,
+  WoodSpecies,
+  RafterSpecies,
   StructuralIssue,
 } from './structural/types';
 
@@ -70,7 +78,7 @@ export interface StructuralInput {
   };
 }
 
-// StructuralIssue re-exported from structural/types.ts above
+// StructuralIssue: imported from structural/types.ts above
 
 export interface WindCalcResult {
   designWindSpeed: number;     // mph

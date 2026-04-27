@@ -23,13 +23,22 @@ import { getRackingById, type RackingSystemSpec } from './racking-database';
 // ─── INPUT TYPES ─────────────────────────────────────────────────────────────
 
 // ── Types: imported from canonical source ─────────────────────────────────
-export type {
+import type {
   WindExposure,
-  WindExposureCategory,   // alias — backward compat
+  WindExposureCategory,
   FramingType,
   RoofZone,
   WoodSpecies,
-  RafterSpecies,          // alias — backward compat
+  RafterSpecies,
+  StructuralIssue,
+} from './structural/types';
+export type {
+  WindExposure,
+  WindExposureCategory,
+  FramingType,
+  RoofZone,
+  WoodSpecies,
+  RafterSpecies,
   StructuralIssue,
 } from './structural/types';
 
@@ -184,7 +193,7 @@ export interface StructuralResultV3 {
   recommendations: string[];
 }
 
-// StructuralIssue re-exported from structural/types.ts above
+// StructuralIssue: imported from structural/types.ts above
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 

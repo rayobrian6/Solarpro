@@ -25,13 +25,24 @@
 
 // ── Types: imported from canonical source ─────────────────────────────────
 // @deprecated V2 engine — use structural-engine-v4.ts for new code
-export type {
+import type {
   WindExposure,
-  WindExposureCategory,   // alias — backward compat
+  WindExposureCategory,
   RoofType,
   FramingType,
   WoodSpecies,
-  RafterSpecies,          // alias — backward compat
+  RafterSpecies,
+  RoofZone,
+  PanelOrientation,
+  StructuralIssue,
+} from './structural/types';
+export type {
+  WindExposure,
+  WindExposureCategory,
+  RoofType,
+  FramingType,
+  WoodSpecies,
+  RafterSpecies,
   RoofZone,
   PanelOrientation,
   StructuralIssue,
@@ -151,7 +162,7 @@ export interface StructuralResultV2 {
   recommendations: string[];
 }
 
-// StructuralIssue re-exported from structural/types.ts above
+// StructuralIssue: imported from structural/types.ts above
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS

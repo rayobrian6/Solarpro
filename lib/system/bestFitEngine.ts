@@ -35,12 +35,16 @@ import {
   DC_AC_IDEAL_MIN,
   DC_AC_IDEAL_MAX,
 } from './feasibilityEvaluator';
+import { PREFERRED_DC_AC_RATIO_TARGET } from './sizingEngine';
 import type { BrandInverterModelRef } from './brandProfiles/types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/** DC/AC ideal target for scoring. */
-const DC_AC_IDEAL_TARGET = 1.20;
+/** DC/AC ideal target for scoring.
+ *  Imported from sizingEngine — unified with auto-sizing target (1.25).
+ *  Previously 1.20 (local); now consistent with PREFERRED_DC_AC_RATIO_TARGET.
+ */
+// DC_AC_IDEAL_TARGET (local 1.20) removed — PREFERRED_DC_AC_RATIO_TARGET (1.25) imported above
 
 /** Max inverter units per config (caps candidate explosion). */
 const MAX_UNITS_PER_CONFIG = 3;
@@ -387,7 +391,7 @@ function evaluateAndScore(
     // which conflicts with our pre-determined slot.qty. Instead we compute
     // DC/AC at slot level ourselves and inject the correct result below.
     // Sentinel: put evaluator's DC/AC at exactly 1.20 (dead center of ideal band).
-    const sentinelAcKw = slotDcKw / DC_AC_IDEAL_TARGET;
+    const sentinelAcKw = slotDcKw / PREFERRED_DC_AC_RATIO_TARGET;
 
     const scaledInverter: InverterElectricalSpecs = {
       ...slot.inverterSpecs,
@@ -526,7 +530,7 @@ function distributePanelsToSlots(slots: InverterSlot[], totalPanels: number): nu
  * Compute the 4-component score breakdown.
  *
  * Component weights:
- *   DC/AC fit     40 pts  — peak at ideal target (1.20), linear falloff
+ *   DC/AC fit     40 pts  — peak at ideal target (1.25), linear falloff
  *   Simplicity    25 pts  — fewer units = better
  *   Headroom      20 pts  — voltage + current margin
  *   Economic      15 pts  — penalize excessive AC overcapacity
@@ -542,18 +546,18 @@ function computeScoreBreakdown(
   totalAcKw: number,
 ): ScoredConfig['scoreBreakdown'] {
   // ── 1. DC/AC Fit (40 pts) ──────────────────────────────────────────────────
-  // Perfect at DC_AC_IDEAL_TARGET (1.20). Linear falloff to 0 at acceptable edges.
+  // Perfect at PREFERRED_DC_AC_RATIO_TARGET (1.25). Linear falloff to 0 at acceptable edges.
   // Extra heavy penalty outside acceptable band (shouldn't reach scoring if
   // feasibility gate correctly rejects, but be defensive).
   let dcAcFit: number;
   if (dcAcRatio < DC_AC_ACCEPTABLE_MIN || dcAcRatio > DC_AC_ACCEPTABLE_MAX) {
     dcAcFit = 0;
   } else {
-    const dist = Math.abs(dcAcRatio - DC_AC_IDEAL_TARGET);
+    const dist = Math.abs(dcAcRatio - PREFERRED_DC_AC_RATIO_TARGET);
     // Distance to nearest acceptable edge from ideal.
-    const rangeFromIdeal = dcAcRatio >= DC_AC_IDEAL_TARGET
-      ? DC_AC_ACCEPTABLE_MAX - DC_AC_IDEAL_TARGET   // upper half range
-      : DC_AC_IDEAL_TARGET - DC_AC_ACCEPTABLE_MIN;  // lower half range
+    const rangeFromIdeal = dcAcRatio >= PREFERRED_DC_AC_RATIO_TARGET
+      ? DC_AC_ACCEPTABLE_MAX - PREFERRED_DC_AC_RATIO_TARGET   // upper half range
+      : PREFERRED_DC_AC_RATIO_TARGET - DC_AC_ACCEPTABLE_MIN;  // lower half range
     // Inside ideal band (1.10–1.30): full 40 pts.
     if (dcAcRatio >= DC_AC_IDEAL_MIN && dcAcRatio <= DC_AC_IDEAL_MAX) {
       dcAcFit = 40;

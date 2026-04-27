@@ -4358,10 +4358,10 @@ function EngineeringPageInner() {
           } : {}),
         },
         system: {
-          totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw),
+          totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),
           totalAcKw: parseFloat(totalInverterKw),
           totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
-          dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
+          dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
           topology: topologyType,
           inverters: config.inverters.map(inv => {
             const invData = getInvById(inv.inverterId, inv.type) as any;
@@ -10740,10 +10740,10 @@ function EngineeringPageInner() {
                                 } : {}),
                               },
                               system: {
-                                totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw),
+                                totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),
                                 totalAcKw: parseFloat(totalInverterKw),
                                 totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
-                                dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * 0.4).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
+                                dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
                                 topology: topologyType,
                                 inverters: config.inverters.map(inv => {
                                   const invData = getInvById(inv.inverterId, inv.type) as any;

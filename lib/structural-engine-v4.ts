@@ -12,13 +12,24 @@ import { getMountingSystemById, resolveMountingSystemId, type MountingSystemSpec
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Types: imported from canonical source ─────────────────────────────────
+import type {
+  InstallationType,
+  WindExposure,
+  WindExposureCategory,
+  FramingType,
+  WoodSpecies,
+  RafterSpecies,
+  RoofZone,
+  PanelOrientation,
+  StructuralIssue,
+} from './structural/types';
 export type {
   InstallationType,
   WindExposure,
-  WindExposureCategory,   // alias — backward compat
+  WindExposureCategory,
   FramingType,
   WoodSpecies,
-  RafterSpecies,          // alias — backward compat
+  RafterSpecies,
   RoofZone,
   PanelOrientation,
   StructuralIssue,
@@ -196,7 +207,7 @@ export interface RackingBOM {
   piles?: { qty: number; unit: string; description: string; embedmentFt: number };
 }
 
-// StructuralIssue re-exported from structural/types.ts above
+// StructuralIssue: imported from structural/types.ts above
 
 export interface StructuralResultV4 {
   status: 'PASS' | 'WARNING' | 'FAIL';
