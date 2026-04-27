@@ -18,6 +18,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
+import { getInverterById } from '@/lib/equipment-db';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import {
@@ -169,6 +170,28 @@ export async function POST(req: NextRequest) {
     const layoutTotalAcKw     = layoutCandidate?.totalAcKw
       ?? (sizingResult ? sizingResult.inverterModels.reduce((s, m) => s + m.acKw * m.qty, 0) : null);
     const layoutMicroCount    = sizingResult?.microDeviceCount ?? null;
+
+    // ── Ecosystem truth: optimizerQty + integratedDcDisconnect ──
+    const _optimizerComponent = sizingResult?.requiredComponents?.find(c => c.category === 'optimizer');
+    const _resolvedOptimizerQty: number | undefined =
+      _optimizerComponent?.qty
+      ?? (isOptimizer ? totalModules : undefined);
+
+    const _invSpec = _selectedInvId ? getInverterById(_selectedInvId) : undefined;
+    const _integratedDcDisconnect: boolean =
+      _invSpec?.integratedDcDisconnect === true
+      || (isOptimizer && !_selectedInvId);
+
+    const _optimizerModel: string | undefined = _optimizerComponent?.equipmentDbId
+      ? _optimizerComponent.equipmentDbId.toUpperCase().replace(/^SE-?/i, '')
+      : undefined;
+
+    console.log('[SLD TRUTH CHECK] stage=route selectedBrand=' + (_selectedBrand ?? 'none') +
+      ' topology=' + (isOptimizer ? 'optimizer' : isMicro ? 'micro' : 'string') +
+      ' optimizerQty=' + (_resolvedOptimizerQty ?? 0) +
+      ' integratedDcDisconnect=' + _integratedDcDisconnect +
+      ' stringCount=' + (layoutStrings?.length ?? 0) +
+      ' batteryQty=' + (sizingResult?.battery ? 1 : 0));
 
     // Override acOutputKw when the sizing engine gives a cleaner value
     const acOutputKw: number = layoutTotalAcKw ?? _bodyAcOutputKw;
@@ -509,6 +532,13 @@ export async function POST(req: NextRequest) {
 
       // EGC gauge from engine (NEC 250.122)
       egcGauge:                resolvedEgcGauge,
+
+      // ── Ecosystem / optimizer truth (Phase 2-5 SLD fix) ──
+      selectedBrand:           _selectedBrand,
+      ecosystemTopology:       isOptimizer ? 'optimizer' : (isMicro ? 'micro' : 'string'),
+      optimizerQty:            _resolvedOptimizerQty,
+      optimizerModel:          _optimizerModel,
+      integratedDcDisconnect:  _integratedDcDisconnect,
     };
 
     const svg = renderSLDProfessional(input);

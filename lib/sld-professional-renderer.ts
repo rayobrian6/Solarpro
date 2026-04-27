@@ -125,6 +125,12 @@ export interface SLDProfessionalInput {
   batteryBrand?:           string;
   batteryCount?:           number;
   batteryBackfeedA?:       number;
+  // Ecosystem / optimizer fields
+  selectedBrand?:          string;           // e.g. 'solaredge', 'enphase'
+  ecosystemTopology?:      string;           // 'optimizer' | 'string' | 'micro' | 'hybrid'
+  optimizerQty?:           number;           // total optimizers (per_module = totalModules)
+  optimizerModel?:         string;           // optimizer model name (e.g. 'P505')
+  integratedDcDisconnect?: boolean;          // true = skip external DC disco node
   generatorBrand?:         string;
   generatorModel?:         string;
   generatorKw?:            number;
@@ -1469,6 +1475,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push(txt(pvCX, pvCY+pvH/2+18, `${_ns} str × ${_pps} mod`, {sz:F.tiny, anc:'middle', bold:true}));
     parts.push(txt(pvCX, pvCY+pvH/2+27, `Voc=${_sVoc.toFixed(1)}V  Isc=${_sIsc.toFixed(2)}A`, {sz:F.tiny, anc:'middle', fill:'#B71C1C'}));
     console.log(`[SLD STRING SUMMARY] ${_ns} strings × ${_pps} modules, Voc=${_sVoc.toFixed(1)}V, Isc=${_sIsc.toFixed(2)}A`);
+    // Phase 3: Optimizer callout — show when optimizer topology
+    if (input.optimizerQty && input.optimizerQty > 0) {
+      const _optModel = input.optimizerModel ? ` (${input.optimizerModel})` : '';
+      const _optLabel = `${input.optimizerQty} DC OPTIMIZERS— 1 PER MODULE${_optModel}`;
+      const _topoLabel = 'TOPOLOGY: STRING + OPTIMIZER';
+      parts.push(txt(pvCX, pvCY+pvH/2+38, _optLabel, {sz:F.tiny, anc:'middle', fill:'#1A237E', bold:true}));
+      parts.push(txt(pvCX, pvCY+pvH/2+47, _topoLabel, {sz:F.tiny, anc:'middle', fill:'#1A237E'}));
+      console.log(`[SLD OPTIMIZER CALLOUT] qty=${input.optimizerQty} model=${input.optimizerModel ?? 'unknown'}`);
+    }
   }
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
@@ -1553,6 +1568,23 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
         buildWireRun('SEGMENT_2A_JBOX_TO_COMBINER', _jbOutPt.x, _s2aY, cr.lx, _s2aY, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY — post-jbox
         lines));
     }
+  } else if (input.integratedDcDisconnect) {
+    // Phase 5: Integrated DC disconnect — skip external node, wire J-Box → Inverter directly
+    console.log('[SLD DEVICE OMITTED] external_dc_disconnect reason=integrated_inverter_disconnect brand=' + (input.selectedBrand ?? 'unknown'));
+    // SEG 2D: J-Box → Inverter direct (no external DC disco)
+    {
+      const run = dcStringRun;
+      const _strCnt = input.totalStrings || 1;
+      const _dcWireNum = resolvedDcWire.replace('#','').replace(' AWG','');
+      const fb = [`${_strCnt*2}#${_dcWireNum} THWN-2`, `+ #${egcNum} EGC`, `IN ${input.dcConduitType??'EMT'}`];
+      const {lines} = runLines(run, fb);
+      const _s2dInvX = xInv - 60;  // invBox not yet defined here; use xInv offset
+      node3RX = _s2dInvX;            // Phase 5: set node3RX for downstream code
+      const _s2dY = resolveSegY(_jbOutPt.x, _s2dInvX, BUS_Y);
+      parts.push(renderWireRun(
+        buildWireRun('SEGMENT_2D_JBOX_TO_INV_DIRECT', _jbOutPt.x, _s2dY, _s2dInvX, _s2dY, run, lines, true, 'RACEWAY'),
+        lines));
+    }
   } else {
     // DC DISCONNECT with fuse symbols
     // SOT: symbol size from SLD_SYMBOL_MAP['dc-disconnect'] = 120×100
@@ -1582,10 +1614,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // SEGMENT 2: J-Box → DC Disco
     {
       const run = dcStringRun;
-      const fb = [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, `IN ${input.dcConduitType??'EMT'}`];
+      // Phase 4/6: JBOX→DC DISCO is in conduit (RACEWAY) — THWN-2, not USE-2
+      const _s2bStrCnt = input.totalStrings || 1;
+      const _s2bWireNum = resolvedDcWire.replace('#','').replace(' AWG','');
+      const fb = [`${_s2bStrCnt*2}#${_s2bWireNum} THWN-2`, `+ #${egcNum} EGC`, `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
       const _s2bY = resolveSegY(_jbOutPt.x, _dcInPt.x, BUS_Y);  // SOT: anchor coords
-      console.log('[WIRE RUN CREATED] SEGMENT_2B_JBOX_TO_DCDISCO: DC string run');
+      console.log('[WIRE RUN CREATED] SEGMENT_2B_JBOX_TO_DCDISCO: DC string run (RACEWAY/THWN-2)');
       parts.push(renderWireRun(
         buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', _jbOutPt.x, _s2bY, _dcInPt.x, _s2bY, run, lines, true, 'RACEWAY'),  // Phase 1: RACEWAY — conduit from jbox
         lines));
@@ -1597,7 +1632,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
 
   if (!isMicro) {
     const invCX = xInv, invCY = BUS_Y;
-    const tl = input.topologyType==='STRING_WITH_OPTIMIZER' ? 'STRING + OPTIMIZER' : 'STRING INVERTER';
+    const tl = (input.ecosystemTopology === 'optimizer' || input.topologyType === 'STRING_WITH_OPTIMIZER' || input.topologyType === 'OPTIMIZER')
+      ? 'STRING + OPTIMIZER'
+      : 'STRING INVERTER';
     const invBox = renderInverterBox(
       invCX, invCY,
       input.inverterManufacturer, input.inverterModel,
@@ -1609,18 +1646,25 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     invRX = invBox.acOutX;  // Use AC output terminal X as the right-side connection point
 
     // SEGMENT 3: DC Disco LOAD terminal → Inverter DC_IN terminal
-    {
-      const run = dcDiscoInvRun ?? dcStringRun;
-      const fb = [`${resolvedDcWire} USE-2/PV Wire`, `1×#${egcNum} GRN EGC`, `IN ${input.dcConduitType??'EMT'}`];
-      const {lines, cnt} = runLines(run, fb);
-      // Use inverter dcInX/Y terminal for precise routing
-      const segY = invBox.dcInY;
-      const _s3Y = resolveSegY(node3RX, invBox.dcInX, segY);
-      console.log('[WIRE RUN CREATED] SEGMENT_3_DCDISCO_TO_INV: DC run');
-      parts.push(renderWireRun(
-        buildWireRun('SEGMENT_3_DCDISCO_TO_INV', node3RX, _s3Y, invBox.dcInX, _s3Y, run, lines, true, 'RACEWAY'),  // Phase 1: RACEWAY
-        lines));
-    }
+    // Phase 5: skip SEGMENT_3 when integratedDcDisconnect (SEG_2D already drew JBOX→INV)
+    if (!input.integratedDcDisconnect) {
+      // SEGMENT_3 only runs when there IS an external DC disco
+      {
+        const run = dcDiscoInvRun ?? dcStringRun;
+        // Phase 4/6: DC Disco→Inv is in conduit (RACEWAY) — THWN-2
+        const _s3StrCnt = input.totalStrings || 1;
+        const _s3WireNum = resolvedDcWire.replace('#','').replace(' AWG','');
+        const fb = [`${_s3StrCnt*2}#${_s3WireNum} THWN-2`, `+ #${egcNum} EGC`, `IN ${input.dcConduitType??'EMT'}`];
+        const {lines: s3lines, cnt: s3cnt} = runLines(run, fb);
+        // Use inverter dcInX/Y terminal for precise routing
+        const segY = invBox.dcInY;
+        const _s3Y = resolveSegY(node3RX, invBox.dcInX, segY);
+        console.log('[WIRE RUN CREATED] SEGMENT_3_DCDISCO_TO_INV: DC run');
+        parts.push(renderWireRun(
+          buildWireRun('SEGMENT_3_DCDISCO_TO_INV', node3RX, _s3Y, invBox.dcInX, _s3Y, run, s3lines, true, 'RACEWAY'),  // Phase 1: RACEWAY
+          s3lines));
+      }
+    } // end !integratedDcDisconnect
   }
 
   // ── NODE 5: AC DISCONNECT ─────────────────────────────────────────────────

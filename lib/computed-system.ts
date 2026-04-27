@@ -1359,7 +1359,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       destTerminal:   'LINE',         // DC Disconnect LINE (PV array) side
       conductorCount: stringCount * 2,  // stringCount × DC+ + stringCount × DC-
       wireGauge: dcWire.gauge,
-      insulation: 'USE-2/PV Wire',
+      insulation: 'USE-2/PV Wire',   // open-air roof wiring (NEC 690.31(B))
+      isOpenAir: true,               // PV array → J-Box: roof surface, no conduit
       egcGauge: dcWire.egcGauge,
       neutralRequired: false,
       systemVoltage: strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
@@ -1401,7 +1402,9 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       destTerminal:   'DC_IN',        // String inverter DC input
       conductorCount: stringCount * 2,  // same bundle as DC_STRING_RUN
       wireGauge: dcDiscoWire.gauge,
-      insulation: 'USE-2/PV Wire',
+      insulation: 'THWN-2',          // in conduit after J-Box (NEC 310.15)
+      isOpenAir: false,              // DC Disco → Inverter is in raceway
+      // note: original was USE-2/PV Wire — corrected per Phase 4
       egcGauge: dcDiscoWire.egcGauge,
       neutralRequired: false,
       systemVoltage: strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
