@@ -4,11 +4,13 @@
 // Utility-recognizable, permit-ready
 //
 // DESIGN SYSTEM:
-//   Primary stroke:   2px   (enclosures, main conductors)
-//   Secondary stroke: 1.5px (internal details, labels)
-//   Hair stroke:      0.75px (fine detail)
+//   Primary stroke:   2.5px  (enclosures, main conductors)
+//   Secondary stroke: 2px    (internal details)
+//   Hair stroke:      1px    (fine detail)
+//   Bus stroke:       5px    (busbars)
 //   Grid unit:        8px
-//   Max corner radius: 2px
+//   Min font:         10px   (all labels readable at 1x)
+//   Corner radius:    3px
 //
 // CONNECTION POINTS: { x, y, dir: 'left'|'right'|'top'|'bottom' }
 // VOLTAGE DOMAIN:    'AC' | 'DC' | 'BOTH' | 'GND'
@@ -46,30 +48,26 @@ export interface SLDSymbol {
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const T = {
-  // Strokes
-  SW_PRIMARY:   2,
-  SW_SECONDARY: 1.5,
-  SW_HAIR:      0.75,
-  SW_BUS:       3.5,
-  // Colors
+  SW_PRIMARY:   2.5,
+  SW_SECONDARY: 2,
+  SW_HAIR:      1,
+  SW_BUS:       5,
   BLACK:   '#1A1A1A',
   WHITE:   '#FFFFFF',
-  GND:     '#005500',
-  DC_CLR:  '#C84B00',   // warm orange — DC domain
-  AC_CLR:  '#0A3D7C',   // deep blue  — AC domain
-  BAT_CLR: '#1565C0',   // battery blue
-  GEN_CLR: '#2E7D32',   // generator green
-  ATS_CLR: '#E65100',   // ATS orange
-  BUI_ENP: '#0D47A1',   // Enphase blue
-  BUI_TSL: '#CC0000',   // Tesla red
-  BUI_GEN: '#1565C0',   // Generic BUI blue
-  SUB_CLR: '#6A1B9A',   // subpanel purple
-  // Geometry
-  R: 2,                 // corner radius
-  GRID: 8,              // grid unit
+  GND:     '#1B5E20',
+  DC_CLR:  '#BF360C',
+  AC_CLR:  '#0D3B7A',
+  BAT_CLR: '#1565C0',
+  GEN_CLR: '#2E7D32',
+  ATS_CLR: '#E65100',
+  BUI_ENP: '#0D47A1',
+  SUB_CLR: '#6A1B9A',
+  GRAY:    '#555555',
+  R: 3,
+  GRID: 8,
 };
 
-// ─── SVG Primitives ───────────────────────────────────────────────────────────
+// ─── SVG Primitives ──────────────────────────────────────────────────────────
 function p_rect(x: number, y: number, w: number, h: number,
   opts: { fill?: string; stroke?: string; sw?: number; r?: number } = {}): string {
   const { fill = T.WHITE, stroke = T.BLACK, sw = T.SW_PRIMARY, r = T.R } = opts;
@@ -99,116 +97,12 @@ function p_path(d: string,
 }
 function p_text(x: number, y: number, text: string,
   opts: { sz?: number; fill?: string; anchor?: string; bold?: boolean; italic?: boolean } = {}): string {
-  const { sz = 7, fill = T.BLACK, anchor = 'middle', bold = false, italic = false } = opts;
+  const { sz = 11, fill = T.BLACK, anchor = 'middle', bold = false, italic = false } = opts;
   let s = `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="${sz}" fill="${fill}"`;
   if (bold)   s += ' font-weight="bold"';
   if (italic) s += ' font-style="italic"';
   s += `>${text}</text>`;
   return s;
-}
-function p_tspan(x: number, y: number, lines: string[],
-  opts: { sz?: number; fill?: string; anchor?: string; bold?: boolean; lh?: number } = {}): string {
-  const { sz = 6.5, fill = T.BLACK, anchor = 'middle', bold = false, lh = 9 } = opts;
-  const spans = lines.map((l, i) =>
-    `<tspan x="${x}" dy="${i === 0 ? 0 : lh}">${l}</tspan>`).join('');
-  return `<text x="${x}" y="${y}" text-anchor="${anchor}" font-size="${sz}" fill="${fill}"${bold ? ' font-weight="bold"' : ''}>${spans}</text>`;
-}
-
-// ─── Shared Sub-symbols ───────────────────────────────────────────────────────
-
-/** IEEE 315 ground — 3 descending horizontal lines */
-function sym_ground(x: number, y: number, clr = T.GND): string {
-  return [
-    p_line(x, y, x, y + 8,   { stroke: clr, sw: T.SW_PRIMARY }),
-    p_line(x - 10, y + 8,  x + 10, y + 8,  { stroke: clr, sw: T.SW_PRIMARY }),
-    p_line(x - 7,  y + 13, x + 7,  y + 13, { stroke: clr, sw: T.SW_SECONDARY }),
-    p_line(x - 4,  y + 18, x + 4,  y + 18, { stroke: clr, sw: T.SW_SECONDARY }),
-  ].join('');
-}
-
-/** Terminal lug: open circle with center dot */
-function sym_lug(cx: number, cy: number, clr = T.BLACK): string {
-  return p_circle(cx, cy, 3.5, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY })
-       + p_circle(cx, cy, 1.2, { fill: clr, stroke: clr, sw: 0 });
-}
-
-/** Directional arrow on a conductor */
-function sym_arrow(x: number, y: number, dir: 'right' | 'left' | 'down', clr = T.BLACK, sz = 5): string {
-  let d = '';
-  if (dir === 'right') d = `M${x},${y - sz / 2} L${x + sz},${y} L${x},${y + sz / 2}`;
-  if (dir === 'left')  d = `M${x},${y - sz / 2} L${x - sz},${y} L${x},${y + sz / 2}`;
-  if (dir === 'down')  d = `M${x - sz / 2},${y} L${x},${y + sz} L${x + sz / 2},${y}`;
-  return p_path(d, { fill: clr, stroke: clr, sw: 1 });
-}
-
-/** Sine wave path centered at (cx, cy) */
-function sym_sine(cx: number, cy: number, w = 20, h = 7): string {
-  return p_path(
-    `M${cx - w / 2},${cy} Q${cx - w / 4},${cy - h} ${cx},${cy} Q${cx + w / 4},${cy + h} ${cx + w / 2},${cy}`,
-    { stroke: T.BLACK, sw: T.SW_SECONDARY }
-  );
-}
-
-/** DC flat line marker */
-function sym_dc_line(cx: number, cy: number, w = 18): string {
-  return p_line(cx - w / 2, cy, cx + w / 2, cy, { stroke: T.BLACK, sw: T.SW_SECONDARY });
-}
-
-/** Fuse: IEEE 315 rectangle with leads */
-function sym_fuse(cx: number, cy: number, w = 16, h = 8): string {
-  return [
-    p_line(cx - w / 2 - 8, cy, cx - w / 2, cy, { sw: T.SW_SECONDARY }),
-    p_rect(cx - w / 2, cy - h / 2, w, h, { sw: T.SW_SECONDARY }),
-    p_line(cx + w / 2, cy, cx + w / 2 + 8, cy, { sw: T.SW_SECONDARY }),
-  ].join('');
-}
-
-/** Circuit breaker: rectangle + arc */
-function sym_breaker(cx: number, cy: number, w = 20, h = 14, amps?: number, clr = T.BLACK): string {
-  const parts = [
-    p_rect(cx - w / 2, cy - h / 2, w, h, { stroke: clr, sw: T.SW_SECONDARY }),
-    p_path(`M${cx - 5},${cy + 3} Q${cx},${cy - 6} ${cx + 5},${cy + 3}`,
-      { stroke: clr, sw: T.SW_HAIR }),
-  ];
-  if (amps) parts.push(p_text(cx, cy - h / 2 - 3, `${amps}A`, { sz: 5.5, anchor: 'middle', bold: true, fill: clr }));
-  return parts.join('');
-}
-
-/** Open-blade knife switch (IEEE 315) */
-function sym_knife_switch(lx: number, cy: number, w = 40, clr = T.BLACK): string {
-  return [
-    p_line(lx, cy, lx + 10, cy, { stroke: clr, sw: T.SW_SECONDARY }),
-    p_circle(lx + 10, cy, 3, { fill: clr, stroke: clr, sw: 0 }),
-    p_line(lx + 10, cy, lx + w - 10, cy - 12, { stroke: clr, sw: T.SW_SECONDARY }),
-    p_circle(lx + w - 10, cy, 3, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY }),
-    p_line(lx + w - 10, cy, lx + w, cy, { stroke: clr, sw: T.SW_SECONDARY }),
-  ].join('');
-}
-
-/** Callout circle */
-function sym_callout(cx: number, cy: number, n: number): string {
-  return p_circle(cx, cy, 10, { fill: T.WHITE, stroke: T.BLACK, sw: T.SW_SECONDARY })
-       + p_text(cx, cy + 4, String(n), { sz: 8, bold: true, anchor: 'middle' });
-}
-
-/** Section header label for a box */
-function sym_header(bx: number, by: number, bw: number, text: string, clr = T.BLACK): string {
-  return p_rect(bx, by, bw, 14, { fill: clr, stroke: clr, sw: 0, r: T.R })
-       + p_text(bx + bw / 2, by + 10, text, { sz: 5.5, fill: T.WHITE, anchor: 'middle', bold: true });
-}
-
-/** Voltage domain badge (small pill top-right of enclosure) */
-function sym_domain_badge(rx: number, ty: number, domain: 'AC' | 'DC' | 'BOTH'): string {
-  const clr = domain === 'DC' ? T.DC_CLR : domain === 'AC' ? T.AC_CLR : '#444';
-  return p_rect(rx - 22, ty + 3, 20, 9, { fill: clr, stroke: 'none', sw: 0, r: 2 })
-       + p_text(rx - 12, ty + 10, domain, { sz: 5, fill: T.WHITE, anchor: 'middle', bold: true });
-}
-
-/** Busbar: heavy horizontal line */
-function sym_busbar(x1: number, x2: number, y: number, label?: string, clr = T.BLACK): string {
-  const p = [p_line(x1, y, x2, y, { stroke: clr, sw: T.SW_BUS })];
-  if (label) p.push(p_text((x1 + x2) / 2, y - 5, label, { sz: 5.5, anchor: 'middle', bold: true, fill: clr }));
-  return p.join('');
 }
 
 // ─── SVG wrapper ─────────────────────────────────────────────────────────────
@@ -216,15 +110,108 @@ function svg_wrap(w: number, h: number, content: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="background:#fff;display:block;">${content}</svg>`;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
+// ─── Shared Sub-symbols ──────────────────────────────────────────────────────
+
+/** IEEE 315 ground — 3 descending horizontal lines */
+function sym_ground(x: number, y: number, clr = T.GND): string {
+  return [
+    p_line(x, y,      x, y + 10,   { stroke: clr, sw: T.SW_PRIMARY }),
+    p_line(x - 16, y + 10, x + 16, y + 10, { stroke: clr, sw: T.SW_PRIMARY }),
+    p_line(x - 11, y + 16, x + 11, y + 16, { stroke: clr, sw: T.SW_SECONDARY }),
+    p_line(x - 6,  y + 22, x + 6,  y + 22, { stroke: clr, sw: T.SW_SECONDARY }),
+  ].join('');
+}
+
+/** Terminal lug: open circle with center dot */
+function sym_lug(cx: number, cy: number, clr = T.BLACK): string {
+  return p_circle(cx, cy, 5, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY })
+       + p_circle(cx, cy, 2, { fill: clr, stroke: clr, sw: 0 });
+}
+
+/** Directional filled arrow */
+function sym_arrow(x: number, y: number, dir: 'right' | 'left' | 'down' | 'up', clr = T.BLACK, sz = 7): string {
+  let d = '';
+  if (dir === 'right') d = `M${x},${y - sz/2} L${x + sz},${y} L${x},${y + sz/2}`;
+  if (dir === 'left')  d = `M${x},${y - sz/2} L${x - sz},${y} L${x},${y + sz/2}`;
+  if (dir === 'down')  d = `M${x - sz/2},${y} L${x},${y + sz} L${x + sz/2},${y}`;
+  if (dir === 'up')    d = `M${x - sz/2},${y} L${x},${y - sz} L${x + sz/2},${y}`;
+  return p_path(d, { fill: clr, stroke: clr, sw: 1 });
+}
+
+/** Sine wave path */
+function sym_sine(cx: number, cy: number, w = 32, h = 10): string {
+  return p_path(
+    `M${cx - w/2},${cy} Q${cx - w/4},${cy - h} ${cx},${cy} Q${cx + w/4},${cy + h} ${cx + w/2},${cy}`,
+    { stroke: T.BLACK, sw: T.SW_SECONDARY }
+  );
+}
+
+/** DC flat bars marker (two parallel horizontal lines) */
+function sym_dc_bars(cx: number, cy: number, w = 24): string {
+  return p_line(cx - w/2, cy - 5, cx + w/2, cy - 5, { stroke: T.BLACK, sw: T.SW_SECONDARY })
+       + p_line(cx - w/2, cy + 5, cx + w/2, cy + 5, { stroke: T.BLACK, sw: T.SW_SECONDARY });
+}
+
+/** IEEE 315 fuse: rectangle with leads */
+function sym_fuse(cx: number, cy: number, w = 24, h = 12): string {
+  return [
+    p_line(cx - w/2 - 12, cy, cx - w/2, cy, { sw: T.SW_SECONDARY }),
+    p_rect(cx - w/2, cy - h/2, w, h, { sw: T.SW_SECONDARY, r: 2 }),
+    p_line(cx + w/2, cy, cx + w/2 + 12, cy, { sw: T.SW_SECONDARY }),
+  ].join('');
+}
+
+/** Circuit breaker: rectangle + arc inside */
+function sym_breaker(cx: number, cy: number, w = 32, h = 22, amps?: number, clr = T.BLACK): string {
+  const parts = [
+    p_rect(cx - w/2, cy - h/2, w, h, { stroke: clr, sw: T.SW_SECONDARY }),
+    p_path(`M${cx - 8},${cy + 5} Q${cx},${cy - 10} ${cx + 8},${cy + 5}`,
+      { stroke: clr, sw: T.SW_HAIR }),
+  ];
+  if (amps) parts.push(
+    p_text(cx, cy + h/2 + 13, `${amps}A`, { sz: 11, anchor: 'middle', bold: true, fill: clr })
+  );
+  return parts.join('');
+}
+
+/** Open-blade knife switch (IEEE 315) */
+function sym_knife_switch(lx: number, cy: number, sw_w = 52, clr = T.BLACK): string {
+  return [
+    p_line(lx, cy, lx + 12, cy, { stroke: clr, sw: T.SW_SECONDARY }),
+    p_circle(lx + 12, cy, 4, { fill: clr, stroke: clr, sw: 0 }),
+    p_line(lx + 12, cy, lx + sw_w - 12, cy - 16, { stroke: clr, sw: T.SW_SECONDARY }),
+    p_circle(lx + sw_w - 12, cy, 4, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY }),
+    p_line(lx + sw_w - 12, cy, lx + sw_w, cy, { stroke: clr, sw: T.SW_SECONDARY }),
+  ].join('');
+}
+
+/** Section header bar */
+function sym_header(bx: number, by: number, bw: number, text: string, clr = T.BLACK): string {
+  return p_rect(bx, by, bw, 20, { fill: clr, stroke: clr, sw: 0, r: T.R })
+       + p_text(bx + bw/2, by + 14, text, { sz: 10, fill: T.WHITE, anchor: 'middle', bold: true });
+}
+
+/** Voltage domain badge pill */
+function sym_domain_badge(rx: number, ty: number, domain: 'AC' | 'DC' | 'BOTH'): string {
+  const clr = domain === 'DC' ? T.DC_CLR : domain === 'AC' ? T.AC_CLR : '#444';
+  return p_rect(rx - 30, ty + 3, 28, 14, { fill: clr, stroke: 'none', sw: 0, r: 3 })
+       + p_text(rx - 16, ty + 13, domain, { sz: 8, fill: T.WHITE, anchor: 'middle', bold: true });
+}
+
+/** Busbar: heavy horizontal line with label */
+function sym_busbar(x1: number, x2: number, y: number, label?: string, clr = T.BLACK): string {
+  const parts = [p_line(x1, y, x2, y, { stroke: clr, sw: T.SW_BUS, cap: 'square' })];
+  if (label) parts.push(p_text((x1 + x2)/2, y - 8, label, { sz: 10, anchor: 'middle', bold: true, fill: clr }));
+  return parts.join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // SYMBOL DEFINITIONS
-// ═══════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
 
 export const SLD_SYMBOLS: SLDSymbol[] = [
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 1. GROUND
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 1. GROUND ──────────────────────────────────────────────────────────────
   {
     id: 'ground',
     label: 'Ground',
@@ -232,19 +219,18 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'GND',
     badge: 'Always',
     badgeColor: 'blue',
-    width: 48,
-    height: 40,
-    connections: [{ id: 'in', x: 24, y: 0, dir: 'top', domain: 'GND' }],
-    labelAnchor: { x: 24, y: 44, anchor: 'middle', baseline: 'hanging' },
-    svg: () => svg_wrap(48, 40,
-      p_line(24, 0, 24, 8, { stroke: T.GND, sw: T.SW_PRIMARY })
-      + sym_ground(24, 8, T.GND)
+    width: 72,
+    height: 64,
+    connections: [{ id: 'in', x: 36, y: 0, dir: 'top', domain: 'GND' }],
+    labelAnchor: { x: 36, y: 68, anchor: 'middle', baseline: 'hanging' },
+    svg: () => svg_wrap(72, 64,
+      p_line(36, 0, 36, 12, { stroke: T.GND, sw: T.SW_PRIMARY })
+      + sym_ground(36, 12, T.GND)
+      + p_text(36, 56, 'GND', { sz: 11, fill: T.GND, anchor: 'middle', bold: true })
     ),
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 2. FUSE (inline)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 2. FUSE ────────────────────────────────────────────────────────────────
   {
     id: 'fuse',
     label: 'Fuse (Inline)',
@@ -252,21 +238,23 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'DC',
     badge: 'String only',
     badgeColor: 'green',
-    width: 64,
-    height: 32,
+    width: 96,
+    height: 40,
     connections: [
-      { id: 'line', x: 0, y: 16, dir: 'left', domain: 'DC' },
-      { id: 'load', x: 64, y: 16, dir: 'right', domain: 'DC' },
+      { id: 'line', x: 0,  y: 20, dir: 'left',  domain: 'DC' },
+      { id: 'load', x: 96, y: 20, dir: 'right', domain: 'DC' },
     ],
-    labelAnchor: { x: 32, y: 30, anchor: 'middle', baseline: 'hanging' },
-    svg: () => svg_wrap(64, 32,
-      sym_fuse(32, 16)
-    ),
+    labelAnchor: { x: 48, y: 38, anchor: 'middle', baseline: 'hanging' },
+    svg: (opts = {}) => {
+      const amps = opts.amps as number | undefined;
+      return svg_wrap(96, 40,
+        sym_fuse(48, 20, 32, 16)
+        + (amps ? p_text(48, 38, `${amps}A`, { sz: 10, fill: T.DC_CLR, anchor: 'middle', bold: true }) : '')
+      );
+    },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 3. CIRCUIT BREAKER
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 3. CIRCUIT BREAKER ─────────────────────────────────────────────────────
   {
     id: 'breaker',
     label: 'Circuit Breaker',
@@ -274,21 +262,24 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'Always',
     badgeColor: 'blue',
-    width: 64,
-    height: 40,
+    width: 96,
+    height: 56,
     connections: [
-      { id: 'line', x: 0, y: 20, dir: 'left', domain: 'AC' },
-      { id: 'load', x: 64, y: 20, dir: 'right', domain: 'AC' },
+      { id: 'line', x: 0,  y: 28, dir: 'left',  domain: 'AC' },
+      { id: 'load', x: 96, y: 28, dir: 'right', domain: 'AC' },
     ],
-    labelAnchor: { x: 32, y: 38, anchor: 'middle', baseline: 'hanging' },
-    svg: (opts = {}) => svg_wrap(64, 40,
-      sym_breaker(32, 20, 24, 16, opts.amps as number | undefined)
-    ),
+    labelAnchor: { x: 48, y: 54, anchor: 'middle', baseline: 'hanging' },
+    svg: (opts = {}) => {
+      const amps = opts.amps as number | undefined;
+      return svg_wrap(96, 56,
+        p_line(0, 28, 18, 28, { sw: T.SW_SECONDARY })
+        + sym_breaker(48, 28, 36, 24, amps)
+        + p_line(66, 28, 96, 28, { sw: T.SW_SECONDARY })
+      );
+    },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 4. JUNCTION BOX
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 4. JUNCTION BOX ────────────────────────────────────────────────────────
   {
     id: 'jbox',
     label: 'Junction Box',
@@ -296,38 +287,32 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'BOTH',
     badge: 'Always',
     badgeColor: 'blue',
-    width: 80,
-    height: 80,
+    width: 120,
+    height: 120,
     connections: [
-      { id: 'left',   x: 0,  y: 40, dir: 'left',   domain: 'DC',  label: 'IN' },
-      { id: 'right',  x: 80, y: 40, dir: 'right',  domain: 'DC',  label: 'OUT' },
-      { id: 'top',    x: 40, y: 0,  dir: 'top',    domain: 'DC' },
-      { id: 'bottom', x: 40, y: 80, dir: 'bottom', domain: 'DC' },
+      { id: 'left',   x: 0,   y: 60, dir: 'left',   domain: 'DC', label: 'IN' },
+      { id: 'right',  x: 120, y: 60, dir: 'right',  domain: 'DC', label: 'OUT' },
+      { id: 'top',    x: 60,  y: 0,  dir: 'top',    domain: 'DC' },
+      { id: 'bottom', x: 60,  y: 120, dir: 'bottom', domain: 'DC' },
     ],
-    labelAnchor: { x: 40, y: -14, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 60, y: -16, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const label = (opts.label as string) || 'ROOF J-BOX';
       const sub   = (opts.sub   as string) || 'DC JUNCTION';
       const p: string[] = [];
-      p.push(p_rect(8, 8, 64, 64));
-      // X cross
-      p.push(p_line(16, 16, 64, 64, { sw: T.SW_HAIR }));
-      p.push(p_line(64, 16, 16, 64, { sw: T.SW_HAIR }));
-      // Lugs
-      p.push(sym_lug(8, 40)); p.push(sym_lug(72, 40));
-      // Stubs
-      p.push(p_line(0, 40, 8, 40, { sw: T.SW_SECONDARY }));
-      p.push(p_line(72, 40, 80, 40, { sw: T.SW_SECONDARY }));
-      // Header
-      p.push(sym_header(8, 8, 64, label));
-      p.push(p_text(40, 52, sub, { sz: 6, anchor: 'middle', italic: true }));
-      return svg_wrap(80, 80, p.join(''));
+      p.push(p_rect(10, 10, 100, 100));
+      p.push(p_line(20, 28, 100, 100, { sw: T.SW_HAIR }));
+      p.push(p_line(100, 28, 20, 100, { sw: T.SW_HAIR }));
+      p.push(p_line(0, 60, 10, 60, { sw: T.SW_SECONDARY }));
+      p.push(p_line(110, 60, 120, 60, { sw: T.SW_SECONDARY }));
+      p.push(sym_lug(10, 60)); p.push(sym_lug(110, 60));
+      p.push(sym_header(10, 10, 100, label));
+      p.push(p_text(60, 72, sub, { sz: 10, anchor: 'middle', italic: true }));
+      return svg_wrap(120, 120, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 5. PV ARRAY BLOCK
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 5. PV ARRAY ────────────────────────────────────────────────────────────
   {
     id: 'pv-array',
     label: 'PV Array',
@@ -335,55 +320,44 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'DC',
     badge: 'Always',
     badgeColor: 'blue',
-    width: 120,
-    height: 104,
+    width: 180,
+    height: 164,
     connections: [
-      { id: 'dc-pos', x: 120, y: 36, dir: 'right', domain: 'DC', label: 'DC+' },
-      { id: 'dc-neg', x: 120, y: 52, dir: 'right', domain: 'DC', label: 'DC−' },
-      { id: 'egc',    x: 60,  y: 104, dir: 'bottom', domain: 'GND', label: 'EGC' },
+      { id: 'dc-pos', x: 180, y: 64, dir: 'right', domain: 'DC', label: 'DC+' },
+      { id: 'dc-neg', x: 180, y: 88, dir: 'right', domain: 'DC', label: 'DC−' },
+      { id: 'egc',    x: 90,  y: 164, dir: 'bottom', domain: 'GND', label: 'EGC' },
     ],
-    labelAnchor: { x: 60, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 90, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const modules = (opts.modules as number) || 18;
       const watts   = (opts.watts   as number) || 400;
       const model   = (opts.model   as string) || 'MODULE MODEL';
       const dcKw    = ((modules * watts) / 1000).toFixed(2);
       const p: string[] = [];
-      // Outer enclosure
-      p.push(p_rect(0, 16, 120, 88, { r: T.R }));
-      // Header
-      p.push(sym_header(0, 16, 120, 'PV ARRAY'));
-      // Domain badge
-      p.push(sym_domain_badge(120, 16, 'DC'));
-      // 2×3 module grid
+      p.push(p_rect(0, 0, 180, 140, { r: T.R }));
+      p.push(sym_header(0, 0, 180, 'PV ARRAY'));
+      p.push(sym_domain_badge(180, 0, 'DC'));
       for (let row = 0; row < 2; row++) {
         for (let col = 0; col < 3; col++) {
-          const mx = 8  + col * 34;
-          const my = 38 + row * 30;
-          // Module rectangle + diagonal (IEEE/IEC)
-          p.push(p_rect(mx, my, 28, 22, { sw: T.SW_SECONDARY }));
-          p.push(p_line(mx, my + 22, mx + 28, my, { sw: T.SW_HAIR }));
+          const mx = 10 + col * 52;
+          const my = 28 + row * 48;
+          p.push(p_rect(mx, my, 44, 36, { sw: T.SW_SECONDARY }));
+          p.push(p_line(mx, my + 36, mx + 44, my, { sw: T.SW_HAIR }));
         }
       }
-      // DC output stubs + polarity
-      p.push(p_line(112, 36, 120, 36, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
-      p.push(p_text(106, 33, '+', { sz: 7, fill: T.DC_CLR, bold: true, anchor: 'middle' }));
-      p.push(p_line(112, 52, 120, 52, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
-      p.push(p_text(106, 55, '−', { sz: 7, fill: T.DC_CLR, bold: true, anchor: 'middle' }));
-      // Arrow
-      p.push(sym_arrow(116, 44, 'right', T.DC_CLR));
-      // EGC stub
-      p.push(p_line(60, 104, 60, 112, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      // Labels below
-      p.push(p_text(60, 110, `${modules} × ${watts}W — ${dcKw} kW DC`, { sz: 6, anchor: 'middle', fill: T.DC_CLR, bold: true }));
-      p.push(p_text(60, 120, model, { sz: 5.5, anchor: 'middle', italic: true }));
-      return svg_wrap(120, 124, p.join(''));
+      p.push(p_line(168, 64, 180, 64, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
+      p.push(p_text(160, 61, '+', { sz: 13, fill: T.DC_CLR, bold: true, anchor: 'middle' }));
+      p.push(p_line(168, 88, 180, 88, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
+      p.push(p_text(160, 92, '−', { sz: 13, fill: T.DC_CLR, bold: true, anchor: 'middle' }));
+      p.push(sym_arrow(174, 76, 'right', T.DC_CLR));
+      p.push(p_line(90, 140, 90, 164, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(p_text(90, 126, `${modules} × ${watts}W = ${dcKw} kW DC`, { sz: 10, anchor: 'middle', fill: T.DC_CLR, bold: true }));
+      p.push(p_text(90, 138, model, { sz: 9, anchor: 'middle', italic: true }));
+      return svg_wrap(180, 164, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 6. INVERTER (STRING / HYBRID)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 6. INVERTER ────────────────────────────────────────────────────────────
   {
     id: 'inverter',
     label: 'Inverter',
@@ -391,83 +365,80 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'BOTH',
     badge: 'String only',
     badgeColor: 'green',
-    width: 128,
-    height: 104,
+    width: 210,
+    height: 164,
     connections: [
-      { id: 'dc-in',  x: 0,   y: 44, dir: 'left',   domain: 'DC',  label: 'DC IN' },
-      { id: 'ac-out', x: 128, y: 44, dir: 'right',  domain: 'AC',  label: 'AC OUT' },
-      { id: 'egc',    x: 64,  y: 104, dir: 'bottom', domain: 'GND', label: 'EGC' },
+      { id: 'dc-in',  x: 0,   y: 80, dir: 'left',   domain: 'DC',  label: 'DC IN' },
+      { id: 'ac-out', x: 210, y: 80, dir: 'right',  domain: 'AC',  label: 'AC OUT' },
+      { id: 'egc',    x: 105, y: 164, dir: 'bottom', domain: 'GND', label: 'EGC' },
     ],
-    labelAnchor: { x: 64, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 105, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const mfr    = (opts.mfr    as string) || 'MANUFACTURER';
       const model  = (opts.model  as string) || 'MODEL NO.';
       const acKw   = (opts.acKw   as number) || 0;
       const acAmps = (opts.acAmps as number) || 0;
-      const mppt   = (opts.mppt   as number) || 2;
+      const mppt   = Math.min((opts.mppt as number) || 2, 4);
       const topo   = (opts.topo   as string) || 'STRING INVERTER';
       const p: string[] = [];
 
-      // Enclosure
-      p.push(p_rect(0, 0, 128, 88));
-      p.push(sym_header(0, 0, 128, topo));
+      p.push(p_rect(0, 0, 200, 140));
+      p.push(sym_header(0, 0, 200, topo));
 
-      // Domain badges
-      p.push(p_rect(2, 18, 18, 9, { fill: T.DC_CLR, stroke: 'none', sw: 0, r: 2 }));
-      p.push(p_text(11, 25, 'DC', { sz: 5, fill: T.WHITE, anchor: 'middle', bold: true }));
-      p.push(p_rect(108, 18, 18, 9, { fill: T.AC_CLR, stroke: 'none', sw: 0, r: 2 }));
-      p.push(p_text(117, 25, 'AC', { sz: 5, fill: T.WHITE, anchor: 'middle', bold: true }));
+      // DC / AC domain badges
+      p.push(p_rect(4, 24, 30, 14, { fill: T.DC_CLR, stroke: 'none', sw: 0, r: 3 }));
+      p.push(p_text(19, 34, 'DC', { sz: 9, fill: T.WHITE, anchor: 'middle', bold: true }));
+      p.push(p_rect(166, 24, 30, 14, { fill: T.AC_CLR, stroke: 'none', sw: 0, r: 3 }));
+      p.push(p_text(181, 34, 'AC', { sz: 9, fill: T.WHITE, anchor: 'middle', bold: true }));
 
-      // Vertical divider (DC | AC)
-      p.push(p_line(64, 14, 64, 88, { sw: T.SW_HAIR, dash: '3,3' }));
+      // Vertical divider
+      p.push(p_line(100, 20, 100, 140, { sw: T.SW_HAIR, dash: '5,4' }));
 
-      // DC side — flat line indicator
-      p.push(sym_dc_line(26, 44, 18));
-      p.push(p_text(26, 54, 'DC', { sz: 6.5, fill: T.DC_CLR, anchor: 'middle', bold: true }));
+      // DC side — flat bars
+      p.push(sym_dc_bars(42, 80, 32));
+      p.push(p_text(42, 100, 'DC', { sz: 12, fill: T.DC_CLR, anchor: 'middle', bold: true }));
 
-      // Conversion arrow
-      p.push(p_line(38, 44, 88, 44, { sw: T.SW_PRIMARY }));
-      p.push(sym_arrow(76, 44, 'right'));
+      // Center arrow
+      p.push(sym_arrow(100, 80, 'right', T.BLACK, 11));
 
       // AC side — sine wave
-      p.push(sym_sine(104, 44, 22, 8));
-      p.push(p_text(104, 54, 'AC', { sz: 6.5, fill: T.AC_CLR, anchor: 'middle', bold: true }));
+      p.push(sym_sine(160, 80, 40, 13));
+      p.push(p_text(160, 100, 'AC', { sz: 12, fill: T.AC_CLR, anchor: 'middle', bold: true }));
 
-      // MPPT input dots (left side, evenly spaced)
-      const mpptSpacing = 16;
-      const mpptStartY  = 44 - ((mppt - 1) * mpptSpacing) / 2;
+      // MPPT dots on left edge
+      const mpptSpacing = 24;
+      const mpptStartY  = 80 - ((mppt - 1) * mpptSpacing) / 2;
       for (let i = 0; i < mppt; i++) {
         const my = mpptStartY + i * mpptSpacing;
-        p.push(p_circle(0, my, 3.5, { fill: T.DC_CLR, stroke: T.DC_CLR, sw: 0 }));
-        p.push(p_text(8, my + 3, `MPPT${i + 1}`, { sz: 4.5, fill: T.DC_CLR, anchor: 'start' }));
-        p.push(p_line(3.5, my, 20, my, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
+        p.push(p_circle(0, my, 5, { fill: T.DC_CLR, stroke: T.DC_CLR, sw: 0 }));
+        p.push(p_text(12, my + 4, `MPPT${i + 1}`, { sz: 8, fill: T.DC_CLR, anchor: 'start' }));
+        p.push(p_line(5, my, 24, my, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
       }
 
-      // AC output lug right
-      p.push(sym_lug(128, 44, T.AC_CLR));
-      p.push(p_line(128, 44, 136, 44, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
+      // AC output lug + arrow
+      p.push(sym_lug(200, 80, T.AC_CLR));
+      p.push(p_line(200, 80, 210, 80, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
+      p.push(sym_arrow(206, 80, 'right', T.AC_CLR, 6));
 
-      // DC input lug left
-      p.push(sym_lug(0, 44, T.DC_CLR));
-      p.push(p_line(-8, 44, 0, 44, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
+      // DC input lug
+      p.push(sym_lug(0, 80, T.DC_CLR));
+      p.push(p_line(-10, 80, 0, 80, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
 
-      // EGC bottom
-      p.push(p_line(64, 88, 64, 104, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      // EGC
+      p.push(p_line(100, 140, 100, 164, { stroke: T.GND, sw: T.SW_SECONDARY }));
 
-      // Manufacturer / model / specs
-      p.push(p_text(64, 68, mfr,   { sz: 6, anchor: 'middle', italic: true }));
-      p.push(p_text(64, 76, model, { sz: 7, anchor: 'middle', bold: true }));
+      // Labels
+      p.push(p_text(100, 115, mfr, { sz: 10, anchor: 'middle', italic: true }));
+      p.push(p_text(100, 128, model, { sz: 11, anchor: 'middle', bold: true }));
       if (acKw > 0) {
-        p.push(p_text(64, 84, `${acKw} kW AC / ${acAmps}A`, { sz: 6, anchor: 'middle', fill: T.AC_CLR }));
+        p.push(p_text(100, 141, `${acKw} kW AC / ${acAmps}A`, { sz: 10, anchor: 'middle', fill: T.AC_CLR }));
       }
 
-      return svg_wrap(144, 116, p.join(''));
+      return svg_wrap(210, 164, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 7. DC DISCONNECT
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 7. DC DISCONNECT ───────────────────────────────────────────────────────
   {
     id: 'dc-disconnect',
     label: 'DC Disconnect',
@@ -475,63 +446,54 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'DC',
     badge: 'String only',
     badgeColor: 'green',
-    width: 96,
-    height: 80,
+    width: 160,
+    height: 168,
     connections: [
-      { id: 'line-pos', x: 0,  y: 32, dir: 'left',  domain: 'DC', label: 'LINE +' },
-      { id: 'line-neg', x: 0,  y: 48, dir: 'left',  domain: 'DC', label: 'LINE −' },
-      { id: 'load-pos', x: 96, y: 32, dir: 'right', domain: 'DC', label: 'LOAD +' },
-      { id: 'load-neg', x: 96, y: 48, dir: 'right', domain: 'DC', label: 'LOAD −' },
-      { id: 'egc',      x: 48, y: 80, dir: 'bottom', domain: 'GND' },
+      { id: 'line-pos', x: 0,   y: 60, dir: 'left',  domain: 'DC', label: 'LINE +' },
+      { id: 'line-neg', x: 0,   y: 88, dir: 'left',  domain: 'DC', label: 'LINE −' },
+      { id: 'load-pos', x: 160, y: 60, dir: 'right', domain: 'DC', label: 'LOAD +' },
+      { id: 'load-neg', x: 160, y: 88, dir: 'right', domain: 'DC', label: 'LOAD −' },
+      { id: 'egc',      x: 80,  y: 168, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 48, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 80, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const amps  = (opts.amps  as number) || 15;
       const label = (opts.label as string) || '(N) DC DISCONNECT';
       const rsd   = opts.rsd as boolean;
       const p: string[] = [];
 
-      p.push(p_rect(0, 8, 96, 64));
-      p.push(sym_header(0, 8, 96, 'DC DISC'));
-      p.push(sym_domain_badge(96, 8, 'DC'));
+      p.push(p_rect(0, 20, 160, 108));
+      p.push(sym_header(0, 20, 160, 'DC DISCONNECT'));
+      p.push(sym_domain_badge(160, 20, 'DC'));
 
-      // LINE lugs + stubs
-      p.push(sym_lug(6, 32, T.DC_CLR)); p.push(p_line(0, 32, 6, 32, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
-      p.push(sym_lug(6, 48, T.DC_CLR)); p.push(p_line(0, 48, 6, 48, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
+      p.push(p_text(12, 57, '+', { sz: 13, fill: T.DC_CLR, bold: true, anchor: 'middle' }));
+      p.push(p_text(12, 92, '−', { sz: 13, fill: T.DC_CLR, bold: true, anchor: 'middle' }));
 
-      // Polarity labels
-      p.push(p_text(14, 30, '+', { sz: 7, fill: T.DC_CLR, bold: true, anchor: 'start' }));
-      p.push(p_text(14, 54, '−', { sz: 7, fill: T.DC_CLR, bold: true, anchor: 'start' }));
+      p.push(sym_lug(8, 60, T.DC_CLR)); p.push(p_line(0, 60, 8, 60, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
+      p.push(sym_lug(8, 88, T.DC_CLR)); p.push(p_line(0, 88, 8, 88, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
 
-      // Fuses
-      p.push(sym_fuse(48, 32)); p.push(sym_fuse(48, 48));
+      p.push(p_line(13, 60, 56, 60, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
+      p.push(p_line(13, 88, 56, 88, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
+      p.push(p_line(104, 60, 147, 60, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
+      p.push(p_line(104, 88, 147, 88, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
 
-      // LOAD lugs + stubs
-      p.push(sym_lug(90, 32, T.DC_CLR)); p.push(p_line(90, 32, 96, 32, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
-      p.push(sym_lug(90, 48, T.DC_CLR)); p.push(p_line(90, 48, 96, 48, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
+      p.push(sym_fuse(80, 60, 36, 14)); p.push(sym_fuse(80, 88, 36, 14));
 
-      // Internal wires to fuse
-      p.push(p_line(9.5, 32, 32, 32, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
-      p.push(p_line(9.5, 48, 32, 48, { stroke: T.DC_CLR, sw: T.SW_HAIR }));
-      p.push(p_line(64, 32, 86, 32,  { stroke: T.DC_CLR, sw: T.SW_HAIR }));
-      p.push(p_line(64, 48, 86, 48,  { stroke: T.DC_CLR, sw: T.SW_HAIR }));
+      p.push(sym_lug(152, 60, T.DC_CLR)); p.push(p_line(152, 60, 160, 60, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
+      p.push(sym_lug(152, 88, T.DC_CLR)); p.push(p_line(152, 88, 160, 88, { stroke: T.DC_CLR, sw: T.SW_PRIMARY }));
 
-      // EGC stub
-      p.push(p_line(48, 72, 48, 80, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(48, 80, T.GND));
+      p.push(p_line(80, 128, 80, 148, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(80, 148, T.GND));
 
-      // Labels
-      p.push(p_text(48, -8, label, { sz: 7, anchor: 'middle', bold: true }));
-      p.push(p_text(48, 82, `${amps}A FUSED`, { sz: 6, anchor: 'middle', fill: T.DC_CLR }));
-      if (rsd) p.push(p_text(48, 91, 'RAPID SHUTDOWN — NEC 690.12', { sz: 5.5, anchor: 'middle', italic: true }));
+      p.push(p_text(80, 10, label, { sz: 10, anchor: 'middle', bold: true }));
+      p.push(p_text(80, 136, `${amps}A FUSED`, { sz: 10, anchor: 'middle', fill: T.DC_CLR }));
+      if (rsd) p.push(p_text(80, 160, 'RAPID SHUTDOWN — NEC 690.12', { sz: 8, anchor: 'middle', italic: true, fill: T.GRAY }));
 
-      return svg_wrap(96, 100, p.join(''));
+      return svg_wrap(160, 172, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 8. AC DISCONNECT
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 8. AC DISCONNECT ───────────────────────────────────────────────────────
   {
     id: 'ac-disconnect',
     label: 'AC Disconnect',
@@ -539,50 +501,45 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'Always',
     badgeColor: 'blue',
-    width: 96,
-    height: 80,
+    width: 160,
+    height: 160,
     connections: [
-      { id: 'load-a', x: 0,  y: 32, dir: 'left',  domain: 'AC', label: 'LOAD A' },
-      { id: 'load-b', x: 0,  y: 48, dir: 'left',  domain: 'AC', label: 'LOAD B' },
-      { id: 'line-a', x: 96, y: 32, dir: 'right', domain: 'AC', label: 'LINE A' },
-      { id: 'line-b', x: 96, y: 48, dir: 'right', domain: 'AC', label: 'LINE B' },
-      { id: 'egc',    x: 48, y: 80, dir: 'bottom', domain: 'GND' },
+      { id: 'load-a', x: 0,   y: 60, dir: 'left',  domain: 'AC', label: 'LOAD A' },
+      { id: 'load-b', x: 0,   y: 88, dir: 'left',  domain: 'AC', label: 'LOAD B' },
+      { id: 'line-a', x: 160, y: 60, dir: 'right', domain: 'AC', label: 'LINE A' },
+      { id: 'line-b', x: 160, y: 88, dir: 'right', domain: 'AC', label: 'LINE B' },
+      { id: 'egc',    x: 80,  y: 160, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 48, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 80, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const amps  = (opts.amps  as number) || 30;
       const label = (opts.label as string) || '(N) AC DISCONNECT';
       const p: string[] = [];
 
-      p.push(p_rect(0, 8, 96, 64));
-      p.push(sym_header(0, 8, 96, 'AC DISC'));
-      p.push(sym_domain_badge(96, 8, 'AC'));
+      p.push(p_rect(0, 20, 160, 108));
+      p.push(sym_header(0, 20, 160, 'AC DISCONNECT'));
+      p.push(sym_domain_badge(160, 20, 'AC'));
 
-      // Two knife switches
-      [32, 48].forEach(y => {
-        p.push(sym_lug(6, y, T.AC_CLR));
-        p.push(p_line(0, y, 6, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
-        p.push(sym_knife_switch(6, y, 60, T.AC_CLR));
-        p.push(sym_lug(90, y, T.AC_CLR));
-        p.push(p_line(66, y, 90, y, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
-        p.push(p_line(90, y, 96, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
+      [60, 88].forEach(y => {
+        p.push(sym_lug(8, y, T.AC_CLR));
+        p.push(p_line(0, y, 8, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
+        p.push(sym_knife_switch(8, y, 108, T.AC_CLR));
+        p.push(sym_lug(152, y, T.AC_CLR));
+        p.push(p_line(116, y, 152, y, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
+        p.push(p_line(152, y, 160, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
       });
 
-      // EGC
-      p.push(p_line(48, 72, 48, 80, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(48, 80));
+      p.push(p_line(80, 128, 80, 148, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(80, 148));
 
-      // Labels
-      p.push(p_text(48, -8, label, { sz: 7, anchor: 'middle', bold: true }));
-      p.push(p_text(48, 82, `${amps}A NON-FUSED`, { sz: 6, anchor: 'middle', fill: T.AC_CLR }));
+      p.push(p_text(80, 10, label, { sz: 10, anchor: 'middle', bold: true }));
+      p.push(p_text(80, 136, `${amps}A NON-FUSED`, { sz: 10, anchor: 'middle', fill: T.AC_CLR }));
 
-      return svg_wrap(96, 100, p.join(''));
+      return svg_wrap(160, 160, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 9. FUSED DISCONNECT (AC)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 9. FUSED DISCONNECT ────────────────────────────────────────────────────
   {
     id: 'fused-disconnect',
     label: 'Fused Disconnect (AC)',
@@ -590,48 +547,44 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'Optional',
     badgeColor: 'yellow',
-    width: 96,
-    height: 80,
+    width: 160,
+    height: 160,
     connections: [
-      { id: 'load-a', x: 0,  y: 32, dir: 'left',  domain: 'AC' },
-      { id: 'load-b', x: 0,  y: 48, dir: 'left',  domain: 'AC' },
-      { id: 'line-a', x: 96, y: 32, dir: 'right', domain: 'AC' },
-      { id: 'line-b', x: 96, y: 48, dir: 'right', domain: 'AC' },
-      { id: 'egc',    x: 48, y: 80, dir: 'bottom', domain: 'GND' },
+      { id: 'load-a', x: 0,   y: 60, dir: 'left',  domain: 'AC' },
+      { id: 'load-b', x: 0,   y: 88, dir: 'left',  domain: 'AC' },
+      { id: 'line-a', x: 160, y: 60, dir: 'right', domain: 'AC' },
+      { id: 'line-b', x: 160, y: 88, dir: 'right', domain: 'AC' },
+      { id: 'egc',    x: 80,  y: 160, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 48, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 80, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const amps = (opts.amps as number) || 30;
       const p: string[] = [];
 
-      p.push(p_rect(0, 8, 96, 64));
-      p.push(sym_header(0, 8, 96, 'FUSED DISC'));
-      p.push(sym_domain_badge(96, 8, 'AC'));
+      p.push(p_rect(0, 20, 160, 108));
+      p.push(sym_header(0, 20, 160, 'FUSED DISCONNECT'));
+      p.push(sym_domain_badge(160, 20, 'AC'));
 
-      [32, 48].forEach(y => {
-        p.push(sym_lug(6, y, T.AC_CLR));
-        p.push(p_line(0, y, 6, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
-        // knife switch (shorter)
-        p.push(sym_knife_switch(6, y, 44, T.AC_CLR));
-        // inline fuse after switch
-        p.push(sym_fuse(74, y, 12, 7));
-        p.push(sym_lug(90, y, T.AC_CLR));
-        p.push(p_line(80, y, 90, y, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
-        p.push(p_line(90, y, 96, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
+      [60, 88].forEach(y => {
+        p.push(sym_lug(8, y, T.AC_CLR));
+        p.push(p_line(0, y, 8, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
+        p.push(sym_knife_switch(8, y, 76, T.AC_CLR));
+        p.push(sym_fuse(120, y, 26, 12));
+        p.push(sym_lug(152, y, T.AC_CLR));
+        p.push(p_line(133, y, 152, y, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
+        p.push(p_line(152, y, 160, y, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
       });
 
-      p.push(p_line(48, 72, 48, 80, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(48, 80));
-      p.push(p_text(48, -8, '(N) FUSED DISCONNECT', { sz: 7, anchor: 'middle', bold: true }));
-      p.push(p_text(48, 82, `${amps}A FUSED`, { sz: 6, anchor: 'middle', fill: T.AC_CLR }));
+      p.push(p_line(80, 128, 80, 148, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(80, 148));
+      p.push(p_text(80, 10, '(N) FUSED DISCONNECT', { sz: 10, anchor: 'middle', bold: true }));
+      p.push(p_text(80, 136, `${amps}A FUSED`, { sz: 10, anchor: 'middle', fill: T.AC_CLR }));
 
-      return svg_wrap(96, 100, p.join(''));
+      return svg_wrap(160, 160, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 10. MAIN SERVICE PANEL (MSP)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 10. MSP ────────────────────────────────────────────────────────────────
   {
     id: 'msp',
     label: 'Main Service Panel (MSP)',
@@ -639,14 +592,14 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'Always',
     badgeColor: 'blue',
-    width: 128,
-    height: 128,
+    width: 200,
+    height: 220,
     connections: [
-      { id: 'pv-in',   x: 0,   y: 64, dir: 'left',   domain: 'AC',  label: 'PV IN (BKFD)' },
-      { id: 'bus-out', x: 128, y: 56, dir: 'right',  domain: 'AC',  label: 'BUS OUT' },
-      { id: 'egc',     x: 64,  y: 128, dir: 'bottom', domain: 'GND' },
+      { id: 'pv-in',   x: 0,   y: 120, dir: 'left',   domain: 'AC',  label: 'PV IN (BKFD)' },
+      { id: 'bus-out', x: 200, y: 96,  dir: 'right',  domain: 'AC',  label: 'BUS OUT' },
+      { id: 'egc',     x: 100, y: 220, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 64, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 100, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const busAmps  = (opts.busAmps  as number) || 200;
       const mainAmps = (opts.mainAmps as number) || 200;
@@ -655,45 +608,48 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
       const clr      = T.AC_CLR;
       const p: string[] = [];
 
-      p.push(p_rect(0, 0, 128, 112, { stroke: clr }));
-      p.push(sym_header(0, 0, 128, `MSP ${busAmps}A BUS / ${mainAmps}A MAIN`, clr));
-      p.push(sym_domain_badge(128, 0, 'AC'));
+      p.push(p_rect(0, 0, 200, 188, { stroke: clr }));
+      p.push(sym_header(0, 0, 200, `MSP  ${busAmps}A BUS / ${mainAmps}A MAIN`, clr));
+      p.push(sym_domain_badge(200, 0, 'AC'));
+
+      // Service entry
+      p.push(p_line(100, 20, 100, 44, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_text(100, 38, 'SERVICE ENTRANCE', { sz: 8, anchor: 'middle', fill: T.GRAY }));
 
       // Main breaker
-      p.push(sym_breaker(64, 32, 28, 16, mainAmps, clr));
+      p.push(sym_breaker(100, 64, 44, 30, mainAmps, clr));
+      p.push(p_line(100, 79, 100, 96, { stroke: clr, sw: T.SW_SECONDARY }));
 
-      // Main bus (heavy)
-      p.push(sym_busbar(8, 120, 56, 'MAIN BUS', clr));
-      p.push(p_line(64, 40, 64, 56, { stroke: clr, sw: T.SW_SECONDARY }));
+      // Main bus
+      p.push(sym_busbar(16, 184, 96, 'MAIN BUS', clr));
 
-      // PV backfed breaker (load-side tap)
-      const pvBkX = 80;
-      p.push(p_line(pvBkX, 56, pvBkX, 68, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(sym_breaker(pvBkX, 76, 20, 12, pvAmps, clr));
-      p.push(sym_lug(pvBkX, 90, clr));
-      p.push(p_line(pvBkX, 82, pvBkX, 87, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_line(0, 90, pvBkX, 90, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_line(0, 64, 0, 90, { stroke: clr, sw: T.SW_PRIMARY }));
-      p.push(p_text(pvBkX, 100, `NEC 705.12(B)`, { sz: 5, anchor: 'middle', italic: true }));
-      p.push(p_text(pvBkX, 108, `120% RULE: ${rule120}`, { sz: 5, anchor: 'middle', bold: true, fill: rule120.includes('✓') ? '#005500' : '#CC0000' }));
+      // Bus-out lug right
+      p.push(sym_lug(192, 96, clr));
+      p.push(p_line(192, 96, 200, 96, { stroke: clr, sw: T.SW_PRIMARY }));
 
-      // Bus out lug (right)
-      p.push(sym_lug(120, 56, clr));
-      p.push(p_line(120, 56, 128, 56, { stroke: clr, sw: T.SW_PRIMARY }));
+      // PV backfed breaker
+      const pvBkX = 148;
+      p.push(p_line(pvBkX, 96, pvBkX, 108, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(sym_breaker(pvBkX, 124, 32, 22, pvAmps, clr));
+      p.push(sym_lug(pvBkX, 138, clr));
+      p.push(p_line(pvBkX, 135, pvBkX, 138, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_line(0, 138, pvBkX, 138, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_line(0, 120, 0, 138, { stroke: clr, sw: T.SW_PRIMARY }));
 
-      // EGC / neutral bar
-      p.push(p_line(64, 112, 64, 128, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(64, 128));
+      p.push(p_text(pvBkX, 152, 'NEC 705.12(B)', { sz: 8, anchor: 'middle', italic: true, fill: T.GRAY }));
+      p.push(p_text(pvBkX, 164, `120%: ${rule120}`, { sz: 10, anchor: 'middle', bold: true, fill: rule120.includes('✓') ? T.GND : '#CC0000' }));
 
-      p.push(p_text(64, -8, `MSP / MAIN PANEL`, { sz: 7.5, anchor: 'middle', bold: true }));
+      // EGC
+      p.push(p_line(100, 188, 100, 220, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(100, 220));
 
-      return svg_wrap(128, 148, p.join(''));
+      p.push(p_text(100, -8, 'MSP / MAIN PANEL', { sz: 12, anchor: 'middle', bold: true }));
+
+      return svg_wrap(200, 232, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 11. SUBPANEL
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 11. SUBPANEL ───────────────────────────────────────────────────────────
   {
     id: 'subpanel',
     label: 'Subpanel / Backup Panel',
@@ -701,56 +657,51 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'hasBackupPanel',
     badgeColor: 'yellow',
-    width: 96,
-    height: 104,
+    width: 160,
+    height: 188,
     connections: [
-      { id: 'feed-in', x: 0,  y: 56, dir: 'left',   domain: 'AC', label: 'FEED IN' },
-      { id: 'egc',     x: 48, y: 104, dir: 'bottom', domain: 'GND' },
+      { id: 'feed-in', x: 0,  y: 96, dir: 'left',   domain: 'AC', label: 'FEED IN' },
+      { id: 'egc',     x: 80, y: 188, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 48, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 80, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const amps  = (opts.amps  as number) || 100;
       const brand = (opts.brand as string) || '';
       const clr   = T.SUB_CLR;
       const p: string[] = [];
 
-      p.push(p_rect(0, 0, 96, 88, { stroke: clr }));
-      p.push(sym_header(0, 0, 96, 'SUB PANEL', clr));
-      p.push(sym_domain_badge(96, 0, 'AC'));
+      p.push(p_rect(0, 0, 160, 160, { stroke: clr }));
+      p.push(sym_header(0, 0, 160, 'SUB PANEL', clr));
+      p.push(sym_domain_badge(160, 0, 'AC'));
 
-      // Main breaker
-      p.push(sym_breaker(48, 26, 24, 14, amps, clr));
-      p.push(p_text(48, 20, 'MAIN', { sz: 5, anchor: 'middle', bold: true, fill: clr }));
+      p.push(p_line(80, 20, 80, 36, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_text(80, 30, 'MAIN', { sz: 9, anchor: 'middle', bold: true, fill: clr }));
+      p.push(sym_breaker(80, 54, 40, 26, amps, clr));
+      p.push(p_line(80, 67, 80, 84, { stroke: clr, sw: T.SW_SECONDARY }));
 
-      // Bus
-      p.push(sym_busbar(8, 88, 46, 'CRIT. LOADS BUS', clr));
-      p.push(p_line(48, 33, 48, 46, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(sym_busbar(12, 148, 84, 'CRIT. LOADS BUS', clr));
 
-      // 3 branch breakers
-      [-22, 0, 22].forEach(off => {
-        p.push(p_line(48 + off, 46, 48 + off, 56, { stroke: clr, sw: T.SW_SECONDARY }));
-        p.push(sym_breaker(48 + off, 63, 14, 10, undefined, clr));
+      [-28, 0, 28].forEach(off => {
+        p.push(p_line(80 + off, 84, 80 + off, 96, { stroke: clr, sw: T.SW_SECONDARY }));
+        p.push(sym_breaker(80 + off, 112, 22, 16, undefined, clr));
+        p.push(p_line(80 + off, 120, 80 + off, 128, { stroke: clr, sw: T.SW_SECONDARY }));
       });
 
-      // Feed-in lug left
-      p.push(sym_lug(0, 56, clr));
-      p.push(p_line(0, 46, 0, 56, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(sym_lug(0, 96, clr));
+      p.push(p_line(0, 84, 0, 96, { stroke: clr, sw: T.SW_PRIMARY }));
 
-      // EGC
-      p.push(p_line(48, 88, 48, 104, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(48, 104, T.GND));
+      p.push(p_line(80, 160, 80, 188, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(80, 188, T.GND));
 
-      p.push(p_text(48, -8, 'BACKUP SUB-PANEL', { sz: 7.5, anchor: 'middle', bold: true, fill: clr }));
-      if (brand) p.push(p_text(48, 97, brand, { sz: 5.5, anchor: 'middle', italic: true }));
-      p.push(p_text(48, 106, 'CRITICAL LOADS ONLY', { sz: 5.5, anchor: 'middle', fill: clr }));
+      p.push(p_text(80, -8, 'BACKUP SUB-PANEL', { sz: 12, anchor: 'middle', bold: true, fill: clr }));
+      if (brand) p.push(p_text(80, 152, brand, { sz: 9, anchor: 'middle', italic: true }));
+      p.push(p_text(80, 164, 'CRITICAL LOADS ONLY', { sz: 9, anchor: 'middle', fill: clr }));
 
-      return svg_wrap(96, 120, p.join(''));
+      return svg_wrap(160, 196, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 12. UTILITY METER
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 12. UTILITY METER ──────────────────────────────────────────────────────
   {
     id: 'utility-meter',
     label: 'Utility Meter',
@@ -758,53 +709,41 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'Always',
     badgeColor: 'blue',
-    width: 80,
-    height: 160,
+    width: 120,
+    height: 248,
     connections: [
-      { id: 'line-in',  x: 0,  y: 32, dir: 'left',   domain: 'AC' },
-      { id: 'grid-out', x: 40, y: 160, dir: 'bottom', domain: 'AC' },
+      { id: 'line-in',  x: 0,  y: 56, dir: 'left',   domain: 'AC' },
+      { id: 'grid-out', x: 60, y: 248, dir: 'bottom', domain: 'AC' },
     ],
-    labelAnchor: { x: 40, y: -16, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 60, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const utility = (opts.utility as string) || 'UTILITY';
       const p: string[] = [];
 
-      // Meter circle
-      p.push(p_circle(40, 32, 28));
-      p.push(p_text(40, 30, 'kWh', { sz: 8, anchor: 'middle', bold: true }));
-      p.push(p_text(40, 40, 'M', { sz: 7, anchor: 'middle' }));
-      // Entry wire
-      p.push(p_line(0, 32, 12, 32, { sw: T.SW_PRIMARY }));
+      p.push(p_circle(60, 56, 40));
+      p.push(p_text(60, 50, 'kWh', { sz: 14, anchor: 'middle', bold: true }));
+      p.push(p_text(60, 65, 'M', { sz: 12, anchor: 'middle' }));
+      p.push(p_line(0, 56, 20, 56, { sw: T.SW_PRIMARY }));
+      p.push(sym_arrow(16, 56, 'right'));
 
-      // Arrow in
-      p.push(sym_arrow(8, 32, 'right'));
+      p.push(p_line(60, 96, 60, 144, { sw: T.SW_PRIMARY }));
+      p.push(sym_arrow(60, 120, 'down'));
 
-      // Wire to grid circle
-      p.push(p_line(40, 60, 40, 96, { sw: T.SW_PRIMARY }));
-      p.push(sym_arrow(40, 80, 'down'));
+      p.push(p_circle(60, 180, 32));
+      p.push(p_text(60, 175, 'UTIL', { sz: 11, anchor: 'middle', bold: true }));
+      p.push(p_text(60, 189, 'GRID', { sz: 10, anchor: 'middle' }));
 
-      // Grid circle (utility)
-      p.push(p_circle(40, 112, 20));
-      p.push(p_text(40, 108, 'UTIL', { sz: 6, anchor: 'middle', bold: true }));
-      p.push(p_text(40, 118, 'GRID', { sz: 5.5, anchor: 'middle' }));
+      p.push(p_line(60, 212, 60, 226, { sw: T.SW_SECONDARY }));
+      p.push(sym_ground(60, 226, T.GND));
 
-      // Wire + ground
-      p.push(p_line(40, 132, 40, 144, { sw: T.SW_SECONDARY }));
-      p.push(sym_ground(40, 144, T.GND));
+      p.push(p_text(60, -10, 'UTILITY METER', { sz: 13, anchor: 'middle', bold: true }));
+      p.push(p_text(60, 3, utility, { sz: 11, anchor: 'middle' }));
 
-      // Labels
-      p.push(p_text(40, -6, 'UTILITY METER', { sz: 7.5, anchor: 'middle', bold: true }));
-      p.push(p_text(40, 4, utility, { sz: 6.5, anchor: 'middle' }));
-      p.push(p_text(40, 164, 'UTILITY GRID', { sz: 6.5, anchor: 'middle', bold: true }));
-      p.push(p_text(40, 173, utility, { sz: 6, anchor: 'middle', italic: true }));
-
-      return svg_wrap(80, 180, p.join(''));
+      return svg_wrap(120, 252, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 13. BATTERY — DC-COUPLED
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 13. BATTERY DC-COUPLED ─────────────────────────────────────────────────
   {
     id: 'battery-dc',
     label: 'Battery — DC-Coupled',
@@ -812,72 +751,72 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'DC',
     badge: 'hasBattery (DC)',
     badgeColor: 'yellow',
-    width: 104,
-    height: 96,
+    width: 160,
+    height: 168,
     connections: [
-      { id: 'dc-pos', x: 0,   y: 40, dir: 'left',   domain: 'DC', label: 'DC+' },
-      { id: 'dc-neg', x: 0,   y: 56, dir: 'left',   domain: 'DC', label: 'DC−' },
-      { id: 'egc',    x: 52,  y: 96, dir: 'bottom', domain: 'GND' },
+      { id: 'dc-pos', x: 0,   y: 68,  dir: 'left',   domain: 'DC', label: 'DC+' },
+      { id: 'dc-neg', x: 0,   y: 100, dir: 'left',   domain: 'DC', label: 'DC−' },
+      { id: 'egc',    x: 80,  y: 168, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 52, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 80, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const model = (opts.model as string) || 'BATTERY STORAGE';
       const kwh   = (opts.kwh   as number) || 0;
       const clr   = T.BAT_CLR;
       const p: string[] = [];
 
-      p.push(p_rect(0, 0, 104, 80, { stroke: clr }));
-      p.push(sym_header(0, 0, 104, 'DC-COUPLED BATTERY', clr));
-      p.push(sym_domain_badge(104, 0, 'DC'));
+      p.push(p_rect(0, 0, 160, 136, { stroke: clr }));
+      p.push(sym_header(0, 0, 160, 'DC-COUPLED BATTERY', clr));
+      p.push(sym_domain_badge(160, 0, 'DC'));
 
-      // IEC 60617 cell stack (3 cells)
-      const cx = 52, cy = 42;
-      for (let i = 0; i < 3; i++) {
-        const lx = cx - 14 + i * 10;
-        p.push(p_line(lx, cy - 12, lx, cy + 12, { stroke: clr, sw: 2.5 }));
-        if (i < 2) p.push(p_line(lx + 5, cy - 7, lx + 5, cy + 7, { stroke: clr, sw: 1.5 }));
-      }
-      p.push(p_text(cx - 22, cy + 4, '−', { sz: 10, bold: true, fill: clr }));
-      p.push(p_text(cx + 22, cy + 4, '+', { sz: 10, bold: true, fill: clr }));
+      // IEC 60617 cell stack: alternating long/short bars
+      const cx = 80, cy = 72;
+      const cells = [
+        { x: cx - 24, h: 32 },
+        { x: cx - 12, h: 20 },
+        { x: cx,      h: 32 },
+        { x: cx + 12, h: 20 },
+        { x: cx + 24, h: 32 },
+      ];
+      cells.forEach(c => p.push(p_line(c.x, cy - c.h/2, c.x, cy + c.h/2, { stroke: clr, sw: 3.5 })));
+      p.push(p_text(cx - 36, cy + 6, '−', { sz: 18, bold: true, fill: clr }));
+      p.push(p_text(cx + 36, cy + 6, '+', { sz: 18, bold: true, fill: clr }));
 
-      // DC +/- stubs
-      p.push(p_line(0, 40, 6, 40, { stroke: clr, sw: T.SW_PRIMARY }));
-      p.push(sym_lug(6, 40, clr));
-      p.push(p_text(14, 38, '+', { sz: 7, bold: true, fill: clr, anchor: 'start' }));
-      p.push(p_line(0, 56, 6, 56, { stroke: clr, sw: T.SW_PRIMARY }));
-      p.push(sym_lug(6, 56, clr));
-      p.push(p_text(14, 59, '−', { sz: 7, bold: true, fill: clr, anchor: 'start' }));
+      // DC stubs left
+      p.push(p_line(0, 68, 8, 68, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(sym_lug(8, 68, clr));
+      p.push(p_text(20, 65, '+', { sz: 13, bold: true, fill: clr, anchor: 'start' }));
+      p.push(p_line(0, 100, 8, 100, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(sym_lug(8, 100, clr));
+      p.push(p_text(20, 104, '−', { sz: 13, bold: true, fill: clr, anchor: 'start' }));
 
       // EGC
-      p.push(p_line(52, 80, 52, 96, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(52, 96));
+      p.push(p_line(80, 136, 80, 168, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(80, 168));
 
-      // Labels
-      p.push(p_text(52, -8, 'BATTERY STORAGE', { sz: 7.5, anchor: 'middle', bold: true, fill: clr }));
-      p.push(p_text(52, 90, model.substring(0, 24), { sz: 5.5, anchor: 'middle', italic: true }));
-      if (kwh > 0) p.push(p_text(52, 99, `${kwh} kWh`, { sz: 6.5, anchor: 'middle', bold: true, fill: clr }));
+      p.push(p_text(80, -8, 'BATTERY STORAGE', { sz: 12, anchor: 'middle', bold: true, fill: clr }));
+      p.push(p_text(80, 114, model.substring(0, 22), { sz: 9, anchor: 'middle', italic: true }));
+      if (kwh > 0) p.push(p_text(80, 127, `${kwh} kWh`, { sz: 12, anchor: 'middle', bold: true, fill: clr }));
 
-      return svg_wrap(104, 108, p.join(''));
+      return svg_wrap(160, 178, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 14. BATTERY — AC-COUPLED (ESS)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 14. BATTERY AC-COUPLED ─────────────────────────────────────────────────
   {
     id: 'battery-ac',
     label: 'Battery — AC-Coupled (ESS)',
-    sub: 'IEC 60617 cell stack — AC OUT port connects on AC bus',
+    sub: 'IEC 60617 cell stack — AC OUT port on AC bus',
     domain: 'BOTH',
     badge: 'hasBattery (AC)',
     badgeColor: 'yellow',
-    width: 104,
-    height: 96,
+    width: 160,
+    height: 168,
     connections: [
-      { id: 'ac-out', x: 52,  y: 96, dir: 'bottom', domain: 'AC',  label: 'AC OUT' },
-      { id: 'egc',    x: 0,   y: 48, dir: 'left',   domain: 'GND' },
+      { id: 'ac-out', x: 80,  y: 168, dir: 'bottom', domain: 'AC',  label: 'AC OUT' },
+      { id: 'egc',    x: 0,   y: 84,  dir: 'left',   domain: 'GND' },
     ],
-    labelAnchor: { x: 52, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 80, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const model     = (opts.model     as string) || 'BATTERY STORAGE';
       const kwh       = (opts.kwh       as number) || 0;
@@ -885,43 +824,40 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
       const clr       = T.BAT_CLR;
       const p: string[] = [];
 
-      p.push(p_rect(0, 0, 104, 80, { stroke: clr }));
-      p.push(sym_header(0, 0, 104, 'AC-COUPLED BATTERY', clr));
+      p.push(p_rect(0, 0, 160, 136, { stroke: clr }));
+      p.push(sym_header(0, 0, 160, 'AC-COUPLED BATTERY', clr));
+      p.push(p_rect(128, 3, 28, 14, { fill: '#444', stroke: 'none', sw: 0, r: 3 }));
+      p.push(p_text(142, 13, 'AC/DC', { sz: 7, fill: T.WHITE, anchor: 'middle', bold: true }));
 
-      // Domain badge both
-      p.push(p_rect(82, 3, 20, 9, { fill: '#555', stroke: 'none', sw: 0, r: 2 }));
-      p.push(p_text(92, 10, 'AC/DC', { sz: 4.5, fill: T.WHITE, anchor: 'middle', bold: true }));
+      const cx = 80, cy = 72;
+      const cells = [
+        { x: cx - 24, h: 32 },
+        { x: cx - 12, h: 20 },
+        { x: cx,      h: 32 },
+        { x: cx + 12, h: 20 },
+        { x: cx + 24, h: 32 },
+      ];
+      cells.forEach(c => p.push(p_line(c.x, cy - c.h/2, c.x, cy + c.h/2, { stroke: clr, sw: 3.5 })));
+      p.push(p_text(cx - 36, cy + 6, '−', { sz: 18, bold: true, fill: clr }));
+      p.push(p_text(cx + 36, cy + 6, '+', { sz: 18, bold: true, fill: clr }));
 
-      // IEC cell stack
-      const cx = 52, cy = 42;
-      for (let i = 0; i < 3; i++) {
-        const lx = cx - 14 + i * 10;
-        p.push(p_line(lx, cy - 12, lx, cy + 12, { stroke: clr, sw: 2.5 }));
-        if (i < 2) p.push(p_line(lx + 5, cy - 7, lx + 5, cy + 7, { stroke: clr, sw: 1.5 }));
-      }
-      p.push(p_text(cx - 22, cy + 4, '−', { sz: 10, bold: true, fill: clr }));
-      p.push(p_text(cx + 22, cy + 4, '+', { sz: 10, bold: true, fill: clr }));
+      // AC OUT bottom
+      p.push(sym_lug(80, 128, T.AC_CLR));
+      p.push(p_line(80, 128, 80, 136, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
+      p.push(p_line(80, 136, 80, 168, { stroke: T.AC_CLR, sw: T.SW_PRIMARY, dash: '8,4' }));
+      p.push(sym_arrow(80, 148, 'down', T.AC_CLR));
+      p.push(p_text(92, 152, 'AC OUT', { sz: 9, anchor: 'start', fill: T.AC_CLR }));
 
-      // AC OUT lug (bottom)
-      p.push(sym_lug(52, 76, T.AC_CLR));
-      p.push(p_line(52, 76, 52, 80, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
-      p.push(p_line(52, 80, 52, 96, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
-      p.push(p_text(52, 88, 'AC OUT', { sz: 4, anchor: 'middle', fill: T.AC_CLR }));
-      p.push(sym_arrow(52, 86, 'down', T.AC_CLR));
+      p.push(p_text(80, -8, 'BATTERY STORAGE', { sz: 12, anchor: 'middle', bold: true, fill: clr }));
+      p.push(p_text(80, 114, model.substring(0, 22), { sz: 9, anchor: 'middle', italic: true }));
+      if (kwh > 0)       p.push(p_text(80, 127, `${kwh} kWh`, { sz: 12, anchor: 'middle', bold: true, fill: clr }));
+      if (backfeedA > 0) p.push(p_text(80, 158, `${backfeedA}A — NEC 705.12(B)`, { sz: 8, anchor: 'middle', fill: clr }));
 
-      // Labels
-      p.push(p_text(52, -8, 'BATTERY STORAGE', { sz: 7.5, anchor: 'middle', bold: true, fill: clr }));
-      p.push(p_text(52, 99, model.substring(0, 24), { sz: 5.5, anchor: 'middle', italic: true }));
-      if (kwh > 0)       p.push(p_text(52, 108, `${kwh} kWh`, { sz: 6.5, anchor: 'middle', bold: true, fill: clr }));
-      if (backfeedA > 0) p.push(p_text(52, 117, `${backfeedA}A BACKFEED — NEC 705.12(B)`, { sz: 5.5, anchor: 'middle', fill: clr }));
-
-      return svg_wrap(104, 120, p.join(''));
+      return svg_wrap(160, 178, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 15. BUI — ENPHASE IQ SC3
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 15. BUI ENPHASE ────────────────────────────────────────────────────────
   {
     id: 'bui-enphase',
     label: 'BUI — Enphase IQ System Controller 3',
@@ -929,15 +865,15 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'hasBattery (Enphase)',
     badgeColor: 'yellow',
-    width: 128,
-    height: 112,
+    width: 200,
+    height: 188,
     connections: [
-      { id: 'grid',    x: 0,   y: 40, dir: 'left',   domain: 'AC', label: 'GRID IN' },
-      { id: 'gen',     x: 0,   y: 72, dir: 'left',   domain: 'AC', label: 'GEN IN' },
-      { id: 'load',    x: 128, y: 56, dir: 'right',  domain: 'AC', label: 'LOAD OUT' },
-      { id: 'battery', x: 64,  y: 112, dir: 'bottom', domain: 'AC', label: 'BATTERY' },
+      { id: 'grid',    x: 0,   y: 68,  dir: 'left',   domain: 'AC', label: 'GRID IN' },
+      { id: 'gen',     x: 0,   y: 116, dir: 'left',   domain: 'AC', label: 'GEN IN' },
+      { id: 'load',    x: 200, y: 92,  dir: 'right',  domain: 'AC', label: 'LOAD OUT' },
+      { id: 'battery', x: 100, y: 188, dir: 'bottom', domain: 'AC', label: 'BATTERY' },
     ],
-    labelAnchor: { x: 64, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 100, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const brand  = (opts.brand  as string) || 'Enphase';
       const model  = (opts.model  as string) || 'IQ System Controller 3';
@@ -946,65 +882,55 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
       const clr    = T.BUI_ENP;
       const p: string[] = [];
 
-      p.push(p_rect(0, 0, 128, 96, { stroke: clr }));
-      p.push(sym_header(0, 0, 128, 'IQ SYSTEM CONTROLLER 3', clr));
-      p.push(sym_domain_badge(128, 0, 'AC'));
+      p.push(p_rect(0, 0, 200, 160, { stroke: clr }));
+      p.push(sym_header(0, 0, 200, 'IQ SYSTEM CONTROLLER 3', clr));
+      p.push(sym_domain_badge(200, 0, 'AC'));
 
-      // GRID lug
-      p.push(sym_lug(8, 40, clr));
-      p.push(p_text(8, 32, 'GRID', { sz: 4.5, anchor: 'middle', fill: '#555' }));
-      p.push(p_line(0, 40, 8, 40, { stroke: clr, sw: T.SW_PRIMARY }));
+      // GRID port
+      p.push(sym_lug(10, 68, clr));
+      p.push(p_text(10, 56, 'GRID', { sz: 9, anchor: 'middle', fill: T.GRAY }));
+      p.push(p_line(0, 68, 10, 68, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(p_line(15, 68, 76, 68, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_circle(15, 68, 4, { fill: clr, stroke: clr, sw: 0 }));
+      p.push(p_circle(76, 68, 4, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY }));
 
-      // GEN lug
+      // GEN port
       if (hasGen) {
-        p.push(sym_lug(8, 72, T.GEN_CLR));
-        p.push(p_text(8, 82, 'GEN', { sz: 4.5, anchor: 'middle', fill: T.GEN_CLR }));
-        p.push(p_line(0, 72, 8, 72, { stroke: T.GEN_CLR, sw: T.SW_PRIMARY }));
-      }
-
-      // GRID blade closed
-      p.push(p_line(11, 40, 50, 40, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_circle(11, 40, 2.5, { fill: clr, stroke: clr, sw: 0 }));
-      p.push(p_circle(50, 40, 2.5, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY }));
-
-      // GEN blade open
-      if (hasGen) {
-        p.push(p_line(11, 72, 34, 60, { stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
-        p.push(p_circle(11, 72, 2.5, { fill: T.GEN_CLR, stroke: T.GEN_CLR, sw: 0 }));
-        p.push(p_circle(50, 72, 2.5, { fill: T.WHITE, stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
+        p.push(sym_lug(10, 116, T.GEN_CLR));
+        p.push(p_text(10, 130, 'GEN', { sz: 9, anchor: 'middle', fill: T.GEN_CLR }));
+        p.push(p_line(0, 116, 10, 116, { stroke: T.GEN_CLR, sw: T.SW_PRIMARY }));
+        p.push(p_line(15, 116, 48, 96, { stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
+        p.push(p_circle(15, 116, 4, { fill: T.GEN_CLR, stroke: T.GEN_CLR, sw: 0 }));
+        p.push(p_circle(76, 116, 4, { fill: T.WHITE, stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
+        p.push(p_line(76, 116, 104, 116, { stroke: clr, sw: T.SW_SECONDARY }));
       }
 
       // Internal bus
-      const busX = 66;
-      p.push(p_line(busX, 40, busX, hasGen ? 72 : 56, { stroke: clr, sw: 2.5 }));
-      p.push(p_line(50, 40, busX, 40, { stroke: clr, sw: T.SW_SECONDARY }));
-      if (hasGen) p.push(p_line(50, 72, busX, 72, { stroke: clr, sw: T.SW_SECONDARY }));
+      const busX = 104;
+      p.push(p_line(busX, 68, busX, hasGen ? 116 : 92, { stroke: clr, sw: 3.5 }));
+      p.push(p_line(76, 68, busX, 68, { stroke: clr, sw: T.SW_SECONDARY }));
 
       // LOAD port right
-      p.push(sym_lug(120, 56, clr));
-      p.push(p_text(120, 48, 'LOAD', { sz: 4.5, anchor: 'middle', fill: '#555' }));
-      p.push(p_line(busX, 56, 120, 56, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_line(120, 56, 128, 56, { stroke: clr, sw: T.SW_PRIMARY }));
-      p.push(sym_arrow(124, 56, 'right', clr));
+      p.push(sym_lug(192, 92, clr));
+      p.push(p_text(192, 80, 'LOAD', { sz: 9, anchor: 'middle', fill: T.GRAY }));
+      p.push(p_line(busX, 92, 192, 92, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_line(192, 92, 200, 92, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(sym_arrow(196, 92, 'right', clr, 6));
 
       // BATTERY port bottom
-      p.push(sym_lug(64, 92, clr));
-      p.push(p_text(64, 104, 'BATTERY', { sz: 4.5, anchor: 'middle', fill: clr }));
-      p.push(p_line(64, 92, 64, 96, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_line(64, 96, 64, 112, { stroke: clr, sw: T.SW_PRIMARY, dash: '5,2' }));
+      p.push(sym_lug(100, 156, clr));
+      p.push(p_text(100, 172, 'BATTERY', { sz: 9, anchor: 'middle', fill: clr }));
+      p.push(p_line(100, 156, 100, 188, { stroke: clr, sw: T.SW_PRIMARY, dash: '6,3' }));
 
-      // Labels
-      p.push(p_text(64, -8, `${brand} ${model}`, { sz: 7, anchor: 'middle', bold: true, fill: clr }));
-      p.push(p_text(64, 106, `${amps}A`, { sz: 6, anchor: 'middle', bold: true, fill: clr }));
-      p.push(p_text(64, 114, 'NEC 706 / NEC 230.82 / UL 1741-SA', { sz: 5, anchor: 'middle', italic: true }));
+      p.push(p_text(100, -8, `${brand} ${model}`, { sz: 10, anchor: 'middle', bold: true, fill: clr }));
+      p.push(p_text(100, 140, `${amps}A`, { sz: 12, anchor: 'middle', bold: true, fill: clr }));
+      p.push(p_text(100, 153, 'NEC 706 / UL 1741-SA', { sz: 8, anchor: 'middle', italic: true }));
 
-      return svg_wrap(128, 124, p.join(''));
+      return svg_wrap(200, 196, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 16. GENERATOR
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 16. GENERATOR ──────────────────────────────────────────────────────────
   {
     id: 'generator',
     label: 'Standby Generator',
@@ -1012,13 +938,13 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'generatorKw > 0',
     badgeColor: 'yellow',
-    width: 96,
-    height: 96,
+    width: 160,
+    height: 172,
     connections: [
-      { id: 'ac-out', x: 96, y: 48, dir: 'right', domain: 'AC', label: 'GEN OUT' },
-      { id: 'egc',    x: 48, y: 96, dir: 'bottom', domain: 'GND' },
+      { id: 'ac-out', x: 160, y: 80, dir: 'right', domain: 'AC', label: 'GEN OUT' },
+      { id: 'egc',    x: 80,  y: 172, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 48, y: -24, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 80, y: -24, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const brand = (opts.brand as string) || '';
       const model = (opts.model as string) || '';
@@ -1026,34 +952,28 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
       const clr   = T.GEN_CLR;
       const p: string[] = [];
 
-      p.push(p_circle(48, 48, 36, { stroke: clr }));
-      p.push(p_text(48, 52, 'G', { sz: 18, bold: true, fill: clr, anchor: 'middle' }));
-      // Sine wave inside
-      p.push(sym_sine(48, 62, 18, 5));
+      p.push(p_circle(80, 80, 60, { stroke: clr }));
+      p.push(p_text(80, 90, 'G', { sz: 36, bold: true, fill: clr, anchor: 'middle' }));
+      p.push(sym_sine(80, 110, 40, 11));
 
-      // GEN OUT lug
-      p.push(sym_lug(84, 48, clr));
-      p.push(p_line(84, 48, 96, 48, { stroke: clr, sw: T.SW_PRIMARY }));
-      p.push(sym_arrow(90, 48, 'right', clr));
-      p.push(p_text(85, 41, 'GEN OUT', { sz: 4, anchor: 'start', fill: clr }));
+      p.push(sym_lug(140, 80, clr));
+      p.push(p_line(140, 80, 160, 80, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(sym_arrow(152, 80, 'right', clr, 7));
+      p.push(p_text(142, 68, 'GEN OUT', { sz: 9, anchor: 'start', fill: clr }));
 
-      // EGC
-      p.push(p_line(48, 84, 48, 96, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(48, 96));
+      p.push(p_line(80, 140, 80, 172, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(80, 172));
 
-      // Labels
-      p.push(p_text(48, -12, 'STANDBY GENERATOR', { sz: 7.5, anchor: 'middle', bold: true, fill: clr }));
-      if (brand || model) p.push(p_text(48, -2, `${brand} ${model}`.trim(), { sz: 6.5, anchor: 'middle', fill: clr }));
-      if (kw > 0) p.push(p_text(48, 100, `${kw} kW / ${Math.round(kw * 1000 / 240)}A`, { sz: 6.5, anchor: 'middle', bold: true, fill: clr }));
-      p.push(p_text(48, 110, 'NEC 702.5 — TRANSFER EQUIP. REQ.', { sz: 5.5, anchor: 'middle', italic: true, fill: clr }));
+      p.push(p_text(80, -12, 'STANDBY GENERATOR', { sz: 12, anchor: 'middle', bold: true, fill: clr }));
+      if (brand || model) p.push(p_text(80, 0, `${brand} ${model}`.trim(), { sz: 10, anchor: 'middle', fill: clr }));
+      if (kw > 0) p.push(p_text(80, 154, `${kw} kW / ${Math.round(kw * 1000 / 240)}A`, { sz: 11, anchor: 'middle', bold: true, fill: clr }));
+      p.push(p_text(80, 168, 'NEC 702.5', { sz: 9, anchor: 'middle', italic: true, fill: T.GRAY }));
 
-      return svg_wrap(96, 120, p.join(''));
+      return svg_wrap(160, 180, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 17. ATS — AUTOMATIC TRANSFER SWITCH
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 17. ATS ────────────────────────────────────────────────────────────────
   {
     id: 'ats',
     label: 'ATS — Automatic Transfer Switch',
@@ -1061,75 +981,67 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'generatorKw > 0',
     badgeColor: 'yellow',
-    width: 120,
-    height: 96,
+    width: 200,
+    height: 176,
     connections: [
-      { id: 'util-in', x: 0,   y: 32, dir: 'left',   domain: 'AC', label: 'UTIL IN' },
-      { id: 'gen-in',  x: 0,   y: 64, dir: 'left',   domain: 'AC', label: 'GEN IN' },
-      { id: 'load-out', x: 120, y: 48, dir: 'right',  domain: 'AC', label: 'LOAD OUT' },
-      { id: 'egc',     x: 60,  y: 96, dir: 'bottom', domain: 'GND' },
+      { id: 'util-in',  x: 0,   y: 60,  dir: 'left',   domain: 'AC', label: 'UTIL IN' },
+      { id: 'gen-in',   x: 0,   y: 108, dir: 'left',   domain: 'AC', label: 'GEN IN' },
+      { id: 'load-out', x: 200, y: 84,  dir: 'right',  domain: 'AC', label: 'LOAD OUT' },
+      { id: 'egc',      x: 100, y: 176, dir: 'bottom', domain: 'GND' },
     ],
-    labelAnchor: { x: 60, y: -20, anchor: 'middle', baseline: 'auto' },
+    labelAnchor: { x: 100, y: -20, anchor: 'middle', baseline: 'auto' },
     svg: (opts = {}) => {
       const brand  = (opts.brand  as string) || '';
       const amps   = (opts.amps   as number) || 200;
       const clr    = T.ATS_CLR;
       const p: string[] = [];
 
-      p.push(p_rect(0, 0, 120, 80, { stroke: clr }));
-      p.push(sym_header(0, 0, 120, 'AUTO TRANSFER SWITCH', clr));
-      p.push(sym_domain_badge(120, 0, 'AC'));
+      p.push(p_rect(0, 0, 200, 148, { stroke: clr }));
+      p.push(sym_header(0, 0, 200, 'AUTO TRANSFER SWITCH', clr));
+      p.push(sym_domain_badge(200, 0, 'AC'));
 
-      // UTIL lug
-      p.push(sym_lug(8, 32, clr));
-      p.push(p_text(8, 24, 'UTIL', { sz: 4.5, anchor: 'middle', fill: '#555' }));
-      p.push(p_line(0, 32, 8, 32, { stroke: clr, sw: T.SW_PRIMARY }));
+      // UTIL lug + closed blade
+      p.push(sym_lug(10, 60, clr));
+      p.push(p_text(10, 48, 'UTIL', { sz: 9, anchor: 'middle', fill: T.GRAY }));
+      p.push(p_line(0, 60, 10, 60, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(p_line(15, 60, 84, 60, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_circle(15, 60, 4, { fill: clr, stroke: clr, sw: 0 }));
+      p.push(p_circle(84, 60, 4, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY }));
 
-      // GEN lug
-      p.push(sym_lug(8, 64, T.GEN_CLR));
-      p.push(p_text(8, 74, 'GEN', { sz: 4.5, anchor: 'middle', fill: T.GEN_CLR }));
-      p.push(p_line(0, 64, 8, 64, { stroke: T.GEN_CLR, sw: T.SW_PRIMARY }));
-
-      // UTIL blade — closed
-      p.push(p_line(11, 32, 52, 32, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_circle(11, 32, 2.5, { fill: clr, stroke: clr, sw: 0 }));
-      p.push(p_circle(52, 32, 2.5, { fill: T.WHITE, stroke: clr, sw: T.SW_SECONDARY }));
-
-      // GEN blade — open (angled)
-      p.push(p_line(11, 64, 36, 52, { stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
-      p.push(p_circle(11, 64, 2.5, { fill: T.GEN_CLR, stroke: T.GEN_CLR, sw: 0 }));
-      p.push(p_circle(52, 64, 2.5, { fill: T.WHITE, stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
+      // GEN lug + open blade
+      p.push(sym_lug(10, 108, T.GEN_CLR));
+      p.push(p_text(10, 122, 'GEN', { sz: 9, anchor: 'middle', fill: T.GEN_CLR }));
+      p.push(p_line(0, 108, 10, 108, { stroke: T.GEN_CLR, sw: T.SW_PRIMARY }));
+      p.push(p_line(15, 108, 52, 84, { stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
+      p.push(p_circle(15, 108, 4, { fill: T.GEN_CLR, stroke: T.GEN_CLR, sw: 0 }));
+      p.push(p_circle(84, 108, 4, { fill: T.WHITE, stroke: T.GEN_CLR, sw: T.SW_SECONDARY }));
 
       // Internal bus
-      const busX = 68;
-      p.push(p_line(busX, 32, busX, 64, { stroke: clr, sw: 2.5 }));
-      p.push(p_line(52, 32, busX, 32, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_line(52, 64, busX, 64, { stroke: clr, sw: T.SW_SECONDARY }));
+      const busX = 112;
+      p.push(p_line(busX, 60, busX, 108, { stroke: clr, sw: 3.5 }));
+      p.push(p_line(84, 60, busX, 60, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_line(84, 108, busX, 108, { stroke: clr, sw: T.SW_SECONDARY }));
 
       // LOAD lug right
-      p.push(sym_lug(112, 48, clr));
-      p.push(p_text(112, 40, 'LOAD', { sz: 4.5, anchor: 'middle', fill: '#555' }));
-      p.push(p_line(busX, 48, 112, 48, { stroke: clr, sw: T.SW_SECONDARY }));
-      p.push(p_line(112, 48, 120, 48, { stroke: clr, sw: T.SW_PRIMARY }));
-      p.push(sym_arrow(116, 48, 'right', clr));
+      p.push(sym_lug(192, 84, clr));
+      p.push(p_text(192, 72, 'LOAD', { sz: 9, anchor: 'middle', fill: T.GRAY }));
+      p.push(p_line(busX, 84, 192, 84, { stroke: clr, sw: T.SW_SECONDARY }));
+      p.push(p_line(192, 84, 200, 84, { stroke: clr, sw: T.SW_PRIMARY }));
+      p.push(sym_arrow(196, 84, 'right', clr, 6));
 
       // EGC
-      p.push(p_line(60, 80, 60, 96, { stroke: T.GND, sw: T.SW_SECONDARY }));
-      p.push(sym_ground(60, 96));
+      p.push(p_line(100, 148, 100, 176, { stroke: T.GND, sw: T.SW_SECONDARY }));
+      p.push(sym_ground(100, 176));
 
-      // Labels
-      p.push(p_text(60, -8, 'AUTO TRANSFER SWITCH', { sz: 7.5, anchor: 'middle', bold: true, fill: clr }));
-      if (brand) p.push(p_text(60, 88, brand, { sz: 5.5, anchor: 'middle', italic: true }));
-      p.push(p_text(60, 97, `${amps}A RATED`, { sz: 6, anchor: 'middle', bold: true, fill: clr }));
-      p.push(p_text(60, 106, 'NEC 702.5 — AUTO TRANSFER', { sz: 5.5, anchor: 'middle', italic: true, fill: clr }));
+      p.push(p_text(100, -8, 'AUTO TRANSFER SWITCH', { sz: 12, anchor: 'middle', bold: true, fill: clr }));
+      if (brand) p.push(p_text(100, 128, brand, { sz: 9, anchor: 'middle', italic: true }));
+      p.push(p_text(100, 142, `${amps}A — NEC 702.5`, { sz: 10, anchor: 'middle', bold: true, fill: clr }));
 
-      return svg_wrap(120, 116, p.join(''));
+      return svg_wrap(200, 188, p.join(''));
     },
   },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // 18. AC COMBINER (microinverter)
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── 18. AC COMBINER ────────────────────────────────────────────────────────
   {
     id: 'ac-combiner',
     label: 'AC Combiner',
@@ -1137,74 +1049,68 @@ export const SLD_SYMBOLS: SLDSymbol[] = [
     domain: 'AC',
     badge: 'Micro only',
     badgeColor: 'purple',
-    width: 112,
-    height: 96,
+    width: 176,
+    height: 152,
     connections: [
-      { id: 'branch-1', x: 24,  y: 0,  dir: 'top',   domain: 'AC', label: 'BR-1' },
-      { id: 'branch-2', x: 56,  y: 0,  dir: 'top',   domain: 'AC', label: 'BR-2' },
-      { id: 'branch-3', x: 88,  y: 0,  dir: 'top',   domain: 'AC', label: 'BR-3' },
-      { id: 'feeder',   x: 112, y: 64, dir: 'right', domain: 'AC', label: 'FEEDER' },
+      { id: 'branch-1', x: 36,  y: 0,   dir: 'top',   domain: 'AC', label: 'BR-1' },
+      { id: 'branch-2', x: 88,  y: 0,   dir: 'top',   domain: 'AC', label: 'BR-2' },
+      { id: 'branch-3', x: 140, y: 0,   dir: 'top',   domain: 'AC', label: 'BR-3' },
+      { id: 'feeder',   x: 176, y: 108, dir: 'right', domain: 'AC', label: 'FEEDER' },
     ],
-    labelAnchor: { x: 56, y: 100, anchor: 'middle', baseline: 'hanging' },
+    labelAnchor: { x: 88, y: 156, anchor: 'middle', baseline: 'hanging' },
     svg: (opts = {}) => {
-      const branches = (opts.branches as number) || 3;
+      const branches = Math.min((opts.branches as number) || 3, 3);
       const ocpd     = (opts.ocpd     as number) || 20;
       const label    = (opts.label    as string) || 'AC COMBINER';
       const p: string[] = [];
 
-      p.push(p_rect(0, 16, 112, 72));
-      p.push(sym_header(0, 16, 112, label));
-      p.push(sym_domain_badge(112, 16, 'AC'));
+      p.push(p_rect(0, 28, 176, 116));
+      p.push(sym_header(0, 28, 176, label));
+      p.push(sym_domain_badge(176, 28, 'AC'));
 
-      // Branch breakers (up to 3 shown)
-      const bxPositions = [24, 56, 88];
-      for (let i = 0; i < Math.min(branches, 3); i++) {
+      const bxPositions = [36, 88, 140];
+      for (let i = 0; i < branches; i++) {
         const bx = bxPositions[i];
-        p.push(p_line(bx, 0, bx, 16, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
-        p.push(sym_breaker(bx, 38, 16, 10, ocpd, T.AC_CLR));
-        p.push(p_line(bx, 44, bx, 64, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
+        p.push(p_line(bx, 0, bx, 28, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
+        p.push(sym_breaker(bx, 64, 26, 18, ocpd, T.AC_CLR));
+        p.push(p_line(bx, 73, bx, 108, { stroke: T.AC_CLR, sw: T.SW_SECONDARY }));
       }
 
-      // Combiner bus
-      p.push(sym_busbar(8, 104, 64, 'COMBINER BUS', T.AC_CLR));
+      p.push(sym_busbar(12, 164, 108, 'COMBINER BUS', T.AC_CLR));
 
-      // Feeder lug
-      p.push(sym_lug(104, 64, T.AC_CLR));
-      p.push(p_line(104, 64, 112, 64, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
-      p.push(sym_arrow(108, 64, 'right', T.AC_CLR));
+      p.push(sym_lug(168, 108, T.AC_CLR));
+      p.push(p_line(168, 108, 176, 108, { stroke: T.AC_CLR, sw: T.SW_PRIMARY }));
+      p.push(sym_arrow(172, 108, 'right', T.AC_CLR, 6));
 
-      p.push(p_text(56, 102, `${branches} branches / ${ocpd}A OCPD ea.`, { sz: 6, anchor: 'middle', fill: T.AC_CLR }));
+      p.push(p_text(88, 124, `${branches} branches × ${ocpd}A OCPD`, { sz: 10, anchor: 'middle', fill: T.AC_CLR }));
 
-      return svg_wrap(120, 112, p.join(''));
+      return svg_wrap(184, 140, p.join(''));
     },
   },
 ];
 
 // ─── Export helpers ───────────────────────────────────────────────────────────
 
-/** Get a symbol by ID */
 export function getSymbol(id: string): SLDSymbol | undefined {
   return SLD_SYMBOLS.find(s => s.id === id);
 }
 
-/** Render a symbol with options, returns SVG string */
 export function renderSymbol(id: string, opts?: Record<string, string | number | boolean>): string {
   const sym = getSymbol(id);
   if (!sym) return `<!-- SLD symbol "${id}" not found -->`;
   return sym.svg(opts);
 }
 
-/** Line type system */
 export const LINE_TYPES = {
-  AC_CONDUCTOR:    { stroke: T.AC_CLR,  sw: 2,   dash: undefined, label: 'AC Conductor in Conduit',       sub: 'THWN-2 — solid 2px blue' },
-  DC_CONDUCTOR:    { stroke: T.DC_CLR,  sw: 1.5, dash: undefined, label: 'DC Conductor in Conduit',       sub: 'USE-2/PV Wire — solid 1.5px orange' },
-  OPEN_AIR:        { stroke: T.GND,     sw: 1.5, dash: '10,5',    label: 'Open Air — PV Wire/THWN-2',     sub: 'NEC 690.31 — long-dash green' },
-  EGC:             { stroke: T.GND,     sw: 1.5, dash: undefined, label: 'Equipment Grounding Conductor',  sub: 'NEC 250.122 — solid green' },
-  BATTERY_AC:      { stroke: T.BAT_CLR, sw: 1.5, dash: '6,3',    label: 'Battery AC-Coupled Connection', sub: 'AC OUT → BUI BATTERY port — dashed blue' },
-  GENERATOR_OUT:   { stroke: T.GEN_CLR, sw: 2,   dash: undefined, label: 'Generator Output Conductor',    sub: 'Gen → BUI GEN port / ATS — solid green' },
-  ATS_TRANSFER:    { stroke: T.ATS_CLR, sw: 2,   dash: undefined, label: 'ATS Transfer Conductor',        sub: 'ATS LOAD → MSP — solid orange' },
-  BACKUP_FEEDER:   { stroke: T.SUB_CLR, sw: 1.5, dash: undefined, label: 'Backup Sub-Panel Feeder',       sub: 'BUI LOAD → Sub-Panel — solid purple' },
-  COMMUNICATION:   { stroke: '#888888', sw: 1,   dash: '4,3',    label: 'Communication / Control',        sub: 'Signal wiring — short-dash gray' },
+  AC_CONDUCTOR:  { stroke: T.AC_CLR,  sw: 2.5, dash: undefined,  label: 'AC Conductor in Conduit',       sub: 'THWN-2 — solid 2.5px blue' },
+  DC_CONDUCTOR:  { stroke: T.DC_CLR,  sw: 2,   dash: undefined,  label: 'DC Conductor in Conduit',       sub: 'USE-2/PV Wire — solid 2px orange' },
+  OPEN_AIR:      { stroke: T.GND,     sw: 2,   dash: '12,6',     label: 'Open Air — PV Wire/THWN-2',     sub: 'NEC 690.31 — long-dash green' },
+  EGC:           { stroke: T.GND,     sw: 2,   dash: undefined,  label: 'Equipment Grounding Conductor',  sub: 'NEC 250.122 — solid green' },
+  BATTERY_AC:    { stroke: T.BAT_CLR, sw: 2,   dash: '8,4',      label: 'Battery AC-Coupled Connection', sub: 'AC OUT → BUI BATTERY port — dashed blue' },
+  GENERATOR_OUT: { stroke: T.GEN_CLR, sw: 2.5, dash: undefined,  label: 'Generator Output Conductor',    sub: 'Gen → BUI GEN port / ATS — solid green' },
+  ATS_TRANSFER:  { stroke: T.ATS_CLR, sw: 2.5, dash: undefined,  label: 'ATS Transfer Conductor',        sub: 'ATS LOAD → MSP — solid orange' },
+  BACKUP_FEEDER: { stroke: T.SUB_CLR, sw: 2,   dash: undefined,  label: 'Backup Sub-Panel Feeder',       sub: 'BUI LOAD → Sub-Panel — solid purple' },
+  COMMUNICATION: { stroke: '#888888', sw: 1.5, dash: '5,4',      label: 'Communication / Control',        sub: 'Signal wiring — short-dash gray' },
 } as const;
 
 export const DESIGN_TOKENS = T;
