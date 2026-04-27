@@ -21,6 +21,7 @@ import type { RunSegment, MicroBranch } from './computed-system';
 import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
+import { SLD_SYMBOL_MAP } from './sld-symbols';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
@@ -240,6 +241,22 @@ function callout(cx: number, cy: number, n: number): string {
     + txt(cx, cy+1, String(n), {sz:F.hdr, bold:true, anc:'middle'});
 }
 
+// ── Embed sld-symbols.ts emblem as scaled SVG group ──────────────────────
+// Strips the outer <svg> wrapper and scales inner content to fit slot (cx,cy center)
+function embedSymbol(id: string, cx: number, cy: number, slotW: number, slotH: number): string {
+  const sym = SLD_SYMBOL_MAP[id];
+  if (!sym) return '';
+  const svgStr = sym.svg({});
+  // Strip outer <svg ...> wrapper — extract inner content
+  const inner = svgStr.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+  const sx = slotW / sym.width;
+  const sy = slotH / sym.height;
+  const scale = Math.min(sx, sy);
+  const ox = cx - (sym.width * scale) / 2;
+  const oy = cy - (sym.height * scale) / 2;
+  return `<g transform="translate(${ox.toFixed(1)},${oy.toFixed(1)}) scale(${scale.toFixed(4)})">${inner}</g>`;
+}
+
 // ── IEEE Standard Equipment Symbols ─────────────────────────────────────────
 
 // PV Module symbol v2: realistic solar cell with cell grid (hybrid realism v3.0)
@@ -327,7 +344,7 @@ function busbar(x1: number, x2: number, y: number, label?: string): string {
 // Battery Storage Symbol (IEEE/ANSI)
 // Drawn as a stack of cells (IEC 60617 battery symbol) with AC connection
 // Terminal BAT_AC_OUT: bottom center — AC output lug connecting to BUI BATTERY port
-// Battery Storage Symbol v2 — hybrid realism cabinet style
+// Battery Storage Symbol v3 — embeds sld-symbols.ts hybrid realism emblem
 function renderBattery(
   cx: number, cy: number,
   model: string, kwh: number, backfeedA: number, calloutN: number
@@ -336,60 +353,23 @@ function renderBattery(
   const W2 = 88, H2 = 72;
   const bx = cx - W2/2, by2 = cy - H2/2;
   const p: string[] = [];
-  const BAT_EDGE = '#1A237E'; // deep navy edge
-  const BAT_FILL = '#E8EAF6'; // pale indigo cabinet body
-  const BAT_HDR  = '#1565C0'; // blue header band
-  const BAT_CELL = '#1A237E'; // cell stack color
+  const BAT_HDR = '#1565C0';
 
-  // Cabinet body
-  p.push(rect(bx, by2, W2, H2, {fill: BAT_FILL, stroke: BAT_EDGE, sw: SW_HEAVY}));
-  // Inner inset
-  p.push(rect(bx+2, by2+2, W2-4, H2-4, {fill: 'none', stroke: '#9FA8DA', sw: 0.4}));
-  // Header band
-  p.push(rect(bx, by2, W2, 16, {fill: BAT_HDR, stroke: BAT_EDGE, sw: SW_THIN}));
-  p.push(txt(cx, by2+11, 'BATTERY STORAGE', {sz: 5.5, bold: true, anc: 'middle', fill: '#FFFFFF'}));
+  // Embed the sld-symbols.ts hybrid realism battery emblem (AC-coupled)
+  p.push(embedSymbol('battery-ac', cx, cy, W2, H2));
 
-  // State-of-charge bar (horizontal, center)
-  const socY = cy - 14;
-  const socW = W2 - 20;
-  const socX = bx + 10;
-  p.push(rect(socX, socY, socW, 8, {fill: '#C5CAE9', stroke: BAT_EDGE, sw: 0.8}));
-  p.push(rect(socX, socY, socW * 0.82, 8, {fill: '#1565C0', stroke: 'none', sw: 0}));
-  // Battery nub on right
-  p.push(rect(socX + socW, socY + 2, 4, 4, {fill: BAT_EDGE, stroke: 'none', sw: 0}));
-  p.push(txt(cx, socY - 4, 'STATE OF CHARGE', {sz: 4, anc: 'middle', fill: BAT_CELL}));
-
-  // IEC 60617 battery cell stack — improved
-  const cellX = cx - 12;
-  const cellY = cy + 10;
-  // Negative terminal plate (thick short line)
-  p.push(ln(cellX,     cellY - 8, cellX,     cellY + 8, {stroke: BAT_CELL, sw: 3.0}));
-  // Positive terminal plate (thin tall line)
-  p.push(ln(cellX + 5, cellY - 12, cellX + 5, cellY + 12, {stroke: BAT_CELL, sw: 1.5}));
-  // Second pair
-  p.push(ln(cellX + 10, cellY - 8, cellX + 10, cellY + 8, {stroke: BAT_CELL, sw: 3.0}));
-  p.push(ln(cellX + 15, cellY - 12, cellX + 15, cellY + 12, {stroke: BAT_CELL, sw: 1.5}));
-  // Polarity labels
-  p.push(txt(cellX - 7, cellY + 4, '−', {sz: 9, bold: true, anc: 'middle', fill: BAT_CELL}));
-  p.push(txt(cellX + 22, cellY + 4, '+', {sz: 9, bold: true, anc: 'middle', fill: BAT_CELL}));
-
-  // Status LEDs
-  p.push(circ(bx+8, by2+H2-10, 3.5, {fill: '#00C853', stroke: BAT_EDGE, sw: 0.5}));
-  p.push(circ(bx+16, by2+H2-10, 3.5, {fill: '#00C853', stroke: BAT_EDGE, sw: 0.5}));
-  p.push(txt(bx+24, by2+H2-7, 'CHARGED', {sz: 4, anc: 'start', fill: '#00C853'}));
-
-  // BAT_AC_OUT terminal — bottom center lug (AC output to BUI BATTERY port)
-  const acOutX = cx;
-  const acOutY = by2 + H2;
-  p.push(lug(acOutX, acOutY - 6));
-  p.push(ln(acOutX, acOutY - 6, acOutX, acOutY, {stroke: BAT_HDR, sw: SW_MED}));
-  p.push(txt(acOutX, acOutY + 6, 'AC OUT', {sz: 4, anc: 'middle', fill: BAT_HDR}));
-
+  // Labels below
   p.push(txt(cx, by2 + H2 + 16, model ? model.substring(0, 22) : 'BATTERY STORAGE', {sz: F.tiny, anc: 'middle', italic: true}));
   p.push(txt(cx, by2 + H2 + 25, kwh > 0 ? `${kwh} kWh` : '', {sz: F.tiny, anc: 'middle', bold: true, fill: BAT_HDR}));
   if (backfeedA > 0) {
     p.push(txt(cx, by2 + H2 + 34, `${backfeedA}A BACKFEED — NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_HDR}));
   }
+
+  // BAT_AC_OUT terminal — bottom center wire stub
+  const acOutX = cx;
+  const acOutY = by2 + H2;
+  p.push(ln(acOutX, acOutY, acOutX, acOutY + 8, {stroke: BAT_HDR, sw: SW_MED}));
+
   p.push(callout(bx + W2 + 14, by2 - 5, calloutN));
   return {svg: p.join(''), lx: bx, rx: bx + W2, ty: by2, by: by2 + H2,
           acOutX, acOutY};
@@ -631,7 +611,7 @@ function renderBUI(
   };
 }
 
-// Professional Inverter Box v2 — hybrid realism cabinet style
+// Professional Inverter Box v3 — embeds sld-symbols.ts hybrid realism emblem
 function renderInverterBox(
   cx: number, cy: number,
   manufacturer: string, model: string,
@@ -643,70 +623,31 @@ function renderInverterBox(
   const W2 = 96, H2 = 80;
   const bx = cx - W2/2, by2 = cy - H2/2;
   const p: string[] = [];
-  const INV_EDGE = '#2C2C2C'; // charcoal cabinet edge
-  const INV_FILL = '#F4F4F0'; // light grey cabinet body
-  const INV_HDR  = '#1A2035'; // dark navy header band
-  const INV_ACC  = '#1565C0'; // blue accent (DC/AC indicator)
 
-  // Cabinet body + outer border
-  p.push(rect(bx, by2, W2, H2, {fill: INV_FILL, stroke: INV_EDGE, sw: SW_HEAVY}));
-  // Inner inset shadow (2px inner border)
-  p.push(rect(bx+2, by2+2, W2-4, H2-4, {fill: 'none', stroke: '#BBBBBB', sw: 0.5}));
-  // Header band
-  p.push(rect(bx, by2, W2, 16, {fill: INV_HDR, stroke: INV_EDGE, sw: SW_THIN}));
-  p.push(txt(cx, by2+11, topologyLabel, {sz: 5.5, bold: true, anc: 'middle', fill: '#FFFFFF'}));
+  // Embed the sld-symbols.ts hybrid realism inverter emblem
+  p.push(embedSymbol('inverter', cx, cy, W2, H2));
 
-  // Vent slots (top right corner of cabinet)
-  for (let i = 0; i < 4; i++) {
-    p.push(rect(bx+W2-18+i*3.5, by2+20, 2, 10, {fill: '#CCCCCC', stroke: INV_EDGE, sw: 0.3}));
-  }
-
-  // DC→AC conversion symbol in center of cabinet
-  const symY = cy + 2;
-  // DC side label
-  p.push(rect(bx+8, symY-8, 20, 14, {fill: '#E3F2FD', stroke: INV_ACC, sw: 0.8, rx: 2}));
-  p.push(txt(bx+18, symY+1, 'DC', {sz: 7, bold: true, anc: 'middle', fill: INV_ACC}));
-  // Arrow
-  p.push(ln(bx+29, symY-1, bx+W2-30, symY-1, {stroke: INV_EDGE, sw: SW_MED}));
-  p.push(`<path d="M${bx+W2-32},${symY-5} L${bx+W2-28},${symY-1} L${bx+W2-32},${symY+3}" fill="${INV_EDGE}" stroke="${INV_EDGE}" stroke-width="1"/>`);
-  // AC side label + sine wave
-  p.push(rect(bx+W2-28, symY-8, 20, 14, {fill: '#FFF9C4', stroke: '#F9A825', sw: 0.8, rx: 2}));
-  const swX = bx + W2 - 18;
-  const swPath = `M${swX-7},${symY-1} Q${swX-3.5},${symY-7} ${swX},${symY-1} Q${swX+3.5},${symY+5} ${swX+7},${symY-1}`;
-  p.push(`<path d="${swPath}" fill="none" stroke="#F9A825" stroke-width="1.5"/>`);
-  p.push(txt(bx+W2-18, symY+1, '~', {sz: 5, bold: true, anc: 'middle', fill: '#F9A825'}));
-
-  // Status LED indicator (green dot — online)
-  p.push(circ(bx+8, by2+H2-10, 4, {fill: '#00C853', stroke: INV_EDGE, sw: 0.5}));
-  p.push(txt(bx+16, by2+H2-7, 'ONLINE', {sz: 4.5, anc: 'start', fill: '#00C853'}));
-
-  // Manufacturer + model text
+  // Manufacturer + model labels below
   const mfgLabel = manufacturer ? `${manufacturer}` : '';
   const mdlLabel = model ? model.substring(0, 18) : '';
-  p.push(txt(cx, by2+H2-26, mfgLabel, {sz: F.sub, anc: 'middle', italic: true, fill: '#444444'}));
-  p.push(txt(cx, by2+H2-17, mdlLabel, {sz: F.label, anc: 'middle', bold: true, fill: INV_EDGE}));
-
-  // Output specs
-  p.push(txt(cx, by2+H2+9, acKw > 0 ? `${acKw} kW / ${acAmps}A` : '', {sz: F.tiny, anc: 'middle'}));
-
-  // MPPT allocation
+  p.push(txt(cx, by2+H2+9,  mfgLabel, {sz: F.sub,   anc: 'middle', italic: true}));
+  p.push(txt(cx, by2+H2+18, mdlLabel, {sz: F.label,  anc: 'middle', bold: true}));
+  p.push(txt(cx, by2+H2+27, acKw > 0 ? `${acKw} kW / ${acAmps}A` : '', {sz: F.tiny, anc: 'middle'}));
   if (mpptAllocation) {
-    p.push(txt(cx, by2+H2+18, `MPPT: ${mpptAllocation}`, {sz: F.tiny, anc: 'middle', fill: '#555'}));
+    p.push(txt(cx, by2+H2+36, `MPPT: ${mpptAllocation}`, {sz: F.tiny, anc: 'middle', fill: '#555'}));
   }
 
-  // DC input lug (left)
-  p.push(lug(bx, cy));
+  // Topology label above
+  p.push(txt(cx, by2-10, topologyLabel, {sz: F.hdr, bold: true, anc: 'middle'}));
+
+  // Wire stubs for terminal connections
   p.push(ln(bx-10, cy, bx, cy, {sw: SW_MED}));
-  p.push(txt(bx-6, cy-5, 'DC IN', {sz: 4, anc: 'middle', fill: INV_ACC}));
-  // AC output lug (right)
-  p.push(lug(bx+W2, cy));
   p.push(ln(bx+W2, cy, bx+W2+10, cy, {sw: SW_MED}));
-  p.push(txt(bx+W2+6, cy-5, 'AC OUT', {sz: 4, anc: 'middle', fill: '#F9A825'}));
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
 
-  // Terminal coordinates for segment routing
+  // Terminal coordinates — same as before
   const dcInX  = bx - 10;
   const dcInY  = cy;
   const acOutX2 = bx + W2 + 10;
@@ -1193,16 +1134,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const pvW = 80, pvH = 68;
   const pvCX = xPV, pvCY = BUS_Y;
 
-  // PV array: grid of module symbols
-  parts.push(rect(pvCX-pvW/2, pvCY-pvH/2, pvW, pvH, {fill:WHT, sw:SW_MED}));
-  // 2×3 grid of mini module symbols
-  for (let row = 0; row < 2; row++) {
-    for (let col = 0; col < 3; col++) {
-      const mx = pvCX - pvW/2 + 10 + col*22;
-      const my = pvCY - pvH/2 + 12 + row*26;
-      parts.push(pvModuleSymbol(mx+9, my+9, 18, 14));
-    }
-  }
+  // PV array: embed sld-symbols.ts hybrid realism emblem
+  parts.push(embedSymbol('pv-array', pvCX, pvCY, pvW, pvH));
   parts.push(txt(pvCX, pvCY-pvH/2-18, 'PV ARRAY', {sz:F.hdr, bold:true, anc:'middle'}));
   parts.push(txt(pvCX, pvCY-pvH/2-8, `${input.totalModules} × ${input.panelWatts}W`, {sz:F.sub, anc:'middle'}));
   parts.push(txt(pvCX, pvCY+pvH/2+9, esc(input.panelModel), {sz:F.tiny, anc:'middle', italic:true}));
