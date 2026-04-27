@@ -20,6 +20,7 @@
 import type { RunSegment, MicroBranch } from './computed-system';
 import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
+import { calcDcAcRatio } from './system/calcDcAcRatio';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
@@ -1666,7 +1667,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const si  = input.stringIsc ?? input.panelIsc;
     const op  = input.ocpdPerString ?? input.dcOCPD;
     const dt  = input.designTempMin ?? -10;
-    const dar = input.dcAcRatio ?? (input.acOutputKw>0 ? dcKw/input.acOutputKw : 0);
+    const dar = input.dcAcRatio ?? calcDcAcRatio(dcKw, input.acOutputKw);
     parts.push(txt(p1x+cW/2, CALC_Y+10, 'DC SYSTEM CALCULATIONS', {sz:F.hdr, bold:true, anc:'middle', fill:WHT}));
     const rows: [string,string][] = [
       ['Module Voc (STC)',`${input.panelVoc} V`],

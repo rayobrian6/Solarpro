@@ -53,6 +53,9 @@ import { applyFeasibleFix } from '@/lib/system/fixEngine';
 // Phase 13.9 — Brand inference from current inverter (prevents stale selectedBrand mismatch loop)
 import { getBrandProfileByInverterId, getBrandProfile } from '@/lib/system/brandProfiles';
 import { getUtilitiesByState } from '@/lib/utility-rules';
+// Phase B2 — Decision Consistency Lock: canonical DC/AC ratio helpers
+import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
+import { DC_AC_TARGET } from '@/lib/system/dcAcConstants';
 import { getUtilitiesByStateNational, STATE_UTILITY_FALLBACK } from '@/lib/utilityDetector';
 import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
@@ -1746,7 +1749,7 @@ function EngineeringPageInner() {
              if (!primary?.inverterId) return undefined;
              const _dcKw  = (systemPanelCount * panelWattage) / 1000;
              const _acKw  = Number(totalInverterKw);
-             const _ratio = _acKw > 0 ? _dcKw / _acKw : 0;
+             const _ratio = calcDcAcRatio(_dcKw, _acKw);
              if (_ratio > 0 && _ratio < 1.0) {
                console.log('🔓 [SIZING REC] ratio', _ratio.toFixed(3), '< 1.0 — drop selectedInverterId for clean auto-tier');
                return undefined;
@@ -2152,7 +2155,7 @@ function EngineeringPageInner() {
          (s, m) => s + m.acKw * m.qty, 0,
        );
        const dcKw = (sizingRecommendation.input.panelCount * (sizingRecommendation.input.panelWattage ?? 400)) / 1000;
-       const recRatio = totalAcKw > 0 ? dcKw / totalAcKw : 0;
+       const recRatio = calcDcAcRatio(dcKw, totalAcKw);
        if (recRatio < 1.0) {
          console.warn('[HARD DC/AC AUTO-HEAL] recommendation also has ratio < 1.0 — skipping', { recRatio });
          return;
@@ -4361,7 +4364,7 @@ function EngineeringPageInner() {
           totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),
           totalAcKw: parseFloat(totalInverterKw),
           totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
-          dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
+          dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(totalInverterKw) || 0),
           topology: topologyType,
           inverters: config.inverters.map(inv => {
             const invData = getInvById(inv.inverterId, inv.type) as any;
@@ -5417,7 +5420,7 @@ function EngineeringPageInner() {
             const _totalKwNum = parseFloat(totalKw) || 0;
             // v58.0: use canonicalAcKw (component-scope, prefers sizingRecommendation)
             const _acKwNum = canonicalAcKw;
-            const _dcAcRatio  = _acKwNum > 0 ? (_totalKwNum / _acKwNum).toFixed(2) : '—';
+            const _dcAcRatio  = _acKwNum > 0 ? calcDcAcRatio(_totalKwNum, _acKwNum).toFixed(2) : '—';
             // String/branch count: prefer sizing recommendation strings when available.
             const _recStringCount = sizingRecommendation && !cs.isMicro
               ? sizingRecommendation.strings.length
@@ -6793,7 +6796,7 @@ function EngineeringPageInner() {
                           { label: 'Panels', value: totalPanels, color: 'text-amber-400', icon: <Sun size={11} /> },
                           { label: 'kW DC', value: totalKw, color: 'text-amber-400', icon: <Zap size={11} /> },
                           { label: 'kW AC', value: _acKwNum > 0 ? _acKwNum.toFixed(2) : '—', color: 'text-blue-400', icon: <Cpu size={11} /> },
-                          { label: 'DC/AC', value: _dcAcRatio, color: parseFloat(_dcAcRatio) < 1.0 ? 'text-red-400' : parseFloat(_dcAcRatio) > 1.6 ? 'text-red-400' : parseFloat(_dcAcRatio) > 1.35 ? 'text-amber-400' : parseFloat(_dcAcRatio) < 1.15 ? 'text-amber-400' : 'text-emerald-400', icon: <Activity size={11} /> },
+                          { label: 'DC/AC', value: _dcAcRatio, color: parseFloat(_dcAcRatio) < 1.0 ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.hardMax ? 'text-red-400' : parseFloat(_dcAcRatio) > DC_AC_TARGET.max ? 'text-amber-400' : parseFloat(_dcAcRatio) < DC_AC_TARGET.min ? 'text-amber-400' : 'text-emerald-400', icon: <Activity size={11} /> },
                           { label: cs.isMicro ? 'Branches' : 'Strings', value: _branchCount, color: 'text-purple-400', icon: <GitBranch size={11} /> },
                           { label: 'BOM Cost', value: bomPricing?.pricingApplied ? `$${(bomPricing.totalBomCost / 1000).toFixed(1)}k` : '—', color: 'text-emerald-400', icon: <Package size={11} /> },
                         ].map(item => (
@@ -10743,7 +10746,7 @@ function EngineeringPageInner() {
                                 totalDcKw: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw),
                                 totalAcKw: parseFloat(totalInverterKw),
                                 totalPanels: projectLayout?.panels?.length > 0 ? projectLayout.panels.length : totalPanels,
-                                dcAcRatio: parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw) / (parseFloat(totalInverterKw) || 1),
+                                dcAcRatio: calcDcAcRatio(parseFloat(projectLayout?.panels?.length > 0 ? (projectLayout.panels.length * (() => { const _pw0 = config.inverters?.[0]?.strings?.[0]; return _pw0 ? ((getPanelById(_pw0.panelId) as any)?.watts ?? 400) / 1000 : 0.4; })()).toFixed(2) : totalKw), parseFloat(totalInverterKw) || 0),
                                 topology: topologyType,
                                 inverters: config.inverters.map(inv => {
                                   const invData = getInvById(inv.inverterId, inv.type) as any;

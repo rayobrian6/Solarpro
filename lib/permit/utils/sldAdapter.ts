@@ -8,6 +8,7 @@ import type { CADModel } from '@/lib/cad/types';
 import { renderSLDProfessional, type SLDProfessionalInput } from '@/lib/sld-professional-renderer';
 import { utilityDisplayName, interconnectionLabel } from './helpers';
 import { getEquipmentContext, getInverterTopology, topologyToLegacy } from '@/lib/system';
+import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 
 /**
  * Build a live SLDProfessionalInput from PermitInput canonical data.
@@ -132,7 +133,7 @@ export function buildSLDInputFromPermit(input: PermitInput, cad?: CADModel | nul
     combinerType:            isMicro ? 'DIRECT' : undefined,
     combinerLabel:           isMicro ? 'AC Trunk Cable' : undefined,
     ocpdPerString:           isMicro ? 0 : dcOCPD,
-    dcAcRatio:               totalAcKw > 0 ? totalDcKw / totalAcKw : undefined,
+    dcAcRatio:               totalAcKw > 0 ? calcDcAcRatio(totalDcKw, totalAcKw) : undefined,
 
     // Design temperature (if available from AHJ data)
     designTempMin:           (project as any).designTempMin ?? -10,

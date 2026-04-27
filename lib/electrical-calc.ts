@@ -16,6 +16,8 @@ import {
   getConductorArea,
   getConductorByMinAmpacity,
 } from './manufacturer-specs';
+import { DC_AC_TARGET } from './system/dcAcConstants';
+import { calcDcAcRatio } from './system/calcDcAcRatio';
 
 // ─── Input Types ──────────────────────────────────────────────────────────────
 
@@ -1015,15 +1017,15 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   }
 
   // ── DC/AC Ratio ───────────────────────────────────────────────────────────
-  const dcAcRatio = totalAcKw > 0 ? totalDcKw / totalAcKw : 0;
-  if (dcAcRatio > 1.5) {
+  const dcAcRatio = calcDcAcRatio(totalDcKw, totalAcKw);
+  if (dcAcRatio > DC_AC_TARGET.hardMax) {
     allWarnings.push({
       code: 'W-DCAC-RATIO',
       severity: 'warning',
       message: `DC/AC ratio (${dcAcRatio.toFixed(2)}) is high — inverter may clip production`,
       value: dcAcRatio.toFixed(2),
-      limit: '1.5',
-      suggestion: 'Add inverter or reduce panel count to stay below 1.5 DC/AC ratio',
+      limit: String(DC_AC_TARGET.hardMax),
+      suggestion: `Add inverter or reduce panel count to stay below ${DC_AC_TARGET.hardMax} DC/AC ratio`,
     });
   }
 
@@ -1032,8 +1034,8 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   if (allErrors.length === 0 && allWarnings.length === 0) {
     recommendations.push('System design meets all NEC requirements. Ready for permit submission.');
   }
-  if (dcAcRatio < 1.1) {
-    recommendations.push('Consider increasing DC array size (target DC/AC ratio 1.1–1.3 for optimal production).');
+  if (dcAcRatio < DC_AC_TARGET.min) {
+    recommendations.push(`Consider increasing DC array size (target DC/AC ratio ${DC_AC_TARGET.min}–${DC_AC_TARGET.max} for optimal production).`);
   }
   if (autoResolutions.length > 0) {
     recommendations.push(`${autoResolutions.length} auto-resolution(s) applied in AUTO mode. Review correction log before permit submission.`);

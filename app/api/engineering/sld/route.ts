@@ -31,6 +31,7 @@ import {
   getGeneratorById,
 } from '@/lib/equipment-db';
 import { requireAuth } from '@/lib/security';
+import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
@@ -402,7 +403,7 @@ export async function POST(req: NextRequest) {
       combinerType:            isMicro ? 'DIRECT' : stringResult?.combinerType,
       combinerLabel:           isMicro ? 'AC Trunk Cable' : stringResult?.combinerLabel,
       ocpdPerString:           isMicro ? 0 : (systemModel?.stringOcpdAmps ?? stringResult?.ocpdPerString),
-      dcAcRatio:               isMicro ? undefined : (stringResult ? stringResult.totalDcPower / (acOutputKw * 1000) : undefined),
+      dcAcRatio:               isMicro ? undefined : (stringResult ? calcDcAcRatio(stringResult.totalDcPower / 1000, acOutputKw) : undefined),
       stringConfigWarnings:    stringResult?.warnings,
 
       // Engine system model — passed to renderer for enhanced display
@@ -444,7 +445,7 @@ export async function POST(req: NextRequest) {
         combinerLabel:        stringResult.combinerLabel,
         mpptAllocation,
         ocpdPerString:        resolvedDcOCPD,
-        dcAcRatio:            stringResult.totalDcPower / (acOutputKw * 1000),
+        dcAcRatio:            calcDcAcRatio(stringResult.totalDcPower / 1000, acOutputKw),
         warnings:             stringResult.warnings,
         errors:               stringResult.errors,
         isValid:              stringResult.isValid,

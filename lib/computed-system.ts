@@ -28,6 +28,7 @@ import {
 import { buildSegments } from './segment-builder';
 import { InterconnectionType, type SegmentBuilderInput } from './segment-model';
 import { computeBatteryBusImpact, getBatteryById, getGeneratorById, getATSById, getBackupInterfaceById } from './equipment-db';
+import { calcDcAcRatio } from './system/calcDcAcRatio';
 
 // ─── Equipment Spec ──────────────────────────────────────────────────────────
 
@@ -916,7 +917,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const totalAcKw = isMicro
     ? (input.totalPanels / input.inverterModulesPerDevice) * input.inverterAcKw
     : input.inverterAcKw;
-  const dcAcRatio = totalAcKw > 0 ? totalDcKw / totalAcKw : 0;
+  const dcAcRatio = calcDcAcRatio(totalDcKw, totalAcKw);
 
   // ── NEC 690.7 — String Voltage Calculation ─────────────────────────────────
   // Voc_corrected = Voc_STC × [1 + (tempCoeffVoc/100) × (Tmin - 25)]

@@ -10,6 +10,7 @@ import {
   StringGeneratorResult,
 } from '@/lib/string-generator';
 import { requireAuth } from '@/lib/security';
+import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -361,7 +362,7 @@ export async function POST(req: NextRequest) {
             (sum: number, inv: any) => sum + (inv.acOutputKw ?? 0),
             0,
           );
-          return totalAcKw > 0 ? stringConfig.totalDcPower / (totalAcKw * 1000) : 0;
+          return calcDcAcRatio(stringConfig.totalDcPower / 1000, totalAcKw);
         })(),
         warnings:               stringConfig.warnings,
         errors:                 stringConfig.errors,
