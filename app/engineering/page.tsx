@@ -1247,7 +1247,6 @@ function EngineeringPageInner() {
 
   const [structuralOptions, setStructuralOptions] = useState<any[]>([]);
   const [ecosystemLog, setEcosystemLog] = useState<any[]>([]);
-  const [ecosystemComponents, setEcosystemComponents] = useState<any[]>([]);
   // PVWatts production estimate
   const [pvwattsData, setPvwattsData] = useState<{
     annualKwh?: number;
@@ -1279,87 +1278,6 @@ function EngineeringPageInner() {
   const [aiLoading, setAiLoading] = useState(false);
   const [decisionLog, setDecisionLog] = useState<Array<{ ts: string; action: string; detail: string; type: 'auto' | 'manual' | 'info' }>>([]);
   const [showDecisionLog, setShowDecisionLog] = useState(false);
-
-  // toSystemState: convert ProjectConfig to SystemState for API calls
-  const toSystemState = useCallback(() => {
-    // v47.358: 'ecoflow' maps to STRING topology for compliance engine
-    // (EcoFlow is a string-based hybrid inverter — compatible with string logic)
-    const invType0 = config.inverters[0]?.type;
-    const topo = invType0 === 'micro' ? 'MICRO'
-               : invType0 === 'optimizer' ? 'STRING_OPTIMIZER'
-               : 'STRING';  // ecoflow + string both go here
-    const firstInv = getInvById(config.inverters[0]?.inverterId || '', config.inverters[0]?.type || 'string') as any;
-    return {
-      projectName: config.projectName,
-      clientName: config.clientName,
-      address: config.address,
-      designer: config.designer,
-      date: config.date,
-      topologyType: topo,
-      inverterBrand: firstInv?.manufacturer || 'SolarEdge',
-      inverters: config.inverters,
-      modules: [],
-      optimizers: [],
-      ecosystemComponents,
-      systemType: config.systemType,
-      mainPanelAmps: config.mainPanelAmps,
-      mainPanelBrand: config.mainPanelBrand,
-      utilityMeter: config.utilityMeter,
-      acDisconnect: config.acDisconnect,
-      dcDisconnect: config.dcDisconnect,
-      productionMeter: config.productionMeter,
-      rapidShutdown: config.rapidShutdown,
-      batteryBrand: config.batteryBrand,
-      batteryModel: config.batteryModel,
-      batteryCount: config.batteryCount,
-      batteryKwh: config.batteryKwh,
-      batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
-      generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
-      generatorModel: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? ''; })() : undefined,
-      generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
-      atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
-      atsModel: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? ''; })() : undefined,
-      atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
-      conductorSizing: {
-        acWireGauge: config.wireGauge,
-        acConductorCallout: '',
-        acWireAmpacity: 0,
-        acVoltageDrop: 0,
-        groundingConductor: '#12 AWG',
-        conduitSize: '3/4"',
-        conduitType: config.conduitType,
-        autoSized: engineeringMode === 'AUTO',
-      },
-      structuralData: {
-        roofType: config.roofType,
-        roofPitch: config.roofPitch,
-        rafterSpacing: config.rafterSpacing,
-        rafterSpan: config.rafterSpan,
-        rafterSize: config.rafterSize,
-        rafterSpecies: config.rafterSpecies,
-        attachmentSpacing: config.attachmentSpacing,
-        windSpeed: config.windSpeed,
-        windExposure: config.windExposure,
-        groundSnowLoad: config.groundSnowLoad,
-      },
-      mountingId: config.mountingId,
-      complianceStatus: {
-        overallStatus: compliance.overallStatus,
-        electrical: compliance.electrical || null,
-        structural: compliance.structural || null,
-        jurisdiction: compliance.jurisdiction || null,
-        autoDetected: compliance.autoDetected || null,
-        lastCalculatedAt: null,
-      },
-      bom: [],
-      bomGeneratedAt: null,
-      engineeringMode,
-      overrides: [],
-      topologyChangeLog: [],
-      autoResolutions: compliance.electrical?.autoResolutions || [],
-      notes: config.notes,
-    };
-  }, [config, compliance, engineeringMode, ecosystemComponents]);
 
   const getPanelById = (id: string) => SOLAR_PANELS.find(p => p.id === id);
   const getInvById = (id: string, type: InverterType) => {
@@ -1825,6 +1743,98 @@ function EngineeringPageInner() {
            };
          });
      }, [sizingRecommendation]);
+
+  // toSystemState: convert ProjectConfig to SystemState for API calls
+  const toSystemState = useCallback(() => {
+    // v47.358: 'ecoflow' maps to STRING topology for compliance engine
+    // (EcoFlow is a string-based hybrid inverter — compatible with string logic)
+    const invType0 = config.inverters[0]?.type;
+    const topo = invType0 === 'micro' ? 'MICRO'
+               : invType0 === 'optimizer' ? 'STRING_OPTIMIZER'
+               : 'STRING';  // ecoflow + string both go here
+    const firstInv = getInvById(config.inverters[0]?.inverterId || '', config.inverters[0]?.type || 'string') as any;
+    return {
+      projectName: config.projectName,
+      clientName: config.clientName,
+      address: config.address,
+      designer: config.designer,
+      date: config.date,
+      topologyType: topo,
+      inverterBrand: firstInv?.manufacturer || 'SolarEdge',
+      inverters: config.inverters,
+      modules: [],
+      optimizers: [],
+      ecosystemComponents: displayedEcosystemComponents.map((c, idx) => ({
+        id: `eco-${c.category}-${idx}`,
+        category: c.category as any,
+        manufacturer: c.manufacturer,
+        model: c.model,
+        partNumber: c.partNumber ?? '',
+        quantity: c.quantity,
+        autoAdded: true,
+        reason: c.reason ?? c.category,
+        requiredBy: sizingRecommendation?.brand?.id ?? '',
+      })),
+      systemType: config.systemType,
+      mainPanelAmps: config.mainPanelAmps,
+      mainPanelBrand: config.mainPanelBrand,
+      utilityMeter: config.utilityMeter,
+      acDisconnect: config.acDisconnect,
+      dcDisconnect: config.dcDisconnect,
+      productionMeter: config.productionMeter,
+      rapidShutdown: config.rapidShutdown,
+      batteryBrand: config.batteryBrand,
+      batteryModel: config.batteryModel,
+      batteryCount: config.batteryCount,
+      batteryKwh: config.batteryKwh,
+      batteryBackfeedA: calcBatteryBackfeedAmps(config.batteryId, config.batteryCount),
+      generatorBrand: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.manufacturer ?? ''; })() : undefined,
+      generatorModel: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.model ?? ''; })() : undefined,
+      generatorKw: config.generatorId ? (() => { const g = getGeneratorById(config.generatorId); return g?.ratedOutputKw ?? 0; })() : undefined,
+      atsBrand: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.manufacturer ?? ''; })() : undefined,
+      atsModel: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.model ?? ''; })() : undefined,
+      atsAmpRating: config.atsId ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? 0; })() : undefined,
+      conductorSizing: {
+        acWireGauge: config.wireGauge,
+        acConductorCallout: '',
+        acWireAmpacity: 0,
+        acVoltageDrop: 0,
+        groundingConductor: '#12 AWG',
+        conduitSize: '3/4"',
+        conduitType: config.conduitType,
+        autoSized: engineeringMode === 'AUTO',
+      },
+      structuralData: {
+        roofType: config.roofType,
+        roofPitch: config.roofPitch,
+        rafterSpacing: config.rafterSpacing,
+        rafterSpan: config.rafterSpan,
+        rafterSize: config.rafterSize,
+        rafterSpecies: config.rafterSpecies,
+        attachmentSpacing: config.attachmentSpacing,
+        windSpeed: config.windSpeed,
+        windExposure: config.windExposure,
+        groundSnowLoad: config.groundSnowLoad,
+      },
+      mountingId: config.mountingId,
+      complianceStatus: {
+        overallStatus: compliance.overallStatus,
+        electrical: compliance.electrical || null,
+        structural: compliance.structural || null,
+        jurisdiction: compliance.jurisdiction || null,
+        autoDetected: compliance.autoDetected || null,
+        lastCalculatedAt: null,
+      },
+      bom: [],
+      bomGeneratedAt: null,
+      engineeringMode,
+      overrides: [],
+      topologyChangeLog: [],
+      autoResolutions: compliance.electrical?.autoResolutions || [],
+      notes: config.notes,
+    };
+  }, [config, compliance, engineeringMode, displayedEcosystemComponents, sizingRecommendation]);
+
   // Snapshot of current config for diffing.
     // v58.0 — Canonical AC output kW.
     // Always prefer sizingRecommendation (engine truth) over totalInverterKw
@@ -2401,9 +2411,6 @@ function EngineeringPageInner() {
         if (data.success) {
           const result = data.data;
           // DIAGNOSTIC: confirm ecosystem is cleared before rebuild
-          const incoming = result.updatedState?.ecosystemComponents || [];
-          console.log('Ecosystem cleared before rebuild. Incoming components:', incoming.length, incoming.map((c: any) => c.category));
-          setEcosystemComponents(incoming);
           setEcosystemLog(result.propagationLog || []);
           setTopologyType(result.newTopology);
         }
@@ -3644,7 +3651,6 @@ function EngineeringPageInner() {
                     quantity: a.quantity,
                     reason: a.notes || a.description,
                   }));
-                setEcosystemComponents(enphaseComponents);
                 logDecision('Enphase API', `${enphaseComponents.length} accessories — AC: ${enphaseData.systemSummary?.totalAcOutputKw}kW`, 'auto');
               }
             }
@@ -3800,13 +3806,6 @@ function EngineeringPageInner() {
       if (topoRes.ok) {
         const topoData = await topoRes.json();
         if (topoData.success && topoData.resolvedAccessories?.length > 0) {
-          setEcosystemComponents(topoData.resolvedAccessories.map((a: any) => ({
-            manufacturer: a.manufacturer || 'Enphase',
-            model: a.model || a.label || a.category,
-            partNumber: a.partNumber || '',
-            quantity: a.quantity || 1,
-            reason: a.label || `Required by ${topoData.topologyLabel} topology`,
-          })));
           logDecision('Auto Fill', `Topology resolved: ${topoData.topologyLabel} — ${topoData.resolvedAccessories.length} accessories`, 'auto');
         }
       }
@@ -3847,7 +3846,6 @@ function EngineeringPageInner() {
                 quantity: a.quantity,
                 reason: a.notes || a.description,
               }));
-            setEcosystemComponents(enphaseComponents);
             logDecision('Enphase API', `Resolved ${enphaseComponents.length} accessories for ${enphaseData.inverterModel} x${deviceCountFill} — AC: ${enphaseData.systemSummary?.totalAcOutputKw}kW`, 'auto');
           }
         }
