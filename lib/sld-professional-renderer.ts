@@ -22,7 +22,7 @@ import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SLD_SYMBOL_MAP } from './sld-symbols';
-import type { Conductor, WireRun, ConductorType } from './sld-types';
+import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const W = 2304;
@@ -122,6 +122,8 @@ export interface SLDProfessionalInput {
   hasBattery:              boolean;
   batteryModel:            string;
   batteryKwh:              number;
+  batteryBrand?:           string;
+  batteryCount?:           number;
   batteryBackfeedA?:       number;
   generatorBrand?:         string;
   generatorModel?:         string;
@@ -746,25 +748,65 @@ function makeOverlapGuard() {
 // ── Phase 6: getConductorStyle ───────────────────────────────────────────────
 // Returns consistent SVG line style per conductor type.
 // AC: solid medium line. DC: slightly thinner + dashed. Ground: green + thin.
-function getConductorStyle(type: ConductorType, isOpenAir = false): {
+// Phase 1: WireEnvironment-aware conductor style
+// OPEN_AIR  → dashed (PV roof wiring, NEC 690.31)
+// RACEWAY   → solid (in conduit, all downstream wiring)
+// ENCLOSED  → solid thin (equipment internal)
+function getConductorStyle(
+  type: ConductorType,
+  envOrOpenAir: WireEnvironment | boolean = 'RACEWAY'
+): {
   stroke: string; sw: number; dash?: string; label: string;
 } {
+  // Backwards compat: boolean true = OPEN_AIR, false = RACEWAY
+  const env: WireEnvironment =
+    typeof envOrOpenAir === 'boolean'
+      ? (envOrOpenAir ? 'OPEN_AIR' : 'RACEWAY')
+      : envOrOpenAir;
+  const isOA = env === 'OPEN_AIR';
   switch (type) {
     case 'L1':
-      return { stroke: BLK,      sw: SW_MED,  dash: isOpenAir ? '10,5' : undefined, label: 'L1' };
+      return { stroke: BLK,      sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'L1' };
     case 'L2':
-      return { stroke: BLK,      sw: SW_MED,  dash: isOpenAir ? '10,5' : undefined, label: 'L2' };
+      return { stroke: BLK,      sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'L2' };
     case 'N':
-      return { stroke: '#444444', sw: SW_MED,  dash: isOpenAir ? '10,5' : undefined, label: 'N'  };
+      return { stroke: '#444444', sw: SW_MED,  dash: isOA ? '10,5' : undefined, label: 'N'  };
     case 'G':
-      return { stroke: GRN,      sw: SW_THIN, dash: undefined,                       label: 'G'  };
+      return { stroke: GRN,      sw: SW_THIN, dash: undefined,                  label: 'G'  };
     case 'DC_POS':
-      return { stroke: BLK,      sw: SW_THIN, dash: isOpenAir ? '10,5' : '4,2',     label: '+'  };
+      return { stroke: BLK,      sw: SW_THIN, dash: isOA ? '10,5' : '4,2',     label: '+'  };
     case 'DC_NEG':
-      return { stroke: BLK,      sw: SW_THIN, dash: isOpenAir ? '10,5' : '4,2',     label: '−'  };
+      return { stroke: BLK,      sw: SW_THIN, dash: isOA ? '10,5' : '4,2',     label: '−'  };
     default:
       return { stroke: BLK,      sw: SW_MED,  label: '' };
   }
+}
+
+// Phase 2: Format conductor callout label
+// Format: "X#AWG TYPE + #GND IN CONDUIT"
+// Example: "2#10 THWN-2 + #10 GND IN 3/4" EMT"
+// Source: RunSegment fields. Fallback to plain gauge labels.
+function formatCallout(run: RunSegment | undefined, fallbackLines: string[], isDC: boolean): string[] {
+  if (!run) return fallbackLines;
+
+  // Prefer pre-computed conductorCallout from engine
+  if (run.conductorCallout) {
+    return run.conductorCallout.split('\n').filter((l: string) => l.trim());
+  }
+
+  // Build formatted callout from individual fields
+  const g   = run.wireGauge  ? run.wireGauge.replace('#','').replace(' AWG','')  : '10';
+  const eg  = run.egcGauge   ? run.egcGauge.replace('#','').replace(' AWG','')   : '10';
+  const ins = run.insulation ?? (isDC ? 'USE-2' : 'THWN-2');
+  const cnt = run.conductorCount ?? (isDC ? 2 : 2);
+  const conduit = run.isOpenAir
+    ? 'OPEN AIR — NEC 690.31'
+    : (run.conduitSize && run.conduitType ? `IN ${run.conduitSize} ${run.conduitType}` : '');
+
+  const hotLine = `${cnt}#${g} ${ins}`;
+  const gndLine = `+ #${eg} GND`;
+  if (conduit) return [`${hotLine} ${gndLine}`, conduit];
+  return [`${hotLine} ${gndLine}`];
 }
 
 // ── Phase 3: buildWireRun ─────────────────────────────────────────────────────
@@ -772,6 +814,8 @@ function getConductorStyle(type: ConductorType, isOpenAir = false): {
 // DO NOT infer new electrical logic — only maps what exists in segment data.
 // AC split-phase: L1 + L2 + (optional N) + G
 // DC:             DC_POS + DC_NEG + G
+// Phase 1: buildWireRun now takes WireEnvironment (isOpenAir=boolean still accepted
+// for backwards compat at call sites; will be removed in a future pass)
 function buildWireRun(
   runId: string,
   x1: number, y1: number,
@@ -779,8 +823,14 @@ function buildWireRun(
   run: import('./computed-system').RunSegment | undefined,
   fallbackLabel: string[],
   isDC: boolean,
-  isOpenAir: boolean
+  envOrOpenAir: WireEnvironment | boolean
 ): WireRun {
+  // Resolve environment
+  const environment: WireEnvironment =
+    typeof envOrOpenAir === 'boolean'
+      ? (envOrOpenAir ? 'OPEN_AIR' : 'RACEWAY')
+      : envOrOpenAir;
+  const isOpenAir = environment === 'OPEN_AIR';
   const conductors: Conductor[] = [];
 
   if (isDC) {
@@ -815,13 +865,18 @@ function buildWireRun(
     console.log(`[WIRE RUN CREATED] ${runId} from (${x1.toFixed(0)},${y1.toFixed(0)}) to (${x2.toFixed(0)},${y2.toFixed(0)})`);
   }
 
+  // Phase 2: build formatted callout lines
+  const calloutLines = formatCallout(run, fallbackLabel, isDC);
+
   const wireRun: WireRun = {
     id: runId,
     from: { x: x1, y: y1 },
     to:   { x: x2, y: y2 },
     conductors,
+    environment,
     isOpenAir,
     conduitLabel,
+    calloutLines,
   };
   return wireRun;
 }
@@ -843,6 +898,8 @@ function renderWireRun(
   opts: { above?: boolean } = {}
 ): string {
   const { from, to, conductors, isOpenAir } = wr;
+  // Phase 1: use environment field when available, fall back to isOpenAir
+  const env: WireEnvironment = wr.environment ?? (isOpenAir ? 'OPEN_AIR' : 'RACEWAY');
   const x1 = from.x, x2 = to.x, baseY = from.y;
   const cx = (x1 + x2) / 2;
   const above = opts.above ?? true;
@@ -857,7 +914,7 @@ function renderWireRun(
   const sigBase = baseY - sigSpread / 2;
 
   sigConductors.forEach((conductor, i) => {
-    const style = getConductorStyle(conductor.type, isOpenAir);
+    const style = getConductorStyle(conductor.type, env);
     const cy = sigCount > 1
       ? sigBase + i * (sigSpread / (sigCount - 1))
       : baseY;
@@ -869,7 +926,7 @@ function renderWireRun(
 
   // Ground conductor — routed 6px below for visual separation
   gndConductors.forEach((conductor) => {
-    const style = getConductorStyle(conductor.type, false);
+    const style = getConductorStyle(conductor.type, 'RACEWAY');  // Phase 1: ground always solid
     const gy = baseY + 6;
     if (typeof console !== 'undefined') {
       console.log(`[RENDER LINE: ${conductor.type}] ${wr.id} y=${gy.toFixed(1)} (ground)`);
@@ -878,20 +935,22 @@ function renderWireRun(
   });
 
   // Inline label (wire gauge, conduit info) — centered on segment
-  if (labelLines.length > 0) {
+  // Phase 2: prefer wr.calloutLines when available, fall back to passed-in labelLines
+  const activeLabels = (wr.calloutLines && wr.calloutLines.length > 0) ? wr.calloutLines : labelLines;
+  if (activeLabels.length > 0) {
     const primaryColor = sigConductors.length > 0
-      ? getConductorStyle(sigConductors[0].type, isOpenAir).stroke
+      ? getConductorStyle(sigConductors[0].type, env).stroke
       : BLK;
     const lh = Math.round(F.seg * 1.35);
-    const th = labelLines.length * lh;
+    const th = activeLabels.length * lh;
     const ty = above ? baseY - 7 - th + lh : baseY + 11;
-    parts.push(tspan(cx, ty, labelLines, { sz: F.seg, anc: 'middle', fill: primaryColor }));
+    parts.push(tspan(cx, ty, activeLabels, { sz: F.seg, anc: 'middle', fill: primaryColor }));
   }
 
   // Conductor type micro-labels (L1, L2, +, -) near midpoint when spread > 2px
   if (sigCount > 1 && sigSpread > 2) {
     sigConductors.forEach((conductor, i) => {
-      const style = getConductorStyle(conductor.type, isOpenAir);
+      const style = getConductorStyle(conductor.type, env);
       const cy = sigBase + i * (sigSpread / (sigCount - 1));
       const labelX = cx + 8;
       parts.push(
@@ -1386,6 +1445,16 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(txt(pvCX, pvCY-pvH/2-18, 'PV ARRAY', {sz:F.hdr, bold:true, anc:'middle'}));
   parts.push(txt(pvCX, pvCY-pvH/2-8, `${input.totalModules} × ${input.panelWatts}W`, {sz:F.sub, anc:'middle'}));
   parts.push(txt(pvCX, pvCY+pvH/2+9, esc(input.panelModel), {sz:F.tiny, anc:'middle', italic:true}));
+  // Phase 3: String summary — Voc / Isc from existing input fields (no recalc)
+  if (!isMicro) {
+    const _ns  = input.totalStrings || 1;
+    const _pps = input.panelsPerString ?? Math.round(input.totalModules / Math.max(_ns, 1));
+    const _sVoc = input.stringVoc ?? ((input.vocCorrected ?? input.panelVoc) * _pps);
+    const _sIsc = input.stringIsc ?? input.panelIsc;
+    parts.push(txt(pvCX, pvCY+pvH/2+18, `${_ns} str × ${_pps} mod`, {sz:F.tiny, anc:'middle', bold:true}));
+    parts.push(txt(pvCX, pvCY+pvH/2+27, `Voc=${_sVoc.toFixed(1)}V  Isc=${_sIsc.toFixed(2)}A`, {sz:F.tiny, anc:'middle', fill:'#B71C1C'}));
+    console.log(`[SLD STRING SUMMARY] ${_ns} strings × ${_pps} modules, Voc=${_sVoc.toFixed(1)}V, Isc=${_sIsc.toFixed(2)}A`);
+  }
   if (isMicro) {
     const md = input.deviceCount ?? input.totalModules;
     parts.push(txt(pvCX, pvCY+pvH/2+18, `${md} × ${esc(input.inverterModel)}`, {sz:F.tiny, anc:'middle'}));
@@ -1441,7 +1510,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _s1Y = resolveSegY(pvOutX, jbCX-jbW/2, BUS_Y);
     console.log('[WIRE RUN CREATED] SEGMENT_1_PV_TO_JBOX: DC open-air');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, _jbInPt.x, _s1Y, run, lines, true, true),  // SOT: anchor jbox.left
+      buildWireRun('SEGMENT_1_PV_TO_JBOX', pvOutX, _s1Y, _jbInPt.x, _s1Y, run, lines, true, 'OPEN_AIR'),  // Phase 1: OPEN_AIR — roof surface wiring
       lines));
   }
 
@@ -1466,7 +1535,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const _s2aY = resolveSegY(jbCX+jbW/2, cr.lx, BUS_Y);
       console.log('[WIRE RUN CREATED] SEGMENT_2A_JBOX_TO_COMBINER: AC branch');
       parts.push(renderWireRun(
-        buildWireRun('SEGMENT_2A_JBOX_TO_COMBINER', _jbOutPt.x, _s2aY, cr.lx, _s2aY, run, lines, false, false),  // SOT: anchor jbox.right
+        buildWireRun('SEGMENT_2A_JBOX_TO_COMBINER', _jbOutPt.x, _s2aY, cr.lx, _s2aY, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY — post-jbox
         lines));
     }
   } else {
@@ -1503,7 +1572,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const _s2bY = resolveSegY(_jbOutPt.x, _dcInPt.x, BUS_Y);  // SOT: anchor coords
       console.log('[WIRE RUN CREATED] SEGMENT_2B_JBOX_TO_DCDISCO: DC string run');
       parts.push(renderWireRun(
-        buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', _jbOutPt.x, _s2bY, _dcInPt.x, _s2bY, run, lines, true, false),  // SOT: anchors jbox.right→dc_in
+        buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', _jbOutPt.x, _s2bY, _dcInPt.x, _s2bY, run, lines, true, 'RACEWAY'),  // Phase 1: RACEWAY — conduit from jbox
         lines));
     }
   }
@@ -1534,7 +1603,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       const _s3Y = resolveSegY(node3RX, invBox.dcInX, segY);
       console.log('[WIRE RUN CREATED] SEGMENT_3_DCDISCO_TO_INV: DC run');
       parts.push(renderWireRun(
-        buildWireRun('SEGMENT_3_DCDISCO_TO_INV', node3RX, _s3Y, invBox.dcInX, _s3Y, run, lines, true, false),
+        buildWireRun('SEGMENT_3_DCDISCO_TO_INV', node3RX, _s3Y, invBox.dcInX, _s3Y, run, lines, true, 'RACEWAY'),  // Phase 1: RACEWAY
         lines));
     }
   }
@@ -1560,7 +1629,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _s4Y = resolveSegY(invRX, discoResult.loadInX, segY);
     console.log('[WIRE RUN CREATED] SEGMENT_4_INV_TO_ACDISCO: AC feeder');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_4_INV_TO_ACDISCO', invRX, _s4Y, discoResult.loadInX, _s4Y, run, lines, false, false),
+      buildWireRun('SEGMENT_4_INV_TO_ACDISCO', invRX, _s4Y, discoResult.loadInX, _s4Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
       lines));
   }
 
@@ -1605,7 +1674,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _s5Y = resolveSegY(discoResult.lineOutX, mspResult.bkfdInX, segY);
     console.log('[WIRE RUN CREATED] SEGMENT_5_ACDISCO_TO_MSP: AC feeder');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_5_ACDISCO_TO_MSP', discoResult.lineOutX, _s5Y, mspResult.bkfdInX, _s5Y, run, lines, false, false),
+      buildWireRun('SEGMENT_5_ACDISCO_TO_MSP', discoResult.lineOutX, _s5Y, mspResult.bkfdInX, _s5Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
       lines));
   }
 
@@ -1615,7 +1684,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // Battery connects to BUI battery port — NOT directly to MSP bus
   // Backfeed breaker at MSP connects MSP bus to BUI grid port
   buiRX = mspRX;
-  if (input.hasBattery && input.batteryModel) {
+  // Phase 4: Battery guard — hasBattery is the authoritative flag.
+  // batteryModel may be '' when only batteryBrand/batteryKwh are provided.
+  // Build a display model string so the render path always has something to show.
+  const _batDisplayModel = input.batteryModel
+    || (input.batteryKwh && input.batteryKwh > 0
+        ? `${input.batteryKwh} kWh Battery`
+        : 'BATTERY STORAGE');
+  if (!input.hasBattery) {
+    console.log('[SLD BATTERY MISSING AT STAGE RENDERER] hasBattery=false — battery not rendered');
+  }
+  if (input.hasBattery) {
     const isEnphase = !!(input.backupInterfaceBrand?.toLowerCase().includes('enphase') ||
       input.inverterManufacturer?.toLowerCase().includes('enphase') ||
       input.batteryModel?.toLowerCase().includes('enphase') ||
@@ -1658,9 +1737,11 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // Battery symbol — above BUI, connected to BUI battery port
     const batCX = buiCX;
     const batCY = BUS_Y - 120;
+    // Phase 4: Use _batDisplayModel (never empty)
+    console.log(`[SLD BATTERY MISSING AT STAGE RENDERER] hasBattery=true, model='${_batDisplayModel}', kwh=${input.batteryKwh ?? 0}`);
     const batResult = renderBattery(
       batCX, batCY,
-      input.batteryModel,
+      _batDisplayModel,
       input.batteryKwh ?? 0,
       input.batteryBackfeedA ?? 0,
       isMicro ? 8 : 9
@@ -1834,7 +1915,7 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const _s6Y = resolveSegY(buiRX, utilCX-mR-10, segY);
     console.log('[WIRE RUN CREATED] SEGMENT_6_MSP_TO_METER: AC service run');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_6_MSP_TO_METER', buiRX, _s6Y, utilCX-mR-10, _s6Y, run, lines, false, false),
+      buildWireRun('SEGMENT_6_MSP_TO_METER', buiRX, _s6Y, utilCX-mR-10, _s6Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
       lines));
   }
 

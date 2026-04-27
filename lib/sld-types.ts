@@ -33,6 +33,12 @@ export interface SLDTitleBlock {
 // Canonical per-conductor structure: one SVG line per electrical conductor
 // DO NOT modify NEC sizing, BOM, or calculation logic — rendering only
 
+// Wire installation environment — determines visual style and NEC rule context
+// OPEN_AIR  = roof surface wiring, no conduit (PV → JBOX per NEC 690.31)
+// RACEWAY   = in conduit/wireway (JBOX → inverter → MSP per NEC 690.31(E))
+// ENCLOSED  = inside equipment enclosures (internal bus connections)
+export type WireEnvironment = 'OPEN_AIR' | 'RACEWAY' | 'ENCLOSED';
+
 export type ConductorType = 'L1' | 'L2' | 'N' | 'G' | 'DC_POS' | 'DC_NEG';
 
 export interface Conductor {
@@ -54,8 +60,11 @@ export interface WireRun {
   from: AnchorRef;
   to: AnchorRef;
   conductors: Conductor[];
-  isOpenAir?: boolean;
-  conduitLabel?: string;  // e.g. 'IN 3/4" EMT'
+  // Phase 1: explicit environment replaces boolean isOpenAir
+  environment: WireEnvironment;     // OPEN_AIR | RACEWAY | ENCLOSED
+  isOpenAir?: boolean;              // retained for backwards compat — derived from environment
+  conduitLabel?: string;            // e.g. 'IN 3/4" EMT'
+  calloutLines?: string[];          // Phase 2: formatted conductor callout lines
 }
 
 // ─── Conductor Callout ────────────────────────────────────────────────────────

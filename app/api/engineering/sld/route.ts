@@ -368,6 +368,11 @@ export async function POST(req: NextRequest) {
         runLengthsBatteryGen:          body.runLengthsBatteryGen ?? undefined,
       };
 
+      // Phase 4: Battery pipeline stage 1 diagnostic
+      const _batStage1 = !!(csInput.batteryBackfeedA || csInput.batteryIds?.length);
+      if (!_batStage1 && (body.hasBattery || body.batteryModel || body.batteryKwh || body.batteryBrand)) {
+        console.warn('[SLD BATTERY MISSING AT STAGE 1] battery fields in request body but not forwarded to computeSystem');
+      }
       cs = computeSystem(csInput);
       computedRuns = cs.runs;
 
@@ -445,9 +450,11 @@ export async function POST(req: NextRequest) {
       })(),
       rapidShutdownIntegrated: !!(body.rapidShutdownIntegrated || body.rapidShutdown),
       hasProductionMeter:      body.hasProductionMeter !== false,
-      hasBattery:              !!(body.hasBattery || body.batteryModel || body.batteryKwh),
-      batteryModel:            String(body.batteryModel            ?? ''),
+      hasBattery:              !!(body.hasBattery || body.batteryModel || body.batteryKwh || body.batteryBrand || (body.batteryCount && Number(body.batteryCount) > 0)),
+      batteryModel:            String(body.batteryModel || body.batteryBrand || ''),
       batteryKwh:              Number(body.batteryKwh)             || 0,
+      batteryBrand:            body.batteryBrand   ? String(body.batteryBrand)   : undefined,
+      batteryCount:            body.batteryCount   ? Number(body.batteryCount)   : undefined,
       batteryBackfeedA:        Number(body.batteryBackfeedA)       || undefined,
       generatorBrand:          body.generatorBrand  ? String(body.generatorBrand)  : undefined,
       generatorModel:          body.generatorModel  ? String(body.generatorModel)  : undefined,
