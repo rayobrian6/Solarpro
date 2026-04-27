@@ -108,6 +108,10 @@ export interface StructuralSpecs {
   ballastWeightLbs?: number;      // per mount (flat roof)
   iccEsReport?: string;           // ICC-ES evaluation report number
   asceEdition?: string;           // ASCE 7 edition tested to
+   loadModel?: 'discrete' | 'distributed' | 'continuous'; // load distribution model
+   fastenersPerAttachment?: number;  // fasteners per attachment point
+   upliftCapacity?: number;           // lbf per fastener
+   tributaryArea?: number;            // ft2 per attachment point
 }
 
 export interface ElectricalSpecs {
