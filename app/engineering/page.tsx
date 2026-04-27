@@ -9608,26 +9608,41 @@ function EngineeringPageInner() {
                 const gapPx = 4;
                 const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(totalPanels))));
                 const rows = Math.min(3, Math.max(1, Math.ceil(totalPanels / cols)));
-                const marginL = 48; const marginT = 28;
-                const svgW = marginL + cols * (panelLenPx + gapPx) + 50;
-                const svgH = marginT + rows * (panelWidPx + 22) + 60;
+                const marginL = 56; const marginT = 28;
+                const svgW = marginL + cols * (panelLenPx + gapPx) + 60;
+                const svgH = marginT + rows * (panelWidPx + 22) + 72;
+                const isRtMini = selectedSystem?.id === 'rooftech-mini';
                 const railY = (r: number) => [
                   marginT + r*(panelWidPx+22) + panelWidPx*0.22,
                   marginT + r*(panelWidPx+22) + panelWidPx*0.78,
                 ];
-                const mountPts: {x:number;y:number;rail:number}[] = [];
+                const rowW = cols*(panelLenPx+gapPx)-gapPx;
+                // RT-MINI staggered foot placement per field practice:
+                //   Rail A (top): start at x=0, then every attachSpPx (48" = 4ft)
+                //   Rail B (bottom): offset by attachSpPx/2 (24" = 2ft), then every attachSpPx
+                //   Result: no two feet share the same rafter — distributes load across more rafters
+                const mountPts: {x:number;y:number;rail:number;staggered:boolean}[] = [];
                 for (let r=0;r<rows;r++) {
                   const [y1,y2]=railY(r);
-                  const rowW = cols*(panelLenPx+gapPx)-gapPx;
-                  const nM = Math.max(2, Math.round(rowW/attachSpPx)+1);
-                  const step = rowW/Math.max(1,nM-1);
-                  for (let m=0;m<nM;m++) {
-                    mountPts.push({x:marginL+m*step,y:y1,rail:0});
-                    mountPts.push({x:marginL+m*step,y:y2,rail:1});
+                  if (isRtMini) {
+                    let xA = marginL;
+                    while (xA <= marginL + rowW + 1) { mountPts.push({x:xA,y:y1,rail:0,staggered:true}); xA+=attachSpPx; }
+                    let xB = marginL + attachSpPx * 0.5;
+                    while (xB <= marginL + rowW + 1) { mountPts.push({x:xB,y:y2,rail:1,staggered:true}); xB+=attachSpPx; }
+                  } else {
+                    const nM = Math.max(2, Math.round(rowW/attachSpPx)+1);
+                    const step = rowW/Math.max(1,nM-1);
+                    for (let m=0;m<nM;m++) {
+                      mountPts.push({x:marginL+m*step,y:y1,rail:0,staggered:false});
+                      mountPts.push({x:marginL+m*step,y:y2,rail:1,staggered:false});
+                    }
                   }
                 }
+                const rafterSpPx = (config.rafterSpacing ?? 24) * SCALE;
+                const rafterXs: number[] = [];
+                for (let rx = marginL; rx <= marginL + rowW + rafterSpPx; rx += rafterSpPx) rafterXs.push(rx);
                 return (
-                  <svg width="100%" viewBox={`0 0 ${svgW} ${svgH}`} style={{maxHeight:280}}>
+                  <svg width="100%" viewBox={`0 0 ${svgW} ${svgH}`} style={{maxHeight:300}}>
                     <defs>
                       <marker id="da-r" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L0,5 L5,2.5 z" fill="#64748b"/></marker>
                       <marker id="da-l" markerWidth="5" markerHeight="5" refX="1" refY="2.5" orient="auto"><path d="M5,0 L5,5 L0,2.5 z" fill="#64748b"/></marker>
@@ -9636,16 +9651,20 @@ function EngineeringPageInner() {
                       </pattern>
                     </defs>
                     <text x={svgW/2} y={11} textAnchor="middle" fill="#94a3b8" fontSize="8" fontWeight="bold" fontFamily="monospace">
-                      TOP-DOWN ARRAY LAYOUT — {cols}x{rows} ({totalPanels} MODULES)
+                      TOP-DOWN ARRAY LAYOUT — {cols}×{rows} ({totalPanels} MODULES){isRtMini ? ' · STAGGERED FEET' : ''}
                     </text>
+                    {rafterXs.map((rx,i)=>(
+                      <line key={`rf-${i}`} x1={rx} y1={marginT-8} x2={rx} y2={svgH-42}
+                        stroke="#334155" strokeWidth="0.8" strokeDasharray="3,4" opacity="0.6"/>
+                    ))}
                     {Array.from({length:rows}).map((_,r)=>{
                       const [y1,y2]=railY(r);
-                      const x1=marginL-12; const x2=marginL+cols*(panelLenPx+gapPx)+8;
+                      const x1=marginL-14; const x2=marginL+cols*(panelLenPx+gapPx)+10;
                       return (<g key={`rl-${r}`}>
                         <line x1={x1} y1={y1} x2={x2} y2={y1} stroke="#f59e0b" strokeWidth="3" strokeLinecap="round"/>
                         <line x1={x1} y1={y2} x2={x2} y2={y2} stroke="#f59e0b" strokeWidth="3" strokeLinecap="round"/>
-                        <text x={x1-3} y={y1+3} textAnchor="end" fill="#f59e0b" fontSize="7" fontFamily="monospace">R{r*2+1}</text>
-                        <text x={x1-3} y={y2+3} textAnchor="end" fill="#f59e0b" fontSize="7" fontFamily="monospace">R{r*2+2}</text>
+                        <text x={x1-3} y={y1+3} textAnchor="end" fill="#f59e0b" fontSize="7" fontFamily="monospace">R{r*2+1}{isRtMini?' (A)':''}</text>
+                        <text x={x1-3} y={y2+3} textAnchor="end" fill="#f59e0b" fontSize="7" fontFamily="monospace">R{r*2+2}{isRtMini?' (B)':''}</text>
                       </g>);
                     })}
                     {Array.from({length:rows}).map((_,r)=>Array.from({length:cols}).map((_,c)=>{
@@ -9658,26 +9677,41 @@ function EngineeringPageInner() {
                         ))}
                       </g>);
                     }))}
-                    {mountPts.map((m,i)=>(
-                      <g key={`mpt-${i}`}>
-                        <circle cx={m.x} cy={m.y} r={4.5} fill="#ef4444" stroke="#fca5a5" strokeWidth="1.5"/>
+                    {mountPts.map((m,i)=>{
+                      const fc = m.staggered ? (m.rail===0 ? '#ef4444' : '#f97316') : '#ef4444';
+                      const sc = m.staggered ? (m.rail===0 ? '#fca5a5' : '#fdba74') : '#fca5a5';
+                      return (<g key={`mpt-${i}`}>
+                        <circle cx={m.x} cy={m.y} r={4.5} fill={fc} stroke={sc} strokeWidth="1.5"/>
                         <circle cx={m.x} cy={m.y} r={1.5} fill="white"/>
-                      </g>
-                    ))}
+                      </g>);
+                    })}
+                    {isRtMini && (()=>{
+                      const rA=mountPts.find(m=>m.rail===0&&m.staggered);
+                      const rB=mountPts.find(m=>m.rail===1&&m.staggered);
+                      if(!rA||!rB)return null;
+                      const dy=svgH-44; const midX=(rA.x+rB.x)/2;
+                      return (<g>
+                        <line x1={rA.x} y1={dy} x2={rB.x} y2={dy} stroke="#a855f7" strokeWidth="1.2" strokeDasharray="3,2" markerStart="url(#da-l)" markerEnd="url(#da-r)"/>
+                        <line x1={rA.x} y1={dy-4} x2={rA.x} y2={dy+4} stroke="#a855f7" strokeWidth="0.8"/>
+                        <line x1={rB.x} y1={dy-4} x2={rB.x} y2={dy+4} stroke="#a855f7" strokeWidth="0.8"/>
+                        <rect x={midX-24} y={dy-9} width={48} height={10} fill="#0f172a"/>
+                        <text x={midX} y={dy-0.5} textAnchor="middle" fill="#a855f7" fontSize="7" fontFamily="monospace">{Math.round(attachSpIn/2)}" stagger</text>
+                      </g>);
+                    })()}
                     {(()=>{
                       const p0=mountPts.filter(m=>m.rail===0);
                       if(p0.length<2)return null;
-                      const dy=svgH-24;
+                      const dy=svgH-27;
                       return (<g>
                         <line x1={p0[0].x} y1={dy} x2={p0[1].x} y2={dy} stroke="#64748b" strokeWidth="1" markerStart="url(#da-l)" markerEnd="url(#da-r)"/>
                         <line x1={p0[0].x} y1={dy-5} x2={p0[0].x} y2={dy+5} stroke="#64748b" strokeWidth="0.8"/>
                         <line x1={p0[1].x} y1={dy-5} x2={p0[1].x} y2={dy+5} stroke="#64748b" strokeWidth="0.8"/>
-                        <rect x={(p0[0].x+p0[1].x)/2-20} y={dy-8} width={40} height={10} fill="#0f172a"/>
+                        <rect x={(p0[0].x+p0[1].x)/2-24} y={dy-9} width={48} height={10} fill="#0f172a"/>
                         <text x={(p0[0].x+p0[1].x)/2} y={dy} textAnchor="middle" fill="#94a3b8" fontSize="7.5" fontFamily="monospace">{attachSpIn}" O.C.</text>
                       </g>);
                     })()}
                     {rows>=1&&(()=>{
-                      const [y1,y2]=railY(0); const dx=svgW-12;
+                      const [y1,y2]=railY(0); const dx=svgW-14;
                       return (<g>
                         <line x1={dx} y1={y1} x2={dx} y2={y2} stroke="#f59e0b" strokeWidth="1" markerStart="url(#da-l)" markerEnd="url(#da-r)"/>
                         <text x={dx+5} y={(y1+y2)/2+3} textAnchor="start" fill="#f59e0b" fontSize="7" fontFamily="monospace">{railSpIn}"</text>
@@ -9686,10 +9720,16 @@ function EngineeringPageInner() {
                     <g transform={`translate(${marginL},${svgH-12})`}>
                       <rect x={0} y={0} width={9} height={7} fill="#0f172a" stroke="#334155" rx="1"/>
                       <text x={13} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Panel</text>
-                      <line x1={50} y1={3} x2={62} y2={3} stroke="#f59e0b" strokeWidth="2.5"/>
-                      <text x={66} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Rail</text>
-                      <circle cx={104} cy={3} r={4} fill="#ef4444" stroke="#fca5a5" strokeWidth="1"/>
-                      <text x={112} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">L-Foot</text>
+                      <line x1={52} y1={3} x2={64} y2={3} stroke="#f59e0b" strokeWidth="2.5"/>
+                      <text x={68} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Rail</text>
+                      <circle cx={106} cy={3} r={4} fill="#ef4444" stroke="#fca5a5" strokeWidth="1"/>
+                      <text x={114} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">{isRtMini?'Rail A Pad':'L-Foot'}</text>
+                      {isRtMini && (<>
+                        <circle cx={184} cy={3} r={4} fill="#f97316" stroke="#fdba74" strokeWidth="1"/>
+                        <text x={192} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Rail B Pad</text>
+                        <line x1={256} y1={3} x2={268} y2={3} stroke="#334155" strokeWidth="1.5" strokeDasharray="3,2"/>
+                        <text x={272} y={7} fill="#64748b" fontSize="7" fontFamily="monospace">Rafter</text>
+                      </>)}
                     </g>
                   </svg>
                 );

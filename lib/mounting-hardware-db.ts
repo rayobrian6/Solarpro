@@ -426,7 +426,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
   },
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ROOF TECH — Rail-Less (RT-MINI)
+  // ROOF TECH — RT-MINI (Rail-Based Standoff System)
   // ══════════════════════════════════════════════════════════════════════════
   {
     id: 'rooftech-mini',
@@ -434,9 +434,9 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     productLine: 'RT-MINI',
     model: 'RT-MINI',
     category: 'roof_residential',
-    systemType: 'rail_less',
+    systemType: 'rail_based',
     compatibleRoofTypes: ['asphalt_shingle', 'wood_shake'],
-    description: 'Roof Tech RT-MINI rail-less mount — 2 lag bolts per mount, ICC-ES ESR-3575',
+    description: 'Roof Tech RT-MINI — flashed pad standoff, rail-based system. 2 lag bolts per pad, L-foot, compatible rail. ICC-ES ESR-3575',
     mount: {
       model: 'RT-MINI',
       attachmentMethod: 'l_foot_lag',
@@ -456,7 +456,7 @@ const MOUNTING_SYSTEMS: MountingSystemSpec[] = [
     hardware: {
       midClamp: 'RT-MINI Mid Clamp',
       endClamp: 'RT-MINI End Clamp',
-      railSplice: 'N/A — Rail-less system',
+      railSplice: 'Compatible with IronRidge XR100/XR1000, Pegasus, UniRac SFM, or equivalent rail',
       groundLug: 'RT-MINI Ground Lug',
       lagBolt: '1/2" × 3" Lag Bolt SS (2 per mount)',
       flashingKit: 'RT-MINI Flashing Kit',

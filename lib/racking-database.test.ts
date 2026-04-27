@@ -45,7 +45,7 @@ const EXPECTED_ROWS: RackingLock[] = [
   { id: 'ironridge-xr1000',    manufacturer: 'IronRidge',     model: 'XR1000 Rail System',          systemType: 'rail_based', ulListing: 'UL 2703', warranty: '20 years' },
   { id: 'unirac-solarmount',   manufacturer: 'Unirac',        model: 'SolarMount',                  systemType: 'rail_based', ulListing: 'UL 2703', warranty: '20 years' },
   { id: 'unirac-sme',          manufacturer: 'Unirac',        model: 'SolarMount Evolution (SME)',  systemType: 'rail_based', ulListing: 'UL 2703', warranty: '20 years' },
-  { id: 'rooftech-mini',       manufacturer: 'Roof Tech',     model: 'RT-MINI Rail-Less',           systemType: 'rail_less',  ulListing: 'UL 2703', warranty: '20 years' },
+  { id: 'rooftech-mini',       manufacturer: 'Roof Tech',     model: 'RT-MINI Flush Mount',         systemType: 'rail_based', ulListing: 'UL 2703', warranty: '20 years' },
   { id: 'snapnrack-100',       manufacturer: 'SnapNrack',     model: 'Series 100',                  systemType: 'rail_based', ulListing: 'UL 2703', warranty: '20 years' },
   { id: 'quickmount-classic',  manufacturer: 'QuickMount PV', model: 'Classic Mount',               systemType: 'rail_based', ulListing: 'UL 2703', warranty: '10 years' },
   { id: 'quickmount-tile',     manufacturer: 'QuickMount PV', model: 'Tile Replacement Mount',      systemType: 'rail_based', ulListing: 'UL 2703', warranty: '10 years' },

@@ -303,18 +303,19 @@ export const RACKING_DATABASE: RackingSystemSpec[] = [
     notes: 'Improved version of SolarMount.',
   },
 
-  // ── Roof Tech RT-MINI (Rail-Less) ────────────────────────────────────────────
+  // ── Roof Tech RT-MINI (Rail-Based Standoff) ─────────────────────────────────────
   {
     id: 'rooftech-mini',
     manufacturer: 'Roof Tech',
-    model: 'RT-MINI Rail-Less',
-    systemType: 'rail_less',
+    model: 'RT-MINI Flush Mount',
+    systemType: 'rail_based',
     compatibleRoofTypes: ['shingle', 'tile_concrete', 'tile_clay'],
     loadModel: 'discrete',
-    rail: null, // rail-less system
+    // RT-MINI pad (2 lag bolts into rafter) → L-foot → compatible rail (IronRidge/Pegasus/UniRac)
+    rail: null, // Rail supplied separately — compatible: IronRidge XR100/XR1000, Pegasus, UniRac SFM
     mount: {
       model: 'RT-MINI',
-      attachmentMethod: 'direct_attach',
+      attachmentMethod: 'l_foot_lag',  // pad → L-foot → rail
       fastenersPerMount: 2,          // 2 lag bolts per RT-MINI foot
       upliftCapacityLbs: 900,        // 2 × 450 lbf/lag (ICC-ES ESR-3575)
       upliftPerFastenerLbs: 450,     // per lag bolt
@@ -325,7 +326,7 @@ export const RACKING_DATABASE: RackingSystemSpec[] = [
       fastenerDiameterIn: 0.3125,   // 5/16"
       iccEsReport: 'ICC-ES ESR-3575',
       ulListing: 'UL 2703',
-      notes: 'Rail-less direct attachment. 2 lag bolts per mount. Integrated EPDM flashing.',
+      notes: 'Rail-based standoff. RT-MINI pad (2 lag bolts into rafter) → L-foot → standard rail. Integrated EPDM flashing on pad.',
     },
     hardware: {
       midClamp: 'RT-MINI Integrated Mid Clamp',
@@ -339,7 +340,7 @@ export const RACKING_DATABASE: RackingSystemSpec[] = [
     ulListing: 'UL 2703',
     warranty: '20 years',
     datasheetUrl: 'https://www.roof-tech.com/rt-mini',
-    notes: 'Rail-less system. Mount spacing is critical — must be calculated from loads.',
+    notes: 'Rail-based standoff system. RT-MINI pad → L-foot → rail (IronRidge XR100/XR1000, Pegasus, or compatible). Staggered rafter placement for load distribution.',
   },
 
   // ── SnapNrack Series 100 ─────────────────────────────────────────────────────

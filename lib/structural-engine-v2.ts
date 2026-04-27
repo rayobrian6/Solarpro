@@ -225,7 +225,7 @@ const RT_MINI_SPECS = {
   shearCapacityPerLag: 350,      // lbs per lag bolt
   upliftCapacityPerLag: 450,     // lbs per lag bolt (2.5" embedment)
   fastenersPerMount: 2,          // 2 lag bolts per RT-MINI
-  maxMountSpacing: 48,           // inches (rail-less)
+  maxMountSpacing: 48,           // inches max pad spacing (L-foot to L-foot)
   minEdgeDistance: 6,            // inches
 };
 
@@ -464,25 +464,32 @@ function generateRackingBOM(
   mountLayout: MountLayout
 ): RackingBOM {
   if (mountingSystem === 'rt-mini') {
-    // RT-MINI is rail-less
+    // RT-MINI is a rail-based standoff system:
+    // pad (2 lag bolts into rafter) → L-foot → standard rail → mid/end clamps → modules
+    // Staggered rafter placement: Rail A starts on rafter 1, then every 4ft;
+    //   Rail B starts offset (first foot at 2ft), then every 4ft — different rafters for load distribution
+    const railRows = mountLayout.positions.length > 0
+      ? Math.max(...mountLayout.positions.map(p => p.rail ?? 0)) + 1
+      : 2; // default 2 rails per module row
+    const totalRailLengthFt = Math.ceil((railRows * (mountLayout.mountSpacing * (mountLayout.mountsPerRow - 1) + 24)) / 12);
     return {
-      rails: { qty: 0, unit: 'EA', description: 'N/A (rail-less system)' },
-      railSplices: { qty: 0, unit: 'EA', description: 'N/A' },
+      rails: { qty: railRows * 2, unit: 'EA', description: `Rail — ${railRows * 2} sections (IronRidge XR100/XR1000, Pegasus, or compatible)` },
+      railSplices: { qty: Math.max(0, railRows * 2 - 2), unit: 'EA', description: 'Rail splice (if run exceeds section length)' },
       mounts: { 
         qty: mountLayout.mountCount, 
         unit: 'EA', 
-        description: 'Roof Tech RT-MINI mount with integrated flashing' 
+        description: 'Roof Tech RT-MINI flashed pad with integrated EPDM flashing' 
       },
-      lFeet: { qty: 0, unit: 'EA', description: 'N/A (direct attach)' },
+      lFeet: { qty: mountLayout.mountCount, unit: 'EA', description: 'L-foot — 1 per RT-MINI pad (attaches to pad stud, receives rail)' },
       midClamps: { 
         qty: Math.ceil(mountLayout.mountCount / 4), 
         unit: 'EA', 
-        description: 'RT-MINI mid clamp' 
+        description: 'Mid clamp' 
       },
       endClamps: { 
         qty: Math.ceil(mountLayout.mountCount / 8), 
         unit: 'EA', 
-        description: 'RT-MINI end clamp' 
+        description: 'End clamp' 
       },
       groundLugs: { qty: 1, unit: 'EA', description: 'Grounding lug' }
     };

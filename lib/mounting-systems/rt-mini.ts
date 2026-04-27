@@ -3,12 +3,14 @@
 // ICC-ES ESR-3575 Structural Data
 // ============================================================
 //
-// The RT-MINI is a rail-less direct-attach mounting system for
-// rooftop solar. Key features:
-//   - Integrated EPDM flashing (no separate flashing needed)
-//   - 2 lag bolts per mount (stainless steel)
-//   - Direct attachment to rafters (not deck-only)
-//   - ICC-ES evaluated for uplift and shear
+// The RT-MINI is a flashed pad standoff system for rooftop solar.
+// Assembly: RT-MINI pad (2 lag bolts into rafter) → L-foot → standard rail
+// (IronRidge XR100/XR1000, Pegasus, UniRac SFM, or compatible) → mid/end clamps
+// Key features:
+//   - Integrated EPDM flashing on pad (no separate flashing needed on shingles)
+//   - 2 lag bolts per pad into rafter (stainless steel, 2.5" min embedment)
+//   - L-foot attaches to pad stud; standard rail attaches to L-foot
+//   - ICC-ES ESR-3575 evaluated for uplift and shear per ASCE 7-22
 //
 // ============================================================
 
@@ -54,7 +56,7 @@ export const RT_MINI_SPECS: MountingSystemSpecs = {
   id: 'rooftech-rt-mini',
   manufacturer: 'Roof Tech',
   model: 'RT-MINI',
-  type: 'rail-less',
+  type: 'rail-based',
   
   fasteners: {
     type: '5/16" x 3" stainless steel lag bolt',
@@ -72,7 +74,7 @@ export const RT_MINI_SPECS: MountingSystemSpecs = {
   },
   
   spacing: {
-    maxMountSpacing: 48,   // inches (rail-less)
+    maxMountSpacing: 48,   // inches max pad-to-pad spacing (along rail direction)
     minEdgeDistance: 6,    // inches
     minRafterOffset: 0.75, // inches from rafter center
   },
@@ -86,9 +88,9 @@ export const RT_MINI_SPECS: MountingSystemSpecs = {
   datasheetUrl: 'https://www.roof-tech.com/rt-mini',
 };
 
-// Mount spacing table derived from ICC-ES data
+// Pad spacing table derived from ICC-ES ESR-3575 data
 // Rows: Wind speed (mph), Columns: Exposure category
-// Values: Maximum mount spacing in inches
+// Values: Maximum RT-MINI pad spacing in inches (L-foot to L-foot along rail)
 export const RT_MINI_SPACING_TABLE: Record<number, Record<string, number>> = {
   // Wind speed: { Exposure B, C, D }
   85:  { B: 48, C: 48, D: 48 },
@@ -117,7 +119,7 @@ export function getRTMiniMountSpacing(
   return RT_MINI_SPACING_TABLE[applicableSpeed][exposure] || 36;
 }
 
-// Calculate required mount count
+// Calculate required RT-MINI pad count (each pad = 1 L-foot + 2 lag bolts)
 export function calculateRTMiniMountCount(
   arrayLengthInches: number,
   rowCount: number,
