@@ -1346,7 +1346,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const dcWire = autoSizeWire(
       dcStringCurrent,
       defaultRunLengths.DC_STRING_RUN,
-      2,
+      stringCount * 2,   // NEC 310.15(B)(3)(a): all current-carrying conductors (stringCount DC+ + stringCount DC-)
       input.conduitType,
       dcRunAmb,
       strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
@@ -1357,7 +1357,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     runs.push(makeRunSegment('DC_STRING_RUN', 'DC STRING RUN (PV Wire)', 'PV ARRAY', 'DC DISCONNECT', {
       sourceTerminal: 'OUT',          // PV string output
       destTerminal:   'LINE',         // DC Disconnect LINE (PV array) side
-      conductorCount: 2,
+      conductorCount: stringCount * 2,  // stringCount × DC+ + stringCount × DC-
       wireGauge: dcWire.gauge,
       insulation: 'USE-2/PV Wire',
       egcGauge: dcWire.egcGauge,
@@ -1388,7 +1388,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const dcDiscoWire = autoSizeWire(
       dcStringCurrent,
       defaultRunLengths.DC_DISCO_TO_INV_RUN,
-      2,
+      stringCount * 2,   // same bundle continues to inverter
       input.conduitType,
       dcRunAmb,
       strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
@@ -1399,7 +1399,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
       sourceTerminal: 'DISCO_LOAD',   // DC Disconnect LOAD (inverter) side
       destTerminal:   'DC_IN',        // String inverter DC input
-      conductorCount: 2,
+      conductorCount: stringCount * 2,  // same bundle as DC_STRING_RUN
       wireGauge: dcDiscoWire.gauge,
       insulation: 'USE-2/PV Wire',
       egcGauge: dcDiscoWire.egcGauge,
