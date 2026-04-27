@@ -6,7 +6,7 @@ import {
   LayoutDashboard, Users, Building2, FolderOpen,
   Cpu, Zap, Database, HardDrive, Activity,
   Shield, ChevronRight, LogOut, Sun, Wrench,
-  ScrollText, Terminal, MessageSquare, Rocket, Layers, DollarSign,
+  ScrollText, Terminal, MessageSquare, Rocket, Layers, DollarSign, PenTool,
 } from 'lucide-react';
 
 const NAV_SECTIONS = [
@@ -34,6 +34,7 @@ const NAV_SECTIONS = [
       { href: '/admin/utilities',   label: 'Utilities',   icon: Activity },
       { href: '/admin/hardware',    label: 'Hardware',    icon: Wrench },
     { href: '/admin/distributor-prices', label: 'Distributor Prices', icon: DollarSign },
+      { href: '/admin/sld-emblems',          label: 'SLD Emblems',        icon: PenTool },
     ],
   },
   {
