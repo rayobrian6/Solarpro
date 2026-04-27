@@ -11,11 +11,18 @@ import { getMountingSystemById, resolveMountingSystemId, type MountingSystemSpec
 // INPUT TYPES
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type InstallationType = 'roof_residential' | 'roof_commercial' | 'commercial_ballasted' | 'ground_mount' | 'tracker' | 'carport';
-export type FramingType = 'truss' | 'rafter' | 'unknown';
-export type WoodSpecies = 'Douglas Fir-Larch' | 'Southern Pine' | 'Hem-Fir' | 'Spruce-Pine-Fir';
-export type WindExposure = 'B' | 'C' | 'D';
-export type RoofZone = 'interior' | 'edge' | 'corner';
+// ── Types: imported from canonical source ─────────────────────────────────
+export type {
+  InstallationType,
+  WindExposure,
+  WindExposureCategory,   // alias — backward compat
+  FramingType,
+  WoodSpecies,
+  RafterSpecies,          // alias — backward compat
+  RoofZone,
+  PanelOrientation,
+  StructuralIssue,
+} from './structural/types';
 
 export interface StructuralInputV4 {
   // Installation type
@@ -189,13 +196,7 @@ export interface RackingBOM {
   piles?: { qty: number; unit: string; description: string; embedmentFt: number };
 }
 
-export interface StructuralIssue {
-  code: string;
-  message: string;
-  severity: 'error' | 'warning' | 'info';
-  suggestion: string;
-  reference?: string;
-}
+// StructuralIssue re-exported from structural/types.ts above
 
 export interface StructuralResultV4 {
   status: 'PASS' | 'WARNING' | 'FAIL';

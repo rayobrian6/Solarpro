@@ -22,10 +22,16 @@ import { getRackingById, type RackingSystemSpec } from './racking-database';
 
 // ─── INPUT TYPES ─────────────────────────────────────────────────────────────
 
-export type WindExposure = 'B' | 'C' | 'D';
-export type FramingType  = 'truss' | 'rafter' | 'unknown';
-export type RoofZone     = 'interior' | 'edge' | 'corner';
-export type WoodSpecies  = 'Douglas Fir-Larch' | 'Southern Pine' | 'Hem-Fir' | 'Spruce-Pine-Fir';
+// ── Types: imported from canonical source ─────────────────────────────────
+export type {
+  WindExposure,
+  WindExposureCategory,   // alias — backward compat
+  FramingType,
+  RoofZone,
+  WoodSpecies,
+  RafterSpecies,          // alias — backward compat
+  StructuralIssue,
+} from './structural/types';
 
 export interface StructuralInputV3 {
   // ── Site ──────────────────────────────────────────────────
@@ -178,12 +184,7 @@ export interface StructuralResultV3 {
   recommendations: string[];
 }
 
-export interface StructuralIssue {
-  code: string;
-  message: string;
-  severity: 'error' | 'warning' | 'info';
-  suggestion?: string;
-}
+// StructuralIssue re-exported from structural/types.ts above
 
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 

@@ -3,6 +3,12 @@
 // Full audit & correction — Phase 1-10
 // ============================================================
 //
+// @deprecated  V1 — Superseded by structural-engine-v4.ts
+//              Used by: /api/engineering/structural, siteSurvey/engineeringIntegration, rules-engine
+//              Migration: update callers to use calculateStructuralV4() from structural-engine-v4.ts
+//              Retained for backward compatibility — do not add new features here
+//
+//
 // AUDIT CORRECTIONS APPLIED:
 //   1. Wind: full ASCE 7-22 C&C formula: qz = 0.00256 × Kz × Kzt × Kd × V²
 //            netUplift = qz × (|GCp| + GCpi)
@@ -14,9 +20,16 @@
 //   7. Rafter check uses combined loads (existing + PV) with correct Fb'
 // ============================================================
 
-export type WindExposureCategory = 'B' | 'C' | 'D';
-export type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' | 'flat_tpo' | 'flat_epdm' | 'flat_gravel';
-export type RafterSpecies = 'Douglas Fir-Larch' | 'Southern Pine' | 'Hem-Fir' | 'Spruce-Pine-Fir';
+// ── Types: imported from canonical source ─────────────────────────────────
+// @deprecated V1 engine — use structural-engine-v4.ts for new code
+export type {
+  WindExposure,
+  WindExposureCategory,   // alias for WindExposure — backward compat
+  RoofType,
+  WoodSpecies,
+  RafterSpecies,          // alias for WoodSpecies — backward compat
+  StructuralIssue,
+} from './structural/types';
 
 export interface StructuralInput {
   // Site
@@ -57,15 +70,7 @@ export interface StructuralInput {
   };
 }
 
-export interface StructuralIssue {
-  code: string;
-  severity: 'error' | 'warning' | 'info';
-  message: string;
-  value?: number | string;
-  limit?: number | string;
-  reference?: string;
-  suggestion?: string;
-}
+// StructuralIssue re-exported from structural/types.ts above
 
 export interface WindCalcResult {
   designWindSpeed: number;     // mph

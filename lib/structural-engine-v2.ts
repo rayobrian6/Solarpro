@@ -3,6 +3,12 @@
 // Realistic residential rooftop solar structural analysis
 // ============================================================
 //
+// @deprecated  V2 — Superseded by structural-engine-v4.ts
+//              Used by: structural-resolver.ts (internal only, not a public API route)
+//              Migration: update structural-resolver to use V4 engine directly
+//              Retained for backward compatibility — do not add new features here
+//
+//
 // KEY IMPROVEMENTS OVER V1:
 //   1. TRUSS vs RAFTER distinction — trusses use engineered capacity tables
 //   2. MOUNT SPACING is CALCULATED (not user-specified)
@@ -17,12 +23,19 @@
 // TYPES
 // ─────────────────────────────────────────────────────────────
 
-export type WindExposureCategory = 'B' | 'C' | 'D';
-export type RoofType = 'shingle' | 'tile' | 'metal_standing_seam' | 'metal_corrugated' | 'flat_tpo' | 'flat_epdm' | 'flat_gravel';
-export type FramingType = 'truss' | 'rafter' | 'unknown';
-export type RafterSpecies = 'Douglas Fir-Larch' | 'Southern Pine' | 'Hem-Fir' | 'Spruce-Pine-Fir';
-export type RoofZone = 'interior' | 'edge' | 'corner';
-export type PanelOrientation = 'portrait' | 'landscape';
+// ── Types: imported from canonical source ─────────────────────────────────
+// @deprecated V2 engine — use structural-engine-v4.ts for new code
+export type {
+  WindExposure,
+  WindExposureCategory,   // alias — backward compat
+  RoofType,
+  FramingType,
+  WoodSpecies,
+  RafterSpecies,          // alias — backward compat
+  RoofZone,
+  PanelOrientation,
+  StructuralIssue,
+} from './structural/types';
 
 export interface StructuralInputV2 {
   // Site
@@ -138,12 +151,7 @@ export interface StructuralResultV2 {
   recommendations: string[];
 }
 
-export interface StructuralIssue {
-  code: string;
-  message: string;
-  severity: 'error' | 'warning' | 'info';
-  suggestion?: string;
-}
+// StructuralIssue re-exported from structural/types.ts above
 
 // ─────────────────────────────────────────────────────────────
 // CONSTANTS
