@@ -351,21 +351,23 @@ describe('Sizing Engine — selectedInverterId upsizing (real-life logic)', () =
     expect(r.warnings.find(w => w.code === 'INVERTER_UPSIZED')).toBeUndefined();
   });
 
-  it('Huge system (60 panels) + se-7600h: upsizes to se-11400h (tier-recommended)', () => {
-    // 60 panels × 400W = 24 kW. Tier for 24 kW = se-11400h (12+ kW bucket).
+  it('Huge system (60 panels) + se-7600h: upsizes to se-10000h (ratio-optimal, v60.0+)', () => {
+    // 60 panels × 400W = 24 kW DC.
     // Phase 13.2: per-unit panel capacity = mpptCount × parallelPerMppt × maxPPS
     //             = 1 × 2 × 25 = 50 panels/unit for all SolarEdge models.
-    // DC: se-7600h ceil(24/11.4)=3, se-11400h ceil(24/17.1)=2.
-    // Panels: ceil(60/50)=2 for both.
-    // qty dominates → se-7600h needs 3, se-11400h needs 2. User's
-    // se-7600h selection upsizes to se-11400h (fewer units is preferred).
+    // DC units: se-7600h ceil(24/11.4)=3, se-10000h ceil(24/15.0)=2, se-11400h ceil(24/17.1)=2.
+    // Panel units: ceil(60/50)=2 for se-10000h and se-11400h.
+    // se-7600h needs 3 units → fewerUnitsCandidate = {se-10000h×2, se-11400h×2}.
+    // v60.0 pickRatioAwareTier: se-10000h×2 ratio=24/20=1.20 (≈1.25 target, diff=0.05)
+    //                           se-11400h×2 ratio=24/22.8=1.053 (diff=0.197)
+    // se-10000h is closest to 1.25 target → ratio-optimal selection.
     const r = sizeSystemFromBrand({
       systemType: 'roof',
       panelCount: 60,
       selectedBrand: 'solaredge',
       selectedInverterId: 'se-7600h',
     });
-    expect(r.inverterModels[0].equipmentDbId).toBe('se-11400h');
+    expect(r.inverterModels[0].equipmentDbId).toBe('se-10000h');
     expect(r.inverterModels[0].qty).toBe(2);
     expect(r.warnings.find(w => w.code === 'INVERTER_UPSIZED')).toBeDefined();
   });

@@ -1,10 +1,10 @@
-export const BUILD_VERSION     = 'v60.2';
+export const BUILD_VERSION     = 'v60.3';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-28'; // v60.2
-export const BUILD_DESCRIPTION = 'v60.2: Fix selectedInverterId path DC/AC ratio logic — sort candidates by ratio proximity (not AC kW), filter Rule 1 to valid-ratio candidates (>=1.00), use pickRatioAwareTier for tierRec. Sol-Ark 8K-2P + 36 panels now correctly upsizes to 12K-2P×1 (ratio=1.20) instead of falling back to 2×8K-2P (ratio=0.90).';
+export const BUILD_DATE        = '2026-04-28'; // v60.3
+export const BUILD_DESCRIPTION = 'v60.3: Engineering audit — fix unitsByMpptCurrent escalation to be ratio-guarded (prevents Fronius 10kW×2 over-sizing when DC/AC < 0.9), fix BUILD_FEATURES drift-guard format, fix SolarEdge 60-panel tier regression.';
 export const BUILD_FEATURES: string[] = [
   // v60.2 (newest — must be first for releaseHistory drift-guard)
-  'v60.2: Fix selectedInverterId DC/AC logic: sort candidates by ratio proximity, filter Rule 1 to valid-ratio candidates, use pickRatioAwareTier for tierRec. Sol-Ark 8K-2P+36p → 12K-2P×1 (1.20) not 2×8K-2P (0.90)',
+  'Stage 19.3 (v60.3) — Fix selectedInverterId DC/AC ratio logic: sort candidates by ratio proximity, filter Rule 1 to valid-ratio candidates, use pickRatioAwareTier for tierRec. unitsByMpptCurrent escalation now ratio-guarded to prevent over-sizing. Sol-Ark 8K-2P+36p → 12K-2P×1 (ratio=1.20) not 2×8K-2P (ratio=0.90)',
   // v60.1 — must be first for releaseHistory drift-guard)
   'Stage 19.1 (v60.1) — ARRAY_UNDERSIZED_FOR_BRAND warning: when no model in the brand can produce DC/AC ≥1.00, surfaces actionable message with minimum panels needed and micro recommendation',
   // v60.0

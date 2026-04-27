@@ -459,13 +459,22 @@ export function evaluateInverterFeasibility(
       const strPerMppt1Unit = Math.ceil(numStringsNeeded / inverter.mpptCount);
       const currPerMppt1Unit = Math.min(strPerMppt1Unit, parallelPerMppt) * designCurrent;
       if (currPerMppt1Unit > inverter.maxInputCurrentPerMppt + 1e-6) {
-        // Find minimum units where current fits within cap.
+        // Find minimum units where current fits within cap — but only escalate
+        // if the ratio at that unit count remains within the acceptable band.
+        // If escalating would tank DC/AC below DC_AC_ACCEPTABLE_MIN (e.g. Fronius
+        // 10kW x2 for 14.4 kW DC gives ratio 0.72), keep unitsByMpptCurrent=1 and
+        // let the allocation fail naturally so the correct MPPT failure is surfaced.
         for (let u = 2; u <= 8; u++) {
           const mppts = u * inverter.mpptCount;
           const strPerMppt = Math.ceil(numStringsNeeded / mppts);
           const curr = Math.min(strPerMppt, parallelPerMppt) * designCurrent;
           if (curr <= inverter.maxInputCurrentPerMppt + 1e-6) {
-            unitsByMpptCurrent = u;
+            // Only apply escalation if ratio stays within acceptable band
+            const ratioAtU = totalDcKw / Math.max(inverter.acKw * u, 1e-6);
+            if (ratioAtU >= DC_AC_ACCEPTABLE_MIN - 1e-6) {
+              unitsByMpptCurrent = u;
+            }
+            // Either way, stop searching — this is the minimum current-safe count
             break;
           }
         }

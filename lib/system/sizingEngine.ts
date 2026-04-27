@@ -828,8 +828,30 @@ function sizeInverters(
     // Also check: is the chosen model explicitly listed as rejected?
     const chosenIsRejected = bestFit.rejected.some(r => r.equipmentDbId === chosenId);
 
-    // If chosen model is feasible and not rejected — nothing to do.
-    if (feasibleIds.has(chosenId) && !chosenIsRejected) return resolved;
+    // If chosen model is feasible and not rejected — check if qty needs updating.
+    // The feasibility evaluator may have found the model feasible at a different
+    // inverterCount than what was passed in (e.g. tigo-tsi-3p8k-us needs qty=2 for
+    // 18 panels due to MPPT current, but sizing picked qty=1). If the feasibility
+    // result says a higher count is needed, update qty to match so compliance agrees.
+    if (feasibleIds.has(chosenId) && !chosenIsRejected) {
+      const feasibleCandidate = [bestFit.recommended, ...bestFit.alternatives]
+        .find(c => c?.modelRef.equipmentDbId === chosenId);
+      const feasibleQty = feasibleCandidate?.result.inverterCount ?? null;
+      const resolvedQty = resolved[0].qty ?? 1;
+      if (feasibleQty !== null && feasibleQty > resolvedQty) {
+        // Sizing engine under-counted units for MPPT current reasons — correct it.
+        warnings.push({
+          severity: 'info',
+          code: 'INVERTER_QTY_CORRECTED',
+          message:
+            `${chosenId}: sizing picked ${resolvedQty} unit${resolvedQty > 1 ? 's' : ''} but ` +
+            `electrical feasibility requires ${feasibleQty} for MPPT current compliance. ` +
+            `Using ${feasibleQty} unit${feasibleQty > 1 ? 's' : ''}.`,
+        });
+        return [{ ...resolved[0], qty: feasibleQty }];
+      }
+      return resolved;
+    }
 
     // Chosen model is infeasible. Substitute with the engine's recommendation.
     if (!bestFit.recommended) {
