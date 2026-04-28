@@ -24,7 +24,16 @@ function LoginForm() {
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastFormRef      = useRef(form);
 
-  const redirect = searchParams.get('redirect') || '/dashboard';
+  // SECURITY: open redirect fix — only allow relative paths starting with '/'
+  // Reject absolute URLs (http://, https://, //) and protocol-relative URLs
+  // to prevent attackers from using ?redirect=https://evil.com
+  const rawRedirect = searchParams.get('redirect') || '';
+  const redirect = (
+    rawRedirect.startsWith('/') &&
+    !rawRedirect.startsWith('//') &&
+    !rawRedirect.toLowerCase().startsWith('/\\') &&
+    !/^\/[a-z]+:/i.test(rawRedirect)
+  ) ? rawRedirect : '/dashboard';
 
   // Keep lastFormRef in sync so the retry closure sees the current values
   useEffect(() => { lastFormRef.current = form; }, [form]);

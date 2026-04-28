@@ -8,6 +8,12 @@ import { handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 
 export async function PUT(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('settings', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -22,6 +28,16 @@ export async function PUT(req: NextRequest) {
       brandSecondaryColor,
       proposalFooterText,
     } = body;
+
+    // SECURITY: field length caps to prevent oversized DB writes
+    if (companyName     && typeof companyName     === 'string' && companyName.length     > 200) return NextResponse.json({ success: false, error: 'Company name too long.'     }, { status: 400 });
+    if (companyLogoUrl  && typeof companyLogoUrl  === 'string' && companyLogoUrl.length  > 500) return NextResponse.json({ success: false, error: 'Logo URL too long.'         }, { status: 400 });
+    if (companyWebsite  && typeof companyWebsite  === 'string' && companyWebsite.length  > 500) return NextResponse.json({ success: false, error: 'Website URL too long.'      }, { status: 400 });
+    if (companyAddress  && typeof companyAddress  === 'string' && companyAddress.length  > 500) return NextResponse.json({ success: false, error: 'Address too long.'          }, { status: 400 });
+    if (companyPhone    && typeof companyPhone    === 'string' && companyPhone.length    > 30)  return NextResponse.json({ success: false, error: 'Phone number too long.'     }, { status: 400 });
+    if (brandPrimaryColor   && typeof brandPrimaryColor   === 'string' && brandPrimaryColor.length   > 20) return NextResponse.json({ success: false, error: 'Primary color value too long.'   }, { status: 400 });
+    if (brandSecondaryColor && typeof brandSecondaryColor === 'string' && brandSecondaryColor.length > 20) return NextResponse.json({ success: false, error: 'Secondary color value too long.' }, { status: 400 });
+    if (proposalFooterText  && typeof proposalFooterText  === 'string' && proposalFooterText.length  > 1000) return NextResponse.json({ success: false, error: 'Footer text too long.'         }, { status: 400 });
 
     const sql = await getDbReady();
 

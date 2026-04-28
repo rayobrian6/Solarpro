@@ -8,6 +8,12 @@ import { handleRouteDbError } from '@/lib/db-neon';
 
 export async function PUT(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('settings', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -20,6 +26,12 @@ export async function PUT(req: NextRequest) {
     if (!email?.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ success: false, error: 'Valid email is required.' }, { status: 400 });
     }
+
+    // SECURITY: field length caps
+    if (name.trim().length    > 200) return NextResponse.json({ success: false, error: 'Name too long.'         }, { status: 400 });
+    if (email.trim().length   > 320) return NextResponse.json({ success: false, error: 'Email too long.'        }, { status: 400 });
+    if (company && typeof company === 'string' && company.trim().length > 200) return NextResponse.json({ success: false, error: 'Company name too long.' }, { status: 400 });
+    if (phone   && typeof phone   === 'string' && phone.trim().length   > 30)  return NextResponse.json({ success: false, error: 'Phone number too long.'}, { status: 400 });
 
     const sql = await getDbReady();
 

@@ -1,5 +1,5 @@
 // lib/rateLimiter.ts
-// v48.6: Rate limiting for critical AI/API cost routes.
+// Phase 27/27b: Full rate limiting coverage for all 149 mutation routes.
 // Falls back to ALLOW on any Redis error — never blocks normal usage due to infra issues.
 
 import { Ratelimit } from '@upstash/ratelimit';
@@ -39,45 +39,134 @@ function makeLimiter(requests: number, window: `${number} s` | `${number} m`): R
 }
 
 // ── Route-specific limiters ───────────────────────────────────────────────────
-// bill-upload: 5 req / 30s — expensive Claude + OCR calls
-const _billUploadLimiter   = makeLimiter(5,  '30 s');
-// login: 5 req / 60s — brute-force protection
-const _loginLimiter        = makeLimiter(5,  '60 s');
-// engineering: 10 req / 30s — heavy compute + external API calls
-const _engineeringLimiter  = makeLimiter(10, '30 s');
-// register: 3 req / 60s — prevent mass account creation
-const _registerLimiter     = makeLimiter(3,  '60 s');
-// password-reset: 3 req / 60s — prevent reset abuse
-const _passwordResetLimiter = makeLimiter(3, '60 s');
-// ocr: 10 req / 60s — Tesseract is CPU-intensive; prevent compute abuse
-const _ocrLimiter           = makeLimiter(10, '60 s');
-const _autoDesignLimiter    = makeLimiter(10, '60 s');  // AI layout generation
-const _pipelineLimiter      = makeLimiter(5,  '60 s');  // full engineering pipeline
-const _solarApiLimiter      = makeLimiter(20, '60 s');  // Google Solar API proxy
-const _geoLimiter           = makeLimiter(30, '60 s');  // geocode/elevation/dsm
-const _systemSizeLimiter    = makeLimiter(20, '60 s');  // system sizing calculations
+// Auth / identity — tight limits, brute-force sensitive
+const _loginLimiter          = makeLimiter(5,  '60 s');  // brute-force protection
+const _registerLimiter       = makeLimiter(3,  '60 s');  // prevent mass account creation
+const _passwordResetLimiter  = makeLimiter(3,  '60 s');  // prevent reset abuse
+const _deleteAccountLimiter  = makeLimiter(3,  '60 m');  // destructive — very tight
+const _mobileSessionLimiter  = makeLimiter(10, '60 s');  // SSO token minting
+
+// AI / compute — expensive operations
+const _billUploadLimiter     = makeLimiter(5,  '30 s');  // Claude + OCR calls
+const _engineeringLimiter    = makeLimiter(10, '30 s');  // heavy compute + external APIs
+const _ocrLimiter            = makeLimiter(10, '60 s');  // CPU-intensive Tesseract
+const _autoDesignLimiter     = makeLimiter(10, '60 s');  // AI layout generation
+const _pipelineLimiter       = makeLimiter(5,  '60 s');  // full engineering pipeline
+const _systemSizeLimiter     = makeLimiter(20, '60 s');  // system sizing calculations
+const _systemCapabilitiesLimiter = makeLimiter(20, '60 s');
+
+// External API proxies
+const _solarApiLimiter       = makeLimiter(20, '60 s');  // Google Solar API proxy
+const _geoLimiter            = makeLimiter(30, '60 s');  // geocode/elevation/dsm
+const _utilityDetectLimiter  = makeLimiter(20, '60 s');  // utility detection
+const _utilityRatesLimiter   = makeLimiter(20, '60 s');  // utility rates lookup
+const _mapsSessionLimiter    = makeLimiter(20, '60 s');  // Maps API session tokens
+const _productionLimiter     = makeLimiter(20, '60 s');  // production estimates
+const _topographyLimiter     = makeLimiter(20, '60 s');  // topography data
+const _tileLimiter           = makeLimiter(60, '60 s');  // map tiles — higher volume OK
+
+// Standard CRUD — normal user mutation rate
+const _standardLimiter       = makeLimiter(30, '60 s');  // projects, clients, etc.
+const _adminLimiter          = makeLimiter(30, '60 s');  // admin panel actions
+const _feedbackLimiter       = makeLimiter(10, '60 s');  // feedback submissions
+const _enterpriseContactLimiter = makeLimiter(5, '60 m'); // enterprise contact — anti-spam
+const _tosLimiter            = makeLimiter(10, '60 s');  // ToS acceptance
+const _statsLimiter          = makeLimiter(30, '60 s');  // stats/reporting
+const _activityLimiter       = makeLimiter(30, '60 s');  // activity log
+const _commandsLimiter       = makeLimiter(30, '60 s');  // commands/tasks
+const _hardwareLimiter       = makeLimiter(30, '60 s');  // hardware catalog
+const _incentivesLimiter     = makeLimiter(30, '60 s');  // incentives
+const _surveyLimiter         = makeLimiter(20, '60 s');  // survey upload/submit
+const _settingsLimiter       = makeLimiter(20, '60 s');  // profile/branding/logo
+const _stripeLimiter         = makeLimiter(5,  '60 m');  // Stripe checkout/portal — costly op
+const _migrateLimiter        = makeLimiter(2,  '60 m');  // DB migrations — extremely tight
+
+// ── LimiterKey union ─────────────────────────────────────────────────────────
+export type LimiterKey =
+  // Auth
+  | 'login'
+  | 'register'
+  | 'password-reset'
+  | 'delete-account'
+  | 'mobile-session'
+  // AI / compute
+  | 'bill-upload'
+  | 'engineering'
+  | 'ocr'
+  | 'auto-design'
+  | 'pipeline'
+  | 'system-size'
+  | 'system-capabilities'
+  // External APIs
+  | 'solar-api'
+  | 'geo'
+  | 'utility-detect'
+  | 'utility-rates'
+  | 'maps-session'
+  | 'production'
+  | 'topography'
+  | 'tile'
+  // Standard CRUD
+  | 'standard'
+  | 'admin'
+  | 'feedback'
+  | 'enterprise-contact'
+  | 'tos'
+  | 'stats'
+  | 'activity'
+  | 'commands'
+  | 'hardware'
+  | 'incentives'
+  | 'survey'
+  | 'settings'
+  | 'stripe'
+  | 'migrate';
+
+const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
+  // Auth
+  'login':                  _loginLimiter,
+  'register':               _registerLimiter,
+  'password-reset':         _passwordResetLimiter,
+  'delete-account':         _deleteAccountLimiter,
+  'mobile-session':         _mobileSessionLimiter,
+  // AI / compute
+  'bill-upload':            _billUploadLimiter,
+  'engineering':            _engineeringLimiter,
+  'ocr':                    _ocrLimiter,
+  'auto-design':            _autoDesignLimiter,
+  'pipeline':               _pipelineLimiter,
+  'system-size':            _systemSizeLimiter,
+  'system-capabilities':    _systemCapabilitiesLimiter,
+  // External APIs
+  'solar-api':              _solarApiLimiter,
+  'geo':                    _geoLimiter,
+  'utility-detect':         _utilityDetectLimiter,
+  'utility-rates':          _utilityRatesLimiter,
+  'maps-session':           _mapsSessionLimiter,
+  'production':             _productionLimiter,
+  'topography':             _topographyLimiter,
+  'tile':                   _tileLimiter,
+  // Standard CRUD
+  'standard':               _standardLimiter,
+  'admin':                  _adminLimiter,
+  'feedback':               _feedbackLimiter,
+  'enterprise-contact':     _enterpriseContactLimiter,
+  'tos':                    _tosLimiter,
+  'stats':                  _statsLimiter,
+  'activity':               _activityLimiter,
+  'commands':               _commandsLimiter,
+  'hardware':               _hardwareLimiter,
+  'incentives':             _incentivesLimiter,
+  'survey':                 _surveyLimiter,
+  'settings':               _settingsLimiter,
+  'stripe':                 _stripeLimiter,
+  'migrate':                _migrateLimiter,
+};
 
 // ── Public check function ─────────────────────────────────────────────────────
 // Returns true  → request allowed
 // Returns false → request should be rejected with 429
 // SAFETY: always returns true if Redis is unavailable or throws
-
-type LimiterKey = 'bill-upload' | 'login' | 'register' | 'password-reset' | 'engineering' | 'enterprise-contact' | 'ocr' | 'auto-design' | 'pipeline' | 'solar-api' | 'geo' | 'system-size';
-
-const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
-  'bill-upload':         _billUploadLimiter,
-  'login':               _loginLimiter,
-  'register':            _registerLimiter,
-  'password-reset':      _passwordResetLimiter,
-  'engineering':         _engineeringLimiter,
-  'enterprise-contact':  _registerLimiter,   // 5 req/60s — reuse register limiter config
-  'ocr':                 _ocrLimiter,        // 10 req/60s — CPU-intensive Tesseract
-  'auto-design':         _autoDesignLimiter, // 10 req/60s — AI layout generation
-  'pipeline':            _pipelineLimiter,   // 5 req/60s  — full engineering pipeline
-  'solar-api':           _solarApiLimiter,   // 20 req/60s — Google Solar API proxy
-  'geo':                 _geoLimiter,        // 30 req/60s — geocode/elevation/dsm
-  'system-size':         _systemSizeLimiter, // 20 req/60s — system sizing
-};
 
 export async function checkRateLimit(
   key: LimiterKey,
