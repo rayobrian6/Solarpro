@@ -43,6 +43,15 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
+    // SECURITY: equipmentType allowlist — only accept known types
+    const VALID_EQUIPMENT_TYPES = new Set(['panel', 'inverter', 'mounting', 'battery']);
+    if (typeof equipmentType !== 'string' || !VALID_EQUIPMENT_TYPES.has(equipmentType)) {
+      return NextResponse.json({
+        success: false,
+        error: `Unknown equipment type: ${String(equipmentType)}`,
+      }, { status: 400 });
+    }
+
     // userId from authenticated session (not from body)
     const userId = user.id;
 

@@ -1,6 +1,6 @@
 // ============================================================
 // app/api/admin/distributor-prices/route.ts
-// ─────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────
 // CRUD API for admin-managed distributor price overrides.
 //
 // GET    /api/admin/distributor-prices
@@ -17,14 +17,18 @@
 //   Body: { id } — soft-delete (sets active=false)
 //   Body: { id, hard: true } — hard delete (removes row)
 //
+// PATCH  /api/admin/distributor-prices — reactivate a soft-deleted override
+//   Body: { id }
+//
 // GET    /api/admin/distributor-prices/catalog
 //   Returns the full static catalog from distributorPricing.ts (read-only).
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import {
   DISTRIBUTOR_PRICE_CATALOG,
   CATEGORY_FALLBACK_PRICES,
@@ -46,6 +50,11 @@ export async function GET(req: NextRequest) {
   const category   = searchParams.get('category')    || null;
   const partNumber = searchParams.get('part_number') || null;
   const activeOnly = searchParams.get('active') !== 'false'; // default true
+
+  // Validate user_id query param if provided
+  if (userId && !isValidUUID(userId)) {
+    return NextResponse.json({ success: false, error: 'Invalid user_id format.' }, { status: 400 });
+  }
 
   try {
     const sql = await getDbReady();
@@ -113,6 +122,12 @@ export async function POST(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
+  // ── Rate limiting ──
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+  }
+
   let body: {
     user_id?: string;
     part_number?: string;
@@ -125,12 +140,6 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
-
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
@@ -148,6 +157,28 @@ export async function POST(req: NextRequest) {
   }
   if (body.part_number === '*' && !body.category) {
     return NextResponse.json({ success: false, error: 'category is required when part_number is "*"' }, { status: 400 });
+  }
+
+  // ── UUID validation on optional user_id ──
+  if (body.user_id && !isValidUUID(body.user_id)) {
+    return NextResponse.json({ success: false, error: 'Invalid user_id format.' }, { status: 400 });
+  }
+
+  // ── Field length caps ──
+  if (body.part_number.trim().length > 100) {
+    return NextResponse.json({ success: false, error: 'part_number must be 100 characters or fewer.' }, { status: 400 });
+  }
+  if (body.category && body.category.length > 100) {
+    return NextResponse.json({ success: false, error: 'category must be 100 characters or fewer.' }, { status: 400 });
+  }
+  if (body.label && body.label.length > 200) {
+    return NextResponse.json({ success: false, error: 'label must be 200 characters or fewer.' }, { status: 400 });
+  }
+  if (body.source && body.source.length > 200) {
+    return NextResponse.json({ success: false, error: 'source must be 200 characters or fewer.' }, { status: 400 });
+  }
+  if (body.notes && body.notes.length > 2000) {
+    return NextResponse.json({ success: false, error: 'notes must be 2000 characters or fewer.' }, { status: 400 });
   }
 
   const partNumber = body.part_number.trim();
@@ -239,14 +270,14 @@ export async function DELETE(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
+  // ── Rate limiting ──
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+  }
+
   let body: { id?: string; hard?: boolean };
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
-
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
@@ -254,6 +285,11 @@ export async function DELETE(req: NextRequest) {
 
   if (!body.id) {
     return NextResponse.json({ success: false, error: 'id is required' }, { status: 400 });
+  }
+
+  // ── UUID validation ──
+  if (!isValidUUID(body.id)) {
+    return NextResponse.json({ success: false, error: 'Invalid id format.' }, { status: 400 });
   }
 
   try {
@@ -290,14 +326,14 @@ export async function PATCH(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
+  // ── Rate limiting ──
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+  }
+
   let body: { id?: string };
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
-
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
@@ -305,6 +341,11 @@ export async function PATCH(req: NextRequest) {
 
   if (!body.id) {
     return NextResponse.json({ success: false, error: 'id is required' }, { status: 400 });
+  }
+
+  // ── UUID validation ──
+  if (!isValidUUID(body.id)) {
+    return NextResponse.json({ success: false, error: 'Invalid id format.' }, { status: 400 });
   }
 
   try {
