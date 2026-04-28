@@ -542,6 +542,10 @@ function EngineeringPageInner() {
     if (!projectId || projectAutoLoaded) return;
     setProjectAutoLoaded(true);
     setCurrentProjectId(projectId);
+    // Persist this project so the page auto-loads it next time (no re-selecting needed)
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('eng:lastProjectId', projectId);
+    }
 
     fetch(`/api/projects/${projectId}`)
       .then(r => r.json())
@@ -954,9 +958,23 @@ function EngineeringPageInner() {
   }, [searchParams, projectAutoLoaded]);
 
   // ── Project selector: load projects list when no projectId in URL ──────────
+  // Also: if no projectId in URL, check localStorage for last-used project and auto-redirect.
+  // This persists the user's project selection across page refreshes so they never have to
+  // re-select a client/project every time they open the Engineering page.
   useEffect(() => {
     const projectId = searchParams?.get('projectId');
-    if (projectId) return; // already have a project
+    if (projectId) return; // already have a project in URL
+
+    // Auto-redirect to last used project (persists selection across page refreshes)
+    if (typeof window !== 'undefined') {
+      const lastProjectId = window.localStorage.getItem('eng:lastProjectId');
+      if (lastProjectId) {
+        console.log('[EngineeringPage] Auto-redirecting to last project:', lastProjectId);
+        router.replace(`/engineering?projectId=${lastProjectId}`);
+        return;
+      }
+    }
+
     setSelectorLoading(true);
     fetch('/api/projects')
       .then(r => r.json())
@@ -5270,6 +5288,24 @@ function EngineeringPageInner() {
         </div>
       )}
 
+      {/* ─── Change Project chip: shown when a project IS loaded ─── */}
+      {currentProjectId && (
+        <div className="bg-slate-900/60 border-b border-slate-700/30 px-6 py-2 flex-shrink-0 flex items-center gap-3">
+          <span className="text-xs text-slate-500">Project loaded</span>
+          <button
+            className="text-xs text-amber-400 hover:text-amber-300 transition-colors underline-offset-2 hover:underline"
+            onClick={() => {
+              if (typeof window !== 'undefined') {
+                window.localStorage.removeItem('eng:lastProjectId');
+              }
+              router.push('/engineering');
+            }}
+          >
+            ↩ Change Project
+          </button>
+        </div>
+      )}
+
       {/* ── Project Selector: shown when no projectId in URL ── */}
       {!currentProjectId && (
         <div className="bg-slate-900/80 border-b border-slate-700/50 px-6 py-4 flex-shrink-0">
@@ -5310,6 +5346,10 @@ function EngineeringPageInner() {
                           onMouseDown={e => {
                             e.preventDefault();
                             setSelectorOpen(false);
+                            // Persist this project selection across page refreshes
+                            if (typeof window !== 'undefined') {
+                              window.localStorage.setItem('eng:lastProjectId', p.id);
+                            }
                             router.push(`/engineering?projectId=${p.id}`);
                           }}
                         >
@@ -6204,7 +6244,11 @@ function EngineeringPageInner() {
                         </span>
                         <button
                           className="ml-auto text-[10px] text-slate-500 hover:text-amber-400 transition-colors"
-                          onClick={() => updateConfig({ ecosystemBrand: undefined } as any)}
+                          onClick={() => {
+                            // Clear ecosystem brand so picker reappears, and unlock
+                            // userHasEditedInverters so auto-sizing can run fresh recommendations
+                            updateConfig({ ecosystemBrand: undefined, userHasEditedInverters: false } as any);
+                          }}
                           title="Clear ecosystem to re-select"
                         >
                           Change
@@ -6280,6 +6324,8 @@ function EngineeringPageInner() {
                           );
                           if (!ok) return;
                         }
+                        // Lock to prevent auto-sizing engine from overwriting ecosystem selection
+                        updates.userHasEditedInverters = true;
                         updateConfig(updates);
                         const appliedCount = Object.values(payload.selections).filter(Boolean).length;
                         setAutoLoadBanner(
@@ -6523,6 +6569,9 @@ function EngineeringPageInner() {
                                             if (t === 'micro') defaultId = MICROINVERTERS[0]?.id || inv.inverterId;
                                             else if (t === 'ecoflow') defaultId = 'ecoflow-power-ocean-10kw';
                                             else defaultId = STRING_INVERTERS[0]?.id || inv.inverterId;
+                                            // Clear ecosystemBrand when user manually switches topology
+                                            // so the EcosystemPicker reappears for the new topology type
+                                            updateConfig({ ecosystemBrand: undefined } as any);
                                             handleTopologySwitch(inv.id, t, defaultId);
                                           }
                                         }}
