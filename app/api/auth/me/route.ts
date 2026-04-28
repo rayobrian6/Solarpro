@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
   const cookieHeader = req.headers.get('cookie') || '';
   const hasCookie = cookieHeader.includes('solarpro_session');
   const cookieCount = req.cookies.size;
-  console.log(`[REQUEST_COOKIES] hasSolarproCookie=${hasCookie} totalCookies=${cookieCount} cookieHeader=${cookieHeader.substring(0, 120)}`);
+  console.log(`[REQUEST_COOKIES] hasSolarproCookie=${hasCookie} totalCookies=${cookieCount}`);
 
   const session = getUserFromRequest(req);
   const sessionValid = !!(session?.id);
