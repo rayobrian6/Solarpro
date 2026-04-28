@@ -102,7 +102,10 @@ export function middleware(req: NextRequest) {
   // Webhook endpoints (Stripe) are excluded — they use signature verification.
   const method = req.method.toUpperCase();
   const isStateChanging = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
-  const isWebhook = pathname.startsWith('/api/stripe/webhook');
+  // Exclude HMAC-signed webhooks from CSRF check — they use signature verification instead.
+  // Both are also in PUBLIC_PATHS so they bypass auth entirely; this is belt-and-suspenders.
+  const isWebhook = pathname.startsWith('/api/stripe/webhook') ||
+                    pathname.startsWith('/api/webhooks/survey-complete');
 
   if (isStateChanging && pathname.startsWith('/api/') && !isWebhook) {
     const origin = req.headers.get('origin');

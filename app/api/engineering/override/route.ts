@@ -33,6 +33,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // SECURITY: fieldName allowlist — only permit known auto-config fields.
+    // Prevents arbitrary DB field injection via this endpoint.
+    const VALID_FIELD_NAMES = new Set([
+      'exposure_category',
+      'wind_design_speed_mph',
+      'ac_breaker_size',
+      'minimum_wire_gauge',
+      'egc_size',
+      'voltage_drop_percent',
+      'conduit_fill',
+      'primary_racking',
+    ]);
+    if (!VALID_FIELD_NAMES.has(fieldName)) {
+      return NextResponse.json(
+        { success: false, error: `Invalid fieldName. Allowed values: ${[...VALID_FIELD_NAMES].join(', ')}.` },
+        { status: 400 }
+      );
+    }
+
+    // SECURITY: reason length cap — prevent oversized DB writes
+    if (reason !== undefined && reason !== null && typeof reason === 'string' && reason.length > 2000) {
+      return NextResponse.json(
+        { success: false, error: 'reason too long (max 2000 characters).' },
+        { status: 400 }
+      );
+    }
+
     // Verify user has access to this project
     const sql = await getDbReady();
     const projectCheck = await sql`
