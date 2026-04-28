@@ -1,49 +1,35 @@
-# SLD Engineering Accuracy Fix — 9 Phases
+# SLD Engineering Accuracy — Post-Audit Fix List
 
-## Phase 1 — Audit SLD Data Input
-- [ ] Add [SLD INPUT TRUTH] log block at renderSLDProfessional() entry
-- [ ] Add acRequiresNeutral field to SLDProfessionalInput interface
-- [ ] Derive acRequiresNeutral from inverter spec in route.ts and forward it
-- [ ] Trace what stringCount, conductorGauge, environment, acNeutral, interconnection values arrive
+## CRITICAL (data/logic bugs that produce wrong engineering values)
 
-## Phase 2 — Fix Wire Environment Transition
-- [ ] PV→JBOX = OPEN_AIR (already done)
-- [ ] JBOX→anything = RACEWAY (audit all segments after JBOX)
-- [ ] Fix any "OPEN AIR" label on J-box→inverter segment
-- [ ] Add regression: no segment after JBOX may be OPEN_AIR
+### Fix 1 — String count consistency (DONE)
+- [x] computeSystem() recalculated stringCount from Voc physics — ignored design's totalStrings
+- [x] Added totalStrings?: number to ComputedSystemInput
+- [x] When provided, skip Voc recalculation — use design's string count directly
+- [x] Route passes resolvedTotalStrings to computeSystem() csInput
+- [x] DC run objects now have conductorCount = totalStrings*2 (6 for 3-string, not 8)
+- [x] All 24 accuracy tests pass + 2573/2573 total
 
-## Phase 3 — Fix DC Conductor Count
-- [ ] Audit formatCallout / fb= label construction for DC segments
-- [ ] Fix: currentCarryingDcConductors = stringCount * 2 (not hardcoded 8)
-- [ ] Verify SEGMENT_2D (JBOX→INV direct) uses stringCount*2
-- [ ] Verify SEGMENT_1 (PV→JBOX) uses stringCount*2
-- [ ] Expected: "6#10 THWN-2 + #10 EGC IN EMT" for 3 strings
+### Fix 2 — AC EGC missing from callout
+- [ ] AC callout shows "2#6 THWN-2" — no EGC size listed
+- [ ] Should show "2#6 CU THWN-2 + #10 EGC IN 1\" EMT"
+- [ ] Fix AC callout in SEG4/SEG5/SEG6 to append EGC gauge
 
-## Phase 4 — Fix Optimizer String Visual
-- [ ] PV array block: show module count + string layout + optimizer count clearly
-- [ ] "36 MODULES / 3 STRINGS × 12 / 36 OPTIMIZERS — 1 PER MODULE"
+### Fix 3 — MPPT landing schedule must match design strings
+- [ ] "MPPT: CH1:3str" when inverter has 2 MPPT channels — all 3 on CH1 is wrong
+- [ ] Route builds mpptAllocation from generateStringConfig() which recalculates independently
+- [ ] Fix: when layoutStrings is present, build mpptAllocation from layoutStrings grouping
+- [ ] When not present, distribute resolvedTotalStrings across mpptChannels evenly
 
-## Phase 5 — Fix Inverter String Landings
-- [ ] 3 strings → render 3 string landings into inverter
-- [ ] Add [SLD STRING LANDING] log
+### Fix 4 — J-box label clarity
+- [ ] Text "X strings" at jbCY+jbH/2+9 visually co-located with ground drop line
+- [ ] Audit and move/add context so string count is not visually on the ground line
 
-## Phase 6 — Fix AC Conductor Labels
-- [ ] Determine acRequiresNeutral from inverter profile
-- [ ] SolarEdge SE11400H: 240V split-phase, no neutral required
-- [ ] If false: "2#X THWN-2 + #Y EGC IN EMT"
-- [ ] If true: "3#X THWN-2 + #Y EGC IN EMT"
+### Fix 5 — DC open-air callout should use per-polarity format with PV Wire insulation
+- [ ] SEGMENT_1 (PV->JBOX) fallback fb uses "resolvedDcWire USE-2/PV Wire" (single total)
+- [ ] Should be "3x#10 PV Wire DC+ / 3x#10 PV Wire DC-" format matching post-JBOX style
 
-## Phase 7 — Fix Interconnection Display
-- [ ] Compute max allowed PV breaker (120% rule NEC 705.12)
-- [ ] Show FAIL/REVIEW if pvBreaker > maxAllowed
-- [ ] Never show PASS unless 705.12 validation passes
-
-## Phase 8 — Clean Grounding
-- [ ] Ground drops only at: PV/JBOX, inverter, AC disco, MSP, meter
-- [ ] No random mid-run ground drops
-- [ ] Common EGC bus at bottom
-
-## Phase 9 — Tests + TSC + Commit
-- [ ] Regression test: 3-string SolarEdge — all 9 failure criteria
-- [ ] npx tsc --noEmit → 0 errors
-- [ ] git commit + push
+### Fix 6 — Commit and push all fixes
+- [ ] npx tsc --noEmit -> 0 errors
+- [ ] npx vitest run -> all passing
+- [ ] git add + commit + push

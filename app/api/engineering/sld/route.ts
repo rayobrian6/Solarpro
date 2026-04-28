@@ -415,6 +415,9 @@ export async function POST(req: NextRequest) {
         topology:                      isMicro ? 'micro' : (isOptimizer ? 'optimizer' : 'string'),
         optimizerMaxOutputCurrent,
         totalPanels:                   totalModules,
+        // Pass resolved string count so computeSystem() uses the same
+        // count as the SLD renderer (avoids conductor count mismatch).
+        totalStrings:                  !isMicro ? resolvedTotalStrings : undefined,
         panelWatts:                    panelWatts,
         panelVoc:                      panelVoc,
         panelIsc:                      panelIsc,

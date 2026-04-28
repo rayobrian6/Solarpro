@@ -327,6 +327,11 @@ export interface ComputedSystemInput {
   // From ProjectConfig
   topology: 'string' | 'micro' | 'optimizer';
   totalPanels: number;
+  // Optional override: when provided, this explicit string count is used
+  // instead of recalculating from physics (NEC 690.7 Voc/maxPanelsPerString).
+  // Pass this when the user's design specifies an explicit string layout so
+  // that conductor counts in run segments match the SLD string count display.
+  totalStrings?: number;
   panelWatts: number;
   panelVoc: number;
   panelIsc: number;
@@ -936,9 +941,15 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const strings: StringCalc[] = [];
 
   if (isString) {
-    // Auto-calculate optimal string count
-    // Target: as few strings as possible while staying under maxPanelsPerString
-    stringCount = Math.ceil(input.totalPanels / maxPanelsPerString);
+    // Honor explicit totalStrings override when provided (e.g. from sizing engine / user design).
+    // This ensures conductor counts in run segments match the SLD string count display
+    // instead of being recalculated from Voc physics which may differ from the design intent.
+    if (input.totalStrings && input.totalStrings > 0) {
+      stringCount = input.totalStrings;
+    } else {
+      // Auto-calculate: as few strings as possible while staying under maxPanelsPerString
+      stringCount = Math.ceil(input.totalPanels / maxPanelsPerString);
+    }
     panelsPerString = Math.floor(input.totalPanels / stringCount);
     lastStringPanels = input.totalPanels - panelsPerString * (stringCount - 1);
 
@@ -1971,6 +1982,24 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       run.conductorCallout = seg.conductorCallout;
       run.conduitSize      = seg.conduitSize;
       run.conduitFillPct   = seg.fillPercent;
+      // Phase 3 re-apply: DC_DISCO_TO_INV_RUN must use THWN-2 label.
+      // buildSegmentSchedule() generates USE-2/PV Wire for DC segments;
+      // override here after back-population so the callout is correct.
+      if (runId === 'DC_DISCO_TO_INV_RUN') {
+        const _hotBundle = seg.conductorBundle.filter((c: ConductorBundle) => c.isCurrentCarrying && c.color !== 'GRN');
+        const _egcBundle = seg.conductorBundle.filter((c: ConductorBundle) => c.color === 'GRN');
+        const _hotGaugeNum = (_hotBundle[0]?.gauge ?? '#10 AWG').replace('#','').replace(' AWG','');
+        const _egcGaugeNum = (_egcBundle[0]?.gauge ?? '#12 AWG').replace('#','').replace(' AWG','');
+        const _condAbbr = seg.raceway === 'EMT' ? 'EMT'
+          : seg.raceway === 'PVC_SCH40' ? 'PVC SCH 40'
+          : seg.raceway === 'PVC_SCH80' ? 'PVC SCH 80' : seg.raceway;
+        const _hotCnt = _hotBundle.reduce((s: number, c: ConductorBundle) => s + c.qty, 0);
+        run.insulation = 'THWN-2'; // in-raceway post-JBOX (NEC 310.15)
+        run.conductorCallout =
+          `${_hotCnt}×#${_hotGaugeNum} THWN-2\n` +
+          `1×#${_egcGaugeNum} GRN EGC\n` +
+          `IN ${seg.conduitSize} ${_condAbbr} (${seg.fillPercent.toFixed(0)}% fill)`;
+      }
       run.conduitType      = seg.raceway === 'OPEN_AIR' ? run.conduitType : (
         seg.raceway === 'EMT' ? 'EMT' :
         seg.raceway === 'PVC_SCH40' ? 'PVC Sch 40' :
@@ -1986,7 +2015,8 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       const hotConductor = seg.conductorBundle.find(c => c.isCurrentCarrying && c.color !== 'GRN');
       if (hotConductor) {
         run.wireGauge  = hotConductor.gauge;
-        run.insulation = hotConductor.insulation;
+        // DC_DISCO_TO_INV_RUN: force THWN-2 — in-raceway post-JBOX (NEC 310.15)
+        run.insulation = (runId === 'DC_DISCO_TO_INV_RUN') ? 'THWN-2' : hotConductor.insulation;
       }
       // Update EGC gauge from GRN conductor
       const egcConductor = seg.conductorBundle.find(c => c.color === 'GRN');

@@ -325,21 +325,35 @@ export function buildConductorCallout(
   conduitType: string,
   isOpenAir: boolean
 ): string {
-  // Build concise conductor description: e.g., "2×#6 THWN-2"
-  const hotCount = bundle.filter(c => c.isCurrentCarrying && c.color !== 'GRN').reduce((s, c) => s + c.qty, 0);
-  const primaryGauge = bundle.find(c => c.isCurrentCarrying && c.color !== 'GRN')?.gauge ?? '#10 AWG';
-  const gaugeNum = primaryGauge.replace('#', '').replace(' AWG', '');
-  const insulation = bundle[0]?.insulation ?? 'THWN-2';
+  // Build permit-grade conductor callout with EGC
+  const hotBundles = bundle.filter(c => c.isCurrentCarrying && c.color !== 'GRN');
+  const egcBundles  = bundle.filter(c => c.color === 'GRN');
+  const hotCount    = hotBundles.reduce((s, c) => s + c.qty, 0);
+  const primaryGauge = hotBundles[0]?.gauge ?? '#10 AWG';
+  const gaugeNum    = primaryGauge.replace('#', '').replace(' AWG', '');
+  const insulation  = hotBundles[0]?.insulation ?? 'THWN-2';
   const conductorDesc = `${hotCount}×#${gaugeNum} ${insulation}`;
-  
+
+  // EGC line (include when present)
+  const egcLine = egcBundles.length > 0
+    ? `1×#${egcBundles[0].gauge.replace('#','').replace(' AWG','')} GRN EGC`
+    : '';
+
   if (isOpenAir) {
-    return `${conductorDesc} (OPEN AIR)`;
+    const lines = [conductorDesc];
+    if (egcLine) lines.push(egcLine);
+    lines.push('OPEN AIR — NEC 690.31');
+    return lines.join('\n');
   }
   const conduitAbbrev = conduitType === 'EMT' ? 'EMT'
-    : conduitType === 'PVC Sch 40' ? 'PVC'
-    : conduitType === 'PVC Sch 80' ? 'PVC'
+    : conduitType === 'PVC Sch 40' ? 'PVC SCH 40'
+    : conduitType === 'PVC Sch 80' ? 'PVC SCH 80'
     : conduitType;
-  return `${conductorDesc} · ${conduitSize} ${conduitAbbrev}`;
+  const conduitLine = `IN ${conduitSize} ${conduitAbbrev}`;
+  const lines = [conductorDesc];
+  if (egcLine) lines.push(egcLine);
+  lines.push(conduitLine);
+  return lines.join('\n');
 }
 
 // ─── Build Segment ────────────────────────────────────────────────────────────

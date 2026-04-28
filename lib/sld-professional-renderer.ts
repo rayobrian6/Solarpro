@@ -1574,7 +1574,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push(txt(jbCX, jbCY+jbH/2+9, `${nb} branches`, {sz:F.tiny, anc:'middle'}));
     parts.push(txt(jbCX, jbCY+jbH/2+18, `${bocpd}A OCPD ea.`, {sz:F.tiny, anc:'middle'}));
   } else {
-    parts.push(txt(jbCX, jbCY+jbH/2+9, `${input.totalStrings||1} strings`, {sz:F.tiny, anc:'middle'}));
+    // String count placed to the left of J-box above wire entry to avoid overlapping ground drop
+    parts.push(txt(jbCX-jbW/2-5, jbCY-8, `${input.totalStrings||1}`, {sz:F.sub, bold:true, anc:'end', fill:'#1565C0'}));
+    parts.push(txt(jbCX-jbW/2-5, jbCY+4, 'STRINGS', {sz:F.tiny, anc:'end', fill:'#1565C0'}));
   }
   parts.push(callout(jbCX+jbW/2+12, jbCY-jbH/2-5, 2));
 
