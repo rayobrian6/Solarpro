@@ -1,39 +1,40 @@
-# SLD Ecosystem Truth Fix — 8 Phases
+# SLD Topology Template Selection Fix — 7 Phases
 
-## Phase 1 — Trace SLD Input Truth
-- [ ] Read Project Config → sizeSystemFromBrand() chain
-- [ ] Read route.ts full input construction
-- [ ] Read computeSystem() inputs consumed
-- [ ] Add [SLD TRUTH CHECK] logs at each stage
-- [ ] Identify first stage where optimizers disappear
+## Phase 1 — Trace Topology Source
+- [ ] Read Project Config → toSystemState() → route.ts full chain
+- [ ] Audit how topologyType is derived in route.ts
+- [ ] Audit isMicro / isOptimizer logic in renderer
+- [ ] Find where SolarEdge becomes micro / AC-combiner
+- [ ] Add [SLD TOPOLOGY TRACE] logs at every stage
 
-## Phase 2 — Wire Ecosystem Components into SLD Input
-- [ ] Check route.ts receives selectedBrand, inverterId, optimizerQty, integratedDcDisconnect
-- [ ] Add optimizer/battery/topology fields to SLDProfessionalInput if missing
+## Phase 2 — Define Explicit SLD Topology Enum
+- [ ] Create/enforce SLDTopology: microinverter | string_inverter | optimizer_string | ...
+- [ ] Define canonical priority: LayoutCandidate > inverter capability > brand profile > fallback
+- [ ] Update SLDProfessionalInput to carry canonical sldTopology field
 
-## Phase 3 — Render Optimizer Topology
-- [ ] Add optimizerQty + ecosystemType fields to SLDProfessionalInput
-- [ ] Render optimizer callout on PV array block
-- [ ] Show "STRING + OPTIMIZER" topology label
+## Phase 3 — Block Wrong Fallback
+- [ ] Guard: optimizer_string NEVER renders AC combiner
+- [ ] Guard: optimizer_string NEVER renders micro labels
+- [ ] Guard: log [SLD TOPOLOGY CONTAMINATION] if micro components in optimizer path
+- [ ] Remove stale APsystems/Enphase references from SolarEdge path
 
-## Phase 4 — Fix J-Box Environment Transition
-- [ ] Verify SEG2 (JBOX→Inverter) = RACEWAY with THWN-2 label
+## Phase 4 — Optimizer String Template
+- [ ] Implement/repair optimizer_string render path
+- [ ] Correct node sequence: PV→Optimizer→JBOX→StringInverter→ACDisco→MSP→Meter
+- [ ] Correct labels: optimizer callout, SE inverter, raceway JBOX→INV
 
-## Phase 5 — Remove Invented DC Disconnect
-- [ ] Add integratedDcDisconnect to SLDProfessionalInput
-- [ ] Guard DC disco render: skip if integratedDcDisconnect=true
-- [ ] Add [SLD DEVICE OMITTED] log
+## Phase 5 — Microinverter Template Isolation
+- [ ] Ensure micro path ONLY triggers when topology === 'microinverter'
+- [ ] Ensure AC combiner ONLY appears in micro path
+- [ ] Audit isMicro guard in renderer
 
-## Phase 6 — Correct DC Conductor Labels
-- [ ] Fix formatCallout: raceway = "6#10 THWN-2 + #10 EGC IN EMT"
-- [ ] Fix open-air label: "3 STRINGS / 6 PV CONDUCTORS + EGC"
+## Phase 6 — Remove Stale Component Contamination
+- [ ] Audit why APsystems DS3-S appears in SolarEdge project
+- [ ] Find stale source: config.inverters, ecosystemComponents, localStorage, toSystemState
+- [ ] Clear incompatible old topology when selectedBrand changes
 
-## Phase 7 — Battery Visibility Check
-- [ ] Add [SLD BATTERY CHECK] logs at all stages
-
-## Phase 8 — Regression Test
-- [ ] Write test: 36×400W SolarEdge SE11400H, 3×12, 36 optimizers, integratedDcDisconnect=true
-
-## Phase 9 — TSC + commit + push
+## Phase 7 — Regression Tests + TSC + Commit
+- [ ] Test: SolarEdge SE11400H optimizer_string → no AC combiner, no micro labels
+- [ ] Test: APsystems microinverter → AC combiner, no string inverter
 - [ ] npx tsc --noEmit → 0 errors
 - [ ] git commit + push

@@ -1375,7 +1375,18 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     console.log('[SLD SYMBOLS V2 ACTIVE] renderSLDProfessional — hybrid realism v3.0');
   }
   const parts: string[] = [];
-  const isMicro = input.topologyType === 'MICROINVERTER';
+  // Phase 3 — Topology contamination guard
+  // ecosystemTopology is the canonical field (set by route.ts after sizingResult).
+  // topologyType may be stale from body. We use ecosystemTopology when available.
+  const _ecoTopo = input.ecosystemTopology ?? '';
+  const _isOptimizerEco = _ecoTopo === 'optimizer';
+  const _isMicroEco     = _ecoTopo === 'micro';
+  const _rawIsMicro = input.topologyType === 'MICROINVERTER';
+  const isMicro = _isMicroEco || (_rawIsMicro && !_isOptimizerEco);
+  if (_isOptimizerEco && _rawIsMicro) {
+    console.error('[SLD TOPOLOGY CONTAMINATION] ecosystemTopology=optimizer but topologyType=MICROINVERTER' +
+      ' — micro path blocked, rendering optimizer_string. brand=' + (input.selectedBrand ?? 'unknown'));
+  }
   // Instantiate overlap guard for this diagram — prevents parallel wires from overlapping
   const resolveSegY = makeOverlapGuard();
 

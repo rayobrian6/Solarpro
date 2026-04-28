@@ -89,13 +89,21 @@ export async function POST(req: NextRequest) {
     const panelImp     = Number(body.panelImp)     || 9.57;
     const panelWatts   = Number(body.panelWatts)   || 400;
     const designTempMin = Number(body.designTempMin ?? -10);
-    const topologyType  = String(body.topologyType ?? 'STRING_INVERTER');
-    const isMicro       = topologyType === 'MICROINVERTER';
+    // Phase 7 Topology Fix: body.topologyType is the INITIAL value from the client.
+    // It may be STALE (e.g. 'MICROINVERTER' from a previous APsystems project when
+    // the user has since switched to SolarEdge optimizer).
+    // After sizeSystemFromBrand() runs, we override with sizingResult.topology
+    // (the canonical brand-profile topology). See _canonicalTopologyType below.
+    const _bodyTopologyType = String(body.topologyType ?? 'STRING_INVERTER');
+    // Temporary booleans from body — will be re-derived after sizingResult
+    let topologyType  = _bodyTopologyType;
+    let isMicro       = _bodyTopologyType === 'MICROINVERTER';
     // v47.410 — Distinguish optimizer vs plain-string topology so ComputedSystem
     // can apply NEC 690.8(A)(2) to conductor/OCPD sizing for SolarEdge/Tigo
     // systems. Prior to v47.410 both collapsed to 'string', which caused the
     // SLD to print panel-Isc ampacity for optimizer systems.
-    const isOptimizer   = topologyType === 'OPTIMIZER' || topologyType === 'STRING_OPTIMIZER';
+    let isOptimizer   = _bodyTopologyType === 'OPTIMIZER' || _bodyTopologyType === 'STRING_OPTIMIZER'
+                     || _bodyTopologyType === 'STRING_WITH_OPTIMIZER';
 
     // Auto String Generation (NEC 690.7)
     // SKIP for microinverter topology -- micros convert DC->AC at each panel, no DC strings
@@ -164,6 +172,64 @@ export async function POST(req: NextRequest) {
       console.warn('[SLD B3] No selectedBrand/selectedInverterId in request — SLD layout derived from body only');
     }
 
+    // ── Canonical topology override (Phase 7 Topology Fix) ──────────────────
+    // sizingResult.topology is authoritative: it comes from the brand profile
+    // (e.g. solaredge → 'optimizer', enphase → 'micro', fronius → 'string').
+    // body.topologyType may be stale (e.g. 'MICROINVERTER' from prev project).
+    // Priority: sizingResult.topology > body.topologyType
+    if (sizingResult?.topology) {
+      const _engTopo = sizingResult.topology; // 'optimizer' | 'micro' | 'string' | 'hybrid'
+      const _bodyIsMicro = _bodyTopologyType === 'MICROINVERTER';
+      const _bodyIsOpt   = _bodyTopologyType === 'OPTIMIZER'
+                        || _bodyTopologyType === 'STRING_OPTIMIZER'
+                        || _bodyTopologyType === 'STRING_WITH_OPTIMIZER';
+      // Only override when engine contradicts body (prevents false override when body is correct)
+      if (_engTopo === 'optimizer' && _bodyIsMicro) {
+        topologyType = 'STRING_WITH_OPTIMIZER';
+        isMicro      = false;
+        isOptimizer  = true;
+        console.warn('[SLD TOPOLOGY OVERRIDE] body=MICROINVERTER overridden by engine=optimizer' +
+          ' (selectedBrand=' + (_selectedBrand ?? 'none') + ')' +
+          ' — stale micro config replaced with optimizer_string');
+      } else if (_engTopo === 'string' && (_bodyIsMicro || _bodyIsOpt)) {
+        topologyType = 'STRING_INVERTER';
+        isMicro      = false;
+        isOptimizer  = false;
+        console.warn('[SLD TOPOLOGY OVERRIDE] body=' + _bodyTopologyType + ' overridden by engine=string' +
+          ' (selectedBrand=' + (_selectedBrand ?? 'none') + ')');
+      } else if (_engTopo === 'micro' && !_bodyIsMicro) {
+        topologyType = 'MICROINVERTER';
+        isMicro      = true;
+        isOptimizer  = false;
+        console.warn('[SLD TOPOLOGY OVERRIDE] body=' + _bodyTopologyType + ' overridden by engine=micro' +
+          ' (selectedBrand=' + (_selectedBrand ?? 'none') + ')');
+      } else {
+        // Body and engine agree — no override needed
+        console.log('[SLD TOPOLOGY] body=' + _bodyTopologyType + ' engine=' + _engTopo + ' — agree, no override');
+      }
+    } else {
+      // No sizingResult — warn but keep body value
+      if (_bodyTopologyType === 'MICROINVERTER') {
+        // If body says micro but brand suggests optimizer, guard against contamination
+        const _brandIsOptimizer = !!(_selectedBrand && ['solaredge', 'tigo', 'huawei-optimizer'].includes(_selectedBrand.toLowerCase()));
+        if (_brandIsOptimizer) {
+          topologyType = 'STRING_WITH_OPTIMIZER';
+          isMicro      = false;
+          isOptimizer  = true;
+          console.warn('[SLD TOPOLOGY GUARD] No sizingResult but selectedBrand=' + _selectedBrand +
+            ' is optimizer brand — body MICROINVERTER overridden to STRING_WITH_OPTIMIZER');
+        }
+      }
+    }
+    // Log final canonical topology
+    console.log('[SLD TOPOLOGY TRACE] stage=route_final' +
+      ' bodyTopology=' + _bodyTopologyType +
+      ' canonicalTopology=' + topologyType +
+      ' isMicro=' + isMicro +
+      ' isOptimizer=' + isOptimizer +
+      ' selectedBrand=' + (_selectedBrand ?? 'none') +
+      ' engineTopology=' + (sizingResult?.topology ?? 'none'));
+
     // Resolved layout values: prefer sizing-engine truth, fall back to body
     const layoutInverterCount = sizingResult?.inverterCount ?? null;
     const layoutStrings       = sizingResult?.strings        ?? null;
@@ -187,7 +253,7 @@ export async function POST(req: NextRequest) {
       : undefined;
 
     console.log('[SLD TRUTH CHECK] stage=route selectedBrand=' + (_selectedBrand ?? 'none') +
-      ' topology=' + (isOptimizer ? 'optimizer' : isMicro ? 'micro' : 'string') +
+      ' topology=' + topologyType + ' (isOptimizer=' + isOptimizer + ' isMicro=' + isMicro + ')' +
       ' optimizerQty=' + (_resolvedOptimizerQty ?? 0) +
       ' integratedDcDisconnect=' + _integratedDcDisconnect +
       ' stringCount=' + (layoutStrings?.length ?? 0) +
@@ -437,7 +503,7 @@ export async function POST(req: NextRequest) {
       drawingDate:             String(body.drawingDate ?? body.date ?? new Date().toLocaleDateString()),
       drawingNumber:           String(body.drawingNumber           ?? 'SLD-001'),
       revision:                String(body.revision                ?? 'A'),
-      topologyType:            String(body.topologyType            ?? 'STRING_INVERTER'),
+      topologyType:            topologyType,  // Phase 7: canonical (engine-overridden) topology
       totalModules,
       totalStrings:            resolvedTotalStrings,
       panelModel:              String(body.panelModel              ?? 'Q.PEAK DUO BLK ML-G10+ 400W'),
