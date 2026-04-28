@@ -42,6 +42,12 @@ export async function POST(
   // -- Load project ----------------------------------------------------------
   let sql;
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     sql = await getDbReady();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

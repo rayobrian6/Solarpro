@@ -24,6 +24,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Company name and email are required.' }, { status: 400 });
     }
 
+    // SECURITY: field length caps + numeric type checks
+    if (typeof companyName    === 'string' && companyName.length    > 200)  return NextResponse.json({ success: false, error: 'companyName too long (max 200).'    }, { status: 400 });
+    if (typeof contactEmail   === 'string' && contactEmail.length   > 320)  return NextResponse.json({ success: false, error: 'contactEmail too long (max 320).'   }, { status: 400 });
+    if (contactPhone && typeof contactPhone === 'string' && contactPhone.length > 30)   return NextResponse.json({ success: false, error: 'contactPhone too long (max 30).'   }, { status: 400 });
+    if (message      && typeof message      === 'string' && message.length      > 5000) return NextResponse.json({ success: false, error: 'message too long (max 5000).'      }, { status: 400 });
+    if (numberOfInstallers !== undefined && numberOfInstallers !== null && typeof numberOfInstallers !== 'number' && isNaN(parseInt(numberOfInstallers))) return NextResponse.json({ success: false, error: 'numberOfInstallers must be a number.' }, { status: 400 });
+    if (monthlyInstalls    !== undefined && monthlyInstalls    !== null && typeof monthlyInstalls    !== 'number' && isNaN(parseInt(monthlyInstalls)))    return NextResponse.json({ success: false, error: 'monthlyInstalls must be a number.'    }, { status: 400 });
+
     const emailBody = `
 New Enterprise Lead — SolarPro
 

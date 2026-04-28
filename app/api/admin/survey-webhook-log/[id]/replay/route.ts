@@ -13,6 +13,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export async function POST(
   req: NextRequest,
@@ -20,6 +21,12 @@ export async function POST(
 ) {
   const admin = await requireAdminApi(req);
   if (!admin) {
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
     return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   }
 

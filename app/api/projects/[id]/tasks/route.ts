@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 
 export async function GET(
   req: NextRequest,
@@ -67,6 +67,12 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
@@ -92,6 +98,11 @@ export async function PATCH(
         { success: false, error: 'Missing or invalid field: taskId' },
         { status: 400 }
       );
+    }
+
+    // SECURITY: UUID validation for taskId
+    if (!isValidUUID(taskId)) {
+      return NextResponse.json({ success: false, error: 'Invalid taskId format.' }, { status: 400 });
     }
 
     if (status !== 'pending' && status !== 'completed') {

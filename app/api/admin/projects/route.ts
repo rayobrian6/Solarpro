@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -61,6 +62,12 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
 
   try {
     const sql = await getDbReady();

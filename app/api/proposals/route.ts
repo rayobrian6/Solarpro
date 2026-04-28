@@ -87,6 +87,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -98,6 +104,13 @@ export async function POST(req: NextRequest) {
     }
     if (!isValidUUID(projectId)) {
       return NextResponse.json({ success: false, error: 'Invalid projectId format' }, { status: 400 });
+    }
+
+    // SECURITY: field length caps + validDays range check
+    if (title      && typeof title      === 'string' && title.length      > 200) return NextResponse.json({ success: false, error: 'title too long (max 200).'      }, { status: 400 });
+    if (preparedBy && typeof preparedBy === 'string' && preparedBy.length > 200) return NextResponse.json({ success: false, error: 'preparedBy too long (max 200).' }, { status: 400 });
+    if (typeof validDays !== 'number' || !Number.isFinite(validDays) || validDays < 1 || validDays > 365) {
+      return NextResponse.json({ success: false, error: 'validDays must be a number between 1 and 365.' }, { status: 400 });
     }
 
     // Fetch full project with layout + client + production

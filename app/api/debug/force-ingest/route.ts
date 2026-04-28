@@ -20,6 +20,7 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady } from '@/lib/db-neon';
 import pg from 'pg';
 import { resolveIngestOwner } from '@/lib/survey/ingest/ownerResolver';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic  = 'force-dynamic';
 export const runtime  = 'nodejs';
@@ -203,6 +204,12 @@ export async function POST(req: NextRequest) {
 
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
 
   const results: IngestResult[] = [];
   let photosProcessed = 0;

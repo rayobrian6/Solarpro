@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 import crypto from 'crypto';
 
@@ -55,10 +55,25 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const sql = await getDbReady();
     const body = await req.json();
     const { id, action } = body;
     if (!id || !action) return NextResponse.json({ success: false, error: 'Missing id or action' }, { status: 400 });
+
+    // SECURITY: UUID validation for target user id
+    if (!isValidUUID(id)) return NextResponse.json({ success: false, error: 'Invalid user ID format.' }, { status: 400 });
+
+    // SECURITY: field length caps
+    if (typeof action       === 'string' && action.length       > 50)  return NextResponse.json({ success: false, error: 'action too long (max 50).'       }, { status: 400 });
+    if (body.note    && typeof body.note    === 'string' && body.note.length    > 500) return NextResponse.json({ success: false, error: 'note too long (max 500).'    }, { status: 400 });
+    if (body.name    && typeof body.name    === 'string' && body.name.length    > 200) return NextResponse.json({ success: false, error: 'name too long (max 200).'    }, { status: 400 });
+    if (body.company && typeof body.company === 'string' && body.company.length > 200) return NextResponse.json({ success: false, error: 'company too long (max 200).' }, { status: 400 });
 
     // Fetch target user info for logging
     const targetRows = await sql`SELECT id, name, email, company, role FROM users WHERE id = ${id} LIMIT 1`;

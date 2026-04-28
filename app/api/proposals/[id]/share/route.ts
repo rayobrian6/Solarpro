@@ -8,6 +8,7 @@ import { getDbReady, handleRouteDbError, getProjectWithDetails, getPricingConfig
 import { getUserFromRequest } from '@/lib/auth';
 import { v4 as uuidv4 } from 'uuid';
 import { getBaseUrl } from '@/lib/env';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // POST /api/proposals/[id]/share — generate a shareable token for a proposal
 export async function POST(
@@ -17,6 +18,12 @@ export async function POST(
   try {
     const user = await getUserFromRequest(req);
     if (!user) {
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('standard', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 

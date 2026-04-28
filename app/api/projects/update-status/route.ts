@@ -20,6 +20,12 @@ import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
 
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
@@ -40,6 +46,12 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'Missing or invalid field: projectId' },
         { status: 400 }
       );
+    }
+
+    // SECURITY: UUID validation for projectId
+    const { isValidUUID } = await import('@/lib/db-neon');
+    if (!isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
     }
 
     if (!status || typeof status !== 'string') {

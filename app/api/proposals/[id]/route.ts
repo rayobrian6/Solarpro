@@ -59,6 +59,12 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
 export async function PUT(req: NextRequest, context: RouteContext) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     // Require authenticated session
     const user = await getUserFromRequest(req);
     if (!user) {
@@ -90,6 +96,11 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
     const body = await req.json() as Record<string, unknown>;
 
+    // SECURITY: field length caps
+    if (body.title      && typeof body.title      === 'string' && body.title.length      > 200) return NextResponse.json({ success: false, error: 'title too long (max 200).'      }, { status: 400 });
+    if (body.preparedBy && typeof body.preparedBy === 'string' && body.preparedBy.length > 200) return NextResponse.json({ success: false, error: 'preparedBy too long (max 200).' }, { status: 400 });
+    if (body.status     && typeof body.status     === 'string' && body.status.length     > 50)  return NextResponse.json({ success: false, error: 'status too long (max 50).'      }, { status: 400 });
+
     const existing = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;
     if (existing.length === 0) {
       return NextResponse.json({ success: false, error: 'Proposal not found' }, { status: 404 });
@@ -116,12 +127,23 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 // PATCH — partial update (status, title rename)
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = await getUserFromRequest(req);
     const { id } = await context.params;
     if (!isValidUUID(id)) return NextResponse.json({ success: false, error: 'Invalid ID' }, { status: 400 });
 
     const sql = await getDbReady();
     const body = await req.json() as Record<string, unknown>;
+
+    // SECURITY: field length caps (applied to both public and authenticated paths)
+    if (body.title      && typeof body.title      === 'string' && body.title.length      > 200) return NextResponse.json({ success: false, error: 'title too long (max 200).'      }, { status: 400 });
+    if (body.preparedBy && typeof body.preparedBy === 'string' && body.preparedBy.length > 200) return NextResponse.json({ success: false, error: 'preparedBy too long (max 200).' }, { status: 400 });
+    if (body.status     && typeof body.status     === 'string' && body.status.length     > 50)  return NextResponse.json({ success: false, error: 'status too long (max 50).'      }, { status: 400 });
 
     // Public token-based status update (homeowner view page) — no auth required.
     // Only 'viewed' and 'accepted' are allowed via this path; full edits still require ownership.

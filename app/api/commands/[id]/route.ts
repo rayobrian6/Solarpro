@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 
 /**
  * PATCH /api/commands/[id] — Complete or snooze a command
@@ -14,13 +14,26 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('commands', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
+
+    // SECURITY: UUID validation — prevent injection via route parameter
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ error: 'Invalid command ID.' }, { status: 400 });
+    }
+
     const body = await req.json();
     const { action, snooze_days } = body;
 
+    // SECURITY: action allowlist
     if (!action || !['complete', 'snooze'].includes(action)) {
       return NextResponse.json({ error: 'action must be "complete" or "snooze"' }, { status: 400 });
     }
@@ -38,7 +51,7 @@ export async function PATCH(
       return NextResponse.json({ command: row });
     }
 
-    // Snooze: push due_date forward
+    // Snooze: push due_date forward — snooze_days clamped [1, 30]
     const days = Math.min(Math.max(snooze_days || 1, 1), 30);
     const [row] = await sql`
       UPDATE command_center_actions
@@ -61,10 +74,22 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('commands', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { id } = await params;
+
+    // SECURITY: UUID validation — prevent injection via route parameter
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ error: 'Invalid command ID.' }, { status: 400 });
+    }
+
     const sql = await getDbReady();
 
     const [row] = await sql`

@@ -21,6 +21,12 @@ export async function POST(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const sql = await getDbReady();
     const b = await req.json();
     const rows = await sql`
@@ -42,6 +48,12 @@ export async function PATCH(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const sql = await getDbReady();
     const b = await req.json();
     if (!b.id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
@@ -68,6 +80,12 @@ export async function DELETE(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const sql = await getDbReady();
     const { id } = await req.json();
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });

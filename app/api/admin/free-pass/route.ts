@@ -17,6 +17,12 @@ export const runtime = 'nodejs';
  */
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {{
+      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
+    }}
+
     const body = await req.json().catch(() => ({}));
     const { email, action = 'grant', plan = 'contractor', note = 'Free pass granted by admin', secret } = body;
 

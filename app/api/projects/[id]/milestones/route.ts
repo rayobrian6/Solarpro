@@ -1,19 +1,23 @@
 /**
  * /api/projects/[id]/milestones
- * 
+ *
  * GET   — Fetch all milestones for a project
  * POST  — Create a new milestone
  * PATCH — Update a milestone status/date
- * 
+ *
  * v47.350: Operations Pipeline
  * v47.350-h: Hardened — standardized { success, data } response
+ * Phase 27b/28: Rate limiting + field caps + UUID validation + date/status validation
  */
 
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
+
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const VALID_MILESTONE_STATUSES = new Set(['pending', 'in_progress', 'completed', 'skipped']);
 
 export async function GET(
   req: NextRequest,
@@ -49,9 +53,7 @@ export async function GET(
 
     return NextResponse.json({
       success: true,
-      data: {
-        milestones: milestones || [],
-      },
+      data: { milestones: milestones || [] },
     });
 
   } catch (error: unknown) {
@@ -64,6 +66,12 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
@@ -81,11 +89,19 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const name = body?.name;
+    const name     = body?.name;
     const due_date = body?.due_date;
 
     if (!name || typeof name !== 'string') {
       return NextResponse.json({ success: false, error: 'Missing or invalid field: name' }, { status: 400 });
+    }
+
+    // SECURITY: field length caps + date format validation
+    if (name.length > 200) {
+      return NextResponse.json({ success: false, error: 'name too long (max 200).' }, { status: 400 });
+    }
+    if (due_date && typeof due_date === 'string' && !DATE_REGEX.test(due_date)) {
+      return NextResponse.json({ success: false, error: 'due_date must be in YYYY-MM-DD format.' }, { status: 400 });
     }
 
     const sql = await getDbReady();
@@ -106,9 +122,7 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
-      data: {
-        milestone: result[0] || null,
-      },
+      data: { milestone: result[0] || null },
     });
 
   } catch (error: unknown) {
@@ -121,6 +135,12 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
@@ -139,11 +159,26 @@ export async function PATCH(
     }
 
     const milestoneId = body?.milestoneId;
-    const status = body?.status;
-    const due_date = body?.due_date;
+    const status      = body?.status;
+    const due_date    = body?.due_date;
 
     if (!milestoneId || typeof milestoneId !== 'string') {
       return NextResponse.json({ success: false, error: 'Missing or invalid field: milestoneId' }, { status: 400 });
+    }
+
+    // SECURITY: UUID validation for milestoneId
+    if (!isValidUUID(milestoneId)) {
+      return NextResponse.json({ success: false, error: 'Invalid milestoneId format.' }, { status: 400 });
+    }
+
+    // SECURITY: status allowlist — only known values accepted
+    if (status !== undefined && !VALID_MILESTONE_STATUSES.has(status)) {
+      return NextResponse.json({ success: false, error: `status must be one of: ${[...VALID_MILESTONE_STATUSES].join(', ')}.` }, { status: 400 });
+    }
+
+    // SECURITY: date format validation
+    if (due_date && typeof due_date === 'string' && !DATE_REGEX.test(due_date)) {
+      return NextResponse.json({ success: false, error: 'due_date must be in YYYY-MM-DD format.' }, { status: 400 });
     }
 
     const sql = await getDbReady();
@@ -187,9 +222,7 @@ export async function PATCH(
 
     return NextResponse.json({
       success: true,
-      data: {
-        milestones: milestones || [],
-      },
+      data: { milestones: milestones || [] },
     });
 
   } catch (error: unknown) {

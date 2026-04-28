@@ -61,6 +61,12 @@ export async function POST(req: NextRequest) {
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('maps-session', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const body = await req.json();
     // BUG-21-08 FIX: Validate z/x/y as non-negative integers before interpolating into URL
     const z = parseInt(String(body.z), 10);

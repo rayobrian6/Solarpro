@@ -68,6 +68,12 @@ export async function POST(req: NextRequest) {
 
   let token: string;
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('mobile-session', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     token = jwt.sign(claims, secret, {
       algorithm: 'HS256',
       noTimestamp: true, // iat set manually above

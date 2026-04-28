@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getProjectById, getProjectVersion, upsertLayout, saveProjectVersion , handleRouteDbError } from '@/lib/db-neon';
 import { Layout } from '@/types';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 type RouteContext = { params: Promise<{id: string; versionId: string}> };
 
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest, context: RouteContext) {
     const { id, versionId } = await context.params;
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('standard', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
 
     const project = await getProjectById(id, user.id);
     if (!project) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });

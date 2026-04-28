@@ -39,6 +39,13 @@ async function ensureFeedbackTable(sql: any) {
 
 export async function POST(req: NextRequest) {
   try {
+    // SECURITY: Rate limiting — prevent feedback spam / storage abuse
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('feedback', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many feedback submissions. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });

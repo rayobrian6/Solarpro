@@ -22,6 +22,16 @@ import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
  *  - Requires valid JWT session cookie — unauthenticated requests get 401.
  */
 export async function DELETE(req: NextRequest) {
+  // SECURITY: Rate limiting — very tight on destructive action (3 req / 60 min)
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const rl = await checkRateLimit('delete-account', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Too many requests. Please try again later.' },
+      { status: 429 }
+    );
+  }
+
   const user = getUserFromRequest(req);
   if (!user) {
     return NextResponse.json(

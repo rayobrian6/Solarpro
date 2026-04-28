@@ -16,6 +16,12 @@ import { generateActionsForProjects } from '@/lib/commands/generateActions';
  */
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('commands', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 

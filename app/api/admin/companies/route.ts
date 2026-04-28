@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 
 export const dynamic = 'force-dynamic';
@@ -75,11 +75,22 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const sql = await getDbReady();
     const body = await req.json();
     const { company, action } = body;
     if (!company || !action)
       return NextResponse.json({ success: false, error: 'Missing company or action' }, { status: 400 });
+
+    // SECURITY: field length caps
+    if (typeof company === 'string' && company.length > 200) return NextResponse.json({ success: false, error: 'company too long (max 200).' }, { status: 400 });
+    if (typeof action  === 'string' && action.length  > 50)  return NextResponse.json({ success: false, error: 'action too long (max 50).'  }, { status: 400 });
+    if (body.note      && typeof body.note === 'string' && body.note.length > 500) return NextResponse.json({ success: false, error: 'note too long (max 500).' }, { status: 400 });
 
     switch (action) {
 
@@ -133,6 +144,8 @@ export async function PATCH(req: NextRequest) {
         const userId = body.userId;
         if (!userId)
           return NextResponse.json({ success: false, error: 'Missing userId' }, { status: 400 });
+        if (!isValidUUID(userId))
+          return NextResponse.json({ success: false, error: 'Invalid userId format.' }, { status: 400 });
         if (admin.role !== 'super_admin')
           return NextResponse.json({ success: false, error: 'Only super_admin can promote to admin' }, { status: 403 });
         await sql`UPDATE users SET role = 'admin', updated_at = NOW() WHERE id = ${userId} AND company = ${company}`;
@@ -144,6 +157,8 @@ export async function PATCH(req: NextRequest) {
         const newOwnerId = body.newOwnerId;
         if (!newOwnerId)
           return NextResponse.json({ success: false, error: 'Missing newOwnerId' }, { status: 400 });
+        if (!isValidUUID(newOwnerId))
+          return NextResponse.json({ success: false, error: 'Invalid newOwnerId format.' }, { status: 400 });
         if (admin.role !== 'super_admin')
           return NextResponse.json({ success: false, error: 'Only super_admin can transfer ownership' }, { status: 403 });
         // Demote all current super_admins in company to admin, then promote new owner

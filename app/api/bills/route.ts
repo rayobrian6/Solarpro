@@ -35,6 +35,12 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = await getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -46,6 +52,13 @@ export async function POST(req: NextRequest) {
     if (!projectId || !isValidUUID(projectId)) {
       return NextResponse.json({ success: false, error: 'Missing or invalid projectId' }, { status: 400 });
     }
+
+    // SECURITY: field length caps + numeric type checks
+    if (utilityName && typeof utilityName === 'string' && utilityName.length > 200) return NextResponse.json({ success: false, error: 'utilityName too long (max 200).' }, { status: 400 });
+    if (fileUrl     && typeof fileUrl     === 'string' && fileUrl.length     > 500) return NextResponse.json({ success: false, error: 'fileUrl too long (max 500).'     }, { status: 400 });
+    if (monthlyKwh  !== null && monthlyKwh  !== undefined && typeof monthlyKwh  !== 'number') return NextResponse.json({ success: false, error: 'monthlyKwh must be a number.'  }, { status: 400 });
+    if (annualKwh   !== null && annualKwh   !== undefined && typeof annualKwh   !== 'number') return NextResponse.json({ success: false, error: 'annualKwh must be a number.'   }, { status: 400 });
+    if (electricRate !== null && electricRate !== undefined && typeof electricRate !== 'number') return NextResponse.json({ success: false, error: 'electricRate must be a number.' }, { status: 400 });
 
     const bill = await saveBill({
       projectId,

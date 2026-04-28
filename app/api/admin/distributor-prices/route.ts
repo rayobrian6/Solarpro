@@ -125,6 +125,12 @@ export async function POST(req: NextRequest) {
   };
 
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
@@ -235,6 +241,12 @@ export async function DELETE(req: NextRequest) {
 
   let body: { id?: string; hard?: boolean };
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
@@ -280,6 +292,12 @@ export async function PATCH(req: NextRequest) {
 
   let body: { id?: string };
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('admin', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     body = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });

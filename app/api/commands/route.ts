@@ -56,6 +56,12 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('commands', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -65,6 +71,11 @@ export async function POST(req: NextRequest) {
     if (!project_id || !title || !type) {
       return NextResponse.json({ error: 'project_id, title, and type are required' }, { status: 400 });
     }
+
+    // SECURITY: field length caps
+    if (typeof title       === 'string' && title.length       > 500)  return NextResponse.json({ error: 'title too long.'       }, { status: 400 });
+    if (typeof description === 'string' && description.length > 2000) return NextResponse.json({ error: 'description too long.' }, { status: 400 });
+    if (typeof type        === 'string' && type.length        > 50)   return NextResponse.json({ error: 'type too long.'        }, { status: 400 });
 
     const sql = await getDbReady();
 

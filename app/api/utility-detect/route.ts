@@ -10,6 +10,12 @@ import { detectUtility } from '@/lib/utilityDetector';
 // POST /api/utility-detect — detect utility from address or lat/lng
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('utility-detect', getClientIp(req));
+    if (!rl.allowed) {{
+      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
+    }}
+
     const body = await req.json();
     const { address, lat, lng, stateCode, city } = body;
 

@@ -25,6 +25,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('tos', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const body = await req.json().catch(() => ({}));
     const version: string = body?.version || CURRENT_TOS_VERSION;
 

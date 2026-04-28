@@ -40,6 +40,12 @@ import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
 
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
@@ -72,6 +78,14 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'Missing or invalid field: action' },
         { status: 400 }
       );
+    }
+
+    // SECURITY: field length caps + date format validation
+    if (typeof notes === 'string' && notes.length > 2000) {
+      return NextResponse.json({ success: false, error: 'notes too long (max 2000).' }, { status: 400 });
+    }
+    if (typeof date === 'string' && date.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return NextResponse.json({ success: false, error: 'date must be in YYYY-MM-DD format.' }, { status: 400 });
     }
 
     const transition = DEAL_TRANSITIONS[action as DealDecisionAction];

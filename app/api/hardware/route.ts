@@ -32,6 +32,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('hardware', getClientIp(req));
+    if (!rl.allowed) {{
+      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
+    }}
+
     const body = await req.json();
     const { type, data } = body;
     
@@ -67,6 +73,12 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('hardware', getClientIp(req));
+    if (!rl.allowed) {{
+      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
+    }}
+
     const body = await req.json();
     const { type, id, data } = body;
     
@@ -104,6 +116,12 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('hardware', getClientIp(req));
+    if (!rl.allowed) {{
+      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
+    }}
+
     const body = await req.json();
     const { type, id } = body;
     

@@ -49,6 +49,12 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -57,6 +63,14 @@ export async function POST(req: NextRequest) {
 
     if (!project_id || !type || !date) {
       return NextResponse.json({ error: 'project_id, type, and date are required' }, { status: 400 });
+    }
+
+    // SECURITY: field length caps + date format validation
+    if (typeof type  === 'string' && type.length  > 50)   return NextResponse.json({ error: 'type too long (max 50).'   }, { status: 400 });
+    if (typeof notes === 'string' && notes.length > 2000) return NextResponse.json({ error: 'notes too long (max 2000).'}, { status: 400 });
+    // SECURITY: date format validation — only allow YYYY-MM-DD to prevent injection
+    if (typeof date === 'string' && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return NextResponse.json({ error: 'date must be in YYYY-MM-DD format.' }, { status: 400 });
     }
 
     const sql = await getDbReady();

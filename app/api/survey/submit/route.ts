@@ -22,12 +22,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyHandoffToken } from '../../../../lib/survey/handoff/tokenMinter';
 import { REQUIRED_PHOTO_CATEGORIES } from '../../../../lib/survey/v2/types';
 import type { SurveyV2Payload } from '../../../../lib/survey/v2/types';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // ---------------------------------------------------------------------------
 // POST handler
 // ---------------------------------------------------------------------------
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    // ── Rate limiting ────────────────────────────────────────────────────────
+    const rl = await checkRateLimit('survey', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+    }
     const body = await req.json().catch(() => null);
 
     if (!body || typeof body !== 'object') {

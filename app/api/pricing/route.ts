@@ -4,6 +4,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getPricingConfig, upsertPricingConfig, handleRouteDbError, getDbReady } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 // v47.342: Admin guard removed — pricing accessible to all authenticated users
 // import { requireAdminApi } from '@/lib/adminAuth';
 
@@ -70,6 +71,12 @@ export async function POST(req: NextRequest) {
   const admin = await requireAdminApi(req);
   if (!admin) {
     return NextResponse.json({ success: false, error: 'Admin role required to modify pricing configuration.' }, { status: 403 });
+  }
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
   }
 
   try {

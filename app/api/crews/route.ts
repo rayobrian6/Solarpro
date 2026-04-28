@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 
 /**
  * GET /api/crews — List crews for current user
@@ -34,6 +34,12 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -43,6 +49,10 @@ export async function POST(req: NextRequest) {
     if (!name?.trim()) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 });
     }
+
+    // SECURITY: field length caps
+    if (name.trim().length > 100) return NextResponse.json({ error: 'name too long (max 100).'  }, { status: 400 });
+    if (color && typeof color === 'string' && color.length > 20) return NextResponse.json({ error: 'color too long (max 20).' }, { status: 400 });
 
     const sql = await getDbReady();
 
@@ -64,11 +74,20 @@ export async function POST(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const id = req.nextUrl.searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'id query param required' }, { status: 400 });
+
+    // SECURITY: UUID validation
+    if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid crew ID.' }, { status: 400 });
 
     const sql = await getDbReady();
 

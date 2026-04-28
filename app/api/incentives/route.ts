@@ -26,6 +26,12 @@ export async function GET(req: NextRequest) {
 // POST /api/incentives — calculate incentives for a specific system
 export async function POST(req: NextRequest) {
   try {
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('incentives', getClientIp(req));
+    if (!rl.allowed) {{
+      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
+    }}
+
     const user = await getUserFromRequest(req);
     if (!user) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });

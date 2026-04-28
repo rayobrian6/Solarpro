@@ -7,6 +7,7 @@ import { handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
 import db from '@/lib/db';
 import type { SolarPanel, Inverter, MountingSystem, Battery } from '@/types';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 /**
  * POST /api/equipment/save
@@ -22,6 +23,12 @@ export async function POST(req: NextRequest) {
     // Require authenticated session — userId comes from session, not body
     const user = await getUserFromRequest(req);
     if (!user) {
+
+  // ── Rate limiting ──────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('standard', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
