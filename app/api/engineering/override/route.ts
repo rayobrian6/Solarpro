@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, getDbReady } from '@/lib/auth';
-import { handleRouteDbError } from '@/lib/db-neon';
+import { handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { overrideAutoConfig } from '@/lib/engineering-automation';
 
 export const dynamic = 'force-dynamic';
@@ -29,6 +29,14 @@ export async function POST(req: NextRequest) {
     if (!projectId || !fieldName || !overrideValue) {
       return NextResponse.json(
         { success: false, error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    // SECURITY: UUID validation for projectId — prevent non-UUID strings reaching DB
+    if (!isValidUUID(projectId)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid projectId format.' },
         { status: 400 }
       );
     }

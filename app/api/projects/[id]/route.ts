@@ -33,9 +33,9 @@ export async function PUT(req: NextRequest, context: RouteContext) {
   try {
     const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
     const rl = await checkRateLimit('standard', getClientIp(req));
-    if (!rl.allowed) {{
-      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
-    }}
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
 
     const { id } = await context.params;
     if (!isValidUUID(id)) {
@@ -58,9 +58,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
     const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
     const rl = await checkRateLimit('standard', getClientIp(req));
-    if (!rl.allowed) {{
-      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
-    }}
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
 
     const { id } = await context.params;
     if (!isValidUUID(id)) {
@@ -84,9 +84,9 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
   try {
     const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
     const rl = await checkRateLimit('standard', getClientIp(req));
-    if (!rl.allowed) {{
-      return NextResponse.json({{ success: false, error: 'Too many requests. Please slow down.' }}, {{ status: 429 }});
-    }}
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
 
     const { id } = await context.params;
     if (!isValidUUID(id)) {

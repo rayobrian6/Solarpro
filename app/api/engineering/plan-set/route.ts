@@ -26,7 +26,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { execSync } from 'child_process';
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
@@ -230,6 +230,21 @@ export async function POST(req: NextRequest) {
       );
     }
     const saveToProject = !!projectId;
+
+    // SECURITY: UUID validation for projectId (optional field — only validate if provided)
+    if (projectId && !isValidUUID(projectId)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid projectId format.' },
+        { status: 400 }
+      );
+    }
+    // SECURITY: UUID validation for clientId (optional field — only validate if provided)
+    if (clientId && !isValidUUID(clientId)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid clientId format.' },
+        { status: 400 }
+      );
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // STEP 1: Run computeSystem() ONCE — SINGLE SOURCE OF TRUTH

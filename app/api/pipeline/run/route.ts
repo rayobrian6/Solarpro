@@ -13,7 +13,7 @@ export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, getProjectById, getLayoutByProject, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, getProjectById, getLayoutByProject, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { syncProjectPipeline } from '@/lib/engineering/syncPipeline';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -120,6 +120,10 @@ export async function POST(req: NextRequest) {
   const projectId = body.projectId as string;
   if (!projectId) {
     return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
+  }
+  // SECURITY: UUID validation — prevent non-UUID strings reaching DB
+  if (!isValidUUID(projectId)) {
+    return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
   }
 
   const steps:      PipelineStepResult[]            = [];
