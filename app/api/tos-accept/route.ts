@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(
-      `[TOS_ACCEPTED] userId=${user.id} email=${user.email} version=${rows[0].tos_version} at=${rows[0].tos_accepted_at}`
+      `[TOS_ACCEPTED] userId=${user.id} version=${rows[0].tos_version} at=${rows[0].tos_accepted_at}`
     );
 
     return NextResponse.json({

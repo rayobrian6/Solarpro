@@ -104,6 +104,13 @@ export interface PipelineRunResult {
 
 export async function POST(req: NextRequest) {
   const startMs = Date.now();
+
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const rl = await checkRateLimit('pipeline', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
+  }
+
   const user    = await getUserFromRequest(req);
   if (!user) {
     return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });

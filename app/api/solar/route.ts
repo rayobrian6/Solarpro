@@ -7,10 +7,12 @@ import { handleRouteDbError } from '@/lib/db-neon';
 import { RoofPlane, RoofEdgeType, SolarApiSegment } from '@/types';
 import { requireAuth } from '@/lib/security';
 
+// SECURITY: Read key from env var only — never hardcoded in source.
 const GOOGLE_SOLAR_API_KEY =
   process.env.GOOGLE_SOLAR_API_KEY ||
+  process.env.GOOGLE_MAPS_API_KEY ||
   process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
-  'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+  '';
 
 // ─── Geometry helpers ────────────────────────────────────────────────────────
 
@@ -215,6 +217,12 @@ export async function GET(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const rl = await checkRateLimit('solar-api', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
+  }
+
   const { searchParams } = new URL(req.url);
   const endpoint = searchParams.get('endpoint');
   const lat      = searchParams.get('lat');
@@ -262,6 +270,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const rl = await checkRateLimit('solar-api', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.', roofPlanes: [] }, { status: 429 });
+  }
 
   try {
     const body = await req.json();

@@ -58,9 +58,10 @@ export async function POST(req: NextRequest) {
           message: `✅ Free pass granted to existing user: ${email}`,
         });
       } else {
-        // Create placeholder account — user can reset password via login
+        // Create placeholder account — user must reset password via forgot-password flow
         const bcrypt = await import('bcryptjs');
-        const placeholderHash = await bcrypt.hash('ChangeMe123!', 10);
+        const { randomBytes } = await import('crypto');
+        const placeholderHash = await bcrypt.hash(randomBytes(32).toString('hex'), 10);
         const name = email.split('@')[0];
         await sql`
           INSERT INTO users (name, email, password_hash, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
           email,
           plan,
           note,
-          message: `✅ Free pass account created: ${email} (temp password: ChangeMe123!)`,
+          message: `✅ Free pass account created: ${email}. User must set their password via the forgot-password flow.`,
         });
       }
     } else if (action === 'revoke') {

@@ -5,11 +5,21 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/security';
 
-const GOOGLE_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+// SECURITY: Read key from env var only — never hardcoded in source.
+const GOOGLE_API_KEY =
+  process.env.GOOGLE_MAPS_API_KEY ||
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  '';
 
 export async function GET(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const rl = await checkRateLimit('geo', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
+  }
 
   const { searchParams } = new URL(req.url);
   const lat = searchParams.get('lat');

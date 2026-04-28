@@ -64,7 +64,13 @@ export async function GET(_req: NextRequest) {
  * Upserts the pricing configuration (single active row).
  */
 export async function POST(req: NextRequest) {
-  // v47.342: Pricing config accessible to all authenticated users (not admin-only)
+  // SECURITY: BUG-22-07 FIX — Pricing config is global and shared across all users.
+  // Only admins should be able to modify it. Require admin role.
+  const { requireAdminApi } = await import('@/lib/adminAuth');
+  const admin = await requireAdminApi(req);
+  if (!admin) {
+    return NextResponse.json({ success: false, error: 'Admin role required to modify pricing configuration.' }, { status: 403 });
+  }
 
   try {
     const body = await req.json();

@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     }
 
     const rawToken = token.trim();
-    console.log(`[password-reset] POST — token length: ${rawToken.length}`);
+    // [password-reset] token length logging removed — avoid leaking token metadata
 
     const sql = await getDbReady();
 
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Hash the incoming raw token (SHA-256)
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-    console.log(`[password-reset] POST — computed hash prefix: ${tokenHash.substring(0, 16)}...`);
+    // hash prefix logging removed — avoid leaking token hash metadata
 
     // 2. Look up the token record
     const tokenRows = await sql`
@@ -160,7 +160,7 @@ export async function GET(req: NextRequest) {
     }
 
     const rawToken = token.trim();
-    console.log(`[password-reset] GET validate — token length: ${rawToken.length}`);
+    // token length logging removed — avoid leaking token metadata
 
     const sql = await getDbReady();
 
@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
     }
 
     const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-    console.log(`[password-reset] GET validate — computed hash prefix: ${tokenHash.substring(0, 16)}...`);
+    // hash prefix logging removed — avoid leaking token hash metadata
 
     const rows = await sql`
       SELECT id, expires_at

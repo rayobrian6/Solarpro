@@ -106,6 +106,10 @@ export async function PATCH(req: NextRequest) {
       await logAdminAction({ adminId: admin.id, action: 'set_role', targetUserId: id, targetCompany: targetUser?.company, metadata: { newRole: role, previousRole: targetUser?.role, targetEmail: targetUser?.email } });
 
     } else if (action === 'set_plan') {
+      const VALID_PLANS = ['starter', 'professional', 'contractor', 'free_pass'];
+      if (!body.plan || !VALID_PLANS.includes(body.plan)) {
+        return NextResponse.json({ success: false, error: `Invalid plan. Must be one of: ${VALID_PLANS.join(', ')}` }, { status: 400 });
+      }
       await sql`UPDATE users SET plan = ${body.plan}, updated_at = NOW() WHERE id = ${id}`;
       await logAdminAction({ adminId: admin.id, action: 'set_plan', targetUserId: id, targetCompany: targetUser?.company, metadata: { newPlan: body.plan, targetEmail: targetUser?.email } });
 
@@ -113,6 +117,9 @@ export async function PATCH(req: NextRequest) {
       const { name, company, role, plan } = body;
       if (role && !['user', 'admin', 'super_admin'].includes(role))
         return NextResponse.json({ success: false, error: 'Invalid role' }, { status: 400 });
+      const VALID_PLANS = ['starter', 'professional', 'contractor', 'free_pass'];
+      if (plan && !VALID_PLANS.includes(plan))
+        return NextResponse.json({ success: false, error: `Invalid plan. Must be one of: ${VALID_PLANS.join(', ')}` }, { status: 400 });
       await sql`UPDATE users SET
         name    = COALESCE(${name    ?? null}, name),
         company = COALESCE(${company ?? null}, company),

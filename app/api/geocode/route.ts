@@ -11,6 +11,12 @@ export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const rl = await checkRateLimit('geo', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
+  }
+
   try {
     const { address } = await req.json();
     if (!address?.trim()) {
@@ -39,6 +45,12 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const rlGeo = await checkRateLimit('geo', getClientIp(req));
+  if (!rlGeo.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
+  }
 
   const params = req.nextUrl.searchParams;
   const mode = params.get('mode') || 'search';

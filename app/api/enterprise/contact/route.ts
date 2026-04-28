@@ -7,6 +7,16 @@ import { getDbReady , handleRouteDbError} from '@/lib/db-neon';
 
 export async function POST(req: NextRequest) {
   try {
+    // Rate limiting — prevent spam submissions (3 req / 60s per IP)
+    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const rl = await checkRateLimit('enterprise-contact', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many submissions. Please wait before trying again.' },
+        { status: 429 }
+      );
+    }
+
     const body = await req.json();
     const { companyName, contactEmail, contactPhone, numberOfInstallers, monthlyInstalls, message } = body;
 
@@ -30,13 +40,9 @@ ${message || 'No message provided'}
 Submitted at: ${new Date().toISOString()}
     `.trim();
 
-    // Log lead (replace with email provider when ready)
-    console.log('=== ENTERPRISE LEAD ===');
-    console.log('To: sales@underthesun.solutions');
-    console.log('Subject: Enterprise Lead:', companyName);
-    console.log('Reply-To:', contactEmail);
-    console.log(emailBody);
-    console.log('=======================');
+    // BUG-22-06 FIX: Removed full PII contact form from server logs.
+    // Lead data is stored in DB (enterprise_leads table) — no need to log PII.
+    console.log('[enterprise/contact] Lead received and stored in DB');
 
     // Store in DB (best effort — table created in migration 007)
     try {
