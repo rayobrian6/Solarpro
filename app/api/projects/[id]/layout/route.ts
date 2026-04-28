@@ -7,13 +7,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getProjectById, getLayoutByProject, upsertLayout, saveProjectVersion, handleRouteDbError, getDbReady, isValidUUID} from '@/lib/db-neon';
 import { syncProjectPipeline } from '@/lib/engineering/syncPipeline';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

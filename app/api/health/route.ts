@@ -8,20 +8,18 @@ export const runtime   = 'nodejs';
  * Lightweight production health endpoint.
  * Returns HTTP 200 when healthy, 503 when degraded or misconfigured.
  *
- * Response shape:
+ * Response shape (public-safe — no env var names or infrastructure details):
  * {
- *   status:       "healthy" | "degraded" | "unhealthy",
- *   database:     "connected" | "error" | "not_configured",
- *   env_valid:    boolean,
- *   missing_env:  string[],          // required vars that are absent
- *   warned_env:   string[],          // recommended vars that are absent
- *   version:      string,            // BUILD_VERSION from lib/version.ts
- *   timestamp:    string,            // ISO-8601
- *   elapsed_ms:   number,
+ *   status:    "healthy" | "degraded" | "unhealthy",
+ *   database:  "connected" | "error" | "not_configured",
+ *   version:   string,
+ *   timestamp: string,
+ *   elapsed_ms: number,
  * }
  *
- * For a deeper check (table existence, row counts) use /api/health/database.
- * This endpoint is PUBLIC (no auth) — returns no sensitive data.
+ * SECURITY: env var names, missing var lists, and infrastructure details
+ * are NOT included in the public response. Use /api/health/env (dev/preview only,
+ * productionGuard protected) for internal diagnostics.
  */
 
 import { NextResponse } from 'next/server';
@@ -35,11 +33,11 @@ export async function GET() {
   const startMs  = Date.now();
   const timestamp = new Date().toISOString();
 
-  // ── 1. Environment validation ────────────────────────────────────────────
+  // ── 1. Environment validation ─────────────────────────────────────────────
   const envResult  = validateEnv();
   const missingVars = getMissingVars();
 
-  // ── 2. Database connectivity ─────────────────────────────────────────────
+  // ── 2. Database connectivity ──────────────────────────────────────────────
   let dbStatus: 'connected' | 'error' | 'not_configured' = 'not_configured';
   let dbError: string | undefined;
 
@@ -49,9 +47,6 @@ export async function GET() {
     dbError  = 'DATABASE_URL environment variable is not set';
   } else {
     try {
-      // Use a fresh neon() instance here (not the cached singleton) so that
-      // the health endpoint is independent of the main request path.
-      // This is intentional — health must reflect real-time DB reachability.
       const sql  = neon(dbUrl);
       await sql`SELECT 1 AS ping`;
       dbStatus = 'connected';
@@ -62,7 +57,7 @@ export async function GET() {
     }
   }
 
-  // ── 3. Overall status ────────────────────────────────────────────────────
+  // ── 3. Overall status ─────────────────────────────────────────────────────
   const isHealthy = dbStatus === 'connected' && envResult.valid;
   const isDegraded = dbStatus === 'connected' && !envResult.valid;
 
@@ -75,28 +70,25 @@ export async function GET() {
     status = 'unhealthy';
   }
 
-  // ── 4. Build response ────────────────────────────────────────────────────
+  // ── 4. Build response ─────────────────────────────────────────────────────
   const elapsed = Date.now() - startMs;
 
+  // SECURITY: Do NOT expose env var names, missing var lists, env_details,
+  // node_env, or vercel_env in the public response — these leak infrastructure
+  // information (API key names, deployment environment) to unauthenticated callers.
   const body = {
     status,
-    database:    dbStatus,
-    env_valid:   envResult.valid,
-    missing_env: missingVars.required,      // required vars that are absent
-    warned_env:  missingVars.recommended,   // recommended vars that are absent
-    env_details: envResult.details,         // per-var boolean map
-    ...(dbError ? { db_error: dbError } : {}),
-    version:     process.env.NEXT_PUBLIC_BUILD_VERSION ?? 'unknown',
-    node_env:    process.env.NODE_ENV ?? 'unknown',
-    vercel_env:  process.env.VERCEL_ENV ?? 'local',
+    database:   dbStatus,
+    version:    process.env.NEXT_PUBLIC_BUILD_VERSION ?? 'unknown',
     timestamp,
-    elapsed_ms:  elapsed,
+    elapsed_ms: elapsed,
+    ...(dbError ? { db_error: dbError } : {}),
   };
 
   console.log(
     `[HEALTH] status=${status} db=${dbStatus} env_valid=${envResult.valid}` +
-    (missingVars.required.length   ? ` missing_required=${missingVars.required.join(',')}` : '') +
-    (missingVars.recommended.length ? ` missing_recommended=${missingVars.recommended.join(',')}` : '') +
+    (missingVars.required.length   ? ` missing_required_count=${missingVars.required.length}` : '') +
+    (missingVars.recommended.length ? ` missing_recommended_count=${missingVars.recommended.length}` : '') +
     ` elapsed=${elapsed}ms`
   );
 

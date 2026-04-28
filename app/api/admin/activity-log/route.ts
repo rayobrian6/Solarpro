@@ -14,7 +14,9 @@ export async function GET(req: NextRequest) {
   const page    = Math.max(1, parseInt(searchParams.get('page') || '1'));
   const limit   = Math.min(100, parseInt(searchParams.get('limit') || '50'));
   const offset  = (page - 1) * limit;
-  const action  = searchParams.get('action') || '';
+  const actionRaw = searchParams.get('action') || '';
+  // Field length cap — prevent excessively long ILIKE patterns causing slow DB queries
+  const action  = actionRaw.slice(0, 100);
   const adminId = searchParams.get('adminId') || '';
 
   try {

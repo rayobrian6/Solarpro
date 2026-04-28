@@ -5,6 +5,7 @@ import { logAdminAction } from '@/lib/adminActivityLog';
 import { neon } from '@neondatabase/serverless';
 import fs from 'fs';
 import path from 'path';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,15 +17,14 @@ export async function POST(req: NextRequest) {
   if (admin.role !== 'super_admin')
     return NextResponse.json({ success: false, error: 'Only super_admin can run system tools' }, { status: 403 });
 
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+  }
+
   const { tool, params } = await req.json();
 
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
-
     const sql = await getDbReady();
 
     switch (tool) {

@@ -108,11 +108,15 @@ function extractTOURates(rateData: any): { touPeakRate?: number; touOffPeakRate?
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
-  const address = searchParams.get('address') || '';
-  const zip = searchParams.get('zip') || '';
-  const lat = searchParams.get('lat') || '';
-  const lon = searchParams.get('lon') || '';
-  const sector = searchParams.get('sector') || 'Residential';
+  // Length caps — prevent oversized values being forwarded to third-party NREL API
+  const address = (searchParams.get('address') || '').slice(0, 500);
+  const zip = (searchParams.get('zip') || '').slice(0, 10);
+  const lat = (searchParams.get('lat') || '').slice(0, 20);
+  const lon = (searchParams.get('lon') || '').slice(0, 20);
+  const sectorRaw = searchParams.get('sector') || 'Residential';
+  // Sector allowlist — only forward known valid values to NREL API
+  const VALID_SECTORS = new Set(['Residential', 'Commercial', 'Industrial']);
+  const sector = VALID_SECTORS.has(sectorRaw) ? sectorRaw : 'Residential';
 
   // Build URDB query
   const params = new URLSearchParams({

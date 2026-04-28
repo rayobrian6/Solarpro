@@ -9,6 +9,7 @@ import { getDbReady, isValidUUID, getProjectWithDetails, getPricingConfig, handl
 import { v4 as uuidv4 } from 'uuid';
 import type { Proposal } from '@/types';
 import { fetchProposalUtilityRate } from '@/lib/proposal/buildCanonicalProposal';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 // v48.5: fetchProposalUtilityRate called ONLY at POST (creation) — cached in data_json.dbUtilityRate. GET reads cache, no N+2.
 
 // ── Map a raw DB row → typed Proposal object ──────────────────────────────
@@ -87,8 +88,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

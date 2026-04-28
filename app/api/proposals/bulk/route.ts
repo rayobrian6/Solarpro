@@ -6,13 +6,13 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { getUserFromRequest } from '@/lib/auth';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // POST /api/proposals/bulk
 // Body: { action: 'delete' | 'archive' | 'status' | 'clear_test', ids?: string[], status?: string }
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

@@ -4,6 +4,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 /**
  * PATCH /api/commands/[id] — Complete or snooze a command
@@ -14,8 +15,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('commands', getClientIp(req));
+        const rl = await checkRateLimit('commands', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
@@ -74,8 +74,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('commands', getClientIp(req));
+        const rl = await checkRateLimit('commands', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

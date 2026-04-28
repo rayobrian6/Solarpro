@@ -5,6 +5,7 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, clearSessionCookie } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 /**
  * DELETE /api/auth/delete-account
@@ -23,8 +24,7 @@ import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
  */
 export async function DELETE(req: NextRequest) {
   // SECURITY: Rate limiting — very tight on destructive action (3 req / 60 min)
-  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-  const rl = await checkRateLimit('delete-account', getClientIp(req));
+    const rl = await checkRateLimit('delete-account', getClientIp(req));
   if (!rl.allowed) {
     return NextResponse.json(
       { success: false, error: 'Too many requests. Please try again later.' },

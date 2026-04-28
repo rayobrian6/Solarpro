@@ -25,10 +25,6 @@ export async function GET(req: NextRequest) {
 
   // --- Cookie inspection ---
   const rawCookieHeader = req.headers.get('cookie') || '';
-  const allCookieNames  = rawCookieHeader
-    .split(';')
-    .map(c => c.trim().split('=')[0].trim())
-    .filter(Boolean);
 
   const token   = req.cookies.get(COOKIE_NAME)?.value ?? null;
   const session = token ? verifyToken(token) : null;
@@ -59,15 +55,15 @@ export async function GET(req: NextRequest) {
 
     // ── Cookie ────────────────────────────────────────────────────
     cookieHeaderPresent:    rawCookieHeader.length > 0,
-    allCookieNames,
+    // SECURITY: allCookieNames removed — leaks request cookie names to unauthenticated callers.
     expectedCookieName:     COOKIE_NAME,
     hasAuthCookie:          !!token,
     tokenLength:            token ? token.length : 0,
 
     // ── Session ───────────────────────────────────────────────────
+    // SECURITY: sessionUserId and sessionUserEmail removed — PII must not be returned
+    // to unauthenticated callers even on preview deployments. Boolean validity is sufficient.
     sessionValid:           !!(session?.id),
-    sessionUserId:          session?.id   ?? null,
-    sessionUserEmail:       session?.email ?? null,
 
     // ── Secret ───────────────────────────────────────────────────
     // v48.5: authSecretFingerprint removed — leaked JWT secret metadata to unauthenticated callers.

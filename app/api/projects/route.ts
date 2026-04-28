@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getProjectsByUser, createProject, getClientById, isValidUUID , handleRouteDbError } from '@/lib/db-neon';
 import { geocodeAddress } from '@/lib/geocode';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export async function GET(req: NextRequest) {
   try {
@@ -22,8 +23,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

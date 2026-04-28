@@ -39,6 +39,7 @@ import { logger } from '@/lib/logger';
 
 import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
 import { enrichSurvey } from '@/lib/siteSurvey/enrichSurvey';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 import {
   SITE_SURVEY_PIPELINE_VERSION,
@@ -180,8 +181,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Support both session cookie (web) and Bearer token (field app)
   let userId: string | null = null;
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('survey', getClientIp(req));
+        const rl = await checkRateLimit('survey', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

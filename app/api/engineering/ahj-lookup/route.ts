@@ -17,6 +17,7 @@ import {
   type AhjRecord,
 } from '@/lib/jurisdictions/ahj-national';
 import { requireAuth } from '@/lib/security';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,8 +28,7 @@ export async function GET(req: NextRequest) {
 
   try {
     // v48.6: Rate limiting — 10 req / 30s per IP (protects heavy compute + external APIs)
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const _rl = await checkRateLimit('engineering', getClientIp(req));
+        const _rl = await checkRateLimit('engineering', getClientIp(req));
     if (!_rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many requests. Please slow down.' },

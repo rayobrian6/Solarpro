@@ -30,6 +30,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/security';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // This directive tells Next.js to use the Node.js runtime (not Edge).
 // Required for worker_threads / child_process / filesystem access.
@@ -59,8 +60,7 @@ export async function POST(req: NextRequest) {
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
   // SECURITY: Rate limit OCR — Tesseract is CPU-intensive; prevent abuse
-  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-  const _rl = await checkRateLimit('ocr', getClientIp(req));
+    const _rl = await checkRateLimit('ocr', getClientIp(req));
   if (!_rl.allowed) {
     return NextResponse.json(
       { success: false, error: 'Too many requests. Please slow down.' },
@@ -162,8 +162,10 @@ export async function POST(req: NextRequest) {
     const msg = err instanceof Error ? (err as Error).message : String(err);
     console.error('[ocr] Fatal error:', msg);
     debugLog.push(`[ocr] FATAL: ${msg}`);
+    // SECURITY: Return generic error message — do not expose internal error details
+    // (e.g. Tesseract crash messages, file paths) to callers.
     return NextResponse.json(
-      { success: false, error: msg, text: '', confidence: 0, debugLog },
+      { success: false, error: 'OCR processing failed. Please try again.', text: '', confidence: 0, debugLog },
       { status: 500 },
     );
   }

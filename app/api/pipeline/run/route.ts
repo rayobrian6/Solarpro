@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, getProjectById, getLayoutByProject, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { syncProjectPipeline } from '@/lib/engineering/syncPipeline';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -105,8 +106,7 @@ export interface PipelineRunResult {
 export async function POST(req: NextRequest) {
   const startMs = Date.now();
 
-  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-  const rl = await checkRateLimit('pipeline', getClientIp(req));
+    const rl = await checkRateLimit('pipeline', getClientIp(req));
   if (!rl.allowed) {
     return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
   }

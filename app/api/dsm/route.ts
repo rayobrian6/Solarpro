@@ -4,6 +4,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/security';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // SECURITY: Read key from env var only — never hardcoded in source.
 const GOOGLE_SOLAR_API_KEY =
@@ -128,8 +129,7 @@ export async function GET(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
-  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-  const rl = await checkRateLimit('geo', getClientIp(req));
+    const rl = await checkRateLimit('geo', getClientIp(req));
   if (!rl.allowed) {
     return NextResponse.json({ error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
   }

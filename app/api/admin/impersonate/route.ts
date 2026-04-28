@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 import { signToken } from '@/lib/auth';
 import { requireAdminApi } from '@/lib/adminAuth';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,14 +26,13 @@ export async function POST(req: NextRequest) {
   const adminCheck = await requireAdminApi(req);
   if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
+  const rl = await checkRateLimit('admin', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+  }
+
   let token: string | undefined;
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
-    if (!rl.allowed) {
-      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
-    }
-
     const body = await req.json();
     token = typeof body?.token === 'string' ? body.token : undefined;
   } catch {

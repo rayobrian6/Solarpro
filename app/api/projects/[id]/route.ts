@@ -6,6 +6,7 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getProjectById, getProjectWithDetails, updateProject, softDeleteProject, handleRouteDbError, isValidUUID} from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -31,8 +32,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
 
 export async function PUT(req: NextRequest, context: RouteContext) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
@@ -56,8 +56,7 @@ export async function PUT(req: NextRequest, context: RouteContext) {
 
 export async function PATCH(req: NextRequest, context: RouteContext) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
@@ -82,8 +81,7 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
 
 export async function DELETE(req: NextRequest, context: RouteContext) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

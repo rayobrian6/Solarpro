@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, getDbReady } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { requireAdminApi } from '@/lib/adminAuth';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -17,8 +18,7 @@ export const runtime = 'nodejs';
  */
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
+        const rl = await checkRateLimit('admin', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
@@ -37,6 +37,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'email is required' }, { status: 400 });
     }
 
+    // Field length caps — prevent oversized DB writes
+    if (typeof email === 'string' && email.length > 320) {
+      return NextResponse.json({ success: false, error: 'email too long' }, { status: 400 });
+    }
+    if (typeof note === 'string' && note.length > 500) {
+      return NextResponse.json({ success: false, error: 'note too long (max 500 chars)' }, { status: 400 });
+    }
+
+    // Plan allowlist — only accept known plan values
+    const VALID_PLANS = new Set(['starter', 'contractor', 'pro', 'enterprise', 'admin']);
+    const safePlan = typeof plan === 'string' && VALID_PLANS.has(plan) ? plan : 'contractor';
+
     const sql = await getDbReady();
 
     if (action === 'grant') {
@@ -47,7 +59,7 @@ export async function POST(req: NextRequest) {
         // Update existing user
         await sql`
           UPDATE users SET
-            plan = ${plan},
+            plan = ${safePlan},
             subscription_status = 'free_pass',
             is_free_pass = true,
             free_pass_note = ${note},
@@ -59,7 +71,7 @@ export async function POST(req: NextRequest) {
           success: true,
           action: 'granted',
           email,
-          plan,
+          plan: safePlan,
           note,
           message: `✅ Free pass granted to existing user: ${email}`,
         });
@@ -73,11 +85,11 @@ export async function POST(req: NextRequest) {
           INSERT INTO users (name, email, password_hash, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
           VALUES (
             ${name}, ${email.toLowerCase()}, ${placeholderHash},
-            'user', ${plan}, 'free_pass', true, ${note},
+            'user', ${safePlan}, 'free_pass', true, ${note},
             '2099-12-31 23:59:59+00'
           )
           ON CONFLICT (email) DO UPDATE SET
-            plan = ${plan},
+            plan = ${safePlan},
             subscription_status = 'free_pass',
             is_free_pass = true,
             free_pass_note = ${note},
@@ -88,7 +100,7 @@ export async function POST(req: NextRequest) {
           success: true,
           action: 'created',
           email,
-          plan,
+          plan: safePlan,
           note,
           message: `✅ Free pass account created: ${email}. User must set their password via the forgot-password flow.`,
         });
@@ -137,7 +149,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, action: 'deleted', email, message: `🗑️ User deleted: ${email}` });
     } else if (action === 'search') {
       // Search users by email pattern or name
-      const query = email || body.query || '';
+      const queryRaw = email || body.query || '';
+      // Length cap — prevent excessively long ILIKE patterns causing slow DB queries
+      const query = typeof queryRaw === 'string' ? queryRaw.slice(0, 200) : '';
       if (!query) return NextResponse.json({ success: false, error: 'Provide email or query to search' }, { status: 400 });
       const results = await sql`
         SELECT id, name, email, company, plan, subscription_status, is_free_pass, trial_ends_at, created_at

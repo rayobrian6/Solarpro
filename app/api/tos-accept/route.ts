@@ -6,6 +6,7 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // Current ToS version — bump this string whenever the document is materially revised
 // NOTE: not exported at module level (Next.js route files only allow HTTP method exports)
@@ -25,8 +26,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('tos', getClientIp(req));
+        const rl = await checkRateLimit('tos', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

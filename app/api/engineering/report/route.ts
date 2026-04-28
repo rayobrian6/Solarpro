@@ -11,6 +11,7 @@ import { buildDesignSnapshot } from '@/lib/engineering/designSnapshot';
 import { generateEngineeringReport } from '@/lib/engineering/reportGenerator';
 import { getProjectPhysicalData } from '@/lib/db-neon';
 import { getEngineeringReport, upsertEngineeringReport, generateReportId, isEngineeringReportStale } from '@/lib/engineering/db-engineering';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -19,8 +20,7 @@ export const maxDuration = 30;
 export async function GET(req: NextRequest) {
   try {
     // v48.6: Rate limiting — 10 req / 30s per IP (protects heavy compute + external APIs)
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const _rl = await checkRateLimit('engineering', getClientIp(req));
+        const _rl = await checkRateLimit('engineering', getClientIp(req));
     if (!_rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many requests. Please slow down.' },

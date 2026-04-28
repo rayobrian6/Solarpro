@@ -27,6 +27,7 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady } from '@/lib/db-neon';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 const SSO_TOKEN_TTL_SECONDS = 10 * 60; // 10 minutes
 
@@ -68,8 +69,7 @@ export async function POST(req: NextRequest) {
 
   let token: string;
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('mobile-session', getClientIp(req));
+        const rl = await checkRateLimit('mobile-session', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

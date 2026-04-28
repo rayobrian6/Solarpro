@@ -7,12 +7,12 @@ import { calculateSystemSize } from '@/lib/autoSizing';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { getUserFromRequest } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // POST /api/auto-size — calculate recommended system size from consumption data
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('auto-design', getClientIp(req));
+        const rl = await checkRateLimit('auto-design', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
     }

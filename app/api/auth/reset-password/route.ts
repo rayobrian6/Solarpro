@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getDbReady } from '@/lib/db-neon';
 import { hashPassword, clearSessionCookie } from '@/lib/auth';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // ── Helper: ensure password_reset_tokens table exists ────────────────────────
 async function ensureTable(sql: Awaited<ReturnType<typeof getDbReady>>): Promise<'ok' | 'missing'> {
@@ -25,8 +26,7 @@ async function ensureTable(sql: Awaited<ReturnType<typeof getDbReady>>): Promise
 export async function POST(req: NextRequest) {
   try {
     // Rate limiting — prevent token brute-force
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('password-reset', getClientIp(req));
+        const rl = await checkRateLimit('password-reset', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many attempts. Please wait before trying again.' },

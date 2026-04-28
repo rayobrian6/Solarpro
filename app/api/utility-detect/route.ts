@@ -21,7 +21,11 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { address, lat, lng, stateCode, city } = body;
+    const { address: addressRaw, lat, lng, stateCode: stateCodeRaw, city: cityRaw } = body;
+    // Length caps — prevent oversized values being forwarded to third-party geocoding APIs
+    const address   = typeof addressRaw   === 'string' ? addressRaw.slice(0, 500)   : addressRaw;
+    const stateCode = typeof stateCodeRaw === 'string' ? stateCodeRaw.slice(0, 10)  : stateCodeRaw;
+    const city      = typeof cityRaw      === 'string' ? cityRaw.slice(0, 100)      : cityRaw;
 
     let resolvedLat = lat;
     let resolvedLng = lng;
@@ -53,10 +57,11 @@ export async function POST(req: NextRequest) {
 
 // GET /api/utility-detect?address=...
 export async function GET(req: NextRequest) {
-  const address = req.nextUrl.searchParams.get('address') || '';
+  // Length caps — prevent oversized values being forwarded to third-party geocoding APIs
+  const address = (req.nextUrl.searchParams.get('address') || '').slice(0, 500);
   const lat = parseFloat(req.nextUrl.searchParams.get('lat') || '0');
   const lng = parseFloat(req.nextUrl.searchParams.get('lng') || '0');
-  const stateCode = req.nextUrl.searchParams.get('state') || '';
+  const stateCode = (req.nextUrl.searchParams.get('state') || '').slice(0, 10);
 
   if (!address && (!lat || !lng || !stateCode)) {
     return NextResponse.json({ success: false, error: 'address or lat/lng/state required' }, { status: 400 });

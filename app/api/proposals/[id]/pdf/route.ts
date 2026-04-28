@@ -27,6 +27,7 @@ import { writeFile, readFile, unlink } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import type { Proposal } from '@/types';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 const execAsync = promisify(exec);
 
@@ -160,8 +161,7 @@ function safeFilename(name: string): string {
 async function handleRequest(req: NextRequest, context: RouteContext): Promise<NextResponse> {
   try {
     // Rate limiting — reuse engineering rate limiter
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('engineering', getClientIp(req));
+        const rl = await checkRateLimit('engineering', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

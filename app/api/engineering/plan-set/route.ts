@@ -48,6 +48,7 @@ import { calcFireSetbacks } from '@/lib/engineering/fire-setbacks';
 import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
 import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
 import { BUILD_VERSION } from '@/lib/version';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -57,8 +58,7 @@ export const maxDuration = 60;
 export async function GET(req: NextRequest) {
   try {
     // v48.6: Rate limiting — 10 req / 30s per IP (protects heavy compute + external APIs)
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const _rl = await checkRateLimit('engineering', getClientIp(req));
+        const _rl = await checkRateLimit('engineering', getClientIp(req));
     if (!_rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many requests. Please slow down.' },

@@ -10,11 +10,11 @@ import { calculateProduction } from '@/lib/pvwatts';
 import { calculateFinalPrice, calculateItemizedPrice, loadPricingConfig } from '@/lib/pricingEngine';
 import { buildArraysFromLayout, buildSystemConfig, buildArrayBreakdown } from '@/lib/multiArrayEngine';
 import type { Client, Layout } from '@/types';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('production', getClientIp(req));
+        const rl = await checkRateLimit('production', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

@@ -5,6 +5,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { requireAuth } from '@/lib/security';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // SECURITY: Read key from env var only — never hardcoded in source.
 // Set GOOGLE_MAPS_API_KEY (server-side) or NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env
@@ -61,8 +62,7 @@ export async function POST(req: NextRequest) {
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('maps-session', getClientIp(req));
+        const rl = await checkRateLimit('maps-session', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

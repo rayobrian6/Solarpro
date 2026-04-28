@@ -10,6 +10,7 @@ import {
   getDbReady, verifyPassword, signToken, COOKIE_NAME, COOKIE_MAX_AGE, SessionUser
 } from '@/lib/auth';
 import { DbConfigError, isTransientDbError } from '@/lib/db-ready';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // PHASE 5: Log auth secret fingerprint on first invocation (not the secret itself)
 // This confirms the secret is stable and consistent across deployments.
@@ -32,8 +33,7 @@ export async function POST(req: NextRequest) {
   logSecretFingerprint();
   try {
     // v48.6: Rate limiting — 5 req / 60s per IP (brute-force protection)
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('login', getClientIp(req));
+        const rl = await checkRateLimit('login', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many login attempts. Please wait before trying again.' },

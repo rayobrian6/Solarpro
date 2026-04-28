@@ -9,13 +9,14 @@ export const revalidate = 0;
  *   - Verifies DATABASE_URL is set
  *   - Tests DB connectivity (SELECT 1)
  *   - Verifies required tables exist
- *   - Checks row counts on key tables
  *
  * Returns HTTP 200 when healthy, 503 when degraded/failing.
  * Called on every deploy and available for uptime monitors.
  *
- * This endpoint is intentionally PUBLIC (no auth) — same as /api/health.
- * It returns no sensitive data (only table names and boolean statuses).
+ * SECURITY: This endpoint is PUBLIC (no auth required).
+ * It returns only boolean statuses — no table names, row counts,
+ * PostgreSQL version, env var names, or other infrastructure details.
+ * Those details are available only via /api/health/env (productionGuard protected).
  */
 
 import { NextResponse } from 'next/server';
@@ -33,119 +34,92 @@ export async function GET() {
   const timestamp = new Date().toISOString();
 
   const envResult = validateEnv();
-  const checks: Record<string, any> = {
-    timestamp,
-    env: envResult.details,
-    env_valid: envResult.valid,
-    env_missing: envResult.missing,
-  };
 
   // ── DB not configured ──────────────────────────────────────────────────────
   if (!process.env.DATABASE_URL) {
-    checks.database = 'not_configured';
-    checks.tables = {};
-    checks.status = 'unhealthy';
-    checks.error = 'DATABASE_URL environment variable is not set';
-    return NextResponse.json(checks, { status: 503 });
+    return NextResponse.json({
+      timestamp,
+      status: 'unhealthy',
+      database: 'not_configured',
+      env_valid: envResult.valid,
+      elapsed_ms: Date.now() - startMs,
+    }, { status: 503 });
   }
 
   // ── DB connectivity ────────────────────────────────────────────────────────
   let sql: ReturnType<typeof neon>;
   try {
     sql = neon(process.env.DATABASE_URL);
-    const ping = await sql`SELECT 1 AS ping, NOW() AS ts, version() AS pg_version`;
-    checks.database = 'connected';
-    checks.db_ping = {
-      ok: true,
-      ts: ping[0]?.ts,
-      pg_version: (ping[0]?.pg_version as string)?.split(' ').slice(0, 2).join(' ') ?? 'unknown',
-    };
+    await sql`SELECT 1 AS ping`;
   } catch (e: unknown) {
-    checks.database = 'error';
-    checks.db_ping = { ok: false, error: (e as Error).message };
-    checks.tables = {};
-    checks.status = 'unhealthy';
-    const elapsed = Date.now() - startMs;
-    console.error(`[HEALTH_DB] Connection failed in ${elapsed}ms:`, (e as Error).message);
-    return NextResponse.json(checks, { status: 503 });
+    console.error(`[HEALTH_DB] Connection failed:`, (e as Error).message);
+    return NextResponse.json({
+      timestamp,
+      status: 'unhealthy',
+      database: 'error',
+      env_valid: envResult.valid,
+      elapsed_ms: Date.now() - startMs,
+    }, { status: 503 });
   }
 
   // ── Table existence check ──────────────────────────────────────────────────
-  const tableChecks: Record<string, any> = {};
+  // SECURITY: We check required tables but do NOT include table names or row counts
+  // in the response — those are internal schema details.
   let allRequiredPresent = true;
+  let optionalCount = 0;
 
-  // Check all tables in a single query
   const allTables = [...REQUIRED_TABLES, ...OPTIONAL_TABLES];
   try {
     const tableRows = await sql`
-      SELECT table_name, 
-             (SELECT reltuples::bigint FROM pg_class WHERE relname = t.table_name) AS approx_rows
-      FROM information_schema.tables t
+      SELECT table_name
+      FROM information_schema.tables
       WHERE table_schema = 'public'
         AND table_name = ANY(${allTables as unknown as string[]})
-      ORDER BY table_name
     `;
 
-    // Normalise: neon() returns an array, but other clients may return { rows: [...] }
-    const rows: any[] = Array.isArray(tableRows)
-      ? tableRows
-      : (tableRows as any)?.rows ?? [];
+    const rows: { table_name: string }[] = Array.isArray(tableRows)
+      ? tableRows as { table_name: string }[]
+      : ((tableRows as unknown as { rows: { table_name: string }[] })?.rows ?? []);
 
-    // If DB is connected but no tables found at all, return a safe diagnostic
-    if (!rows.length) {
-      checks.tables = {};
-      checks.status = 'database_connected_but_no_tables_detected';
-      checks.required_tables_present = false;
-      checks.missing_required_tables = [...REQUIRED_TABLES];
-      checks.elapsed_ms = Date.now() - startMs;
-      console.log('[HEALTH_DB] DB connected but no public tables found');
-      return NextResponse.json(checks, { status: 503 });
-    }
-
-    const foundTables = new Set(rows.map((r: any) => r.table_name as string));
+    const foundTables = new Set(rows.map(r => r.table_name));
 
     for (const tbl of REQUIRED_TABLES) {
-      const present = foundTables.has(tbl);
-      const row = rows.find((r: any) => r.table_name === tbl);
-      tableChecks[tbl] = {
-        exists: present,
-        required: true,
-        approx_rows: present ? (row?.approx_rows ?? 'unknown') : null,
-      };
-      if (!present) allRequiredPresent = false;
+      if (!foundTables.has(tbl)) {
+        allRequiredPresent = false;
+        break;
+      }
     }
 
-    for (const tbl of OPTIONAL_TABLES) {
-      const present = foundTables.has(tbl);
-      const row = rows.find((r: any) => r.table_name === tbl);
-      tableChecks[tbl] = {
-        exists: present,
-        required: false,
-        approx_rows: present ? (row?.approx_rows ?? 'unknown') : null,
-      };
-    }
+    optionalCount = OPTIONAL_TABLES.filter(t => foundTables.has(t)).length;
   } catch (e: unknown) {
-    checks.tables = { error: (e as Error).message };
-    checks.status = 'degraded';
     console.error('[HEALTH_DB] Table check failed:', (e as Error).message);
-    const elapsed = Date.now() - startMs;
-    checks.elapsed_ms = elapsed;
-    return NextResponse.json(checks, { status: 503 });
+    return NextResponse.json({
+      timestamp,
+      status: 'degraded',
+      database: 'connected',
+      required_tables: false,
+      env_valid: envResult.valid,
+      elapsed_ms: Date.now() - startMs,
+    }, { status: 503 });
   }
-
-  checks.tables = tableChecks;
 
   // ── Overall status ─────────────────────────────────────────────────────────
   const isHealthy = allRequiredPresent && envResult.valid;
-  const isDegraded = !envResult.valid || !allRequiredPresent;
+  const status = isHealthy ? 'healthy' : 'degraded';
 
-  checks.status = isHealthy ? 'healthy' : isDegraded ? 'degraded' : 'unhealthy';
-  checks.required_tables_present = allRequiredPresent;
-  checks.missing_required_tables = REQUIRED_TABLES.filter(t => !tableChecks[t]?.exists);
-  checks.elapsed_ms = Date.now() - startMs;
+  const elapsed = Date.now() - startMs;
+  console.log(`[HEALTH_DB] status=${status} tables_ok=${allRequiredPresent} env_ok=${envResult.valid} elapsed=${elapsed}ms`);
 
-  console.log(`[HEALTH_DB] status=${checks.status} tables_ok=${allRequiredPresent} env_ok=${envResult.valid} elapsed=${checks.elapsed_ms}ms`);
-
-  const httpStatus = isHealthy ? 200 : 503;
-  return NextResponse.json(checks, { status: httpStatus });
+  // SECURITY: Response contains only boolean/numeric statuses.
+  // No table names, row counts, pg_version, or env var names are included.
+  return NextResponse.json({
+    timestamp,
+    status,
+    database: 'connected',
+    env_valid: envResult.valid,
+    required_tables: allRequiredPresent,
+    optional_tables_present: optionalCount,
+    optional_tables_total: OPTIONAL_TABLES.length,
+    elapsed_ms: elapsed,
+  }, { status: isHealthy ? 200 : 503 });
 }

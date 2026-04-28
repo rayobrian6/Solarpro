@@ -5,6 +5,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest, getDbReady } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // Max logo size: 2MB
 const MAX_SIZE = 2 * 1024 * 1024;
@@ -14,8 +15,7 @@ const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('settings', getClientIp(req));
+        const rl = await checkRateLimit('settings', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

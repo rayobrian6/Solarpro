@@ -15,6 +15,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const VALID_MILESTONE_STATUSES = new Set(['pending', 'in_progress', 'completed', 'skipped']);
@@ -66,8 +67,7 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
@@ -135,8 +135,7 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

@@ -23,6 +23,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, isValidUUID} from '@/lib/db-neon';
 import { mintHandoffToken } from '@/lib/survey/handoff/tokenMinter';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export async function POST(
   req: NextRequest,
@@ -42,8 +43,7 @@ export async function POST(
   // -- Load project ----------------------------------------------------------
   let sql;
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

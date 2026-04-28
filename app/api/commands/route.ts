@@ -4,6 +4,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 /**
  * GET /api/commands — List pending commands for current user
@@ -56,8 +57,7 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('commands', getClientIp(req));
+        const rl = await checkRateLimit('commands', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

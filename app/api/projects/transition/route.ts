@@ -37,11 +37,11 @@ import {
 } from '@/lib/deals/transitions';
 import { isValidStage } from '@/lib/operations/pipeline';
 import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('standard', getClientIp(req));
+        const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

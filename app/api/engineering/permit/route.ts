@@ -28,6 +28,7 @@ import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/
 import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
 import { enrichSurvey } from '@/lib/siteSurvey/enrichSurvey';
 import { permitIntegration } from '@/lib/siteSurvey/permitIntegration';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
@@ -44,8 +45,7 @@ const execAsync = promisify(exec);
 export async function GET(req: NextRequest) {
   try {
     // v48.6: Rate limiting — 10 req / 30s per IP (protects heavy compute + external APIs)
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const _rl = await checkRateLimit('engineering', getClientIp(req));
+        const _rl = await checkRateLimit('engineering', getClientIp(req));
     if (!_rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many requests. Please slow down.' },

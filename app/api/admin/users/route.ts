@@ -3,6 +3,7 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 import crypto from 'crypto';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -13,7 +14,9 @@ export async function GET(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   const { searchParams } = new URL(req.url);
-  const search = searchParams.get('search') || '';
+  const searchRaw = searchParams.get('search') || '';
+  // Length cap — prevent excessively long ILIKE patterns causing slow DB queries
+  const search = searchRaw.slice(0, 200);
   const page   = Math.max(1, parseInt(searchParams.get('page') || '1'));
   const limit  = Math.min(100, parseInt(searchParams.get('limit') || '25'));
   const offset = (page - 1) * limit;
@@ -55,8 +58,7 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
+        const rl = await checkRateLimit('admin', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

@@ -116,10 +116,12 @@ export function middleware(req: NextRequest) {
     if (origin && host) {
       try {
         const originHost = new URL(origin).host;
-        const hostsMatch = originHost === host
+        // SECURITY: Origin must exactly match Host. The previous broad
+          // .vercel.app wildcard allowed any attacker-controlled Vercel app to make
+          // authenticated cross-origin requests against this app.
+          const hostsMatch = originHost === host
           || originHost === 'localhost:3000'
-          || originHost === 'localhost:3008'
-          || host.endsWith('.vercel.app') && originHost.endsWith('.vercel.app');
+          || originHost === 'localhost:3008';
 
         if (!hostsMatch) {
           console.warn(`[CSRF_BLOCKED] origin=${origin} host=${host} path=${pathname}`);

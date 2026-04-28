@@ -5,23 +5,25 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { requireAuth } from '@/lib/security';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // POST /api/geocode — resolve full location metadata from address
 export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
-  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-  const rl = await checkRateLimit('geo', getClientIp(req));
+    const rl = await checkRateLimit('geo', getClientIp(req));
   if (!rl.allowed) {
     return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
   }
 
   try {
-    const { address } = await req.json();
-    if (!address?.trim()) {
+    const { address: addressRaw } = await req.json();
+    if (!addressRaw?.trim()) {
       return NextResponse.json({ success: false, error: 'Address required' }, { status: 400 });
     }
+    // Length cap — prevent oversized values being forwarded to Google Maps geocoding API
+    const address = typeof addressRaw === 'string' ? addressRaw.slice(0, 500) : addressRaw;
     const result = await geocodeAddress(address);
     if (!result.success || !result.location) {
       return NextResponse.json({ success: false, error: result.error || 'Not found' });
@@ -46,8 +48,7 @@ export async function GET(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
-  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-  const rlGeo = await checkRateLimit('geo', getClientIp(req));
+    const rlGeo = await checkRateLimit('geo', getClientIp(req));
   if (!rlGeo.allowed) {
     return NextResponse.json({ success: false, error: 'Too many requests. Please wait before trying again.' }, { status: 429 });
   }
@@ -68,7 +69,9 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Forward geocode / autocomplete ──────────────────────────────────────────
-  const q = params.get('q') || params.get('address') || '';
+  const qRaw = params.get('q') || params.get('address') || '';
+  // Length cap — prevent oversized values being forwarded to Google Maps geocoding API
+  const q = qRaw.slice(0, 500);
   if (!q.trim()) {
     return NextResponse.json({ success: false, error: 'Query required' }, { status: 400 });
   }

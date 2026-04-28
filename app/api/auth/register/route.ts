@@ -9,6 +9,7 @@ import {
 } from '@/lib/auth';
 import { getDbReady, DbConfigError , handleRouteDbError } from '@/lib/db-neon';
 import { isTransientDbError } from '@/lib/db-ready';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // v47.9: Explicit maxDuration for DB cold-start retry budget
 export const maxDuration = 30;
@@ -16,8 +17,7 @@ export const maxDuration = 30;
 export async function POST(req: NextRequest) {
   try {
     // Rate limiting — prevent mass account creation
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('register', getClientIp(req));
+        const rl = await checkRateLimit('register', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many registration attempts. Please wait before trying again.' },

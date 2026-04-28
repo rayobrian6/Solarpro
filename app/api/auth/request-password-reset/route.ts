@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getDbReady } from '@/lib/db-neon';
 import { sendPasswordResetEmail } from '@/lib/email';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // Always return the same response regardless of whether the email exists.
 // This prevents user enumeration attacks.
@@ -34,8 +35,7 @@ async function ensureTable(sql: Awaited<ReturnType<typeof getDbReady>>): Promise
 export async function POST(req: NextRequest) {
   try {
     // Rate limiting — prevent reset request abuse
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('password-reset', getClientIp(req));
+        const rl = await checkRateLimit('password-reset', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many reset requests. Please wait before trying again.' },
@@ -46,8 +46,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
 
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      // Still return success shape to avoid email enumeration via error messages
+    // Email length cap (RFC 5321: max 320 chars) + basic format check.
+    // Still return SUCCESS_RESPONSE on invalid input to prevent email enumeration.
+    if (!email || email.length > 320 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json(SUCCESS_RESPONSE);
     }
 

@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { generateActionsForProjects } from '@/lib/commands/generateActions';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 /**
  * POST /api/commands/generate — Recalculate auto-generated actions for all user projects.
@@ -16,8 +17,7 @@ import { generateActionsForProjects } from '@/lib/commands/generateActions';
  */
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('commands', getClientIp(req));
+        const rl = await checkRateLimit('commands', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

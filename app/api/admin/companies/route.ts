@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -75,8 +76,7 @@ export async function PATCH(req: NextRequest) {
   if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
-    const rl = await checkRateLimit('admin', getClientIp(req));
+        const rl = await checkRateLimit('admin', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
