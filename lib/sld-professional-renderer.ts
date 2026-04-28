@@ -72,18 +72,36 @@ const SW_BORDER = 2.5;
 const SW_HEAVY  = 2.0;
 const SW_MED    = 1.5;
 const SW_THIN   = 1.0;
+
+// ─── SPACING CONSTANTS ───────────────────────────────────────────────────────
+// Single source of truth for all positional offsets.
+// Change once here — propagates everywhere.
+const LABEL_OFFSET_ABOVE = 8;   // px: wire label sits N px above the line
+const LABEL_OFFSET_BELOW = 11;  // px: wire label sits N px below the line
+const EQP_LABEL_ABOVE    = 15;  // px: equipment header above top edge
+const EQP_LABEL_BELOW    = 9;   // px: equipment info below bottom edge
 const SW_HAIR   = 0.5;
 const SW_BUS    = 3.5;
 
 // ── Font sizes ───────────────────────────────────────────────────────────────
+// ─── TYPE SCALE ─────────────────────────────────────────────────────────────
+// Consistent typographic hierarchy for permit-grade SLD.
+// title   = drawing title (largest)
+// hdr     = equipment section headers (e.g. "PV ARRAY", "STRING INVERTER")
+// label   = equipment name plates (manufacturer, model)
+// sub     = secondary equipment info (kW rating, panel model)
+// seg     = conductor callout text (wire gauge, insulation, conduit)
+// tiny    = NEC references, secondary annotations
+// tb      = title block fields
+// tbTitle = title block section headers
 const F = {
-  title:  12,
-  hdr:     8.5,
-  label:   7.5,
-  sub:     7,
-  seg:     6.5,
-  tiny:    6.5,
-  tb:      7,
+  title:  13,
+  hdr:     9.5,   // equipment headers — bold, most prominent after title
+  label:   8.0,   // equipment name plates
+  sub:     7.0,   // secondary info (kW, model details)
+  seg:     6.5,   // conductor callouts — readable but not dominant
+  tiny:    6.0,   // NEC references — smallest, clearly secondary
+  tb:      7.0,
   tbTitle: 10,
 };
 
@@ -982,7 +1000,7 @@ function renderWireRun(
       : BLK;
     const lh = Math.round(F.seg * 1.35);
     const th = activeLabels.length * lh;
-    const ty = above ? baseY - 7 - th + lh : baseY + 11;
+    const ty = above ? baseY - LABEL_OFFSET_ABOVE - th + lh : baseY + LABEL_OFFSET_BELOW;
     parts.push(tspan(cx, ty, activeLabels, { sz: F.seg, anc: 'middle', fill: primaryColor }));
   }
 
@@ -1014,7 +1032,7 @@ function wireSeg(
   if (lines.length > 0) {
     const lh = Math.round(F.seg * 1.35);
     const th = lines.length * lh;
-    const ty = above ? y - 7 - th + lh : y + 11;
+    const ty = above ? y - LABEL_OFFSET_ABOVE - th + lh : y + LABEL_OFFSET_BELOW;
     parts.push(tspan(cx, ty, lines, {sz:F.seg, anc:'middle', fill:color}));
   }
 
@@ -1479,32 +1497,56 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(rect(SCH_X, SCH_Y, SCH_W, SCH_H, {fill:WHT, stroke:BLK, sw:SW_THIN}));
 
   // ── X positions ───────────────────────────────────────────────────────────
-  const xPad = 50;
-  const uW   = SCH_W - xPad*2;
+  // ─── GRID LAYOUT ENGINE ──────────────────────────────────────────────────
+  // Node center-to-center spacing = (leftW/2) + WIRE_GAP + (rightW/2)
+  // WIRE_GAP = minimum horizontal space for wire segment + conductor callout label
+  // This ensures equal visual wire segments regardless of equipment widths.
+  const WIRE_GAP   = 120;  // px: min segment length (wire + label space)
+  const LEFT_MARGIN = 60;  // px: left edge of drawing to first node center
+
+  // Equipment widths from SLD_SYMBOL_MAP (frozen — do not hard-code inline)
+  const W_PV    = SLD_SYMBOL_MAP['pv-array'].width;       // 200
+  const W_JBOX  = SLD_SYMBOL_MAP['junction-box'].width;   // 100
+  const W_INV   = SLD_SYMBOL_MAP['inverter'].width;       // 200
+  const W_DCDS  = SLD_SYMBOL_MAP['dc-disconnect'].width;  // 120
+  const W_ACDS  = SLD_SYMBOL_MAP['ac-disconnect'].width;  // 120
+  const W_COMB  = SLD_SYMBOL_MAP['ac-combiner'].width;    // 180
+
+  // Helper: next center X = current center + (currentW/2) + WIRE_GAP + (nextW/2)
+  const nextCX = (cx: number, curW: number, nxtW: number, gap = WIRE_GAP) =>
+    cx + curW/2 + gap + nxtW/2;
 
   let xPV: number, xJBox: number, xComb: number, xDisco: number, xMSP: number, xUtil: number;
   let xInv = 0;
 
   if (isMicro) {
-    xPV   = SCH_X + xPad;
-    xJBox = SCH_X + xPad + uW*0.18;  // SOT: wider spacing for 100px j-box
-    xComb = SCH_X + xPad + uW*0.38;  // SOT: wider for 180px combiner
-    xDisco= SCH_X + xPad + uW*0.57;  // SOT: wider for 120px ac-disco
-    xMSP  = SCH_X + xPad + uW*0.76;  // SOT: adjusted
-    xUtil = SCH_X + xPad + uW;
+    // Micro path: PV → J-Box → Combiner → AC Disco → MSP → Utility
+    xPV   = SCH_X + LEFT_MARGIN + W_PV/2;
+    xJBox = nextCX(xPV,   W_PV,  W_JBOX);
+    xComb = nextCX(xJBox, W_JBOX, W_COMB);
+    xDisco= nextCX(xComb, W_COMB, W_ACDS);
+    xMSP  = nextCX(xDisco, W_ACDS, 160);   // MSP width=160
+    xUtil = nextCX(xMSP,  160,    120);    // Utility meter
   } else {
-    xPV   = SCH_X + xPad;
-    xJBox = SCH_X + xPad + uW*0.14;  // SOT: wider for 100px j-box
-    xComb = SCH_X + xPad + uW*0.28;  // SOT: DC Disco at wider spacing
-    xInv  = SCH_X + xPad + uW*0.44;  // SOT: wider for 200px inverter
-    xDisco= SCH_X + xPad + uW*0.60;  // SOT: AC Disco
-    xMSP  = SCH_X + xPad + uW*0.77;  // SOT: adjusted
-    xUtil = SCH_X + xPad + uW;
+    // String/Optimizer path: PV → J-Box → [DC Disco] → Inverter → AC Disco → MSP
+    xPV   = SCH_X + LEFT_MARGIN + W_PV/2;
+    xJBox = nextCX(xPV,   W_PV,  W_JBOX);
+    if (input.integratedDcDisconnect) {
+      // No external DC disco — wire goes directly J-Box → Inverter
+      xComb = xJBox;  // unused but keep for ground rail code
+      xInv  = nextCX(xJBox, W_JBOX, W_INV);
+    } else {
+      xComb = nextCX(xJBox, W_JBOX, W_DCDS);
+      xInv  = nextCX(xComb, W_DCDS, W_INV);
+    }
+    xDisco= nextCX(xInv,  W_INV,  W_ACDS);
+    xMSP  = nextCX(xDisco, W_ACDS, 160);
+    xUtil = nextCX(xMSP,  160,    120);
   }
 
   // ── NODE 1: PV ARRAY ──────────────────────────────────────────────────────
-  // SOT: symbol size from SLD_SYMBOL_MAP['pv-array'] = 200×160
-  const pvW = SLD_SYMBOL_MAP['pv-array'].width;   // 200
+  // PV array symbol size — use grid engine constants (W_PV already defined)
+  const pvW = W_PV;  // 200 — from grid engine
   const pvH = SLD_SYMBOL_MAP['pv-array'].height;  // 160
   console.log(`[SLD SYMBOL SIZE USED] pv-array: ${pvW}×${pvH}`);
   const pvCX = xPV, pvCY = BUS_Y;
@@ -1550,8 +1592,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   console.log(`[SLD WIRE TYPE: DC] pv-array.dc_pos → junction-box`);
 
   // ── NODE 2: ROOF J-BOX ────────────────────────────────────────────────────
-  // SOT: symbol size from SLD_SYMBOL_MAP['junction-box'] = 100×100
-  const jbW = SLD_SYMBOL_MAP['junction-box'].width;   // 100
+  // J-box symbol size — use grid engine constant
+  const jbW = W_JBOX;  // 100 — from grid engine
   const jbH = SLD_SYMBOL_MAP['junction-box'].height;  // 100
   console.log(`[SLD SYMBOL SIZE USED] junction-box: ${jbW}×${jbH}`);
   const jbCX = xJBox, jbCY = BUS_Y;
@@ -2067,11 +2109,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     : (input.integratedDcDisconnect
         ? [xJBox, xInv, xDisco, xMSP]          // no external DC disco node
         : [xJBox, xComb, xInv, xDisco, xMSP]); // DC disco at xComb
+  // ─── GROUNDING RAIL (subordinate visual weight) ─────────────────────────
+  // Use thinner stroke + muted green so the ground rail recedes behind the
+  // primary DC/AC conductor paths. Drops start well below BUS_Y to clear labels.
+  const GND_CLR  = '#2E7D32';  // muted green — less dominant than #005500
+  const GND_SW   = 1.0;        // thin stroke — subordinate
+  const GND_DROP = BUS_Y + 55; // start below equipment bottom edge (jbH/2=50)
   const gx1 = gndPts[0], gx2 = gndPts[gndPts.length-1];
-  parts.push(ln(gx1, GND_Y, gx2, GND_Y, {stroke:GRN, sw:SW_MED}));
+  parts.push(ln(gx1, GND_Y, gx2, GND_Y, {stroke:GND_CLR, sw:GND_SW}));
   for (const gx of gndPts) {
-    parts.push(ln(gx, BUS_Y+36, gx, GND_Y, {stroke:GRN, sw:SW_MED}));
-    parts.push(gnd(gx, GND_Y));
+    parts.push(ln(gx, GND_DROP, gx, GND_Y, {stroke:GND_CLR, sw:GND_SW, dash:'4,3'}));
+    parts.push(gnd(gx, GND_Y, GND_CLR));
   }
   parts.push(txt((gx1+gx2)/2, GND_Y-5,
     'EQUIPMENT GROUNDING CONDUCTORS — NEC 250.122 / NEC 690.43',
