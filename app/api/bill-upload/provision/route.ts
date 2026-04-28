@@ -169,8 +169,6 @@ export async function POST(req: NextRequest) {
 
     console.log('[PROVISION_STARTED]', {
       userId: user.id,
-      customerName: billData.customerName,
-      serviceAddress: billData.serviceAddress,
       confidence: billData.confidence,
     });
 
@@ -221,7 +219,7 @@ export async function POST(req: NextRequest) {
       utilityRate,
     });
 
-    console.log('[PROVISION_CLIENT_CREATED]', { clientId: client.id, clientName, userId: user.id });
+    console.log('[PROVISION_CLIENT_CREATED]', { clientId: client.id, userId: user.id });
 
     // ── Step 3: Create project linked to client ───────────────────────────────
     const projectName = `${clientName} — Solar`;
@@ -246,7 +244,7 @@ export async function POST(req: NextRequest) {
       } as Record<string, unknown>,
     });
 
-    console.log('[PROVISION_PROJECT_CREATED]', { projectId: project.id, projectName, clientId: client.id });
+    console.log('[PROVISION_PROJECT_CREATED]', { projectId: project.id, clientId: client.id });
 
     // ── Step 4: Save bill record ──────────────────────────────────────────────
     await saveBill({

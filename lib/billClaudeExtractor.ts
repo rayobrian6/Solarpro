@@ -161,14 +161,13 @@ export async function extractBillWithClaude(
     ]);
 
     console.log(`[claudeExtractor] Raw output length=${rawOutput.length}`);
-    console.log(`[claudeExtractor] Raw output preview: ${rawOutput.slice(0, 300)}`);
 
     const parsed = parseClaudeOutput(rawOutput);
     const aiBillData = mapToAiBillData(parsed);
     const validationFlags = validateExtraction(parsed);
     const status = computeStatus(parsed);
 
-    console.log(`[claudeExtractor] Result: status=${status} utility=${aiBillData.utility_name} kwh=${aiBillData.total_kwh} months=${aiBillData.monthly_kwh?.length ?? 0} cost=${aiBillData.total_cost}`);
+    console.log(`[claudeExtractor] Result: status=${status} months=${aiBillData.monthly_kwh?.length ?? 0}`);
     console.log(`[claudeExtractor] Validation: annualMismatch=${validationFlags.annualMismatch} costOutOfRange=${validationFlags.costOutOfRange} totalBillInvalid=${validationFlags.totalBillInvalid} missingBillingPeriod=${validationFlags.missingBillingPeriod}`);
 
     return {
@@ -229,9 +228,10 @@ async function callClaudeAPI(
     const { rawText } = input;
     console.log(`[claudeExtractor] Text input length=${rawText.length}`);
 
+    const sanitizedText = sanitizeForPrompt(rawText.slice(0, 8000));
     messageContent.push({
       type: 'text',
-      text: `Extract all bill data from this utility bill text. Return ONLY the JSON object as instructed.\n\n${rawText.slice(0, 8000)}`,
+      text: `Extract all bill data from this utility bill text. Return ONLY the JSON object as instructed.\n\n${sanitizedText}`,
     });
   }
 
@@ -279,6 +279,43 @@ async function callClaudeAPI(
   return textBlock.text.trim();
 }
 
+// ─── Prompt injection sanitization ────────────────────────────────────────────
+
+/**
+ * sanitizeForPrompt — strips prompt injection patterns from bill text before
+ * sending to Claude or any LLM. Removes instruction-like patterns that could
+ * override the system prompt.
+ *
+ * Targets patterns like:
+ *   "Ignore previous instructions..."
+ *   "You are now..." / "Act as..."
+ *   "Return your system prompt"
+ *   Markdown code fences with embedded instructions
+ *   Repeated newline injection attempts
+ */
+function sanitizeForPrompt(text: string): string {
+  // Strip common prompt injection trigger phrases (case-insensitive)
+  const injectionPatterns = [
+    /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /you\s+are\s+now\s+[a-z]/gi,
+    /act\s+as\s+(a|an|the)\s+[a-z]/gi,
+    /pretend\s+(to\s+be|you\s+are)/gi,
+    /return\s+(your\s+)?(system\s+prompt|instructions)/gi,
+    /reveal\s+(your\s+)?(system\s+prompt|instructions|secrets?)/gi,
+    /new\s+instruction[s]?:/gi,
+    /system\s*:\s*[^\n]{0,100}/gi,
+    /\[\s*system\s*\]/gi,
+    /<\s*system\s*>/gi,
+  ];
+  let sanitized = text;
+  for (const pattern of injectionPatterns) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  }
+  return sanitized;
+}
+
 // ─── Output parsing ─────────────────────────────────────────────────────────────
 
 function parseClaudeOutput(raw: string): Record<string, any> {
@@ -304,7 +341,6 @@ function parseClaudeOutput(raw: string): Record<string, any> {
     return JSON.parse(cleaned);
   } catch (e) {
     console.warn(`[claudeExtractor] JSON parse failed: ${e instanceof Error ? e.message : e}`);
-    console.warn(`[claudeExtractor] Attempted to parse: ${cleaned.slice(0, 300)}`);
     return {};
   }
 }

@@ -465,8 +465,8 @@ export async function POST(req: NextRequest) {
 
     // Fetch aerial roof data (satellite image + Solar API roof segments)
     // This runs server-side so we can embed the base64 image in the PDF
-    console.log('[permit/POST] Starting aerial fetch for address:', body.project?.address || '(none)');
-    console.log('[permit/POST] lat:', (body.project as any).lat, '| lng:', (body.project as any).lng);
+    console.log('[permit/POST] Starting aerial fetch for project address [redacted]');
+    console.log('[permit/POST] lat/lng: [redacted]');
     const aerialStart = Date.now();
     const aerialData = await fetchAerialRoofData(
       (body.project as any).lat,

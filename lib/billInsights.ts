@@ -248,7 +248,7 @@ export function computeBillInsights(
       // (e.g. "gas & electric combined charge" — skip it)
       const hasNonElectric = NON_ELECTRIC_KEYWORDS.some(kw => lline.includes(kw));
       if (hasNonElectric) {
-        console.log(`[ELECTRIC_SUBTOTAL] skipping ambiguous line: "${line.trim().slice(0, 80)}"`);
+        // PII REDACTED: bill line content must not appear in server logs
         continue;
       }
 

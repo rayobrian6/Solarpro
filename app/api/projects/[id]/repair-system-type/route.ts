@@ -68,7 +68,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       RETURNING id
     `;
 
-    console.log(`[repair-system-type] Project ${id} (${project.name}): ${previousType} → ${systemType}, layouts updated: ${layoutResult.length}`);
+    console.log(`[repair-system-type] Project ${id}: ${previousType} → ${systemType}, layouts updated: ${layoutResult.length}`);
 
     return NextResponse.json({
       success: true,

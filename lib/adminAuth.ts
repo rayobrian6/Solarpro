@@ -59,7 +59,7 @@ export async function requireAdmin(): Promise<AdminUser> {
     dbError = `DB error: ${(e as Error).message}`;
   }
 
-  console.log('[requireAdmin] DB lookup result:', { dbUser: dbUser ? { id: dbUser.id, email: dbUser.email, role: dbUser.role } : null, dbError });
+  console.log('[requireAdmin] DB lookup result:', { dbUser: dbUser ? { id: dbUser.id, role: dbUser.role } : null, dbError });
 
   if (!dbUser) {
     console.log('[requireAdmin] DB user not found — redirecting to login. Error:', dbError);
@@ -74,7 +74,7 @@ export async function requireAdmin(): Promise<AdminUser> {
     redirect('/dashboard');
   }
 
-  console.log('[requireAdmin] ✅ Access granted for', dbUser.email, 'role:', role);
+  console.log('[requireAdmin] ✅ Access granted for userId:', dbUser.id, 'role:', role);
 
   return {
     id:    dbUser.id,

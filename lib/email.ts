@@ -28,12 +28,11 @@ export async function sendEmail(opts: SendEmailOptions): Promise<{ success: bool
   const resend = getResendClient();
 
   if (!resend) {
-    // Dev fallback — log to console
+    // Dev fallback — log to console (redacted to prevent PII leakage)
     console.log('\n========== EMAIL (dev fallback — RESEND_API_KEY not set) ==========');
-    console.log(`To:      ${opts.to}`);
+    console.log(`To:      [redacted]`);
     console.log(`Subject: ${opts.subject}`);
-    console.log('Body:');
-    console.log(opts.text);
+    console.log('Body:    [redacted]');
     console.log('===================================================================\n');
     return { success: true };
   }

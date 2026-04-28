@@ -151,9 +151,8 @@ const UTILITY_ALIASES: [RegExp, string][] = [
 ];
 
 function extractUtility(text: string, log: string[]): ExtractedValue<string> | null {
-  // Log the first 300 chars so we can see what the OCR captured at the top of the bill
-  const preview = text.slice(0, 300).replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
-  log.push(`[bill-parser] utility detection: first 300 chars = "${preview}"`);
+  // Log text length only — raw bill text must not appear in server logs (PII)
+  log.push(`[bill-parser] utility detection: text length=${text.length}`);
 
   // U1: Check first 1000 chars (bill header area) — highest confidence.
   // 1000 chars instead of 500 because some OCR engines output logo/noise text before

@@ -241,12 +241,13 @@ export async function POST(req: NextRequest) {
           logger.debug('BILL', `[OCR_COMPLETED] method=${result.method} chars=${result.text.length} path=legacy`);
         }
       } else if (
-        fileType.startsWith('image/') ||
+        (['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/bmp'].includes(fileType)) ||
         fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') ||
         fileName.endsWith('.png') || fileName.endsWith('.jfif') ||
         fileName.endsWith('.webp')
       ) {
-        const safeMime = fileType.startsWith('image/') ? fileType : 'image/jpeg';
+        const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/bmp'];
+        const safeMime = ALLOWED_IMAGE_MIMES.includes(fileType) ? fileType : 'image/jpeg';
         logger.debug('BILL', `[IMAGE_PIPELINE_STARTED] name=${fileName} type=${safeMime} size=${buffer.length} ms=${Date.now() - startMs}`);
 
         // v48.0: Claude 3.5 Sonnet direct image path — no OCR pre-processing needed.
@@ -384,8 +385,10 @@ export async function POST(req: NextRequest) {
 
     const parseResult = parseBill(extractedText);
 
-    for (const line of parseResult.debugLog) {
-      console.log(line);
+    if (process.env.NODE_ENV !== 'production') {
+      for (const line of parseResult.debugLog) {
+        console.log(line);
+      }
     }
 
     // Stage B: extract non-usage fields (address, account, charges)

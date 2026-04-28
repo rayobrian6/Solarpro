@@ -103,6 +103,32 @@ const UTILITY_PATTERNS: [RegExp, string][] = [
 ];
 
 // ── Detect bill type (electric vs gas vs combined) ────────────────────────────
+/**
+ * sanitizeForPrompt — strips prompt injection patterns from bill text before
+ * sending to any LLM. Prevents malicious bill content from overriding system prompts.
+ */
+function sanitizeForPrompt(text: string): string {
+  const injectionPatterns = [
+    /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /you\s+are\s+now\s+[a-z]/gi,
+    /act\s+as\s+(a|an|the)\s+[a-z]/gi,
+    /pretend\s+(to\s+be|you\s+are)/gi,
+    /return\s+(your\s+)?(system\s+prompt|instructions)/gi,
+    /reveal\s+(your\s+)?(system\s+prompt|instructions|secrets?)/gi,
+    /new\s+instruction[s]?:/gi,
+    /system\s*:\s*[^\n]{0,100}/gi,
+    /\[\s*system\s*\]/gi,
+    /<\s*system\s*>/gi,
+  ];
+  let sanitized = text;
+  for (const pattern of injectionPatterns) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  }
+  return sanitized;
+}
+
 function detectBillType(text: string): 'electric' | 'gas' | 'combined' | 'unknown' {
   const hasElectric = /\bkwh\b|kilowatt.?hour|electric(?:ity)?\s+(?:usage|charge|service)/i.test(text);
   const hasGas = /\btherm\b|\bccf\b|\bcubic\s+feet\b|natural\s+gas\s+(?:usage|charge|service)/i.test(text);
@@ -270,8 +296,8 @@ function extractKwh(text: string): { monthly?: number; annual?: number; monthlyH
     }
 
     const monthObj = Object.fromEntries(MONTH_ORDER.map((m, i) => [m, history[i]]));
-    console.log('[bill-upload] Parsed monthly usage object:', JSON.stringify(monthObj));
-    console.log(`[bill-upload] Yearly usage computed: ${result.annual ?? 'n/a'} kWh (${nonZero.length} months, source: ${sourceLabel})`);
+    console.log(`[bill-upload] Monthly usage parsed: ${nonZero.length} non-zero months source=${sourceLabel}`);
+    console.log(`[bill-upload] Yearly usage computed: ${result.annual ? 'ok' : 'n/a'} months=${nonZero.length} source=${sourceLabel}`);
   }
 
   // ── PRIORITY 3: Explicit yearly total line ─────────────────────────────────
@@ -943,7 +969,7 @@ Rules:
             role: 'user',
             content: `Extract data from this utility bill OCR text:
 
-${ocrText.substring(0, 4000)}`,
+${sanitizeForPrompt(ocrText.substring(0, 4000))}`,
           },
         ],
       }),
@@ -961,14 +987,14 @@ ${ocrText.substring(0, 4000)}`,
     let ai: Record<string, any> = {};
     try { ai = JSON.parse(raw); } catch { ai = {}; }
 
-    console.log('[billOcr] AI extraction result:', JSON.stringify(ai));
+    console.log(`[billOcr] AI extraction result: fields=${Object.keys(ai).length}`);
 
     // v47.178: Extract monthly_kwh_history from AI response — highest priority for system sizing
     const aiMonthlyHistory: number[] | undefined =
       Array.isArray(ai.monthly_kwh_history) && ai.monthly_kwh_history.length >= 6
         ? (ai.monthly_kwh_history as number[]).filter((v: number) => typeof v === 'number' && v > 50 && v <= 50000).slice(0, 12)
         : undefined;
-    console.log(`[billOcr] AI monthly_kwh_history: ${aiMonthlyHistory ? aiMonthlyHistory.join(',') : 'none'}`);
+    console.log(`[billOcr] AI monthly_kwh_history: ${aiMonthlyHistory ? `${aiMonthlyHistory.length} months` : 'none'}`);
 
     // Merge AI results into existing — AI fills gaps, never overrides existing values
     // EXCEPTION: monthlyUsageHistory from AI (bar chart) takes priority over nothing

@@ -24,6 +24,32 @@ import { logger } from '@/lib/logger';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * sanitizeForPrompt — strips prompt injection patterns from bill text before
+ * sending to any LLM. Prevents malicious bill content from overriding system prompts.
+ */
+function sanitizeForPrompt(text: string): string {
+  const injectionPatterns = [
+    /ignore\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /disregard\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /forget\s+(all\s+)?(previous|prior|above|earlier)\s+(instructions?|prompts?|context)/gi,
+    /you\s+are\s+now\s+[a-z]/gi,
+    /act\s+as\s+(a|an|the)\s+[a-z]/gi,
+    /pretend\s+(to\s+be|you\s+are)/gi,
+    /return\s+(your\s+)?(system\s+prompt|instructions)/gi,
+    /reveal\s+(your\s+)?(system\s+prompt|instructions|secrets?)/gi,
+    /new\s+instruction[s]?:/gi,
+    /system\s*:\s*[^\n]{0,100}/gi,
+    /\[\s*system\s*\]/gi,
+    /<\s*system\s*>/gi,
+  ];
+  let sanitized = text;
+  for (const pattern of injectionPatterns) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  }
+  return sanitized;
+}
+
 /** Returns a Promise that rejects after `ms` milliseconds */
 function raceTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
@@ -542,7 +568,7 @@ export async function aiExtractBillData(rawText: string): Promise<AiBillData | n
   }
 
   logger.debug('billPipeline', `[billPipeline] AI extraction starting — textLen=${rawText.length}`);
-  console.log('RAW OCR TEXT:', rawText.slice(0, 500));
+  // PII REDACTED: raw OCR text must not appear in server logs
 
   // ── Log ALL kWh-like numbers found in the text for debugging ──────────────
   const kwhCandidates = extractAllKwhCandidates(rawText);
@@ -585,7 +611,7 @@ CRITICAL RULES:
         temperature: 0,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: `Extract data from this utility bill:\n\n${text}` },
+          { role: 'user', content: `Extract data from this utility bill:\n\n${sanitizeForPrompt(text)}` },
         ],
       }),
       signal: AbortSignal.timeout(10000),

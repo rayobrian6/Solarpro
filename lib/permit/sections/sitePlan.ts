@@ -311,7 +311,7 @@ export async function fetchAerialRoofData(
 
     // ── Step 1: Geocode if lat/lng not provided ──────────────────────────────
     if (!finalLat || !finalLng || (Math.abs(finalLat) < 0.001 && Math.abs(finalLng) < 0.001)) {
-      console.log('[permit/aerial] Step 1: Geocoding address:', address);
+      console.log('[permit/aerial] Step 1: Geocoding address [redacted]');
       const gcUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GKEY}`;
       const gcRes = await fetch(gcUrl, { signal: AbortSignal.timeout(8000) });
       const gcJson = await gcRes.json() as any;

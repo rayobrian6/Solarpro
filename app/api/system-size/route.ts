@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
       state_code,
     } = body;
 
-    console.log(`[SYSTEM_SIZE_STARTED] annualKwh=${annual_kwh ?? 'null'} monthlyKwh=${monthly_kwh ?? 'null'} address="${address ?? 'none'}" utility="${utility ?? 'none'}" stateCode=${state_code ?? 'null'}`);
+    console.log(`[SYSTEM_SIZE_STARTED] annualKwh=${annual_kwh ?? 'null'} monthlyKwh=${monthly_kwh ?? 'null'} hasAddress=${!!address} hasUtility=${!!utility} stateCode=${state_code ?? 'null'}`);
     // Full input validation log for pipeline audit
     console.log(`[UPLOAD_RECEIVED] route=system-size annualKwh=${annual_kwh ?? 'null'} monthlyKwh=${monthly_kwh ?? 'null'} monthlyUsageItems=${monthly_usage?.length ?? 0} hasAddress=${!!address} hasUtility=${!!utility} hasRate=${!!rate} offsetTarget=${offset_target}`);
     if (!annual_kwh && !monthly_kwh && (!monthly_usage || monthly_usage.length === 0)) {
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     let matchedUtility = null;
 
     if (address) {
-      console.log('[system-size] Geocoding address:', address);
+      console.log('[system-size] Geocoding address: [redacted]');
       try {
         const geoResult = await geocodeAddress(address);
         if (geoResult.success && geoResult.location) {
@@ -114,12 +114,12 @@ export async function POST(req: NextRequest) {
           const parsedUtilityName = utility || null;
           const effectiveStateCode = locationData.stateCode || state_code || null;
 
-          console.log(`[system-size] Matching utility: "${parsedUtilityName}" state=${effectiveStateCode}`);
+          console.log(`[system-size] Matching utility: [redacted] state=${effectiveStateCode}`);
           try {
             matchedUtility = await matchUtility(parsedUtilityName, effectiveStateCode);
             if (matchedUtility) {
               const dbRate = matchedUtility.effectiveRate ?? matchedUtility.defaultResidentialRate;
-              console.log(`[system-size] Utility matched: "${matchedUtility.utilityName}" via ${matchedUtility.source} effectiveRate=${dbRate}`);
+              console.log(`[system-size] Utility matched via ${matchedUtility.source} effectiveRate=${dbRate}`);
             } else {
               console.warn('[system-size] No utility match found');
             }

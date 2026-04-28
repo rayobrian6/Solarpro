@@ -78,9 +78,9 @@ export async function POST(req: NextRequest) {
         if (geo) {
           lat = geo.lat;
           lng = geo.lng;
-          console.log(`[POST /api/projects] Geocoded "${projectAddress}" → ${lat}, ${lng}`);
+          console.log(`[POST /api/projects] Geocoded address → ${lat}, ${lng}`);
         } else {
-          console.warn(`[POST /api/projects] Geocoding returned null for "${projectAddress}"`);
+          console.warn(`[POST /api/projects] Geocoding returned null for address`);
         }
       } catch (geoErr: unknown) {
         // Non-fatal — project still creates, design studio will geocode on load

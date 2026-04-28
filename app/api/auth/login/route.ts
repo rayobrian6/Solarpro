@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     console.log('[AUTH_COOKIE_SET]', JSON.stringify({
       cookieName:          COOKIE_NAME,
       hasSetCookieHeader:  !!setCookieHeader,
-      setCookiePreview:    setCookieHeader ? setCookieHeader.substring(0, 120) : 'MISSING',
+      setCookiePresent:    setCookieHeader ? true : false,
       secure:              cookieOptions.secure,
       sameSite:            cookieOptions.sameSite,
       path:                cookieOptions.path,
