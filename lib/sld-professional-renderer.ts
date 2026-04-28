@@ -131,6 +131,8 @@ export interface SLDProfessionalInput {
   optimizerQty?:           number;           // total optimizers (per_module = totalModules)
   optimizerModel?:         string;           // optimizer model name (e.g. 'P505')
   integratedDcDisconnect?: boolean;          // true = skip external DC disco node
+  // AC conductor truth from inverter profile (NEC 310.15)
+  acRequiresNeutral?:      boolean;          // true = 3-wire (L1+L2+N); false = 2-wire (L1+L2 only)
   generatorBrand?:         string;
   generatorModel?:         string;
   generatorKw?:            number;
@@ -698,6 +700,9 @@ function renderInverterBox(
   p.push(txt(cx, by2+H2+27, acKw > 0 ? `${acKw} kW / ${acAmps}A` : '', {sz: F.tiny, anc: 'middle'}));
   if (mpptAllocation) {
     p.push(txt(cx, by2+H2+36, `MPPT: ${mpptAllocation}`, {sz: F.tiny, anc: 'middle', fill: '#555'}));
+    if (typeof console !== 'undefined') {
+      console.log('[SLD STRING LANDING] mpptAllocation=' + mpptAllocation);
+    }
   }
 
   // Topology label above
@@ -1374,6 +1379,29 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   if (typeof console !== 'undefined') {
     console.log('[SLD SYMBOLS V2 ACTIVE] renderSLDProfessional — hybrid realism v3.0');
   }
+
+  // [SLD INPUT TRUTH] canonical field dump at render entry
+  // Every engineering accuracy bug should be traceable from this log first.
+  console.log(
+    '[SLD INPUT TRUTH]' +
+    ' topology=' + (input.ecosystemTopology ?? input.topologyType ?? 'UNKNOWN') +
+    ' selectedBrand=' + (input.selectedBrand ?? 'none') +
+    ' inverterModel=' + (input.inverterModel ?? 'none') +
+    ' integratedDcDisconnect=' + String(input.integratedDcDisconnect ?? false) +
+    ' stringCount=' + String(input.totalStrings ?? 0) +
+    ' modulesPerString=' + String(input.panelsPerString ?? 0) +
+    ' optimizerQty=' + String(input.optimizerQty ?? 0) +
+    ' dcConductorGauge=' + (input.dcWireGauge ?? 'none') +
+    ' dcEgcGauge=' + (input.egcGauge ?? 'none') +
+    ' dcRacewayType=' + (input.dcConduitType ?? 'none') +
+    ' acConductorGauge=' + (input.acWireGauge ?? 'none') +
+    ' acRequiresNeutral=' + String(input.acRequiresNeutral ?? 'NOT_SET') +
+    ' interconnectionMethod=' + (input.interconnection ?? 'none') +
+    ' mainBreakerA=' + String(input.mainPanelAmps ?? 0) +
+    ' pvBreakerA=' + String(input.backfeedAmps ?? 0) +
+    ' acOutputAmps=' + String(input.acOutputAmps ?? 0)
+  );
+
   const parts: string[] = [];
   // Phase 3 — Topology contamination guard
   // ecosystemTopology is the canonical field (set by route.ts after sizingResult).
@@ -1411,6 +1439,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const resolvedAcOCPD      = acFeederRun?.ocpdAmps    ?? input.acOCPD        ?? 30;
   const resolvedAcConduit   = acFeederRun?.conduitSize ?? '3/4"';
   const resolvedAcCondType  = acFeederRun?.conduitType ?? input.acConduitType ?? 'EMT';
+  // Phase 6: AC conductor count — 240V split-phase = 2 current-carrying (L1+L2), no neutral
+  // acRequiresNeutral derived from inverter spec in route.ts (acOutputVoltage===240 → false)
+  // Fallback: engine run neutralRequired → acRequiresNeutral → default false for 240V inverters
+  const _acNeutral: boolean =
+    input.acRequiresNeutral !== undefined
+      ? input.acRequiresNeutral
+      : (acFeederRun?.neutralRequired ?? false);
+  const _acConductorCount = _acNeutral ? 3 : 2;  // 3 = L1+L2+N; 2 = L1+L2 only
+  const _acWireNum = resolvedAcWire.replace('#','').replace(' AWG','');
   const resolvedDcWire      = dcStringRun?.wireGauge   ?? input.dcWireGauge   ?? '#10 AWG';
   // EGC gauge: from engine (NEC 250.122) → input.egcGauge → run data → '#10 AWG' fallback
   const resolvedEgcGauge    = input.egcGauge
@@ -1477,32 +1514,32 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(txt(pvCX, pvCY-pvH/2-18, 'PV ARRAY', {sz:F.hdr, bold:true, anc:'middle'}));
   parts.push(txt(pvCX, pvCY-pvH/2-8, `${input.totalModules} × ${input.panelWatts}W`, {sz:F.sub, anc:'middle'}));
   parts.push(txt(pvCX, pvCY+pvH/2+9, esc(input.panelModel), {sz:F.tiny, anc:'middle', italic:true}));
-  // Phase 3: String summary — Voc / Isc from existing input fields (no recalc)
-  if (!isMicro) {
+  // Phase 4: PV Array callout — complete engineering truth
+  // For micro: show device count and model
+  // For string/optimizer: show module count + string layout + optimizer count
+  if (isMicro) {
+    const md = input.deviceCount ?? input.totalModules;
+    parts.push(txt(pvCX, pvCY+pvH/2+18, `${md} × ${esc(input.inverterModel)}`, {sz:F.tiny, anc:'middle'}));
+  } else {
     const _ns  = input.totalStrings || 1;
     const _pps = input.panelsPerString ?? Math.round(input.totalModules / Math.max(_ns, 1));
     const _sVoc = input.stringVoc ?? ((input.vocCorrected ?? input.panelVoc) * _pps);
     const _sIsc = input.stringIsc ?? input.panelIsc;
-    parts.push(txt(pvCX, pvCY+pvH/2+18, `${_ns} str × ${_pps} mod`, {sz:F.tiny, anc:'middle', bold:true}));
+    // Line 1: string layout (e.g. "3 STRINGS × 12 MODULES")
+    parts.push(txt(pvCX, pvCY+pvH/2+18, `${_ns} STRING${_ns>1?'S':''} × ${_pps} MODULES`, {sz:F.tiny, anc:'middle', bold:true}));
+    // Line 2: electrical parameters
     parts.push(txt(pvCX, pvCY+pvH/2+27, `Voc=${_sVoc.toFixed(1)}V  Isc=${_sIsc.toFixed(2)}A`, {sz:F.tiny, anc:'middle', fill:'#B71C1C'}));
     console.log(`[SLD STRING SUMMARY] ${_ns} strings × ${_pps} modules, Voc=${_sVoc.toFixed(1)}V, Isc=${_sIsc.toFixed(2)}A`);
-    // Phase 3: Optimizer callout — show when optimizer topology
+    // Phase 4: Optimizer callout — show full info when optimizer topology
     if (input.optimizerQty && input.optimizerQty > 0) {
       const _optModel = input.optimizerModel ? ` (${input.optimizerModel})` : '';
-      const _optLabel = `${input.optimizerQty} DC OPTIMIZERS— 1 PER MODULE${_optModel}`;
+      // Full optimizer label: count + per-module note + model
+      const _optLabel = `${input.optimizerQty} DC OPTIMIZERS — 1 PER MODULE${_optModel}`;
       const _topoLabel = 'TOPOLOGY: STRING + OPTIMIZER';
       parts.push(txt(pvCX, pvCY+pvH/2+38, _optLabel, {sz:F.tiny, anc:'middle', fill:'#1A237E', bold:true}));
       parts.push(txt(pvCX, pvCY+pvH/2+47, _topoLabel, {sz:F.tiny, anc:'middle', fill:'#1A237E'}));
       console.log(`[SLD OPTIMIZER CALLOUT] qty=${input.optimizerQty} model=${input.optimizerModel ?? 'unknown'}`);
     }
-  }
-  if (isMicro) {
-    const md = input.deviceCount ?? input.totalModules;
-    parts.push(txt(pvCX, pvCY+pvH/2+18, `${md} × ${esc(input.inverterModel)}`, {sz:F.tiny, anc:'middle'}));
-  } else {
-    const ns = input.totalStrings||1;
-    const pps = input.panelsPerString ?? Math.round(input.totalModules/Math.max(ns,1));
-    parts.push(txt(pvCX, pvCY+pvH/2+18, `${ns} string${ns>1?'s':''} × ${pps} panels`, {sz:F.tiny, anc:'middle'}));
   }
   parts.push(callout(pvCX+pvW/2+14, pvCY-pvH/2-5, 1));
   // SOT: pvOutX via anchor 'dc_pos' (native x=200, right side)
@@ -1583,10 +1620,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     // Phase 5: Integrated DC disconnect — skip external node, wire J-Box → Inverter directly
     console.log('[SLD DEVICE OMITTED] external_dc_disconnect reason=integrated_inverter_disconnect brand=' + (input.selectedBrand ?? 'unknown'));
     // SEG 2D: J-Box → Inverter direct (no external DC disco)
+    // Phase 2 fix: post-JBOX wire is in RACEWAY — use dcDiscoInvRun (DC_DISCO_TO_INV_RUN)
+    // DC_DISCO_TO_INV_RUN has isOpenAir=false, insulation='THWN-2', conductorCount=stringCount*2
+    // Do NOT use dcStringRun here (isOpenAir=true → would show OPEN AIR label incorrectly)
     {
-      const run = dcStringRun;
-      const _strCnt = input.totalStrings || 1;
-      const _dcWireNum = resolvedDcWire.replace('#','').replace(' AWG','');
+      const run = dcDiscoInvRun ?? dcStringRun;  // Phase 2: prefer DC_DISCO_TO_INV_RUN (in-raceway)
+      const _strCnt = run?.conductorCount
+        ? Math.max(1, Math.floor(run.conductorCount / 2))
+        : (input.totalStrings || 1);
+      const _dcWireNum = (run?.wireGauge ?? resolvedDcWire).replace('#','').replace(' AWG','');
       const fb = [`${_strCnt*2}#${_dcWireNum} THWN-2`, `+ #${egcNum} EGC`, `IN ${input.dcConduitType??'EMT'}`];
       const {lines} = runLines(run, fb);
       const _s2dInvX = xInv - 60;  // invBox not yet defined here; use xInv offset
@@ -1623,17 +1665,21 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     console.log(`[SLD WIRE TYPE: DC] dc-disconnect → inverter`);
 
     // SEGMENT 2: J-Box → DC Disco
+    // Phase 2 fix: post-JBOX wire is in RACEWAY — use dcDiscoInvRun (DC_DISCO_TO_INV_RUN)
+    // DC_DISCO_TO_INV_RUN: isOpenAir=false, insulation=THWN-2, conductorCount=stringCount*2
     {
-      const run = dcStringRun;
-      // Phase 4/6: JBOX→DC DISCO is in conduit (RACEWAY) — THWN-2, not USE-2
-      const _s2bStrCnt = input.totalStrings || 1;
-      const _s2bWireNum = resolvedDcWire.replace('#','').replace(' AWG','');
+      const run = dcDiscoInvRun ?? dcStringRun;  // Phase 2: prefer DC_DISCO_TO_INV_RUN (in-raceway)
+      // Phase 3: conductor count from run data (stringCount*2) or fallback from totalStrings
+      const _s2bStrCnt = run?.conductorCount
+        ? Math.max(1, Math.floor(run.conductorCount / 2))
+        : (input.totalStrings || 1);
+      const _s2bWireNum = (run?.wireGauge ?? resolvedDcWire).replace('#','').replace(' AWG','');
       const fb = [`${_s2bStrCnt*2}#${_s2bWireNum} THWN-2`, `+ #${egcNum} EGC`, `IN ${input.dcConduitType??'EMT'}`];
       const {lines, cnt} = runLines(run, fb);
       const _s2bY = resolveSegY(_jbOutPt.x, _dcInPt.x, BUS_Y);  // SOT: anchor coords
-      console.log('[WIRE RUN CREATED] SEGMENT_2B_JBOX_TO_DCDISCO: DC string run (RACEWAY/THWN-2)');
+      console.log('[WIRE RUN CREATED] SEGMENT_2B_JBOX_TO_DCDISCO: DC raceway THWN-2 strCnt=' + _s2bStrCnt);
       parts.push(renderWireRun(
-        buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', _jbOutPt.x, _s2bY, _dcInPt.x, _s2bY, run, lines, true, 'RACEWAY'),  // Phase 1: RACEWAY — conduit from jbox
+        buildWireRun('SEGMENT_2B_JBOX_TO_DCDISCO', _jbOutPt.x, _s2bY, _dcInPt.x, _s2bY, run, lines, true, 'RACEWAY'),  // Phase 2: RACEWAY — conduit from jbox
         lines));
     }
   }
@@ -1688,8 +1734,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // Dest:   discoResult.loadInX/Y
   {
     const run = isMicro ? combDiscoRun : invDiscoRun;
+    // Phase 6: conductor count from acRequiresNeutral (2 for 240V no-neutral, 3 if neutral)
     const fb = [
-      `${resolvedAcWire} THWN-2`,
+      `${_acConductorCount}#${_acWireNum} THWN-2`,
       `1×${acFeederRun?.egcGauge??'#10 AWG'} GRN EGC`,
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
@@ -1733,8 +1780,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   buiRX = mspRX; // default: no BUI, wire goes directly to meter
   {
     const run = discoMspRun;
+    // Phase 6: conductor count from acRequiresNeutral
     const fb = [
-      `${resolvedAcWire} THWN-2`,
+      `${_acConductorCount}#${_acWireNum} THWN-2`,
       `1×${acFeederRun?.egcGauge??'#10 AWG'} GRN EGC`,
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
@@ -1974,8 +2022,9 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   // Source: mspResult.busOutX/Y  Dest: utility meter left edge
   {
     const run = mspUtilRun;
+    // Phase 6: conductor count from acRequiresNeutral (2=240V no-neutral, 3=neutral required)
     const fb = [
-      `${resolvedAcWire} THWN-2`,
+      `${_acConductorCount}#${_acWireNum} THWN-2`,
       `1×${acFeederRun?.egcGauge??'#10 AWG'} GRN EGC`,
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
@@ -2009,9 +2058,13 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   parts.push(gnd(utilCX, gridCY+26));
 
   // ── GROUNDING RAIL ────────────────────────────────────────────────────────
+  // Phase 8: Ground drops only at actual equipment nodes
+  // For optimizer with integratedDcDisconnect, xComb has no equipment — skip it
   const gndPts = isMicro
     ? [xJBox, xComb, xDisco, xMSP]
-    : [xJBox, xComb, xInv, xDisco, xMSP];
+    : (input.integratedDcDisconnect
+        ? [xJBox, xInv, xDisco, xMSP]          // no external DC disco node
+        : [xJBox, xComb, xInv, xDisco, xMSP]); // DC disco at xComb
   const gx1 = gndPts[0], gx2 = gndPts[gndPts.length-1];
   parts.push(ln(gx1, GND_Y, gx2, GND_Y, {stroke:GRN, sw:SW_MED}));
   for (const gx of gndPts) {

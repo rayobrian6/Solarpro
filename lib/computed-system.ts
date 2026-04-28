@@ -1397,37 +1397,50 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
       true,
       '#10 AWG'
     );
-    runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
-      sourceTerminal: 'DISCO_LOAD',   // DC Disconnect LOAD (inverter) side
-      destTerminal:   'DC_IN',        // String inverter DC input
-      conductorCount: stringCount * 2,  // same bundle as DC_STRING_RUN
-      wireGauge: dcDiscoWire.gauge,
-      insulation: 'THWN-2',          // in conduit after J-Box (NEC 310.15)
-      isOpenAir: false,              // DC Disco → Inverter is in raceway
-      // note: original was USE-2/PV Wire — corrected per Phase 4
-      egcGauge: dcDiscoWire.egcGauge,
-      neutralRequired: false,
-      systemVoltage: strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
-      phase: '1Ø',
-      conduitType: input.conduitType,
-      conduitSize: dcDiscoWire.conduitSize,
-      conduitFillPct: dcDiscoWire.conduitFillPct,
-      onewayLengthFt: defaultRunLengths.DC_DISCO_TO_INV_RUN,
-      continuousCurrent: dcStringCurrent,
-      requiredAmpacity: dcStringCurrent * 1.25,
-      effectiveAmpacity: dcDiscoWire.effectiveAmpacity,
-      tempDeratingFactor: dcDiscoWire.tempDerating,
-      conduitDeratingFactor: dcDiscoWire.conduitDerating,
-      ocpdAmps: strings[0]?.ocpdAmps ?? dcDiscoWire.ocpdAmps,
-      voltageDropPct: dcDiscoWire.voltageDropPct,
-      voltageDropVolts: dcDiscoWire.voltageDropVolts,
-      ampacityPass: dcDiscoWire.ampacityPass,
-      voltageDropPass: dcDiscoWire.voltageDropPass,
-      conduitFillPass: dcDiscoWire.conduitFillPct <= 40,
-      necReferences: ['NEC 690.31', 'NEC 690.8'],
-      conductorCallout: dcDiscoWire.conductorCallout,
-      color: 'dc',
-    }));
+    // Phase 3: DC_DISCO_TO_INV_RUN conductorCallout must use THWN-2 (in-raceway, post-JBOX)
+      // autoSizeWire with isDC=true generates USE-2/PV Wire callout — override it here
+      {
+        const _dcDiscoGaugeNum = dcDiscoWire.gauge.replace('#', '').replace(' AWG', '');
+        const _dcDiscoEgcNum   = dcDiscoWire.egcGauge.replace('#', '').replace(' AWG', '');
+        const _dcDiscoCondAbbr = input.conduitType === 'EMT' ? 'EMT'
+          : input.conduitType === 'PVC Sch 40' ? 'PVC SCH 40'
+          : input.conduitType === 'PVC Sch 80' ? 'PVC SCH 80'
+          : input.conduitType;
+        const _dcDiscoConductorCallout =
+          `${stringCount * 2}×#${_dcDiscoGaugeNum} THWN-2\n` +
+          `1×#${_dcDiscoEgcNum} GRN EGC\n` +
+          `IN ${dcDiscoWire.conduitSize} ${_dcDiscoCondAbbr} (${dcDiscoWire.conduitFillPct.toFixed(0)}% fill)`;
+        runs.push(makeRunSegment('DC_DISCO_TO_INV_RUN', 'DC DISCO TO INVERTER', 'DC DISCONNECT', 'STRING INVERTER', {
+          sourceTerminal: 'DISCO_LOAD',   // DC Disconnect LOAD (inverter) side
+          destTerminal:   'DC_IN',        // String inverter DC input
+          conductorCount: stringCount * 2,  // same bundle as DC_STRING_RUN
+          wireGauge: dcDiscoWire.gauge,
+          insulation: 'THWN-2',          // in conduit after J-Box (NEC 310.15)
+          isOpenAir: false,              // DC Disco → Inverter is in raceway
+          egcGauge: dcDiscoWire.egcGauge,
+          neutralRequired: false,
+          systemVoltage: strings[0]?.stringVmp ?? (input.panelVmp * panelsPerString),
+          phase: '1Ø',
+          conduitType: input.conduitType,
+          conduitSize: dcDiscoWire.conduitSize,
+          conduitFillPct: dcDiscoWire.conduitFillPct,
+          onewayLengthFt: defaultRunLengths.DC_DISCO_TO_INV_RUN,
+          continuousCurrent: dcStringCurrent,
+          requiredAmpacity: dcStringCurrent * 1.25,
+          effectiveAmpacity: dcDiscoWire.effectiveAmpacity,
+          tempDeratingFactor: dcDiscoWire.tempDerating,
+          conduitDeratingFactor: dcDiscoWire.conduitDerating,
+          ocpdAmps: strings[0]?.ocpdAmps ?? dcDiscoWire.ocpdAmps,
+          voltageDropPct: dcDiscoWire.voltageDropPct,
+          voltageDropVolts: dcDiscoWire.voltageDropVolts,
+          ampacityPass: dcDiscoWire.ampacityPass,
+          voltageDropPass: dcDiscoWire.voltageDropPass,
+          conduitFillPass: dcDiscoWire.conduitFillPct <= 40,
+          necReferences: ['NEC 690.31', 'NEC 690.8'],
+          conductorCallout: _dcDiscoConductorCallout,  // Phase 3: THWN-2 (not USE-2/PV Wire)
+          color: 'dc',
+        }));
+      }
 
     // INV_TO_DISCO_RUN: Inverter to AC disconnect
     const invToDiscoWire = autoSizeWire(

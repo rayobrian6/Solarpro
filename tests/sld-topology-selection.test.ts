@@ -240,6 +240,8 @@ describe('SLD Topology — Plain String Inverter (Fronius, 36 modules)', () => {
   });
 
   test('does NOT render optimizer callout', () => {
-    expect(svg.toLowerCase().includes('optimizer')).toBe(false);
+    // Check for actual optimizer callout text nodes (project name also contains 'Optimizer')
+    expect(svg.includes('DC OPTIMIZERS')).toBe(false);
+    expect(svg.includes('TOPOLOGY: STRING + OPTIMIZER')).toBe(false);
   });
 });

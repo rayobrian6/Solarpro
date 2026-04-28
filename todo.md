@@ -1,40 +1,49 @@
-# SLD Topology Template Selection Fix — 7 Phases
+# SLD Engineering Accuracy Fix — 9 Phases
 
-## Phase 1 — Trace Topology Source
-- [ ] Read Project Config → toSystemState() → route.ts full chain
-- [ ] Audit how topologyType is derived in route.ts
-- [ ] Audit isMicro / isOptimizer logic in renderer
-- [ ] Find where SolarEdge becomes micro / AC-combiner
-- [ ] Add [SLD TOPOLOGY TRACE] logs at every stage
+## Phase 1 — Audit SLD Data Input
+- [ ] Add [SLD INPUT TRUTH] log block at renderSLDProfessional() entry
+- [ ] Add acRequiresNeutral field to SLDProfessionalInput interface
+- [ ] Derive acRequiresNeutral from inverter spec in route.ts and forward it
+- [ ] Trace what stringCount, conductorGauge, environment, acNeutral, interconnection values arrive
 
-## Phase 2 — Define Explicit SLD Topology Enum
-- [ ] Create/enforce SLDTopology: microinverter | string_inverter | optimizer_string | ...
-- [ ] Define canonical priority: LayoutCandidate > inverter capability > brand profile > fallback
-- [ ] Update SLDProfessionalInput to carry canonical sldTopology field
+## Phase 2 — Fix Wire Environment Transition
+- [ ] PV→JBOX = OPEN_AIR (already done)
+- [ ] JBOX→anything = RACEWAY (audit all segments after JBOX)
+- [ ] Fix any "OPEN AIR" label on J-box→inverter segment
+- [ ] Add regression: no segment after JBOX may be OPEN_AIR
 
-## Phase 3 — Block Wrong Fallback
-- [ ] Guard: optimizer_string NEVER renders AC combiner
-- [ ] Guard: optimizer_string NEVER renders micro labels
-- [ ] Guard: log [SLD TOPOLOGY CONTAMINATION] if micro components in optimizer path
-- [ ] Remove stale APsystems/Enphase references from SolarEdge path
+## Phase 3 — Fix DC Conductor Count
+- [ ] Audit formatCallout / fb= label construction for DC segments
+- [ ] Fix: currentCarryingDcConductors = stringCount * 2 (not hardcoded 8)
+- [ ] Verify SEGMENT_2D (JBOX→INV direct) uses stringCount*2
+- [ ] Verify SEGMENT_1 (PV→JBOX) uses stringCount*2
+- [ ] Expected: "6#10 THWN-2 + #10 EGC IN EMT" for 3 strings
 
-## Phase 4 — Optimizer String Template
-- [ ] Implement/repair optimizer_string render path
-- [ ] Correct node sequence: PV→Optimizer→JBOX→StringInverter→ACDisco→MSP→Meter
-- [ ] Correct labels: optimizer callout, SE inverter, raceway JBOX→INV
+## Phase 4 — Fix Optimizer String Visual
+- [ ] PV array block: show module count + string layout + optimizer count clearly
+- [ ] "36 MODULES / 3 STRINGS × 12 / 36 OPTIMIZERS — 1 PER MODULE"
 
-## Phase 5 — Microinverter Template Isolation
-- [ ] Ensure micro path ONLY triggers when topology === 'microinverter'
-- [ ] Ensure AC combiner ONLY appears in micro path
-- [ ] Audit isMicro guard in renderer
+## Phase 5 — Fix Inverter String Landings
+- [ ] 3 strings → render 3 string landings into inverter
+- [ ] Add [SLD STRING LANDING] log
 
-## Phase 6 — Remove Stale Component Contamination
-- [ ] Audit why APsystems DS3-S appears in SolarEdge project
-- [ ] Find stale source: config.inverters, ecosystemComponents, localStorage, toSystemState
-- [ ] Clear incompatible old topology when selectedBrand changes
+## Phase 6 — Fix AC Conductor Labels
+- [ ] Determine acRequiresNeutral from inverter profile
+- [ ] SolarEdge SE11400H: 240V split-phase, no neutral required
+- [ ] If false: "2#X THWN-2 + #Y EGC IN EMT"
+- [ ] If true: "3#X THWN-2 + #Y EGC IN EMT"
 
-## Phase 7 — Regression Tests + TSC + Commit
-- [ ] Test: SolarEdge SE11400H optimizer_string → no AC combiner, no micro labels
-- [ ] Test: APsystems microinverter → AC combiner, no string inverter
+## Phase 7 — Fix Interconnection Display
+- [ ] Compute max allowed PV breaker (120% rule NEC 705.12)
+- [ ] Show FAIL/REVIEW if pvBreaker > maxAllowed
+- [ ] Never show PASS unless 705.12 validation passes
+
+## Phase 8 — Clean Grounding
+- [ ] Ground drops only at: PV/JBOX, inverter, AC disco, MSP, meter
+- [ ] No random mid-run ground drops
+- [ ] Common EGC bus at bottom
+
+## Phase 9 — Tests + TSC + Commit
+- [ ] Regression test: 3-string SolarEdge — all 9 failure criteria
 - [ ] npx tsc --noEmit → 0 errors
 - [ ] git commit + push

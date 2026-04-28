@@ -252,6 +252,16 @@ export async function POST(req: NextRequest) {
       ? _optimizerComponent.equipmentDbId.toUpperCase().replace(/^SE-?/i, '')
       : undefined;
 
+      // Phase 3.6 — Derive acRequiresNeutral from inverter output voltage spec
+      // NEC 310.15: 240V split-phase → 2 current-carrying conductors (L1+L2, no neutral)
+      //             208V or 120V → may require neutral depending on system config
+      // Rule: voltage === 240 → no neutral; 208 → neutral required; undefined = unknown
+      const _acOutputVoltage: number | undefined = _invSpec?.acOutputVoltage;
+      const _acRequiresNeutral: boolean | undefined =
+        _acOutputVoltage === 240 ? false
+        : _acOutputVoltage === 208 ? true
+        : undefined; // unknown — renderer will default to 2-wire
+
     console.log('[SLD TRUTH CHECK] stage=route selectedBrand=' + (_selectedBrand ?? 'none') +
       ' topology=' + topologyType + ' (isOptimizer=' + isOptimizer + ' isMicro=' + isMicro + ')' +
       ' optimizerQty=' + (_resolvedOptimizerQty ?? 0) +
@@ -605,6 +615,7 @@ export async function POST(req: NextRequest) {
       optimizerQty:            _resolvedOptimizerQty,
       optimizerModel:          _optimizerModel,
       integratedDcDisconnect:  _integratedDcDisconnect,
+      acRequiresNeutral:       _acRequiresNeutral,
     };
 
     const svg = renderSLDProfessional(input);
