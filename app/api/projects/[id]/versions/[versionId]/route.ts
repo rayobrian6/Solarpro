@@ -4,7 +4,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getProjectVersion, upsertLayout, saveProjectVersion , handleRouteDbError } from '@/lib/db-neon';
+import { getProjectById, getProjectVersion, upsertLayout, saveProjectVersion , handleRouteDbError, isValidUUID} from '@/lib/db-neon';
 import { Layout } from '@/types';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -14,6 +14,12 @@ type RouteContext = { params: Promise<{id: string; versionId: string}> };
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
     const { id, versionId } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
+    if (!isValidUUID(versionId)) {
+      return NextResponse.json({ success: false, error: 'Invalid version ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -33,6 +39,12 @@ export async function GET(req: NextRequest, context: RouteContext) {
 export async function POST(req: NextRequest, context: RouteContext) {
   try {
     const { id, versionId } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
+    if (!isValidUUID(versionId)) {
+      return NextResponse.json({ success: false, error: 'Invalid version ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 

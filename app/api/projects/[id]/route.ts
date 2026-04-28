@@ -5,7 +5,7 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getProjectById, getProjectWithDetails, updateProject, softDeleteProject, handleRouteDbError } from '@/lib/db-neon';
+import { getProjectById, getProjectWithDetails, updateProject, softDeleteProject, handleRouteDbError, isValidUUID} from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{id: string}> };
 
@@ -13,6 +13,9 @@ type RouteContext = { params: Promise<{id: string}> };
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -35,6 +38,9 @@ export async function PUT(req: NextRequest, context: RouteContext) {
     }}
 
     const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -57,6 +63,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     }}
 
     const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -80,6 +89,9 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     }}
 
     const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 

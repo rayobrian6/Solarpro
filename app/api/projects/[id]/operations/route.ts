@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID} from '@/lib/db-neon';
 
 /** Safely run a SQL statement, returning false if it fails (e.g. missing column) */
 async function safeExec(sql: any, query: Promise<any>): Promise<boolean> {
@@ -31,7 +31,7 @@ export async function GET(
     }
 
     const projectId = params.id;
-    if (!projectId) {
+    if (!projectId || !isValidUUID(projectId)) {
       return NextResponse.json({ success: false, error: 'Missing project id' }, { status: 400 });
     }
 
@@ -106,7 +106,7 @@ export async function PATCH(
     }
 
     const projectId = params.id;
-    if (!projectId) {
+    if (!projectId || !isValidUUID(projectId)) {
       return NextResponse.json({ success: false, error: 'Missing project id' }, { status: 400 });
     }
 

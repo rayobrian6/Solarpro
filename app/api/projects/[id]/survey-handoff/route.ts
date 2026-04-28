@@ -21,7 +21,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady } from '@/lib/db-neon';
+import { getDbReady, isValidUUID} from '@/lib/db-neon';
 import { mintHandoffToken } from '@/lib/survey/handoff/tokenMinter';
 
 export async function POST(
@@ -35,8 +35,8 @@ export async function POST(
   }
 
   const { id: projectId } = await context.params;
-  if (!projectId) {
-    return NextResponse.json({ error: 'Project ID required' }, { status: 400 });
+  if (!projectId || !isValidUUID(projectId)) {
+    return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
   }
 
   // -- Load project ----------------------------------------------------------

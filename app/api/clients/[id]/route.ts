@@ -4,13 +4,16 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getClientById, updateClient, softDeleteClient , handleRouteDbError } from '@/lib/db-neon';
+import { getClientById, updateClient, softDeleteClient , handleRouteDbError, isValidUUID} from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
     const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid client ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -31,6 +34,9 @@ export async function PUT(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
     const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid client ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 
@@ -61,6 +67,9 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }
     const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid client ID format.' }, { status: 400 });
+    }
     const user = getUserFromRequest(req);
     if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
 

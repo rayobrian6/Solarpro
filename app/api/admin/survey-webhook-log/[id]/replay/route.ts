@@ -14,6 +14,7 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { isValidUUID } from '@/lib/db-neon';
 
 export async function POST(
   req: NextRequest,
@@ -21,18 +22,18 @@ export async function POST(
 ) {
   const admin = await requireAdminApi(req);
   if (!admin) {
+    return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+  }
 
   // ── Rate limiting ──────────────────────────────────────────────────────────
   const rl = await checkRateLimit('admin', getClientIp(req));
   if (!rl.allowed) {
     return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
   }
-    return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
-  }
 
   const { id } = await ctx.params;
-  if (!id || typeof id !== 'string') {
-    return NextResponse.json({ success: false, error: 'Delivery id required' }, { status: 400 });
+  if (!id || typeof id !== 'string' || !isValidUUID(id)) {
+    return NextResponse.json({ success: false, error: 'Invalid delivery id format.' }, { status: 400 });
   }
 
   return NextResponse.json(
