@@ -4,6 +4,8 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
+import { getUserFromRequest } from '@/lib/auth';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import db from '@/lib/db';
 import { getAllUnifiedPanels, getAllUnifiedInverters } from '@/lib/equipment-library';
 
@@ -32,7 +34,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+
     const rl = await checkRateLimit('hardware', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
@@ -73,7 +77,9 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+
     const rl = await checkRateLimit('hardware', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
@@ -116,7 +122,9 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+
     const rl = await checkRateLimit('hardware', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });

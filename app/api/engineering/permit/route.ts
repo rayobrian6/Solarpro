@@ -124,6 +124,7 @@ export async function GET(req: NextRequest) {
 
     const safeProjectName = (projectRow.name || 'project')
       .replace(/[^\x00-\xFF]/g, '')
+      .replace(/[\r\n]/g, '')
       .replace(/[^\w\s\-\.]/g, '_')
       .trim() || 'project';
 
@@ -701,6 +702,7 @@ export async function POST(req: NextRequest) {
     // Sanitize project name to ASCII-safe characters for HTTP headers (ByteString limit: 0-255)
     const safeProjectName = (project.projectName || 'project')
       .replace(/[^\x00-\xFF]/g, '')
+      .replace(/[\r\n]/g, '')
       .replace(/[^\w\s\-\.]/g, '_')
       .trim() || 'project';
 

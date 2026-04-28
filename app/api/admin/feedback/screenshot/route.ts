@@ -39,12 +39,21 @@ export async function GET(req: NextRequest) {
     const { screenshot_data, screenshot_name, screenshot_mime } = rows[0];
     const buffer = Buffer.isBuffer(screenshot_data) ? screenshot_data : Buffer.from(screenshot_data);
 
+    // Sanitize filename — strip control chars and special chars that could inject headers
+    const rawName = (screenshot_name as string) || 'screenshot.png';
+    const safeScreenshotName = rawName.replace(/[^\w\s.\-()]/g, '_').replace(/[\r\n]/g, '').substring(0, 200);
+
+    // Sanitize MIME type — allowlist only known image types
+    const ALLOWED_SCREENSHOT_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    const safeMime = ALLOWED_SCREENSHOT_MIME.has(screenshot_mime as string) ? screenshot_mime : 'image/png';
+
     return new NextResponse(buffer, {
       status: 200,
       headers: {
-        'Content-Type': screenshot_mime || 'image/png',
-        'Content-Disposition': `inline; filename="${screenshot_name || 'screenshot.png'}"`,
+        'Content-Type': safeMime as string,
+        'Content-Disposition': `inline; filename="${encodeURIComponent(safeScreenshotName)}"`,
         'Cache-Control': 'private, max-age=3600',
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   } catch (err: unknown) {

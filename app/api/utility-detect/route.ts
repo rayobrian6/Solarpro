@@ -4,13 +4,17 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
+import { getUserFromRequest } from '@/lib/auth';
 import { geocodeAddress } from '@/lib/locationEngine';
 import { detectUtility } from '@/lib/utilityDetector';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 // POST /api/utility-detect — detect utility from address or lat/lng
 export async function POST(req: NextRequest) {
   try {
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
+
     const rl = await checkRateLimit('utility-detect', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
