@@ -24,7 +24,15 @@ export async function GET(req: NextRequest) {
   if (!migrateSecret) {
     return NextResponse.json({ success: false, error: 'MIGRATE_SECRET not configured' }, { status: 500 });
   }
-  if (secret !== migrateSecret) {
+  if (!secret) {
+    return NextResponse.json({ success: false, error: 'Invalid secret' }, { status: 401 });
+  }
+  // SECURITY: Use timingSafeEqual to prevent timing attacks on secret comparison
+  const { timingSafeEqual } = await import('crypto');
+  const expectedBuf = Buffer.from(migrateSecret, 'utf8');
+  const actualBuf   = Buffer.from(secret, 'utf8');
+  const secretValid = expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf);
+  if (!secretValid) {
     return NextResponse.json({ success: false, error: 'Invalid secret' }, { status: 401 });
   }
 

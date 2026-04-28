@@ -77,10 +77,14 @@ export async function POST(req: NextRequest) {
   const internalSecret = process.env.INTERNAL_OCR_SECRET;
   if (internalSecret) {
     const headerSecret = req.headers.get('x-internal-secret');
-    if (headerSecret !== internalSecret) {
+    if (headerSecret !== null) {
       // Only enforce secret check if caller DID provide a header (wrong secret).
-      // If no header at all, allow through (PUBLIC_PATHS handles auth).
-      if (headerSecret !== null) {
+      // SECURITY: Use timingSafeEqual to prevent timing attacks on secret comparison
+      const { timingSafeEqual } = await import('crypto');
+      const expected = Buffer.from(internalSecret, 'utf8');
+      const actual   = Buffer.from(headerSecret, 'utf8');
+      const secretValid = expected.length === actual.length && timingSafeEqual(expected, actual);
+      if (!secretValid) {
         console.warn('[OCR] Invalid internal secret — rejecting request');
         return NextResponse.json(
           { success: false, error: 'Invalid internal secret' },

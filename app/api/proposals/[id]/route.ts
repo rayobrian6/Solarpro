@@ -154,7 +154,12 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         SELECT id, share_token FROM proposals WHERE id = ${id} LIMIT 1
       `;
       if (!rows.length) return NextResponse.json({ success: false, error: 'Proposal not found' }, { status: 404 });
-      if (rows[0].share_token !== tokenParam) {
+      // SECURITY: Use timingSafeEqual to prevent timing attacks on token comparison
+      const { timingSafeEqual } = await import('crypto');
+      const expected = Buffer.from(rows[0].share_token as string, 'utf8');
+      const actual   = Buffer.from(tokenParam, 'utf8');
+      const tokenValid = expected.length === actual.length && timingSafeEqual(expected, actual);
+      if (!tokenValid) {
         return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 403 });
       }
       await sql`

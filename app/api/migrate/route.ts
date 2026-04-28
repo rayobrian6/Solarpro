@@ -30,7 +30,13 @@ export async function POST(req: NextRequest) {
     const secret = body?.secret;
     const migrateSecret = process.env.MIGRATE_SECRET;
     if (!migrateSecret) return NextResponse.json({ success: false, error: 'MIGRATE_SECRET env var not configured' }, { status: 500 });
-    if (!secret || secret !== migrateSecret) return NextResponse.json({ success: false, error: 'Valid MIGRATE_SECRET required' }, { status: 401 });
+    if (!secret || typeof secret !== 'string') return NextResponse.json({ success: false, error: 'Valid MIGRATE_SECRET required' }, { status: 401 });
+    // SECURITY: Use timingSafeEqual to prevent timing attacks on secret comparison
+    const { timingSafeEqual } = await import('crypto');
+    const expectedBuf = Buffer.from(migrateSecret, 'utf8');
+    const actualBuf   = Buffer.from(secret, 'utf8');
+    const secretValid = expectedBuf.length === actualBuf.length && timingSafeEqual(expectedBuf, actualBuf);
+    if (!secretValid) return NextResponse.json({ success: false, error: 'Valid MIGRATE_SECRET required' }, { status: 401 });
 
     const sql = await getDbReady();
     const results: string[] = [];
