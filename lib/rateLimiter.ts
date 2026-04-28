@@ -49,20 +49,24 @@ const _engineeringLimiter  = makeLimiter(10, '30 s');
 const _registerLimiter     = makeLimiter(3,  '60 s');
 // password-reset: 3 req / 60s — prevent reset abuse
 const _passwordResetLimiter = makeLimiter(3, '60 s');
+// ocr: 10 req / 60s — Tesseract is CPU-intensive; prevent compute abuse
+const _ocrLimiter           = makeLimiter(10, '60 s');
 
 // ── Public check function ─────────────────────────────────────────────────────
 // Returns true  → request allowed
 // Returns false → request should be rejected with 429
 // SAFETY: always returns true if Redis is unavailable or throws
 
-type LimiterKey = 'bill-upload' | 'login' | 'register' | 'password-reset' | 'engineering';
+type LimiterKey = 'bill-upload' | 'login' | 'register' | 'password-reset' | 'engineering' | 'enterprise-contact' | 'ocr';
 
 const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
-  'bill-upload':      _billUploadLimiter,
-  'login':            _loginLimiter,
-  'register':         _registerLimiter,
-  'password-reset':   _passwordResetLimiter,
-  'engineering':      _engineeringLimiter,
+  'bill-upload':         _billUploadLimiter,
+  'login':               _loginLimiter,
+  'register':            _registerLimiter,
+  'password-reset':      _passwordResetLimiter,
+  'engineering':         _engineeringLimiter,
+  'enterprise-contact':  _registerLimiter,   // 5 req/60s — reuse register limiter config
+  'ocr':                 _ocrLimiter,        // 10 req/60s — CPU-intensive Tesseract
 };
 
 export async function checkRateLimit(

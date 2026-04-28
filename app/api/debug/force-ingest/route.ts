@@ -27,8 +27,9 @@ export const maxDuration = 60;
 
 // ── Partner DB connection ─────────────────────────────────────────────────────
 
-const PARTNER_DB_URL =
-  'postgresql://site_survey_app_user:eLKZab9eQ7SeeTCHFfCl54fISvz4rWMe@dpg-d746qe1aae7s73bbv9e0-a.oregon-postgres.render.com/site_survey_app';
+// SECURITY: Read partner DB URL from env var — never hardcode credentials in source.
+// Set PARTNER_SURVEY_DB_URL in Vercel environment variables.
+const PARTNER_DB_URL = process.env.PARTNER_SURVEY_DB_URL || '';
 const PARTNER_CDN_BASE = 'https://site-survey-api-bpyz.onrender.com';
 
 // SolarPro default ingest user (must exist in SolarPro users table)
@@ -206,7 +207,8 @@ export async function POST(req: NextRequest) {
   const results: IngestResult[] = [];
   let photosProcessed = 0;
 
-  console.log('[FORCE INGEST] Starting — admin:', admin.email);
+  // SECURITY FIX: Removed email from log — PII must not appear in server logs
+  console.log('[FORCE INGEST] Starting — adminId:', admin.id);
 
   // ── Resolve SolarPro ingest user ──────────────────────────────────────────
   let ingestUserId = SOLARPRO_INGEST_USER_ID;

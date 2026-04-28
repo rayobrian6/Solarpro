@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
     // v47.258: Require admin — debug data should not be exposed to regular users
     const adminCheck = await requireAdminApi(req);
-    if (adminCheck instanceof NextResponse) return adminCheck;
+    if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
     const session = getUserFromRequest(req);
     if (!session?.id) {

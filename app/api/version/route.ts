@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { BUILD_VERSION, BUILD_DATE, BUILD_DESCRIPTION, BUILD_FEATURES } from '@/lib/version';
+import { BUILD_VERSION, BUILD_DATE } from '@/lib/version';
+// SECURITY FIX: BUILD_DESCRIPTION and BUILD_FEATURES removed from import —
+// they contain internal engineering notes that should not be exposed publicly.
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -12,8 +14,9 @@ export async function GET() {
         version: BUILD_VERSION,
         buildVersion: `BUILD ${BUILD_VERSION}`,
         timestamp: BUILD_DATE,
-        description: BUILD_DESCRIPTION,
-        features: BUILD_FEATURES,
+        // SECURITY FIX: Removed description and features fields — BUILD_FEATURES contains
+        // detailed internal engineering notes (algorithm names, logic details, component counts)
+        // that aid reconnaissance. Version number is sufficient for public consumers.
         ts: Date.now(),
       },
       {

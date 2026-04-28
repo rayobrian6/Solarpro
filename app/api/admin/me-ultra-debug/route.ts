@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
 
   // v47.258: Require admin role for debug endpoints
   const adminCheck = await requireAdminApi(req);
-  if (adminCheck instanceof NextResponse) return adminCheck;
+  if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   const session = getUserFromRequest(req);
   if (!session?.id) {
@@ -184,17 +184,21 @@ export async function GET(req: NextRequest) {
     };
   } catch (e: unknown) { results.roleCast = { error: (e as Error).message }; }
 
-  // NEW: Check if there are other users with role='user' that might be getting returned
+  // BUG-20-05 FIX: Removed hardcoded email lookup. Check owner account via env var.
   try {
-    const rows = await sql`
-      SELECT id, email, role FROM users WHERE email = 'raymond.obrian@yahoo.com'
-    `;
-    results.raymondByEmail = rows.map((r: any) => ({
-      id: r.id?.substring(0, 8),
-      email: r.email,
-      role: r.role,
-    }));
-  } catch (e: unknown) { results.raymondByEmail = { error: (e as Error).message }; }
+    const ownerEmail = (process.env.OWNER_EMAIL || '').toLowerCase();
+    if (ownerEmail) {
+      const rows = await sql`
+        SELECT id, role FROM users WHERE email = ${ownerEmail} LIMIT 1
+      `;
+      results.ownerAccount = rows.map((r: any) => ({
+        id: r.id?.substring(0, 8),
+        role: r.role,
+      }));
+    } else {
+      results.ownerAccount = { note: 'OWNER_EMAIL env var not set' };
+    }
+  } catch (e: unknown) { results.ownerAccount = { error: (e as Error).message }; }
 
   // NEW: Check what the DB returns for the EXACT user ID with explicit cast
   try {

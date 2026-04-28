@@ -14,6 +14,31 @@ export const runtime = 'nodejs';
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
+// SECURITY: Allowlist of safe MIME types accepted for storage.
+// Mirrors the allowlist in project-files/download/route.ts — both must stay in sync.
+// Any MIME type not on this list is stored as application/octet-stream.
+const SAFE_UPLOAD_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+  'image/svg+xml',
+  'text/csv',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+function sanitizeMimeType(raw: string | undefined | null): string {
+  if (!raw) return 'application/octet-stream';
+  const lower = raw.trim().toLowerCase();
+  return SAFE_UPLOAD_MIME_TYPES.has(lower) ? lower : 'application/octet-stream';
+}
+
 // File type categories
 function categorizeFileType(mimeType: string, fileName: string): string {
   const name = fileName.toLowerCase();
@@ -91,6 +116,8 @@ export async function POST(req: NextRequest) {
       const fileSize = fileData ? Buffer.byteLength(fileData, 'base64') : 0;
       const resolvedType = fileType || categorizeFileType(mimeType || '', fileName);
       const fileBuffer = fileData ? Buffer.from(fileData, 'base64') : null;
+      // SECURITY: Sanitize MIME type before storage — prevents stored XSS via MIME type
+      const safeMimeType = sanitizeMimeType(mimeType);
 
       const rows = await sql`
         INSERT INTO project_files (
@@ -98,7 +125,7 @@ export async function POST(req: NextRequest) {
           file_size, mime_type, file_data, notes
         ) VALUES (
           ${projectId}, ${clientId || null}, ${user.id}, ${fileName},
-          ${resolvedType}, ${fileSize}, ${mimeType || 'application/octet-stream'},
+          ${resolvedType}, ${fileSize}, ${safeMimeType},
           ${fileBuffer}, ${notes || null}
         )
         RETURNING id, project_id, client_id, file_name, file_type, file_size, mime_type, notes, upload_date, created_at
@@ -133,6 +160,8 @@ export async function POST(req: NextRequest) {
     const resolvedClientId = clientId || projectCheck[0].client_id || null;
     const buffer = Buffer.from(await file.arrayBuffer());
     const fileType = categorizeFileType(file.type, file.name);
+    // SECURITY: Sanitize MIME type before storage — prevents stored XSS via MIME type
+    const safeMimeType = sanitizeMimeType(file.type);
 
     const rows = await sql`
       INSERT INTO project_files (
@@ -140,7 +169,7 @@ export async function POST(req: NextRequest) {
         file_size, mime_type, file_data, notes
       ) VALUES (
         ${projectId}, ${resolvedClientId}, ${user.id}, ${file.name},
-        ${fileType}, ${file.size}, ${file.type || 'application/octet-stream'},
+        ${fileType}, ${file.size}, ${safeMimeType},
         ${buffer}, ${notes || null}
       )
       RETURNING id, project_id, client_id, file_name, file_type, file_size, mime_type, notes, upload_date, created_at

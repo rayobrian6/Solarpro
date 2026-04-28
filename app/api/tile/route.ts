@@ -3,12 +3,18 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/security';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+// SECURITY: Read key from env var only — never hardcoded in source.
+const GOOGLE_MAPS_API_KEY =
+  process.env.GOOGLE_MAPS_API_KEY ||
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  '';
 
 let cachedSession: { token: string; expiry: number } | null = null;
 
 async function getSessionToken(): Promise<string> {
+  if (!GOOGLE_MAPS_API_KEY) throw new Error('GOOGLE_MAPS_API_KEY not configured');
   const now = Math.floor(Date.now() / 1000);
   if (cachedSession && cachedSession.expiry > now + 300) {
     return cachedSession.token;
@@ -27,20 +33,33 @@ async function getSessionToken(): Promise<string> {
   return data.session;
 }
 
+// GET /api/tile?z=&x=&y= → proxies satellite tile
+// SECURITY: Requires authentication — prevents unauthenticated quota abuse.
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const z = searchParams.get('z');
-  const x = searchParams.get('x');
-  const y = searchParams.get('y');
+  // SECURITY: Require authenticated user
+  const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
-  if (!z || !x || !y) {
+  const { searchParams } = new URL(req.url);
+  const zRaw = searchParams.get('z');
+  const xRaw = searchParams.get('x');
+  const yRaw = searchParams.get('y');
+
+  if (!zRaw || !xRaw || !yRaw) {
     return new NextResponse('Missing z/x/y', { status: 400 });
+  }
+
+  // BUG-21-07 FIX: Validate z/x/y as non-negative integers before interpolating into URL
+  const z = parseInt(zRaw, 10);
+  const x = parseInt(xRaw, 10);
+  const y = parseInt(yRaw, 10);
+  if (isNaN(z) || isNaN(x) || isNaN(y) || z < 0 || x < 0 || y < 0 || z > 22) {
+    return new NextResponse('Invalid tile coordinates', { status: 400 });
   }
 
   try {
     const session = await getSessionToken();
-    // Use Google Maps 2D satellite tiles (high quality, same projection as 3D)
-    const url = `https://tile.googleapis.com/v1/2dtiles/${z}/${x}/${y}?session=${session}&key=${GOOGLE_MAPS_API_KEY}`;
+    // Use validated integer tile coordinates — no injection possible
+    const url = `https://tile.googleapis.com/v1/2dtiles/${z}/${x}/${y}?session=${encodeURIComponent(session)}&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`;
     
     const res = await fetch(url, {
       headers: { 'User-Agent': 'SolarProDesign/1.0' },
@@ -57,7 +76,7 @@ export async function GET(req: NextRequest) {
         headers: {
           'Content-Type': 'image/jpeg',
           'Cache-Control': 'public, max-age=86400',
-          'Access-Control-Allow-Origin': '*',
+          // BUG-21-07 FIX: Removed CORS wildcard — endpoint requires auth, must not allow cross-origin access
         },
       });
     }
@@ -68,7 +87,7 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': res.headers.get('Content-Type') || 'image/jpeg',
         'Cache-Control': 'public, max-age=86400',
-        'Access-Control-Allow-Origin': '*',
+        // BUG-21-07 FIX: Removed CORS wildcard — endpoint requires auth, must not allow cross-origin access
       },
     });
   } catch (e: unknown) {

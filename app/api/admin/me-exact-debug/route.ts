@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
 
   // v47.258: Require admin role for debug endpoints
   const adminCheck = await requireAdminApi(req);
-  if (adminCheck instanceof NextResponse) return adminCheck;
+  if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
     const session = getUserFromRequest(req);

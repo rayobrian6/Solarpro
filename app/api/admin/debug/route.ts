@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   const _blocked = productionGuard(); if (_blocked) return _blocked;
 
   const adminCheck = await requireAdminApi(req);
-  if (adminCheck instanceof NextResponse) return adminCheck;
+  if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   const cookieHeader = req.headers.get('cookie') || '';
   const match = cookieHeader.match(/solarpro_session=([^;]+)/);
 

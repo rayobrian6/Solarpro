@@ -13,7 +13,8 @@ import { requireAdminApi } from '@/lib/adminAuth';
 export async function GET(req: NextRequest) {
   try {
     const admin = await requireAdminApi(req);
-    console.log('[feedback/count] admin:', admin ? `${admin.email} (${admin.role})` : 'null');
+    // SECURITY FIX: Removed email from log — PII must not appear in server logs
+    console.log('[feedback/count] admin:', admin ? `id=${admin.id} role=${admin.role}` : 'null');
 
     if (!admin) {
       return NextResponse.json({ count: 0, reason: 'not_admin' });

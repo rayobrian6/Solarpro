@@ -16,6 +16,7 @@ export const revalidate = 0;
 export const runtime    = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { productionGuard } from '@/lib/security';
 
 interface EnvCheck {
   present:  boolean;
@@ -26,18 +27,25 @@ interface EnvCheck {
 function checkEnv(name: string, minLen = 1, prefix?: string): EnvCheck {
   const val = process.env[name];
   if (!val || val === `YOUR_${name}_HERE`) {
-    return { present: false, status: 'missing', note: `${name} is not set in Vercel environment variables` };
+    // BUG-21-01 FIX: Don't include env var name in note — prevents variable enumeration via response body
+    return { present: false, status: 'missing', note: 'Variable is not set in environment' };
   }
   if (val.length < minLen) {
-    return { present: true, status: 'invalid', note: `${name} is too short (len=${val.length}, min=${minLen})` };
+    // BUG-21-01 FIX: Don't leak actual length or minimum — prevents value guessing
+    return { present: true, status: 'invalid', note: 'Variable value is too short' };
   }
   if (prefix && !val.startsWith(prefix)) {
-    return { present: true, status: 'invalid', note: `${name} does not start with expected prefix '${prefix}'` };
+    // BUG-21-01 FIX: Don't leak expected prefix — prevents format fingerprinting
+    return { present: true, status: 'invalid', note: 'Variable value has unexpected format' };
   }
   return { present: true, status: 'ok' };
 }
 
 export async function GET(_req: NextRequest) {
+  // SECURITY: Block in production — env var status is internal diagnostics only.
+  // Use /api/health (no auth, status-only) for public health checks.
+  const _blocked = productionGuard(); if (_blocked) return _blocked;
+
   try {
     const checks: Record<string, EnvCheck> = {};
 
@@ -69,8 +77,9 @@ export async function GET(_req: NextRequest) {
       // Actionable fix instructions if anything is wrong
       ...(anyMissing && {
         fix: [
-          'Go to: Vercel Dashboard → Project (solarpro-v31) → Settings → Environment Variables',
-          'Add each missing variable listed above',
+          // BUG-21-01 FIX: Removed hardcoded Vercel project name (solarpro-v31) — internal infrastructure detail
+          'Go to: Vercel Dashboard → Your Project → Settings → Environment Variables',
+          'Add each missing variable shown in the checks above',
           'Check ALL THREE boxes: Production ✓  Preview ✓  Development ✓',
           'Click Save, then redeploy (env vars are NOT hot-reloaded)',
           'Required for login: DATABASE_URL, JWT_SECRET',

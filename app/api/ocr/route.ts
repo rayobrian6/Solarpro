@@ -58,6 +58,16 @@ export async function POST(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
+  // SECURITY: Rate limit OCR — Tesseract is CPU-intensive; prevent abuse
+  const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
+  const _rl = await checkRateLimit('ocr', getClientIp(req));
+  if (!_rl.allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Too many requests. Please slow down.' },
+      { status: 429 }
+    );
+  }
+
   const debugLog: string[] = [];
 
   // ── Internal secret bypass ──────────────────────────────────────────────────

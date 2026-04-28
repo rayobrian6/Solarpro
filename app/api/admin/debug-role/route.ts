@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
   // v47.258: Require admin role before returning any identity/role debug data
   const admin = await requireAdminApi(req);
-  if (admin instanceof NextResponse) return admin;
+  if (!admin) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   const cookieHeader = req.headers.get('cookie') || '';
   const match = cookieHeader.match(/solarpro_session=([^;]+)/);

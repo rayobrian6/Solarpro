@@ -91,6 +91,10 @@ export async function GET(req: NextRequest) {
       (missingRequired.length ? ` MISSING_REQUIRED=${missingRequired.join(',')}` : '')
     );
 
+    // BUG-21-02 FIX: Replace var name arrays with counts only.
+    // Runtime fingerprinting fields (node_version, vercel_env, region) removed.
+    // requireAuth already restricts to authenticated users, but env var names
+    // should not be enumerable by regular users — counts suffice for monitoring.
     return NextResponse.json({
       status,
       version: BUILD_VERSION,
@@ -107,15 +111,9 @@ export async function GET(req: NextRequest) {
         base_url:    baseUrlOk,
       },
 
-      missing_required:    missingRequired,
-      missing_recommended: missingRecommended,
-
-      runtime: {
-        node_version: process.version,
-        vercel_env:   process.env.VERCEL_ENV   || null,
-        region:       process.env.VERCEL_REGION || null,
-        buffer:       typeof Buffer !== 'undefined',
-      },
+      // Counts only — no env var name enumeration
+      missing_required_count:    missingRequired.length,
+      missing_recommended_count: missingRecommended.length,
 
       // Feature availability derived from env vars
       features: {

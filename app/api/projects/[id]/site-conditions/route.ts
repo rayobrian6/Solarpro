@@ -4,9 +4,13 @@ import { handleRouteDbError } from '@/lib/db-neon';
 
 type RouteContext = { params: Promise<{id: string}> };
 
-
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+// UUID format validation
+function isValidUUID(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
 
 export async function GET(req: NextRequest, context: RouteContext) {
   try {
@@ -16,21 +20,35 @@ export async function GET(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
     }
 
-    const projectId = parseInt(id);
+    // BUG-21-06 FIX: Projects use UUID strings, not integers.
+    // parseInt(uuid) always returns NaN, making ownership checks unreliable.
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID' }, { status: 400 });
+    }
+
+    const projectId = id; // use the UUID string directly
 
     // Verify user has access to this project
     const sql = await getDbReady();
     const projectCheck = await sql`
-      SELECT user_id FROM projects WHERE id = ${projectId}
+      SELECT id FROM projects
+      WHERE id = ${projectId}
+        AND user_id = ${user.id}
+        AND deleted_at IS NULL
     `;
 
-    if (projectCheck.length === 0 || projectCheck[0].user_id !== user.id) {
+    if (projectCheck.length === 0) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }
 
-    // Get site conditions
+    // Get site conditions — select only known columns to prevent data overfetch
     const siteResult = await sql`
-      SELECT * FROM site_conditions WHERE project_id = ${projectId}
+      SELECT id, project_id, created_at, updated_at,
+             roof_type, roof_material, roof_age, roof_pitch,
+             attic_access, electrical_panel_location, main_breaker_amps,
+             notes, custom_fields
+      FROM site_conditions
+      WHERE project_id = ${projectId}
     `;
 
     if (siteResult.length === 0) {
@@ -48,7 +66,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
       )
     `;
 
-    const electrical: Record<string, any> = {};
+    const electrical: Record<string, unknown> = {};
     for (const row of electricalLogs) {
       electrical[row.field_name] = row.auto_value;
     }

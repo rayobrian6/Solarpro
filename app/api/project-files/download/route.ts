@@ -39,13 +39,32 @@ export async function GET(req: NextRequest) {
 
     const buffer = Buffer.isBuffer(file_data) ? file_data : Buffer.from(file_data);
 
+    // BUG-21-05 FIX: Sanitize mime_type from DB — never trust it directly.
+    // Allowlist safe types; default to octet-stream for anything not recognised.
+    // Use 'attachment' disposition to force download instead of inline render,
+    // preventing XSS via stored HTML/SVG content.
+    const SAFE_MIME_TYPES = new Set([
+      'application/pdf',
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'image/svg+xml',
+      'application/json',
+      'text/plain',
+      'text/csv',
+      'application/zip',
+      'application/octet-stream',
+    ]);
+    const safeMimeType = SAFE_MIME_TYPES.has(mime_type) ? mime_type : 'application/octet-stream';
+    // Always use attachment — never inline — to prevent browser rendering of untrusted content
+    const safeFileName = file_name.replace(/[^\w\s.\-()]/g, '_');
+
     return new NextResponse(buffer, {
       status: 200,
       headers: {
-        'Content-Type': mime_type || 'application/octet-stream',
-        'Content-Disposition': `inline; filename="${encodeURIComponent(file_name)}"`,
+        'Content-Type': safeMimeType,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(safeFileName)}"`,
         'Content-Length': String(buffer.length),
         'Cache-Control': 'private, max-age=3600',
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   } catch (err: unknown) {

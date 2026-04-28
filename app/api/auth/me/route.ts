@@ -61,28 +61,23 @@ export async function GET(req: NextRequest) {
 
   const session = getUserFromRequest(req);
   const sessionValid = !!(session?.id);
-  console.log(`[SESSION_VALIDATION] valid=${sessionValid} userId=${session?.id ?? 'none'} email=${session?.email ?? 'none'}`);
+  // SECURITY FIX: Removed email from log — PII must not appear in server logs
+  console.log(`[SESSION_VALIDATION] valid=${sessionValid} userId=${session?.id ?? 'none'}`);
 
   if (!sessionValid) {
-    // Log JWT_SECRET fingerprint alongside every 401 so deployment mismatches
-    // are immediately visible without needing to reproduce the login flow.
-    try {
-      const secret = process.env.JWT_SECRET || '';
-      const charSum = secret.split('').reduce((s, c) => s + c.charCodeAt(0), 0) % 9999;
-      const fp = secret
-        ? `len=${secret.length}_head=${secret.substring(0, 4)}_tail=${secret.slice(-4)}_sum=${charSum}`
-        : 'NOT_SET';
-      console.debug('[AUTH_COOKIE_MISSING] No valid session cookie — returning 401');
-    } catch {
-      console.log(`[AUTH_COOKIE_MISSING] No valid solarpro_session cookie — returning 401`);
-    }
+    // BUG-20-07 FIX: Removed JWT_SECRET fingerprint logging (leaked key prefix/suffix).
+    // Only log boolean presence — never log any portion of the secret value.
+    console.debug('[AUTH_COOKIE_MISSING] No valid session cookie — returning 401', {
+      hasJwtSecret: !!process.env.JWT_SECRET,
+    });
     return NextResponse.json(
       { success: false, error: 'Not authenticated' },
       { status: 401 }
     );
   }
 
-  console.log(`[AUTH_COOKIE_PRESENT] userId=${session.id} email=${session.email}`);
+  // SECURITY FIX: Removed email from log — PII must not appear in server logs
+  console.log(`[AUTH_COOKIE_PRESENT] userId=${session.id}`);
 
   const userId = session.id;
 

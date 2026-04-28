@@ -5,14 +5,14 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady , handleRouteDbError} from '@/lib/db-neon';
 
-export async function GET(req: NextRequest) {
-  // Allow GET with secret param for easy browser access
-  const secret = req.nextUrl.searchParams.get('secret');
-  const migrateSecret = process.env.MIGRATE_SECRET;
-  if (!migrateSecret) return NextResponse.json({ success: false, error: 'MIGRATE_SECRET env var not configured' }, { status: 500 });
-  const validSecret = secret === migrateSecret;
-  if (!validSecret) return NextResponse.json({ success: false, error: 'Invalid secret' }, { status: 401 });
-  return POST(req);
+export async function GET(_req: NextRequest) {
+  // SECURITY FIX: GET handler removed — secrets must never appear in URLs
+  // (URL query params are logged by CDNs, proxies, and browser history).
+  // Use POST with { "secret": "..." } in the JSON body instead.
+  return NextResponse.json(
+    { success: false, error: 'Use POST with secret in request body' },
+    { status: 405, headers: { Allow: 'POST' } }
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -20,10 +20,11 @@ export async function POST(req: NextRequest) {
     // Allow either authenticated user OR valid migrate secret key
     // SECURITY: Require MIGRATE_SECRET — authenticated users alone cannot run migrations
     const body = await req.json().catch(() => ({}));
-    const secret = body?.secret || req.nextUrl.searchParams.get('secret');
+    // SECURITY FIX: Read secret from body ONLY — never from query string (URL params appear in logs)
+    const secret = body?.secret;
     const migrateSecret = process.env.MIGRATE_SECRET;
     if (!migrateSecret) return NextResponse.json({ success: false, error: 'MIGRATE_SECRET env var not configured' }, { status: 500 });
-    if (secret !== migrateSecret) return NextResponse.json({ success: false, error: 'Valid MIGRATE_SECRET required' }, { status: 401 });
+    if (!secret || secret !== migrateSecret) return NextResponse.json({ success: false, error: 'Valid MIGRATE_SECRET required' }, { status: 401 });
 
     const sql = await getDbReady();
     const results: string[] = [];

@@ -183,13 +183,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const user = await getUserFromRequest(req);
     userId = user?.id ?? null;
   } catch {
-    // Bearer token path — check Authorization header
+    // Bearer token path — validate handoff JWT from field app
     const authHeader = req.headers.get('authorization');
     if (authHeader?.startsWith('Bearer ')) {
-      // Token is validated by the field app's JWT — we accept with a warning
-      // In production, validate against the tokenMinter in lib/survey/handoff/
-      userId = 'field_app_bearer';
-      pipelineLog.push(`[upload] Auth: Bearer token (field app)`);
+      const bearerToken = authHeader.slice(7).trim();
+      const { verifyHandoffToken } = await import('@/lib/survey/handoff/tokenMinter');
+      const claims = verifyHandoffToken(bearerToken);
+      if (claims) {
+        // Use the SolarPro user identity from the handoff token claims
+        userId = claims.solarpro_user_id ?? 'field_app_bearer';
+        pipelineLog.push(`[upload] Auth: valid handoff JWT (project_id=${claims.project_id} user=${userId})`);
+      } else {
+        // Invalid or expired bearer token — reject
+        return NextResponse.json(
+          { error: 'Invalid or expired handoff token', code: 'UNAUTHORIZED' },
+          { status: 401 },
+        );
+      }
     }
   }
 
@@ -247,7 +257,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error('SURVEY', `[SURVEY_NORMALIZE_FAIL] survey=${raw.id} error=${msg}`);
     return NextResponse.json(
-      { error: 'Survey normalization failed', code: 'NORMALIZATION_ERROR', detail: msg },
+      { error: 'Survey normalization failed', code: 'NORMALIZATION_ERROR' },
       { status: 500 },
     );
   }
@@ -390,28 +400,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const sql = await getDbReady();
 
-    let rows: any[];
+    // IDOR FIX: All queries JOIN against projects to enforce ownership —
+    // user can only read surveys for projects they own.
+    let rows: Record<string, unknown>[];
     if (surveyId) {
       rows = await sql`
-        SELECT id, project_id, pipeline_version, normalized, enriched,
-               structural_feasibility, electrical_feasibility, created_at, updated_at
-        FROM project_site_surveys
-        WHERE id = ${surveyId}
+        SELECT s.id, s.project_id, s.pipeline_version, s.normalized, s.enriched,
+               s.structural_feasibility, s.electrical_feasibility, s.created_at, s.updated_at
+        FROM project_site_surveys s
+        JOIN projects p ON p.id = s.project_id
+        WHERE s.id = ${surveyId}
+          AND p.user_id = ${userId}
         LIMIT 1
       `;
     } else {
-      // Return most recent survey for project
+      // Return most recent survey for project — ownership enforced via JOIN
       rows = await sql`
-        SELECT id, project_id, pipeline_version, normalized, enriched,
-               structural_feasibility, electrical_feasibility, created_at, updated_at
-        FROM project_site_surveys
-        WHERE project_id = ${projectId}
-        ORDER BY created_at DESC
+        SELECT s.id, s.project_id, s.pipeline_version, s.normalized, s.enriched,
+               s.structural_feasibility, s.electrical_feasibility, s.created_at, s.updated_at
+        FROM project_site_surveys s
+        JOIN projects p ON p.id = s.project_id
+        WHERE s.project_id = ${projectId}
+          AND p.user_id = ${userId}
+        ORDER BY s.created_at DESC
         LIMIT 1
       `;
     }
 
     if (rows.length === 0) {
+      // Return 404 for both "not found" and "not yours" — don't leak existence
       return NextResponse.json({ error: 'Survey not found' }, { status: 404 });
     }
 
@@ -432,6 +449,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error('SURVEY', `[SURVEY_GET_FAIL] error=${msg}`);
-    return NextResponse.json({ error: 'Failed to fetch survey', detail: msg }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch survey' }, { status: 500 });
   }
 }

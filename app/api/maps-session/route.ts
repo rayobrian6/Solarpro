@@ -4,12 +4,19 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
+import { requireAuth } from '@/lib/security';
 
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+// SECURITY: Read key from env var only — never hardcoded in source.
+// Set GOOGLE_MAPS_API_KEY (server-side) or NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env
+const GOOGLE_MAPS_API_KEY =
+  process.env.GOOGLE_MAPS_API_KEY ||
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  '';
 
 let cachedSession: { token: string; expiry: number } | null = null;
 
 async function getSessionToken(): Promise<string> {
+  if (!GOOGLE_MAPS_API_KEY) throw new Error('GOOGLE_MAPS_API_KEY not configured');
   const now = Math.floor(Date.now() / 1000);
   if (cachedSession && cachedSession.expiry > now + 300) {
     return cachedSession.token;
@@ -30,22 +37,41 @@ async function getSessionToken(): Promise<string> {
   return data.session;
 }
 
-// GET /api/maps-session → returns { session, key }
+// GET /api/maps-session → returns { session }
+// SECURITY: Requires authentication — prevents unauthenticated quota abuse.
+// Client reads NEXT_PUBLIC_GOOGLE_MAPS_API_KEY from process.env directly;
+// the key is NOT returned in this response body.
 export async function GET(req: NextRequest) {
+  // SECURITY: Require authenticated user
+  const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
   try {
     const session = await getSessionToken();
-    return NextResponse.json({ session, key: GOOGLE_MAPS_API_KEY });
+    // Return session only — do NOT expose key in response body
+    return NextResponse.json({ session });
   } catch (e: unknown) {
     return handleRouteDbError('[app/api/maps-session/route.ts]', e);
   }
 }
 
-// GET /api/maps-session/tile?z=&x=&y= → proxies satellite tile
+// POST /api/maps-session → proxies satellite tile
+// SECURITY: Requires authentication — prevents unauthenticated tile scraping.
 export async function POST(req: NextRequest) {
+  // SECURITY: Require authenticated user
+  const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
   try {
-    const { z, x, y } = await req.json();
+    const body = await req.json();
+    // BUG-21-08 FIX: Validate z/x/y as non-negative integers before interpolating into URL
+    const z = parseInt(String(body.z), 10);
+    const x = parseInt(String(body.x), 10);
+    const y = parseInt(String(body.y), 10);
+    if (isNaN(z) || isNaN(x) || isNaN(y) || z < 0 || x < 0 || y < 0 || z > 22) {
+      return new NextResponse('Invalid tile coordinates', { status: 400 });
+    }
     const session = await getSessionToken();
-    const url = `https://tile.googleapis.com/v1/2dtiles/${z}/${x}/${y}?session=${session}&key=${GOOGLE_MAPS_API_KEY}`;
+    // BUG-21-08 FIX: Use validated integers and encodeURIComponent on token/key — no injection possible
+    const url = `https://tile.googleapis.com/v1/2dtiles/${z}/${x}/${y}?session=${encodeURIComponent(session)}&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`;
     const res = await fetch(url);
     if (!res.ok) return new NextResponse('Tile error', { status: res.status });
     const buf = await res.arrayBuffer();
@@ -53,7 +79,7 @@ export async function POST(req: NextRequest) {
       headers: {
         'Content-Type': res.headers.get('Content-Type') || 'image/jpeg',
         'Cache-Control': 'public, max-age=86400',
-        'Access-Control-Allow-Origin': '*',
+        // BUG-21-08 FIX: Removed CORS wildcard — endpoint requires auth, must not allow cross-origin access
       },
     });
   } catch (e: unknown) {

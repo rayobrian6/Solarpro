@@ -114,7 +114,7 @@ export async function POST(
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[survey-handoff] token mint failed: ${msg}`);
     return NextResponse.json(
-      { error: `Handoff token error: ${msg}` },
+      { error: 'Failed to generate handoff token' },
       { status: 500 },
     );
   }
@@ -123,8 +123,9 @@ export async function POST(
     `[survey-handoff] minted token for projectId=${projectId} userId=${user.id}`,
   );
   // F-06: [HANDOFF OWNER] log — confirms ownership claims are embedded in the JWT
+  // SECURITY FIX: Removed email from log line — PII must not appear in server logs
   console.log(
-    `[HANDOFF OWNER] projectId=${projectId} solarpro_user_id=${user.id} solarpro_project_id=${projectId} email=${user.email}`,
+    `[HANDOFF OWNER] projectId=${projectId} solarpro_user_id=${user.id} solarpro_project_id=${projectId}`,
   );
 
   return NextResponse.json({ url }, { status: 200 });

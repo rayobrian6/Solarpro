@@ -130,7 +130,8 @@ export async function POST(req: NextRequest) {
       nodeEnv:             process.env.NODE_ENV,
     }));
 
-    console.log(`[AUTH_LOGIN_SUCCESS] user=${sessionUser.email} cookie=${COOKIE_NAME} set via response.cookies.set()`);
+    // SECURITY FIX: Removed email from log — PII must not appear in server logs
+    console.log(`[AUTH_LOGIN_SUCCESS] userId=${sessionUser.id} cookie=${COOKIE_NAME} set via response.cookies.set()`);
 
     return response;
 

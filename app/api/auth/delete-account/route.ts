@@ -64,7 +64,8 @@ export async function DELETE(req: NextRequest) {
     // Delete the user record (cascade will handle related rows if FK constraints set)
     await sql`DELETE FROM users WHERE id = ${id}`;
 
-    console.log(`[DELETE_ACCOUNT] User self-deleted: id=${id} email=${email}`);
+    // SECURITY FIX: Removed email from log — PII must not appear in server logs
+    console.log(`[DELETE_ACCOUNT] User self-deleted: id=${id}`);
 
     // Clear the session cookie in the response
     const res = NextResponse.json(

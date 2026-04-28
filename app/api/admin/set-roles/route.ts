@@ -1,15 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { productionGuard } from '@/lib/security';
+import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 // GET /api/admin/set-roles?secret=YOUR_SECRET
-// Emergency endpoint to set admin roles — bypasses JWT auth, uses migrate secret
+// Emergency endpoint to normalise DB role constraints — dev/staging only.
+// Requires: productionGuard (blocks in production) + requireAdminApi (super_admin JWT).
+// Hardcoded email list removed — use /api/admin/users PATCH to assign roles instead.
 export async function GET(req: NextRequest) {
   // SECURITY: Block in production — use admin panel instead
   const _blocked = productionGuard(); if (_blocked) return _blocked;
+
+  // SECURITY: Require super_admin session even in dev/staging
+  const adminCheck = await requireAdminApi(req);
+  if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+
   const secret = req.nextUrl.searchParams.get('secret');
   const migrateSecret = process.env.MIGRATE_SECRET;
 
@@ -48,32 +56,9 @@ export async function GET(req: NextRequest) {
       results.push(`⚠️ Add constraint: ${(e as Error).message}`);
     }
 
-    // Step 4: Set roles
-    const roleUpdates = [
-      { email: 'raymond.obrian@yahoo.com',   role: 'super_admin' },
-      { email: 'carpenterjames88@gmail.com',  role: 'admin' },
-      { email: 'cody@underthesun.solutions',  role: 'admin' },
-    ];
-
-    for (const { email, role } of roleUpdates) {
-      try {
-        const result = await sql`UPDATE users SET role = ${role}, updated_at = NOW() WHERE email = ${email} RETURNING email, role`;
-        if (result.length > 0) {
-          results.push(`✅ ${email} → role = ${role}`);
-        } else {
-          results.push(`⚠️ ${email} — user not found in DB`);
-        }
-      } catch (e: unknown) {
-        results.push(`❌ ${email}: ${(e as Error).message}`);
-      }
-    }
-
-    // Step 5: Verify
-    const verify = await sql`SELECT email, role FROM users WHERE email IN ('raymond.obrian@yahoo.com','carpenterjames88@gmail.com','cody@underthesun.solutions') ORDER BY email`;
-    results.push('--- Verification ---');
-    for (const row of verify) {
-      results.push(`  ${row.email}: role = ${row.role}`);
-    }
+    // Note: to assign admin/super_admin roles to specific users, use:
+    //   PATCH /api/admin/users  { userId, role }
+    // That endpoint is already admin-only and audit-logged.
 
     return NextResponse.json({ success: true, results });
   } catch (e: unknown) {

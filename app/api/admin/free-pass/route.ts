@@ -21,8 +21,8 @@ export async function POST(req: NextRequest) {
     const { email, action = 'grant', plan = 'contractor', note = 'Free pass granted by admin', secret } = body;
 
     // SECURITY: Require admin role — ADMIN_SECRET alone is not sufficient
+    // BUG-21-09 FIX: requireAdminApi returns AdminUser|null, never NextResponse.
     const adminUser = await requireAdminApi(req);
-    if (adminUser instanceof NextResponse) return adminUser;
     if (!adminUser) {
       return NextResponse.json({ success: false, error: 'Admin role required.' }, { status: 403 });
     }
@@ -119,7 +119,14 @@ export async function POST(req: NextRequest) {
     } else if (action === 'delete') {
       // Permanently delete a user account (admin only)
       // SECURITY: Destructive action — admin role already enforced at handler entry
-      await sql`DELETE FROM users WHERE email = ${email.toLowerCase()} AND email != 'raymond.obrian@yahoo.com'`;
+      // BUG-20-05 FIX: Protect the owner account using env var instead of hardcoded email.
+      // Set OWNER_EMAIL in environment to protect a specific account from admin deletion.
+      const ownerEmail = (process.env.OWNER_EMAIL || '').toLowerCase();
+      const targetEmail = email.toLowerCase();
+      if (ownerEmail && targetEmail === ownerEmail) {
+        return NextResponse.json({ success: false, error: 'Cannot delete the owner account' }, { status: 403 });
+      }
+      await sql`DELETE FROM users WHERE email = ${targetEmail}`;
       return NextResponse.json({ success: true, action: 'deleted', email, message: `🗑️ User deleted: ${email}` });
     } else if (action === 'search') {
       // Search users by email pattern or name
@@ -148,8 +155,9 @@ export async function POST(req: NextRequest) {
  */
 export async function GET(req: NextRequest) {
   // SECURITY: Require admin role
+  // BUG-21-09 FIX: requireAdminApi returns AdminUser|null, never NextResponse.
   const adminCheck = await requireAdminApi(req);
-  if (adminCheck instanceof NextResponse) return adminCheck;
+  if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
 
   try {
     const sql = await getDbReady();

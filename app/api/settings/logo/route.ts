@@ -8,7 +8,9 @@ import { handleRouteDbError } from '@/lib/db-neon';
 
 // Max logo size: 2MB
 const MAX_SIZE = 2 * 1024 * 1024;
-const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/svg+xml', 'image/webp', 'image/gif'];
+// SECURITY: SVG excluded — SVG files can contain embedded JavaScript and cause stored XSS
+// when rendered as a data URL. Only rasterized formats are accepted.
+const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,7 +27,7 @@ export async function POST(req: NextRequest) {
     // Validate type
     if (!ALLOWED_TYPES.includes(file.type)) {
       return NextResponse.json(
-        { success: false, error: 'Invalid file type. Please upload PNG, JPG, SVG, or WebP.' },
+        { success: false, error: 'Invalid file type. Please upload PNG, JPG, WebP, or GIF.' },
         { status: 400 }
       );
     }

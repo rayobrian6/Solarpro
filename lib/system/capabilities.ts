@@ -92,7 +92,7 @@ export function buildCapabilitiesPayload(nowIso: string = new Date().toISOString
         expectedContract: {
           algorithm: 'HS256',
           claims: ['jti', 'project_id', 'iat', 'exp'],
-          sharedSecretEnvVar: 'SOLARPRO_HANDOFF_SECRET',
+          // SECURITY FIX: Removed sharedSecretEnvVar field — env var names must not be disclosed publicly
         },
       },
       releaseWebhook: {
