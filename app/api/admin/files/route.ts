@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -82,6 +82,7 @@ export async function DELETE(req: NextRequest) {
     const sql = await getDbReady();
     const { id } = await req.json();
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
+    if (!isValidUUID(id)) return NextResponse.json({ success: false, error: 'Invalid file ID format.' }, { status: 400 });
     await sql`DELETE FROM project_files WHERE id = ${id}`;
     return NextResponse.json({ success: true });
   } catch (e: unknown) {

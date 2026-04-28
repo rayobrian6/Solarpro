@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -73,11 +73,13 @@ export async function PATCH(req: NextRequest) {
     const sql = await getDbReady();
     const { id, action, userId } = await req.json();
     if (!id || !action) return NextResponse.json({ success: false, error: 'Missing id or action' }, { status: 400 });
+    if (!isValidUUID(id)) return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
 
     if (action === 'delete') {
       await sql`DELETE FROM projects WHERE id = ${id}`;
     } else if (action === 'reassign') {
       if (!userId) return NextResponse.json({ success: false, error: 'Missing userId for reassign' }, { status: 400 });
+      if (!isValidUUID(userId)) return NextResponse.json({ success: false, error: 'Invalid userId format.' }, { status: 400 });
       await sql`UPDATE projects SET user_id = ${userId} WHERE id = ${id}`;
     } else {
       return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });

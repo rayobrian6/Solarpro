@@ -5,7 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -18,6 +18,9 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const fileId = searchParams.get('id');
     if (!fileId) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
+    if (!isValidUUID(fileId)) {
+      return NextResponse.json({ success: false, error: 'Invalid file ID format.' }, { status: 400 });
+    }
 
     const sql = await getDbReady();
 

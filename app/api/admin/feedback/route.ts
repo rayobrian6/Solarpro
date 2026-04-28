@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -113,6 +113,9 @@ export async function POST(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Feedback ID required' }, { status: 400 });
+    }
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid feedback ID format.' }, { status: 400 });
     }
     if (!status || !['new', 'reviewed', 'resolved'].includes(status)) {
       return NextResponse.json({ success: false, error: 'Status must be new, reviewed, or resolved' }, { status: 400 });
