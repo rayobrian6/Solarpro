@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,6 +34,9 @@ export async function GET(req: NextRequest) {
 
     if (!projectId) {
       return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
+    }
+    if (!isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
     }
 
     const sql = await getDbReady();

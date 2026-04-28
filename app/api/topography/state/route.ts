@@ -21,7 +21,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady } from '@/lib/db-neon';
+import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import { getTopographyState } from '@/lib/topography/getTopographyState';
 
 export async function GET(req: NextRequest) {
@@ -43,6 +43,9 @@ export async function GET(req: NextRequest) {
       { success: false, error: 'projectId is required' },
       { status: 400 },
     );
+  }
+  if (!isValidUUID(projectId)) {
+    return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
   }
 
   // -- Verify project ownership (security: prevent cross-user data leaks) ----

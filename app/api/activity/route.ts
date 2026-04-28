@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 
 /**
  * GET /api/activity — Get recent activity log
@@ -16,6 +16,10 @@ export async function GET(req: NextRequest) {
 
     const projectId = req.nextUrl.searchParams.get('project_id');
     const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') || '30', 10), 100);
+
+    if (projectId && !isValidUUID(projectId)) {
+      return NextResponse.json({ error: 'Invalid project_id format.' }, { status: 400 });
+    }
 
     const sql = await getDbReady();
 
@@ -65,6 +69,9 @@ export async function POST(req: NextRequest) {
 
     if (!project_id || !type || !title) {
       return NextResponse.json({ error: 'project_id, type, and title are required' }, { status: 400 });
+    }
+    if (!isValidUUID(project_id)) {
+      return NextResponse.json({ error: 'Invalid project_id format.' }, { status: 400 });
     }
 
     // SECURITY: field length caps

@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbReady } from '@/lib/db-neon';
+import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import { requireAdminApi } from '@/lib/adminAuth';
 
 export async function GET(req: NextRequest) {
@@ -19,6 +19,10 @@ export async function GET(req: NextRequest) {
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Feedback ID required' }, { status: 400 });
+    }
+
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid feedback ID format.' }, { status: 400 });
     }
 
     const sql = await getDbReady();

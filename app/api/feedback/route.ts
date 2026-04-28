@@ -10,6 +10,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { BUILD_VERSION } from '@/lib/version';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// ── Magic byte validation for screenshot images ─────────────────────────────
+const ALLOWED_SCREENSHOT_MIMES = new Set([
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+]);
+
+function isValidScreenshotMagic(buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;
+  // WebP: RIFF????WEBP
+  if (buf.length >= 12 &&
+      buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+  // GIF: GIF87a or GIF89a
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true;
+  return false;
+}
 
 // Max screenshot size: 5MB
 const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024;
@@ -40,7 +61,6 @@ async function ensureFeedbackTable(sql: any) {
 export async function POST(req: NextRequest) {
   try {
     // SECURITY: Rate limiting — prevent feedback spam / storage abuse
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
     const rl = await checkRateLimit('feedback', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many feedback submissions. Please slow down.' }, { status: 429 });
@@ -85,6 +105,16 @@ export async function POST(req: NextRequest) {
         screenshotBuffer = Buffer.from(await screenshot.arrayBuffer());
         screenshotName = screenshot.name;
         screenshotMime = screenshot.type;
+        // ── Magic byte validation ──
+        if (!isValidScreenshotMagic(screenshotBuffer)) {
+          return NextResponse.json(
+            { success: false, error: 'Screenshot file type not supported. Please use JPEG, PNG, WebP, or GIF.' },
+            { status: 400 }
+          );
+        }
+        if (!ALLOWED_SCREENSHOT_MIMES.has(screenshotMime)) {
+          screenshotMime = 'image/jpeg'; // sanitize declared MIME
+        }
       }
     } else {
       // Handle JSON
@@ -107,6 +137,16 @@ export async function POST(req: NextRequest) {
             { status: 400 }
           );
         }
+        // ── Magic byte validation ──
+        if (!isValidScreenshotMagic(screenshotBuffer)) {
+          return NextResponse.json(
+            { success: false, error: 'Screenshot file type not supported. Please use JPEG, PNG, WebP, or GIF.' },
+            { status: 400 }
+          );
+        }
+        if (!ALLOWED_SCREENSHOT_MIMES.has(screenshotMime)) {
+          screenshotMime = 'image/jpeg'; // sanitize declared MIME
+        }
       }
     }
 
@@ -122,6 +162,19 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'Message must be at least 5 characters' },
         { status: 400 }
       );
+    }
+    // ── Field length caps ──
+    if (message.trim().length > 5000) {
+      return NextResponse.json({ success: false, error: 'Message must be 5000 characters or fewer.' }, { status: 400 });
+    }
+    if (pageUrl && pageUrl.length > 2000) {
+      return NextResponse.json({ success: false, error: 'Page URL too long.' }, { status: 400 });
+    }
+    if (browserInfo && browserInfo.length > 500) {
+      return NextResponse.json({ success: false, error: 'Browser info too long.' }, { status: 400 });
+    }
+    if (screenSize && screenSize.length > 50) {
+      return NextResponse.json({ success: false, error: 'Screen size too long.' }, { status: 400 });
     }
 
     // Insert — separate path for with/without screenshot to avoid BYTEA null issues

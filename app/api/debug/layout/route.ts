@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady } from '@/lib/db-neon';
+import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import { productionGuard } from '@/lib/security';
 
 export async function GET(req: NextRequest) {
@@ -25,6 +25,10 @@ export async function GET(req: NextRequest) {
   }
 
   const projectId = req.nextUrl.searchParams.get('projectId');
+
+  if (projectId && !isValidUUID(projectId)) {
+    return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
+  }
 
   try {
     const sql = await getDbReady();

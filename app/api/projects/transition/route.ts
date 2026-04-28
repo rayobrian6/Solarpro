@@ -29,7 +29,7 @@ export const runtime = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import {
   DEAL_TRANSITIONS,
   stageToSimpleStatus,
@@ -71,6 +71,9 @@ export async function POST(req: NextRequest) {
         { success: false, error: 'Missing or invalid field: projectId' },
         { status: 400 }
       );
+    }
+    if (!isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
     }
 
     if (!action || typeof action !== 'string') {

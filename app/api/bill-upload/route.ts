@@ -19,6 +19,31 @@ import { enrichBillData, type BillEnrichmentInput } from '@/lib/billEnrichment';
 // v48.2: Confidence scoring layer
 import { confidenceFromBillExtractResult } from '@/lib/billConfidence';
 import { logger } from '@/lib/logger';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// ── Magic byte validation for bill uploads ──────────────────────────────────
+// Accepted: PDF, JPEG, PNG, WebP, GIF, TIFF, BMP
+function isValidBillFileMagic(buf: Buffer): boolean {
+  if (buf.length < 4) return false;
+  // PDF: %PDF (25 50 44 46)
+  if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) return true;
+  // JPEG: FF D8 FF
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+  // PNG: 89 50 4E 47
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;
+  // WebP: RIFF????WEBP
+  if (buf.length >= 12 &&
+      buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 &&
+      buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50) return true;
+  // GIF: GIF87a or GIF89a (47 49 46)
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return true;
+  // TIFF: little-endian (49 49 2A 00) or big-endian (4D 4D 00 2A)
+  if (buf[0] === 0x49 && buf[1] === 0x49 && buf[2] === 0x2A && buf[3] === 0x00) return true;
+  if (buf[0] === 0x4D && buf[1] === 0x4D && buf[2] === 0x00 && buf[3] === 0x2A) return true;
+  // BMP: BM (42 4D)
+  if (buf[0] === 0x42 && buf[1] === 0x4D) return true;
+  return false;
+}
 
 // Log env status once per cold start for deployment observability
 logEnvStatus('bill-upload');
@@ -111,7 +136,6 @@ export async function POST(req: NextRequest) {
   // ── JSON Error Boundary ────────────────────────────────────────────────────
   try {
     // v48.6: Rate limiting — 5 req / 30s per IP (protects Claude + OCR costs)
-    const { checkRateLimit, getClientIp } = await import('@/lib/rateLimiter');
     const rl = await checkRateLimit('bill-upload', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
@@ -157,6 +181,15 @@ export async function POST(req: NextRequest) {
       if (buffer.length === 0) {
         console.error('[FILE_BUFFER_CREATED] ERROR: buffer is 0 bytes — file.arrayBuffer() returned empty');
         return NextResponse.json({ success: false, error: 'File buffer is empty. Please try uploading again.', stage: 'buffer' }, { status: 422 });
+      }
+
+      // ── Magic byte validation — reject files whose binary signature doesn't match their declared type ──
+      if (!isValidBillFileMagic(buffer)) {
+        logger.warn('BILL', `[MAGIC_BYTE_REJECTED] name=${fileName} mime=${fileType} size=${buffer.length}`);
+        return NextResponse.json(
+          { success: false, error: 'Unsupported or invalid file format. Please upload a PDF, JPG, PNG, WebP, GIF, TIFF, or BMP.' },
+          { status: 400 }
+        );
       }
 
       if (fileType === 'application/pdf' || fileName.endsWith('.pdf')) {

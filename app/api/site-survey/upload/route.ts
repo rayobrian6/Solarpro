@@ -34,7 +34,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady } from '@/lib/db-neon';
+import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import { logger } from '@/lib/logger';
 
 import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
@@ -401,6 +401,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       { error: 'projectId or surveyId query parameter required' },
       { status: 400 },
     );
+  }
+  if (projectId && !isValidUUID(projectId)) {
+    return NextResponse.json({ error: 'Invalid projectId format.' }, { status: 400 });
+  }
+  if (surveyId && !isValidUUID(surveyId)) {
+    return NextResponse.json({ error: 'Invalid surveyId format.' }, { status: 400 });
   }
 
   try {

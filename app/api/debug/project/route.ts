@@ -12,7 +12,7 @@ export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, getProjectById, getLayoutByProject, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, getProjectById, getLayoutByProject, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { getEngineeringReport } from '@/lib/engineering/db-engineering';
 import { buildDesignSnapshot } from '@/lib/engineering/designSnapshot';
 import { productionGuard } from '@/lib/security';
@@ -30,6 +30,9 @@ export async function GET(req: NextRequest) {
     const projectId = req.nextUrl.searchParams.get('id') || req.nextUrl.searchParams.get('projectId');
     if (!projectId) {
       return NextResponse.json({ success: false, error: 'id or projectId parameter required' }, { status: 400 });
+    }
+    if (!isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
     }
 
     const sql = await getDbReady();

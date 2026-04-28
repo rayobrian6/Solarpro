@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
@@ -118,6 +118,9 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const projectId = searchParams.get('projectId');
     if (!projectId) return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
+    if (!isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
+    }
 
     const sql = await getDbReady();
 
@@ -166,6 +169,12 @@ export async function POST(req: NextRequest) {
 
       if (!projectId || !fileName) {
         return NextResponse.json({ success: false, error: 'projectId and fileName required' }, { status: 400 });
+      }
+      if (!isValidUUID(projectId)) {
+        return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
+      }
+      if (clientId && !isValidUUID(clientId)) {
+        return NextResponse.json({ success: false, error: 'Invalid clientId format.' }, { status: 400 });
       }
 
       // Verify ownership
@@ -217,6 +226,12 @@ export async function POST(req: NextRequest) {
 
     if (!file || !projectId) {
       return NextResponse.json({ success: false, error: 'file and projectId required' }, { status: 400 });
+    }
+    if (!isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Invalid projectId format.' }, { status: 400 });
+    }
+    if (clientId && !isValidUUID(clientId)) {
+      return NextResponse.json({ success: false, error: 'Invalid clientId format.' }, { status: 400 });
     }
 
     if (file.size > MAX_FILE_SIZE) {
@@ -283,6 +298,9 @@ export async function DELETE(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const fileId = searchParams.get('id');
     if (!fileId) return NextResponse.json({ success: false, error: 'id required' }, { status: 400 });
+    if (!isValidUUID(fileId)) {
+      return NextResponse.json({ success: false, error: 'Invalid file ID format.' }, { status: 400 });
+    }
 
     const sql = await getDbReady();
     const result = await sql`
