@@ -202,7 +202,10 @@ export async function POST(req: NextRequest) {
     for (const u of freePassUsers) {
       try {
         const bcrypt = await import('bcryptjs');
-        const placeholderHash = await bcrypt.hash('ChangeMe123!', 10);
+        const { randomBytes } = await import('crypto');
+        // Generate a cryptographically random placeholder — never predictable, must be reset via password-reset flow
+        const placeholderPassword = randomBytes(32).toString('hex');
+        const placeholderHash = await bcrypt.hash(placeholderPassword, 10);
         // Use full UPSERT — handles both existing and new users atomically
         await sql`
           INSERT INTO users (name, email, password_hash, company, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
@@ -217,8 +220,8 @@ export async function POST(req: NextRequest) {
             is_free_pass        = true,
             free_pass_note      = ${u.note},
             trial_ends_at       = '2099-12-31 23:59:59+00',
-            role                = EXCLUDED.role,
-            password_hash       = ${placeholderHash}
+            role                = EXCLUDED.role
+            -- password_hash intentionally omitted from UPDATE: never overwrite existing user passwords on re-migration
         `;
         results.push(`✅ Free pass upserted: ${u.email}`);
       } catch (e: unknown) {
