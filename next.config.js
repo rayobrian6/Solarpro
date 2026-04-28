@@ -145,6 +145,22 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // Security headers for ALL routes (pages + API)
+        source: '/(.*)',
+        headers: [
+          // Prevent MIME-type sniffing
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          // Prevent clickjacking
+          { key: 'X-Frame-Options', value: 'DENY' },
+          // Limit referrer info leakage
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          // Disable browser features not needed by the app
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), interest-cohort=()' },
+          // HSTS -- enforce HTTPS (max-age=1 year, includeSubDomains)
+          { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+        ],
+      },
+      {
         // Page routes only -- explicitly exclude /api and /_next
         source: '/((?!api|_next/static|_next/image|favicon.ico).*)',
         headers: [
