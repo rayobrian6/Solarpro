@@ -82,7 +82,8 @@ export function signToken(user: SessionUser): string {
 
 export function verifyToken(token: string): SessionUser | null {
   try {
-    const decoded = jwt.verify(token, getJwtSecret()) as Record<string, any>;
+    // SECURITY: explicitly restrict to HS256 — prevents alg:none and algorithm confusion attacks
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as Record<string, any>;
     // Explicitly extract ONLY identity fields — discard any role/subscription
     // fields that may exist in old JWTs issued before this fix.
     if (!decoded?.id || !decoded?.email) return null;

@@ -84,9 +84,22 @@ export default function AdminUsers() {
           const u = users.find(u => u.id === userId);
           setTempPasswordModal({ password: d.tempPassword, email: u?.email || '' });
         } else if (actionName === 'impersonate' && d.token) {
-          // Open impersonation in new tab
-          window.open(`/api/admin/impersonate?token=${d.token}`, '_blank');
-          showToast(`✓ Impersonating ${d.targetUser?.name || 'user'} — check new tab`);
+          // SECURITY FIX: POST the token in the request body instead of exposing it
+          // in the URL (which would leak it into browser history, server access logs,
+          // and Referer headers). The backend requires POST for this endpoint.
+          const impRes = await fetch('/api/admin/impersonate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ token: d.token }),
+          });
+          const impData = await impRes.json();
+          if (impRes.ok && impData.success && impData.redirectTo) {
+            window.open(impData.redirectTo, '_blank');
+            showToast(`✓ Impersonating ${d.targetUser?.name || 'user'} — check new tab`);
+          } else {
+            showToast(impData.error || 'Impersonation failed', false);
+          }
         } else {
           showToast(`✓ ${actionName.replace(/_/g, ' ')} applied`);
         }
