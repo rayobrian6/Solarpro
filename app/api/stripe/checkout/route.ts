@@ -10,14 +10,14 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export async function POST(req: NextRequest) {
   try {
+    // ── Rate limiting ──────────────────────────────────────────────────────────
+    const rl = await checkRateLimit('stripe', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+    }
+
     const user = getUserFromRequest(req);
     if (!user) {
-
-  // ── Rate limiting ──────────────────────────────────────────────────────────
-  const rl = await checkRateLimit('stripe', getClientIp(req));
-  if (!rl.allowed) {
-    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
-  }
       return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
     }
 

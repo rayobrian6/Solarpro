@@ -16,12 +16,20 @@ export async function POST(req: NextRequest) {
     }
 
     // Verify webhook signature
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      // SECURITY: Reject all webhook events if the secret is not configured —
+      // an empty/missing secret would allow unsigned events to be accepted.
+      console.error('[Stripe Webhook] STRIPE_WEBHOOK_SECRET is not configured. Rejecting event.');
+      return NextResponse.json({ error: 'Webhook secret not configured' }, { status: 500 });
+    }
+
     let event: Stripe.Event;
     try {
       event = stripe.webhooks.constructEvent(
         body,
         signature,
-        process.env.STRIPE_WEBHOOK_SECRET || ''
+        webhookSecret
       );
     } catch (err: unknown) {
       console.error('Webhook signature verification failed:', (err as Error).message);
