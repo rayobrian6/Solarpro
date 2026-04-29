@@ -296,6 +296,12 @@ function rowToProject(row: Record<string, unknown>): Project {
           ? JSON.parse(row.engineering_seed)
           : row.engineering_seed) as import('@/types').EngineeringSeed
       : undefined,
+    engineeringConfig: row.engineering_config
+      ? (typeof row.engineering_config === 'string'
+          ? JSON.parse(row.engineering_config)
+          : row.engineering_config) as Record<string, unknown>
+      : undefined,
+    engineeringUpdatedAt: row.engineering_updated_at as string | undefined,
     noItc: (row.no_itc as boolean) || false,   // v47.243: suppress ITC display
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
@@ -1425,6 +1431,12 @@ export async function getProjectWithDetails(
           ? JSON.parse(row.engineering_seed)
           : row.engineering_seed) as import('@/types').EngineeringSeed
       : undefined,
+    engineeringConfig: row.engineering_config
+      ? (typeof row.engineering_config === 'string'
+          ? JSON.parse(row.engineering_config)
+          : row.engineering_config) as Record<string, unknown>
+      : undefined,
+    engineeringUpdatedAt: row.engineering_updated_at as string | undefined,
     noItc: (row.no_itc as boolean) || false,   // v47.243: suppress ITC display
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,

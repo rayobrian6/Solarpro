@@ -1176,6 +1176,22 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ trg_project_physical_data_updated_at trigger: ${(e as Error).message}`);
     }
 
+        // ── Migration 021: projects.engineering_config + engineering_updated_at ──────
+    // Persists the full engineering workspace config (inverter, panel, battery,
+    // wire, utility, AHJ, structural fields) so the page restores exactly on reload.
+    try {
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_config JSONB`;
+      results.push('✅ projects.engineering_config — added (or already existed)');
+    } catch (e: unknown) {
+      results.push(`⚠️ projects.engineering_config: ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_updated_at TIMESTAMPTZ`;
+      results.push('✅ projects.engineering_updated_at — added (or already existed)');
+    } catch (e: unknown) {
+      results.push(`⚠️ projects.engineering_updated_at: ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

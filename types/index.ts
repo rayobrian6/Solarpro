@@ -640,6 +640,8 @@ export interface Project {
   billAnalysis?: BillAnalysis;
   billData?: Record<string, unknown>;  // raw extracted bill data from BillUploadFlow
   engineeringSeed?: EngineeringSeed;  // structured seed from bill upload — drives engineering engine hydration
+  engineeringConfig?: Record<string, unknown>;  // persisted engineering workspace config (auto-saved)
+  engineeringUpdatedAt?: string;                // ISO timestamp of last engineering config save
   notes?: string;
   noItc?: boolean;             // v47.243: suppress ITC for clients who don't qualify (no tax liability)
   createdAt: string;

@@ -534,6 +534,15 @@ function EngineeringPageInner() {
   const [fileHydrationBanner, setFileHydrationBanner] = useState<string | null>(null);
   const [restoredRunId, setRestoredRunId]        = useState<string | null>(null);
 
+  // Auto-save state
+  // isHydrated: set to true ONCE after engineering_config (or seed) is loaded.
+  // No auto-save fires until this is true - prevents overwriting DB with defaults.
+  const isHydrated   = useRef(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  // Debounced save ref - holds the debounced function so it can be cancelled on unmount.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Auto-load project data when ?projectId= is in the URL
   // Full seed hydration: reads engineeringSeed.synthetic_eng_config to populate
   // the exact inverter/panel/string config the engineering engine needs.
@@ -939,7 +948,33 @@ function EngineeringPageInner() {
           }
         }
 
-        if (Object.keys(patches).length > 0) {
+        // ── engineering_config: authoritative restore ───────────────────────
+        // If the project has a saved engineering_config (auto-saved by the
+        // workspace), it takes priority over the seed patches — it represents
+        // exactly what the user last configured. The seed patches are still
+        // applied as a base (for project-level fields like address/state/client)
+        // but all equipment / string / config fields are overwritten by the
+        // saved engineering_config.
+        const savedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
+        if (savedConfig && Object.keys(savedConfig).length > 0) {
+          console.log('[EngineeringPage] Restoring from engineering_config (auto-saved workspace)');
+          // Merge: project-level fields from patches, all engineering fields from savedConfig
+          setConfig(prev => ({
+            ...prev,
+            // Project-level identity fields from patches (address, name, state, city, etc.)
+            projectName: patches.projectName ?? prev.projectName,
+            address:     patches.address     ?? prev.address,
+            clientName:  patches.clientName  ?? prev.clientName,
+            state:       patches.state       ?? prev.state,
+            city:        patches.city        ?? prev.city,
+            county:      patches.county      ?? prev.county,
+            zip:         patches.zip         ?? prev.zip,
+            systemType:  patches.systemType  ?? prev.systemType,
+            // All engineering config fields from saved workspace (user's last state)
+            ...savedConfig,
+          }));
+        } else if (Object.keys(patches).length > 0) {
+          // No saved config — use seed patches as before
           setConfig(prev => {
             const merged = { ...prev, ...patches };
             // Phase 11: silent brand/panel reconciliation removed from load path.
@@ -947,12 +982,32 @@ function EngineeringPageInner() {
             // surfaced via the SizingRecommendation panel (apply = explicit).
             return merged;
           });
+        }
+
+        // localStorage fallback: if DB has no engineering_config, check localStorage
+        // This covers the case where the network failed during a previous save.
+        if (!savedConfig || Object.keys(savedConfig).length === 0) {
+          try {
+            const localKey = `eng-config-${projectId}`;
+            const localRaw = typeof window !== 'undefined' ? window.localStorage.getItem(localKey) : null;
+            if (localRaw) {
+              const localConfig = JSON.parse(localRaw) as Partial<ProjectConfig>;
+              if (localConfig && Object.keys(localConfig).length > 0) {
+                console.log('[EngineeringPage] Restoring from localStorage fallback (no DB config)');
+                setConfig(prev => ({ ...prev, ...localConfig }));
+              }
+            }
+          } catch { /* localStorage unavailable or corrupt — ignore */ }
+        }
+
+        // Mark hydration complete — auto-save may now fire on config changes
+        isHydrated.current = true;
+
           // Trigger compliance calculation after config is hydrated
           setTimeout(() => {
             console.log('[EngineeringPage] Auto-triggering compliance calc after seed hydration');
             runCalc();
           }, 300);
-        }
       })
       .catch(err => console.warn('[engineering] auto-load failed:', err));
   }, [searchParams, projectAutoLoaded]);
@@ -1178,6 +1233,58 @@ function EngineeringPageInner() {
         setFileHydrationBanner('⚠️ Could not restore engineering configuration from file.');
       });
   }, [searchParams, fileHydrated]);
+
+  // ── Auto-save effect ────────────────────────────────────────────────────────
+  // Fires on every config change. Debounced 800ms so rapid edits (typing panel
+  // count, adjusting wire length) collapse into a single save. Guards:
+  //   1. isHydrated.current — never fires before the project has been loaded
+  //   2. currentProjectId — never fires if no project is selected
+  //   3. Empty config guard — never overwrites a real config with an empty object
+  useEffect(() => {
+    if (!isHydrated.current) return;
+    if (!currentProjectId) return;
+    if (!config || Object.keys(config).length === 0) return;
+
+    // Mirror to localStorage immediately (synchronous, no network)
+    // This is the "no network" fallback that keeps data safe even if the
+    // debounced fetch hasn't fired yet.
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(`eng-config-${currentProjectId}`, JSON.stringify(config));
+      }
+    } catch { /* quota exceeded or private mode — ignore */ }
+
+    // Cancel any pending debounced save and schedule a new one
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    setSaveState('saving');
+
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/engineering/save-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: currentProjectId, config }),
+        });
+        if (res.ok) {
+          setSaveState('saved');
+          setLastSavedAt(new Date());
+        } else {
+          console.warn('[EngineeringPage] Auto-save failed:', res.status);
+          setSaveState('error');
+        }
+      } catch (err) {
+        console.warn('[EngineeringPage] Auto-save network error:', err);
+        setSaveState('error');
+      }
+    }, 800);
+
+    // Cleanup: cancel pending timer on unmount or next effect run
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config, currentProjectId]);
 
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
@@ -5288,7 +5395,7 @@ function EngineeringPageInner() {
         </div>
       )}
 
-      {/* ─── Change Project chip: shown when a project IS loaded ─── */}
+      {/* ─── Change Project chip + Auto-save indicator ─── */}
       {currentProjectId && (
         <div className="bg-slate-900/60 border-b border-slate-700/30 px-6 py-2 flex-shrink-0 flex items-center gap-3">
           <span className="text-xs text-slate-500">Project loaded</span>
@@ -5303,6 +5410,40 @@ function EngineeringPageInner() {
           >
             ↩ Change Project
           </button>
+
+          {/* Auto-save indicator — shows save state after first hydration */}
+          {saveState !== 'idle' && (
+            <span className={`ml-auto flex items-center gap-1.5 text-xs transition-all ${
+              saveState === 'saving' ? 'text-slate-400' :
+              saveState === 'saved'  ? 'text-emerald-400' :
+                                      'text-red-400'
+            }`}>
+              {saveState === 'saving' && (
+                <>
+                  <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+                  </svg>
+                  Saving…
+                </>
+              )}
+              {saveState === 'saved' && (
+                <>
+                  <CheckCircle size={12} />
+                  {lastSavedAt
+                    ? `Saved ${Math.round((Date.now() - lastSavedAt.getTime()) / 1000) < 5 ? 'just now' : `${Math.round((Date.now() - lastSavedAt.getTime()) / 1000)}s ago`}`
+                    : 'Saved ✓'
+                  }
+                </>
+              )}
+              {saveState === 'error' && (
+                <>
+                  <AlertCircle size={12} />
+                  Save failed — changes stored locally
+                </>
+              )}
+            </span>
+          )}
         </div>
       )}
 
