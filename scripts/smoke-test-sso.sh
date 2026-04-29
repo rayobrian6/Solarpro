@@ -55,8 +55,9 @@ LOGIN_RESP=$(curl -sS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   -H 'Content-Type: application/json' \
   -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASSWORD\"}")
 
-echo "$LOGIN_RESP" | jq -e '.user.id' > /dev/null || fail "login failed: $LOGIN_RESP"
-USER_ID=$(echo "$LOGIN_RESP" | jq -r '.user.id')
+# Response shape from /api/auth/login is {success, data: {user: {...}}}
+echo "$LOGIN_RESP" | jq -e '.data.user.id' > /dev/null || fail "login failed: $LOGIN_RESP"
+USER_ID=$(echo "$LOGIN_RESP" | jq -r '.data.user.id')
 pass "logged in as user_id=$USER_ID"
 
 # -----------------------------------------------------------------------------
@@ -145,9 +146,16 @@ step "[6/7] Verifying auto-created project for Case-2"
 # and survey_external_id=$SURVEY_ID_C2.
 sleep 2  # let async ingest settle
 
-PROJ_LIST=$(curl -sS -b "$COOKIE_JAR" "$BASE_URL/api/projects")
-NEW_PROJ_ID=$(echo "$PROJ_LIST" | jq -r --arg sid "$SURVEY_ID_C2" \
-  '.projects[]? | select(.survey_external_id==$sid) | .id' | head -1)
+# NOTE: rowToProject in lib/db-neon.ts does not surface survey_external_id
+# on the /api/projects response (known gap; see AUDIT). So we verify via the
+# admin survey-webhook-log endpoint, which reads webhook_deliveries directly
+# and includes the project_id that the ingest pipeline upserted.
+#
+# Response shape: {success: true, data: [{ id, project_id, raw_body, status, ... }]}
+# We match by event_id in raw_body (which contains our SURVEY_ID_C2).
+WEBHOOK_LOG=$(curl -sS -b "$COOKIE_JAR" "$BASE_URL/api/admin/survey-webhook-log?limit=20")
+NEW_PROJ_ID=$(echo "$WEBHOOK_LOG" | jq -r --arg sid "$SURVEY_ID_C2" \
+  '.data[]? | select((.raw_body // "") | contains($sid)) | .project_id' | head -1)
 [[ -n "$NEW_PROJ_ID" && "$NEW_PROJ_ID" != "null" ]] \
   || fail "no project found with survey_external_id=$SURVEY_ID_C2"
 pass "auto-created project id=$NEW_PROJ_ID"
