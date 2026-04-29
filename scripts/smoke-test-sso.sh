@@ -120,18 +120,20 @@ BODY_C2=$(jq -n --arg sid "$SURVEY_ID_C2" --arg uid "$USER_ID" --arg at "$COMPLE
   --arg base "$BASE_URL" \
   '{survey_id:$sid, survey_url:($base+"/api/survey/mock/"+$sid), completed_at:$at, solarpro_user_id:$uid}')
 TS=$(date +%s)
-SIG=$(printf '%s' "$BODY_C2" | python3 -c "
+SIG=$(TS="$TS" printf '%s' "$BODY_C2" | python3 -c "
 import hmac, hashlib, os, sys
 secret = os.environ['SURVEY_WEBHOOK_SECRET'].encode()
-body = sys.stdin.buffer.read()
-print('sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest())
+ts     = os.environ['TS'].encode()
+body   = sys.stdin.buffer.read()
+signed = ts + b'.' + body
+print('sha256=' + hmac.new(secret, signed, hashlib.sha256).hexdigest())
 ")
 
 HTTP_CODE=$(curl -sS -o /tmp/smoke-c2.json -w '%{http_code}' \
   -X POST "$BASE_URL/api/webhooks/survey-complete" \
   -H 'Content-Type: application/json' \
-  -H "X-Timestamp: $TS" \
-  -H "X-Signature: $SIG" \
+  -H "X-Survey-Timestamp: $TS" \
+  -H "X-Survey-Signature: $SIG" \
   --data-raw "$BODY_C2")
 
 [[ "$HTTP_CODE" == "200" ]] || fail "case-2 webhook status=$HTTP_CODE body=$(cat /tmp/smoke-c2.json)"
@@ -157,18 +159,20 @@ BODY_C1=$(jq -n --arg sid "$SURVEY_ID_C1" --arg uid "$USER_ID" --arg pid "$NEW_P
   --arg at "$COMPLETED" --arg base "$BASE_URL" \
   '{survey_id:$sid, survey_url:($base+"/api/survey/mock/"+$sid), completed_at:$at, solarpro_user_id:$uid, solarpro_project_id:$pid}')
 TS=$(date +%s)
-SIG=$(printf '%s' "$BODY_C1" | python3 -c "
+SIG=$(TS="$TS" printf '%s' "$BODY_C1" | python3 -c "
 import hmac, hashlib, os, sys
 secret = os.environ['SURVEY_WEBHOOK_SECRET'].encode()
-body = sys.stdin.buffer.read()
-print('sha256=' + hmac.new(secret, body, hashlib.sha256).hexdigest())
+ts     = os.environ['TS'].encode()
+body   = sys.stdin.buffer.read()
+signed = ts + b'.' + body
+print('sha256=' + hmac.new(secret, signed, hashlib.sha256).hexdigest())
 ")
 
 HTTP_CODE=$(curl -sS -o /tmp/smoke-c1.json -w '%{http_code}' \
   -X POST "$BASE_URL/api/webhooks/survey-complete" \
   -H 'Content-Type: application/json' \
-  -H "X-Timestamp: $TS" \
-  -H "X-Signature: $SIG" \
+  -H "X-Survey-Timestamp: $TS" \
+  -H "X-Survey-Signature: $SIG" \
   --data-raw "$BODY_C1")
 
 [[ "$HTTP_CODE" == "200" ]] || fail "case-1 webhook status=$HTTP_CODE body=$(cat /tmp/smoke-c1.json)"

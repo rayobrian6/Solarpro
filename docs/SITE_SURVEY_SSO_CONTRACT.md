@@ -165,8 +165,21 @@ POST https://solarpro.solutions/api/webhooks/survey-complete
 | Header | Value |
 |---|---|
 | `Content-Type` | `application/json` |
-| `X-Timestamp` | Unix seconds at send time (within ±5 min of server clock) |
-| `X-Signature` | `sha256=` + HMAC-SHA256 over **raw request body** using `SURVEY_WEBHOOK_SECRET` |
+| `X-Survey-Timestamp` | ISO-8601 timestamp at send time (within ±5 min of server clock; Unix-seconds also accepted) |
+| `X-Survey-Signature` | `sha256=` + HMAC-SHA256 over **`${X-Survey-Timestamp}.${rawBody}`** using `SURVEY_WEBHOOK_SECRET` |
+| `X-Survey-Event-Id` | UUID v4 — used for idempotency on the receiver side |
+
+> **⚠️ IMPORTANT — header names are `X-Survey-*`, not `X-*`.**
+> The survey app's `webhookService.ts` already sends this family, and SolarPro's `verifyWebhookSignature.ts` already expects this family. Do NOT rename these — the existing integration is already live and compatible.
+
+### 5.2.1 Signed-string format (exact)
+
+```
+signedString = `${X-Survey-Timestamp}.${rawBody}`
+signature    = `sha256=` + hex(HMAC_SHA256(SURVEY_WEBHOOK_SECRET, signedString))
+```
+
+Both sender and receiver must hash the **exact raw bytes** of the request body, not a re-stringified JSON.
 
 ### 5.3 Body (envelope)
 
@@ -223,7 +236,7 @@ Ownership enforcement:
 
 1. **Never trust a device-supplied `user_id`.** Re-derive from the JWT.
 2. **JWT signatures are mandatory** on every request from B and every webhook from C.
-3. **Webhook HMAC is mandatory.** A rejects any webhook without a valid `X-Signature`.
+3. **Webhook HMAC is mandatory.** A rejects any webhook without a valid `X-Survey-Signature` (header name is literally `X-Survey-Signature`, NOT `X-Signature`).
 4. **Redirect-URI allowlist is mandatory** on `/api/auth/authorize`.
 5. **No secrets in logs.** Log only `user_id`, `jti`, and truncated tokens.
 6. **Rate limit** the authorize endpoint (bucket: `mobile-session`).
@@ -290,3 +303,23 @@ The script:
 7. Sends a signed webhook WITH `solarpro_project_id` → asserts the survey attached to that project.
 
 See `scripts/smoke-test-sso.sh`.
+---
+
+## 11. Reconciliation with kilby8/site_survey-app handoff docs (commit `a503b096`)
+
+On 2026-04-29, commit `a503b096` on `kilby8/site_survey-app` added two handoff
+briefs (`docs/HANDOFF_B_MOBILE_SSO_INTEGRATION.md` and
+`docs/HANDOFF_C_RENDER_API_INTEGRATION.md`) that describe the B/C sides of the
+same contract documented here. The two docs align with this contract in spirit.
+There are three small but important corrections that must be applied before
+either handoff is executed:
+
+| Field | kilby handoff says | Reality (code on both sides) | Action |
+|---|---|---|---|
+| Signature header name | `X-Signature` | `X-Survey-Signature` | **Use `X-Survey-Signature`** — the survey app's `webhookService.ts` already sends this and SolarPro's `verifyWebhookSignature.ts` already expects this. |
+| HMAC input | "raw request body" | `${X-Survey-Timestamp}.${rawBody}` | **Sign the timestamped form.** Signing only the body will fail verification. |
+| Timestamp header | not specified in kilby doc | `X-Survey-Timestamp` | **Send `X-Survey-Timestamp`** alongside the signature. |
+
+The underlying integration is **already implemented and compatible** on both
+sides — only the handoff prose diverged. This contract doc (§ 5.2 and § 5.2.1)
+is authoritative and matches the live code.
