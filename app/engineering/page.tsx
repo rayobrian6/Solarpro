@@ -537,7 +537,8 @@ function EngineeringPageInner() {
   // Auto-save state
   // isHydrated: set to true ONCE after engineering_config (or seed) is loaded.
   // No auto-save fires until this is true - prevents overwriting DB with defaults.
-  const isHydrated   = useRef(false);
+  // Uses useState (not useRef) so the autosave useEffect re-runs when hydration completes.
+  const [isHydrated, setIsHydrated] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   // Debounced save ref - holds the debounced function so it can be cancelled on unmount.
@@ -1002,7 +1003,7 @@ function EngineeringPageInner() {
         }
 
         // Mark hydration complete — auto-save may now fire on config changes
-        isHydrated.current = true;
+        setIsHydrated(true);
 
           // Trigger compliance calculation after config is hydrated
           setTimeout(() => {
@@ -1238,11 +1239,11 @@ function EngineeringPageInner() {
   // ── Auto-save effect ────────────────────────────────────────────────────────
   // Fires on every config change. Debounced 800ms so rapid edits (typing panel
   // count, adjusting wire length) collapse into a single save. Guards:
-  //   1. isHydrated.current — never fires before the project has been loaded
+  //   1. isHydrated (useState) — never fires before the project has been loaded
   //   2. currentProjectId — never fires if no project is selected
   //   3. Empty config guard — never overwrites a real config with an empty object
   useEffect(() => {
-    if (!isHydrated.current) return;
+    if (!isHydrated) return;
     if (!currentProjectId) return;
     if (!config || Object.keys(config).length === 0) return;
 
@@ -1288,7 +1289,7 @@ function EngineeringPageInner() {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config, currentProjectId]);
+  }, [config, currentProjectId, isHydrated]);
 
   const [activeTab, setActiveTab] = useState<TabId>('config');
   const [expandedInv, setExpandedInv] = useState<string | null>(config.inverters[0]?.id || null);
