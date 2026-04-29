@@ -74,63 +74,49 @@ export function resolveProjectLink(
   const effectiveStrategy = strategy ?? resolveProjectLinkStrategy();
   const { event, partnerProjectId, traceId } = context;
 
-  switch (effectiveStrategy) {
-    case 'CREATE_ORPHAN': {
-      // Default strategy (pre-Q8): always create (or upsert) a SolarPro project
-      // keyed on survey_external_id = event.survey_id. No partner project linkage.
+  // Q8 ANSWERED (v60.5): per-event routing.
+  //   Case 1 — event carries solarpro_project_id (partnerProjectId):
+  //            ATTACH to that project. This is the "Start Survey from project"
+  //            flow - JWT had project_id.
+  //   Case 2 — event carries NO solarpro_project_id:
+  //            CREATE a new project automatically under the SSO user's
+  //            account. This is the "user logs into app and starts a
+  //            survey from scratch" flow. The owner is already resolved
+  //            upstream via resolveIngestOwner(solarpro_user_id).
+  //
+  // The env-configured strategy is honoured as an OVERRIDE only when it is
+  // TRIAGE_QUEUE (ops wants manual review of everything). Otherwise per-event
+  // routing is the default behaviour.
+  if (effectiveStrategy !== 'TRIAGE_QUEUE') {
+    if (partnerProjectId) {
       return {
-        action: 'create',
-        surveyExternalId: event.survey_id,
-        strategy: 'CREATE_ORPHAN',
+        action: 'attach',
+        projectId: partnerProjectId,
       };
     }
-
-    case 'ATTACH_TO_EXISTING': {
-      // Q8 answered: partner guarantees project_id will be present.
-      // If partnerProjectId is null, we cannot attach — fall through to triage.
-      if (partnerProjectId) {
-        return {
-          action: 'attach',
-          projectId: partnerProjectId,
-        };
-      }
-      // partnerProjectId unexpectedly absent — degrade gracefully to triage
-      // rather than silently creating orphans when ATTACH was the intent.
-      console.warn(
-        `[projectLinkResolver] ATTACH_TO_EXISTING strategy selected but ` +
-        `partnerProjectId is null. Falling back to TRIAGE_QUEUE. ` +
-        `traceId=${traceId} survey_id=${event.survey_id}`,
-      );
-      return {
-        action: 'triage',
-        surveyExternalId: event.survey_id,
-        reason:
-          'ATTACH_TO_EXISTING strategy is configured but no partner project_id ' +
-          'was supplied in this delivery. Manual linkage required.',
-      };
-    }
-
-    case 'TRIAGE_QUEUE': {
-      // Q8 answered: all survey deliveries require manual ops triage.
-      // Create a triage record for ops to resolve. The pipeline will create a
-      // placeholder project with status='triage' (to be implemented when Q8
-      // is answered and triage semantics are agreed with partner).
-      return {
-        action: 'triage',
-        surveyExternalId: event.survey_id,
-        reason:
-          'TRIAGE_QUEUE strategy is configured. All survey deliveries require ' +
-          'manual ops review before project linkage.',
-      };
-    }
-
-    default: {
-      // TypeScript exhaustiveness guard — should never reach here.
-      const exhaustiveCheck: never = effectiveStrategy;
-      return {
-        action: 'error',
-        error: `Unhandled link strategy: ${String(exhaustiveCheck)}`,
-      };
-    }
+    // No project_id on the event — auto-create under the SSO user.
+    return {
+      action: 'create',
+      surveyExternalId: event.survey_id,
+      strategy: 'CREATE_ORPHAN',
+    };
   }
+
+  // At this point effectiveStrategy === 'TRIAGE_QUEUE' by the guard above.
+  // (The other two enum values are handled by per-event routing.)
+  //
+  // TRIAGE_QUEUE is an ops-level "pause the world" switch: every survey is
+  // parked for manual review regardless of whether partnerProjectId is set.
+  // We explicitly log traceId so ops can correlate triage rows back to the
+  // originating webhook delivery.
+  console.log(
+    `[projectLinkResolver] TRIAGE_QUEUE override active — triaging survey_id=${event.survey_id} traceId=${traceId}`,
+  );
+  return {
+    action: 'triage',
+    surveyExternalId: event.survey_id,
+    reason:
+      'TRIAGE_QUEUE strategy is configured. All survey deliveries require ' +
+      'manual ops review before project linkage.',
+  };
 }

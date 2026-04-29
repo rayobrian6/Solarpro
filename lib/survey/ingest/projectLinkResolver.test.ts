@@ -108,10 +108,16 @@ describe('resolveProjectLink — CREATE_ORPHAN', () => {
     }
   });
 
-  it('ignores partnerProjectId when strategy is CREATE_ORPHAN', () => {
+  it('v60.5: per-event routing overrides non-TRIAGE env strategy — attaches when partnerProjectId present', () => {
+    // Pre-v60.5 behaviour: env=CREATE_ORPHAN hard-created every time.
+    // v60.5 behaviour: only TRIAGE_QUEUE is honoured as an env override;
+    // CREATE_ORPHAN/ATTACH_TO_EXISTING both fall through to per-event routing.
     const ctx = makeContext({ partnerProjectId: 'some-project-id' });
     const result = resolveProjectLink(ctx, 'CREATE_ORPHAN');
-    expect(result.action).toBe('create');
+    expect(result.action).toBe('attach');
+    if (result.action === 'attach') {
+      expect(result.projectId).toBe('some-project-id');
+    }
   });
 
   it('uses event.survey_id as the idempotency key', () => {
@@ -154,20 +160,24 @@ describe('resolveProjectLink — ATTACH_TO_EXISTING', () => {
     }
   });
 
-  it('falls back to triage when partnerProjectId is null', () => {
+  it('v60.5: auto-creates under SSO user when partnerProjectId is null (per-event routing)', () => {
+    // Pre-v60.5 behaviour: env=ATTACH_TO_EXISTING + no partnerProjectId → triage.
+    // v60.5 behaviour: "user logs into mobile app and starts a survey from
+    // scratch" is a legitimate flow — auto-create a new project for the SSO
+    // user. Ops can still opt into triage-everything via env=TRIAGE_QUEUE.
     const ctx = makeContext({ partnerProjectId: null });
     const result = resolveProjectLink(ctx, 'ATTACH_TO_EXISTING');
-    expect(result.action).toBe('triage');
-    if (result.action === 'triage') {
+    expect(result.action).toBe('create');
+    if (result.action === 'create') {
       expect(result.surveyExternalId).toBe('survey-abc-123');
-      expect(result.reason).toContain('ATTACH_TO_EXISTING');
+      expect(result.strategy).toBe('CREATE_ORPHAN');
     }
   });
 
-  it('triage fallback includes the survey_id for traceability', () => {
+  it('v60.5: auto-create path uses event.survey_id as idempotency key', () => {
     const ctx = makeContext({ partnerProjectId: null });
     const result = resolveProjectLink(ctx, 'ATTACH_TO_EXISTING');
-    if (result.action === 'triage') {
+    if (result.action === 'create') {
       expect(result.surveyExternalId).toBe(ctx.event.survey_id);
     }
   });
@@ -201,6 +211,37 @@ describe('resolveProjectLink — TRIAGE_QUEUE', () => {
     if (result.action === 'triage') {
       expect(result.surveyExternalId).toBe(ctx.event.survey_id);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveProjectLink — v60.5 per-event routing (canonical default behaviour)
+// ---------------------------------------------------------------------------
+describe('resolveProjectLink — v60.5 per-event routing', () => {
+  it('attaches to partnerProjectId when present (Case 1: survey from project)', () => {
+    const ctx = makeContext({ partnerProjectId: 'existing-project-99' });
+    // Default strategy (CREATE_ORPHAN) falls through to per-event routing.
+    const result = resolveProjectLink(ctx, 'CREATE_ORPHAN');
+    expect(result.action).toBe('attach');
+    if (result.action === 'attach') {
+      expect(result.projectId).toBe('existing-project-99');
+    }
+  });
+
+  it('auto-creates when partnerProjectId is null (Case 2: survey from scratch)', () => {
+    const ctx = makeContext({ partnerProjectId: null });
+    const result = resolveProjectLink(ctx, 'CREATE_ORPHAN');
+    expect(result.action).toBe('create');
+    if (result.action === 'create') {
+      expect(result.strategy).toBe('CREATE_ORPHAN');
+      expect(result.surveyExternalId).toBe(ctx.event.survey_id);
+    }
+  });
+
+  it('TRIAGE_QUEUE env override still parks everything for manual review', () => {
+    const ctx = makeContext({ partnerProjectId: 'existing-project-99' });
+    const result = resolveProjectLink(ctx, 'TRIAGE_QUEUE');
+    expect(result.action).toBe('triage');
   });
 });
 

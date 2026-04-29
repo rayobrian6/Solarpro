@@ -1,8 +1,11 @@
-export const BUILD_VERSION     = 'v60.4a';
+export const BUILD_VERSION     = 'v60.5';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-28'; // v60.4a
-export const BUILD_DESCRIPTION = 'v60.4a: Engineering workspace save/restore — manual Save button in header, autosave on config change, DB restore on page load.';
+export const BUILD_DATE        = '2026-04-29'; // v60.5
+export const BUILD_DESCRIPTION = 'v60.5: Site Survey SSO — OAuth-style /api/auth/authorize endpoint + per-event project link routing (attach existing or auto-create). Contract doc + smoke test for B (mobile) and C (Render).';
 export const BUILD_FEATURES: string[] = [
+  'Stage 20.0 (v60.5) — Site Survey SSO: new GET /api/auth/authorize OAuth-style endpoint with redirect_uri allowlist, HS256 JWT (10min), jti replay protection via mobile_sso_used_jtis. Canonical entry point for the Expo mobile app.',
+  'Stage 20.0 (v60.5) — Per-event project link routing in projectLinkResolver: if event carries solarpro_project_id → attach, else → auto-create project under the SSO user. TRIAGE_QUEUE env still honoured as ops override.',
+  'Stage 20.0 (v60.5) — docs/SITE_SURVEY_SSO_CONTRACT.md + scripts/smoke-test-sso.sh: contract and end-to-end proof for the 3-part system (SolarPro / Mobile / Render Survey API).',
   'Stage 19.4 (v60.4a) - Engineering workspace save/restore: manual Save button in sticky header, autosave debounced 800ms on config change, DB restore on page load, localStorage fallback.',
   // v60.2 (newest — must be first for releaseHistory drift-guard)
   'Stage 19.3 (v60.3) — Fix selectedInverterId DC/AC ratio logic: sort candidates by ratio proximity, filter Rule 1 to valid-ratio candidates, use pickRatioAwareTier for tierRec. unitsByMpptCurrent escalation now ratio-guarded to prevent over-sizing. Sol-Ark 8K-2P+36p → 12K-2P×1 (ratio=1.20) not 2×8K-2P (ratio=0.90)',
