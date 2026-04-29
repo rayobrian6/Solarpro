@@ -51,7 +51,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }
 
-    const result = await runEngineeringAssist(projectId, body);
+    // Cast: body is Record<string, unknown>; runEngineeringAssist validates fields internally
+    const result = await runEngineeringAssist(projectId, body as unknown as Parameters<typeof runEngineeringAssist>[1]);
 
     return NextResponse.json({ success: true, data: result });
   } catch (error: unknown) {

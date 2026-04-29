@@ -18,7 +18,7 @@ const getSql = () => getDbReady();
 // ===== TYPES =====
 
 export interface SiteConditions {
-  project_id: number;
+  project_id: string | number;
   state: string;
   county: string;
   latitude: number;
@@ -282,7 +282,7 @@ async function getPVWattsData(
 // ===== SMART ENGINEERING ENGINE =====
 
 export async function autoConfigureProject(
-  projectId: number,
+  projectId: string | number,
   address: string,
   inverterACOutput: number,
   dcStringCurrent: number,
@@ -695,7 +695,7 @@ All values are subject to verification by a licensed electrical engineer.
 
 // ===== ENGINEERING ASSIST MODE =====
 
-export async function runEngineeringAssist(projectId: number, params: {
+export async function runEngineeringAssist(projectId: string | number, params: {
   address: string;
   inverterACOutput: number;
   dcStringCurrent: number;
@@ -731,7 +731,7 @@ export async function runEngineeringAssist(projectId: number, params: {
 }
 
 export async function overrideAutoConfig(
-  projectId: number,
+  projectId: string | number,
   fieldName: string,
   overrideValue: any,
   reason: string

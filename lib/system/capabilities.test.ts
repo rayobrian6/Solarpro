@@ -104,9 +104,13 @@ describe('v47.434c — buildCapabilitiesPayload', () => {
     const p = buildCapabilitiesPayload(FIXED_NOW);
     expect(p.outbound.handoff.status).toBe('not_yet_implemented');
     expect(p.outbound.handoff.expectedContract.algorithm).toBe('HS256');
-    expect(p.outbound.handoff.expectedContract.sharedSecretEnvVar).toBe(
-      'SOLARPRO_HANDOFF_SECRET',
-    );
+    // SECURITY: sharedSecretEnvVar intentionally NOT exposed on capabilities payload
+    // (env var names must not be disclosed publicly). See capabilities.ts line 95.
+    expect(
+      (p.outbound.handoff.expectedContract as { sharedSecretEnvVar?: string }).sharedSecretEnvVar,
+    ).toBeUndefined();
+    expect(p.outbound.handoff.expectedContract.claims).toContain('jti');
+    expect(p.outbound.handoff.expectedContract.claims).toContain('project_id');
     expect(p.outbound.releaseWebhook.status).toBe('not_yet_implemented');
   });
 
