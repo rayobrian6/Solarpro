@@ -145,6 +145,10 @@ export async function POST(req: NextRequest) {
       if (ownerEmail && targetEmail === ownerEmail) {
         return NextResponse.json({ success: false, error: 'Cannot delete the owner account' }, { status: 403 });
       }
+      // SECURITY: Prevent admin from deleting their own account via this endpoint
+      if (targetEmail === adminUser.email.toLowerCase()) {
+        return NextResponse.json({ success: false, error: 'Cannot delete your own account via this endpoint.' }, { status: 400 });
+      }
       await sql`DELETE FROM users WHERE email = ${targetEmail}`;
       return NextResponse.json({ success: true, action: 'deleted', email, message: `🗑️ User deleted: ${email}` });
     } else if (action === 'search') {

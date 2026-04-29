@@ -211,7 +211,18 @@ export async function DELETE(req: NextRequest) {
     }
     if (!id) return NextResponse.json({ success: false, error: 'Missing id' }, { status: 400 });
 
+    // SECURITY: Validate UUID format to prevent malformed IDs reaching the DB
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid user id format.' }, { status: 400 });
+    }
+
+    // SECURITY: Prevent admin from deleting their own account via this endpoint
+    if (id === admin.id) {
+      return NextResponse.json({ success: false, error: 'Cannot delete your own account via this endpoint.' }, { status: 400 });
+    }
+
     const targetRows = await sql`SELECT email, company FROM users WHERE id = ${id} LIMIT 1`;
+    if (!targetRows[0]) return NextResponse.json({ success: false, error: 'User not found.' }, { status: 404 });
     await sql`DELETE FROM users WHERE id = ${id}`;
     await logAdminAction({ adminId: admin.id, action: 'delete_user', targetUserId: id, targetCompany: targetRows[0]?.company, metadata: { targetEmail: targetRows[0]?.email } });
     return NextResponse.json({ success: true });
