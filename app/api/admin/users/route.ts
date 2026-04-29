@@ -104,8 +104,10 @@ export async function PATCH(req: NextRequest) {
       await logAdminAction({ adminId: admin.id, action: 'reset_trial', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
 
     } else if (action === 'reset_password') {
-      // Generate a temporary password and hash it
-      const tempPassword = 'TempPass' + Math.random().toString(36).slice(2, 10).toUpperCase() + '!';
+      // SECURITY FIX: Use crypto.randomBytes instead of Math.random() for temp password
+      // Math.random() is not cryptographically secure — crypto.randomBytes gives 48 bits of entropy
+      const { randomBytes } = await import('crypto');
+      const tempPassword = 'TempPass' + randomBytes(6).toString('hex').toUpperCase() + '!';
       const bcrypt = await import('bcryptjs');
       const hash = await bcrypt.hash(tempPassword, 10);
       await sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${id}`;
