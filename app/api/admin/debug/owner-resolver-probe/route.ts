@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
   // 1. Raw DB row inspection — what does the `users` table actually say?
   let rawRow: Record<string, unknown> | null = null;
   let rawError: string | null = null;
+  let hasDeletedAt = false;
+  let resolverSqlAttempt: Record<string, unknown> | null = null;
   try {
     const sql = await getDbReady();
     const colRows = await sql`
@@ -49,7 +51,7 @@ export async function GET(req: NextRequest) {
     const cols = new Set<string>(
       (colRows as Array<{ column_name: string }>).map((r) => r.column_name)
     );
-    const hasDeletedAt = cols.has('deleted_at');
+    hasDeletedAt = cols.has('deleted_at');
 
     // Full-row select without filtering — bypasses the resolver's "deleted_at IS NULL"
     // so we can see WHY the resolver might reject it.
@@ -77,6 +79,34 @@ export async function GET(req: NextRequest) {
         updated_at: row.updated_at,
         deleted_at: row.deleted_at,
         is_soft_deleted: row.deleted_at !== null && row.deleted_at !== undefined,
+        column_exists: hasDeletedAt,
+      };
+    }
+
+    // Run the resolver's EXACT SQL directly, capture the error if any.
+    try {
+      const resolverRows = await sql`
+        SELECT id FROM users
+         WHERE id = ${userId}
+           AND deleted_at IS NULL
+         LIMIT 1
+      `;
+      resolverSqlAttempt = {
+        ran_ok: true,
+        rows_returned: resolverRows.length,
+        note:
+          resolverRows.length > 0
+            ? 'resolver should have succeeded on this user'
+            : 'query ran but returned 0 rows — resolver will fall back to default',
+      };
+    } catch (resolverSqlErr) {
+      resolverSqlAttempt = {
+        ran_ok: false,
+        error:
+          resolverSqlErr instanceof Error
+            ? resolverSqlErr.message
+            : String(resolverSqlErr),
+        note: 'resolver SQL threw — resolver will fall back to default via catch block',
       };
     }
   } catch (err) {
@@ -101,8 +131,12 @@ export async function GET(req: NextRequest) {
       queried_user_id: userId,
       traceId,
     },
+    users_schema: {
+      has_deleted_at_column: hasDeletedAt,
+    },
     raw_users_row: rawRow,
     raw_error: rawError,
+    resolver_sql_direct_attempt: resolverSqlAttempt,
     resolver_result: resolution,
     resolver_error: resolverError,
     env: {
