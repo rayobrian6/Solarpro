@@ -43,10 +43,17 @@ export async function resolveIngestOwner(
   if (solarpro_user_id) {
     try {
       const sql = await getDbReady();
+      // NOTE: The public.users table does NOT currently have a soft-delete
+      // column. Earlier versions of this query included `AND deleted_at IS NULL`
+      // which caused every lookup to throw (column does not exist), land in the
+      // catch block below, and fall back to SURVEY_INGEST_DEFAULT_USER_ID —
+      // which routed EVERY survey to a single account regardless of claim.
+      //
+      // This query is intentionally minimal. If/when users.deleted_at is
+      // introduced, add the filter AND update this comment.
       const rows = await sql`
         SELECT id FROM users
          WHERE id = ${solarpro_user_id}
-           AND deleted_at IS NULL
          LIMIT 1
       `;
 
