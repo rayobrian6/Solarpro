@@ -168,6 +168,22 @@ const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
 // Returns false → request should be rejected with 429
 // SAFETY: always returns true if Redis is unavailable or throws
 
+// Hard timeout for rate limiter calls. If Upstash Redis is slow/unreachable,
+// we fail open quickly instead of blocking the whole request for seconds.
+// Observed incident: Upstash calls were hanging ~4.3s, making login feel frozen.
+// See v60.6 LOGIN_LATENCY_FIX — diag instrumentation pinpointed rate limiter.
+const RATE_LIMIT_TIMEOUT_MS = 500;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('RATE_LIMIT_TIMEOUT')), ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 export async function checkRateLimit(
   key: LimiterKey,
   identifier: string,
@@ -178,14 +194,23 @@ export async function checkRateLimit(
   if (!limiter) return { allowed: true };
 
   try {
-    const result = await limiter.limit(identifier);
+    // Race the Upstash call against a 500ms timeout.
+    // If Redis is slow/unreachable, we fail open rather than hold up the user.
+    const result = await withTimeout(limiter.limit(identifier), RATE_LIMIT_TIMEOUT_MS);
     return {
       allowed:   result.success,
       remaining: result.remaining,
       reset:     result.reset,
     };
-  } catch {
-    // Redis error — fail open, never block real users due to infra issues
+  } catch (err: unknown) {
+    // Redis error or timeout — fail open, never block real users due to infra issues.
+    // Log at warn so operators can detect sustained Upstash outages.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === 'RATE_LIMIT_TIMEOUT') {
+      console.warn(`[RATE_LIMIT_TIMEOUT] key=${key} upstash slow/unreachable, failing open`);
+    } else {
+      console.warn(`[RATE_LIMIT_ERROR] key=${key} err=${msg}, failing open`);
+    }
     return { allowed: true };
   }
 }
