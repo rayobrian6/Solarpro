@@ -82,7 +82,10 @@ export async function GET(req: NextRequest) {
   try {
     const sql = await getDbReady();
 
-    // Probe which optional columns exist so the query doesn't 500 if schema drifts.
+    // Probe which optional columns exist so we know whether to try selecting
+    // last_login_at. Neon's tagged-template client doesn't expose a generic
+    // .query() method, so we branch on the column presence and issue one of
+    // two fully-static tagged queries.
     const colRows = await sql`
       SELECT column_name
       FROM information_schema.columns
@@ -93,27 +96,20 @@ export async function GET(req: NextRequest) {
     );
     const hasLastLogin = cols.has('last_login_at');
 
-    // Use plain string interpolation of a column LIST, then bind email via param.
-    // (We've already validated column names against information_schema.)
-    const selectList = [
-      'id',
-      'created_at',
-      'updated_at',
-      'password_hash',
-      'role',
-      hasLastLogin ? 'last_login_at' : 'NULL::timestamptz AS last_login_at',
-    ].join(', ');
-
-    // Neon's tagged-template doesn't support dynamic identifier lists; use
-    // sql.query for this one probe. Column names are hard-coded above.
-    // Cast to any to access .query without breaking the tagged-template type.
-    const rawSql = sql as unknown as {
-      query: (q: string, params: unknown[]) => Promise<Array<Record<string, unknown>>>;
-    };
-    const rows = await rawSql.query(
-      `SELECT ${selectList} FROM users WHERE email = $1 LIMIT 1`,
-      [email]
-    );
+    const rows = hasLastLogin
+      ? await sql`
+          SELECT id, created_at, updated_at, password_hash, role, last_login_at
+          FROM users
+          WHERE email = ${email}
+          LIMIT 1
+        `
+      : await sql`
+          SELECT id, created_at, updated_at, password_hash, role,
+                 NULL::timestamptz AS last_login_at
+          FROM users
+          WHERE email = ${email}
+          LIMIT 1
+        `;
 
     if (rows.length === 0) {
       return NextResponse.json({
