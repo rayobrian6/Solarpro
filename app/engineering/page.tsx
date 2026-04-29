@@ -5415,39 +5415,58 @@ function EngineeringPageInner() {
             ↩ Change Project
           </button>
 
-          {/* Auto-save indicator — shows save state after first hydration */}
-          {saveState !== 'idle' && (
-            <span className={`ml-auto flex items-center gap-1.5 text-xs transition-all ${
-              saveState === 'saving' ? 'text-slate-400' :
-              saveState === 'saved'  ? 'text-emerald-400' :
-                                      'text-red-400'
-            }`}>
-              {saveState === 'saving' && (
-                <>
-                  <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
-                  </svg>
-                  Saving…
-                </>
-              )}
-              {saveState === 'saved' && (
-                <>
-                  <CheckCircle size={12} />
-                  {lastSavedAt
-                    ? `Saved ${Math.round((Date.now() - lastSavedAt.getTime()) / 1000) < 5 ? 'just now' : `${Math.round((Date.now() - lastSavedAt.getTime()) / 1000)}s ago`}`
-                    : 'Saved ✓'
-                  }
-                </>
-              )}
-              {saveState === 'error' && (
-                <>
-                  <AlertCircle size={12} />
-                  Save failed — changes stored locally
-                </>
-              )}
-            </span>
-          )}
+          {/* Manual Save button + status indicator */}
+          <button
+            className={`ml-auto flex items-center gap-1.5 text-xs px-3 py-1 rounded border transition-all ${
+              saveState === 'saving' ? 'border-slate-600 text-slate-400 cursor-wait' :
+              saveState === 'saved'  ? 'border-emerald-600 text-emerald-400 hover:bg-emerald-900/20' :
+              saveState === 'error'  ? 'border-red-600 text-red-400 hover:bg-red-900/20' :
+                                      'border-slate-600 text-slate-300 hover:border-amber-500 hover:text-amber-400'
+            }`}
+            disabled={saveState === 'saving'}
+            onClick={async () => {
+              if (!currentProjectId || !config || Object.keys(config).length === 0) {
+                alert('No project loaded.');
+                return;
+              }
+              setSaveState('saving');
+              try {
+                const res = await fetch('/api/engineering/save-config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ projectId: currentProjectId, config }),
+                });
+                const body = await res.json();
+                console.log('[MANUAL SAVE] status:', res.status, 'body:', body);
+                if (res.ok && body.success) {
+                  setSaveState('saved');
+                  setLastSavedAt(new Date());
+                } else {
+                  console.error('[MANUAL SAVE] failed:', body);
+                  setSaveState('error');
+                  alert('Save failed: ' + (body.error || res.status));
+                }
+              } catch (err) {
+                console.error('[MANUAL SAVE] network error:', err);
+                setSaveState('error');
+                alert('Save failed: ' + String(err));
+              }
+            }}
+          >
+            {saveState === 'saving' && (
+              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+              </svg>
+            )}
+            {saveState === 'saved'  && <CheckCircle size={12} />}
+            {saveState === 'error'  && <AlertCircle size={12} />}
+            {saveState === 'idle'   && '💾'}
+            {saveState === 'saving' ? 'Saving…' :
+             saveState === 'saved'  ? (lastSavedAt && Math.round((Date.now() - lastSavedAt.getTime()) / 1000) < 5 ? 'Saved ✓' : 'Saved ✓') :
+             saveState === 'error'  ? 'Save Failed' :
+                                      'Save Config'}
+          </button>
         </div>
       )}
 
