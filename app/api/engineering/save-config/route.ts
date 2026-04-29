@@ -17,10 +17,6 @@ export const revalidate = 0;
  *   - Rejects payloads > 256 KB
  *   - Rejects empty configs (prevents accidental blank overwrites)
  *   - UUID validation on projectId
- *
- * Self-healing:
- *   - If engineering_config column is missing (migration not run), this route
- *     adds the column automatically and retries the save. No manual migration needed.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -28,24 +24,25 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
-const MAX_CONFIG_BYTES = 256 * 1024; // 256 KB — well above any realistic config
+const MAX_CONFIG_BYTES = 256 * 1024; // 256 KB
 
-async function doSave(
-  sql: Awaited<ReturnType<typeof getDbReady>>,
-  projectId: string,
-  userId: string,
-  configJson: string,
-) {
-  return sql`
-    UPDATE projects
-    SET
-      engineering_config     = ${configJson}::jsonb,
-      engineering_updated_at = NOW()
-    WHERE id      = ${projectId}
-      AND user_id = ${userId}
-      AND deleted_at IS NULL
-    RETURNING id, engineering_updated_at
-  `;
+// Track whether we've verified the columns exist in this function instance.
+// ALTER TABLE IF NOT EXISTS is a no-op when column exists, but we only want
+// to pay that cost once per cold start, not once per request.
+let columnsVerified = false;
+
+async function ensureColumns(sql: Awaited<ReturnType<typeof getDbReady>>) {
+  if (columnsVerified) return;
+  try {
+    await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_config JSONB`;
+    await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_updated_at TIMESTAMPTZ`;
+    columnsVerified = true;
+    console.log('[save-config] engineering_config columns verified/created');
+  } catch (e: unknown) {
+    // Non-fatal: if ALTER fails for any reason, attempt the UPDATE anyway.
+    // The UPDATE will give a clear error if the column truly doesn't exist.
+    console.warn('[save-config] ensureColumns warning:', (e as Error)?.message);
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -110,40 +107,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Serialize config ──────────────────────────────────────────────────────
-    // Neon tagged-template driver does not auto-serialize complex objects as
-    // JSONB. Must JSON.stringify + ::jsonb cast — same pattern used by every
-    // other JSONB column in this codebase (proposals, engineering_seed, etc.)
+    // ── Serialize ─────────────────────────────────────────────────────────────
+    // Neon tagged-template driver requires JSON.stringify + ::jsonb cast for
+    // JSONB columns — same pattern as proposals, engineering_seed, etc.
     const configJson = JSON.stringify(config);
 
-    // ── Save with self-healing column creation ────────────────────────────────
-    // If the migration has not been run yet, the first attempt throws
-    // "column engineering_config does not exist". We catch that specific error,
-    // add the columns inline, then retry — no manual /api/migrate call needed.
+    // ── Ensure columns exist (self-healing, once per cold start) ──────────────
     const sql = await getDbReady();
-    let result;
-    try {
-      result = await doSave(sql, projectId, user.id, configJson);
-    } catch (firstErr: unknown) {
-      const msg = (firstErr as Error)?.message ?? '';
-      if (msg.includes('engineering_config') || msg.includes('column') || msg.includes('does not exist')) {
-        // Column missing — add it now and retry
-        console.warn('[save-config] engineering_config column missing — auto-migrating...');
-        try {
-          await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_config JSONB`;
-          await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_updated_at TIMESTAMPTZ`;
-          console.log('[save-config] Auto-migration complete — retrying save');
-        } catch (migErr: unknown) {
-          console.error('[save-config] Auto-migration failed:', migErr);
-          // Migration itself failed — fall through to original error
-          throw firstErr;
-        }
-        // Retry the save after adding the column
-        result = await doSave(sql, projectId, user.id, configJson);
-      } else {
-        throw firstErr;
-      }
-    }
+    await ensureColumns(sql);
+
+    // ── Save ──────────────────────────────────────────────────────────────────
+    const result = await sql`
+      UPDATE projects
+      SET
+        engineering_config     = ${configJson}::jsonb,
+        engineering_updated_at = NOW()
+      WHERE id      = ${projectId}
+        AND user_id = ${user.id}
+        AND deleted_at IS NULL
+      RETURNING id, engineering_updated_at
+    `;
 
     if (result.length === 0) {
       return NextResponse.json(
@@ -158,7 +141,7 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: unknown) {
-    console.error('[POST /api/engineering/save-config] Unhandled error:', err);
+    console.error('[POST /api/engineering/save-config] Error:', err);
     return handleRouteDbError('[POST /api/engineering/save-config]', err);
   }
 }
