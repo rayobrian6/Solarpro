@@ -17,6 +17,10 @@ export const revalidate = 0;
  *   - Rejects payloads > 256 KB
  *   - Rejects empty configs (prevents accidental blank overwrites)
  *   - UUID validation on projectId
+ *
+ * Self-healing:
+ *   - If engineering_config column is missing (migration not run), this route
+ *     adds the column automatically and retries the save. No manual migration needed.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,9 +30,27 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 const MAX_CONFIG_BYTES = 256 * 1024; // 256 KB — well above any realistic config
 
+async function doSave(
+  sql: Awaited<ReturnType<typeof getDbReady>>,
+  projectId: string,
+  userId: string,
+  configJson: string,
+) {
+  return sql`
+    UPDATE projects
+    SET
+      engineering_config     = ${configJson}::jsonb,
+      engineering_updated_at = NOW()
+    WHERE id      = ${projectId}
+      AND user_id = ${userId}
+      AND deleted_at IS NULL
+    RETURNING id, engineering_updated_at
+  `;
+}
+
 export async function POST(req: NextRequest) {
   try {
-    // ── Rate limit (light) ──────────────────────────────────────────────────
+    // ── Rate limit ────────────────────────────────────────────────────────────
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
@@ -37,7 +59,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Auth ────────────────────────────────────────────────────────────────
+    // ── Auth ──────────────────────────────────────────────────────────────────
     const user = getUserFromRequest(req);
     if (!user) {
       return NextResponse.json(
@@ -46,7 +68,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Body size guard ─────────────────────────────────────────────────────
+    // ── Body size guard ───────────────────────────────────────────────────────
     const rawBody = await req.text();
     if (rawBody.length > MAX_CONFIG_BYTES) {
       return NextResponse.json(
@@ -55,7 +77,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Parse JSON ──────────────────────────────────────────────────────────
+    // ── Parse JSON ────────────────────────────────────────────────────────────
     let body: { projectId?: unknown; config?: unknown };
     try {
       body = JSON.parse(rawBody);
@@ -66,7 +88,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Validate projectId ──────────────────────────────────────────────────
+    // ── Validate projectId ────────────────────────────────────────────────────
     const { projectId, config } = body;
     if (!projectId || typeof projectId !== 'string' || !isValidUUID(projectId)) {
       return NextResponse.json(
@@ -75,7 +97,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Validate config ─────────────────────────────────────────────────────
+    // ── Validate config ───────────────────────────────────────────────────────
     if (
       !config ||
       typeof config !== 'object' ||
@@ -88,26 +110,42 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── Save (ownership enforced by WHERE user_id = userId) ─────────────────
-    // IMPORTANT: Neon tagged-template driver does not auto-serialize complex
-    // objects as JSONB. Must JSON.stringify + ::jsonb cast, exactly like every
-    // other JSONB column update in this codebase (proposals, engineering_seed, etc.)
+    // ── Serialize config ──────────────────────────────────────────────────────
+    // Neon tagged-template driver does not auto-serialize complex objects as
+    // JSONB. Must JSON.stringify + ::jsonb cast — same pattern used by every
+    // other JSONB column in this codebase (proposals, engineering_seed, etc.)
     const configJson = JSON.stringify(config);
+
+    // ── Save with self-healing column creation ────────────────────────────────
+    // If the migration has not been run yet, the first attempt throws
+    // "column engineering_config does not exist". We catch that specific error,
+    // add the columns inline, then retry — no manual /api/migrate call needed.
     const sql = await getDbReady();
-    const result = await sql`
-      UPDATE projects
-      SET
-        engineering_config     = ${configJson}::jsonb,
-        engineering_updated_at = NOW()
-      WHERE id      = ${projectId}
-        AND user_id = ${user.id}
-        AND deleted_at IS NULL
-      RETURNING id, engineering_updated_at
-    `;
+    let result;
+    try {
+      result = await doSave(sql, projectId, user.id, configJson);
+    } catch (firstErr: unknown) {
+      const msg = (firstErr as Error)?.message ?? '';
+      if (msg.includes('engineering_config') || msg.includes('column') || msg.includes('does not exist')) {
+        // Column missing — add it now and retry
+        console.warn('[save-config] engineering_config column missing — auto-migrating...');
+        try {
+          await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_config JSONB`;
+          await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engineering_updated_at TIMESTAMPTZ`;
+          console.log('[save-config] Auto-migration complete — retrying save');
+        } catch (migErr: unknown) {
+          console.error('[save-config] Auto-migration failed:', migErr);
+          // Migration itself failed — fall through to original error
+          throw firstErr;
+        }
+        // Retry the save after adding the column
+        result = await doSave(sql, projectId, user.id, configJson);
+      } else {
+        throw firstErr;
+      }
+    }
 
     if (result.length === 0) {
-      // Either project doesn't exist or belongs to another user — same 404 response
-      // (don't reveal which, prevents enumeration)
       return NextResponse.json(
         { success: false, error: 'Project not found.' },
         { status: 404 }
@@ -120,7 +158,6 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: unknown) {
-    // Log the full error server-side so we can diagnose save failures
     console.error('[POST /api/engineering/save-config] Unhandled error:', err);
     return handleRouteDbError('[POST /api/engineering/save-config]', err);
   }
