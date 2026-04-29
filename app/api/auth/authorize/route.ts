@@ -147,6 +147,9 @@ export async function GET(req: NextRequest) {
   }
 
   // -- Mint SSO JWT ---------------------------------------------------------
+  // Note: jsonwebtoken auto-adds `iat` when noTimestamp is NOT set. We rely on
+  // that so clients can compute token age. Previously we set iat manually AND
+  // passed noTimestamp: true, which caused the library to strip iat entirely.
   const jti = randomUUID();
   const iat = Math.floor(Date.now() / 1000);
   const exp = iat + SSO_TOKEN_TTL_SECONDS;
@@ -156,8 +159,7 @@ export async function GET(req: NextRequest) {
     solarpro_user_id: user.id,
     email: user.email,
     name: user.name ?? '',
-    iat,
-    exp,
+    exp, // absolute expiry; jsonwebtoken will add iat
     jti,
   };
 
@@ -165,7 +167,7 @@ export async function GET(req: NextRequest) {
   try {
     token = jwt.sign(claims, secret, {
       algorithm: 'HS256',
-      noTimestamp: true, // iat set manually
+      // iat is added automatically by jsonwebtoken (noTimestamp defaults false)
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
