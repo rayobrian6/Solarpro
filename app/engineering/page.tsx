@@ -549,9 +549,10 @@ function EngineeringPageInner() {
   // the exact inverter/panel/string config the engineering engine needs.
   useEffect(() => {
     const projectId = searchParams?.get('projectId');
-    if (!projectId || projectAutoLoaded) return;
-    setProjectAutoLoaded(true);
+    if (!projectId) return;
     setCurrentProjectId(projectId);
+    if (projectAutoLoaded) return;
+    setProjectAutoLoaded(true);
     // Persist this project so the page auto-loads it next time (no re-selecting needed)
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('eng:lastProjectId', projectId);
