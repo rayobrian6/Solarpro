@@ -1,9 +1,9 @@
-export const BUILD_VERSION     = 'v60.4-save';
+export const BUILD_VERSION     = 'v60.4a';
 export const APP_VERSION       = BUILD_VERSION;
-export const BUILD_DATE        = '2026-04-28'; // v60.4-save
-export const BUILD_DESCRIPTION = 'v60.4-save: Engineering workspace save/restore — manual Save button in header, autosave on config change, DB restore on page load.';
+export const BUILD_DATE        = '2026-04-28'; // v60.4a
+export const BUILD_DESCRIPTION = 'v60.4a: Engineering workspace save/restore — manual Save button in header, autosave on config change, DB restore on page load.';
 export const BUILD_FEATURES: string[] = [
-  'Stage 19.4 (v60.4-save) - Engineering workspace save/restore: manual Save button in sticky header, autosave debounced 800ms on config change, DB restore on page load, localStorage fallback.',
+  'Stage 19.4 (v60.4a) - Engineering workspace save/restore: manual Save button in sticky header, autosave debounced 800ms on config change, DB restore on page load, localStorage fallback.',
   // v60.2 (newest — must be first for releaseHistory drift-guard)
   'Stage 19.3 (v60.3) — Fix selectedInverterId DC/AC ratio logic: sort candidates by ratio proximity, filter Rule 1 to valid-ratio candidates, use pickRatioAwareTier for tierRec. unitsByMpptCurrent escalation now ratio-guarded to prevent over-sizing. Sol-Ark 8K-2P+36p → 12K-2P×1 (ratio=1.20) not 2×8K-2P (ratio=0.90)',
   // v60.1 — must be first for releaseHistory drift-guard)
