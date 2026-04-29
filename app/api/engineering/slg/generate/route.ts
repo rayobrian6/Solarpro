@@ -39,6 +39,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // SECURITY: Validate numeric inputs — prevent NaN/Infinity from reaching calculation engine
+    const acOut = Number(inverterACOutput);
+    const modCt = Number(moduleCount);
+    const tilt   = Number(arrayTilt);
+    const capKw  = Number(systemCapacityKw);
+    if (!Number.isFinite(acOut) || acOut <= 0 || acOut > 1000) {
+      return NextResponse.json({ success: false, error: 'inverterACOutput must be a positive number ≤ 1000 kW.' }, { status: 400 });
+    }
+    if (!Number.isFinite(modCt) || modCt <= 0 || modCt > 10000 || !Number.isInteger(modCt)) {
+      return NextResponse.json({ success: false, error: 'moduleCount must be a positive integer ≤ 10,000.' }, { status: 400 });
+    }
+    if (!Number.isFinite(tilt) || tilt < 0 || tilt > 90) {
+      return NextResponse.json({ success: false, error: 'arrayTilt must be between 0 and 90 degrees.' }, { status: 400 });
+    }
+    if (!Number.isFinite(capKw) || capKw <= 0 || capKw > 100000) {
+      return NextResponse.json({ success: false, error: 'systemCapacityKw must be a positive number ≤ 100,000 kW.' }, { status: 400 });
+    }
+
     // Verify user has access to this project
     const sql = await getDbReady();
     const projectCheck = await sql`

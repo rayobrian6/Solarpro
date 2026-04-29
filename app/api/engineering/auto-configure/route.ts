@@ -42,6 +42,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // SECURITY: Validate numeric inputs — prevent NaN/Infinity from reaching calculation engine
+    const acOut = Number(inverterACOutput);
+    const dcCurr = Number(dcStringCurrent);
+    const runLen = Number(runLengthFeet);
+    if (!Number.isFinite(acOut) || acOut <= 0 || acOut > 1000) {
+      return NextResponse.json({ success: false, error: 'inverterACOutput must be a positive number ≤ 1000 kW.' }, { status: 400 });
+    }
+    if (!Number.isFinite(dcCurr) || dcCurr <= 0 || dcCurr > 100) {
+      return NextResponse.json({ success: false, error: 'dcStringCurrent must be a positive number ≤ 100 A.' }, { status: 400 });
+    }
+    if (!Number.isFinite(runLen) || runLen <= 0 || runLen > 10000) {
+      return NextResponse.json({ success: false, error: 'runLengthFeet must be a positive number ≤ 10,000 ft.' }, { status: 400 });
+    }
+
     // Verify user has access to this project
     const sql = await getDbReady();
     const projectCheck = await sql`

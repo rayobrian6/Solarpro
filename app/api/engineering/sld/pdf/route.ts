@@ -23,12 +23,17 @@ export const maxDuration = 30;
 const execAsync = promisify(exec);
 
 // ─── HTML wrapper for wkhtmltopdf ─────────────────────────────────────────────
+function escHtml(s: string): string {
+  return s.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"').replace(/'/g, '&#39;');
+}
+
 function wrapSVGinHTML(svgContent: string, projectName: string): string {
+  const safeTitle = escHtml(projectName);
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>SLD — ${projectName}</title>
+  <title>SLD — ${safeTitle}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
