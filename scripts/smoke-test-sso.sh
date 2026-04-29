@@ -116,12 +116,16 @@ pass "ttl=${TTL}s"
 # -----------------------------------------------------------------------------
 step "[5/7] Sending Case-2 webhook (no solarpro_project_id → auto-create)"
 SURVEY_ID_C2="smoke-c2-$(date +%s)-$RANDOM"
+EVENT_ID_C2="evt-$(date +%s)-$RANDOM"
 COMPLETED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-BODY_C2=$(jq -n --arg sid "$SURVEY_ID_C2" --arg uid "$USER_ID" --arg at "$COMPLETED" \
-  --arg base "$BASE_URL" \
-  '{survey_id:$sid, survey_url:($base+"/api/survey/mock/"+$sid), completed_at:$at, solarpro_user_id:$uid}')
+# Envelope: event + event_id + survey_id + completed_at are required.
+# solarpro_user_id is optional ownership routing field (Case 2: no project_id).
+BODY_C2=$(jq -n --arg sid "$SURVEY_ID_C2" --arg eid "$EVENT_ID_C2" \
+  --arg uid "$USER_ID" --arg at "$COMPLETED" --arg base "$BASE_URL" \
+  '{event:"survey.completed", event_id:$eid, survey_id:$sid, survey_url:($base+"/api/survey/mock/"+$sid), completed_at:$at, solarpro_user_id:$uid}')
 TS=$(date +%s)
-SIG=$(TS="$TS" printf '%s' "$BODY_C2" | python3 -c "
+export TS
+SIG=$(printf '%s' "$BODY_C2" | python3 -c "
 import hmac, hashlib, os, sys
 secret = os.environ['SURVEY_WEBHOOK_SECRET'].encode()
 ts     = os.environ['TS'].encode()
@@ -137,8 +141,13 @@ HTTP_CODE=$(curl -sS -o /tmp/smoke-c2.json -w '%{http_code}' \
   -H "X-Survey-Signature: $SIG" \
   --data-raw "$BODY_C2")
 
-[[ "$HTTP_CODE" == "200" ]] || fail "case-2 webhook status=$HTTP_CODE body=$(cat /tmp/smoke-c2.json)"
-pass "case-2 webhook accepted"
+# 200 = synchronously ingested, 202 = accepted for async ingest. Both are success.
+[[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "202" ]] \
+  || fail "case-2 webhook status=$HTTP_CODE body=$(cat /tmp/smoke-c2.json)"
+# Sanity: payload must report success=true (defence in depth vs 2xx-with-error-body)
+jq -e '.success == true' /tmp/smoke-c2.json > /dev/null \
+  || fail "case-2 webhook body reports failure: $(cat /tmp/smoke-c2.json)"
+pass "case-2 webhook accepted (status=$HTTP_CODE, projectId=$(jq -r '.projectId // "-"' /tmp/smoke-c2.json))"
 
 # -----------------------------------------------------------------------------
 step "[6/7] Verifying auto-created project for Case-2"
@@ -163,11 +172,15 @@ pass "auto-created project id=$NEW_PROJ_ID"
 # -----------------------------------------------------------------------------
 step "[7/7] Sending Case-1 webhook (attach to existing project)"
 SURVEY_ID_C1="smoke-c1-$(date +%s)-$RANDOM"
-BODY_C1=$(jq -n --arg sid "$SURVEY_ID_C1" --arg uid "$USER_ID" --arg pid "$NEW_PROJ_ID" \
+EVENT_ID_C1="evt-$(date +%s)-$RANDOM"
+# Case 1: solarpro_project_id present → should ATTACH to that project, not create new.
+BODY_C1=$(jq -n --arg sid "$SURVEY_ID_C1" --arg eid "$EVENT_ID_C1" \
+  --arg uid "$USER_ID" --arg pid "$NEW_PROJ_ID" \
   --arg at "$COMPLETED" --arg base "$BASE_URL" \
-  '{survey_id:$sid, survey_url:($base+"/api/survey/mock/"+$sid), completed_at:$at, solarpro_user_id:$uid, solarpro_project_id:$pid}')
+  '{event:"survey.completed", event_id:$eid, survey_id:$sid, survey_url:($base+"/api/survey/mock/"+$sid), completed_at:$at, solarpro_user_id:$uid, solarpro_project_id:$pid}')
 TS=$(date +%s)
-SIG=$(TS="$TS" printf '%s' "$BODY_C1" | python3 -c "
+export TS
+SIG=$(printf '%s' "$BODY_C1" | python3 -c "
 import hmac, hashlib, os, sys
 secret = os.environ['SURVEY_WEBHOOK_SECRET'].encode()
 ts     = os.environ['TS'].encode()
@@ -183,7 +196,11 @@ HTTP_CODE=$(curl -sS -o /tmp/smoke-c1.json -w '%{http_code}' \
   -H "X-Survey-Signature: $SIG" \
   --data-raw "$BODY_C1")
 
-[[ "$HTTP_CODE" == "200" ]] || fail "case-1 webhook status=$HTTP_CODE body=$(cat /tmp/smoke-c1.json)"
+# 200 = synchronously ingested, 202 = accepted for async ingest. Both are success.
+[[ "$HTTP_CODE" == "200" || "$HTTP_CODE" == "202" ]] \
+  || fail "case-1 webhook status=$HTTP_CODE body=$(cat /tmp/smoke-c1.json)"
+jq -e '.success == true' /tmp/smoke-c1.json > /dev/null \
+  || fail "case-1 webhook body reports failure: $(cat /tmp/smoke-c1.json)"
 pass "case-1 webhook accepted (attached to project $NEW_PROJ_ID)"
 
 echo ""
