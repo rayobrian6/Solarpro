@@ -630,12 +630,22 @@ interface PipelineStep {
 
 const PIPELINE_STEPS: PipelineStep[] = [
   {
+    num: 0,
+    layer: 'solarpro',
+    layerLabel: 'SolarPro · SSO (v60.5)',
+    title: 'Identity Handoff · /api/auth/authorize',
+    detail: 'OAuth-style authorize endpoint. Mobile app opens /api/auth/authorize?redirect_uri=sitesurvey://login&state=<r>. If user has a session, SolarPro mints HS256 JWT (10 min TTL) with sub, solarpro_user_id, email, name, iat, exp, jti; records jti in mobile_sso_used_jtis (replay protection); 302-redirects to sitesurvey://login?token=<jwt>&state=<r>. SolarPro is the ONLY source of user identity.',
+    code: 'app/api/auth/authorize/route.ts\nJWT: HS256 (SOLARPRO_HANDOFF_SECRET ≥ 32 chars)\nAllowlist: AUTHORIZE_ALLOWED_REDIRECTS (default sitesurvey://)\nJTI store: mobile_sso_used_jtis (replay protection)',
+    envVars: ['SOLARPRO_HANDOFF_SECRET', 'AUTHORIZE_ALLOWED_REDIRECTS'],
+    status: 'live',
+  },
+  {
     num: 1,
     layer: 'mobile',
     layerLabel: 'Partner · Mobile',
-    title: 'Field Survey Captured',
-    detail: 'Inspector fills survey on mobile app (Expo/React Native). GPS, photos, metadata collected. Stored locally then synced.',
-    code: 'mobile/src/screens/NewSurveyScreen.tsx\nmobile/src/services/SyncManager.ts',
+    title: 'Field Survey Captured (w/ bearer JWT)',
+    detail: 'Inspector fills survey on mobile app (Expo/React Native). GPS, photos, metadata collected. Stored locally then synced. Every API call to the partner backend carries Authorization: Bearer <jwt> from step 0 — device-supplied user_id is never trusted.',
+    code: 'mobile/src/screens/NewSurveyScreen.tsx\nmobile/src/services/SyncManager.ts\nmobile/src/screens/LoginScreen.tsx (SSO button → /api/auth/authorize)',
     status: 'external',
   },
   {
@@ -671,8 +681,8 @@ const PIPELINE_STEPS: PipelineStep[] = [
     layer: 'cloud',
     layerLabel: 'Boundary · Wire',
     title: '⚡ Partner → SolarPro Webhook Boundary',
-    detail: 'Thin event crosses the wire. Payload: { event, event_id, occurred_at, survey_id, project_id, project_name, inspector_name, site_name, completed_at }. HMAC verified on arrival.',
-    code: '{"event":"survey.completed","survey_id":"uuid",\n "project_name":"...","inspector_name":"...",\n "site_name":"...","completed_at":"ISO"}',
+    detail: 'Thin event crosses the wire. v60.5 payload includes ownership claims: { event, event_id, occurred_at, survey_id, project_id, project_name, inspector_name, site_name, completed_at, solarpro_user_id, solarpro_project_id, solarpro_email }. HMAC verified on arrival. solarpro_user_id drives owner resolution; solarpro_project_id drives ATTACH-vs-CREATE routing in step 9.',
+    code: '{\n  \"event\":\"survey.completed\",\n  \"survey_id\":\"uuid\",\n  \"solarpro_user_id\":\"uuid\",          // v60.5 \u2014 from JWT\n  \"solarpro_project_id\":\"uuid|null\",  // v60.5 \u2014 optional\n  \"project_name\":\"...\",\n  \"inspector_name\":\"...\",\n  \"site_name\":\"...\",\n  \"completed_at\":\"ISO\"\n}',
     status: 'live',
   },
   {
@@ -707,10 +717,11 @@ const PIPELINE_STEPS: PipelineStep[] = [
   {
     num: 9,
     layer: 'db',
-    layerLabel: 'SolarPro · DB Write',
-    title: 'projects + project_physical_data Upsert',
-    detail: 'Idempotent ON CONFLICT upsert. Creates project with origin=\'survey\'. Writes all 20 physical_data fields. Re-deliveries overwrite with latest data. project_files inserted for photos.',
-    code: 'lib/survey/ingest/ingestPipeline.ts\n→ projects (origin=\'survey\', survey_external_id)\n→ project_physical_data (20 fields, source=\'survey\')\n→ project_files (photos, status=\'pending\')',
+    layerLabel: 'SolarPro · DB Write (v60.5)',
+    title: 'projects + project_physical_data — per-event routing',
+    detail: 'v60.5 projectLinkResolver decides per-event: if webhook carries solarpro_project_id → ATTACH to the existing project (Case 1, \"survey started from a SolarPro project page\"). If absent → CREATE new project under the SSO user (Case 2, \"user logs into app and starts survey from scratch\"). TRIAGE_QUEUE env override still honoured as ops pause-everything switch. Idempotent ON CONFLICT upsert on survey_external_id; re-deliveries overwrite with latest data. project_files inserted for photos.',
+    code: 'lib/survey/ingest/projectLinkResolver.ts  (v60.5 per-event)\nlib/survey/ingest/ingestPipeline.ts\n→ projects (origin=\'survey\', survey_external_id)\n→ project_physical_data (20 fields, source=\'survey\')\n→ project_files (photos, status=\'pending\')',
+    envVars: ['SURVEY_PROJECT_LINK_STRATEGY'],
     status: 'live',
   },
   {
