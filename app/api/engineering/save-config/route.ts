@@ -89,11 +89,15 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Save (ownership enforced by WHERE user_id = userId) ─────────────────
+    // IMPORTANT: Neon tagged-template driver does not auto-serialize complex
+    // objects as JSONB. Must JSON.stringify + ::jsonb cast, exactly like every
+    // other JSONB column update in this codebase (proposals, engineering_seed, etc.)
+    const configJson = JSON.stringify(config);
     const sql = await getDbReady();
     const result = await sql`
       UPDATE projects
       SET
-        engineering_config     = ${config as Record<string, unknown>},
+        engineering_config     = ${configJson}::jsonb,
         engineering_updated_at = NOW()
       WHERE id      = ${projectId}
         AND user_id = ${user.id}
@@ -116,6 +120,8 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (err: unknown) {
+    // Log the full error server-side so we can diagnose save failures
+    console.error('[POST /api/engineering/save-config] Unhandled error:', err);
     return handleRouteDbError('[POST /api/engineering/save-config]', err);
   }
 }
