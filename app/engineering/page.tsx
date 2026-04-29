@@ -956,6 +956,7 @@ function EngineeringPageInner() {
         // but all equipment / string / config fields are overwritten by the
         // saved engineering_config.
         const savedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
+        console.log('[HYDRATION] p.engineeringConfig:', savedConfig ? `${Object.keys(savedConfig).length} keys` : 'null/undefined');
         if (savedConfig && Object.keys(savedConfig).length > 0) {
           console.log('[EngineeringPage] Restoring from engineering_config (auto-saved workspace)');
           // Merge: project-level fields from patches, all engineering fields from savedConfig
@@ -1261,16 +1262,19 @@ function EngineeringPageInner() {
 
     saveTimerRef.current = setTimeout(async () => {
       try {
+        let resBody: unknown;
         const res = await fetch('/api/engineering/save-config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId: currentProjectId, config }),
         });
+        try { resBody = await res.clone().json(); } catch { resBody = null; }
+        console.log('[AUTO-SAVE] status:', res.status, 'body:', resBody);
         if (res.ok) {
           setSaveState('saved');
           setLastSavedAt(new Date());
         } else {
-          console.warn('[EngineeringPage] Auto-save failed:', res.status);
+          console.error('[EngineeringPage] Auto-save failed:', res.status, resBody);
           setSaveState('error');
         }
       } catch (err) {
