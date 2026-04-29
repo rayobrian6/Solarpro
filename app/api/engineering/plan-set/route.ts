@@ -27,7 +27,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
-import { execSync } from 'child_process';
+// execSync removed — plan-set PDF generation now uses execFileSync via inline require()
 import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -838,10 +838,23 @@ export async function POST(req: NextRequest) {
     let pdfMethod = 'wkhtmltopdf';
 
     try {
-      execSync(
-        `wkhtmltopdf --page-width 11in --page-height 8.5in --orientation Landscape --margin-top 0 --margin-bottom 0 --margin-left 0 --margin-right 0 --enable-local-file-access --quiet "${htmlPath}" "${pdfPath}"`,
-        { timeout: 45000 }
-      );
+      // SECURITY: Use execFileSync with argument array (not shell string interpolation)
+      // to prevent any risk of shell injection. Even though paths are UUID-based,
+      // this avoids spawning a shell at all.
+      const { execFileSync: _execFileSync } = require('child_process');
+      _execFileSync('wkhtmltopdf', [
+        '--page-width', '11in',
+        '--page-height', '8.5in',
+        '--orientation', 'Landscape',
+        '--margin-top', '0',
+        '--margin-bottom', '0',
+        '--margin-left', '0',
+        '--margin-right', '0',
+        '--enable-local-file-access',
+        '--quiet',
+        htmlPath,
+        pdfPath,
+      ], { timeout: 45000 });
       pdfBuffer = readFileSync(pdfPath);
     } catch (wkErr: unknown) {
       console.warn('[plan-set] wkhtmltopdf failed, returning HTML:', (wkErr as Error).message);

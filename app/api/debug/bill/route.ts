@@ -50,7 +50,7 @@ async function runOcr(buf: Buffer, mime: string, name: string): Promise<{
   if (mime === 'application/pdf' || name.toLowerCase().endsWith('.pdf')) {
     // Try pdftotext CLI
     try {
-      const { execSync } = await import('child_process');
+      const { execSync, execFileSync } = await import('child_process');
       const os = await import('os');
       const path = await import('path');
       const fs = await import('fs');
@@ -58,7 +58,8 @@ async function runOcr(buf: Buffer, mime: string, name: string): Promise<{
       const tmpOut = path.join(os.tmpdir(), `dbg_bill_${Date.now()}.txt`);
       fs.writeFileSync(tmpIn, buf);
       try {
-        execSync(`pdftotext -layout "${tmpIn}" "${tmpOut}"`, { timeout: 10000 });
+        // SECURITY: execFileSync with argument array — avoids spawning a shell.
+        execFileSync('pdftotext', ['-layout', tmpIn, tmpOut], { timeout: 10000 });
         const text = fs.readFileSync(tmpOut, 'utf8').trim();
         try { fs.unlinkSync(tmpIn); } catch {}
         try { fs.unlinkSync(tmpOut); } catch {}
@@ -97,7 +98,7 @@ async function runOcr(buf: Buffer, mime: string, name: string): Promise<{
 
   // Image path -- try Tesseract CLI first
   try {
-    const { execSync } = await import('child_process');
+    const { execSync, execFileSync } = await import('child_process');
     const os = await import('os');
     const path = await import('path');
     const fs = await import('fs');
@@ -108,7 +109,8 @@ async function runOcr(buf: Buffer, mime: string, name: string): Promise<{
     fs.writeFileSync(tmpIn, buf);
 
     try {
-      execSync(`tesseract "${tmpIn}" "${tmpOut}" --oem 1 --psm 3 -l eng`, { timeout: 15000 });
+      // SECURITY: execFileSync with argument array — avoids spawning a shell.
+      execFileSync('tesseract', [tmpIn, tmpOut, '--oem', '1', '--psm', '3', '-l', 'eng'], { timeout: 15000 });
       const outFile = `${tmpOut}.txt`;
       if (fs.existsSync(outFile)) {
         const text = fs.readFileSync(outFile, 'utf8').trim();

@@ -21,15 +21,13 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
 import { renderProposalHTML, ProposalBranding } from '@/lib/proposal/renderProposalHTML';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+// exec/promisify moved to inline imports in generatePDF() — using execFile arg array
 import { writeFile, readFile, unlink } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import type { Proposal } from '@/types';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
-const execAsync = promisify(exec);
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -119,27 +117,29 @@ async function generatePDF(html: string, _filename: string): Promise<Uint8Array 
   try {
     await writeFile(htmlPath, html, 'utf8');
 
-    const cmd = [
-      'wkhtmltopdf',
-      '--page-size Letter',
-      '--orientation Portrait',
-      '--margin-top 0',
-      '--margin-right 0',
-      '--margin-bottom 0',
-      '--margin-left 0',
-      '--dpi 150',
-      '--image-dpi 150',
-      '--image-quality 90',
+    // SECURITY: Use execFile with argument array (not shell string interpolation)
+    // to prevent any risk of shell injection.
+    const { execFile } = await import('child_process');
+    const { promisify } = await import('util');
+    const execFileAsync = promisify(execFile);
+    await execFileAsync('wkhtmltopdf', [
+      '--page-size', 'Letter',
+      '--orientation', 'Portrait',
+      '--margin-top', '0',
+      '--margin-right', '0',
+      '--margin-bottom', '0',
+      '--margin-left', '0',
+      '--dpi', '150',
+      '--image-dpi', '150',
+      '--image-quality', '90',
       '--enable-local-file-access',
       '--disable-smart-shrinking',
-      '--zoom 1.0',
+      '--zoom', '1.0',
       '--quiet',
       '--print-media-type',
-      `"${htmlPath}"`,
-      `"${pdfPath}"`,
-    ].join(' ');
-
-    await execAsync(cmd, { timeout: 40000 });
+      htmlPath,
+      pdfPath,
+    ], { timeout: 40000 });
     return new Uint8Array(await readFile(pdfPath));
   } catch (err) {
     console.warn('[proposal-pdf] wkhtmltopdf failed:', (err as Error).message);

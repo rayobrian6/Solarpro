@@ -908,14 +908,15 @@ Output the complete raw text including all numbers, addresses, account numbers, 
 
 // ── PDF CLI fallback ────────────────────────────────────────────────────────────
 async function extractPdfTextCli(buffer: Buffer): Promise<string> {
-  const { execSync } = await import('child_process');
+  const { execSync, execFileSync } = await import('child_process');
   const { writeFileSync, readFileSync, unlinkSync } = await import('fs');
   const { tmpdir } = await import('os');
   const { join } = await import('path');
   const tmpIn = join(tmpdir(), `bill_${Date.now()}.pdf`);
   const tmpOut = join(tmpdir(), `bill_${Date.now()}.txt`);
   writeFileSync(tmpIn, buffer);
-  execSync(`pdftotext -layout "${tmpIn}" "${tmpOut}"`, { timeout: 15000 });
+  // SECURITY: execFileSync with argument array — avoids spawning a shell.
+  execFileSync('pdftotext', ['-layout', tmpIn, tmpOut], { timeout: 15000 });
   const text = readFileSync(tmpOut, 'utf-8');
   try { unlinkSync(tmpIn); } catch {}
   try { unlinkSync(tmpOut); } catch {}
