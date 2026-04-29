@@ -31,9 +31,14 @@ function logSecretFingerprint() {
 
 export async function POST(req: NextRequest) {
   logSecretFingerprint();
+  // v60.6 DIAG: step-by-step timing to diagnose slow login
+  const _t0 = Date.now();
+  const _timings: Record<string, number> = {};
+  const _mark = (label: string) => { _timings[label] = Date.now() - _t0; };
   try {
     // v48.6: Rate limiting — 5 req / 60s per IP (brute-force protection)
         const rl = await checkRateLimit('login', getClientIp(req));
+    _mark('rateLimit');
     if (!rl.allowed) {
       return NextResponse.json(
         { success: false, error: 'Too many login attempts. Please wait before trying again.' },
@@ -42,10 +47,12 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    _mark('parseJson');
 
     // Zod schema validation
     const { loginSchema, parseBody } = await import('@/lib/validation');
     const { data: parsed, error: validationError } = parseBody(loginSchema, body);
+    _mark('validate');
     if (validationError || !parsed) {
       return NextResponse.json(
         { success: false, error: validationError || 'Email and password are required.' },
@@ -54,9 +61,16 @@ export async function POST(req: NextRequest) {
     }
 
     const { email, password } = parsed;
+    // DIAG endpoint: ?diag=1 returns timings only (no DB, no bcrypt)
+    const url = new URL(req.url);
+    if (url.searchParams.get('diag') === '1') {
+      _mark('diag_early_return');
+      return NextResponse.json({ ok: true, diag: true, timings: _timings });
+    }
 
     // ── DB with cold-start retry ──────────────────────────────────────────
     const sql = await getDbReady();
+    _mark('getDbReady');
 
     // ── Fetch user ────────────────────────────────────────────────────────
     const rows = await sql`
@@ -65,8 +79,10 @@ export async function POST(req: NextRequest) {
       WHERE email = ${email.toLowerCase().trim()}
       LIMIT 1
     `;
+    _mark('userQuery');
 
     if (rows.length === 0) {
+      console.log('[LOGIN_TIMING]', JSON.stringify({ ..._timings, outcome: 'no-user' }));
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }
@@ -76,6 +92,7 @@ export async function POST(req: NextRequest) {
     const user = rows[0];
 
     const valid = await verifyPassword(password, user.password_hash);
+    _mark('bcrypt');
     if (!valid) {
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
@@ -92,6 +109,7 @@ export async function POST(req: NextRequest) {
     };
 
     const token = signToken(sessionUser);
+    _mark('signToken');
 
     // ── FIX: Use response.cookies.set() — the Next.js 14 App Router
     // canonical API. Using headers: { 'Set-Cookie': string } is unreliable
@@ -115,6 +133,10 @@ export async function POST(req: NextRequest) {
     };
 
     response.cookies.set(COOKIE_NAME, token, cookieOptions);
+    _mark('cookieSet');
+    console.log('[LOGIN_TIMING]', JSON.stringify({ ..._timings, outcome: 'success' }));
+    // Add diagnostic header so we can read timings from response
+    response.headers.set('x-login-timings', JSON.stringify(_timings));
 
     // PHASE 1: Structured cookie diagnostic log
     const setCookieHeader = response.headers.get('set-cookie');
