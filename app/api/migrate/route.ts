@@ -1192,6 +1192,72 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ projects.engineering_updated_at: ${(e as Error).message}`);
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // Migration 016b: Organizations (company hierarchy / multi-seat)
+    // ══════════════════════════════════════════════════════════════════════════
+
+    // organizations table
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS organizations (
+          id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name       TEXT NOT NULL,
+          owner_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          plan       TEXT NOT NULL DEFAULT 'contractor',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+      `;
+      results.push('✅ organizations table — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ organizations table: ${(e as Error).message}`);
+    }
+
+    // org_invites table
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS org_invites (
+          id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          org_id        UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+          invited_email TEXT NOT NULL,
+          invited_by    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          token         TEXT NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(24), 'hex'),
+          accepted_at   TIMESTAMPTZ,
+          created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+          expires_at    TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '7 days'
+        )
+      `;
+      results.push('✅ org_invites table — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ org_invites table: ${(e as Error).message}`);
+    }
+
+    // users.org_id + users.org_role
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id UUID REFERENCES organizations(id) ON DELETE SET NULL`;
+      results.push('✅ users.org_id — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ users.org_id: ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS org_role TEXT NOT NULL DEFAULT 'owner'`;
+      results.push('✅ users.org_role — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ users.org_role: ${(e as Error).message}`);
+    }
+
+    // Indexes
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_users_org_id ON users(org_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_organizations_owner ON organizations(owner_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_org_invites_org ON org_invites(org_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_org_invites_email ON org_invites(invited_email)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_org_invites_token ON org_invites(token)`;
+      results.push('✅ organizations indexes — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ organizations indexes: ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
