@@ -238,6 +238,11 @@ export const ECOSYSTEM_BRANDS: Array<{
   description: string;
 }> = [
   {
+    id: 'ecoflow',
+    displayName: 'EcoFlow',
+    description: 'OCEAN Pro hybrid inverter (11.5/24 kW) + EF-BP-10 LFP battery (UL 9540B)',
+  },
+  {
     id: 'tesla',
     displayName: 'Tesla',
     description: 'Powerwall storage + Backup Gateway + Wall Connector',

@@ -1079,6 +1079,57 @@ export const STRING_INVERTERS: StringInverter[] = [
     active: false, // v47.404: EcoFlow PowerOcean Pro is AU/EU-only; deactivated pending US launch
     isNew: true,
   },
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  // v58.14 — EcoFlow OCEAN Pro (US) — hybrid string inverter / PCS
+  //   Model number: EF-PCS-24
+  //   Source datasheet: https://enterprise-service-us-cdn.ecoflow.com/
+  //                     enterprise/documentation/1760684472240/
+  //                     Ocean%20Pro%20PCS%20datasheet%20v1013_View.pdf
+  //
+  //   Note: EF-PCS-24 is a single hardware platform sold in two configured
+  //   AC output tiers — 11.5 kW and 24 kW. We model both as separate DB
+  //   rows so the sizing engine can pick between them based on DC kW.
+  //   Electrical specs (MPPTs, DC input, enclosure, weight) are identical
+  //   across both tiers per datasheet.
+  // ═══════════════════════════════════════════════════════════════════════════════════════
+  {
+    id: 'ecoflow-ocean-pro-11kw',
+    manufacturer: 'EcoFlow', model: 'OCEAN Pro Hybrid Inverter (11.5 kW)', category: 'string_inverter',
+    acOutputKw: 11.5, dcInputKwMax: 40.0,
+    maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
+    maxInputCurrentPerMppt: 16, maxShortCircuitCurrent: 20, mpptChannels: 8, numberOfMPPT: 8, maxParallelStringsPerMppt: 1,
+    recommendedStringRange: { min: 4, max: 16 },
+    acOutputVoltage: 240, acOutputCurrentMax: 48.0,
+    efficiency: 97.5, cec_efficiency: 97.0,
+    weight: 146.6, dimensions: '43.3 x 17.3 x 10.3',
+    warranty: '15yr standard', ulListing: 'UL 1741-SB',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    integratedDcDisconnect: true,
+    datasheetUrl: 'https://enterprise-service-us-cdn.ecoflow.com/enterprise/documentation/1760684472240/Ocean%20Pro%20PCS%20datasheet%20v1013_View.pdf',
+    ecosystemBrand: 'ecoflow',
+    ecosystemFamily: 'ocean-pro',
+    active: true,
+    isNew: true,
+  },
+  {
+    id: 'ecoflow-ocean-pro-24kw',
+    manufacturer: 'EcoFlow', model: 'OCEAN Pro Hybrid Inverter (24 kW)', category: 'string_inverter',
+    acOutputKw: 24.0, dcInputKwMax: 40.0,
+    maxDcVoltage: 600, mpptVoltageMin: 60, mpptVoltageMax: 480,
+    maxInputCurrentPerMppt: 16, maxShortCircuitCurrent: 20, mpptChannels: 8, numberOfMPPT: 8, maxParallelStringsPerMppt: 1,
+    recommendedStringRange: { min: 4, max: 16 },
+    acOutputVoltage: 240, acOutputCurrentMax: 100.0,
+    efficiency: 97.5, cec_efficiency: 97.0,
+    weight: 146.6, dimensions: '43.3 x 17.3 x 10.3',
+    warranty: '15yr standard', ulListing: 'UL 1741-SB',
+    rapidShutdownCompliant: true, arcFaultProtection: true, groundFaultProtection: true,
+    integratedDcDisconnect: true,
+    datasheetUrl: 'https://enterprise-service-us-cdn.ecoflow.com/enterprise/documentation/1760684472240/Ocean%20Pro%20PCS%20datasheet%20v1013_View.pdf',
+    ecosystemBrand: 'ecoflow',
+    ecosystemFamily: 'ocean-pro',
+    active: true,
+    isNew: true,
+  },
   // ═══════════════════════════════════════════════════════════════════════════
   // v47.399 — Sol-Ark hybrid inverter family (Stage 1 of upgrade roadmap)
   // All datasheetUrl values verified HTTP 200 against sol-ark.com on 2025-01
@@ -2524,10 +2575,41 @@ export const BATTERIES: BatterySystem[] = [
     ulListing: 'UL 9540A / UL 1973', certifications: ['UL 9540A', 'UL 1973', 'IEC 62619'],
     ecosystemBrand: 'ecoflow',
     ecosystemFamily: 'powerocean',
-    compatibleWith: ['ecoflow-power-ocean-10kw'],
+    // v58.14 — broadened: all 3 legacy PowerOcean inverter SKUs use this module
+    compatibleWith: ['ecoflow-power-ocean-5kw', 'ecoflow-power-ocean-10kw', 'ecoflow-power-ocean-20kw'],
     active: true,
     isNew: true,
     datasheetUrl: 'https://enterprise-service-us-cdn.ecoflow.com/enterprise/documentation/1763710879602/EcoFlow%20PowerOcean%20Battery_Datasheet_EN(1).pdf',
+  },
+  // ═══ v58.14 — EcoFlow OCEAN Pro Battery (EF-BP-10, 10 kWh, US) ══════════════════
+  // Datasheet: https://enterprise-service-us-cdn.ecoflow.com/enterprise/
+  //            documentation/1760684383859/Ocean%20Pro%20BP%20datasheet%20v1013_View.pdf
+  // LFP, 400 V DC nominal, HV DC-coupled to OCEAN Pro PCS (EF-PCS-24).
+  // Stackable up to 8 modules (80 kWh) per inverter. First home battery
+  // in the industry to achieve UL 9540B certification (Sept 2025).
+  {
+    id: 'ecoflow-ocean-pro-bp-10',
+    manufacturer: 'EcoFlow', model: 'OCEAN Pro Battery (EF-BP-10, 10 kWh)',
+    category: 'battery', subcategory: 'dc_coupled',
+    usableCapacityKwh: 10.0, peakPowerKw: 10.0, continuousPowerKw: 10.0,
+    roundTripEfficiencyPct: 89.0, chemistry: 'LFP', voltageNominalV: 400,
+    acOutputVoltageV: 240, maxContinuousOutputA: 26.32,
+    backfeedBreakerA: 0,
+    minDedicatedBreakerA: 0,
+    weightLbs: 245.8, outdoorRated: true, ipRating: 'IP67',
+    gridFormingCapable: true, backupCapable: true, wholeHomeBackup: true,
+    requiresGateway: true, gatewayModel: 'EcoFlow OCEAN Smart Electrical Panel / OCEAN Gateway',
+    warrantyYears: 15, cycleGuarantee: '6000 cycles', capacityRetentionPct: 70,
+    msrpUsd: 5200,
+    necRefs: ['NEC 706 — Energy Storage Systems', 'NEC 690.71 — Battery installation'],
+    ulListing: 'UL 9540 / UL 9540A / UL 9540B / UL 1973',
+    certifications: ['UL 9540', 'UL 9540A', 'UL 9540B', 'UL 1973', 'UN 38.3', 'AC156', 'IEEE 693-2005'],
+    ecosystemBrand: 'ecoflow',
+    ecosystemFamily: 'ocean-pro',
+    compatibleWith: ['ecoflow-ocean-pro-11kw', 'ecoflow-ocean-pro-24kw'],
+    active: true,
+    isNew: true,
+    datasheetUrl: 'https://enterprise-service-us-cdn.ecoflow.com/enterprise/documentation/1760684383859/Ocean%20Pro%20BP%20datasheet%20v1013_View.pdf',
   },
   // ═══ v47.428 — Battery Ecosystem Batch ═══════════════════════════════════
   // Closes the gap: BrandProfile recommendedBatteryBrands tokens (byd, pylontech,
