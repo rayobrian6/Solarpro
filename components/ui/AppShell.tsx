@@ -1,5 +1,6 @@
 'use client';
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -176,55 +177,78 @@ function HeaderUserDropdown({ initials, displayName, loading, onLogout }: {
 }) {
   const { user } = useUser();
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
   const badge = getAccountBadge(user);
   const showAdminPortal = isAdminRole(user?.role);
+
+  useEffect(() => { setMounted(true); }, []);
+
+  const handleOpen = useCallback(() => {
+    if (btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setDropdownPos({
+        top: rect.bottom + 6,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    logClick('TOGGLE_HEADER_USER_MENU');
+    setOpen(prev => !prev);
+  }, []);
+
+  const dropdown = open && mounted ? createPortal(
+    <>
+      <div className="fixed inset-0 z-[9990]" onClick={() => setOpen(false)} />
+      <div
+        className="fixed w-56 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-[9991]"
+        style={{ top: dropdownPos.top, right: dropdownPos.right }}
+      >
+        <div className="px-3 py-3 border-b border-slate-700/50">
+          <div className="text-white font-semibold text-sm truncate">{displayName}</div>
+          <div className="text-slate-500 text-xs truncate">{user?.email}</div>
+          <div className={`text-xs font-medium mt-0.5 ${badge.color}`}>{badge.label}</div>
+        </div>
+        <div className="py-1">
+          {showAdminPortal && (
+            <Link href="/admin" onClick={() => { logNavigation('/admin'); setOpen(false); }}
+              className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors">
+              <Shield size={14} /> Admin Portal
+            </Link>
+          )}
+          <Link href="/account/billing" onClick={() => { logNavigation('/account/billing'); setOpen(false); }}
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
+            <CreditCard size={14} className="text-slate-500" /> Billing
+          </Link>
+          <Link href="/settings" onClick={() => { logNavigation('/settings'); setOpen(false); }}
+            className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
+            <Settings size={14} className="text-slate-500" /> Settings
+          </Link>
+        </div>
+        <div className="border-t border-slate-700/50 py-1">
+          <button type="button"
+            onClick={() => { logClick('HEADER_USER_LOGOUT'); setOpen(false); onLogout(); }}
+            className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors">
+            <LogOut size={14} /> Sign Out
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body
+  ) : null;
 
   return (
     <div className="relative">
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => { logClick('TOGGLE_HEADER_USER_MENU'); setOpen(!open); }}
+        onClick={handleOpen}
         className="w-7 h-7 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-slate-900 font-black text-xs cursor-pointer hover:scale-110 transition-transform"
         title={displayName}
       >
         {loading ? '…' : initials}
       </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full right-0 mt-1 w-56 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl z-20 overflow-hidden">
-            <div className="px-3 py-3 border-b border-slate-700/50">
-              <div className="text-white font-semibold text-sm truncate">{displayName}</div>
-              <div className="text-slate-500 text-xs truncate">{user?.email}</div>
-              <div className={`text-xs font-medium mt-0.5 ${badge.color}`}>{badge.label}</div>
-            </div>
-            <div className="py-1">
-              {showAdminPortal && (
-                <Link href="/admin" onClick={() => { logNavigation('/admin'); setOpen(false); }}
-                  className="flex items-center gap-2.5 px-3 py-2 text-sm text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors">
-                  <Shield size={14} /> Admin Portal
-                </Link>
-              )}
-              <Link href="/account/billing" onClick={() => { logNavigation('/account/billing'); setOpen(false); }}
-                className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
-                <CreditCard size={14} className="text-slate-500" /> Billing
-              </Link>
-              <Link href="/settings" onClick={() => { logNavigation('/settings'); setOpen(false); }}
-                className="flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors">
-                <Settings size={14} className="text-slate-500" /> Settings
-              </Link>
-            </div>
-            <div className="border-t border-slate-700/50 py-1">
-              <button type="button"
-                onClick={() => { logClick('HEADER_USER_LOGOUT'); setOpen(false); onLogout(); }}
-                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors">
-                <LogOut size={14} /> Sign Out
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+      {dropdown}
     </div>
   );
 }
