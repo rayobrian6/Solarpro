@@ -13,10 +13,11 @@ import {
 } from './sld-device-illustrations';
 
 describe('sld-device-illustrations — registry', () => {
-  it('Phase 1 + 1.5 + 2 ships Tesla, EcoFlow, Enphase, SolarEdge, Generac', () => {
+  it('Phase 1-3 ships 8 brands (Tesla, EcoFlow, Enphase, SolarEdge, Generac, Sol-Ark, Growatt, Solis, APsystems, Hoymiles)', () => {
     const all = listDeviceIllustrations();
     const ids = all.map(d => `${d.brand}::${d.kind}`).sort();
     expect(ids).toEqual([
+      'apsystems::inverter',
       'ecoflow::battery',
       'ecoflow::bui',
       'ecoflow::inverter',
@@ -26,9 +27,16 @@ describe('sld-device-illustrations — registry', () => {
       'generac::battery',
       'generac::bui',
       'generac::inverter',
+      'growatt::battery',
+      'growatt::bui',
+      'growatt::inverter',
+      'hoymiles::inverter',
       'solaredge::battery',
       'solaredge::bui',
       'solaredge::inverter',
+      'solark::bui',
+      'solark::inverter',
+      'solis::inverter',
       'tesla::battery',
       'tesla::bui',
     ]);
@@ -54,6 +62,14 @@ describe('sld-device-illustrations — normalizeDeviceBrandKey', () => {
   it('strips trademark symbols', () => {
     expect(normalizeDeviceBrandKey('Tesla®')).toBe('tesla');
     expect(normalizeDeviceBrandKey('Powerwall™')).toBe('powerwall');
+  });
+  it('collapses hyphens, underscores, and dots (Sol-Ark family)', () => {
+    expect(normalizeDeviceBrandKey('Sol-Ark')).toBe('solark');
+    expect(normalizeDeviceBrandKey('Sol Ark')).toBe('solark');
+    expect(normalizeDeviceBrandKey('SolArk')).toBe('solark');
+    expect(normalizeDeviceBrandKey('sol_ark')).toBe('solark');
+    expect(normalizeDeviceBrandKey('APsystems')).toBe('apsystems');
+    expect(normalizeDeviceBrandKey('AP.systems')).toBe('apsystems');
   });
   it('returns empty string for empty input', () => {
     expect(normalizeDeviceBrandKey('')).toBe('');
@@ -95,6 +111,39 @@ describe('sld-device-illustrations — resolveDeviceIllustration', () => {
     expect(resolveDeviceIllustration('Generac', 'battery')!.label).toMatch(/PWRcell/i);
     expect(resolveDeviceIllustration('Generac', 'bui')!.label).toMatch(/PWRmanager/i);
   });
+  it('resolves Sol-Ark inverter + BUI (Phase 3)', () => {
+    expect(resolveDeviceIllustration('Sol-Ark', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('Sol-Ark', 'bui')).not.toBeNull();
+    expect(resolveDeviceIllustration('SolArk', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('sol ark', 'bui')).not.toBeNull();
+  });
+  it('resolves Growatt inverter + battery + BUI (Phase 3)', () => {
+    expect(resolveDeviceIllustration('Growatt', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('Growatt', 'battery')).not.toBeNull();
+    expect(resolveDeviceIllustration('Growatt', 'bui')).not.toBeNull();
+  });
+  it('resolves Solis inverter only (Phase 3)', () => {
+    expect(resolveDeviceIllustration('Solis', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('Solis', 'battery')).toBeNull();
+    expect(resolveDeviceIllustration('Solis', 'bui')).toBeNull();
+  });
+  it('resolves APsystems and Hoymiles microinverters (Phase 3)', () => {
+    expect(resolveDeviceIllustration('APsystems', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('Hoymiles', 'inverter')).not.toBeNull();
+    // No first-party batteries or BUIs for these two in Phase 3
+    expect(resolveDeviceIllustration('APsystems', 'battery')).toBeNull();
+    expect(resolveDeviceIllustration('Hoymiles', 'bui')).toBeNull();
+  });
+  it('Phase 3 brand labels reference actual product lines', () => {
+    expect(resolveDeviceIllustration('Sol-Ark', 'inverter')!.label).toMatch(/15K/i);
+    expect(resolveDeviceIllustration('Sol-Ark', 'bui')!.label).toMatch(/Load Center/i);
+    expect(resolveDeviceIllustration('Growatt', 'inverter')!.label).toMatch(/SPH/i);
+    expect(resolveDeviceIllustration('Growatt', 'battery')!.label).toMatch(/ARK/i);
+    expect(resolveDeviceIllustration('Growatt', 'bui')!.label).toMatch(/ATS/i);
+    expect(resolveDeviceIllustration('Solis', 'inverter')!.label).toMatch(/S6/i);
+    expect(resolveDeviceIllustration('APsystems', 'inverter')!.label).toMatch(/DS3/i);
+    expect(resolveDeviceIllustration('Hoymiles', 'inverter')!.label).toMatch(/HMS/i);
+  });
   it('resolves Tesla BUI (Backup Gateway 2)', () => {
     const d = resolveDeviceIllustration('Tesla', 'bui');
     expect(d).not.toBeNull();
@@ -127,10 +176,17 @@ describe('sld-device-illustrations — brandHasDevice', () => {
     expect(brandHasDevice('Enphase')).toBe(true);
     expect(brandHasDevice('SolarEdge')).toBe(true);
     expect(brandHasDevice('Generac')).toBe(true);
+    // Phase 3 brands
+    expect(brandHasDevice('Sol-Ark')).toBe(true);
+    expect(brandHasDevice('Growatt')).toBe(true);
+    expect(brandHasDevice('Solis')).toBe(true);
+    expect(brandHasDevice('APsystems')).toBe(true);
+    expect(brandHasDevice('Hoymiles')).toBe(true);
   });
   it('false for brands without illustrations', () => {
     expect(brandHasDevice('Fronius')).toBe(false);
     expect(brandHasDevice('SMA')).toBe(false);
+    expect(brandHasDevice('Tigo')).toBe(false);  // MLPE vendor, deferred
     expect(brandHasDevice('Unknown OEM')).toBe(false);
   });
   it('false for empty manufacturer', () => {
