@@ -1511,6 +1511,14 @@ function LiveSurveyDataView() {
                                       lines.push(`  solarpro_email:      ${c.solarpro_email ?? '(none)'}`);
                                       lines.push(`  solarpro_project_id: ${c.solarpro_project_id ?? '(none)'}`);
                                       lines.push('');
+                                      // Show all other fields partner sent
+                                      const af = (c.allFields ?? {}) as Record<string,unknown>;
+                                      const afKeys = Object.keys(af).filter(k => !['solarpro_user_id','solarpro_email','solarpro_project_id'].includes(k));
+                                      if (afKeys.length > 0) {
+                                        lines.push('  All fields in raw_body:');
+                                        afKeys.forEach(k => lines.push(`    ${k}: ${af[k] ?? '(none)'}`));
+                                      }
+                                      lines.push('');
                                     });
                                     if (data.deliveryCount === 0) lines.push('(no webhook_deliveries rows found for this project)');
                                     alert(lines.join('\n'));

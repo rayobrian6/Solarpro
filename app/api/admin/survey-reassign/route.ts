@@ -714,12 +714,27 @@ export async function POST(req: NextRequest) {
       let claims: Record<string,unknown> = {};
       try {
         const body = JSON.parse(d.raw_body as string) as Record<string,unknown>;
+        // Extract all top-level keys for full diagnostic view
+        const allKeys = Object.keys(body);
+        const fullBody: Record<string,unknown> = {};
+        for (const k of allKeys) {
+          // Truncate long values (e.g. photos arrays)
+          const v = body[k];
+          if (Array.isArray(v)) {
+            fullBody[k] = `[Array(${(v as unknown[]).length})]`;
+          } else if (typeof v === 'object' && v !== null) {
+            fullBody[k] = `[Object(${Object.keys(v as object).length} keys)]`;
+          } else {
+            fullBody[k] = v ?? null;
+          }
+        }
         claims = {
+          // Key ownership fields first
           solarpro_user_id:    body.solarpro_user_id    ?? null,
           solarpro_email:      body.solarpro_email       ?? null,
           solarpro_project_id: body.solarpro_project_id ?? null,
-          event:               body.event               ?? null,
-          survey_id:           body.survey_id           ?? null,
+          // All other fields for diagnosis
+          allFields: fullBody,
         };
       } catch { claims = { parseError: 'malformed JSON' }; }
       return {
