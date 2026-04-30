@@ -1897,8 +1897,21 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push(txt(bfX, BUS_Y + 56, 'NEC 705.12(B)', {sz: 4.5, anc: 'middle', italic: true, fill: '#1565C0'}));
 
     // Battery symbol — above BUI, connected to BUI battery port
+    //
+    // v58.9 LAYOUT FIX: Battery was visually overlapping the MSP top-right corner
+    // and the BUI box. Symbol heights:
+    //   MSP:     160 x 180 (top edge at BUS_Y - 90)
+    //   BUI:     180 x 130 (top edge at BUS_Y - 65)
+    //   Battery: 180 x 170 (half-height 85)
+    //
+    // Previous batCY = BUS_Y - 120 put the battery bottom at BUS_Y - 35,
+    //   -> 55px INSIDE the MSP and 30px INSIDE the BUI (vertical overlap).
+    //
+    // New batCY = BUS_Y - 200 puts the battery bottom at BUS_Y - 115,
+    //   -> 25px ABOVE the MSP top (clean gap), 50px ABOVE the BUI top.
+    // Wire from battery.ac_out drops straight down to BUI.batPort as before.
     const batCX = buiCX;
-    const batCY = BUS_Y - 120;
+    const batCY = BUS_Y - 200;
     // Phase 4: Use _batDisplayModel (never empty)
     console.log(`[SLD BATTERY MISSING AT STAGE RENDERER] hasBattery=true, model='${_batDisplayModel}', kwh=${input.batteryKwh ?? 0}`);
     const batResult = renderBattery(
