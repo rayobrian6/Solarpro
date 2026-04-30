@@ -862,6 +862,25 @@ export async function softDeleteProject(id: string, userId: string): Promise<boo
   return rows.length > 0;
 }
 
+export async function bulkSoftDeleteProjects(ids: string[], userId: string): Promise<string[]> {
+  if (!isValidUUID(userId)) return [];
+  const validIds = ids.filter(isValidUUID);
+  if (validIds.length === 0) return [];
+  const sql = await getDbReady();
+  // Use ordinary function call syntax so we can pass the array param directly.
+  // Neon serializes a JS string[] as a Postgres text array for ANY().
+  const rows = await sql(
+    `UPDATE projects
+     SET deleted_at = NOW(), updated_at = NOW()
+     WHERE id = ANY($1::uuid[])
+       AND user_id = $2
+       AND deleted_at IS NULL
+     RETURNING id`,
+    [validIds, userId]
+  );
+  return rows.map((r: Record<string, unknown>) => r.id as string);
+}
+
 // ============================================================
 // LAYOUTS
 // ============================================================

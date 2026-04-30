@@ -617,15 +617,31 @@ export default function ProjectsPage() {
   const executeDelete = async () => {
     if (!confirmDelete) return;
     setDeleteLoading(true);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000);
     try {
-      for (const id of confirmDelete.ids) await removeProject(id);
+      const ids = confirmDelete.ids;
+      if (ids.length === 1) {
+        // Single delete — use existing store action (optimistic UI update)
+        await removeProject(ids[0]);
+      } else {
+        // Bulk delete — single SQL round-trip, avoids N serial fetches timing out
+        const res = await fetch('/api/projects/bulk-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error || 'Bulk delete failed');
+        // Reload projects to reflect server state
+        await loadProjects(true);
+        if (json.skipped?.length > 0) {
+          alert(`${json.deleted.length} project(s) deleted. ${json.skipped.length} could not be deleted (not found or not owned by you).`);
+        }
+      }
       setSelectedIds(new Set());
       setConfirmDelete(null);
     } catch (e: unknown) {
       alert(`Delete failed: ${(e as Error)?.message || 'Unknown error'}`);
-    } finally { clearTimeout(timeout); setDeleteLoading(false); }
+    } finally { setDeleteLoading(false); }
   };
 
   const sharedCardProps = {
