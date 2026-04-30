@@ -6551,6 +6551,22 @@ function EngineeringPageInner() {
                         if (payload.selections.batteryId) {
                           updates.batteryId = payload.selections.batteryId;
                           if (!config.batteryCount || config.batteryCount < 1) updates.batteryCount = 1;
+                          // v58.8: Populate full battery metadata (same shape as when the
+                          // user picks from the Battery Model dropdown), so BOM, proposal,
+                          // datasheets, and the kWh summary strip all have correct values.
+                          const bat = getBatteryById(payload.selections.batteryId);
+                          if (bat) {
+                            updates.batteryBrand = bat.manufacturer ?? '';
+                            updates.batteryModel = bat.model ?? '';
+                            updates.batteryKwh = bat.usableCapacityKwh ?? 0;
+                          }
+                          // v58.8: Auto-enable the battery toggle so the sizing engine
+                          // recognizes the ecosystem-picked battery. Without this, the
+                          // Battery column in "System Matches Recommendation" shows "—"
+                          // and the Battery Storage panel stays collapsed ("No battery —
+                          // toggle above to add"), leaving users unable to see what
+                          // battery the ecosystem actually selected.
+                          setBatteryEnabled(true);
                         }
                         const wouldClobber: string[] = [];
                         if (payload.selections.inverterId && config.inverters?.[0]?.inverterId &&
