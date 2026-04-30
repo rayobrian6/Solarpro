@@ -1511,12 +1511,22 @@ function LiveSurveyDataView() {
                                       lines.push(`  solarpro_email:      ${c.solarpro_email ?? '(none)'}`);
                                       lines.push(`  solarpro_project_id: ${c.solarpro_project_id ?? '(none)'}`);
                                       lines.push('');
-                                      // Show all other fields partner sent
+                                      lines.push('  --- Partner fields ---');
+                                      lines.push(`  project_id:      ${c.project_id ?? '(none)'}`);
+                                      lines.push(`  project_name:    ${c.project_name ?? '(none)'}`);
+                                      lines.push(`  site_name:       ${c.site_name ?? '(none)'}`);
+                                      lines.push(`  inspector_name:  ${c.inspector_name ?? '(none)'}`);
+                                      lines.push(`  inspector_email: ${c.inspector_email ?? '(none)'}`);
+                                      lines.push(`  user_email:      ${c.user_email ?? '(none)'}`);
+                                      lines.push(`  user_id:         ${c.user_id ?? '(none)'}`);
+                                      lines.push('');
+                                      // Show all remaining fields
                                       const af = (c.allFields ?? {}) as Record<string,unknown>;
-                                      const afKeys = Object.keys(af).filter(k => !['solarpro_user_id','solarpro_email','solarpro_project_id'].includes(k));
+                                      const skipKeys = ['solarpro_user_id','solarpro_email','solarpro_project_id','project_id','project_name','site_name','inspector_name','inspector_email','user_email','user_id'];
+                                      const afKeys = Object.keys(af).filter(k => !skipKeys.includes(k));
                                       if (afKeys.length > 0) {
-                                        lines.push('  All fields in raw_body:');
-                                        afKeys.forEach(k => lines.push(`    ${k}: ${af[k] ?? '(none)'}`));
+                                        lines.push('  --- All other raw_body fields ---');
+                                        afKeys.forEach(k => lines.push(`  ${k}: ${af[k] ?? '(none)'}`));
                                       }
                                       lines.push('');
                                     });

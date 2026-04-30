@@ -733,7 +733,15 @@ export async function POST(req: NextRequest) {
           solarpro_user_id:    body.solarpro_user_id    ?? null,
           solarpro_email:      body.solarpro_email       ?? null,
           solarpro_project_id: body.solarpro_project_id ?? null,
-          // All other fields for diagnosis
+          // Partner-side fields that might help identify the owner
+          project_id:          body.project_id          ?? null,
+          project_name:        body.project_name        ?? null,
+          site_name:           body.site_name           ?? null,
+          inspector_name:      body.inspector_name      ?? null,
+          inspector_email:     body.inspector_email     ?? null,
+          user_email:          body.user_email          ?? null,
+          user_id:             body.user_id             ?? null,
+          // All other fields for full diagnosis
           allFields: fullBody,
         };
       } catch { claims = { parseError: 'malformed JSON' }; }
