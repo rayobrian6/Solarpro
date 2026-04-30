@@ -1535,14 +1535,17 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   const resolvedAcOCPD      = acFeederRun?.ocpdAmps    ?? input.acOCPD        ?? 30;
   const resolvedAcConduit   = acFeederRun?.conduitSize ?? '3/4"';
   const resolvedAcCondType  = acFeederRun?.conduitType ?? input.acConduitType ?? 'EMT';
-  // Phase 6: AC conductor count — 240V split-phase = 2 current-carrying (L1+L2), no neutral
-  // acRequiresNeutral derived from inverter spec in route.ts (acOutputVoltage===240 → false)
-  // Fallback: engine run neutralRequired → acRequiresNeutral → default false for 240V inverters
+  // Phase 6: AC conductor count — US residential 120/240V split-phase.
+  // Standard string/hybrid inverters output L1+L2+N (3 current-carrying + EGC = 4 total).
+  // Source of truth: run data neutralRequired (set by computed-system.ts topology engine).
+  // input.acRequiresNeutral is kept for edge-case override from route but no longer
+  // hard-coded false based on acOutputVoltage===240 (that was incorrect for split-phase).
+  // Default: true (split-phase is universal for US residential 240V systems).
   const _acNeutral: boolean =
     input.acRequiresNeutral !== undefined
       ? input.acRequiresNeutral
-      : (acFeederRun?.neutralRequired ?? false);
-  const _acConductorCount = _acNeutral ? 3 : 2;  // 3 = L1+L2+N; 2 = L1+L2 only
+      : (acFeederRun?.neutralRequired ?? true);
+  const _acConductorCount = _acNeutral ? 3 : 2;  // 3 = L1+L2+N; 2 = L1+L2 only (pure 240V no-neutral)
   const _acWireNum = resolvedAcWire.replace('#','').replace(' AWG','');
   const resolvedDcWire      = dcStringRun?.wireGauge   ?? input.dcWireGauge   ?? '#10 AWG';
   // EGC gauge: from engine (NEC 250.122) → input.egcGauge → run data → '#10 AWG' fallback

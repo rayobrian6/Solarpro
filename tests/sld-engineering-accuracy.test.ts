@@ -354,10 +354,10 @@ describe('H — acRequiresNeutral derivation from inverter spec', () => {
     expect(has3Ac).toBe(true);
   });
 
-  test('H4: acRequiresNeutral=undefined falls back to 2-conductor (safe default)', () => {
+  test('H4: acRequiresNeutral=undefined falls back to 3-conductor (split-phase default)', () => {
     const svg = renderSLDProfessional(makeOptimizerInput(3, 12, { acRequiresNeutral: undefined, acWireGauge: '#8 AWG' }));
-    // Default: no neutral → 2 conductors
-    const has2Ac = svg.includes('2#8') || svg.includes('2\u00d7#8');
-    expect(has2Ac).toBe(true);
+    // v58.17 fix: default is true (neutral required for US residential 120/240V split-phase)
+    const has3Ac = svg.includes('3#8') || svg.includes('3\u00d7#8');
+    expect(has3Ac).toBe(true);
   });
 });

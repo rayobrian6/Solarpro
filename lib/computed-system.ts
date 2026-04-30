@@ -1457,7 +1457,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     const invToDiscoWire = autoSizeWire(
       acOutputCurrentA,
       defaultRunLengths.INV_TO_DISCO_RUN,
-      2, // L1 + L2 only — no neutral per NEC 690.8 (string inverter AC output circuit)
+      3, // L1 + L2 + N — US residential 120/240V split-phase (NEC 310.15; neutral required for 120V loads)
       input.conduitType,
       input.ambientTempC,
       systemVoltageAC,
@@ -1468,11 +1468,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     runs.push(makeRunSegment('INV_TO_DISCO_RUN', 'INVERTER TO AC DISCO', 'STRING INVERTER', 'AC DISCONNECT', {
       sourceTerminal: 'AC_OUT',       // String inverter AC output lug (right side)
       destTerminal:   'DISCO_LOAD',   // AC Disconnect LOAD terminals (PV/inverter side)
-      conductorCount: 2, // L1 + L2 only — no neutral per NEC 690.8 (string inverter AC output circuit)
+      conductorCount: 3, // L1 + L2 + N — 120/240V split-phase; neutral required per NEC 200.3
       wireGauge: invToDiscoWire.gauge,
       insulation: 'THWN-2',
       egcGauge: invToDiscoWire.egcGauge,
-      neutralRequired: false, // PV AC output circuit — 2-wire ungrounded 240V per NEC 690.8
+      neutralRequired: true, // 120/240V split-phase AC output — neutral carries 120V load imbalance current
       systemVoltage: systemVoltageAC,
       phase: '1Ø',
       conduitType: input.conduitType,
@@ -1503,7 +1503,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   // NOTE: No separate production meter — utility swaps bidirectional meter for net metering;
   // Enphase IQ Gateway provides production monitoring per manufacturer spec.
   // Microinverters produce 120/240V split-phase, requiring neutral for imbalance current per NEC 200.3
-  const discoToMeterConductorCount = (input.topology === 'micro') ? 3 : 2;
+  const discoToMeterConductorCount = 3; // L1 + L2 + N for all 120/240V split-phase topologies (NEC 310.15, 200.3)
   const discoToMeterWire = autoSizeWire(
     acOutputCurrentA,
     defaultRunLengths.DISCO_TO_METER_RUN,
@@ -1522,7 +1522,7 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
     wireGauge: discoToMeterWire.gauge,
     insulation: 'THWN-2',
     egcGauge: discoToMeterWire.egcGauge,
-    neutralRequired: input.topology === 'micro', // Microinverters require neutral for split-phase output
+    neutralRequired: true, // 120/240V split-phase — neutral required for all string/micro/hybrid inverters (NEC 200.3)
     systemVoltage: systemVoltageAC,
     phase: '1Ø',
     conduitType: input.conduitType,

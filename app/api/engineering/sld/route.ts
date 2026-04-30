@@ -155,6 +155,17 @@ export async function POST(req: NextRequest) {
           selectedBrand:      _selectedBrand,
           selectedInverterId: _selectedInvId,
           panelId:            _panelId,
+          // Battery fields — required for sizing engine to include battery in result.
+          // Previously omitted, causing the engine to return no-battery result even when
+          // the user had configured a battery system.
+          batteryEnabled:       body.batteryEnabled === true || body.batteryEnabled === 'true'
+                                || !!(body.hasBattery || body.batteryModel || body.batteryKwh || body.batteryBrand || body.batteryId),
+          batteryMode:          body.batteryMode ? String(body.batteryMode) as any : undefined,
+          batteryGoal:          body.batteryGoal ? String(body.batteryGoal) as any : undefined,
+          batteryTargetKwh:     body.batteryTargetKwh ? Number(body.batteryTargetKwh) : undefined,
+          selectedBatteryBrand: body.selectedBatteryBrand ? String(body.selectedBatteryBrand)
+                                : (body.batteryBrand ? String(body.batteryBrand) : undefined),
+          batteryUsePro:        body.batteryUsePro === true || body.batteryUsePro === 'true',
         });
         layoutCandidate = sizingResult.selectedLayoutCandidate ?? null;
         console.log('[SLD B3] sizeSystemFromBrand success:', {
@@ -253,14 +264,17 @@ export async function POST(req: NextRequest) {
       : undefined;
 
       // Phase 3.6 — Derive acRequiresNeutral from inverter output voltage spec
-      // NEC 310.15: 240V split-phase → 2 current-carrying conductors (L1+L2, no neutral)
-      //             208V or 120V → may require neutral depending on system config
-      // Rule: voltage === 240 → no neutral; 208 → neutral required; undefined = unknown
+      // FIX v58.17: 240V split-phase US residential DOES require a neutral conductor
+      // (L1+L2+N+EGC) because the AC output supplies both 240V (L1-L2) and 120V (L1-N, L2-N)
+      // loads. NEC 200.3 and 310.15 require the neutral for all residential feeders.
+      // We no longer hard-code false for 240V. Instead we leave acRequiresNeutral=undefined
+      // so the renderer defers to the topology-engine run data (neutralRequired=true) which
+      // is already correctly set by computed-system.ts for all string/micro/hybrid topologies.
+      // Explicit override only for 208V 3-phase commercial systems (not residential).
       const _acOutputVoltage: number | undefined = _invSpec?.acOutputVoltage;
       const _acRequiresNeutral: boolean | undefined =
-        _acOutputVoltage === 240 ? false
-        : _acOutputVoltage === 208 ? true
-        : undefined; // unknown — renderer will default to 2-wire
+        _acOutputVoltage === 208 ? true  // 208V wye — always needs neutral
+        : undefined; // 240V split-phase: defer to topology engine run data (neutralRequired=true)
 
     console.log('[SLD TRUTH CHECK] stage=route selectedBrand=' + (_selectedBrand ?? 'none') +
       ' topology=' + topologyType + ' (isOptimizer=' + isOptimizer + ' isMicro=' + isMicro + ')' +
