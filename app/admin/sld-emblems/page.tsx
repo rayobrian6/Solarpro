@@ -2,6 +2,13 @@
 import { useState, useCallback } from 'react';
 import { Download, Layers, Info, ZoomIn, ZoomOut } from 'lucide-react';
 import { SLD_SYMBOLS, LINE_TYPES, DESIGN_TOKENS as T, type SLDSymbol } from '@/lib/sld-symbols';
+import {
+  BRAND_EMBLEMS,
+  emitBrandEmblem,
+  getBrandEmblemStyle,
+  hasTunedEmblem,
+} from '@/lib/sld-brand-emblems';
+import { ECOSYSTEM_BRANDS } from '@/lib/system/brandProfiles/resolveBrandEquipment';
 
 // ─── Sample opts for preview rendering ────────────────────────────────────────
 const PREVIEW_OPTS: Record<string, Record<string, string | number | boolean>> = {
@@ -149,6 +156,181 @@ function EmblemCard({ symbol, zoom, showDetails }: { symbol: SLDSymbol; zoom: nu
   );
 }
 
+// ===========================================================================
+// Brand Emblem Card (v58.15)
+// Renders a preview of a single brand emblem in its native 54x14 coordinate
+// space, scaled up 3x for legibility, plus brand metadata and usage examples.
+// ===========================================================================
+function BrandEmblemCard({
+  brandKey,
+  zoom,
+  showDetails,
+}: {
+  brandKey: string;
+  zoom: number;
+  showDetails: boolean;
+}) {
+  const ecosystemEntry = ECOSYSTEM_BRANDS.find(b => b.id === brandKey);
+  const displayName = ecosystemEntry?.displayName
+    ?? (brandKey[0].toUpperCase() + brandKey.slice(1));
+  const style = getBrandEmblemStyle(displayName);
+  const tuned = hasTunedEmblem(displayName);
+  const badgeW = 54;
+  const badgeH = 14;
+  const emblemSvg = emitBrandEmblem(displayName, 2, 2, badgeW, badgeH);
+  const placement = ecosystemEntry
+    ? 'Inverter + Battery | Top-right corner'
+    : 'Inverter + Battery | Top-right corner (non-ecosystem)';
+
+  return (
+    <div className="bg-[#111827] border border-white/8 rounded-xl overflow-hidden hover:border-white/20 transition-all group flex flex-col">
+      <div className="bg-white flex items-center justify-center p-6 min-h-[130px] relative">
+        <div
+          style={{ transform: `scale(${zoom * 3})`, transformOrigin: 'center', transition: 'transform 0.15s' }}
+        >
+          <svg
+            width={badgeW + 4}
+            height={badgeH + 4}
+            viewBox={`0 0 ${badgeW + 4} ${badgeH + 4}`}
+            style={{ display: 'block', shapeRendering: 'geometricPrecision' }}
+            dangerouslySetInnerHTML={{ __html: emblemSvg }}
+          />
+        </div>
+        <div
+          className={`absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full ${
+            tuned
+              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/20'
+              : 'bg-slate-500/15 text-slate-300 border border-slate-500/20'
+          }`}
+        >
+          {tuned ? 'TUNED' : 'FALLBACK'}
+        </div>
+        {ecosystemEntry && (
+          <div className="absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/20">
+            ECOSYSTEM
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 flex flex-col gap-2 flex-1">
+        <div>
+          <div className="text-sm font-bold text-slate-100">{displayName}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">
+            {ecosystemEntry?.description || 'Non-ecosystem brand (supplier catalog)'}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+            style={{
+              backgroundColor: `${style.fill}22`,
+              color: style.fill,
+              border: `1px solid ${style.fill}55`,
+            }}
+          >
+            {style.wordmark}
+          </span>
+          <span className="text-[9px] font-mono text-slate-500">{style.fill}</span>
+        </div>
+
+        {showDetails && (
+          <div className="mt-2 pt-2 border-t border-white/5 space-y-1">
+            <div className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">
+              Style Properties
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+              <div className="text-slate-500">Wordmark</div>
+              <div className="font-mono text-slate-200">"{style.wordmark}"</div>
+              <div className="text-slate-500">Fill</div>
+              <div className="font-mono text-slate-200 flex items-center gap-1">
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-sm border border-white/20"
+                  style={{ backgroundColor: style.fill }}
+                />
+                {style.fill}
+              </div>
+              <div className="text-slate-500">Ink</div>
+              <div className="font-mono text-slate-200 flex items-center gap-1">
+                <span
+                  className="inline-block w-2.5 h-2.5 rounded-sm border border-white/20"
+                  style={{ backgroundColor: style.ink }}
+                />
+                {style.ink}
+              </div>
+              {style.stroke && (
+                <>
+                  <div className="text-slate-500">Stroke</div>
+                  <div className="font-mono text-slate-200 flex items-center gap-1">
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-sm border border-white/20"
+                      style={{ backgroundColor: style.stroke }}
+                    />
+                    {style.stroke}
+                  </div>
+                </>
+              )}
+              <div className="text-slate-500">Font size</div>
+              <div className="font-mono text-slate-200">{style.fontSize ?? 9}px</div>
+              <div className="text-slate-500">Weight</div>
+              <div className="font-mono text-slate-200">
+                {style.bold === false ? '400 (regular)' : '700 (bold)'}
+              </div>
+              <div className="text-slate-500">Style</div>
+              <div className="font-mono text-slate-200">
+                {style.italic ? 'italic' : 'normal'}
+              </div>
+            </div>
+            <div className="text-[9px] text-slate-600 pt-1">
+              <span className="font-bold text-slate-500">Placement: </span>
+              {placement}
+            </div>
+            <div className="text-[9px] text-slate-600">
+              <span className="font-bold text-slate-500">Native badge size: </span>
+              {badgeW}x{badgeH} px (scales with host symbol)
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Brand emblem groupings
+function buildBrandEmblemGroups(): Array<{
+  id: string;
+  label: string;
+  description: string;
+  brandKeys: string[];
+}> {
+  const ecosystemIds = ECOSYSTEM_BRANDS.map(b => b.id);
+  const ecosystemSet = new Set(ecosystemIds);
+  const nonEcosystemKeys = Object.keys(BRAND_EMBLEMS)
+    .filter(k => !ecosystemSet.has(k))
+    .filter(k => {
+      if (k === 'solark') return false;
+      if (k === 'franklinwh') return false;
+      return true;
+    })
+    .sort();
+  return [
+    {
+      id: 'ecosystem-brands',
+      label: 'Ecosystem Brand Emblems',
+      description:
+        'v58.15 - displayed on inverter + battery symbols when the brand is selected in the ecosystem picker',
+      brandKeys: ecosystemIds,
+    },
+    {
+      id: 'other-brands',
+      label: 'Other Catalog Brand Emblems',
+      description:
+        'Non-ecosystem brands with hand-tuned emblems - auto-applied when equipment-db manufacturer matches',
+      brandKeys: nonEcosystemKeys,
+    },
+  ];
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function SLDEmblemsPage() {
   const [zoom, setZoom] = useState(1);
@@ -160,6 +342,13 @@ export default function SLDEmblemsPage() {
   const visibleSections = activeSection === 'all'
     ? SECTIONS
     : SECTIONS.filter(s => s.id === activeSection);
+
+  // v58.15 - Brand emblems sections (ecosystem + other)
+  const BRAND_GROUPS = buildBrandEmblemGroups();
+  const visibleBrandGroups =
+    activeSection === 'all'
+      ? BRAND_GROUPS
+      : BRAND_GROUPS.filter(g => g.id === activeSection);
 
   // ── Download SVG reference sheet ──────────────────────────────────────────
   const handleDownloadSVG = useCallback(() => {
@@ -346,8 +535,8 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
         <Info size={15} className="text-blue-400 mt-0.5 flex-shrink-0" />
         <div className="text-xs text-slate-300 leading-relaxed space-y-1">
           <div>
-            <strong className="text-white">18 engineering-grade symbols</strong> — each with defined connection points, voltage domain, label anchor, and options API.
-            Primary stroke 2px · Secondary 1.5px · Grid-aligned · Scales without distortion.
+            <strong className="text-white">18 engineering-grade symbols + {Object.keys(BRAND_EMBLEMS).length} brand emblems (v58.15)</strong> — each symbol with defined connection points, voltage domain, label anchor, and options API.
+            Primary stroke 2px · Secondary 1.5px · Grid-aligned · Scales without distortion. Brand emblems overlay inverter + battery symbols whenever a brand is selected.
           </div>
           <div className="flex flex-wrap gap-3 mt-2">
             {[
@@ -385,6 +574,19 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
               }`}
             >
               {s.label}
+            </button>
+          ))}
+          {BRAND_GROUPS.map(g => (
+            <button
+              key={g.id}
+              onClick={() => setActiveSection(g.id)}
+              className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${
+                activeSection === g.id
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  : 'text-slate-400 border border-white/8 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              {g.label}
             </button>
           ))}
         </div>
@@ -425,6 +627,26 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
                 if (!sym) return null;
                 return <EmblemCard key={id} symbol={sym} zoom={zoom} showDetails={showDetails} />;
               })}
+            </div>
+          </div>
+        ))}
+
+        {/* v58.15 - Brand emblem sections */}
+        {visibleBrandGroups.map(group => (
+          <div key={group.id} className="sec">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">{group.label}</div>
+                <div className="text-[11px] text-slate-600 mt-0.5">{group.description}</div>
+              </div>
+              <div className="text-[10px] text-slate-500">
+                <span className="font-mono text-amber-400">{group.brandKeys.length}</span> brand{group.brandKeys.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {group.brandKeys.map(k => (
+                <BrandEmblemCard key={k} brandKey={k} zoom={zoom} showDetails={showDetails} />
+              ))}
             </div>
           </div>
         ))}
