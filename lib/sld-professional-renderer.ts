@@ -636,7 +636,7 @@ function renderBackupPanel(
 function renderBUI(
   cx: number, cy: number,
   brand: string, model: string, ampRating: number,
-  isEnphase: boolean, isTesla: boolean,
+  buiBrand: string,      // normalised lowercase brand key e.g. 'enphase', 'tesla', 'solark'
   hasGenerator: boolean, calloutN: number
 ): {svg: string; lx: number; rx: number; ty: number; by: number;
     batPortX: number; batPortY: number;
@@ -648,7 +648,22 @@ function renderBUI(
   const H2 = SLD_SYMBOL_MAP['bui-enphase'].height;  // 130
   console.log(`[SLD SYMBOL SIZE USED] bui-enphase: ${W2}×${H2}`);
   const bx = cx - W2/2, by2 = cy - H2/2;
-  const BUI_CLR = isEnphase ? '#0D47A1' : isTesla ? '#CC0000' : '#1565C0';
+  // ── Brand config table ────────────────────────────────────────────────────
+  // Each entry: [accentColour, headerText, defaultModel, necNote]
+  const BUI_BRAND_CONFIG: Record<string, [string, string, string, string]> = {
+    enphase:    ['#0D47A1', 'IQ SYSTEM CONTROLLER 3',  'IQ SC3',             'NEC 706 / NEC 230.82 / UL 1741-SA'],
+    tesla:      ['#CC0000', 'BACKUP GATEWAY 2',         'Backup Gateway 2',   'NEC 706 / UL 9540A'],
+    ecoflow:    ['#006D5B', 'SMART HOME PANEL',         'Smart Home Panel',   'NEC 706 / UL 1741 / UL 9540'],
+    solaredge:  ['#E8520A', 'BACKUP INTERFACE',         'Backup Interface',   'NEC 706 / UL 1741-SB'],
+    generac:    ['#1B5E20', 'PWRmanager',               'PWRmanager',         'NEC 706 / UL 1008 / UL 1741'],
+    solark:     ['#1A237E', 'SMART LOAD CENTER',        'Smart Load Center',  'NEC 706 / UL 1741-SB'],
+    growatt:    ['#2E7D32', 'ATS-S TRANSFER SWITCH',    'ATS-S 200A',         'NEC 706 / UL 1008'],
+  };
+  const _bCfg   = BUI_BRAND_CONFIG[buiBrand] ?? ['#1565C0', 'BACKUP INTERFACE UNIT', 'BUI', 'NEC 706 / UL 1741'];
+  const BUI_CLR = _bCfg[0];
+  const _buiHeaderText  = _bCfg[1];
+  const _buiDefaultModel = _bCfg[2];
+  const _buiNecNote     = _bCfg[3];
   const p: string[] = [];
 
   // v58.16 Phase 1.5 — Device illustration (painted as background so the
@@ -666,9 +681,7 @@ function renderBUI(
   p.push(ln(bx, by2+14, bx+W2, by2+14, {stroke: BUI_CLR, sw: SW_THIN}));
 
   // Header text
-  const headerText = isEnphase ? 'IQ SYSTEM CONTROLLER 3'
-    : isTesla ? 'BACKUP GATEWAY 2'
-    : 'BACKUP INTERFACE UNIT';
+  const headerText = _buiHeaderText;
   p.push(txt(cx, by2+10, headerText, {sz: 5.5, bold: true, anc: 'middle', fill: BUI_CLR}));
 
   // GRID input lug (left side, upper)
@@ -721,15 +734,11 @@ function renderBUI(
   p.push(ln(batPortX2, batPortY2-4, batPortX2, batPortY2, {stroke: BUI_CLR, sw: SW_MED}));
 
   // Labels below
-  const labelBrand = brand || (isEnphase ? 'Enphase' : isTesla ? 'Tesla' : 'BUI');
-  const labelModel = model || (isEnphase ? 'IQ SC3' : isTesla ? 'Gateway 2' : 'BUI');
+  const labelBrand = brand || (buiBrand ? buiBrand.charAt(0).toUpperCase() + buiBrand.slice(1) : 'BUI');
+  const labelModel = model || _buiDefaultModel;
   p.push(txt(cx, by2+H2+18, `${labelBrand} ${labelModel}`, {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
   p.push(txt(cx, by2+H2+27, ampRating > 0 ? `${ampRating}A` : '200A', {sz: F.tiny, anc: 'middle', bold: true, fill: BUI_CLR}));
-  if (isEnphase) {
-    p.push(txt(cx, by2+H2+36, 'NEC 706 / NEC 230.82 / UL 1741-SA', {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
-  } else {
-    p.push(txt(cx, by2+H2+36, 'NEC 706 / UL 1741', {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
-  }
+  p.push(txt(cx, by2+H2+36, _buiNecNote, {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
@@ -1953,12 +1962,30 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     console.log('[SLD BATTERY MISSING AT STAGE RENDERER] hasBattery=false — battery not rendered');
   }
   if (input.hasBattery) {
-    const isEnphase = !!(input.backupInterfaceBrand?.toLowerCase().includes('enphase') ||
-      input.inverterManufacturer?.toLowerCase().includes('enphase') ||
-      input.batteryModel?.toLowerCase().includes('enphase') ||
-      input.batteryModel?.toLowerCase().includes('iq battery'));
-    const isTesla = !!(input.backupInterfaceBrand?.toLowerCase().includes('tesla') ||
-      input.batteryModel?.toLowerCase().includes('powerwall'));
+    // Derive a normalised BUI brand key (mirrors normalizeDeviceBrandKey).
+    // Priority: explicit backupInterfaceBrand > inverter manufacturer > battery model sniff.
+    const _normBuiKey = (s?: string) =>
+      (s ?? '').toLowerCase().replace(/[\u00ae\u2122\u00a9]/g, '').replace(/[\s\-_.]+/g, '').trim();
+    const _buiBrandFromInput: string = (() => {
+      if (input.backupInterfaceBrand) return _normBuiKey(input.backupInterfaceBrand);
+      // Infer from inverter brand (Enphase micro system → IQ SC3; Tesla → Gateway 2)
+      const invKey = _normBuiKey(input.inverterManufacturer);
+      if (invKey === 'enphase') return 'enphase';
+      if (invKey === 'tesla')   return 'tesla';
+      // Infer from battery model string as last resort
+      const batM = (input.batteryModel ?? '').toLowerCase();
+      if (batM.includes('enphase') || batM.includes('iq battery')) return 'enphase';
+      if (batM.includes('powerwall'))                               return 'tesla';
+      if (batM.includes('ecoflow') || batM.includes('ocean'))       return 'ecoflow';
+      if (batM.includes('solaredge') || batM.includes('energy bank')) return 'solaredge';
+      if (batM.includes('generac') || batM.includes('pwrcell'))     return 'generac';
+      if (batM.includes('sol-ark') || batM.includes('solark'))      return 'solark';
+      if (batM.includes('growatt') || batM.includes('ark lv'))      return 'growatt';
+      return '';
+    })();
+    // Legacy compat flags (used by backupPanelBrand fallback below)
+    const isEnphase = _buiBrandFromInput === 'enphase';
+    const isTesla   = _buiBrandFromInput === 'tesla';
 
     // BUI positioned right of MSP, on the main bus line.
     // v58.11: Use grid-computed xBUI (full WIRE_GAP clearance on each side)
@@ -1968,10 +1995,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const buiAmpRating = input.atsAmpRating ?? 200;
     buiResult = renderBUI(
       buiCX, buiCY,
-      input.backupInterfaceBrand ?? (isEnphase ? 'Enphase' : isTesla ? 'Tesla' : ''),
-      input.backupInterfaceModel ?? (isEnphase ? 'IQ System Controller 3' : isTesla ? 'Backup Gateway 2' : 'BUI'),
+      input.backupInterfaceBrand ?? '',
+      input.backupInterfaceModel ?? '',
       buiAmpRating,
-      isEnphase, isTesla,
+      _buiBrandFromInput,
       (input.generatorKw ?? 0) > 0,
       isMicro ? 7 : 8
     );
