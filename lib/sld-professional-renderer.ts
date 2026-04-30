@@ -22,6 +22,7 @@ import { getBuildBadge } from './version';
 import type { ConductorBundle } from './segment-schedule';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 import { SLD_SYMBOL_MAP } from './sld-symbols';
+import { emitBrandEmblem } from './sld-brand-emblems';
 import type { Conductor, WireRun, ConductorType, WireEnvironment } from './sld-types';
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
@@ -415,7 +416,8 @@ function getAnchorPoint(
 // Battery Storage Symbol v3 — embeds sld-symbols.ts hybrid realism emblem
 function renderBattery(
   cx: number, cy: number,
-  model: string, kwh: number, backfeedA: number, calloutN: number
+  model: string, kwh: number, backfeedA: number, calloutN: number,
+  manufacturer: string = ''
 ): {svg: string; lx: number; rx: number; ty: number; by: number;
     acOutX: number; acOutY: number} {
   // SOT: symbol size from SLD_SYMBOL_MAP['battery-ac'] = 180×170
@@ -428,6 +430,43 @@ function renderBattery(
 
   // Embed the sld-symbols.ts hybrid realism battery emblem (AC-coupled)
   p.push(embedSymbol('battery-ac', cx, cy, W2, H2));
+
+  // v58.15 — Brand emblem overlay (top-right corner of battery cabinet).
+  // Falls back to extracting a brand keyword from the model string when no
+  // explicit manufacturer is passed (keeps legacy callers rendering a
+  // recognizable brand even without the new arg).
+  const _batSym = SLD_SYMBOL_MAP['battery-ac'];
+  if (_batSym) {
+    const _batScale = Math.min(W2 / _batSym.width, H2 / _batSym.height);
+    const _batOx = cx - (_batSym.width * _batScale) / 2;
+    const _batOy = cy - (_batSym.height * _batScale) / 2;
+    // Infer manufacturer from model if caller didn't supply one.
+    let _batMfg = manufacturer;
+    if (!_batMfg && model) {
+      const ml = model.toLowerCase();
+      if      (ml.includes('powerwall'))  _batMfg = 'Tesla';
+      else if (ml.includes('iq battery') || ml.includes('enphase')) _batMfg = 'Enphase';
+      else if (ml.includes('solaredge') || ml.includes('energy bank')) _batMfg = 'SolarEdge';
+      else if (ml.includes('pwrcell') || ml.includes('generac')) _batMfg = 'Generac';
+      else if (ml.includes('ocean pro') || ml.includes('ecoflow')) _batMfg = 'EcoFlow';
+      else if (ml.includes('franklin')) _batMfg = 'FranklinWH';
+      else if (ml.includes('sol-ark') || ml.includes('sol ark')) _batMfg = 'Sol-Ark';
+      else if (ml.includes('growatt')) _batMfg = 'Growatt';
+      else if (ml.includes('solis')) _batMfg = 'Solis';
+      else if (ml.includes('tigo')) _batMfg = 'Tigo';
+      else if (ml.includes('apsystems')) _batMfg = 'APsystems';
+      else if (ml.includes('hoymiles')) _batMfg = 'Hoymiles';
+      else if (ml.includes('anker')) _batMfg = 'Anker';
+      else if (ml.includes('bluetti')) _batMfg = 'BLUETTI';
+      else if (ml.includes('savant')) _batMfg = 'Savant';
+    }
+    // Badge position in the symbol's 180×170 native frame: top-right corner,
+    // above the first cell slab, safely inside the cabinet header strip.
+    const _batEmblem = emitBrandEmblem(_batMfg, 120, 12, 52, 14);
+    if (_batEmblem) {
+      p.push(`<g transform="translate(${_batOx.toFixed(1)},${_batOy.toFixed(1)}) scale(${_batScale.toFixed(4)})">${_batEmblem}</g>`);
+    }
+  }
 
   // Labels below
   p.push(txt(cx, by2 + H2 + 16, model ? model.substring(0, 22) : 'BATTERY STORAGE', {sz: F.tiny, anc: 'middle', italic: true}));
@@ -709,6 +748,26 @@ function renderInverterBox(
 
   // Embed the sld-symbols.ts hybrid realism inverter emblem
   p.push(embedSymbol('inverter', cx, cy, W2, H2));
+
+  // v58.15 — Brand emblem overlay (top-right corner of inverter cabinet).
+  // Emitted in the HOST symbol's native coord space (200×170) then transformed
+  // together with the rest via the same embedSymbol scale factor — which is
+  // why we wrap it in a matching <g transform="translate/scale"> identical to
+  // the one embedSymbol emits. We recompute that transform here so the
+  // emblem paints in the same visual frame.
+  const _invSym = SLD_SYMBOL_MAP['inverter'];
+  if (_invSym) {
+    const _invScale = Math.min(W2 / _invSym.width, H2 / _invSym.height);
+    const _invOx = cx - (_invSym.width * _invScale) / 2;
+    const _invOy = cy - (_invSym.height * _invScale) / 2;
+    // Badge position in the symbol's 200×170 native frame: top-right corner,
+    // comfortably inside the cabinet header but well clear of MPPT rows /
+    // conversion symbol / AC zone.
+    const _emblemNative = emitBrandEmblem(manufacturer, 140, 10, 54, 14);
+    if (_emblemNative) {
+      p.push(`<g transform="translate(${_invOx.toFixed(1)},${_invOy.toFixed(1)}) scale(${_invScale.toFixed(4)})">${_emblemNative}</g>`);
+    }
+  }
 
   // Manufacturer + model labels below
   const mfgLabel = manufacturer ? `${manufacturer}` : '';
@@ -1936,7 +1995,8 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       _batDisplayModel,
       input.batteryKwh ?? 0,
       input.batteryBackfeedA ?? 0,
-      isMicro ? 8 : 9
+      isMicro ? 8 : 9,
+      input.batteryBrand ?? ''
     );
     parts.push(batResult.svg);
 
