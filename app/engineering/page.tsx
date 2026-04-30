@@ -6453,24 +6453,50 @@ function EngineeringPageInner() {
                   ──────────────────────────────────────────────────────────── */}
                   <div className="space-y-5">
 
-                    {/* Ecosystem Picker — v57.5: collapsed to summary chip after selection */}
+                    {/* Ecosystem Picker — v58.7: prominent "Change ecosystem" button for discoverability */}
                     {(config as any).ecosystemBrand ? (
-                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-800/60 border border-slate-700/40">
-                        <Package size={12} className="text-amber-400 flex-shrink-0" />
-                        <span className="text-xs text-slate-300">
-                          <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span> ecosystem applied
-                          {displayedEcosystemComponents.length > 0 && <span className="text-slate-500 ml-1">({displayedEcosystemComponents.length} components)</span>}
-                        </span>
+                      <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-slate-800/60 border border-amber-500/30">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-md bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                          <Package size={16} className="text-amber-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm text-slate-100">
+                            <span className="font-bold text-amber-300">{String((config as any).ecosystemBrand).toUpperCase()}</span>
+                            <span className="text-slate-400 ml-1.5">ecosystem applied</span>
+                          </div>
+                          {displayedEcosystemComponents.length > 0 && (
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {displayedEcosystemComponents.length} component{displayedEcosystemComponents.length !== 1 ? 's' : ''} auto-resolved
+                            </div>
+                          )}
+                        </div>
                         <button
-                          className="ml-auto text-[10px] text-slate-500 hover:text-amber-400 transition-colors"
+                          type="button"
+                          className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md
+                                     bg-slate-700/70 hover:bg-amber-500 hover:text-slate-900
+                                     text-xs font-semibold text-amber-300 border border-amber-500/40
+                                     transition-colors focus:outline-none focus:ring-2 focus:ring-amber-400/50"
                           onClick={() => {
+                            const brand = String((config as any).ecosystemBrand ?? '').toUpperCase();
+                            const ok = window.confirm(
+                              `Change ecosystem?\n\n` +
+                              `This will clear the applied ${brand} ecosystem and let you pick a new one ` +
+                              `(SolarEdge, Enphase, Tesla, Generac, APsystems, Hoymiles).\n\n` +
+                              `Your current inverter/battery selections stay as-is until you Apply a new ` +
+                              `ecosystem — nothing is auto-deleted. Click OK to continue.`
+                            );
+                            if (!ok) return;
                             // Clear ecosystem brand so picker reappears, and unlock
                             // userHasEditedInverters so auto-sizing can run fresh recommendations
                             updateConfig({ ecosystemBrand: undefined, userHasEditedInverters: false } as any);
+                            setAutoLoadBanner(`Ecosystem cleared — pick a new brand below.`);
+                            setTimeout(() => setAutoLoadBanner(null), 5000);
                           }}
-                          title="Clear ecosystem to re-select"
+                          title="Clear current ecosystem to pick a different brand"
+                          aria-label="Change ecosystem"
                         >
-                          Change
+                          <RefreshCw size={12} />
+                          Change ecosystem
                         </button>
                       </div>
                     ) : (
