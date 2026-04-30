@@ -912,10 +912,16 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'Rehearsed 5-minute and 15-minute demos with known-good project fixtures. Screenshot-ready pages. Offline mode in case LVCC wifi tanks.',
     track: 'go-to-market',
     priority: 'p0',
-    status: 'planned',
+    status: 'done',
     effort: 'l',
+    shippedIn: 'v63.0',
+    files: [
+      'REPLUS_2026_BOOTH_PREP.md',
+      'public/offline-demo/index.html',
+    ],
+    notes: '5-min + 15-min demo scripts, objection-handling cheatsheet, persona playbook, screenshot-ready page reference, offline HTML snapshot at public/offline-demo/index.html (serves locally with npx serve). Booth setup + end-of-day reset checklists. Wi-Fi contingency for LVCC.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-05-28',
   },
   {
     id: 'gtm-marketing-site',
