@@ -309,8 +309,10 @@ export async function POST(req: NextRequest) {
       try {
         // F-06: Resolve owner per survey (claim → default fallback)
         const ownerResolution = await resolveIngestOwner(
-          survey.solarpro_user_id ?? null,
+          survey.solarpro_user_id    ?? null,
           `force-ingest:${survey.id}`,
+          survey.solarpro_email      ?? null,
+          survey.solarpro_project_id ?? null,
         );
         const surveyOwnerId = ownerResolution?.ownerId ?? ingestUserId;
         const surveyOwnerSource = ownerResolution?.ownerSource ?? 'default';

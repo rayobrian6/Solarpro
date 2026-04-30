@@ -49,9 +49,12 @@ export interface IngestContext {
    *  Required. Pipeline returns 'failed' if this is missing. */
   ownerId: string;
 
-  /** F-06: Source of the ownerId — 'claim' when resolved from solarpro_user_id,
-   *  'default' when falling back to SURVEY_INGEST_DEFAULT_USER_ID. */
-  ownerSource: 'claim' | 'default';
+  /** F-06: Source of the ownerId.
+   *  'claim'       - resolved from solarpro_user_id UUID match
+   *  'claim_email' - resolved from solarpro_email match
+   *  'project'     - resolved from solarpro_project_id project lookup
+   *  'default'     - fell back to SURVEY_INGEST_DEFAULT_USER_ID */
+  ownerSource: 'claim' | 'claim_email' | 'project' | 'default';
 
   /** Optional: the partner-supplied project_id from the webhook headers or
    *  a future fat-event field. Used by the link resolver (Q8 strategy).
