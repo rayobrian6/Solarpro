@@ -1259,10 +1259,12 @@ function LiveSurveyDataView() {
                     });
                     const data = await res.json();
                     if (data.success) {
-                      const msg = `✓ Fixed ${data.fixed} / ${data.total} surveys`;
+                      const msg = data.fixed > 0
+                        ? `✓ Fixed ${data.fixed} / ${data.total} surveys (scanned ${data.scanned ?? data.total})` 
+                        : `– ${data.message ?? `No resolvable surveys found (scanned ${data.scanned ?? 0})`}`;
                       setFixAllResult(msg);
-                      setFixingAll('done');
-                      await loadData();
+                      setFixingAll(data.fixed > 0 ? 'done' : 'idle');
+                      if (data.fixed > 0) await loadData();
                     } else {
                       setFixAllResult(`⚠ ${data.error}`);
                       setFixingAll('error');
