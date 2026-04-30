@@ -480,12 +480,18 @@ function renderBattery(
     p.push(txt(cx, by2 + H2 + 34, `${backfeedA}A BACKFEED — NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_HDR}));
   }
 
-  // SOT: BAT_AC_OUT terminal via anchor 'ac_l1' (right side: native 180,55)
+  // BAT_AC_OUT: use bottom-centre of symbol so the wire drops straight down
+  // to the BUI BATTERY port (which is also at bottom-centre of the BUI box).
+  // Keep the right-side ac_l1 lug stub for visual authenticity but route
+  // the connection wire from the bottom lug.
   const acPt = getAnchorPoint('battery-ac', 'ac_l1', cx, cy, W2, H2);
-  const acOutX = acPt.x;
-  const acOutY = acPt.y;
-  p.push(ln(acOutX, acOutY, acOutX + 10, acOutY, {stroke: BAT_HDR, sw: SW_MED}));
-  console.log(`[SLD WIRE TYPE: AC] battery-ac.ac_l1 → (${acOutX.toFixed(1)},${acOutY.toFixed(1)})`);
+  // Right-side lug stub (decorative — shows AC terminals on symbol face)
+  p.push(ln(acPt.x, acPt.y, acPt.x + 10, acPt.y, {stroke: BAT_HDR, sw: SW_MED}));
+  // Bottom-centre AC output lug — this is the actual connection point to BUI
+  const acOutX = cx;            // centre X (aligns with BUI batPortX)
+  const acOutY = by2 + H2;      // bottom edge of battery symbol
+  p.push(ln(acOutX, acOutY - 4, acOutX, acOutY, {stroke: BAT_HDR, sw: SW_MED}));
+  console.log(`[SLD WIRE TYPE: AC] battery-ac.bottom → (${acOutX.toFixed(1)},${acOutY.toFixed(1)})`);
 
   p.push(callout(bx + W2 + 14, by2 - 5, calloutN));
   return {svg: p.join(''), lx: bx, rx: bx + W2, ty: by2, by: by2 + H2,
@@ -2056,19 +2062,19 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     );
     parts.push(batResult.svg);
 
-    // Wire: battery AC OUT terminal → BUI BATTERY port (vertical dashed blue line)
-    // Use explicit terminal coordinates: batResult.acOutX/Y → buiResult.batPortX/Y
+    // Wire: battery bottom-centre AC OUT → BUI BATTERY port
+    // Both share the same centre X (batCX == buiCX) so this is a clean
+    // vertical dashed line straight down.
     parts.push(ln(batResult.acOutX, batResult.acOutY, buiResult.batPortX, buiResult.batPortY, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
-    // Wire callout
-    // BUILD v24: Use computed conductorCallout from BATTERY_TO_BUI_RUN (NEC-sized)
-    // Fallback to legacy hardcoded gauge only if segment not computed
+    // Wire callout — placed to the right of the vertical wire at mid-height
     const batWireGauge = batToBuiRun?.wireGauge
       ? `${batToBuiRun.wireGauge} THWN-2`
       : (bfA <= 20 ? '#12 AWG THWN-2' : bfA <= 30 ? '#10 AWG THWN-2' : '#8 AWG THWN-2');
     const batCalloutLines = batToBuiRun?.conductorCallout
       ? batToBuiRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
       : [batWireGauge, `${bfA}A CIRCUIT`];
-    parts.push(tspan(batResult.acOutX + 8, batResult.acOutY + (buiResult.batPortY - batResult.acOutY)/2,
+    const _batWireMidY = (batResult.acOutY + buiResult.batPortY) / 2;
+    parts.push(tspan(batResult.acOutX + 6, _batWireMidY,
       batCalloutLines,
       {sz: F.tiny, anc: 'start', fill: '#1565C0'}));
 
