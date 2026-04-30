@@ -3327,6 +3327,29 @@ export const BACKUP_INTERFACES: BackupInterface[] = [
     active: true,
     datasheetUrl: 'https://enphase.com/download/iq-combiner-5-data-sheet',
   },
+  // ── EcoFlow OCEAN Smart Home Panel ─────────────────────────────────────────────
+  // v58.20: Added so EcoFlow ecosystem systems resolve backupInterfaceBrand = 'EcoFlow'
+  // and the SLD renderer shows the correct EcoFlow Smart Home Panel BUI symbol.
+  {
+    id: 'ecoflow-ocean-smart-home-panel',
+    manufacturer: 'EcoFlow', model: 'OCEAN Smart Home Panel',
+    category: 'backup_interface', subcategory: 'gateway_controller',
+    maxBackupOutputKw: 20, maxContinuousOutputA: 80,
+    serviceEntranceRated: false,
+    gridFormingCapable: true, islandingCapable: true,
+    loadSheddingCapable: true, loadSheddingCircuits: 10,
+    generatorCompatible: false,
+    outdoorRated: false, weightLbs: 15, warrantyYears: 5, msrpUsd: 800,
+    necRefs: ['NEC 706 — Energy Storage Systems', 'NEC 705.12(B) — load-side interconnection', 'NEC 230.82'],
+    ulListing: 'UL 1741 / UL 9540',
+    compatibleBatteries: ['ecoflow-ocean-pro-bp-10', 'ecoflow-battery-5kwh'],
+    isNew: true,
+    ecosystemBrand: 'ecoflow',
+    ecosystemFamily: 'ocean-smart-home-panel',
+    compatibleWith: ['ecoflow-ocean-pro-11kw', 'ecoflow-ocean-pro-24kw', 'ecoflow-ocean-pro-bp-10'],
+    active: true,
+    datasheetUrl: 'https://enterprise-service-us-cdn.ecoflow.com/enterprise/documentation/1760684472240/Ocean%20Pro%20PCS%20datasheet%20v1013_View.pdf',
+  },
 ];
 
 // ── Lookup helpers ────────────────────────────────────────────────────────────
