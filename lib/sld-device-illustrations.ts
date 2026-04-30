@@ -45,7 +45,7 @@
 //   remaining brands keep working until we fill in their illustrations.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type DeviceKind = 'inverter' | 'battery';
+export type DeviceKind = 'inverter' | 'battery' | 'bui';
 
 export interface DeviceIllustration {
   /** Registry key, lowercased/normalised brand. */
@@ -263,6 +263,134 @@ function renderEcoflowOceanProBattery(cx: number, cy: number, slotW: number, slo
   return `<g data-device="ecoflow-ocean-pro-battery">${parts.join('')}</g>`;
 }
 
+// ----- Tesla Backup Gateway 2 (BUI) ----------------------------------------
+// White slim wall-mount unit. Vertical rectangular cabinet with a visible
+// service-door seam, status LED bar along the top, Tesla nameplate on the
+// lower front. Real proportions ~446 mm W x 660 mm H x 152 mm D.
+function renderTeslaGateway2(cx: number, cy: number, slotW: number, slotH: number): string {
+  const nativeW = 58;
+  const nativeH = 86;
+  const scale = Math.min(slotW / nativeW, slotH / nativeH);
+  const W = nativeW * scale;
+  const H = nativeH * scale;
+  const x = cx - W / 2;
+  const y = cy - H / 2;
+
+  const parts: string[] = [];
+  parts.push(rect(x, y, W, H, '#F4F4F2', '#9AA0A6', 0.7, Math.max(1.5, W * 0.05)));
+  // Status LED bar across the top
+  const ledBarY = y + H * 0.06;
+  const ledBarH = H * 0.03;
+  parts.push(rect(x + W * 0.12, ledBarY, W * 0.76, ledBarH, '#E6E8EB', '#B0B4B8', 0.3, 1));
+  const ledColors = ['#4CAF50', '#4CAF50', '#FFA726', '#4A90E2'];
+  for (let i = 0; i < ledColors.length; i++) {
+    const lx = x + W * (0.22 + i * 0.17);
+    parts.push(circleSvg(lx, ledBarY + ledBarH * 0.5, Math.max(0.5, W * 0.015), ledColors[i], '#333', 0.2));
+  }
+  // Service-door seam across middle
+  const seamY = y + H * 0.46;
+  parts.push(line(x + W * 0.06, seamY, x + W * 0.94, seamY, '#D0D4D8', 0.45));
+  parts.push(circleSvg(x + W * 0.08, seamY, Math.max(0.4, W * 0.012), '#B0B4B8', '#9AA0A6', 0.2));
+  parts.push(circleSvg(x + W * 0.92, seamY, Math.max(0.4, W * 0.012), '#B0B4B8', '#9AA0A6', 0.2));
+  // Lower vent slats
+  for (let i = 0; i < 6; i++) {
+    const vx = x + W * (0.22 + i * 0.11);
+    parts.push(line(vx, y + H * 0.7, vx, y + H * 0.86, '#D0D4D8', 0.3));
+  }
+  // TESLA nameplate
+  const plateW = W * 0.5;
+  const plateH = H * 0.06;
+  const plateX = x + (W - plateW) / 2;
+  const plateY = y + H * 0.54;
+  parts.push(rect(plateX, plateY, plateW, plateH, '#202124', '#202124', 0.3, 1));
+  parts.push(textSvg(plateX + plateW / 2, plateY + plateH * 0.75, 'TESLA', {
+    size: Math.max(2.4, H * 0.03),
+    fill: '#F4F4F2',
+    bold: true,
+  }));
+  parts.push(textSvg(x + W / 2, y + H * 0.94, 'GATEWAY 2', {
+    size: Math.max(2.0, H * 0.024),
+    fill: '#5A5E62',
+    bold: false,
+  }));
+  // Mounting tabs
+  parts.push(rect(x - W * 0.02, y + H * 0.14, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+  parts.push(rect(x + W * 0.98, y + H * 0.14, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+  parts.push(rect(x - W * 0.02, y + H * 0.82, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+  parts.push(rect(x + W * 0.98, y + H * 0.82, W * 0.04, H * 0.03, '#B0B4B8', '#9AA0A6', 0.3, 0.5));
+
+  return `<g data-device="tesla-gateway-2">${parts.join('')}</g>`;
+}
+
+// ----- EcoFlow OCEAN Pro Smart Home Panel (BUI) ----------------------------
+// Grid-interconnect + load-control unit that pairs with OCEAN Pro. Anthracite
+// cabinet with blue top strip, visible breaker rows behind front-door glass.
+function renderEcoflowSmartHomePanel(cx: number, cy: number, slotW: number, slotH: number): string {
+  const nativeW = 86;
+  const nativeH = 110;
+  const scale = Math.min(slotW / nativeW, slotH / nativeH);
+  const W = nativeW * scale;
+  const H = nativeH * scale;
+  const x = cx - W / 2;
+  const y = cy - H / 2;
+
+  const parts: string[] = [];
+  parts.push(rect(x, y, W, H, '#2B2F33', '#111418', 0.8, Math.max(1.5, W * 0.03)));
+  // Blue accent strip with wordmark
+  parts.push(rect(x + W * 0.04, y + H * 0.04, W * 0.92, H * 0.07, '#0E7CFF', '#0B5ECC', 0.4, 1.2));
+  parts.push(textSvg(x + W / 2, y + H * 0.04 + H * 0.05, 'EcoFlow Smart Home Panel', {
+    size: Math.max(2.4, H * 0.026),
+    fill: '#FFFFFF',
+    bold: true,
+  }));
+  // Front-door glass window
+  const glassX = x + W * 0.08;
+  const glassY = y + H * 0.16;
+  const glassW = W * 0.84;
+  const glassH = H * 0.62;
+  parts.push(rect(glassX, glassY, glassW, glassH, '#14181C', '#0A0E12', 0.5, 1));
+  // Main bus bar
+  parts.push(line(glassX + glassW * 0.04, glassY + glassH * 0.02, glassX + glassW * 0.96, glassY + glassH * 0.02, '#0E7CFF', 0.5));
+  // Breaker rows 2x6 = 12
+  const rows = 6;
+  const cols = 2;
+  const colGap = glassW * 0.04;
+  const brkW = (glassW - colGap * (cols + 1)) / cols;
+  const rowGap = glassH * 0.02;
+  const brkH = (glassH - rowGap * (rows + 1)) / rows;
+  for (let c = 0; c < cols; c++) {
+    for (let r = 0; r < rows; r++) {
+      const bx = glassX + colGap + c * (brkW + colGap);
+      const by = glassY + rowGap + r * (brkH + rowGap);
+      parts.push(rect(bx, by, brkW, brkH, '#3A3E42', '#1a1a1a', 0.3, 0.8));
+      const swW = brkW * 0.18;
+      const swH = brkH * 0.5;
+      const sx = bx + (brkW - swW) / 2;
+      const sy = by + (brkH - swH) / 2;
+      const isOn = (r + c) % 3 !== 0;
+      parts.push(rect(sx, sy, swW, swH, isOn ? '#4CAF50' : '#616468', '#111', 0.25, 0.4));
+    }
+  }
+  // Status LED strip
+  const ledStripX = x + W * 0.96;
+  for (let i = 0; i < 3; i++) {
+    const ly = y + H * (0.22 + i * 0.07);
+    const colors = ['#4CAF50', '#FFA726', '#4A90E2'];
+    parts.push(circleSvg(ledStripX - W * 0.02, ly, Math.max(0.4, W * 0.012), colors[i], '#333', 0.2));
+  }
+  parts.push(textSvg(x + W / 2, y + H * 0.92, 'OCEAN Pro Hub | 200A Service', {
+    size: Math.max(2.2, H * 0.022),
+    fill: '#8A8E92',
+    bold: false,
+  }));
+  for (let i = 0; i < 3; i++) {
+    const kx = x + W * (0.22 + i * 0.22);
+    parts.push(rect(kx, y + H * 0.96, W * 0.06, H * 0.03, '#111418', '#000', 0.3, 0.5));
+  }
+
+  return `<g data-device="ecoflow-ocean-pro-bui">${parts.join('')}</g>`;
+}
+
 // ─── Registry ────────────────────────────────────────────────────────────────
 // Keyed by `${brand}::${kind}`. The brand key follows normalizeBrandKey()
 // conventions from sld-brand-emblems.ts (lowercase, whitespace/trademark
@@ -277,6 +405,15 @@ const DEVICE_REGISTRY: Record<string, DeviceIllustration> = {
     aspectW: 60,
     aspectH: 108,
     render: renderTeslaPowerwall,
+  },
+  'tesla::bui': {
+    brand: 'tesla',
+    kind: 'bui',
+    label: 'Tesla Backup Gateway 2',
+    sub: 'Wall-mount BUI · 200A service · split-phase',
+    aspectW: 58,
+    aspectH: 86,
+    render: renderTeslaGateway2,
   },
   'ecoflow::inverter': {
     brand: 'ecoflow',
@@ -295,6 +432,15 @@ const DEVICE_REGISTRY: Record<string, DeviceIllustration> = {
     aspectW: 54,
     aspectH: 120,
     render: renderEcoflowOceanProBattery,
+  },
+  'ecoflow::bui': {
+    brand: 'ecoflow',
+    kind: 'bui',
+    label: 'EcoFlow OCEAN Pro Smart Home Panel',
+    sub: '12-circuit load center · 200A service · integrated bus',
+    aspectW: 86,
+    aspectH: 110,
+    render: renderEcoflowSmartHomePanel,
   },
 };
 

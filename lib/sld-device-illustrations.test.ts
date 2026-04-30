@@ -13,13 +13,15 @@ import {
 } from './sld-device-illustrations';
 
 describe('sld-device-illustrations — registry', () => {
-  it('Phase 1 ships Tesla Powerwall + EcoFlow inverter + EcoFlow battery', () => {
+  it('Phase 1 + 1.5 ships Tesla (battery + BUI) and EcoFlow (inverter + battery + BUI)', () => {
     const all = listDeviceIllustrations();
     const ids = all.map(d => `${d.brand}::${d.kind}`).sort();
     expect(ids).toEqual([
       'ecoflow::battery',
+      'ecoflow::bui',
       'ecoflow::inverter',
       'tesla::battery',
+      'tesla::bui',
     ]);
   });
 
@@ -55,9 +57,15 @@ describe('sld-device-illustrations — resolveDeviceIllustration', () => {
     expect(d).not.toBeNull();
     expect(d!.label).toContain('Powerwall');
   });
-  it('resolves EcoFlow inverter + battery', () => {
+  it('resolves EcoFlow inverter + battery + BUI', () => {
     expect(resolveDeviceIllustration('EcoFlow', 'inverter')).not.toBeNull();
     expect(resolveDeviceIllustration('EcoFlow', 'battery')).not.toBeNull();
+    expect(resolveDeviceIllustration('EcoFlow', 'bui')).not.toBeNull();
+  });
+  it('resolves Tesla BUI (Backup Gateway 2)', () => {
+    const d = resolveDeviceIllustration('Tesla', 'bui');
+    expect(d).not.toBeNull();
+    expect(d!.label).toContain('Gateway');
   });
   it('returns null for brand without a registered illustration', () => {
     expect(resolveDeviceIllustration('Fronius', 'inverter')).toBeNull();

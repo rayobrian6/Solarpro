@@ -651,8 +651,18 @@ function renderBUI(
   const BUI_CLR = isEnphase ? '#0D47A1' : isTesla ? '#CC0000' : '#1565C0';
   const p: string[] = [];
 
-  // Enclosure
-  p.push(rect(bx, by2, W2, H2, {fill: WHT, stroke: BUI_CLR, sw: SW_MED}));
+  // v58.16 Phase 1.5 — Device illustration (painted as background so the
+  // functional wire terminals + transfer-switch blades still overlay on top).
+  // Falls back to a plain enclosure rect when no illustration is registered.
+  const _buiDevice = resolveDeviceIllustration(brand, 'bui');
+  if (_buiDevice) {
+    // Paint the illustration slightly smaller than the full symbol so the
+    // header strip + terminal lugs retain their legibility.
+    p.push(_buiDevice.render(cx, cy, W2 * 0.94, H2 * 0.94));
+  } else {
+    // Plain enclosure (legacy look)
+    p.push(rect(bx, by2, W2, H2, {fill: WHT, stroke: BUI_CLR, sw: SW_MED}));
+  }
   p.push(ln(bx, by2+14, bx+W2, by2+14, {stroke: BUI_CLR, sw: SW_THIN}));
 
   // Header text
