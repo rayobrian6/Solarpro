@@ -1,16 +1,53 @@
 'use client';
-import React, { useEffect } from 'react';
-import { Zap, Sun, AlertTriangle, CheckCircle, Info, ExternalLink, Shield, TrendingUp, Settings } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Zap, Sun, AlertTriangle, CheckCircle, Info, ExternalLink, Shield, Pencil, X, Check } from 'lucide-react';
 import type { Project } from '@/types';
 import { getUtilityRules, checkNetMeteringLimit, getProductionFactor } from '@/lib/utility-rules';
 
 interface SystemSizeTabProps {
   project: Project;
   onRunAutoSize: () => void;
+  onSizeOverride?: (newKw: number) => void;
 }
 
-export default function SystemSizeTab({ project, onRunAutoSize }: SystemSizeTabProps) {
+export default function SystemSizeTab({ project, onRunAutoSize, onSizeOverride }: SystemSizeTabProps) {
   const bill = project.billAnalysis;
+  const [editing, setEditing] = useState(false);
+  const [editVal, setEditVal] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+
+  const handleEditOpen = () => {
+    setEditVal(systemKw ? systemKw.toFixed(2) : '');
+    setSaveErr(null);
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    const val = parseFloat(editVal);
+    if (isNaN(val) || val <= 0 || val > 500) {
+      setSaveErr('Enter a valid size between 0.1 and 500 kW');
+      return;
+    }
+    setSaving(true);
+    setSaveErr(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ systemSizeKw: val }),
+      });
+      const d = await res.json();
+      if (!d.success) throw new Error(d.error || 'Save failed');
+      setEditing(false);
+      if (onSizeOverride) onSizeOverride(val);
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
 
   // FIX v47.8: structured pipeline logging for SYSTEM_SIZE_LOADED
   useEffect(() => {
@@ -25,8 +62,8 @@ export default function SystemSizeTab({ project, onRunAutoSize }: SystemSizeTabP
       bill ? 'PRESENT' : 'MISSING'
     );
   }, [project.id, bill, project.utilityRatePerKwh, project.stateCode, project.city, project.utilityName, project.systemSizeKw]);
-  const utilityRules = project.utilityName ? getUtilityRules(project.utilityName) : null;
   const systemKw = project.systemSizeKw || bill?.recommendedSystemKw;
+  const utilityRules = project.utilityName ? getUtilityRules(project.utilityName) : null;
   const productionFactor = getProductionFactor(project.utilityName);
   const netMeteringWarning = systemKw && project.utilityName
     ? checkNetMeteringLimit(systemKw, project.utilityName)
@@ -98,11 +135,44 @@ export default function SystemSizeTab({ project, onRunAutoSize }: SystemSizeTabP
             <div className="text-xs text-slate-400 mb-1 flex items-center gap-1.5">
               <Zap size={11} className="text-amber-400" /> Recommended System Size
             </div>
-            <div className="text-5xl font-black text-amber-400">
-              {systemKw ? systemKw.toFixed(2) : '—'}
-              <span className="text-2xl font-semibold text-slate-400 ml-1">kW</span>
-            </div>
-            {bill?.recommendedPanelCount && (
+            {editing ? (
+              <div className="flex items-center gap-2 mt-1">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="500"
+                  value={editVal}
+                  onChange={e => setEditVal(e.target.value)}
+                  className="w-32 bg-slate-800 border border-amber-500/50 rounded-lg px-3 py-2 text-xl font-bold text-amber-400 focus:outline-none focus:border-amber-400"
+                  autoFocus
+                  onKeyDown={e => { if (e.key === 'Enter') handleSave(); if (e.key === 'Escape') setEditing(false); }}
+                />
+                <span className="text-lg text-slate-400">kW</span>
+                <button onClick={handleSave} disabled={saving}
+                  className="p-1.5 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors disabled:opacity-50">
+                  <Check size={14} />
+                </button>
+                <button onClick={() => setEditing(false)} disabled={saving}
+                  className="p-1.5 rounded-lg bg-slate-700/50 text-slate-400 hover:text-white transition-colors">
+                  <X size={14} />
+                </button>
+                {saveErr && <span className="text-xs text-red-400">{saveErr}</span>}
+              </div>
+            ) : (
+              <div className="flex items-end gap-2 group/size">
+                <div className="text-5xl font-black text-amber-400">
+                  {systemKw ? systemKw.toFixed(2) : '—'}
+                  <span className="text-2xl font-semibold text-slate-400 ml-1">kW</span>
+                </div>
+                <button onClick={handleEditOpen}
+                  title="Override system size"
+                  className="mb-1 p-1 rounded-lg text-slate-600 hover:text-amber-400 transition-colors opacity-0 group-hover/size:opacity-100">
+                  <Pencil size={13} />
+                </button>
+              </div>
+            )}
+            {bill?.recommendedPanelCount && !editing && (
               <div className="text-sm text-slate-400 mt-1">
                 ≈ {bill.recommendedPanelCount} panels @ 400W
               </div>

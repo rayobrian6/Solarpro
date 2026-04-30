@@ -10,8 +10,9 @@ import {
 } from 'lucide-react';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
+import OrganizationPanel from '@/components/settings/OrganizationPanel';
 
-type Tab = 'profile' | 'branding' | 'subscription';
+type Tab = 'profile' | 'branding' | 'subscription' | 'organization';
 
 interface BrandingSettings {
   companyName: string;
@@ -237,6 +238,7 @@ export default function SettingsPage() {
     { id: 'profile',      label: 'Profile',      icon: <User size={16} /> },
     { id: 'branding',     label: 'Branding',     icon: <Palette size={16} /> },
     { id: 'subscription', label: 'Subscription', icon: <CreditCard size={16} /> },
+    { id: 'organization', label: 'Organization', icon: <Building2 size={16} /> },
   ];
 
   return (
@@ -668,6 +670,12 @@ export default function SettingsPage() {
         )}
 
       </div>
+
+        {/* ── ORGANIZATION TAB ── */}
+        {activeTab === 'organization' && user && (
+          <OrganizationPanel userId={user.id} />
+        )}
+
     </AppShell>
   );
 }

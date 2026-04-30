@@ -11,7 +11,7 @@ import {
   Activity, BarChart3, Map, Flame, Radio,
   ArrowUpRight, Send, Wrench, Star,
   Truck, Calendar, MapPin, Sun, Loader2,
-  Inbox, Search, PenTool, Eye, UserCheck,
+  Inbox, Search, PenTool, Eye, EyeOff, UserCheck,
   ChevronDown, ChevronUp, X,
   ClipboardList, Phone, Play,
 } from 'lucide-react';
@@ -176,9 +176,10 @@ function CommandCard({
   return <Link href={href} className="block group">{inner}</Link>;
 }
 
-function WorkQueueRow({ project, onAction }: {
+function WorkQueueRow({ project, onAction, onDismiss }: {
   project: Project;
   onAction?: (project: Project, actionLabel: string) => void;
+  onDismiss?: (project: Project) => void;
 }) {
   const action = getNextAction(project);
   const urgency = getUrgency(project);
@@ -274,6 +275,15 @@ function WorkQueueRow({ project, onAction }: {
           onClick={handleActionClick}>
           <ArrowRight size={12} />
         </button>
+        {onDismiss && (
+          <button
+            title="Dismiss from queue"
+            className="p-1.5 rounded-lg text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+            style={{ background: 'rgba(255,255,255,0.04)' }}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); onDismiss(project); }}>
+            <EyeOff size={12} />
+          </button>
+        )}
       </div>
     </div>
   );
@@ -686,6 +696,7 @@ export default function CommandCenter() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
 
   // Modal state
+  const [dismissedQueueIds, setDismissedQueueIds] = useState<Set<string>>(new Set());
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
     commandId?: string;
@@ -914,12 +925,13 @@ export default function CommandCenter() {
   }));
 
   const workQueue = useMemo(() => [...projects]
+    .filter(p => !dismissedQueueIds.has(p.id))
     .sort((a, b) => {
       const o: Record<CanonicalStatus, number> = { proposal: 0, approved: 1, design: 2, lead: 3, installed: 4 };
       return (o[normalizeStatus(a.status)] ?? 5) - (o[normalizeStatus(b.status)] ?? 5);
     })
     .filter(p => pipelineFilter === 'all' || normalizeStatus(p.status) === pipelineFilter)
-    .slice(0, 8), [projects, pipelineFilter]);
+    .slice(0, 8), [projects, pipelineFilter, dismissedQueueIds]);
 
   const highValueDeals = useMemo(() => [...projects]
     .filter(p => normalizeStatus(p.status) !== 'installed')
@@ -1258,6 +1270,9 @@ export default function CommandCenter() {
                   onAction={(proj, label) => {
                     // All action buttons open the Decision Engine
                     openDecisionModal(proj.id, proj.name, proj.client?.name);
+                  }}
+                  onDismiss={proj => {
+                    setDismissedQueueIds(prev => new Set([...prev, proj.id]));
                   }} />
               ))}</div>
             )}
