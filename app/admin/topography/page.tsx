@@ -1055,6 +1055,8 @@ function LiveSurveyDataView() {
   const [loadError, setLoadError]     = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<IngestResponse | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [fixingAll, setFixingAll]     = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [fixAllResult, setFixAllResult] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadState('loading');
@@ -1228,6 +1230,44 @@ function LiveSurveyDataView() {
               <span className="text-[10px] text-emerald-400/70 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                 origin=survey
               </span>
+              {/* v58.20: bulk-fix all surveys owned by fallback default user */}
+              <button
+                disabled={fixingAll === 'running'}
+                className="text-[10px] px-2.5 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={async () => {
+                  if (!confirm('Reassign ALL surveys currently owned by the fallback default user to their correct owners (based on solarpro_user_id claim)?\n\nThis will update all affected projects at once.')) return;
+                  setFixingAll('running');
+                  setFixAllResult(null);
+                  try {
+                    const res = await fetch('/api/admin/survey-reassign', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'fix-all-defaults' }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      const msg = `✓ Fixed ${data.fixed} / ${data.total} surveys`;
+                      setFixAllResult(msg);
+                      setFixingAll('done');
+                      await loadData();
+                    } else {
+                      setFixAllResult(`⚠ ${data.error}`);
+                      setFixingAll('error');
+                    }
+                  } catch (e) {
+                    setFixAllResult('Network error — check console');
+                    setFixingAll('error');
+                    console.error(e);
+                  }
+                }}
+              >
+                {fixingAll === 'running' ? '⏳ Fixing…' : '⟳ Fix All Defaults'}
+              </button>
+              {fixAllResult && (
+                <span className={`text-[10px] font-medium ${fixingAll === 'done' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {fixAllResult}
+                </span>
+              )}
             </div>
 
             {projects.map((project) => {
@@ -1296,7 +1336,7 @@ function LiveSurveyDataView() {
                   {isExpanded && (
                     <div className="border-t border-slate-800/60 px-4 py-3 space-y-3">
 
-                      {/* F-06: Ownership badge */}
+                      {/* F-06: Ownership badge + Fix Owner button */}
                       {(() => {
                         const meta = project.survey_meta as Record<string, unknown> | null;
                         const ownerSource = (meta?.owner_source as string) ?? null;
@@ -1304,19 +1344,50 @@ function LiveSurveyDataView() {
                         const solarproProjectId = (meta?.solarpro_project_id as string) ?? null;
                         const isDefault = ownerSource === 'default' || (!ownerSource && !solarproUserId);
                         return (
-                          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-medium ${
-                            isDefault
-                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                          }`}>
-                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDefault ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                            {isDefault ? (
-                              <span>⚠ Fallback Owner Used — no handoff JWT claim present</span>
-                            ) : (
-                              <span>✓ Owner Resolved from Handoff JWT — solarpro_user_id: <span className="font-mono opacity-80">{(solarproUserId ?? '').slice(0, 8)}…</span></span>
-                            )}
-                            {solarproProjectId && (
-                              <span className="opacity-60 ml-1">project: <span className="font-mono">{solarproProjectId.slice(0, 8)}…</span></span>
+                          <div className="space-y-1.5">
+                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-medium ${
+                              isDefault
+                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                            }`}>
+                              <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDefault ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                              {isDefault ? (
+                                <span>⚠ Fallback Owner Used — no handoff JWT claim present</span>
+                              ) : (
+                                <span>✓ Owner Resolved from Handoff JWT — solarpro_user_id: <span className="font-mono opacity-80">{(solarproUserId ?? '').slice(0, 8)}…</span></span>
+                              )}
+                              {solarproProjectId && (
+                                <span className="opacity-60 ml-1">project: <span className="font-mono">{solarproProjectId.slice(0, 8)}…</span></span>
+                              )}
+                            </div>
+                            {/* v58.20: Fix Owner button — shown when survey_meta has a solarpro_user_id claim
+                                 but the project is currently owned by the fallback default user. */}
+                            {isDefault && solarproUserId && (
+                              <button
+                                className="text-[10px] px-3 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium"
+                                onClick={async () => {
+                                  if (!confirm(`Reassign this survey to solarpro_user_id:\n${solarproUserId}\n\nThis will change the project owner. Proceed?`)) return;
+                                  try {
+                                    const res = await fetch('/api/admin/survey-reassign', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'fix-one', projectId: project.id }),
+                                    });
+                                    const data = await res.json();
+                                    if (data.success) {
+                                      alert(`✓ Reassigned to ${data.newOwnerEmail ?? data.newOwnerId}`);
+                                      loadData();
+                                    } else {
+                                      alert(`⚠ Fix failed: ${data.error}`);
+                                    }
+                                  } catch (e) {
+                                    alert('Network error — check console');
+                                    console.error(e);
+                                  }
+                                }}
+                              >
+                                → Fix Owner (assign to solarpro_user_id claim)
+                              </button>
                             )}
                           </div>
                         );

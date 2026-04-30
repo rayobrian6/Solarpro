@@ -86,18 +86,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Build HMAC-SHA256 signature for the internal webhook call
+    // Build HMAC-SHA256 signature for the internal webhook call.
+    // v58.20 FIX: The envelope validator (envelopeValidator.ts) expects snake_case
+    // field names (survey_id, event_id, completed_at, event) and the F-06 ownership
+    // claims (solarpro_user_id, solarpro_project_id, solarpro_email) from the JWT.
+    // Previously these were missing, causing every survey to fall back to the
+    // SURVEY_INGEST_DEFAULT_USER_ID (owner) instead of the submitting user.
     const webhookBody = JSON.stringify({
+      // Envelope fields required by envelopeValidator.ts
+      event:        'survey.completed',
+      event_id:     payload.surveyId,          // surveyId doubles as event_id
+      survey_id:    payload.surveyId,
+      completed_at: payload.submittedAt,
       schemaVersion: payload.schemaVersion,
-      surveyId: payload.surveyId,
-      projectId: payload.projectId,
-      submittedAt: payload.submittedAt,
+      // F-06 ownership claims — forwarded from the verified handoff JWT.
+      // ownerResolver.ts uses solarpro_user_id to assign the project to the
+      // correct SolarPro user instead of falling back to SURVEY_INGEST_DEFAULT_USER_ID.
+      solarpro_user_id:    claims.solarpro_user_id    ?? null,
+      solarpro_project_id: claims.solarpro_project_id ?? null,
+      solarpro_email:      claims.solarpro_email       ?? null,
+      // Survey payload fields
+      projectId:     payload.projectId,
+      submittedAt:   payload.submittedAt,
       inspectorName: payload.inspectorName,
-      siteOverview: payload.siteOverview,
-      roofConditions: payload.roofConditions,
+      siteOverview:  payload.siteOverview,
+      roofConditions:    payload.roofConditions,
       electricalService: payload.electricalService,
-      obstructions: payload.obstructions,
-      photos: payload.photos,
+      obstructions:      payload.obstructions,
+      photos:            payload.photos,
     });
 
     const { createHmac } = await import('crypto');
