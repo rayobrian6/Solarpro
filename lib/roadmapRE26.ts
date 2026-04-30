@@ -945,10 +945,16 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'One-click "reset demo account" that drops in 3 golden projects (residential retrofit, new-construction, commercial) for booth demos.',
     track: 'go-to-market',
     priority: 'p1',
-    status: 'planned',
+    status: 'done',
     effort: 'm',
+    shippedIn: 'v63.0',
+    files: [
+      'app/api/admin/system-tools/route.ts',
+      'app/admin/system-tools/page.tsx',
+    ],
+    notes: 'seed_demo_account tool case in system-tools route — accepts userEmail or userId, soft-deletes old [demo]-tagged projects, creates 3 golden clients+projects+layouts (Mitchell Residence 10.4kW roof Phoenix, Greenfield Lot 14 8.0kW roof Austin, RML Warehouse 49.6kW ground Denver). Violet Demo Account Seeder card in admin UI with email input + confirm modal.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-05-28',
   },
 
   // ─── PLANNED — ADMIN / OPS ───────────────────────────────────────────

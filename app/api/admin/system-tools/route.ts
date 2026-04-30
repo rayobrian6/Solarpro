@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady , handleRouteDbError, createClient, createProject, upsertLayout } from '@/lib/db-neon';
 import { logAdminAction } from '@/lib/adminActivityLog';
 import { neon } from '@neondatabase/serverless';
 import fs from 'fs';
@@ -258,6 +258,275 @@ export async function POST(req: NextRequest) {
           details: fixLog,
           projectsFixed,
           layoutsFixed,
+        });
+      }
+
+      case 'seed_demo_account': {
+        // One-click demo account seeder — drops 3 golden projects for booth demos.
+        // Accepts { userEmail } or { userId }. Resolves email → userId if needed.
+        // Marks previously seeded demo projects as deleted, then creates fresh ones.
+        const userEmail = params?.userEmail as string | undefined;
+        let targetUserId = params?.userId as string | undefined;
+
+        if (!targetUserId && !userEmail) {
+          return NextResponse.json({ success: false, error: 'Provide userEmail or userId' }, { status: 400 });
+        }
+
+        // Resolve email → userId
+        if (!targetUserId && userEmail) {
+          const userRows = await sql`SELECT id FROM users WHERE email = ${userEmail.toLowerCase().trim()} LIMIT 1`;
+          if (!userRows.length) {
+            return NextResponse.json({ success: false, error: `No user found with email: ${userEmail}` }, { status: 404 });
+          }
+          targetUserId = userRows[0].id as string;
+        }
+
+        // Soft-delete any previously seeded demo projects for this user
+        let deletedCount = 0;
+        try {
+          const deleted = await sql`
+            UPDATE projects SET deleted_at = NOW(), updated_at = NOW()
+            WHERE user_id = ${targetUserId!}
+              AND deleted_at IS NULL
+              AND (
+                LOWER(name) LIKE '%[demo]%'
+                OR LOWER(notes) LIKE '%demo-seed%'
+              )
+            RETURNING id
+          `;
+          deletedCount = deleted.length;
+        } catch { /* ignore if no prior seeds */ }
+
+        // ── Golden Project 1: Residential Retrofit ────────────────────────────
+        const client1 = await createClient({
+          userId: targetUserId!,
+          name: 'Sarah & James Mitchell',
+          email: 'mitchell.family@demo.solarpro',
+          phone: '(602) 555-0182',
+          address: '4821 E Camelback Rd',
+          city: 'Phoenix',
+          state: 'AZ',
+          zip: '85018',
+          lat: 33.5093,
+          lng: -111.9936,
+          utilityProvider: 'APS – Arizona Public Service',
+          monthlyKwh: [920, 870, 1050, 1210, 1480, 1690, 1820, 1760, 1540, 1280, 1010, 890],
+          annualKwh: 14520,
+          averageMonthlyKwh: 1210,
+          averageMonthlyBill: 182,
+          annualBill: 2184,
+          utilityRate: 0.1506,
+        });
+
+        const project1 = await createProject({
+          userId: targetUserId!,
+          clientId: client1.id,
+          name: 'Mitchell Residence – Roof Retrofit [demo]',
+          status: 'proposal',
+          systemType: 'roof',
+          notes: 'demo-seed: residential retrofit. 10.4 kW roof array. South-facing, 22° tilt.',
+          address: '4821 E Camelback Rd, Phoenix, AZ 85018',
+          lat: 33.5093,
+          lng: -111.9936,
+          stateCode: 'AZ',
+          city: 'Phoenix',
+          zip: '85018',
+          utilityName: 'APS – Arizona Public Service',
+          utilityRatePerKwh: 0.1506,
+          systemSizeKw: 10.4,
+        });
+
+        await upsertLayout({
+          projectId: project1.id,
+          userId: targetUserId!,
+          systemType: 'roof',
+          totalPanels: 26,
+          systemSizeKw: 10.4,
+          mapCenter: { lat: 33.5093, lng: -111.9936 },
+          mapZoom: 20,
+          panels: Array.from({ length: 26 }, (_, i) => ({
+            id: `demo-p1-${i}`,
+            x: (i % 9) * 1.1,
+            y: Math.floor(i / 9) * 1.8,
+            width: 1.0,
+            height: 1.65,
+            rotation: 0,
+            roofPlaneId: 'rp-south',
+            active: true,
+          })),
+          roofPlanes: [{
+            id: 'rp-south',
+            name: 'South Roof',
+            tilt: 22,
+            azimuth: 180,
+            color: '#3b82f6',
+            vertices: [
+              { x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 9 }, { x: 0, y: 9 },
+            ],
+          }],
+        });
+
+        // ── Golden Project 2: New Construction ────────────────────────────────
+        const client2 = await createClient({
+          userId: targetUserId!,
+          name: 'Greenfield Homes LLC',
+          email: 'builds@greenfield-demo.solarpro',
+          phone: '(512) 555-0247',
+          address: '7200 Ranch Rd 2222',
+          city: 'Austin',
+          state: 'TX',
+          zip: '78730',
+          lat: 30.3869,
+          lng: -97.8211,
+          utilityProvider: 'Austin Energy',
+          monthlyKwh: [710, 680, 780, 910, 1100, 1340, 1520, 1490, 1260, 1020, 790, 700],
+          annualKwh: 12300,
+          averageMonthlyKwh: 1025,
+          averageMonthlyBill: 138,
+          annualBill: 1656,
+          utilityRate: 0.1134,
+        });
+
+        const project2 = await createProject({
+          userId: targetUserId!,
+          clientId: client2.id,
+          name: 'Greenfield Lot 14 – New Construction [demo]',
+          status: 'design',
+          systemType: 'roof',
+          notes: 'demo-seed: new construction. 8.0 kW dual-plane roof. Builder pre-wire.',
+          address: '7200 Ranch Rd 2222, Austin, TX 78730',
+          lat: 30.3869,
+          lng: -97.8211,
+          stateCode: 'TX',
+          city: 'Austin',
+          zip: '78730',
+          utilityName: 'Austin Energy',
+          utilityRatePerKwh: 0.1134,
+          systemSizeKw: 8.0,
+        });
+
+        await upsertLayout({
+          projectId: project2.id,
+          userId: targetUserId!,
+          systemType: 'roof',
+          totalPanels: 20,
+          systemSizeKw: 8.0,
+          mapCenter: { lat: 30.3869, lng: -97.8211 },
+          mapZoom: 20,
+          panels: Array.from({ length: 20 }, (_, i) => ({
+            id: `demo-p2-${i}`,
+            x: (i % 8) * 1.1,
+            y: Math.floor(i / 8) * 1.8,
+            width: 1.0,
+            height: 1.65,
+            rotation: 0,
+            roofPlaneId: i < 12 ? 'rp-south' : 'rp-east',
+            active: true,
+          })),
+          roofPlanes: [
+            {
+              id: 'rp-south',
+              name: 'South Plane',
+              tilt: 18,
+              azimuth: 175,
+              color: '#3b82f6',
+              vertices: [
+                { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 7 }, { x: 0, y: 7 },
+              ],
+            },
+            {
+              id: 'rp-east',
+              name: 'East Plane',
+              tilt: 18,
+              azimuth: 90,
+              color: '#8b5cf6',
+              vertices: [
+                { x: 10, y: 0 }, { x: 16, y: 0 }, { x: 16, y: 7 }, { x: 10, y: 7 },
+              ],
+            },
+          ],
+        });
+
+        // ── Golden Project 3: Commercial Ground Mount ─────────────────────────
+        const client3 = await createClient({
+          userId: targetUserId!,
+          name: 'Rocky Mountain Logistics Inc.',
+          email: 'facilities@rml-demo.solarpro',
+          phone: '(720) 555-0391',
+          address: '5280 Commerce Pkwy',
+          city: 'Denver',
+          state: 'CO',
+          zip: '80239',
+          lat: 39.7742,
+          lng: -104.8731,
+          utilityProvider: 'Xcel Energy – Colorado',
+          monthlyKwh: [8200, 7600, 8900, 9400, 10200, 11400, 12100, 11800, 10500, 9300, 8100, 7900],
+          annualKwh: 115400,
+          averageMonthlyKwh: 9617,
+          averageMonthlyBill: 1124,
+          annualBill: 13488,
+          utilityRate: 0.0974,
+        });
+
+        const project3 = await createProject({
+          userId: targetUserId!,
+          clientId: client3.id,
+          name: 'RML Warehouse – Ground Mount [demo]',
+          status: 'lead',
+          systemType: 'ground',
+          notes: 'demo-seed: commercial ground mount. 49.6 kW. Single-axis tracker row layout.',
+          address: '5280 Commerce Pkwy, Denver, CO 80239',
+          lat: 39.7742,
+          lng: -104.8731,
+          stateCode: 'CO',
+          city: 'Denver',
+          zip: '80239',
+          utilityName: 'Xcel Energy – Colorado',
+          utilityRatePerKwh: 0.0974,
+          systemSizeKw: 49.6,
+        });
+
+        await upsertLayout({
+          projectId: project3.id,
+          userId: targetUserId!,
+          systemType: 'ground',
+          totalPanels: 124,
+          systemSizeKw: 49.6,
+          mapCenter: { lat: 39.7742, lng: -104.8731 },
+          mapZoom: 19,
+          groundTilt: 30,
+          groundAzimuth: 180,
+          rowSpacing: 3.5,
+          groundHeight: 1.2,
+          panels: Array.from({ length: 124 }, (_, i) => ({
+            id: `demo-p3-${i}`,
+            x: (i % 31) * 1.1,
+            y: Math.floor(i / 31) * 3.5,
+            width: 1.0,
+            height: 1.65,
+            rotation: 0,
+            roofPlaneId: null,
+            active: true,
+          })),
+        });
+
+        await logAdminAction({
+          adminId: admin.id,
+          action: 'seed_demo_account',
+          metadata: { targetUserId, userEmail: userEmail ?? null, deletedCount, projectsCreated: 3 },
+        });
+
+        return NextResponse.json({
+          success: true,
+          message: `Demo account seeded — 3 projects created (${deletedCount} old demo projects removed)`,
+          summary: {
+            deletedOldDemos: deletedCount,
+            created: [
+              { name: project1.name, id: project1.id, kw: 10.4, type: 'roof' },
+              { name: project2.name, id: project2.id, kw: 8.0,  type: 'roof' },
+              { name: project3.name, id: project3.id, kw: 49.6, type: 'ground' },
+            ],
+          },
         });
       }
 
