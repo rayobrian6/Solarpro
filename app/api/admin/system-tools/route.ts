@@ -336,6 +336,13 @@ export async function POST(req: NextRequest) {
           systemSizeKw: 10.4,
         });
 
+        // Demo panels: minimal seed data — cast as any[] since engine fields are optional at rest
+        const demoPanel1 = (i: number, col: number, row: number) => ({
+          id: `demo-p1-${i}`, layoutId: project1.id,
+          lat: 33.5093, lng: -111.9936, x: col * 1.1, y: row * 1.8,
+          tilt: 22, azimuth: 180, wattage: 400, bifacialGain: 0,
+          row, col, planeId: 'rp-south',
+        });
         await upsertLayout({
           projectId: project1.id,
           userId: targetUserId!,
@@ -344,26 +351,14 @@ export async function POST(req: NextRequest) {
           systemSizeKw: 10.4,
           mapCenter: { lat: 33.5093, lng: -111.9936 },
           mapZoom: 20,
-          panels: Array.from({ length: 26 }, (_, i) => ({
-            id: `demo-p1-${i}`,
-            x: (i % 9) * 1.1,
-            y: Math.floor(i / 9) * 1.8,
-            width: 1.0,
-            height: 1.65,
-            rotation: 0,
-            roofPlaneId: 'rp-south',
-            active: true,
-          })),
+          panels: Array.from({ length: 26 }, (_, i) => demoPanel1(i, i % 9, Math.floor(i / 9))) as any[],
           roofPlanes: [{
-            id: 'rp-south',
-            name: 'South Roof',
-            tilt: 22,
-            azimuth: 180,
-            color: '#3b82f6',
+            id: 'rp-south', pitch: 22, azimuth: 180, area: 108, usableArea: 90,
             vertices: [
-              { x: 0, y: 0 }, { x: 12, y: 0 }, { x: 12, y: 9 }, { x: 0, y: 9 },
+              { lat: 33.5094, lng: -111.9938 }, { lat: 33.5094, lng: -111.9934 },
+              { lat: 33.5092, lng: -111.9934 }, { lat: 33.5092, lng: -111.9938 },
             ],
-          }],
+          } as any],
         });
 
         // ── Golden Project 2: New Construction ────────────────────────────────
@@ -405,6 +400,12 @@ export async function POST(req: NextRequest) {
           systemSizeKw: 8.0,
         });
 
+        const demoPanel2 = (i: number, col: number, row: number, planeId: string) => ({
+          id: `demo-p2-${i}`, layoutId: project2.id,
+          lat: 30.3869, lng: -97.8211, x: col * 1.1, y: row * 1.8,
+          tilt: 18, azimuth: i < 12 ? 175 : 90, wattage: 400, bifacialGain: 0,
+          row, col, planeId,
+        });
         await upsertLayout({
           projectId: project2.id,
           userId: targetUserId!,
@@ -413,37 +414,24 @@ export async function POST(req: NextRequest) {
           systemSizeKw: 8.0,
           mapCenter: { lat: 30.3869, lng: -97.8211 },
           mapZoom: 20,
-          panels: Array.from({ length: 20 }, (_, i) => ({
-            id: `demo-p2-${i}`,
-            x: (i % 8) * 1.1,
-            y: Math.floor(i / 8) * 1.8,
-            width: 1.0,
-            height: 1.65,
-            rotation: 0,
-            roofPlaneId: i < 12 ? 'rp-south' : 'rp-east',
-            active: true,
-          })),
+          panels: Array.from({ length: 20 }, (_, i) =>
+            demoPanel2(i, i % 8, Math.floor(i / 8), i < 12 ? 'rp-south' : 'rp-east')
+          ) as any[],
           roofPlanes: [
             {
-              id: 'rp-south',
-              name: 'South Plane',
-              tilt: 18,
-              azimuth: 175,
-              color: '#3b82f6',
+              id: 'rp-south', pitch: 18, azimuth: 175, area: 70, usableArea: 58,
               vertices: [
-                { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 7 }, { x: 0, y: 7 },
+                { lat: 30.3871, lng: -97.8214 }, { lat: 30.3871, lng: -97.8209 },
+                { lat: 30.3868, lng: -97.8209 }, { lat: 30.3868, lng: -97.8214 },
               ],
-            },
+            } as any,
             {
-              id: 'rp-east',
-              name: 'East Plane',
-              tilt: 18,
-              azimuth: 90,
-              color: '#8b5cf6',
+              id: 'rp-east', pitch: 18, azimuth: 90, area: 42, usableArea: 35,
               vertices: [
-                { x: 10, y: 0 }, { x: 16, y: 0 }, { x: 16, y: 7 }, { x: 10, y: 7 },
+                { lat: 30.3871, lng: -97.8208 }, { lat: 30.3871, lng: -97.8205 },
+                { lat: 30.3868, lng: -97.8205 }, { lat: 30.3868, lng: -97.8208 },
               ],
-            },
+            } as any,
           ],
         });
 
@@ -486,6 +474,12 @@ export async function POST(req: NextRequest) {
           systemSizeKw: 49.6,
         });
 
+        const demoPanel3 = (i: number, col: number, row: number) => ({
+          id: `demo-p3-${i}`, layoutId: project3.id,
+          lat: 39.7742, lng: -104.8731, x: col * 1.1, y: row * 3.5,
+          tilt: 30, azimuth: 180, wattage: 400, bifacialGain: 0,
+          row, col, systemType: 'ground' as const,
+        });
         await upsertLayout({
           projectId: project3.id,
           userId: targetUserId!,
@@ -498,16 +492,9 @@ export async function POST(req: NextRequest) {
           groundAzimuth: 180,
           rowSpacing: 3.5,
           groundHeight: 1.2,
-          panels: Array.from({ length: 124 }, (_, i) => ({
-            id: `demo-p3-${i}`,
-            x: (i % 31) * 1.1,
-            y: Math.floor(i / 31) * 3.5,
-            width: 1.0,
-            height: 1.65,
-            rotation: 0,
-            roofPlaneId: null,
-            active: true,
-          })),
+          panels: Array.from({ length: 124 }, (_, i) =>
+            demoPanel3(i, i % 31, Math.floor(i / 31))
+          ) as any[],
         });
 
         await logAdminAction({

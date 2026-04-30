@@ -901,10 +901,17 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'One-click "Download as PDF" for sharing via email when the customer isn\'t ready to sign in-portal.',
     track: 'proposal-flow',
     priority: 'p1',
-    status: 'planned',
+    status: 'done',
     effort: 'm',
+    shippedIn: 'v62.0',
+    files: [
+      'app/api/proposals/[id]/pdf/route.ts',
+      'lib/proposal/buildCanonicalProposal.ts',
+      'lib/proposal/renderProposalHTML.ts',
+    ],
+    notes: 'GET+POST /api/proposals/[id]/pdf. Uses wkhtmltopdf with HTML fallback for Vercel serverless. Rate-limited, auth+share-token access. Download button wired in proposal viewer (handleDownloadPdf in ui-proposal-polish).',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-05-28',
   },
 
   // ─── PLANNED — GO-TO-MARKET ──────────────────────────────────────────
