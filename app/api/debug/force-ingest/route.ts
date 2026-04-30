@@ -240,6 +240,20 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Connect to partner DB ─────────────────────────────────────────────────
+  // Guard: if PARTNER_SURVEY_DB_URL is not configured, return a clear error
+  // instead of letting pg.Pool default to localhost:5432 (ECONNREFUSED).
+  if (!PARTNER_DB_URL) {
+    return NextResponse.json({
+      success: false,
+      error:
+        'PARTNER_SURVEY_DB_URL is not configured. ' +
+        'Set this environment variable to the partner PostgreSQL connection string. ' +
+        'To fix existing misowned surveys without the partner DB, use the ' +
+        '"Fix All Defaults" button in the Live Survey Data panel instead.',
+      code: 'PARTNER_DB_NOT_CONFIGURED',
+    }, { status: 503 });
+  }
+
   const partnerPool = new pg.Pool({
     connectionString: PARTNER_DB_URL,
     ssl: { rejectUnauthorized: false },

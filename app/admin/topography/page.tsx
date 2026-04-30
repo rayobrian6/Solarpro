@@ -1029,6 +1029,7 @@ interface IngestResponse {
   success:          boolean;
   surveysProcessed?: number;
   photosProcessed?:  number;
+  code?:             string;   // e.g. 'PARTNER_DB_NOT_CONFIGURED'
   results?:          Array<{
     surveyId:    string;
     siteName:    string;
@@ -1057,6 +1058,8 @@ function LiveSurveyDataView() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [fixingAll, setFixingAll]     = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [fixAllResult, setFixAllResult] = useState<string | null>(null);
+  const [fixingWebhook, setFixingWebhook]   = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [fixWebhookResult, setFixWebhookResult] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadState('loading');
@@ -1166,7 +1169,17 @@ function LiveSurveyDataView() {
                 )}
               </span>
             ) : (
-              <span>✗ {ingestResult.error}</span>
+              <span className="space-y-1">
+                <span className="block">✗ {ingestResult.error}</span>
+                {ingestResult.code === 'PARTNER_DB_NOT_CONFIGURED' && (
+                  <span className="block text-amber-400/80 text-[10px] mt-1">
+                    Tip: The partner DB is not reachable from this environment.
+                    Use <strong>"⟳ Fix All Defaults"</strong> or{' '}
+                    <strong>"⟳ Fix from Webhook Log"</strong> below to reassign
+                    existing misowned surveys without needing the partner DB.
+                  </span>
+                )}
+              </span>
             )}
           </div>
         )}
@@ -1266,6 +1279,46 @@ function LiveSurveyDataView() {
               {fixAllResult && (
                 <span className={`text-[10px] font-medium ${fixingAll === 'done' ? 'text-emerald-400' : 'text-amber-400'}`}>
                   {fixAllResult}
+                </span>
+              )}
+              {/* v58.20: backfill from webhook_deliveries.raw_body for pre-fix surveys */}
+              <button
+                disabled={fixingWebhook === 'running'}
+                className="text-[10px] px-2.5 py-1 rounded-md bg-violet-600/20 border border-violet-500/30 text-violet-400 hover:bg-violet-600/30 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={async () => {
+                  if (!confirm('Scan webhook delivery log and reassign surveys where solarpro_user_id is recorded in the raw webhook body?\n\nThis fixes surveys ingested before the JWT-forwarding fix.')) return;
+                  setFixingWebhook('running');
+                  setFixWebhookResult(null);
+                  try {
+                    const res = await fetch('/api/admin/survey-reassign', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'fix-from-webhook-log' }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      const msg = data.fixed > 0
+                        ? `✓ Fixed ${data.fixed} surveys from webhook log`
+                        : (data.message ?? '✓ No fixable surveys found in webhook log');
+                      setFixWebhookResult(msg);
+                      setFixingWebhook('done');
+                      if (data.fixed > 0) await loadData();
+                    } else {
+                      setFixWebhookResult(`⚠ ${data.error}`);
+                      setFixingWebhook('error');
+                    }
+                  } catch (e) {
+                    setFixWebhookResult('Network error — check console');
+                    setFixingWebhook('error');
+                    console.error(e);
+                  }
+                }}
+              >
+                {fixingWebhook === 'running' ? '⏳ Scanning…' : '⟳ Fix from Webhook Log'}
+              </button>
+              {fixWebhookResult && (
+                <span className={`text-[10px] font-medium ${fixingWebhook === 'done' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {fixWebhookResult}
                 </span>
               )}
             </div>
