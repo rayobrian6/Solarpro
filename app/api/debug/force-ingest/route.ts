@@ -323,14 +323,26 @@ export async function POST(req: NextRequest) {
 
         if (existingRows.length > 0) {
           projectId = existingRows[0].id as string;
-          // Update address/name in case it changed
+          // Update address/name + refresh survey_meta ownership claims (F-06)
+          const updateMeta = JSON.stringify({
+            inspector:           survey.inspector_name,
+            category:            survey.category_name,
+            survey_date:         survey.survey_date,
+            site_name:           survey.site_name,
+            source:              'force_ingest',
+            metadata:            survey.metadata,
+            owner_source:        surveyOwnerSource,
+            solarpro_user_id:    survey.solarpro_user_id ?? null,
+            solarpro_project_id: survey.solarpro_project_id ?? null,
+          });
           await sql`
             UPDATE projects
-            SET name    = ${projectName},
-                address = ${address},
-                lat     = ${survey.latitude ?? null},
-                lng     = ${survey.longitude ?? null},
-                updated_at = now()
+            SET name        = ${projectName},
+                address     = ${address},
+                lat         = ${survey.latitude ?? null},
+                lng         = ${survey.longitude ?? null},
+                survey_meta = COALESCE(survey_meta, '{}'::jsonb) || ${updateMeta}::jsonb,
+                updated_at  = now()
             WHERE id = ${projectId}
           `;
           result.action = 'updated';
