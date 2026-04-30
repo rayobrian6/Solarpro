@@ -390,15 +390,14 @@ export async function POST(req: NextRequest) {
   }
 
   // ── fix-from-webhook-log ────────────────────────────────────────────────────
-  // Backfills survey_meta.solarpro_user_id from webhook_deliveries.raw_body
-  // for projects that were ingested before the F-06 pipeline fix.
+  // Backfills ownership for surveys that were ingested before the F-06 pipeline
+  // fix and have no claims stored in survey_meta.
   //
-  // Workflow:
-  //   1. Find survey projects that have owner_source='default' in survey_meta
-  //      (or no owner_source at all) — these are misowned candidates.
-  //   2. For each, look up the most recent webhook_deliveries row (by project_id)
-  //      and parse raw_body for solarpro_user_id.
-  //   3. If found and valid, patch survey_meta and (if dryRun=false) reassign.
+  // For each misowned survey, parses webhook_deliveries.raw_body and tries
+  // the same 3-strategy chain as ownerResolver.ts:
+  //   1. raw_body.solarpro_user_id UUID → users table
+  //   2. raw_body.solarpro_email → users LOWER() match
+  //   3. raw_body.solarpro_project_id → existing project's user_id
   //
   if (action === 'fix-from-webhook-log') {
     const defaultOwnerId = process.env.SURVEY_INGEST_DEFAULT_USER_ID?.trim();
@@ -449,18 +448,19 @@ export async function POST(req: NextRequest) {
        ORDER BY project_id, received_at DESC
     `;
 
-    // Build a map: project_id → { uid, email } from raw_body
-    const claimMap = new Map<string, { uid: string | null; email: string | null }>();
+    // Build a map: project_id → { uid, email, projectId } from raw_body
+    const claimMap = new Map<string, { uid: string | null; email: string | null; projectId: string | null }>();
     for (const d of deliveries as Record<string, unknown>[]) {
       try {
         const body = JSON.parse(d.raw_body as string) as Record<string, unknown>;
-        const uid   = (body.solarpro_user_id as string | null | undefined)?.trim() ?? null;
-        const email = (body.solarpro_email   as string | null | undefined)?.trim().toLowerCase() ?? null;
-        // Store if we have at least a valid UUID or an email
-        if ((uid && isValidUUID(uid)) || email) {
+        const uid     = (body.solarpro_user_id    as string | null | undefined)?.trim() ?? null;
+        const email   = (body.solarpro_email       as string | null | undefined)?.trim().toLowerCase() ?? null;
+        const projId  = (body.solarpro_project_id  as string | null | undefined)?.trim() ?? null;
+        if ((uid && isValidUUID(uid)) || email || (projId && isValidUUID(projId))) {
           claimMap.set(d.project_id as string, {
-            uid:   uid && isValidUUID(uid) ? uid : null,
-            email: email || null,
+            uid:       uid && isValidUUID(uid) ? uid : null,
+            email:     email || null,
+            projectId: projId && isValidUUID(projId) ? projId : null,
           });
         }
       } catch {
@@ -475,29 +475,45 @@ export async function POST(req: NextRequest) {
         scanned: misownedQuery.length,
         message:
           'Scanned webhook_deliveries for all misowned surveys but found no ' +
-          'solarpro_user_id or solarpro_email claims in any raw_body. ' +
+          'solarpro_user_id, solarpro_email, or solarpro_project_id claims in any raw_body. ' +
           'Use "✎ Reassign to Email…" on individual cards to fix manually.',
       });
     }
 
-    // Validate: try UUID match first, then email match
+    // Batch-fetch all possible matches
     const claimedIds    = Array.from(claimMap.values()).map(c => c.uid).filter(Boolean) as string[];
     const claimedEmails = Array.from(claimMap.values()).map(c => c.email).filter(Boolean) as string[];
+    const claimedProjIds = Array.from(claimMap.values()).map(c => c.projectId).filter(Boolean) as string[];
 
     const uidUsers = claimedIds.length > 0
-      ? await sql`SELECT id, email, name FROM users WHERE id = ANY(${claimedIds})`
+      ? await sql`SELECT id, email, name FROM users WHERE id::text = ANY(${claimedIds})`
       : [];
     const emailUsers = claimedEmails.length > 0
       ? await sql`SELECT id, email, name FROM users WHERE LOWER(email) = ANY(${claimedEmails})`
       : [];
+    // Strategy 3: look up projects by solarpro_project_id and get their owner
+    const projectOwnerRows = claimedProjIds.length > 0
+      ? await sql`
+          SELECT p.id AS project_id, p.user_id, u.email, u.name
+            FROM projects p
+            JOIN users u ON u.id = p.user_id
+           WHERE p.id = ANY(${claimedProjIds})
+             AND p.deleted_at IS NULL
+        `
+      : [];
 
-    const userByUid   = new Map<string, { id: string; email: string; name: string }>();
-    const userByEmail = new Map<string, { id: string; email: string; name: string }>();
-    for (const u of uidUsers   as Record<string, unknown>[]) {
+    const userByUid       = new Map<string, { id: string; email: string; name: string }>();
+    const userByEmail     = new Map<string, { id: string; email: string; name: string }>();
+    const userByProjectId = new Map<string, { id: string; email: string; name: string }>();
+
+    for (const u of uidUsers as Record<string, unknown>[]) {
       userByUid.set(u.id as string, { id: u.id as string, email: u.email as string, name: u.name as string });
     }
     for (const u of emailUsers as Record<string, unknown>[]) {
       userByEmail.set((u.email as string).toLowerCase(), { id: u.id as string, email: u.email as string, name: u.name as string });
+    }
+    for (const r of projectOwnerRows as Record<string, unknown>[]) {
+      userByProjectId.set(r.project_id as string, { id: r.user_id as string, email: r.email as string, name: r.name as string });
     }
 
     const candidates: Array<{
@@ -506,10 +522,16 @@ export async function POST(req: NextRequest) {
     }> = [];
 
     for (const [pid, claim] of claimMap) {
-      // Prefer UUID match, fall back to email match
-      const match = (claim.uid ? userByUid.get(claim.uid) : null)
-                 ?? (claim.email ? userByEmail.get(claim.email) : null);
-      if (!match) continue; // neither matched a SolarPro user
+      // Strategy 1: UUID, 2: email, 3: project
+      const match = (claim.uid       ? userByUid.get(claim.uid)                       : null)
+                 ?? (claim.email     ? userByEmail.get(claim.email)                    : null)
+                 ?? (claim.projectId ? userByProjectId.get(claim.projectId)            : null);
+      if (!match) continue;
+
+      const matchMethod = claim.uid && userByUid.has(claim.uid) ? 'uid'
+                        : claim.email && userByEmail.has(claim.email) ? 'email'
+                        : 'project';
+
       const proj = (misownedQuery as Record<string, unknown>[]).find(r => r.project_id === pid);
       if (!proj) continue;
       candidates.push({
@@ -518,7 +540,7 @@ export async function POST(req: NextRequest) {
         currentOwnerId:   proj.current_owner_id as string,
         targetOwnerId:    match.id,
         targetOwnerEmail: match.email,
-        matchMethod:      claim.uid && userByUid.has(claim.uid) ? 'uid' : 'email',
+        matchMethod,
       });
     }
 
@@ -529,7 +551,7 @@ export async function POST(req: NextRequest) {
         scanned: misownedQuery.length,
         claimsFound: claimMap.size,
         message:
-          'Found claims in webhook log but none matched valid SolarPro users. ' +
+          'Found claims in webhook log but none matched valid SolarPro users or projects. ' +
           'The partner may be using their own user IDs (not SolarPro IDs). ' +
           'Use "✎ Reassign to Email…" on individual cards to fix manually.',
       });
@@ -564,7 +586,7 @@ export async function POST(req: NextRequest) {
            WHERE id = ${c.projectId}
         `;
         console.log(
-          `[SURVEY REASSIGN WEBHOOK] admin=${admin.email ?? 'admin'} ` +
+          `[SURVEY REASSIGN WEBHOOK] admin=${(admin as {email?:string}).email ?? 'admin'} ` +
           `projectId=${c.projectId} from=${c.currentOwnerId} to=${c.targetOwnerId} (${c.targetOwnerEmail}) via=${c.matchMethod}`,
         );
         fixed++;
@@ -578,6 +600,7 @@ export async function POST(req: NextRequest) {
       success: true,
       fixed,
       total: candidates.length,
+      scanned: misownedQuery.length,
       skipped: errors.length,
       errors: errors.length > 0 ? errors : undefined,
       message: `Backfilled + reassigned ${fixed} of ${candidates.length} survey project(s) from webhook delivery log.`,
@@ -656,6 +679,69 @@ export async function POST(req: NextRequest) {
       newOwnerName:    targetUser.name,
       projectName:     proj.name,
       message:         `Project reassigned to ${targetUser.email}`,
+    });
+  }
+
+  // ── debug-claims ──────────────────────────────────────────────────────────
+  // Returns the raw claims from webhook_deliveries.raw_body for a given project.
+  // Used to diagnose why a survey isn't auto-resolving.
+  if (action === 'debug-claims') {
+    if (!projectId || !isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Missing or invalid projectId' }, { status: 400 });
+    }
+
+    // Get project details
+    const projRows = await sql`
+      SELECT id, name, user_id, origin, survey_external_id, survey_meta
+        FROM projects WHERE id = ${projectId} AND deleted_at IS NULL LIMIT 1
+    `;
+    if (projRows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+    const proj = projRows[0];
+
+    // Get all webhook deliveries for this project
+    const deliveries = await sql`
+      SELECT id, project_id, raw_body, status, received_at
+        FROM webhook_deliveries
+       WHERE project_id = ${projectId}
+       ORDER BY received_at DESC
+       LIMIT 5
+    `;
+
+    // Parse claims from each delivery
+    const parsed = (deliveries as Record<string,unknown>[]).map(d => {
+      let claims: Record<string,unknown> = {};
+      try {
+        const body = JSON.parse(d.raw_body as string) as Record<string,unknown>;
+        claims = {
+          solarpro_user_id:    body.solarpro_user_id    ?? null,
+          solarpro_email:      body.solarpro_email       ?? null,
+          solarpro_project_id: body.solarpro_project_id ?? null,
+          event:               body.event               ?? null,
+          survey_id:           body.survey_id           ?? null,
+        };
+      } catch { claims = { parseError: 'malformed JSON' }; }
+      return {
+        deliveryId: d.id,
+        status:     d.status,
+        receivedAt: d.received_at,
+        claims,
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      project: {
+        id:              proj.id,
+        name:            proj.name,
+        userId:          proj.user_id,
+        origin:          proj.origin,
+        surveyExternalId: proj.survey_external_id,
+        surveyMeta:      proj.survey_meta,
+      },
+      webhookDeliveries: parsed,
+      deliveryCount:     parsed.length,
     });
   }
 

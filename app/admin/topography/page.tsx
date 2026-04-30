@@ -1481,6 +1481,48 @@ function LiveSurveyDataView() {
                                 ✎ Reassign to Email…
                               </button>
                             )}
+                            {/* Debug Claims - shows what claims are in the webhook log for this survey */}
+                            {isDefault && (
+                              <button
+                                className="text-[10px] px-3 py-1 rounded-md bg-violet-600/20 border border-violet-500/30 text-violet-400 hover:bg-violet-600/30 transition-colors font-medium"
+                                onClick={async () => {
+                                  try {
+                                    const res = await fetch('/api/admin/survey-reassign', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'debug-claims', projectId: project.id }),
+                                    });
+                                    const data = await res.json();
+                                    if (!data.success) { alert(`⚠ ${data.error}`); return; }
+                                    const meta = (data.project.surveyMeta ?? {}) as Record<string,unknown>;
+                                    const lines: string[] = [
+                                      `Project: ${data.project.name}`,
+                                      `survey_meta.solarpro_user_id:    ${meta.solarpro_user_id ?? '(none)'}`,
+                                      `survey_meta.solarpro_email:       ${meta.solarpro_email ?? '(none)'}`,
+                                      `survey_meta.solarpro_project_id:  ${meta.solarpro_project_id ?? '(none)'}`,
+                                      `survey_meta.owner_source:         ${meta.owner_source ?? '(none)'}`,
+                                      '',
+                                      `Webhook deliveries found: ${data.deliveryCount}`,
+                                    ];
+                                    (data.webhookDeliveries as Record<string,unknown>[]).forEach((d, i) => {
+                                      const c = (d.claims ?? {}) as Record<string,unknown>;
+                                      lines.push(`--- Delivery ${i+1} (${d.status}) @ ${d.receivedAt} ---`);
+                                      lines.push(`  solarpro_user_id:    ${c.solarpro_user_id ?? '(none)'}`);
+                                      lines.push(`  solarpro_email:      ${c.solarpro_email ?? '(none)'}`);
+                                      lines.push(`  solarpro_project_id: ${c.solarpro_project_id ?? '(none)'}`);
+                                      lines.push('');
+                                    });
+                                    if (data.deliveryCount === 0) lines.push('(no webhook_deliveries rows found for this project)');
+                                    alert(lines.join('\n'));
+                                  } catch (e) {
+                                    alert('Network error');
+                                    console.error(e);
+                                  }
+                                }}
+                              >
+                                ? Debug Claims
+                              </button>
+                            )}
                           </div>
                         );
                       })()}
