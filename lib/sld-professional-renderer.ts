@@ -1519,20 +1519,29 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
   let xPV: number, xJBox: number, xComb: number, xDisco: number, xMSP: number, xUtil: number;
   let xInv = 0;
 
+  // v58.11: When the system has a battery, reserve a grid slot for the Backup
+  // Interface Unit (BUI) between MSP and the Utility Meter. BUI width = 180px
+  // (SLD_SYMBOL_MAP['bui-enphase']). Without this, the BUI was shoe-horned at
+  // xMSP + 130, overlapping both the MSP (40px) and the meter (20px).
+  const W_BUI = SLD_SYMBOL_MAP['bui-enphase'].width;  // 180
+  const _hasBUI = !!input.hasBattery;
+
   if (isMicro) {
-    // Micro path: PV → J-Box → Combiner → AC Disco → MSP → Utility
+    // Micro path: PV -> J-Box -> Combiner -> AC Disco -> MSP -> [BUI?] -> Utility
     xPV   = SCH_X + LEFT_MARGIN + W_PV/2;
     xJBox = nextCX(xPV,   W_PV,  W_JBOX);
     xComb = nextCX(xJBox, W_JBOX, W_COMB);
     xDisco= nextCX(xComb, W_COMB, W_ACDS);
     xMSP  = nextCX(xDisco, W_ACDS, 160);   // MSP width=160
-    xUtil = nextCX(xMSP,  160,    120);    // Utility meter
+    xUtil = _hasBUI
+      ? nextCX(nextCX(xMSP, 160, W_BUI), W_BUI, 120)  // MSP -> BUI -> Utility
+      : nextCX(xMSP, 160, 120);
   } else {
-    // String/Optimizer path: PV → J-Box → [DC Disco] → Inverter → AC Disco → MSP
+    // String/Optimizer path: PV -> J-Box -> [DC Disco] -> Inverter -> AC Disco -> MSP -> [BUI?] -> Utility
     xPV   = SCH_X + LEFT_MARGIN + W_PV/2;
     xJBox = nextCX(xPV,   W_PV,  W_JBOX);
     if (input.integratedDcDisconnect) {
-      // No external DC disco — wire goes directly J-Box → Inverter
+      // No external DC disco - wire goes directly J-Box -> Inverter
       xComb = xJBox;  // unused but keep for ground rail code
       xInv  = nextCX(xJBox, W_JBOX, W_INV);
     } else {
@@ -1541,8 +1550,14 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     }
     xDisco= nextCX(xInv,  W_INV,  W_ACDS);
     xMSP  = nextCX(xDisco, W_ACDS, 160);
-    xUtil = nextCX(xMSP,  160,    120);
+    xUtil = _hasBUI
+      ? nextCX(nextCX(xMSP, 160, W_BUI), W_BUI, 120)  // MSP -> BUI -> Utility
+      : nextCX(xMSP, 160, 120);
   }
+
+  // BUI center X: when hasBattery is true, sits between MSP and Utility with
+  // full WIRE_GAP (120px) clearance on each side. Otherwise unused.
+  const xBUI = _hasBUI ? nextCX(xMSP, 160, W_BUI) : (xMSP + 130);
 
   // ── NODE 1: PV ARRAY ──────────────────────────────────────────────────────
   // PV array symbol size — use grid engine constants (W_PV already defined)
@@ -1864,8 +1879,10 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const isTesla = !!(input.backupInterfaceBrand?.toLowerCase().includes('tesla') ||
       input.batteryModel?.toLowerCase().includes('powerwall'));
 
-    // BUI positioned right of MSP, on the main bus line
-    const buiCX = xMSP + 130;
+    // BUI positioned right of MSP, on the main bus line.
+    // v58.11: Use grid-computed xBUI (full WIRE_GAP clearance on each side)
+    // instead of the old hard-coded xMSP + 130 which overlapped MSP and meter.
+    const buiCX = xBUI;
     const buiCY = BUS_Y;
     const buiAmpRating = input.atsAmpRating ?? 200;
     buiResult = renderBUI(

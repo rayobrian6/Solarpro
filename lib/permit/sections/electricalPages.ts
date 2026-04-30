@@ -800,12 +800,18 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
     const deviceCount = totalPanels;
 
     // X positions
+    // v58.11: When hasBattery, MSP shifts LEFT to reserve space for a first-class
+    // BUI node between MSP and the utility meter. Prior layout placed BUI at
+    // xMSP + 130 which overlapped both MSP (40px) and meter (20px). Shifting MSP
+    // from 0.75 to 0.60 of usable width gives the BUI a clean 0.80 slot with
+    // ~60px gaps on each side.
     const xPad=50, uW=SCH_W-xPad*2;
     const xPV   = SCH_X + xPad;
     const xJBox = SCH_X + xPad + uW*0.17;
     const xComb = SCH_X + xPad + uW*0.36;
-    const xDisco= SCH_X + xPad + uW*0.56;
-    const xMSP  = SCH_X + xPad + uW*0.75;
+    const xDisco= SCH_X + xPad + uW*(hasBattery ? 0.48 : 0.56);
+    const xMSP  = SCH_X + xPad + uW*(hasBattery ? 0.60 : 0.75);
+    const xBUI  = SCH_X + xPad + uW*0.80;   // only used when hasBattery
     const xUtil = SCH_X + xPad + uW;
 
     // SVG root
@@ -886,7 +892,9 @@ export function pageSingleLineDiagram(input: PermitInput, cad: CADModel, pageNum
 
     // NODE 8: BUI + BATTERY (if battery)
     if(hasBattery) {
-      const buiCX=xMSP+130, buiCY=BUS_Y;
+      // v58.11: Use grid-computed xBUI (proper WIRE_GAP clearance) instead of
+      // old hard-coded xMSP + 130 which overlapped both MSP and meter.
+      const buiCX=xBUI, buiCY=BUS_Y;
       const buiResult=renderBUI(buiCX,buiCY,'Enphase','IQ System Controller 3',200,true,false,7);
       parts.push(buiResult.svg);
       buiRX=buiResult.rx;
