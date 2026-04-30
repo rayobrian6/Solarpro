@@ -1413,8 +1413,7 @@ function LiveSurveyDataView() {
                                 <span className="opacity-60 ml-1">project: <span className="font-mono">{solarproProjectId.slice(0, 8)}…</span></span>
                               )}
                             </div>
-                            {/* v58.20: Fix Owner button — shown when survey_meta has a solarpro_user_id claim
-                                 but the project is currently owned by the fallback default user. */}
+                            {/* v58.20: Fix Owner button — shown when survey_meta has a solarpro_user_id claim */}
                             {isDefault && solarproUserId && (
                               <button
                                 className="text-[10px] px-3 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium"
@@ -1442,6 +1441,44 @@ function LiveSurveyDataView() {
                                 → Fix Owner (assign to solarpro_user_id claim)
                               </button>
                             )}
+                            {/* v58.20: Manual reassign — always shown for default-owned surveys */}
+                            {isDefault && (
+                              <button
+                                className="text-[10px] px-3 py-1 rounded-md bg-slate-700/60 border border-slate-600/40 text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors font-medium"
+                                onClick={async () => {
+                                  const email = prompt(
+                                    `Manually reassign project "${project.name}" to a SolarPro user.\n` +
+                                    `Enter the user's email address:`,
+                                  );
+                                  if (!email?.trim()) return;
+                                  try {
+                                    const res = await fetch('/api/admin/survey-reassign', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        action: 'reassign-to-email',
+                                        projectId: project.id,
+                                        targetEmail: email.trim(),
+                                      }),
+                                    });
+                                    const data = await res.json();
+                                    if (data.success) {
+                                      alert(data.alreadyCorrect
+                                        ? data.message
+                                        : `✓ Reassigned to ${data.newOwnerEmail}`);
+                                      loadData();
+                                    } else {
+                                      alert(`⚠ ${data.error}`);
+                                    }
+                                  } catch (e) {
+                                    alert('Network error — check console');
+                                    console.error(e);
+                                  }
+                                }}
+                              >
+                                ✎ Reassign to Email…
+                              </button>
+                            )}
                           </div>
                         );
                       })()}
@@ -1454,6 +1491,8 @@ function LiveSurveyDataView() {
                           { label: 'Source',        value: project.source },
                           { label: 'Owner',         value: project.owner_email ?? project.user_id ?? null },
                           { label: 'Owner Source',  value: (project.survey_meta?.owner_source as string) ?? 'default' },
+                          { label: 'Claimed User ID', value: (project.survey_meta?.solarpro_user_id as string) ?? null },
+                          { label: 'Owner Fixed',   value: (project.survey_meta?.owner_fixed_by_admin as boolean) ? 'yes — admin fix' : null },
                           { label: 'Roof Material', value: project.roof_material },
                           { label: 'Mounting',      value: project.mounting_notes },
                           { label: 'Notes',         value: project.structural_notes },

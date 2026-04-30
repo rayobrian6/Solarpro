@@ -424,5 +424,80 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // ── reassign-to-email ───────────────────────────────────────────────────────
+  // Manually reassign a single project to a user identified by email address.
+  // Used by the admin UI when no solarpro_user_id claim is available.
+  //
+  // Requires: { action, projectId, targetEmail }
+  //
+  if (action === 'reassign-to-email') {
+    if (!projectId || !isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Missing or invalid projectId' }, { status: 400 });
+    }
+    const targetEmail = (body as { targetEmail?: string }).targetEmail?.trim().toLowerCase();
+    if (!targetEmail) {
+      return NextResponse.json({ success: false, error: 'Missing targetEmail' }, { status: 400 });
+    }
+
+    // Look up user by email
+    const userRows = await sql`
+      SELECT id, email, name FROM users WHERE LOWER(email) = ${targetEmail} LIMIT 1
+    `;
+    if (userRows.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: `No SolarPro user found with email: ${targetEmail}`,
+      }, { status: 422 });
+    }
+    const targetUser = userRows[0];
+
+    // Load the project
+    const projRows = await sql`
+      SELECT id, user_id, name FROM projects WHERE id = ${projectId} AND deleted_at IS NULL LIMIT 1
+    `;
+    if (projRows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+    const proj = projRows[0];
+
+    if (proj.user_id === targetUser.id) {
+      return NextResponse.json({
+        success: true,
+        alreadyCorrect: true,
+        message: `Project already owned by ${targetUser.email}`,
+      });
+    }
+
+    await sql`
+      UPDATE projects
+         SET user_id    = ${targetUser.id as string},
+             updated_at = now(),
+             survey_meta = COALESCE(survey_meta, '{}'::jsonb) ||
+               ${JSON.stringify({
+                 owner_source:         'manual_admin',
+                 owner_fixed_by_admin: true,
+                 owner_fix_method:     'reassign_to_email',
+                 owner_fixed_at:       new Date().toISOString(),
+               })}::jsonb
+       WHERE id = ${projectId}
+    `;
+
+    console.log(
+      `[SURVEY REASSIGN EMAIL] admin=${admin.email ?? 'admin'} projectId=${projectId} ` +
+      `from=${proj.user_id} to=${targetUser.id} (${targetUser.email})`,
+    );
+
+    return NextResponse.json({
+      success: true,
+      projectId,
+      previousOwnerId: proj.user_id,
+      newOwnerId:      targetUser.id,
+      newOwnerEmail:   targetUser.email,
+      newOwnerName:    targetUser.name,
+      projectName:     proj.name,
+      message:         `Project reassigned to ${targetUser.email}`,
+    });
+  }
+
   return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
 }
