@@ -174,22 +174,35 @@ export async function POST(req: NextRequest) {
       }, { status: 500 });
     }
 
-    // Find all survey projects owned by the default user that have a
-    // solarpro_user_id claim pointing to a valid user.
+    // Find all survey projects owned by the default user.
+    // Match to a SolarPro user via:
+    //   1. survey_meta.solarpro_user_id (UUID) — works for surveys submitted via handoff JWT
+    //   2. survey_meta.solarpro_email — fallback for surveys where partner used their own user IDs
     const candidates = await sql`
       SELECT p.id          AS project_id,
              p.name,
              p.address,
              p.user_id     AS current_owner_id,
-             p.survey_meta->>'solarpro_user_id' AS claimed_user_id,
-             u.email       AS claimed_user_email,
-             u.name        AS claimed_user_name
+             p.survey_meta->>'solarpro_user_id'    AS claimed_user_id,
+             p.survey_meta->>'solarpro_email'       AS claimed_email,
+             uid_user.id    AS uid_match_id,
+             uid_user.email AS uid_match_email,
+             uid_user.name  AS uid_match_name,
+             email_user.id    AS email_match_id,
+             email_user.email AS email_match_email,
+             email_user.name  AS email_match_name
         FROM projects p
-        JOIN users u ON u.id = (p.survey_meta->>'solarpro_user_id')
+        LEFT JOIN users uid_user
+               ON uid_user.id = (p.survey_meta->>'solarpro_user_id')
+        LEFT JOIN users email_user
+               ON LOWER(email_user.email) = LOWER(p.survey_meta->>'solarpro_email')
        WHERE p.user_id  = ${defaultOwnerId}
          AND p.origin   = 'survey'
-         AND p.survey_meta->>'solarpro_user_id' IS NOT NULL
          AND p.deleted_at IS NULL
+         AND (
+           uid_user.id IS NOT NULL
+           OR email_user.id IS NOT NULL
+         )
     `;
 
     if (candidates.length === 0) {
@@ -197,7 +210,11 @@ export async function POST(req: NextRequest) {
         success: true,
         fixed: 0,
         skipped: 0,
-        message: 'No misowned survey projects found. All surveys are correctly assigned.',
+        total: 0,
+        message: 'No misowned survey projects found with resolvable owners. ' +
+                 'Either all surveys are correctly assigned, or the solarpro_user_id / ' +
+                 'solarpro_email claims do not match any SolarPro users. ' +
+                 'Use "✎ Reassign to Email…" on individual cards to fix manually.',
       });
     }
 
@@ -217,24 +234,36 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Bulk reassign
+    // Bulk reassign — prefer uid match, fall back to email match
     let fixed = 0;
     const errors: string[] = [];
 
     for (const c of candidates as Record<string, unknown>[]) {
+      // Prefer UUID match (most authoritative), fall back to email match
+      const targetId    = (c.uid_match_id    ?? c.email_match_id)    as string | null;
+      const targetEmail = (c.uid_match_email ?? c.email_match_email) as string | null;
+      const matchMethod = c.uid_match_id ? 'uid' : 'email';
+
+      if (!targetId) continue; // safety — shouldn't happen given the WHERE clause above
+
       try {
         await sql`
           UPDATE projects
-             SET user_id    = ${c.claimed_user_id as string},
+             SET user_id    = ${targetId},
                  updated_at = now(),
                  survey_meta = COALESCE(survey_meta, '{}'::jsonb) ||
-                   ${JSON.stringify({ owner_source: 'claim', owner_fixed_by_admin: true, owner_fixed_at: new Date().toISOString() })}::jsonb
+                   ${JSON.stringify({
+                     owner_source:         'claim',
+                     owner_fixed_by_admin: true,
+                     owner_fix_method:     `fix_all_defaults_${matchMethod}`,
+                     owner_fixed_at:       new Date().toISOString(),
+                   })}::jsonb
            WHERE id = ${c.project_id as string}
              AND user_id = ${defaultOwnerId}
         `;
         console.log(
           `[SURVEY REASSIGN BULK] admin=${admin.email ?? 'admin'} projectId=${c.project_id} ` +
-          `from=${c.current_owner_id} to=${c.claimed_user_id} (${c.claimed_user_email})`,
+          `from=${c.current_owner_id} to=${targetId} (${targetEmail}) via=${matchMethod}`,
         );
         fixed++;
       } catch (err) {
@@ -246,6 +275,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       fixed,
+      total: candidates.length,
       skipped: errors.length,
       errors: errors.length > 0 ? errors : undefined,
       message: `Reassigned ${fixed} of ${candidates.length} survey project(s) to their correct owners.`,
@@ -312,14 +342,19 @@ export async function POST(req: NextRequest) {
        ORDER BY project_id, received_at DESC
     `;
 
-    // Build a map: project_id → parsed solarpro_user_id from raw_body
-    const claimMap = new Map<string, string>();
+    // Build a map: project_id → { uid, email } from raw_body
+    const claimMap = new Map<string, { uid: string | null; email: string | null }>();
     for (const d of deliveries as Record<string, unknown>[]) {
       try {
         const body = JSON.parse(d.raw_body as string) as Record<string, unknown>;
-        const uid = (body.solarpro_user_id as string | null | undefined)?.trim();
-        if (uid && isValidUUID(uid)) {
-          claimMap.set(d.project_id as string, uid);
+        const uid   = (body.solarpro_user_id as string | null | undefined)?.trim() ?? null;
+        const email = (body.solarpro_email   as string | null | undefined)?.trim().toLowerCase() ?? null;
+        // Store if we have at least a valid UUID or an email
+        if ((uid && isValidUUID(uid)) || email) {
+          claimMap.set(d.project_id as string, {
+            uid:   uid && isValidUUID(uid) ? uid : null,
+            email: email || null,
+          });
         }
       } catch {
         // malformed raw_body — skip
@@ -333,36 +368,50 @@ export async function POST(req: NextRequest) {
         scanned: misownedQuery.length,
         message:
           'Scanned webhook_deliveries for all misowned surveys but found no ' +
-          'solarpro_user_id claims in any raw_body. These surveys were likely ' +
-          'submitted before the F-06 JWT forwarding fix was deployed.',
+          'solarpro_user_id or solarpro_email claims in any raw_body. ' +
+          'Use "✎ Reassign to Email…" on individual cards to fix manually.',
       });
     }
 
-    // Validate each claimed user exists
-    const claimedIds = Array.from(claimMap.values());
-    const validUsers = await sql`
-      SELECT id, email, name FROM users WHERE id = ANY(${claimedIds})
-    `;
-    const userMap = new Map<string, { email: string; name: string }>();
-    for (const u of validUsers as Record<string, unknown>[]) {
-      userMap.set(u.id as string, { email: u.email as string, name: u.name as string });
+    // Validate: try UUID match first, then email match
+    const claimedIds    = Array.from(claimMap.values()).map(c => c.uid).filter(Boolean) as string[];
+    const claimedEmails = Array.from(claimMap.values()).map(c => c.email).filter(Boolean) as string[];
+
+    const uidUsers = claimedIds.length > 0
+      ? await sql`SELECT id, email, name FROM users WHERE id = ANY(${claimedIds})`
+      : [];
+    const emailUsers = claimedEmails.length > 0
+      ? await sql`SELECT id, email, name FROM users WHERE LOWER(email) = ANY(${claimedEmails})`
+      : [];
+
+    const userByUid   = new Map<string, { id: string; email: string; name: string }>();
+    const userByEmail = new Map<string, { id: string; email: string; name: string }>();
+    for (const u of uidUsers   as Record<string, unknown>[]) {
+      userByUid.set(u.id as string, { id: u.id as string, email: u.email as string, name: u.name as string });
+    }
+    for (const u of emailUsers as Record<string, unknown>[]) {
+      userByEmail.set((u.email as string).toLowerCase(), { id: u.id as string, email: u.email as string, name: u.name as string });
     }
 
     const candidates: Array<{
       projectId: string; projectName: string;
-      currentOwnerId: string; targetOwnerId: string; targetOwnerEmail: string;
+      currentOwnerId: string; targetOwnerId: string; targetOwnerEmail: string; matchMethod: string;
     }> = [];
 
-    for (const [pid, uid] of claimMap) {
-      if (!userMap.has(uid)) continue; // user not in SolarPro DB
+    for (const [pid, claim] of claimMap) {
+      // Prefer UUID match, fall back to email match
+      const match = (claim.uid ? userByUid.get(claim.uid) : null)
+                 ?? (claim.email ? userByEmail.get(claim.email) : null);
+      if (!match) continue; // neither matched a SolarPro user
       const proj = (misownedQuery as Record<string, unknown>[]).find(r => r.project_id === pid);
       if (!proj) continue;
       candidates.push({
         projectId:        pid,
         projectName:      proj.name as string,
         currentOwnerId:   proj.current_owner_id as string,
-        targetOwnerId:    uid,
-        targetOwnerEmail: userMap.get(uid)!.email,
+        targetOwnerId:    match.id,
+        targetOwnerEmail: match.email,
+        matchMethod:      claim.uid && userByUid.has(claim.uid) ? 'uid' : 'email',
       });
     }
 
@@ -372,7 +421,10 @@ export async function POST(req: NextRequest) {
         fixed: 0,
         scanned: misownedQuery.length,
         claimsFound: claimMap.size,
-        message: 'Found solarpro_user_id claims in webhook log but none matched valid SolarPro users.',
+        message:
+          'Found claims in webhook log but none matched valid SolarPro users. ' +
+          'The partner may be using their own user IDs (not SolarPro IDs). ' +
+          'Use "✎ Reassign to Email…" on individual cards to fix manually.',
       });
     }
 
@@ -396,17 +448,17 @@ export async function POST(req: NextRequest) {
                  updated_at = now(),
                  survey_meta = COALESCE(survey_meta, '{}'::jsonb) ||
                    ${JSON.stringify({
-                     solarpro_user_id:    c.targetOwnerId,
-                     owner_source:        'claim',
+                     solarpro_user_id:     c.targetOwnerId,
+                     owner_source:         'claim',
                      owner_fixed_by_admin: true,
-                     owner_fix_method:    'webhook_log_backfill',
-                     owner_fixed_at:      new Date().toISOString(),
+                     owner_fix_method:     `webhook_log_backfill_${c.matchMethod}`,
+                     owner_fixed_at:       new Date().toISOString(),
                    })}::jsonb
            WHERE id = ${c.projectId}
         `;
         console.log(
           `[SURVEY REASSIGN WEBHOOK] admin=${admin.email ?? 'admin'} ` +
-          `projectId=${c.projectId} from=${c.currentOwnerId} to=${c.targetOwnerId} (${c.targetOwnerEmail})`,
+          `projectId=${c.projectId} from=${c.currentOwnerId} to=${c.targetOwnerId} (${c.targetOwnerEmail}) via=${c.matchMethod}`,
         );
         fixed++;
       } catch (err) {
@@ -418,6 +470,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       fixed,
+      total: candidates.length,
       skipped: errors.length,
       errors: errors.length > 0 ? errors : undefined,
       message: `Backfilled + reassigned ${fixed} of ${candidates.length} survey project(s) from webhook delivery log.`,
