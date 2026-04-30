@@ -1003,23 +1003,48 @@ function EngineeringPageInner() {
           } catch { /* localStorage unavailable or corrupt — ignore */ }
         }
 
-        // v58.10: Restore batteryEnabled intent from hydrated config.
+        // v58.12: Restore batteryEnabled intent from hydrated config.
         // batteryEnabled is local React state (not persisted) — but if the loaded
         // config has a batteryId + batteryCount, the user clearly wants the
         // battery rendered. Without this, after refresh the battery toggle is
         // OFF, the Battery Storage panel collapses, and the sizing engine
         // stops emitting the battery line — even though config still has it.
         //
-        // Read the final hydrated config directly from state updater so we
-        // see savedConfig/localConfig merges, not the pre-hydration default.
-        setConfig(prev => {
-          const hasBattery = !!prev.batteryId && (prev.batteryCount ?? 0) > 0;
+        // v58.12 (was v58.10): Read saved data DIRECTLY from the closures above
+        // rather than via setConfig(prev=>...), because React's updater may be
+        // deferred past the microtask boundary where the effect completes,
+        // leaving the inference racing the render. Instead we inspect both
+        // savedConfig (DB) and the localStorage JSON we just parsed.
+        try {
+          let effectiveBatteryId: string | undefined;
+          let effectiveBatteryCount: number | undefined;
+          if (savedConfig && Object.keys(savedConfig).length > 0) {
+            effectiveBatteryId = (savedConfig as any).batteryId;
+            effectiveBatteryCount = (savedConfig as any).batteryCount;
+          } else {
+            // Fall through to localStorage fallback key
+            const localKey = `eng-config-${projectId}`;
+            const localRaw = typeof window !== 'undefined' ? window.localStorage.getItem(localKey) : null;
+            if (localRaw) {
+              try {
+                const lc = JSON.parse(localRaw) as any;
+                effectiveBatteryId = lc?.batteryId;
+                effectiveBatteryCount = lc?.batteryCount;
+              } catch { /* ignore */ }
+            }
+          }
+          const hasBattery = !!effectiveBatteryId && (effectiveBatteryCount ?? 0) > 0;
+          console.log(
+            '[HYDRATION v58.12] batteryId=', effectiveBatteryId,
+            'batteryCount=', effectiveBatteryCount,
+            '=> batteryEnabled will be', hasBattery
+          );
           if (hasBattery) {
-            console.log('[HYDRATION] Restoring batteryEnabled=true (batteryId + batteryCount present)');
             setBatteryEnabled(true);
           }
-          return prev;
-        });
+        } catch (err) {
+          console.warn('[HYDRATION v58.12] battery restore failed:', err);
+        }
 
         // Mark hydration complete — auto-save may now fire on config changes
         setIsHydrated(true);
