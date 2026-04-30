@@ -393,11 +393,13 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'This page. Centralizes every to-do with priority/track filters and a live countdown to the Nov 16 show.',
     track: 'admin-ops',
     priority: 'p1',
-    status: 'in-progress',
+    status: 'done',
     effort: 's',
+    shippedIn: 'v62.0',
     files: ['app/admin/roadmap/page.tsx', 'lib/roadmapRE26.ts'],
+    notes: 'Full roadmap page with track/priority/status filters, live countdown timer to RE+ 2026, progress bars per track, and card detail expansion. Roadmap data lives in lib/roadmapRE26.ts.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-05-28',
   },
 
   // ─── PLANNED — BRAND ONBOARDING BATCHES ──────────────────────────────
@@ -981,10 +983,16 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'Current activity log is a firehose. Needs search by user/company/action and a date range.',
     track: 'admin-ops',
     priority: 'p2',
-    status: 'planned',
+    status: 'done',
     effort: 's',
+    shippedIn: 'v63.0',
+    files: [
+      'app/api/admin/activity-log/route.ts',
+      'app/admin/activity-log/page.tsx',
+    ],
+    notes: 'API now accepts targetEmail, dateFrom, dateTo params with ISO date validation and safe ILIKE SQL. UI adds 4-column filter bar (action, target email, date from, date to) with active-filter chip display and clear-all button.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-05-28',
   },
 
   // ─── PLANNED — INFRASTRUCTURE ────────────────────────────────────────
