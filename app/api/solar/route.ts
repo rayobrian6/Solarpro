@@ -1,6 +1,6 @@
 export const dynamic    = 'force-dynamic';
 export const runtime    = 'nodejs';
-export const revalidate = 0;
+export const revalidate = 3600; // PERF v58.19: cache Solar API 1h
 
 import { NextRequest, NextResponse } from 'next/server';
 import { handleRouteDbError } from '@/lib/db-neon';
