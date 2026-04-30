@@ -696,7 +696,14 @@ export default function CommandCenter() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
 
   // Modal state
-  const [dismissedQueueIds, setDismissedQueueIds] = useState<Set<string>>(new Set());
+  // Persist dismissed work-queue IDs to localStorage so they survive page refreshes
+  const [dismissedQueueIds, setDismissedQueueIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set<string>();
+    try {
+      const raw = localStorage.getItem('solarpro:dismissedQueueIds');
+      return raw ? new Set<string>(JSON.parse(raw) as string[]) : new Set<string>();
+    } catch { return new Set<string>(); }
+  });
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
     commandId?: string;
@@ -1272,7 +1279,11 @@ export default function CommandCenter() {
                     openDecisionModal(proj.id, proj.name, proj.client?.name);
                   }}
                   onDismiss={proj => {
-                    setDismissedQueueIds(prev => new Set([...prev, proj.id]));
+                    setDismissedQueueIds(prev => {
+                      const next = new Set([...prev, proj.id]);
+                      try { localStorage.setItem('solarpro:dismissedQueueIds', JSON.stringify([...next])); } catch { /* ignore */ }
+                      return next;
+                    });
                   }} />
               ))}</div>
             )}

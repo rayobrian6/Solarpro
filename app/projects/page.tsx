@@ -1,5 +1,6 @@
 'use client';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import AppShell from '@/components/ui/AppShell';
 import { PageHeader } from '@/components/ui/PageHeader';
 import Link from 'next/link';
@@ -188,11 +189,15 @@ function ActionMenu({ project, onDuplicate, onDelete, onClose }: {
 }
 
 // ── Confirm Delete Modal ──────────────────────────────────────────────────────
+// Rendered via portal at document.body so it escapes any overflow/stacking context
 function ConfirmDeleteModal({ count, onConfirm, onCancel, loading }: {
   count: number; onConfirm: () => void; onCancel: () => void; loading: boolean;
 }) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+  const modal = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onCancel} />
       <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
@@ -211,6 +216,7 @@ function ConfirmDeleteModal({ count, onConfirm, onCancel, loading }: {
       </div>
     </div>
   );
+  return createPortal(modal, document.body);
 }
 
 // ── Project Card (the real hero) ──────────────────────────────────────────────
