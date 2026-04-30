@@ -2005,13 +2005,20 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     parts.push(buiResult.svg);
     buiRX = buiResult.rx;
 
-    // Wire: MSP output → BUI GRID terminal (route to exact terminal coordinate)
-    // gridPortX is the left edge lug; gridPortY is cy-14 (upper-left terminal)
-    parts.push(ln(mspRX, buiResult.gridPortY, buiResult.gridPortX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
-    // Vertical stub from bus line down to GRID terminal if needed
-    if (Math.abs(buiResult.gridPortY - BUS_Y) > 2) {
-      parts.push(ln(mspRX, BUS_Y, mspRX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
+    // Wire: MSP busOut terminal → BUI GRID terminal (L-route)
+    // MSP busOut is at mspResult.busOutX/Y (anchor 'load_out' on MSP symbol).
+    // BUI GRID port is at buiResult.gridPortX/Y (left-edge lug, cy-14).
+    // Route: horizontal from busOut rightward to BUI left edge X, then
+    // vertical stub to match gridPortY if the two Ys differ.
+    const _mspToBuiX = buiResult.gridPortX;  // left edge of BUI
+    // Horizontal segment at MSP busOut Y level
+    parts.push(ln(mspResult.busOutX, mspResult.busOutY, _mspToBuiX, mspResult.busOutY, {stroke: BLK, sw: SW_MED}));
+    // Vertical jog from busOutY down/up to BUI gridPortY (always draw — tiny if same)
+    if (Math.abs(mspResult.busOutY - buiResult.gridPortY) > 1) {
+      parts.push(ln(_mspToBuiX, mspResult.busOutY, _mspToBuiX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
     }
+    // Final horizontal stub into BUI GRID lug (gridPortX is already the left edge lug)
+    // The lug itself is drawn inside renderBUI; we just need to terminate at it.
 
     // Backfeed breaker at MSP for battery (NEC 705.12(B))
     const bfA = input.batteryBackfeedA ?? 20;
@@ -2212,12 +2219,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
     const {lines, cnt} = runLines(run, fb);
-    // Use MSP busOut terminal Y for precise routing; buiRX is the rightmost equipment edge
-    const segY = mspResult.busOutY;
-    const _s6Y = resolveSegY(buiRX, utilCX-mR-10, segY);
+    // Source: BUI LOAD port when battery present, else MSP busOut terminal.
+    // When BUI is present, the bus wire exits from BUI LOAD port (right-side lug).
+    // When no BUI, it exits from MSP busOut terminal.
+    const _seg6SrcX = buiResult ? buiResult.loadPortX : mspResult.busOutX;
+    const _seg6SrcY = buiResult ? buiResult.loadPortY : mspResult.busOutY;
+    const _s6Y = resolveSegY(_seg6SrcX, utilCX-mR-10, _seg6SrcY);
     console.log('[WIRE RUN CREATED] SEGMENT_6_MSP_TO_METER: AC service run');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_6_MSP_TO_METER', buiRX, _s6Y, utilCX-mR-10, _s6Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
+      buildWireRun('SEGMENT_6_MSP_TO_METER', _seg6SrcX, _s6Y, utilCX-mR-10, _s6Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
       lines));
   }
 
