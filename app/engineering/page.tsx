@@ -2212,13 +2212,55 @@ function EngineeringPageInner() {
         patch.batteryBrand = rec.brand.manufacturer;
         patch.batteryModel = rec.battery.equipmentDbId;
       } else {
-        // No battery in recommendation — clear battery fields cleanly.
-        patch.batteryId = '';
-        patch.batteryCount = 0;
-        patch.batteryKwh = 0;
+        // v58.13 — ECOSYSTEM BATTERY GUARD.
+        //
+        // The sizing engine only emits `rec.battery` when `batteryEnabled === true`.
+        // Prior behaviour: when `batteryEnabled` was false at the moment Apply
+        // was clicked, we wiped batteryId/Count/Kwh — which destroyed the
+        // battery the ecosystem picker had just applied.
+        //
+        // New rule: if the user has an ecosystem applied AND that ecosystem
+        // brought in a battery (prev.batteryId is truthy), PRESERVE it. The
+        // ecosystem is the source of truth for battery selection in that case.
+        //
+        // This also covers the refresh-hydration race where `batteryEnabled`
+        // is momentarily false on first render before the v58.12 hydration
+        // effect flips it to true.
+        const hasEcosystemBattery =
+          !!(prev as any).ecosystemBrand &&
+          !!prev.batteryId &&
+          (prev.batteryCount ?? 0) > 0;
+        if (hasEcosystemBattery) {
+          console.log('[SIZING APPLY v58.13] preserving ecosystem battery:', {
+            ecosystem: (prev as any).ecosystemBrand,
+            batteryId: prev.batteryId,
+            batteryCount: prev.batteryCount,
+          });
+          // Intentionally do NOT set batteryId/batteryCount/batteryKwh on patch.
+        } else {
+          // No ecosystem battery to protect — clear battery fields cleanly
+          // (preserves original behaviour for non-ecosystem flows).
+          patch.batteryId = '';
+          patch.batteryCount = 0;
+          patch.batteryKwh = 0;
+        }
       }
 
       return { ...prev, ...patch };
+    });
+
+    // v58.13 — Also re-assert batteryEnabled if we just preserved an ecosystem
+    // battery. This is safe: it's a no-op if the toggle is already on, and if
+    // the toggle was momentarily off (e.g. refresh-hydration race), flipping
+    // it true makes the next sizing run emit `rec.battery` properly so the
+    // SLD + BOM + permit all stay consistent.
+    setConfig(prev => {
+      const hasEcosystemBattery =
+        !!(prev as any).ecosystemBrand &&
+        !!prev.batteryId &&
+        (prev.batteryCount ?? 0) > 0;
+      if (hasEcosystemBattery) setBatteryEnabled(true);
+      return prev;
     });
 
     // Surface the dismissal reset so the panel stays visible but shows "matches".
