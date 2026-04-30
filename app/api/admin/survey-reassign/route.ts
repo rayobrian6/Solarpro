@@ -226,15 +226,17 @@ export async function POST(req: NextRequest) {
       : [];
 
     // Build a map of webhook-sourced claims for projects missing survey_meta claims
-    const webhookClaimMap = new Map<string, { uid: string|null; email: string|null; projectId: string|null }>();
+    const webhookClaimMap = new Map<string, { uid: string|null; email: string|null; projectId: string|null; inspectorName: string|null; inspectorEmail: string|null }>();
     for (const d of deliveries as Record<string,unknown>[]) {
       try {
         const body = JSON.parse(d.raw_body as string) as Record<string,unknown>;
         const uid   = (body.solarpro_user_id    as string|null|undefined)?.trim() || null;
         const email = (body.solarpro_email       as string|null|undefined)?.trim().toLowerCase() || null;
         const pid   = (body.solarpro_project_id  as string|null|undefined)?.trim() || null;
-        if (uid || email || pid) {
-          webhookClaimMap.set(d.project_id as string, { uid: uid || null, email: email || null, projectId: pid || null });
+        const iname = (body.inspector_name       as string|null|undefined)?.trim() || null;
+        const iemail= (body.inspector_email      as string|null|undefined)?.trim().toLowerCase() || null;
+        if (uid || email || pid || iname || iemail) {
+          webhookClaimMap.set(d.project_id as string, { uid: uid || null, email: email || null, projectId: pid || null, inspectorName: iname || null, inspectorEmail: iemail || null });
         }
       } catch { /* malformed raw_body — skip */ }
     }
@@ -249,14 +251,18 @@ export async function POST(req: NextRequest) {
         claimed_uid:         (r.claimed_uid as string|null) || wc?.uid || null,
         claimed_email:       (r.claimed_email as string|null) || wc?.email || null,
         claimed_project_id:  (r.claimed_project_id as string|null) || wc?.projectId || null,
+        inspector_name:      wc?.inspectorName  || null,
+        inspector_email:     wc?.inspectorEmail || null,
         claim_source:        (r.claimed_uid || r.claimed_email || r.claimed_project_id) ? 'survey_meta' : (wc ? 'webhook_log' : 'none'),
       };
     });
 
     // Step 3: Batch-fetch users and projects for all claims
-    const allUids       = [...new Set(enrichedMisowned.map(r => r.claimed_uid).filter(Boolean))] as string[];
-    const allEmails     = [...new Set(enrichedMisowned.map(r => r.claimed_email?.toLowerCase()).filter(Boolean))] as string[];
-    const allProjIds    = [...new Set(enrichedMisowned.map(r => r.claimed_project_id).filter(Boolean))] as string[];
+    const allUids          = [...new Set(enrichedMisowned.map(r => r.claimed_uid).filter(Boolean))] as string[];
+    const allEmails        = [...new Set(enrichedMisowned.map(r => r.claimed_email?.toLowerCase()).filter(Boolean))] as string[];
+    const allProjIds       = [...new Set(enrichedMisowned.map(r => r.claimed_project_id).filter(Boolean))] as string[];
+    const allInspEmails    = [...new Set(enrichedMisowned.map(r => r.inspector_email).filter(Boolean))] as string[];
+    const allInspNames     = [...new Set(enrichedMisowned.map(r => r.inspector_name).filter(Boolean))] as string[];
 
     const uidUserRows = allUids.length > 0
       ? await sql`SELECT id, email, name FROM users WHERE id::text = ANY(${allUids})`
@@ -273,10 +279,24 @@ export async function POST(req: NextRequest) {
              AND p.deleted_at IS NULL
         `
       : [];
+    const inspEmailUserRows = allInspEmails.length > 0
+      ? await sql`SELECT id, email, name FROM users WHERE LOWER(email) = ANY(${allInspEmails})`
+      : [];
+    // For inspector_name: fetch candidates grouped by name; exclude names that match >1 user (ambiguous)
+    const inspNameUserRows = allInspNames.length > 0
+      ? await sql`
+          SELECT id, email, name
+            FROM users
+           WHERE name = ANY(${allInspNames})
+        `
+      : [];
 
-    const userByUid       = new Map<string, { id: string; email: string; name: string }>();
-    const userByEmail     = new Map<string, { id: string; email: string; name: string }>();
-    const userByProjectId = new Map<string, { id: string; email: string; name: string }>();
+    const userByUid          = new Map<string, { id: string; email: string; name: string }>();
+    const userByEmail        = new Map<string, { id: string; email: string; name: string }>();
+    const userByProjectId    = new Map<string, { id: string; email: string; name: string }>();
+    const userByInspEmail    = new Map<string, { id: string; email: string; name: string }>();
+    // Only store unambiguous name matches (exactly 1 user per name)
+    const userByInspName     = new Map<string, { id: string; email: string; name: string }>();
 
     for (const u of uidUserRows as Record<string,unknown>[]) {
       userByUid.set(u.id as string, { id: u.id as string, email: u.email as string, name: u.name as string });
@@ -286,6 +306,20 @@ export async function POST(req: NextRequest) {
     }
     for (const r of projectOwnerRows as Record<string,unknown>[]) {
       userByProjectId.set(r.project_id as string, { id: r.user_id as string, email: r.email as string, name: r.name as string });
+    }
+    for (const u of inspEmailUserRows as Record<string,unknown>[]) {
+      userByInspEmail.set((u.email as string).toLowerCase(), { id: u.id as string, email: u.email as string, name: u.name as string });
+    }
+    // Group inspector name rows to detect ambiguity
+    const inspNameGroups = new Map<string, Array<{ id: string; email: string; name: string }>>();
+    for (const u of inspNameUserRows as Record<string,unknown>[]) {
+      const uname = u.name as string;
+      if (!inspNameGroups.has(uname)) inspNameGroups.set(uname, []);
+      inspNameGroups.get(uname)!.push({ id: u.id as string, email: u.email as string, name: uname });
+    }
+    for (const [uname, matches] of inspNameGroups) {
+      if (matches.length === 1) userByInspName.set(uname, matches[0]);
+      // else: ambiguous — skip
     }
 
     // Step 4: Resolve each misowned project
@@ -310,6 +344,14 @@ export async function POST(req: NextRequest) {
       if (!match && row.claimed_project_id) {
         match = userByProjectId.get(row.claimed_project_id);
         if (match) matchMethod = 'project';
+      }
+      if (!match && row.inspector_email) {
+        match = userByInspEmail.get(row.inspector_email.toLowerCase());
+        if (match) matchMethod = 'inspector_email';
+      }
+      if (!match && row.inspector_name) {
+        match = userByInspName.get(row.inspector_name);
+        if (match) matchMethod = 'inspector_name';
       }
 
       if (!match) continue;
@@ -448,19 +490,23 @@ export async function POST(req: NextRequest) {
        ORDER BY project_id, received_at DESC
     `;
 
-    // Build a map: project_id → { uid, email, projectId } from raw_body
-    const claimMap = new Map<string, { uid: string | null; email: string | null; projectId: string | null }>();
+    // Build a map: project_id → { uid, email, projectId, inspectorName, inspectorEmail } from raw_body
+    const claimMap = new Map<string, { uid: string | null; email: string | null; projectId: string | null; inspectorName: string | null; inspectorEmail: string | null }>();
     for (const d of deliveries as Record<string, unknown>[]) {
       try {
         const body = JSON.parse(d.raw_body as string) as Record<string, unknown>;
-        const uid     = (body.solarpro_user_id    as string | null | undefined)?.trim() ?? null;
-        const email   = (body.solarpro_email       as string | null | undefined)?.trim().toLowerCase() ?? null;
-        const projId  = (body.solarpro_project_id  as string | null | undefined)?.trim() ?? null;
-        if ((uid && isValidUUID(uid)) || email || (projId && isValidUUID(projId))) {
+        const uid       = (body.solarpro_user_id    as string | null | undefined)?.trim() ?? null;
+        const email     = (body.solarpro_email       as string | null | undefined)?.trim().toLowerCase() ?? null;
+        const projId    = (body.solarpro_project_id  as string | null | undefined)?.trim() ?? null;
+        const iname     = (body.inspector_name       as string | null | undefined)?.trim() ?? null;
+        const iemail    = (body.inspector_email      as string | null | undefined)?.trim().toLowerCase() ?? null;
+        if ((uid && isValidUUID(uid)) || email || (projId && isValidUUID(projId)) || iname || iemail) {
           claimMap.set(d.project_id as string, {
-            uid:       uid && isValidUUID(uid) ? uid : null,
-            email:     email || null,
-            projectId: projId && isValidUUID(projId) ? projId : null,
+            uid:           uid && isValidUUID(uid) ? uid : null,
+            email:         email || null,
+            projectId:     projId && isValidUUID(projId) ? projId : null,
+            inspectorName: iname || null,
+            inspectorEmail: iemail || null,
           });
         }
       } catch {
@@ -485,6 +531,9 @@ export async function POST(req: NextRequest) {
     const claimedEmails = Array.from(claimMap.values()).map(c => c.email).filter(Boolean) as string[];
     const claimedProjIds = Array.from(claimMap.values()).map(c => c.projectId).filter(Boolean) as string[];
 
+    const claimedInspEmails = Array.from(claimMap.values()).map(c => c.inspectorEmail).filter(Boolean) as string[];
+    const claimedInspNames  = Array.from(claimMap.values()).map(c => c.inspectorName).filter(Boolean) as string[];
+
     const uidUsers = claimedIds.length > 0
       ? await sql`SELECT id, email, name FROM users WHERE id::text = ANY(${claimedIds})`
       : [];
@@ -501,10 +550,20 @@ export async function POST(req: NextRequest) {
              AND p.deleted_at IS NULL
         `
       : [];
+    // Strategy 4: inspector_email
+    const inspEmailUsers = claimedInspEmails.length > 0
+      ? await sql`SELECT id, email, name FROM users WHERE LOWER(email) = ANY(${claimedInspEmails})`
+      : [];
+    // Strategy 5: inspector_name (unambiguous matches only)
+    const inspNameUsers = claimedInspNames.length > 0
+      ? await sql`SELECT id, email, name FROM users WHERE name = ANY(${claimedInspNames})`
+      : [];
 
-    const userByUid       = new Map<string, { id: string; email: string; name: string }>();
-    const userByEmail     = new Map<string, { id: string; email: string; name: string }>();
-    const userByProjectId = new Map<string, { id: string; email: string; name: string }>();
+    const userByUid          = new Map<string, { id: string; email: string; name: string }>();
+    const userByEmail        = new Map<string, { id: string; email: string; name: string }>();
+    const userByProjectId    = new Map<string, { id: string; email: string; name: string }>();
+    const userByInspEmail    = new Map<string, { id: string; email: string; name: string }>();
+    const userByInspName     = new Map<string, { id: string; email: string; name: string }>();
 
     for (const u of uidUsers as Record<string, unknown>[]) {
       userByUid.set(u.id as string, { id: u.id as string, email: u.email as string, name: u.name as string });
@@ -515,6 +574,19 @@ export async function POST(req: NextRequest) {
     for (const r of projectOwnerRows as Record<string, unknown>[]) {
       userByProjectId.set(r.project_id as string, { id: r.user_id as string, email: r.email as string, name: r.name as string });
     }
+    for (const u of inspEmailUsers as Record<string, unknown>[]) {
+      userByInspEmail.set((u.email as string).toLowerCase(), { id: u.id as string, email: u.email as string, name: u.name as string });
+    }
+    // Only store unambiguous name matches
+    const inspNameGroups2 = new Map<string, Array<{ id: string; email: string; name: string }>>();
+    for (const u of inspNameUsers as Record<string, unknown>[]) {
+      const uname = u.name as string;
+      if (!inspNameGroups2.has(uname)) inspNameGroups2.set(uname, []);
+      inspNameGroups2.get(uname)!.push({ id: u.id as string, email: u.email as string, name: uname });
+    }
+    for (const [uname, matches] of inspNameGroups2) {
+      if (matches.length === 1) userByInspName.set(uname, matches[0]);
+    }
 
     const candidates: Array<{
       projectId: string; projectName: string;
@@ -522,15 +594,19 @@ export async function POST(req: NextRequest) {
     }> = [];
 
     for (const [pid, claim] of claimMap) {
-      // Strategy 1: UUID, 2: email, 3: project
-      const match = (claim.uid       ? userByUid.get(claim.uid)                       : null)
-                 ?? (claim.email     ? userByEmail.get(claim.email)                    : null)
-                 ?? (claim.projectId ? userByProjectId.get(claim.projectId)            : null);
+      // Strategy 1: UUID, 2: email, 3: project, 4: inspector_email, 5: inspector_name
+      const match = (claim.uid           ? userByUid.get(claim.uid)                            : null)
+                 ?? (claim.email         ? userByEmail.get(claim.email)                         : null)
+                 ?? (claim.projectId     ? userByProjectId.get(claim.projectId)                 : null)
+                 ?? (claim.inspectorEmail ? userByInspEmail.get(claim.inspectorEmail)           : null)
+                 ?? (claim.inspectorName  ? userByInspName.get(claim.inspectorName)             : null);
       if (!match) continue;
 
       const matchMethod = claim.uid && userByUid.has(claim.uid) ? 'uid'
                         : claim.email && userByEmail.has(claim.email) ? 'email'
-                        : 'project';
+                        : claim.projectId && userByProjectId.has(claim.projectId) ? 'project'
+                        : claim.inspectorEmail && userByInspEmail.has(claim.inspectorEmail) ? 'inspector_email'
+                        : 'inspector_name';
 
       const proj = (misownedQuery as Record<string, unknown>[]).find(r => r.project_id === pid);
       if (!proj) continue;

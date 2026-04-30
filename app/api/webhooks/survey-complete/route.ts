@@ -225,6 +225,8 @@ export async function POST(req: NextRequest) {
     deliveryId,
     envelope.solarpro_email      ?? null,
     envelope.solarpro_project_id ?? null,
+    envelope.inspector_email     ?? null,
+    envelope.inspector_name      ?? null,
   );
 
   if (!ownerResolution) {

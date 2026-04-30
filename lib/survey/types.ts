@@ -78,6 +78,13 @@ export interface SurveyCompletedEvent {
   solarpro_project_id?: string | null;
   /** SolarPro user email from the handoff JWT (for audit / fallback lookup). */
   solarpro_email?: string | null;
+  // ── F-06b: Inspector identity ───────────────────────────────────────────────
+  // Sent by the partner as top-level fields in the webhook body.
+  // Used as fallback resolution when no SolarPro ownership claims are present.
+  /** Inspector name as entered in the partner app. Used for name-based owner resolution. */
+  inspector_name?: string | null;
+  /** Inspector email if sent by the partner app. Used for email-based owner resolution. */
+  inspector_email?: string | null;
 }
 
 // ---------------------------------------------------------------------------

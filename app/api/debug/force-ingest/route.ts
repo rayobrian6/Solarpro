@@ -57,6 +57,8 @@ interface PartnerSurvey {
   solarpro_user_id:    string | null;
   solarpro_project_id: string | null;
   solarpro_email:      string | null;
+  // F-06b: Inspector identity fields (may be present even without JWT claims)
+  inspector_email:     string | null;
 }
 
 interface PartnerPhoto {
@@ -268,7 +270,8 @@ export async function POST(req: NextRequest) {
         s.inspector_name, s.category_name, s.latitude, s.longitude,
         s.gps_accuracy, s.survey_date::text, s.status, s.notes,
         s.metadata, s.created_at::text,
-        s.solarpro_user_id, s.solarpro_project_id, s.solarpro_email
+        s.solarpro_user_id, s.solarpro_project_id, s.solarpro_email,
+        s.inspector_email
       FROM surveys s
       WHERE s.deleted_at IS NULL
         AND s.status = 'submitted'
@@ -313,6 +316,8 @@ export async function POST(req: NextRequest) {
           `force-ingest:${survey.id}`,
           survey.solarpro_email      ?? null,
           survey.solarpro_project_id ?? null,
+          survey.inspector_email     ?? null,
+          survey.inspector_name      ?? null,
         );
         const surveyOwnerId = ownerResolution?.ownerId ?? ingestUserId;
         const surveyOwnerSource = ownerResolution?.ownerSource ?? 'default';

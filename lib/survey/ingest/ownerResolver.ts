@@ -16,7 +16,12 @@
 //      → ownerSource = 'project'
 //      (the project was created via the handoff flow and already has the correct
 //       owner set — this is the permanent scale solution for the partner case)
-//   4. SURVEY_INGEST_DEFAULT_USER_ID fallback
+//   4. inspector_email — if partner sends inspector's email in the webhook body
+//      → ownerSource = 'inspector_email'
+//   5. inspector_name — if partner sends inspector's name in the webhook body,
+//      match against users.name (LOWER, trimmed)
+//      → ownerSource = 'inspector_name'
+//   6. SURVEY_INGEST_DEFAULT_USER_ID fallback
 //      → ownerSource = 'default'
 //
 // Returns null if SURVEY_INGEST_DEFAULT_USER_ID is also unset — the caller
@@ -27,7 +32,7 @@ import { getDbReady } from '@/lib/db-neon';
 
 export interface OwnerResolution {
   ownerId: string;
-  ownerSource: 'claim' | 'claim_email' | 'project' | 'default';
+  ownerSource: 'claim' | 'claim_email' | 'project' | 'inspector_email' | 'inspector_name' | 'default';
 }
 
 /**
@@ -44,6 +49,8 @@ export async function resolveIngestOwner(
   traceId:              string,
   solarpro_email?:      string | null,
   solarpro_project_id?: string | null,
+  inspector_email?:     string | null,
+  inspector_name?:      string | null,
 ): Promise<OwnerResolution | null> {
   const defaultOwnerId = process.env.SURVEY_INGEST_DEFAULT_USER_ID?.trim() ?? '';
 
@@ -156,7 +163,84 @@ export async function resolveIngestOwner(
     }
   }
 
-  // ── Strategy 4: Default fallback ────────────────────────────────────────────
+  // ── Strategy 4: Inspector e-mail ────────────────────────────────────────────────────────────────────────────
+  // Some partners send inspector_email in the webhook body (no JWT claim).
+  // Look up the user by email — same logic as Strategy 2 but from the envelope field.
+  if (inspector_email) {
+    try {
+      const db = await getSql();
+      const rows = await db`
+        SELECT id
+          FROM users
+         WHERE email = ${inspector_email}
+         LIMIT 1
+      `;
+
+      if (rows.length > 0) {
+        const ownerId = rows[0].id as string;
+        console.log(
+          `[INGEST OWNER RESOLVED] traceId=${traceId} source=inspector_email ` +
+          `inspector_email=${inspector_email} ownerId=${ownerId}`,
+        );
+        return { ownerId, ownerSource: 'inspector_email' };
+      }
+
+      console.warn(
+        `[INGEST OWNER RESOLVED] traceId=${traceId} source=inspector_email_miss ` +
+        `inspector_email=${inspector_email} not found in users table — trying name`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[INGEST OWNER RESOLVED] traceId=${traceId} source=inspector_email_error ` +
+        `DB lookup failed for inspector_email=${inspector_email}: ${msg} — trying name`,
+      );
+    }
+  }
+
+  // ── Strategy 5: Inspector name ───────────────────────────────────────────────────────────────────────────────
+  // Partner sends inspector_name (e.g. "James Carpenter") — match against users.name.
+  // Only resolve if EXACTLY ONE user matches; two or more matches are ambiguous → skip.
+  if (inspector_name) {
+    try {
+      const db = await getSql();
+      const rows = await db`
+        SELECT id
+          FROM users
+         WHERE name = ${inspector_name}
+         LIMIT 2
+      `;
+
+      if (rows.length === 1) {
+        const ownerId = rows[0].id as string;
+        console.log(
+          `[INGEST OWNER RESOLVED] traceId=${traceId} source=inspector_name ` +
+          `inspector_name=${inspector_name} ownerId=${ownerId}`,
+        );
+        return { ownerId, ownerSource: 'inspector_name' };
+      }
+
+      if (rows.length > 1) {
+        console.warn(
+          `[INGEST OWNER RESOLVED] traceId=${traceId} source=inspector_name_ambiguous ` +
+          `inspector_name=${inspector_name} matched ${rows.length} users — skipping`,
+        );
+      } else {
+        console.warn(
+          `[INGEST OWNER RESOLVED] traceId=${traceId} source=inspector_name_miss ` +
+          `inspector_name=${inspector_name} not found in users table — using default`,
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[INGEST OWNER RESOLVED] traceId=${traceId} source=inspector_name_error ` +
+        `DB lookup failed for inspector_name=${inspector_name}: ${msg} — using default`,
+      );
+    }
+  }
+
+  // ── Strategy 6: Default fallback ────────────────────────────────────────────
   if (!defaultOwnerId) {
     console.error(
       `[INGEST OWNER RESOLVED] traceId=${traceId} source=none ` +

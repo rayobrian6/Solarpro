@@ -54,7 +54,7 @@ export interface IngestContext {
    *  'claim_email' - resolved from solarpro_email match
    *  'project'     - resolved from solarpro_project_id project lookup
    *  'default'     - fell back to SURVEY_INGEST_DEFAULT_USER_ID */
-  ownerSource: 'claim' | 'claim_email' | 'project' | 'default';
+  ownerSource: 'claim' | 'claim_email' | 'project' | 'inspector_email' | 'inspector_name' | 'default';
 
   /** Optional: the partner-supplied project_id from the webhook headers or
    *  a future fat-event field. Used by the link resolver (Q8 strategy).
