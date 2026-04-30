@@ -1003,6 +1003,24 @@ function EngineeringPageInner() {
           } catch { /* localStorage unavailable or corrupt — ignore */ }
         }
 
+        // v58.10: Restore batteryEnabled intent from hydrated config.
+        // batteryEnabled is local React state (not persisted) — but if the loaded
+        // config has a batteryId + batteryCount, the user clearly wants the
+        // battery rendered. Without this, after refresh the battery toggle is
+        // OFF, the Battery Storage panel collapses, and the sizing engine
+        // stops emitting the battery line — even though config still has it.
+        //
+        // Read the final hydrated config directly from state updater so we
+        // see savedConfig/localConfig merges, not the pre-hydration default.
+        setConfig(prev => {
+          const hasBattery = !!prev.batteryId && (prev.batteryCount ?? 0) > 0;
+          if (hasBattery) {
+            console.log('[HYDRATION] Restoring batteryEnabled=true (batteryId + batteryCount present)');
+            setBatteryEnabled(true);
+          }
+          return prev;
+        });
+
         // Mark hydration complete — auto-save may now fire on config changes
         setIsHydrated(true);
 
