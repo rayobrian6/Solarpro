@@ -9,6 +9,10 @@ import {
   hasTunedEmblem,
 } from '@/lib/sld-brand-emblems';
 import { ECOSYSTEM_BRANDS } from '@/lib/system/brandProfiles/resolveBrandEquipment';
+import {
+  listDeviceIllustrations,
+  type DeviceIllustration,
+} from '@/lib/sld-device-illustrations';
 
 // ─── Sample opts for preview rendering ────────────────────────────────────────
 const PREVIEW_OPTS: Record<string, Record<string, string | number | boolean>> = {
@@ -296,6 +300,85 @@ function BrandEmblemCard({
   );
 }
 
+// ===========================================================================
+// Device Illustration Card (v58.16)
+// Shows a front-view silhouette of the actual hardware (e.g. Tesla Powerwall,
+// EcoFlow OCEAN Pro) inside a white preview canvas, plus metadata.
+// ===========================================================================
+function DeviceIllustrationCard({
+  device,
+  zoom,
+  showDetails,
+}: {
+  device: DeviceIllustration;
+  zoom: number;
+  showDetails: boolean;
+}) {
+  const slotW = 130;
+  const slotH = 180;
+  const svg = device.render(slotW / 2, slotH / 2, slotW, slotH);
+
+  return (
+    <div className="bg-[#111827] border border-white/8 rounded-xl overflow-hidden hover:border-white/20 transition-all group flex flex-col">
+      <div className="bg-white flex items-center justify-center p-4 min-h-[220px] relative">
+        <div
+          style={{ transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 0.15s' }}
+        >
+          <svg
+            width={slotW}
+            height={slotH}
+            viewBox={`0 0 ${slotW} ${slotH}`}
+            style={{ display: 'block', shapeRendering: 'geometricPrecision' }}
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </div>
+        <div className="absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
+          HARDWARE
+        </div>
+        <div
+          className={`absolute top-2 right-2 text-[9px] font-bold px-2 py-0.5 rounded-full ${
+            device.kind === 'inverter'
+              ? 'bg-blue-500/15 text-blue-300 border border-blue-500/20'
+              : 'bg-amber-500/15 text-amber-300 border border-amber-500/20'
+          }`}
+        >
+          {device.kind.toUpperCase()}
+        </div>
+      </div>
+
+      <div className="p-4 flex flex-col gap-2 flex-1">
+        <div>
+          <div className="text-sm font-bold text-slate-100">{device.label}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">{device.sub}</div>
+        </div>
+        {showDetails && (
+          <div className="mt-1 pt-2 border-t border-white/5 space-y-1">
+            <div className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-1">
+              Illustration Properties
+            </div>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+              <div className="text-slate-500">Brand key</div>
+              <div className="font-mono text-slate-200">{device.brand}</div>
+              <div className="text-slate-500">Device kind</div>
+              <div className="font-mono text-slate-200">{device.kind}</div>
+              <div className="text-slate-500">Native aspect</div>
+              <div className="font-mono text-slate-200">
+                {device.aspectW} : {device.aspectH}
+              </div>
+              <div className="text-slate-500">Scales with slot</div>
+              <div className="font-mono text-slate-200">yes (preserves AR)</div>
+            </div>
+            <div className="text-[9px] text-slate-600 pt-1">
+              <span className="font-bold text-slate-500">Placement: </span>
+              Replaces generic IEEE emblem when this brand is selected.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Brand emblem groupings
 function buildBrandEmblemGroups(): Array<{
   id: string;
@@ -349,6 +432,10 @@ export default function SLDEmblemsPage() {
     activeSection === 'all'
       ? BRAND_GROUPS
       : BRAND_GROUPS.filter(g => g.id === activeSection);
+
+  // v58.16 - Device illustrations (front-view hardware silhouettes)
+  const DEVICE_ILLUSTRATIONS = listDeviceIllustrations();
+  const showDevices = activeSection === 'all' || activeSection === 'devices';
 
   // ── Download SVG reference sheet ──────────────────────────────────────────
   const handleDownloadSVG = useCallback(() => {
@@ -589,6 +676,16 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
               {g.label}
             </button>
           ))}
+          <button
+            onClick={() => setActiveSection('devices')}
+            className={`text-xs px-3 py-1.5 rounded-lg font-semibold transition-all ${
+              activeSection === 'devices'
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : 'text-slate-400 border border-white/8 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            Device Illustrations
+          </button>
         </div>
 
         {/* Zoom */}
@@ -630,6 +727,26 @@ ${Object.entries(LINE_TYPES).map(([, lt]) => {
             </div>
           </div>
         ))}
+
+        {/* v58.16 - Device illustrations (front-view hardware silhouettes) */}
+        {showDevices && DEVICE_ILLUSTRATIONS.length > 0 && (
+          <div className="sec">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Device Illustrations</div>
+                <div className="text-[11px] text-slate-600 mt-0.5">v58.16 Phase 1 - front-view silhouettes of the actual hardware (replaces the generic emblem on the SLD when the brand is selected)</div>
+              </div>
+              <div className="text-[10px] text-slate-500">
+                <span className="font-mono text-emerald-400">{DEVICE_ILLUSTRATIONS.length}</span> device{DEVICE_ILLUSTRATIONS.length !== 1 ? 's' : ''}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {DEVICE_ILLUSTRATIONS.map(d => (
+                <DeviceIllustrationCard key={d.brand + '::' + d.kind} device={d} zoom={zoom} showDetails={showDetails} />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* v58.15 - Brand emblem sections */}
         {visibleBrandGroups.map(group => (
