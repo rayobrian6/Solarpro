@@ -13,13 +13,22 @@ import {
 } from './sld-device-illustrations';
 
 describe('sld-device-illustrations — registry', () => {
-  it('Phase 1 + 1.5 ships Tesla (battery + BUI) and EcoFlow (inverter + battery + BUI)', () => {
+  it('Phase 1 + 1.5 + 2 ships Tesla, EcoFlow, Enphase, SolarEdge, Generac', () => {
     const all = listDeviceIllustrations();
     const ids = all.map(d => `${d.brand}::${d.kind}`).sort();
     expect(ids).toEqual([
       'ecoflow::battery',
       'ecoflow::bui',
       'ecoflow::inverter',
+      'enphase::battery',
+      'enphase::bui',
+      'enphase::inverter',
+      'generac::battery',
+      'generac::bui',
+      'generac::inverter',
+      'solaredge::battery',
+      'solaredge::bui',
+      'solaredge::inverter',
       'tesla::battery',
       'tesla::bui',
     ]);
@@ -62,6 +71,30 @@ describe('sld-device-illustrations — resolveDeviceIllustration', () => {
     expect(resolveDeviceIllustration('EcoFlow', 'battery')).not.toBeNull();
     expect(resolveDeviceIllustration('EcoFlow', 'bui')).not.toBeNull();
   });
+  it('resolves Enphase inverter + battery + BUI (Phase 2)', () => {
+    expect(resolveDeviceIllustration('Enphase', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('Enphase', 'battery')).not.toBeNull();
+    expect(resolveDeviceIllustration('Enphase', 'bui')).not.toBeNull();
+  });
+  it('resolves SolarEdge inverter + battery + BUI (Phase 2)', () => {
+    expect(resolveDeviceIllustration('SolarEdge', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('SolarEdge', 'battery')).not.toBeNull();
+    expect(resolveDeviceIllustration('SolarEdge', 'bui')).not.toBeNull();
+  });
+  it('resolves Generac inverter + battery + BUI (Phase 2)', () => {
+    expect(resolveDeviceIllustration('Generac', 'inverter')).not.toBeNull();
+    expect(resolveDeviceIllustration('Generac', 'battery')).not.toBeNull();
+    expect(resolveDeviceIllustration('Generac', 'bui')).not.toBeNull();
+  });
+  it('Phase 2 brand labels reference actual product lines', () => {
+    expect(resolveDeviceIllustration('Enphase', 'inverter')!.label).toMatch(/IQ8/i);
+    expect(resolveDeviceIllustration('Enphase', 'battery')!.label).toMatch(/IQ Battery/i);
+    expect(resolveDeviceIllustration('SolarEdge', 'inverter')!.label).toMatch(/Home Hub/i);
+    expect(resolveDeviceIllustration('SolarEdge', 'battery')!.label).toMatch(/Energy Bank/i);
+    expect(resolveDeviceIllustration('Generac', 'inverter')!.label).toMatch(/PWRcell/i);
+    expect(resolveDeviceIllustration('Generac', 'battery')!.label).toMatch(/PWRcell/i);
+    expect(resolveDeviceIllustration('Generac', 'bui')!.label).toMatch(/PWRmanager/i);
+  });
   it('resolves Tesla BUI (Backup Gateway 2)', () => {
     const d = resolveDeviceIllustration('Tesla', 'bui');
     expect(d).not.toBeNull();
@@ -90,10 +123,14 @@ describe('sld-device-illustrations — brandHasDevice', () => {
   it('true when any kind is registered for the brand', () => {
     expect(brandHasDevice('Tesla')).toBe(true);
     expect(brandHasDevice('EcoFlow')).toBe(true);
+    // Phase 2 brands
+    expect(brandHasDevice('Enphase')).toBe(true);
+    expect(brandHasDevice('SolarEdge')).toBe(true);
+    expect(brandHasDevice('Generac')).toBe(true);
   });
   it('false for brands without illustrations', () => {
-    expect(brandHasDevice('Enphase')).toBe(false); // Phase 2
-    expect(brandHasDevice('SolarEdge')).toBe(false); // Phase 2
+    expect(brandHasDevice('Fronius')).toBe(false);
+    expect(brandHasDevice('SMA')).toBe(false);
     expect(brandHasDevice('Unknown OEM')).toBe(false);
   });
   it('false for empty manufacturer', () => {
