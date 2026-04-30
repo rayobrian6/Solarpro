@@ -1,6 +1,5 @@
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-export const revalidate = 3600; // PERF v58.19: cache DSM (roof geometry stable)
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/security';
