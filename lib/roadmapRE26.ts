@@ -881,9 +881,8 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     effort: 'm',
     createdAt: '2026-05-10',
     updatedAt: '2026-05-10',
-    completedAt: '2026-05-10',
-    commit: '6e4e4b9',
-    version: 'v63.1',
+    shippedIn: 'v63.1',
+    commits: ['6e4e4b9'],
   },
   {
     id: 'api-utility-rate-feed',
