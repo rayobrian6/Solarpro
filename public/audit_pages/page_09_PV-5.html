@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta charset="UTF-8">
+<title>Permit Package â Smith Residence Solar Fence</title>
+<style>
+  /* âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+     SOLARPRO ENGINEERING DOCUMENT SYSTEM â CANONICAL STYLESHEET v47.270
+     CAD-standard. Rigid grid. Zero rounded corners. Zero UI colors.
+     Shared across ALL 14 sheets for absolute visual consistency.
+     ONE section system (.sec only). ALL data in tables. No tier variants.
+
+     SPACING SCALE (use ONLY these values):
+       --xs:  8px   (tight gaps, table cell padding)
+       --sm: 12px   (section internal padding)
+       --md: 16px   (between sections)
+       --lg: 24px   (column gaps)
+       --xl: 32px   (page margins)
+
+     GRID SYSTEM:
+       - 2-column: grid-template-columns: 1fr 1fr
+       - 3-column: grid-template-columns: 1fr 1fr 1fr
+       - Wide (full-width): grid-template-columns: 1fr
+       - All grids use gap: var(--md)
+       - All page margins: var(--xl) on all sides
+
+     SECTION BLOCK STANDARD:
+       <div class="sec">
+         <div class="sec-hdr">SECTION TITLE</div>
+         <div class="sec-body"> ... </div>
+       </div>
+  âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+
+  /* ââ Reset âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ââ Design tokens ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  :root {
+    --xs:  8px;
+    --sm: 12px;
+    --md: 16px;
+    --lg: 24px;
+    --xl: 32px;
+
+    --border:     1px solid #000;
+    --border-hvy: 2px solid #000;
+    --border-med: 1.5px solid #000;
+
+    --f-xs:  6.2px;
+    --f-sm:  6.6px;
+    --f-md:  7px;
+    --f-lg:  8px;
+    --f-xl:  9px;
+    --f-2xl:10px;
+    --f-3xl:12px;
+    --f-4xl:16px;
+
+    --mono: 'Courier New', Courier, monospace;
+    --sans: Arial, 'Helvetica Neue', sans-serif;
+
+    /* Vertical rhythm â space between major content blocks */
+    --gap-section: var(--md);   /* default gap between .sec blocks */
+  }
+
+  body {
+    font-family: var(--sans);
+    font-size: var(--f-md);
+    color: #000;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ââ Page container âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .page {
+    width: 17in;
+    height: 11in;
+    padding: var(--xl);
+    page-break-after: always;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    background: #fff;
+  }
+  .page:last-child { page-break-after: avoid; }
+
+  /* ââ Page body grid variants ââââââââââââââââââââââââââââââââââââââââââââââ */
+  /* All page-body variants: fill remaining height, gap = --md */
+  .page-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  .page-body-wide {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  .page-body-3col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  /* span helpers */
+  .span-2 { grid-column: span 2; }
+  .span-3 { grid-column: span 3; }
+
+  /* Column stack: vertical flex with canonical gap */
+  .col-stack       { display: flex; flex-direction: column; gap: var(--gap-section); }
+
+  /* ââ Page footer ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .page-footer {
+    font-size: var(--f-xs);
+    color: #555;
+    border-top: var(--border);
+    padding-top: var(--xs);
+    margin-top: var(--xs);
+    flex-shrink: 0;
+  }
+
+  /* ââ Page content area (fills grid row 2 â used by non-cover pages) âââââââ */
+  .page-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-section);
+    overflow: hidden;
+    margin-top: var(--md);
+    flex: 1;
+  }
+  /* 2-column variant for pages with left/right panels */
+  .page-content-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--gap-section);
+    overflow: hidden;
+    margin-top: var(--md);
+    flex: 1;
+  }
+
+  /* ââ Section block (canonical) ââââââââââââââââââââââââââââââââââââââââââââ */
+  /*
+     Standard section pattern:
+       <div class="sec">
+         <div class="sec-hdr">SECTION TITLE</div>
+         <div class="sec-body"> ... </div>
+       </div>
+  */
+  .sec {
+    border: var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+    box-sizing: border-box;
+  }
+  .sec-hdr {
+    font-size: var(--f-sm);
+    font-weight: 900;
+    color: #fff;
+    background: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px var(--xs);
+    flex-shrink: 0;
+    font-family: var(--sans);
+    border-bottom: var(--border);
+  }
+  .sec-body {
+    flex-grow: 1;
+    padding: var(--xs);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* sec-body-np: no padding (for flush tables) */
+  .sec-body-np {
+    flex-grow: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* sec-scroll: allow internal scroll (for long tables) */
+  .sec-scroll {
+    flex-grow: 1;
+    overflow: auto;
+  }
+
+  /* -- Drawing-package layout (v47.273) -- */
+  .page-draw {
+    display: flex; flex-direction: column; gap: 0;
+    overflow: hidden; margin-top: var(--md); flex: 1;
+  }
+  .draw-zone {
+    flex: 0 0 82%; overflow: hidden;
+    display: flex; flex-direction: column;
+    border: var(--border); background: #fff;
+  }
+  .draw-zone-hdr {
+    background: #000; color: #fff;
+    font-size: var(--f-sm); font-weight: 900;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    padding: 3px var(--xs); flex-shrink: 0;
+  }
+  .draw-zone-body {
+    flex: 1; display: flex; align-items: center;
+    justify-content: center; overflow: hidden; padding: 6px;
+    background: #fff;
+  }
+  .draw-zone-body svg {
+    width: auto; height: auto;
+    max-width: 100%; max-height: 100%;
+    display: block;
+  }
+  .data-zone {
+    flex: 0 0 18%; overflow: hidden;
+    display: flex; flex-direction: column; gap: 0;
+    border: var(--border); border-top: none;
+  }
+  .data-zone-2col {
+    display: flex; flex-direction: column;
+    gap: 0; flex: 1; overflow: hidden;
+  }
+  .data-zone-2col > * { border-bottom: var(--border); overflow: hidden; }
+  .data-zone-2col > *:last-child { border-bottom: none; }
+  .callout-bubble {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border: 1.5px solid #000; border-radius: 50%;
+    font-size: 8px; font-weight: 900; background: #fff; color: #000; flex-shrink: 0;
+  }
+  .callout-row {
+    display: flex; align-items: flex-start; gap: 3px;
+    padding: 2px 4px; font-size: var(--f-xs);
+    border-bottom: 1px solid #eee; line-height: 1.6;
+  }
+  .callout-row:last-child { border-bottom: none; }
+
+  /* -- CAD line weight system (v47.280) -- */
+  .line-struct { stroke: #000; stroke-width: 3.0; fill: none; }
+  .line-panel  { stroke: #2255aa; stroke-width: 1.5; fill: none; }
+  .line-dim    { stroke: #0055aa; stroke-width: 0.7; fill: none; stroke-dasharray: none; }
+  .line-grade  { stroke: #5C4A20; stroke-width: 2.5; fill: none; }
+  .line-hidden { stroke: #888; stroke-width: 0.8; fill: none; stroke-dasharray: 4,3; }
+  .line-wind   { stroke: #cc0000; stroke-width: 1.8; fill: none; }
+  .line-setbk  { stroke: #cc0000; stroke-width: 1.0; fill: none; stroke-dasharray: 6,3; }
+  .line-conduit { stroke: #ff8800; stroke-width: 1.5; fill: none; stroke-dasharray: 8,4; }
+
+  /* Legacy aliases â map old class names to new sec system */
+  .section     { border: var(--border); display: flex; flex-direction: column; overflow: hidden; height: 100%; box-sizing: border-box; }
+  .section-hdr { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); }
+  .section-content { flex-grow: 1; padding: var(--xs); overflow: hidden; display: flex; flex-direction: column; }
+  .section-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
+  .section-title:first-child { margin-top: 0; }
+
+  /* ââ Utility: dark header bar (reused across pages) âââââââââââââââââââââââ */
+  .sec-hdr-dark {
+    background: #000; color: #fff;
+    padding: 3px var(--xs);
+    font-size: var(--f-xs); font-weight: 900;
+    text-transform: uppercase; letter-spacing: 1px;
+    width: 100%; box-sizing: border-box;
+  }
+
+  /* ââ Warning label card âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .lbl-card { border: var(--border-med); overflow: hidden; width: 100%; box-sizing: border-box; }
+  .lbl-hdr {
+    background: #000; color: #fff;
+    padding: 3px 6px;
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; box-sizing: border-box;
+  }
+  .lbl-hdr-id  { font-weight: 900; font-size: 9px; font-family: var(--mono); letter-spacing: 1px; color: #fff; }
+  .lbl-hdr-ref { font-size: 7.5px; font-family: var(--mono); color: #ccc; }
+  .lbl-footer  { background: #f5f5f5; border-top: var(--border); padding: 3px 6px; font-size: 7.5px; color: #000; }
+
+  /* ââ Note / callout bar ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .note-bar {
+    border: var(--border);
+    padding: 4px var(--sm);
+    background: #fff;
+    font-size: var(--f-xs);
+    color: #000;
+    line-height: 1.5;
+  }
+  .note-bar-label {
+    font-weight: 900; font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-right: 6px;
+  }
+
+  /* ââ Table header row (black) ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .tbl-hdr-row th {
+    background: #000; color: #fff;
+    padding: 2px 3px;
+    font-size: var(--f-xs); text-align: left;
+    font-weight: 700;
+  }
+  .tbl-hdr-row th.center { text-align: center; }
+
+  /* ââ PE Letter: signature / stamp ââââââââââââââââââââââââââââââââââââââââââ */
+  .sig-grid {
+    display: grid; grid-template-columns: 3fr 2fr; gap: 0;
+    padding: var(--xs);
+  }
+  .sig-col { padding-right: var(--sm); }
+  .sig-col-stamp {
+    border-left: var(--border);
+    padding-left: var(--sm);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .sig-field { margin-bottom: var(--xs); font-size: var(--f-xs); }
+  .sig-line     { border-bottom: var(--border);     display: inline-block; }
+  .sig-line-hvy { border-bottom: var(--border-hvy); display: inline-block; }
+  .stamp-box {
+    width: 90px; height: 90px;
+    border: var(--border-hvy);
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ââ SVG / diagram wrapper âââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .svg-wrap { background: #fff; border: var(--border); padding: 4px; overflow: hidden; }
+  .svg-wrap img, .svg-wrap svg { display: block; width: 100%; height: auto; }
+
+  /* ââ Aerial/map image wrapper ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .aerial-wrap { position: relative; display: block; width: 100%; overflow: hidden; border: 1.5px solid #374151; }
+  .aerial-wrap img { display: block; width: 100%; height: auto; }
+  .aerial-wrap svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  .aerial-pin-label { background: #fff; border: var(--border); padding: 2px 5px; white-space: nowrap; margin-top: 1px; }
+  .aerial-nts { position: absolute; bottom: 3px; right: 3px; background: #fff; border: var(--border); padding: 1px 4px; }
+
+  /* ââ Sec-body table (table fills sec-body, no internal padding) ââââââââââââ */
+  .sec-body-table { padding: 0; }
+  .sec-body-table table { width: 100%; border-collapse: collapse; }
+
+  /* ââ Cover: 2-col grid layout ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cover-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--md); }
+
+  /* ââ Inline sub-header (within sec-body, not a full sec-hdr) âââââââââââââââ */
+  .sub-hdr {
+    font-size: var(--f-xs); font-weight: 900; text-transform: uppercase; color: #000;
+    border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 4px;
+  }
+  .sub-hdr-hvy { border-bottom: var(--border-hvy) !important; }
+
+  /* ââ Sig line underlines (PE letter) âââââââââââââââââââââââââââââââââââââââ */
+  .sig-underline-sm  { border-bottom: var(--border);     display: inline-block; width: 130px; }
+  .sig-underline-md  { border-bottom: var(--border);     display: inline-block; width: 160px; }
+  .sig-underline-xl  { border-bottom: var(--border-hvy); display: inline-block; width: 200px; }
+  .sig-underline-110 { border-bottom: var(--border);     display: inline-block; width: 110px; }
+
+  /* ââ Centered callout block (e.g. "no data" placeholder) âââââââââââââââââââ */
+  .callout-center {
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; width: 100%;
+  }
+
+  /* ââ Title block (bottom strip on every sheet) ââââââââââââââââââââââââââââ */
+  .title-block {
+    display: table;
+    width: 100%;
+    border: var(--border-hvy);
+    background: #fff;
+    border-collapse: collapse;
+    flex-shrink: 0;
+    margin-bottom: var(--xs);
+  }
+  .tb-left {
+    display: table-cell;
+    width: 30%;
+    padding: var(--xs);
+    border-right: var(--border);
+    vertical-align: top;
+  }
+  .tb-center {
+    display: table-cell;
+    width: 40%;
+    padding: var(--xs);
+    border-right: var(--border);
+    vertical-align: middle;
+    text-align: center;
+  }
+  .tb-right {
+    display: table-cell;
+    width: 30%;
+    padding: 0;
+    vertical-align: top;
+  }
+  .tb-company     { font-size: var(--f-xl); font-weight: 900; color: #000; letter-spacing: 2px; text-transform: uppercase; border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 2px; }
+  .tb-project     { font-size: var(--f-xl); font-weight: 700; color: #000; margin-top: 2px; text-transform: uppercase; }
+  .tb-address     { font-size: var(--f-sm); color: #333; margin-top: 1px; }
+  .tb-client      { font-size: var(--f-sm); color: #333; margin-top: 1px; }
+  .tb-meta        { font-size: var(--f-xs); color: #555; margin-top: 1px; }
+  .tb-sheet-id    { font-size: var(--f-4xl); font-weight: 900; color: #000; font-family: var(--mono); letter-spacing: 4px; border-bottom: var(--border-hvy); padding-bottom: 3px; margin-bottom: 2px; }
+  .tb-sheet-title { font-size: var(--f-2xl); font-weight: 900; color: #000; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
+  .tb-codes       { font-size: var(--f-xs); color: #555; margin-top: 3px; }
+  .tb-size        { font-size: var(--f-xs); color: #777; margin-top: 1px; }
+
+  /* Title block right column â meta table */
+  .tb-table { width: 100%; border-collapse: collapse; font-size: var(--f-sm); }
+  .tb-table tr { border-bottom: var(--border); }
+  .tb-table tr:last-child { border-bottom: none; }
+  .tbl {
+    color: #000;
+    padding: 2px var(--xs);
+    white-space: nowrap;
+    font-weight: 700;
+    width: 38%;
+    font-size: var(--f-xs);
+    border-right: var(--border);
+    text-transform: uppercase;
+    background: #f0f0f0;
+  }
+  .tbv {
+    font-weight: 500;
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-sm);
+  }
+  .pe-seal-box {
+    font-size: var(--f-xs);
+    color: #555;
+    text-align: center;
+    border: var(--border);
+    padding: 2px var(--xs);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  /* ââ Info table (label / value pairs) âââââââââââââââââââââââââââââââââââââ */
+  .info-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .info-table tr { border-bottom: var(--border); }
+  .info-table tr:last-child { border-bottom: none; }
+  .il {
+    font-weight: 900;
+    padding: 2px var(--xs);
+    width: 38%;
+    white-space: nowrap;
+    border-right: var(--border);
+    font-size: var(--f-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: #f0f0f0;
+    vertical-align: top;
+  }
+  .iv {
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-md);
+    vertical-align: top;
+    line-height: 1.4;
+  }
+  /* Emphasized value â key metrics (system size, module count) */
+  .iv-em {
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-lg);
+    font-weight: 900;
+    font-family: var(--mono);
+    vertical-align: top;
+    line-height: 1.4;
+    letter-spacing: 0.3px;
+  }
+
+  /* ââ Equipment / BOM tables âââââââââââââââââââââââââââââââââââââââââââââââ */
+  .equip-table, .bom-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--f-md);
+    border: var(--border);
+  }
+  .equip-table th, .bom-table th {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    text-align: left;
+    font-weight: 900;
+    font-size: var(--f-xs);
+    letter-spacing: 0.5px;
+    border-right: 1px solid #444;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .equip-table th:last-child, .bom-table th:last-child { border-right: none; }
+  .equip-table td, .bom-table td {
+    padding: 2px var(--xs);
+    border-bottom: var(--border);
+    border-right: 1px solid #ddd;
+    vertical-align: middle;
+    color: #000;
+    font-size: var(--f-md);
+  }
+  .equip-table td:last-child, .bom-table td:last-child { border-right: none; }
+  .equip-table tbody tr:last-child td,
+  .bom-table   tbody tr:last-child td { border-bottom: var(--border-hvy); }
+  .equip-table tr:nth-child(even) td,
+  .bom-table   tr:nth-child(even) td { background: #f8f8f8; }
+  .bom-note { font-size: var(--f-xs); color: #444; margin-top: var(--xs); flex-shrink: 0; }
+
+  /* ââ Calc / structural tables âââââââââââââââââââââââââââââââââââââââââââââ */
+  .calc-table { width: 100%; border-collapse: collapse; }
+  .calc-table tr { border-bottom: var(--border); }
+  .calc-table tr:last-child { border-bottom: none; }
+  .calc-table td { padding: 2px var(--xs); font-size: var(--f-md); color: #000; }
+  .cv { text-align: right; font-weight: 700; font-family: var(--mono); }
+
+  /* ââ Sheet index table ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .sheet-index-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .sheet-index-table th {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    text-align: left;
+    font-weight: 900;
+    font-size: var(--f-xs);
+    text-transform: uppercase;
+    border-right: 1px solid #444;
+    letter-spacing: 0.5px;
+  }
+  .sheet-index-table th:last-child { border-right: none; }
+  .sheet-index-table td {
+    padding: 2px var(--xs);
+    border-bottom: var(--border);
+    color: #000;
+    font-size: var(--f-md);
+    border-right: 1px solid #ddd;
+  }
+  .sheet-index-table td:last-child { border-right: none; }
+  .si-id { font-weight: 900; font-family: var(--mono); color: #000; width: 64px; }
+
+  /* ââ Structural cards âââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .struct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; }
+  .struct-card { border: var(--border); overflow: hidden; }
+  .sct {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    font-weight: 900;
+    font-size: var(--f-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ââ NEC rules summary bar ââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .rules-summary { display: flex; flex-direction: row; border: var(--border); border-bottom: none; margin-bottom: var(--xs); overflow: hidden; }
+  .rs { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--xs) var(--sm); border-right: var(--border); flex: 1; }
+  .rs:last-child { border-right: none; }
+  .rs-val { font-size: var(--f-3xl); font-weight: 900; color: #000; font-family: var(--mono); }
+  .rs-lbl { font-size: var(--f-xs); color: #444; text-transform: uppercase; letter-spacing: 0.3px; }
+
+  /* ââ Warning labels âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .label-intro {
+    font-size: var(--f-md);
+    color: #000;
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-bottom: var(--xs);
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+  .labels-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--md); width: 100%; }
+  .label-card { border: var(--border); overflow: hidden; display: flex; flex-direction: column; }
+  .label-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #000;
+    padding: 3px var(--xs);
+    flex-shrink: 0;
+  }
+  .label-id  { font-weight: 900; font-size: var(--f-md); color: #fff; text-transform: uppercase; }
+  .label-nec { font-size: var(--f-xs); color: #ccc; font-family: var(--mono); }
+  .label-visual { padding: var(--xs); flex-grow: 1; display: block; }
+  .label-warning-line { font-size: var(--f-lg); font-weight: 900; letter-spacing: 0.5px; margin-bottom: 3px; }
+  .label-body-line { font-size: var(--f-md); line-height: 1.5; }
+  .label-placement {
+    font-size: var(--f-sm);
+    color: #000;
+    padding: var(--xs);
+    border-top: var(--border);
+    background: #f8f8f8;
+    flex-shrink: 0;
+  }
+
+  /* ââ Map / aerial placeholder âââââââââââââââââââââââââââââââââââââââââââââ */
+  .map-placeholder {
+    border: var(--border-hvy);
+    flex-grow: 1;
+    display: flex;
+    width: 100%;
+    background: #e8e8e8;
+  }
+  .map-inner {
+    text-align: center;
+    padding: var(--sm);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+  }
+  .map-icon  { font-size: 28px; opacity: 0.4; }
+  .map-title { font-size: var(--f-xl); font-weight: 900; color: #333; margin-top: var(--xs); text-transform: uppercase; }
+  .map-addr  { font-size: var(--f-lg); color: #555; margin-top: var(--xs); }
+  .map-note  { font-size: var(--f-md); color: #777; margin-top: var(--xs); }
+
+  /* ââ Rapid shutdown box âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .rapid-shutdown-box { background: #fff; border: var(--border); padding: var(--xs); margin-top: var(--xs); }
+  .rs-title { font-size: var(--f-lg); font-weight: 900; color: #cc0000; margin-bottom: var(--xs); text-transform: uppercase; }
+  .rs-body  { font-size: var(--f-md); color: #000; line-height: 1.5; }
+
+  /* ââ Attachment note ââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .attach-note {
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-top: var(--xs);
+    font-size: var(--f-sm);
+    color: #000;
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+
+  /* ââ Certification page âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cert-header {
+    font-size: var(--f-2xl);
+    font-weight: 900;
+    text-align: center;
+    color: #000;
+    border-bottom: var(--border-hvy);
+    padding-bottom: var(--xs);
+    margin-bottom: var(--xs);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    flex-shrink: 0;
+  }
+  .cert-statement {
+    font-size: var(--f-md);
+    line-height: 1.5;
+    color: #000;
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-bottom: var(--xs);
+  }
+  .cert-statement li { margin-bottom: 2px; margin-left: var(--md); }
+  .cert-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; margin-bottom: var(--xs); }
+  .cert-block-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
+  .cert-block-title:first-child { margin-top: 0; }
+  .cert-field { margin-bottom: var(--xs); }
+  .cf-val { font-size: var(--f-xl); font-weight: 600; color: #000; border-bottom: var(--border-hvy); padding-bottom: 3px; min-height: 22px; }
+  .cf-lbl { font-size: var(--f-sm); color: #555; margin-top: 2px; text-transform: uppercase; }
+  .stamp-box { border: var(--border-hvy); min-height: 96px; display: flex; align-items: center; justify-content: center; width: 100%; text-align: center; }
+  .cert-footer {
+    font-size: var(--f-sm);
+    color: #555;
+    text-align: center;
+    border-top: var(--border);
+    padding-top: var(--xs);
+    margin-top: var(--md);
+  }
+  .notes-box { background: #fff; border: var(--border); padding: var(--xs); font-size: var(--f-lg); color: #000; }
+
+  /* ââ Construction notes list ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .construction-notes { padding-left: var(--md); font-size: var(--f-md); line-height: 1.5; color: #000; }
+  .construction-notes li { margin-bottom: 2px; }
+
+  /* ââ Cover sheet specific âââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cover-section-hdr {
+    font-size: var(--f-md);
+    font-weight: 900;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: var(--border-hvy);
+    padding-bottom: 2px;
+    margin-bottom: var(--xs);
+  }
+  .cover-list-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .cover-list-table tr td { padding: 2px var(--xs); vertical-align: top; color: #000; border-bottom: var(--border); }
+  .cover-list-table tr:last-child td { border-bottom: none; }
+  .cli { width: 64px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
+
+  /* cv0 = cover sheet data rows */
+  .cv0-hdr {
+    font-size: var(--f-md);
+    font-weight: 900;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    border-bottom: var(--border-hvy);
+    padding-bottom: 2px;
+    margin-bottom: var(--xs);
+  }
+  .cv0-tbl { width: 100%; border-collapse: collapse; font-size: var(--f-md); line-height: 1.5; }
+  .cv0-tbl tr td { padding: 2px var(--xs); vertical-align: top; color: #000; border-bottom: var(--border); }
+  .cv0-tbl tr:last-child td { border-bottom: none; }
+  .cv0-tag { width: 28px; font-weight: 900; color: #000; white-space: nowrap; font-family: var(--mono); border-right: var(--border); }
+  .cv0-key { width: 110px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
+
+  /* ââ SLD page âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .sld-page { padding: var(--xl); height: 11in; }
+  .sld-page .title-block { margin-bottom: var(--xs); }
+  .sld-page svg { max-width: 100%; max-height: calc(11in - 1.8in); object-fit: contain; }
+
+  /* ââ Two-column layout helper (legacy) ââââââââââââââââââââââââââââââââââââ */
+  .two-col-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-section); width: 100%; overflow: hidden; }
+  .col-left  { overflow: hidden; }
+  .col-right { overflow: hidden; }
+
+  /* ââ NEC 120% rule box ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .nec-rule-box {
+    border: var(--border-hvy);
+    padding: var(--xs);
+    font-size: var(--f-md);
+    font-family: var(--mono);
+    font-weight: 700;
+    color: #000;
+    background: #fff;
+    line-height: 1.6;
+  }
+
+  /* ââ Utility classes ââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .mono { font-family: var(--mono); }
+  .bold { font-weight: 900; }
+  .caps { text-transform: uppercase; }
+  .center { text-align: center; }
+  .right  { text-align: right; }
+  .muted  { color: #555; }
+  .danger { color: #cc0000; font-weight: 900; }
+  .w100   { width: 100%; }
+
+  /* ââ Inline-style replacement utility classes ââââââââââââââââââââââââââââ */
+  /* These replace the most common inline style patterns across page functions */
+  .tr   { text-align: right; }
+  .tc   { text-align: center; }
+  .tl   { text-align: left; }
+  .fw9  { font-weight: 900; }
+  .fw7  { font-weight: 700; }
+  .fw6  { font-weight: 600; }
+  .fw4  { font-weight: 400; }
+  .mono { font-family: var(--mono); }
+  .f-xs { font-size: var(--f-xs); }
+  .f-sm { font-size: var(--f-sm); }
+  .f-md { font-size: var(--f-md); }
+  .f-lg { font-size: var(--f-lg); }
+  /* ââ Flex helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .df  { display: flex; }
+  .aic { align-items: center; }
+  .jcc { justify-content: center; }
+  .jsb { justify-content: space-between; }
+  .f1  { flex: 1; }
+  .fs0 { flex-shrink: 0; }
+
+  .mt-xs { margin-top: var(--xs); }
+  .mt-sm { margin-top: var(--sm); }
+  .mt-md { margin-top: var(--md); }
+  .mb-xs { margin-bottom: var(--xs); }
+  .mb-sm { margin-bottom: var(--sm); }
+  .mb-md { margin-bottom: var(--md); }
+  .pt-xs { padding-top: var(--xs); }
+  .pt-sm { padding-top: var(--sm); }
+  .pb-xs { padding-bottom: var(--xs); }
+  .pb-sm { padding-bottom: var(--sm); }
+  .p-xs  { padding: var(--xs); }
+  .bb-1   { border-bottom: var(--border); }
+  .bb-hvy { border-bottom: var(--border-hvy); }
+  .bt-1   { border-top: var(--border); }
+  .bl-1   { border-left: var(--border); }
+  .c000  { color: #000; }
+  .c555  { color: #555; }
+  .c999  { color: #999; }
+  .c444  { color: #444; }
+  .c666  { color: #666; }
+  .bg000 { background: #000; color: #fff; }
+  .bg-lt { background: #f8f8f8; }
+  /* Inline section header bar (no outer .sec container needed) */
+  .blk-hdr {
+    font-size: var(--f-sm);
+    font-weight: 900;
+    color: #fff;
+    background: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px var(--xs);
+    font-family: var(--sans);
+  }
+  /* Inline content box (border, padding) */
+  .blk-body {
+    border: var(--border);
+    border-top: none;
+    padding: var(--xs);
+  }
+  /* NEC note / code reference line */
+  .code-ref {
+    font-size: var(--f-xs);
+    font-family: var(--mono);
+    color: #555;
+    margin-top: 2px;
+  }
+  /* Numbered note row */
+  .note-row { display: table; width: 100%; margin-bottom: 2px; }
+  .note-num { display: table-cell; width: var(--md); font-family: var(--mono); font-weight: 900; font-size: var(--f-md); vertical-align: top; color: #000; }
+  .note-txt { display: table-cell; font-size: var(--f-md); line-height: 1.5; color: #000; font-family: var(--sans); }
+
+  /* ââ Print ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  @page { size: 17in 11in landscape; margin: 0; }
+  @media print { .page { page-break-after: always; } }
+</style>
+</head>
+<body>
+
+  
+<body style="margin:0;padding:0;background:#ccc;">
+<div class="page">
+    
+  <div class="title-block">
+    <div class="tb-left">
+      <div class="tb-company">SOLARPRO ENGINEERING</div>
+      <div class="tb-project">Smith Residence Solar Fence</div>
+      <div class="tb-address">1234 Solar Way, Austin, TX 78701</div>
+      <div class="tb-client">CLIENT: John & Jane Smith</div>
+      <div class="tb-meta">APN: â &nbsp;|&nbsp; UTILITY: Austin Energy</div>
+      <div class="tb-meta">AHJ: City of Austin &nbsp;|&nbsp; TX</div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-sheet-id">PV-5</div>
+      <div class="tb-sheet-title">WARNING LABELS & REQUIRED PLACARDS</div>
+      <div class="tb-codes">NEC 2023 &middot; IBC 2021 &middot; IRC 2021 &middot; IFC 2024 &middot; ASCE 7-22</div>
+      <div class="tb-size">SHEET SIZE: ANSI B &mdash; 11&Prime; &times; 17&Prime;</div>
+    </div>
+    <div class="tb-right">
+      <table class="tb-table">
+        <tr><td class="tbl">DESIGNER</td><td class="tbv">Sarah L. Nguyen, PE â TX-PE-54321</td></tr>
+        <tr><td class="tbl">DATE</td><td class="tbv">2026-04-06</td></tr>
+        <tr><td class="tbl">SHEET</td><td class="tbv">9 OF 14</td></tr>
+        <tr><td class="tbl">SYSTEM</td><td class="tbv">19.20 kW DC / 48 modules</td></tr>
+        <tr><td class="tbl">MODULE</td><td class="tbv">Silfab SIL-400-HV</td></tr>
+        <tr><td class="tbl">INVERTER</td><td class="tbv">Enphase IQ8M-72-2-US</td></tr>
+        <tr><td class="tbl">UTILITY</td><td class="tbv">Austin Energy</td></tr>
+        <tr><td class="tbl">AHJ</td><td class="tbv">City of Austin</td></tr>
+        <tr class="tb-rev-hdr"><td class="tbl" colspan="2" style="text-align:center;font-weight:900;background:#000;color:#fff;letter-spacing:0.5px;">REVISIONS</td></tr>
+        <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; 2026-04-06</td></tr>
+        <tr><td class="tbl">SCALE</td><td class="tbv">NTS</td></tr>
+        <tr><td class="tbl">PE SEAL</td><td class="tbv"><div class="pe-seal-box">SEAL / STAMP REQUIRED</div></td></tr>
+      </table>
+    </div>
+  </div>
+    <div class="page-content">
+
+      <div class="note-bar" style="margin-bottom:7px;">
+        ALL WARNING LABELS SHALL BE PERMANENTLY INSTALLED, WEATHER-RESISTANT, AND MEET MINIMUM CHARACTER HEIGHT REQUIREMENTS PER NEC 2023.
+        LETTERING SHALL BE MINIMUM 3/8" HEIGHT FOR FIELD-APPLIED LABELS, OR AS SPECIFIED BY MANUFACTURER FOR LISTED LABELS.
+        COLOR: WHITE LETTERING ON RED BACKGROUND (NEC 690.56) UNLESS OTHERWISE NOTED.
+      </div>
+
+      <div class="sec-hdr-dark" style="margin-bottom:5px;">
+        REQUIRED LABELS &mdash; 5 OF 9 APPLICABLE TO THIS SYSTEM
+      </div>
+
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed;margin-bottom:10px;">
+        <tbody>
+          <tr><td style="width:33.33%;padding:3px 4px;vertical-align:top;"><div class="lbl-card"><div class="lbl-hdr"><span class="lbl-hdr-id">L-1</span><span class="lbl-hdr-ref">NEC 690.54 / NEC 2023</span></div><div style="background:#cc0000;color:#ffffff;padding:6px 8px;min-height:58px;"><div style="font-size:10.5px;font-weight:900;letter-spacing:0.8px;line-height:1.45;white-space:normal;word-break:break-word;">WARNING</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">SOLAR ELECTRIC SYSTEM CONNECTED</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">MAXIMUM SYSTEM VOLTAGE: 240V AC</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">MAXIMUM CIRCUIT CURRENT: 13.1A</div></div><div class="lbl-footer"><strong>LOCATION:</strong> On combiner box and at DC disconnect</div></div></td><td style="width:33.33%;padding:3px 4px;vertical-align:top;"><div class="lbl-card"><div class="lbl-hdr"><span class="lbl-hdr-id">L-2</span><span class="lbl-hdr-ref">NEC 690.56(B)</span></div><div style="background:#cc0000;color:#ffffff;padding:6px 8px;min-height:58px;"><div style="font-size:10.5px;font-weight:900;letter-spacing:0.8px;line-height:1.45;white-space:normal;word-break:break-word;">SOLAR RAPID SHUTDOWN</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">STATUS:</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">â¡ NORMAL OPERATION</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">â¡ RAPID SHUTDOWN ACTIVATED</div></div><div class="lbl-footer"><strong>LOCATION:</strong> At rapid shutdown initiator (service entrance)</div></div></td><td style="width:33.33%;padding:3px 4px;vertical-align:top;"><div class="lbl-card"><div class="lbl-hdr"><span class="lbl-hdr-id">L-3</span><span class="lbl-hdr-ref">NEC 690.56(C)(1)</span></div><div style="background:#cc0000;color:#ffffff;padding:6px 8px;min-height:58px;"><div style="font-size:10.5px;font-weight:900;letter-spacing:0.8px;line-height:1.45;white-space:normal;word-break:break-word;">WARNING</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">PHOTOVOLTAIC POWER SOURCE</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">DO NOT REMOVE OR COVER THIS LABEL</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">INSTALLATION SHUTDOWN INFORMATION INSIDE</div></div><div class="lbl-footer"><strong>LOCATION:</strong> At the array â each fence section with PV</div></div></td></tr><tr><td style="width:33.33%;padding:3px 4px;vertical-align:top;"><div class="lbl-card"><div class="lbl-hdr"><span class="lbl-hdr-id">L-4</span><span class="lbl-hdr-ref">NEC 705.12 / 690.64</span></div><div style="background:#cc0000;color:#ffffff;padding:6px 8px;min-height:58px;"><div style="font-size:10.5px;font-weight:900;letter-spacing:0.8px;line-height:1.45;white-space:normal;word-break:break-word;">WARNING</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">DUAL POWER SOURCES</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">PHOTOVOLTAIC SYSTEM CONNECTED</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">SHUT OFF PV DISCONNECT BEFORE SERVICING</div></div><div class="lbl-footer"><strong>LOCATION:</strong> On the main service panel â inside door</div></div></td><td style="width:33.33%;padding:3px 4px;vertical-align:top;"><div class="lbl-card"><div class="lbl-hdr"><span class="lbl-hdr-id">L-5</span><span class="lbl-hdr-ref">IFC Â§605.11 / NEC 690.56(A)</span></div><div style="background:#000;color:#ffffff;padding:6px 8px;min-height:58px;"><div style="font-size:10.5px;font-weight:900;letter-spacing:0.8px;line-height:1.45;white-space:normal;word-break:break-word;">SOLAR PV SYSTEM CONNECTED</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">1234 Solar Way, Austin, TX 78701</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">System Size: 19.20 kW DC</div><div style="font-size:8.5px;font-weight:700;letter-spacing:0.2px;line-height:1.45;white-space:normal;word-break:break-word;">Interconnection: Load Side â NEC 705.12(B)</div></div><div class="lbl-footer"><strong>LOCATION:</strong> Adjacent to or on the utility meter</div></div></td><td style="width:33.33%;padding:3px 4px;"></td></tr>
+        </tbody>
+      </table>
+
+      <!-- General Notes -->
+      <div class=\"sec-hdr-dark\" style=\"margin-bottom:4px;\">
+        GENERAL NOTES &mdash; INSTALLATION REQUIREMENTS
+      </div>
+      <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.55;border:var(--border);margin-bottom:8px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <div style="font-weight:900;font-size:8px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">ELECTRICAL</div>
+            <div style="margin-bottom:2px;">1. All electrical work shall be performed by a licensed electrician in accordance with NEC 2023.</div>
+            <div style="margin-bottom:2px;">2. All equipment shall be UL-listed and labeled for the intended application.</div>
+            <div style="margin-bottom:2px;">3. All conductor terminations shall be torqued to manufacturer specifications.</div>
+            <div style="margin-bottom:2px;">4. Conduit penetrations through fire-rated assemblies shall be firestopped per IBC 714.</div>
+            <div style="margin-bottom:2px;">5. Anti-islanding protection per IEEE 1547 and UL 1741 SA is integral to the inverter.</div>
+          </div>
+          <div>
+            <div style="font-weight:900;font-size:8px;letter-spacing:0.5px;margin-bottom:3px;border-bottom:1px solid #ccc;padding-bottom:2px;">STRUCTURAL / INSTALLATION</div>
+            <div style="margin-bottom:2px;">1. Contractor shall verify fence post layout, spacing, and foundation conditions prior to installation.</div>
+
+            <div style="margin-bottom:2px;">2. Any deviation from the approved design shall be reported to the engineer of record.</div>
+            <div style="margin-bottom:2px;">3. All below-grade conduit and conductors shall be rated for wet/direct burial locations per NEC 300.5.</div>
+
+            <div style="margin-bottom:2px;">4. Module and racking installation per manufacturer instructions and UL 2703 listing.</div>
+            <div style="margin-bottom:2px;">5. Maintain IFC Â§605.11 fire code setbacks: 3 ft from ridge, 18" from edges and valleys.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Inspection Hold Points -->
+      <div class=\"sec-hdr-dark\" style=\"margin-bottom:4px;\">
+        INSPECTION HOLD POINTS
+      </div>
+      <table class=\"equip-table\">
+        <thead><tr><th style="width:6%;">#</th><th style="width:22%;">Inspection Point</th><th style="width:42%;">Verification Requirements</th><th style="width:15%;">Code Reference</th><th style="width:15%;text-align:center;">Inspector</th></tr></thead>
+        <tbody>
+          <tr><td class="fw9 mono">1</td><td class="fw7">Rough Electrical</td><td>Verify conductor sizing, conduit routing, grounding connections, junction box accessibility</td><td class="mono" style="font-size:8px;">NEC 690, 250</td><td class="center">â¡</td></tr>
+          <tr class="bg-lt"><td class="fw9 mono">2</td><td class="fw7">Structural / Fence</td><td>Verify fence post embedment depth, concrete footing pour, post plumb/alignment, and module mounting</td><td class="mono" style="font-size:8px;">IBC Ch. 16, IRC R301</td><td class="center">â¡</td></tr>
+
+          <tr><td class="fw9 mono">3</td><td class="fw7">Module Installation</td><td>Verify module mounting, clamp torque, bonding connections, setback compliance</td><td class="mono" style="font-size:8px;">UL 2703, IFC 605.11</td><td class="center">â¡</td></tr>
+          <tr class="bg-lt"><td class="fw9 mono">4</td><td class="fw7">Final Electrical</td><td>Verify labeling, rapid shutdown, disconnect operation, grounding continuity, Voc/Isc verification</td><td class="mono" style="font-size:8px;">NEC 690.12, 690.54</td><td class="center">â¡</td></tr>
+          <tr><td class="fw9 mono">5</td><td class="fw7">Utility Interconnection</td><td>Verify meter configuration, net metering enrollment, anti-islanding test (if required by AHJ)</td><td class="mono" style="font-size:8px;">IEEE 1547, NEC 705</td><td class="center">â¡</td></tr>
+        </tbody>
+      </table>
+
+      <div class="sec-hdr-dark" style="margin-bottom:4px;">
+        LABEL SCHEDULE &mdash; ALL LABELS
+      </div>
+      <table class="equip-table">
+        <thead>
+          <tr>
+            <th style="width:7%;">LABEL</th>
+            <th style="width:22%;">CODE REFERENCE</th>
+            <th style="width:8%;text-align:center;">REQ'D</th>
+            <th>PLACEMENT LOCATION</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:#fff;"><td class="fw9 mono">L-1</td><td style="font-family:monospace;font-size:8px;">NEC 690.54 / NEC 2023</td><td style="text-align:center;font-weight:900;font-family:monospace;">YES</td><td style="font-size:9px;">On combiner box and at DC disconnect</td></tr><tr style="background:#f5f5f5;"><td class="fw9 mono">L-2</td><td style="font-family:monospace;font-size:8px;">NEC 690.56(B)</td><td style="text-align:center;font-weight:900;font-family:monospace;">YES</td><td style="font-size:9px;">At rapid shutdown initiator (service entrance)</td></tr><tr style="background:#fff;"><td class="fw9 mono">L-3</td><td style="font-family:monospace;font-size:8px;">NEC 690.56(C)(1)</td><td style="text-align:center;font-weight:900;font-family:monospace;">YES</td><td style="font-size:9px;">At the array â each fence section with PV</td></tr><tr style="background:#f5f5f5;"><td class="fw9 mono">L-4</td><td style="font-family:monospace;font-size:8px;">NEC 705.12 / 690.64</td><td style="text-align:center;font-weight:900;font-family:monospace;">YES</td><td style="font-size:9px;">On the main service panel â inside door</td></tr><tr style="background:#fff;"><td class="fw9 mono">L-5</td><td style="font-family:monospace;font-size:8px;">IFC Â§605.11 / NEC 690.56(A)</td><td style="text-align:center;font-weight:900;font-family:monospace;">YES</td><td style="font-size:9px;">Adjacent to or on the utility meter</td></tr><tr style="opacity:0.45;background:#f5f5f5;"><td class="fw9 mono">L-6</td><td style="font-family:monospace;font-size:8px;">NEC 690.53</td><td style="text-align:center;font-weight:900;font-family:monospace;">N/A</td><td style="font-size:9px;">On PV system DC disconnect (if string inverter)</td></tr><tr style="opacity:0.45;background:#fff;"><td class="fw9 mono">L-7</td><td style="font-family:monospace;font-size:8px;">NFPA 855 Â§4.3 / NEC 706</td><td style="text-align:center;font-weight:900;font-family:monospace;">N/A</td><td style="font-size:9px;">On battery storage enclosure â exterior</td></tr><tr style="opacity:0.45;background:#f5f5f5;"><td class="fw9 mono">L-8</td><td style="font-family:monospace;font-size:8px;">NFPA 855 Â§4.3.3</td><td style="text-align:center;font-weight:900;font-family:monospace;">N/A</td><td style="font-size:9px;">On battery storage enclosure â near electrical terminals</td></tr><tr style="opacity:0.45;background:#fff;"><td class="fw9 mono">L-9</td><td style="font-family:monospace;font-size:8px;">NEC 702 / NEC 705.12</td><td style="text-align:center;font-weight:900;font-family:monospace;">N/A</td><td style="font-size:9px;">On ATS/transfer switch enclosure</td></tr>
+        </tbody>
+      </table>
+
+    </div>
+  </div>
+  
+</body>
+</html>

@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<meta charset="UTF-8">
+<title>Permit Package â Smith Residence Solar Fence</title>
+<style>
+  /* âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+     SOLARPRO ENGINEERING DOCUMENT SYSTEM â CANONICAL STYLESHEET v47.270
+     CAD-standard. Rigid grid. Zero rounded corners. Zero UI colors.
+     Shared across ALL 14 sheets for absolute visual consistency.
+     ONE section system (.sec only). ALL data in tables. No tier variants.
+
+     SPACING SCALE (use ONLY these values):
+       --xs:  8px   (tight gaps, table cell padding)
+       --sm: 12px   (section internal padding)
+       --md: 16px   (between sections)
+       --lg: 24px   (column gaps)
+       --xl: 32px   (page margins)
+
+     GRID SYSTEM:
+       - 2-column: grid-template-columns: 1fr 1fr
+       - 3-column: grid-template-columns: 1fr 1fr 1fr
+       - Wide (full-width): grid-template-columns: 1fr
+       - All grids use gap: var(--md)
+       - All page margins: var(--xl) on all sides
+
+     SECTION BLOCK STANDARD:
+       <div class="sec">
+         <div class="sec-hdr">SECTION TITLE</div>
+         <div class="sec-body"> ... </div>
+       </div>
+  âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+
+  /* ââ Reset âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ââ Design tokens ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  :root {
+    --xs:  8px;
+    --sm: 12px;
+    --md: 16px;
+    --lg: 24px;
+    --xl: 32px;
+
+    --border:     1px solid #000;
+    --border-hvy: 2px solid #000;
+    --border-med: 1.5px solid #000;
+
+    --f-xs:  6.2px;
+    --f-sm:  6.6px;
+    --f-md:  7px;
+    --f-lg:  8px;
+    --f-xl:  9px;
+    --f-2xl:10px;
+    --f-3xl:12px;
+    --f-4xl:16px;
+
+    --mono: 'Courier New', Courier, monospace;
+    --sans: Arial, 'Helvetica Neue', sans-serif;
+
+    /* Vertical rhythm â space between major content blocks */
+    --gap-section: var(--md);   /* default gap between .sec blocks */
+  }
+
+  body {
+    font-family: var(--sans);
+    font-size: var(--f-md);
+    color: #000;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ââ Page container âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .page {
+    width: 17in;
+    height: 11in;
+    padding: var(--xl);
+    page-break-after: always;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    gap: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    background: #fff;
+  }
+  .page:last-child { page-break-after: avoid; }
+
+  /* ââ Page body grid variants ââââââââââââââââââââââââââââââââââââââââââââââ */
+  /* All page-body variants: fill remaining height, gap = --md */
+  .page-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  .page-body-wide {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  .page-body-3col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--md);
+    align-content: stretch;
+    overflow: hidden;
+    margin-top: var(--md);
+  }
+  /* span helpers */
+  .span-2 { grid-column: span 2; }
+  .span-3 { grid-column: span 3; }
+
+  /* Column stack: vertical flex with canonical gap */
+  .col-stack       { display: flex; flex-direction: column; gap: var(--gap-section); }
+
+  /* ââ Page footer ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .page-footer {
+    font-size: var(--f-xs);
+    color: #555;
+    border-top: var(--border);
+    padding-top: var(--xs);
+    margin-top: var(--xs);
+    flex-shrink: 0;
+  }
+
+  /* ââ Page content area (fills grid row 2 â used by non-cover pages) âââââââ */
+  .page-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gap-section);
+    overflow: hidden;
+    margin-top: var(--md);
+    flex: 1;
+  }
+  /* 2-column variant for pages with left/right panels */
+  .page-content-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--gap-section);
+    overflow: hidden;
+    margin-top: var(--md);
+    flex: 1;
+  }
+
+  /* ââ Section block (canonical) ââââââââââââââââââââââââââââââââââââââââââââ */
+  /*
+     Standard section pattern:
+       <div class="sec">
+         <div class="sec-hdr">SECTION TITLE</div>
+         <div class="sec-body"> ... </div>
+       </div>
+  */
+  .sec {
+    border: var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+    box-sizing: border-box;
+  }
+  .sec-hdr {
+    font-size: var(--f-sm);
+    font-weight: 900;
+    color: #fff;
+    background: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px var(--xs);
+    flex-shrink: 0;
+    font-family: var(--sans);
+    border-bottom: var(--border);
+  }
+  .sec-body {
+    flex-grow: 1;
+    padding: var(--xs);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* sec-body-np: no padding (for flush tables) */
+  .sec-body-np {
+    flex-grow: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  /* sec-scroll: allow internal scroll (for long tables) */
+  .sec-scroll {
+    flex-grow: 1;
+    overflow: auto;
+  }
+
+  /* -- Drawing-package layout (v47.273) -- */
+  .page-draw {
+    display: flex; flex-direction: column; gap: 0;
+    overflow: hidden; margin-top: var(--md); flex: 1;
+  }
+  .draw-zone {
+    flex: 0 0 82%; overflow: hidden;
+    display: flex; flex-direction: column;
+    border: var(--border); background: #fff;
+  }
+  .draw-zone-hdr {
+    background: #000; color: #fff;
+    font-size: var(--f-sm); font-weight: 900;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    padding: 3px var(--xs); flex-shrink: 0;
+  }
+  .draw-zone-body {
+    flex: 1; display: flex; align-items: center;
+    justify-content: center; overflow: hidden; padding: 6px;
+    background: #fff;
+  }
+  .draw-zone-body svg {
+    width: auto; height: auto;
+    max-width: 100%; max-height: 100%;
+    display: block;
+  }
+  .data-zone {
+    flex: 0 0 18%; overflow: hidden;
+    display: flex; flex-direction: column; gap: 0;
+    border: var(--border); border-top: none;
+  }
+  .data-zone-2col {
+    display: flex; flex-direction: column;
+    gap: 0; flex: 1; overflow: hidden;
+  }
+  .data-zone-2col > * { border-bottom: var(--border); overflow: hidden; }
+  .data-zone-2col > *:last-child { border-bottom: none; }
+  .callout-bubble {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border: 1.5px solid #000; border-radius: 50%;
+    font-size: 8px; font-weight: 900; background: #fff; color: #000; flex-shrink: 0;
+  }
+  .callout-row {
+    display: flex; align-items: flex-start; gap: 3px;
+    padding: 2px 4px; font-size: var(--f-xs);
+    border-bottom: 1px solid #eee; line-height: 1.6;
+  }
+  .callout-row:last-child { border-bottom: none; }
+
+  /* -- CAD line weight system (v47.280) -- */
+  .line-struct { stroke: #000; stroke-width: 3.0; fill: none; }
+  .line-panel  { stroke: #2255aa; stroke-width: 1.5; fill: none; }
+  .line-dim    { stroke: #0055aa; stroke-width: 0.7; fill: none; stroke-dasharray: none; }
+  .line-grade  { stroke: #5C4A20; stroke-width: 2.5; fill: none; }
+  .line-hidden { stroke: #888; stroke-width: 0.8; fill: none; stroke-dasharray: 4,3; }
+  .line-wind   { stroke: #cc0000; stroke-width: 1.8; fill: none; }
+  .line-setbk  { stroke: #cc0000; stroke-width: 1.0; fill: none; stroke-dasharray: 6,3; }
+  .line-conduit { stroke: #ff8800; stroke-width: 1.5; fill: none; stroke-dasharray: 8,4; }
+
+  /* Legacy aliases â map old class names to new sec system */
+  .section     { border: var(--border); display: flex; flex-direction: column; overflow: hidden; height: 100%; box-sizing: border-box; }
+  .section-hdr { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); }
+  .section-content { flex-grow: 1; padding: var(--xs); overflow: hidden; display: flex; flex-direction: column; }
+  .section-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
+  .section-title:first-child { margin-top: 0; }
+
+  /* ââ Utility: dark header bar (reused across pages) âââââââââââââââââââââââ */
+  .sec-hdr-dark {
+    background: #000; color: #fff;
+    padding: 3px var(--xs);
+    font-size: var(--f-xs); font-weight: 900;
+    text-transform: uppercase; letter-spacing: 1px;
+    width: 100%; box-sizing: border-box;
+  }
+
+  /* ââ Warning label card âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .lbl-card { border: var(--border-med); overflow: hidden; width: 100%; box-sizing: border-box; }
+  .lbl-hdr {
+    background: #000; color: #fff;
+    padding: 3px 6px;
+    display: flex; justify-content: space-between; align-items: center;
+    width: 100%; box-sizing: border-box;
+  }
+  .lbl-hdr-id  { font-weight: 900; font-size: 9px; font-family: var(--mono); letter-spacing: 1px; color: #fff; }
+  .lbl-hdr-ref { font-size: 7.5px; font-family: var(--mono); color: #ccc; }
+  .lbl-footer  { background: #f5f5f5; border-top: var(--border); padding: 3px 6px; font-size: 7.5px; color: #000; }
+
+  /* ââ Note / callout bar ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .note-bar {
+    border: var(--border);
+    padding: 4px var(--sm);
+    background: #fff;
+    font-size: var(--f-xs);
+    color: #000;
+    line-height: 1.5;
+  }
+  .note-bar-label {
+    font-weight: 900; font-size: var(--f-xs);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-right: 6px;
+  }
+
+  /* ââ Table header row (black) ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .tbl-hdr-row th {
+    background: #000; color: #fff;
+    padding: 2px 3px;
+    font-size: var(--f-xs); text-align: left;
+    font-weight: 700;
+  }
+  .tbl-hdr-row th.center { text-align: center; }
+
+  /* ââ PE Letter: signature / stamp ââââââââââââââââââââââââââââââââââââââââââ */
+  .sig-grid {
+    display: grid; grid-template-columns: 3fr 2fr; gap: 0;
+    padding: var(--xs);
+  }
+  .sig-col { padding-right: var(--sm); }
+  .sig-col-stamp {
+    border-left: var(--border);
+    padding-left: var(--sm);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .sig-field { margin-bottom: var(--xs); font-size: var(--f-xs); }
+  .sig-line     { border-bottom: var(--border);     display: inline-block; }
+  .sig-line-hvy { border-bottom: var(--border-hvy); display: inline-block; }
+  .stamp-box {
+    width: 90px; height: 90px;
+    border: var(--border-hvy);
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ââ SVG / diagram wrapper âââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .svg-wrap { background: #fff; border: var(--border); padding: 4px; overflow: hidden; }
+  .svg-wrap img, .svg-wrap svg { display: block; width: 100%; height: auto; }
+
+  /* ââ Aerial/map image wrapper ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .aerial-wrap { position: relative; display: block; width: 100%; overflow: hidden; border: 1.5px solid #374151; }
+  .aerial-wrap img { display: block; width: 100%; height: auto; }
+  .aerial-wrap svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  .aerial-pin-label { background: #fff; border: var(--border); padding: 2px 5px; white-space: nowrap; margin-top: 1px; }
+  .aerial-nts { position: absolute; bottom: 3px; right: 3px; background: #fff; border: var(--border); padding: 1px 4px; }
+
+  /* ââ Sec-body table (table fills sec-body, no internal padding) ââââââââââââ */
+  .sec-body-table { padding: 0; }
+  .sec-body-table table { width: 100%; border-collapse: collapse; }
+
+  /* ââ Cover: 2-col grid layout ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cover-grid { display: grid; grid-template-columns: 2fr 1fr; gap: var(--md); }
+
+  /* ââ Inline sub-header (within sec-body, not a full sec-hdr) âââââââââââââââ */
+  .sub-hdr {
+    font-size: var(--f-xs); font-weight: 900; text-transform: uppercase; color: #000;
+    border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 4px;
+  }
+  .sub-hdr-hvy { border-bottom: var(--border-hvy) !important; }
+
+  /* ââ Sig line underlines (PE letter) âââââââââââââââââââââââââââââââââââââââ */
+  .sig-underline-sm  { border-bottom: var(--border);     display: inline-block; width: 130px; }
+  .sig-underline-md  { border-bottom: var(--border);     display: inline-block; width: 160px; }
+  .sig-underline-xl  { border-bottom: var(--border-hvy); display: inline-block; width: 200px; }
+  .sig-underline-110 { border-bottom: var(--border);     display: inline-block; width: 110px; }
+
+  /* ââ Centered callout block (e.g. "no data" placeholder) âââââââââââââââââââ */
+  .callout-center {
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; width: 100%;
+  }
+
+  /* ââ Title block (bottom strip on every sheet) ââââââââââââââââââââââââââââ */
+  .title-block {
+    display: table;
+    width: 100%;
+    border: var(--border-hvy);
+    background: #fff;
+    border-collapse: collapse;
+    flex-shrink: 0;
+    margin-bottom: var(--xs);
+  }
+  .tb-left {
+    display: table-cell;
+    width: 30%;
+    padding: var(--xs);
+    border-right: var(--border);
+    vertical-align: top;
+  }
+  .tb-center {
+    display: table-cell;
+    width: 40%;
+    padding: var(--xs);
+    border-right: var(--border);
+    vertical-align: middle;
+    text-align: center;
+  }
+  .tb-right {
+    display: table-cell;
+    width: 30%;
+    padding: 0;
+    vertical-align: top;
+  }
+  .tb-company     { font-size: var(--f-xl); font-weight: 900; color: #000; letter-spacing: 2px; text-transform: uppercase; border-bottom: var(--border); padding-bottom: 2px; margin-bottom: 2px; }
+  .tb-project     { font-size: var(--f-xl); font-weight: 700; color: #000; margin-top: 2px; text-transform: uppercase; }
+  .tb-address     { font-size: var(--f-sm); color: #333; margin-top: 1px; }
+  .tb-client      { font-size: var(--f-sm); color: #333; margin-top: 1px; }
+  .tb-meta        { font-size: var(--f-xs); color: #555; margin-top: 1px; }
+  .tb-sheet-id    { font-size: var(--f-4xl); font-weight: 900; color: #000; font-family: var(--mono); letter-spacing: 4px; border-bottom: var(--border-hvy); padding-bottom: 3px; margin-bottom: 2px; }
+  .tb-sheet-title { font-size: var(--f-2xl); font-weight: 900; color: #000; margin-top: 2px; text-transform: uppercase; letter-spacing: 1px; }
+  .tb-codes       { font-size: var(--f-xs); color: #555; margin-top: 3px; }
+  .tb-size        { font-size: var(--f-xs); color: #777; margin-top: 1px; }
+
+  /* Title block right column â meta table */
+  .tb-table { width: 100%; border-collapse: collapse; font-size: var(--f-sm); }
+  .tb-table tr { border-bottom: var(--border); }
+  .tb-table tr:last-child { border-bottom: none; }
+  .tbl {
+    color: #000;
+    padding: 2px var(--xs);
+    white-space: nowrap;
+    font-weight: 700;
+    width: 38%;
+    font-size: var(--f-xs);
+    border-right: var(--border);
+    text-transform: uppercase;
+    background: #f0f0f0;
+  }
+  .tbv {
+    font-weight: 500;
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-sm);
+  }
+  .pe-seal-box {
+    font-size: var(--f-xs);
+    color: #555;
+    text-align: center;
+    border: var(--border);
+    padding: 2px var(--xs);
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  /* ââ Info table (label / value pairs) âââââââââââââââââââââââââââââââââââââ */
+  .info-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .info-table tr { border-bottom: var(--border); }
+  .info-table tr:last-child { border-bottom: none; }
+  .il {
+    font-weight: 900;
+    padding: 2px var(--xs);
+    width: 38%;
+    white-space: nowrap;
+    border-right: var(--border);
+    font-size: var(--f-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    background: #f0f0f0;
+    vertical-align: top;
+  }
+  .iv {
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-md);
+    vertical-align: top;
+    line-height: 1.4;
+  }
+  /* Emphasized value â key metrics (system size, module count) */
+  .iv-em {
+    color: #000;
+    padding: 2px var(--xs);
+    font-size: var(--f-lg);
+    font-weight: 900;
+    font-family: var(--mono);
+    vertical-align: top;
+    line-height: 1.4;
+    letter-spacing: 0.3px;
+  }
+
+  /* ââ Equipment / BOM tables âââââââââââââââââââââââââââââââââââââââââââââââ */
+  .equip-table, .bom-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--f-md);
+    border: var(--border);
+  }
+  .equip-table th, .bom-table th {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    text-align: left;
+    font-weight: 900;
+    font-size: var(--f-xs);
+    letter-spacing: 0.5px;
+    border-right: 1px solid #444;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .equip-table th:last-child, .bom-table th:last-child { border-right: none; }
+  .equip-table td, .bom-table td {
+    padding: 2px var(--xs);
+    border-bottom: var(--border);
+    border-right: 1px solid #ddd;
+    vertical-align: middle;
+    color: #000;
+    font-size: var(--f-md);
+  }
+  .equip-table td:last-child, .bom-table td:last-child { border-right: none; }
+  .equip-table tbody tr:last-child td,
+  .bom-table   tbody tr:last-child td { border-bottom: var(--border-hvy); }
+  .equip-table tr:nth-child(even) td,
+  .bom-table   tr:nth-child(even) td { background: #f8f8f8; }
+  .bom-note { font-size: var(--f-xs); color: #444; margin-top: var(--xs); flex-shrink: 0; }
+
+  /* ââ Calc / structural tables âââââââââââââââââââââââââââââââââââââââââââââ */
+  .calc-table { width: 100%; border-collapse: collapse; }
+  .calc-table tr { border-bottom: var(--border); }
+  .calc-table tr:last-child { border-bottom: none; }
+  .calc-table td { padding: 2px var(--xs); font-size: var(--f-md); color: #000; }
+  .cv { text-align: right; font-weight: 700; font-family: var(--mono); }
+
+  /* ââ Sheet index table ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .sheet-index-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .sheet-index-table th {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    text-align: left;
+    font-weight: 900;
+    font-size: var(--f-xs);
+    text-transform: uppercase;
+    border-right: 1px solid #444;
+    letter-spacing: 0.5px;
+  }
+  .sheet-index-table th:last-child { border-right: none; }
+  .sheet-index-table td {
+    padding: 2px var(--xs);
+    border-bottom: var(--border);
+    color: #000;
+    font-size: var(--f-md);
+    border-right: 1px solid #ddd;
+  }
+  .sheet-index-table td:last-child { border-right: none; }
+  .si-id { font-weight: 900; font-family: var(--mono); color: #000; width: 64px; }
+
+  /* ââ Structural cards âââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .struct-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; }
+  .struct-card { border: var(--border); overflow: hidden; }
+  .sct {
+    background: #000;
+    color: #fff;
+    padding: 3px var(--xs);
+    font-weight: 900;
+    font-size: var(--f-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* ââ NEC rules summary bar ââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .rules-summary { display: flex; flex-direction: row; border: var(--border); border-bottom: none; margin-bottom: var(--xs); overflow: hidden; }
+  .rs { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: var(--xs) var(--sm); border-right: var(--border); flex: 1; }
+  .rs:last-child { border-right: none; }
+  .rs-val { font-size: var(--f-3xl); font-weight: 900; color: #000; font-family: var(--mono); }
+  .rs-lbl { font-size: var(--f-xs); color: #444; text-transform: uppercase; letter-spacing: 0.3px; }
+
+  /* ââ Warning labels âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .label-intro {
+    font-size: var(--f-md);
+    color: #000;
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-bottom: var(--xs);
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+  .labels-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--md); width: 100%; }
+  .label-card { border: var(--border); overflow: hidden; display: flex; flex-direction: column; }
+  .label-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #000;
+    padding: 3px var(--xs);
+    flex-shrink: 0;
+  }
+  .label-id  { font-weight: 900; font-size: var(--f-md); color: #fff; text-transform: uppercase; }
+  .label-nec { font-size: var(--f-xs); color: #ccc; font-family: var(--mono); }
+  .label-visual { padding: var(--xs); flex-grow: 1; display: block; }
+  .label-warning-line { font-size: var(--f-lg); font-weight: 900; letter-spacing: 0.5px; margin-bottom: 3px; }
+  .label-body-line { font-size: var(--f-md); line-height: 1.5; }
+  .label-placement {
+    font-size: var(--f-sm);
+    color: #000;
+    padding: var(--xs);
+    border-top: var(--border);
+    background: #f8f8f8;
+    flex-shrink: 0;
+  }
+
+  /* ââ Map / aerial placeholder âââââââââââââââââââââââââââââââââââââââââââââ */
+  .map-placeholder {
+    border: var(--border-hvy);
+    flex-grow: 1;
+    display: flex;
+    width: 100%;
+    background: #e8e8e8;
+  }
+  .map-inner {
+    text-align: center;
+    padding: var(--sm);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    width: 100%;
+  }
+  .map-icon  { font-size: 28px; opacity: 0.4; }
+  .map-title { font-size: var(--f-xl); font-weight: 900; color: #333; margin-top: var(--xs); text-transform: uppercase; }
+  .map-addr  { font-size: var(--f-lg); color: #555; margin-top: var(--xs); }
+  .map-note  { font-size: var(--f-md); color: #777; margin-top: var(--xs); }
+
+  /* ââ Rapid shutdown box âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .rapid-shutdown-box { background: #fff; border: var(--border); padding: var(--xs); margin-top: var(--xs); }
+  .rs-title { font-size: var(--f-lg); font-weight: 900; color: #cc0000; margin-bottom: var(--xs); text-transform: uppercase; }
+  .rs-body  { font-size: var(--f-md); color: #000; line-height: 1.5; }
+
+  /* ââ Attachment note ââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .attach-note {
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-top: var(--xs);
+    font-size: var(--f-sm);
+    color: #000;
+    line-height: 1.5;
+    flex-shrink: 0;
+  }
+
+  /* ââ Certification page âââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cert-header {
+    font-size: var(--f-2xl);
+    font-weight: 900;
+    text-align: center;
+    color: #000;
+    border-bottom: var(--border-hvy);
+    padding-bottom: var(--xs);
+    margin-bottom: var(--xs);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    flex-shrink: 0;
+  }
+  .cert-statement {
+    font-size: var(--f-md);
+    line-height: 1.5;
+    color: #000;
+    background: #fff;
+    border: var(--border);
+    padding: var(--xs);
+    margin-bottom: var(--xs);
+  }
+  .cert-statement li { margin-bottom: 2px; margin-left: var(--md); }
+  .cert-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--md); width: 100%; margin-bottom: var(--xs); }
+  .cert-block-title { font-size: var(--f-sm); font-weight: 900; color: #fff; background: #000; text-transform: uppercase; letter-spacing: 0.8px; padding: 3px var(--xs); flex-shrink: 0; border-bottom: var(--border); margin-top: var(--xs); }
+  .cert-block-title:first-child { margin-top: 0; }
+  .cert-field { margin-bottom: var(--xs); }
+  .cf-val { font-size: var(--f-xl); font-weight: 600; color: #000; border-bottom: var(--border-hvy); padding-bottom: 3px; min-height: 22px; }
+  .cf-lbl { font-size: var(--f-sm); color: #555; margin-top: 2px; text-transform: uppercase; }
+  .stamp-box { border: var(--border-hvy); min-height: 96px; display: flex; align-items: center; justify-content: center; width: 100%; text-align: center; }
+  .cert-footer {
+    font-size: var(--f-sm);
+    color: #555;
+    text-align: center;
+    border-top: var(--border);
+    padding-top: var(--xs);
+    margin-top: var(--md);
+  }
+  .notes-box { background: #fff; border: var(--border); padding: var(--xs); font-size: var(--f-lg); color: #000; }
+
+  /* ââ Construction notes list ââââââââââââââââââââââââââââââââââââââââââââââ */
+  .construction-notes { padding-left: var(--md); font-size: var(--f-md); line-height: 1.5; color: #000; }
+  .construction-notes li { margin-bottom: 2px; }
+
+  /* ââ Cover sheet specific âââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .cover-section-hdr {
+    font-size: var(--f-md);
+    font-weight: 900;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: var(--border-hvy);
+    padding-bottom: 2px;
+    margin-bottom: var(--xs);
+  }
+  .cover-list-table { width: 100%; border-collapse: collapse; font-size: var(--f-md); }
+  .cover-list-table tr td { padding: 2px var(--xs); vertical-align: top; color: #000; border-bottom: var(--border); }
+  .cover-list-table tr:last-child td { border-bottom: none; }
+  .cli { width: 64px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
+
+  /* cv0 = cover sheet data rows */
+  .cv0-hdr {
+    font-size: var(--f-md);
+    font-weight: 900;
+    color: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    border-bottom: var(--border-hvy);
+    padding-bottom: 2px;
+    margin-bottom: var(--xs);
+  }
+  .cv0-tbl { width: 100%; border-collapse: collapse; font-size: var(--f-md); line-height: 1.5; }
+  .cv0-tbl tr td { padding: 2px var(--xs); vertical-align: top; color: #000; border-bottom: var(--border); }
+  .cv0-tbl tr:last-child td { border-bottom: none; }
+  .cv0-tag { width: 28px; font-weight: 900; color: #000; white-space: nowrap; font-family: var(--mono); border-right: var(--border); }
+  .cv0-key { width: 110px; font-weight: 700; color: #000; white-space: nowrap; border-right: var(--border); }
+
+  /* ââ SLD page âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .sld-page { padding: var(--xl); height: 11in; }
+  .sld-page .title-block { margin-bottom: var(--xs); }
+  .sld-page svg { max-width: 100%; max-height: calc(11in - 1.8in); object-fit: contain; }
+
+  /* ââ Two-column layout helper (legacy) ââââââââââââââââââââââââââââââââââââ */
+  .two-col-layout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-section); width: 100%; overflow: hidden; }
+  .col-left  { overflow: hidden; }
+  .col-right { overflow: hidden; }
+
+  /* ââ NEC 120% rule box ââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .nec-rule-box {
+    border: var(--border-hvy);
+    padding: var(--xs);
+    font-size: var(--f-md);
+    font-family: var(--mono);
+    font-weight: 700;
+    color: #000;
+    background: #fff;
+    line-height: 1.6;
+  }
+
+  /* ââ Utility classes ââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .mono { font-family: var(--mono); }
+  .bold { font-weight: 900; }
+  .caps { text-transform: uppercase; }
+  .center { text-align: center; }
+  .right  { text-align: right; }
+  .muted  { color: #555; }
+  .danger { color: #cc0000; font-weight: 900; }
+  .w100   { width: 100%; }
+
+  /* ââ Inline-style replacement utility classes ââââââââââââââââââââââââââââ */
+  /* These replace the most common inline style patterns across page functions */
+  .tr   { text-align: right; }
+  .tc   { text-align: center; }
+  .tl   { text-align: left; }
+  .fw9  { font-weight: 900; }
+  .fw7  { font-weight: 700; }
+  .fw6  { font-weight: 600; }
+  .fw4  { font-weight: 400; }
+  .mono { font-family: var(--mono); }
+  .f-xs { font-size: var(--f-xs); }
+  .f-sm { font-size: var(--f-sm); }
+  .f-md { font-size: var(--f-md); }
+  .f-lg { font-size: var(--f-lg); }
+  /* ââ Flex helpers âââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  .df  { display: flex; }
+  .aic { align-items: center; }
+  .jcc { justify-content: center; }
+  .jsb { justify-content: space-between; }
+  .f1  { flex: 1; }
+  .fs0 { flex-shrink: 0; }
+
+  .mt-xs { margin-top: var(--xs); }
+  .mt-sm { margin-top: var(--sm); }
+  .mt-md { margin-top: var(--md); }
+  .mb-xs { margin-bottom: var(--xs); }
+  .mb-sm { margin-bottom: var(--sm); }
+  .mb-md { margin-bottom: var(--md); }
+  .pt-xs { padding-top: var(--xs); }
+  .pt-sm { padding-top: var(--sm); }
+  .pb-xs { padding-bottom: var(--xs); }
+  .pb-sm { padding-bottom: var(--sm); }
+  .p-xs  { padding: var(--xs); }
+  .bb-1   { border-bottom: var(--border); }
+  .bb-hvy { border-bottom: var(--border-hvy); }
+  .bt-1   { border-top: var(--border); }
+  .bl-1   { border-left: var(--border); }
+  .c000  { color: #000; }
+  .c555  { color: #555; }
+  .c999  { color: #999; }
+  .c444  { color: #444; }
+  .c666  { color: #666; }
+  .bg000 { background: #000; color: #fff; }
+  .bg-lt { background: #f8f8f8; }
+  /* Inline section header bar (no outer .sec container needed) */
+  .blk-hdr {
+    font-size: var(--f-sm);
+    font-weight: 900;
+    color: #fff;
+    background: #000;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    padding: 3px var(--xs);
+    font-family: var(--sans);
+  }
+  /* Inline content box (border, padding) */
+  .blk-body {
+    border: var(--border);
+    border-top: none;
+    padding: var(--xs);
+  }
+  /* NEC note / code reference line */
+  .code-ref {
+    font-size: var(--f-xs);
+    font-family: var(--mono);
+    color: #555;
+    margin-top: 2px;
+  }
+  /* Numbered note row */
+  .note-row { display: table; width: 100%; margin-bottom: 2px; }
+  .note-num { display: table-cell; width: var(--md); font-family: var(--mono); font-weight: 900; font-size: var(--f-md); vertical-align: top; color: #000; }
+  .note-txt { display: table-cell; font-size: var(--f-md); line-height: 1.5; color: #000; font-family: var(--sans); }
+
+  /* ââ Print ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ */
+  @page { size: 17in 11in landscape; margin: 0; }
+  @media print { .page { page-break-after: always; } }
+</style>
+</head>
+<body>
+
+  
+<body style="margin:0;padding:0;background:#ccc;">
+<div class="page">
+    
+  <div class="title-block">
+    <div class="tb-left">
+      <div class="tb-company">SOLARPRO ENGINEERING</div>
+      <div class="tb-project">Smith Residence Solar Fence</div>
+      <div class="tb-address">1234 Solar Way, Austin, TX 78701</div>
+      <div class="tb-client">CLIENT: John & Jane Smith</div>
+      <div class="tb-meta">APN: â &nbsp;|&nbsp; UTILITY: Austin Energy</div>
+      <div class="tb-meta">AHJ: City of Austin &nbsp;|&nbsp; TX</div>
+    </div>
+    <div class="tb-center">
+      <div class="tb-sheet-id">SCHED</div>
+      <div class="tb-sheet-title">EQUIPMENT SCHEDULE</div>
+      <div class="tb-codes">NEC 2023 &middot; IBC 2021 &middot; IRC 2021 &middot; IFC 2024 &middot; ASCE 7-22</div>
+      <div class="tb-size">SHEET SIZE: ANSI B &mdash; 11&Prime; &times; 17&Prime;</div>
+    </div>
+    <div class="tb-right">
+      <table class="tb-table">
+        <tr><td class="tbl">DESIGNER</td><td class="tbv">Sarah L. Nguyen, PE â TX-PE-54321</td></tr>
+        <tr><td class="tbl">DATE</td><td class="tbv">2026-04-06</td></tr>
+        <tr><td class="tbl">SHEET</td><td class="tbv">10 OF 14</td></tr>
+        <tr><td class="tbl">SYSTEM</td><td class="tbv">19.20 kW DC / 48 modules</td></tr>
+        <tr><td class="tbl">MODULE</td><td class="tbv">Silfab SIL-400-HV</td></tr>
+        <tr><td class="tbl">INVERTER</td><td class="tbv">Enphase IQ8M-72-2-US</td></tr>
+        <tr><td class="tbl">UTILITY</td><td class="tbv">Austin Energy</td></tr>
+        <tr><td class="tbl">AHJ</td><td class="tbv">City of Austin</td></tr>
+        <tr class="tb-rev-hdr"><td class="tbl" colspan="2" style="text-align:center;font-weight:900;background:#000;color:#fff;letter-spacing:0.5px;">REVISIONS</td></tr>
+        <tr><td class="tbl">REV A</td><td class="tbv">ISSUED FOR PERMIT &mdash; 2026-04-06</td></tr>
+        <tr><td class="tbl">SCALE</td><td class="tbv">NTS</td></tr>
+        <tr><td class="tbl">PE SEAL</td><td class="tbv"><div class="pe-seal-box">SEAL / STAMP REQUIRED</div></td></tr>
+      </table>
+    </div>
+  </div>
+    <div class="page-content">
+      <div class="section-title">Solar Modules</div>
+      <table class="equip-table">
+        <thead><tr><th>String</th><th>Manufacturer</th><th>Model</th><th>Qty</th><th>Watts</th><th>Voc (V)</th><th>Isc (A)</th><th>Total kW</th><th>Wire</th><th>Run (ft)</th></tr></thead>
+        <tbody>
+          
+            <tr>
+              <td class="fw7">1-1</td>
+              <td>Silfab</td><td>SIL-400-HV</td>
+              <td class="tr fw7">48</td>
+              <td class="tr">400W</td>
+              <td class="tr">49.2V</td>
+              <td class="tr">10.5A</td>
+              <td class="tr fw7">19.20</td>
+              <td>10 AWG</td>
+              <td class="tr">150</td>
+            </tr>
+          <tr style="background:#f5f5f5;font-weight:bold">
+            <td colspan="3">TOTAL</td><td class="tr">48</td>
+            <td colspan="3"></td><td class="tr">19.20</td>
+            <td colspan="2"></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="section-title">Inverters</div>
+      <table class="equip-table">
+        <thead><tr><th>#</th><th>Type</th><th>Manufacturer</th><th>Model</th><th>AC kW</th><th>Max DC V</th><th>Efficiency</th><th>UL Listing</th></tr></thead>
+        <tbody>
+          
+          <tr>
+            <td class="fw7">1</td>
+            <td>String</td>
+            <td>Enphase</td><td>IQ8M-72-2-US</td>
+            <td class="tr">0.366</td>
+            <td class="tr">60V</td>
+            <td class="tr">97%</td>
+            <td>UL 1741</td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- Wire Sizing Justification -->
+      <div class="section-title">Wire Sizing Justification â NEC 690.8 & 310.15</div>
+      <table class="equip-table">
+        <thead><tr><th>Circuit</th><th>Isc (A)</th><th>Ã1.25 (A)</th><th>Ã1.25 OCPD (A)</th><th>Wire</th><th>Ampacity (90Â°C)</th><th>Derated</th><th>Status</th></tr></thead>
+        <tbody>
+          
+            <tr>
+              <td class="fw7">DC 1-1</td>
+              <td class="tr mono">10.5A</td>
+              <td class="tr mono">13.1A</td>
+              <td class="tr mono fw7">16.4A</td>
+              <td>10 AWG USE-2</td>
+              <td class="tr">30A (#10), 40A (#8)</td>
+              <td class="tr">â¥ 13.1A</td>
+              <td class="center fw7">â</td>
+            </tr>
+        </tbody>
+      </table>
+      <div style="padding:var(--xs);font-size:var(--f-md);line-height:1.5;border:var(--border);border-top:none;background:#fafafa;">
+        <strong>WIRE SIZING INTERPRETATION:</strong>
+        All DC source circuit conductors are sized per NEC 690.8(A)(1) using Isc Ã 1.25 for continuous duty, with OCPD rated at Isc Ã 1.25 Ã 1.25 per NEC 690.8(B)(1).
+        USE-2 rated conductors (90Â°C) are specified for all PV source circuits to maximize ampacity margin under outdoor fence-mounted conditions.
+        Conductor ampacity after derating exceeds the maximum circuit current for all circuits. No conductor upsizing is required.
+      </div>
+      <div style="padding:var(--xs);font-size:var(--f-sm);line-height:1.6;border:var(--border);border-top:none;background:#f0f4f8;">
+        <strong>FORMULA REFERENCE â WIRE SIZING (NEC 690.8):</strong><br/>
+        <span style="font-family:var(--mono);font-size:10px;">Max Circuit Current = Isc Ã 1.25 &nbsp; | &nbsp; OCPD â¥ Isc Ã 1.25 Ã 1.25 &nbsp; | &nbsp; Conductor Ampacity â¥ Max Circuit Current (after derating)</span><br/>
+        <span style="font-size:9px;color:#333;">
+          The wire sizing chain ensures: (1) continuous duty factor accounts for sustained PV output under peak insolation,
+          (2) OCPD rating provides 125% margin above continuous current for fuse/breaker coordination,
+          (3) conductor ampacity (derated for temperature per NEC 310.15(B)(1) and conduit fill) exceeds the maximum circuit current.
+          All PV source circuits use USE-2/THWN-2 rated at 90Â°C to maximize available ampacity under outdoor conditions.
+        </span>
+        <span style="display:inline-block;margin-left:8px;padding:1px 8px;font-size:9px;font-weight:900;letter-spacing:0.5px;border-radius:2px;background:#000;color:#fff;">VERIFIED</span>
+      </div>
+
+      
+      <div class="section-title">Balance of System</div>
+      <table class="equip-table">
+        <thead><tr><th>Category</th><th>Manufacturer</th><th>Model</th><th>Part #</th><th>Qty</th><th>Unit</th><th>UL Listing</th></tr></thead>
+        <tbody>
+          
+          <tr>
+            <td style="text-transform:capitalize;color:#000">PV Module</td>
+            <td>Silfab</td><td>SIL-400-HV</td>
+            <td class="mono f-lg">SIL400HV</td>
+            <td class="tr fw7">48</td>
+            <td>EA</td>
+            <td>UL 61730</td>
+          </tr>
+          <tr>
+            <td style="text-transform:capitalize;color:#000">Microinverter</td>
+            <td>Enphase</td><td>IQ8M-72-2-US</td>
+            <td class="mono f-lg">IQ8M-72-2-US</td>
+            <td class="tr fw7">48</td>
+            <td>EA</td>
+            <td>UL 1741</td>
+          </tr>
+          <tr>
+            <td style="text-transform:capitalize;color:#000">Racking</td>
+            <td>Ironridge</td><td>XR-100 Fence Rail</td>
+            <td class="mono f-lg">XR100-FR</td>
+            <td class="tr fw7">96</td>
+            <td>EA</td>
+            <td>ICC-ES ESR-2148</td>
+          </tr>
+          <tr>
+            <td style="text-transform:capitalize;color:#000">Fence Post</td>
+            <td>Unirac</td><td>2-7/8" OD Steel Pipe Post</td>
+            <td class="mono f-lg">SP-287</td>
+            <td class="tr fw7">40</td>
+            <td>EA</td>
+            <td>ASTM A500</td>
+          </tr>
+          <tr>
+            <td style="text-transform:capitalize;color:#000">Combiner</td>
+            <td>Enphase</td><td>IQ Combiner 4C</td>
+            <td class="mono f-lg">ENV-IQ-AM3-240</td>
+            <td class="tr fw7">1</td>
+            <td>EA</td>
+            <td>UL 508A</td>
+          </tr>
+          <tr>
+            <td style="text-transform:capitalize;color:#000">Monitoring</td>
+            <td>Enphase</td><td>IQ Gateway Standard</td>
+            <td class="mono f-lg">ENV-IQ-AM3-240</td>
+            <td class="tr fw7">1</td>
+            <td>EA</td>
+            <td>FCC Part 15</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- System-Specific Hardware Schedule -->
+      ${(() => {
+        const _eqSysType = cad.systemType as SysType;
+        if (_eqSysType === 'solar_fence') {
+          const _segs = input.layout?.fenceSegments || [];
+          const _postSpacing = input.layout?.fencePostSpacingFt ?? 8;
+          const _embedFt = input.layout?.fencePostEmbedmentFt ?? 2.5;
+          const _totalLen = input.layout?.fenceTotalLengthFt ?? 0;
+          const _estimatedPosts = _totalLen > 0 ? Math.ceil(_totalLen / _postSpacing) + 1 : 'â';
+          const _railCount = input.layout?.fenceRailCount ?? 2;
+          return '<div class="section-title">Fence-Specific Hardware Schedule</div>' + '<table class="equip-table"><thead><tr><th>Item</th><th>Description</th><th>Spec</th><th>Est. Qty</th><th>Unit</th></tr></thead><tbody>' + '<tr><td class="fw7">Fence Posts</td><td>Steel pipe post, Sch. 40, hot-dip galvanized</td><td>Min. 2.5" OD, ' + (input.layout?.fencePostEmbedmentFt ?? 2.5) + ' ft embedment</td><td class="tr">' + _estimatedPosts + '</td><td>EA</td></tr>' + '<tr class="bg-lt"><td class="fw7">Horizontal Rails</td><td>Aluminum extrusion rail, anodized</td><td>' + _railCount + ' rails per bay</td><td class="tr">' + (_estimatedPosts > 0 ? (_estimatedPosts as number - 1) * _railCount : 'â') + '</td><td>EA</td></tr>' + '<tr><td class="fw7">Panel Clamps</td><td>Mid-clamp and end-clamp, listed per UL 2703</td><td>Aluminum, stainless fasteners</td><td class="tr">' + (system.totalPanels * 2) + '</td><td>EA</td></tr>' + '<tr class="bg-lt"><td class="fw7">Post Base Caps</td><td>Steel post cap, weather-tight</td><td>Match post OD</td><td class="tr">' + _estimatedPosts + '</td><td>EA</td></tr>' + '<tr><td class="fw7">Conduit (PV Wire)</td><td>EMT or PVC-C conduit along fence posts</td><td>3/4" min., NEC 358/352</td><td class="tr">TBD</td><td>FT</td></tr>' + '<tr class="bg-lt"><td class="fw7">Conduit Straps</td><td>Corrosion-resistant conduit strap</td><td>4 ft max spacing, NEC 358.30</td><td class="tr">TBD</td><td>EA</td></tr>' + '</tbody></table>';
+        } else if (_eqSysType === 'ground_mount') {
+          const _arrays = input.layout?.groundArrays || [];
+          const _firstArray = _arrays[0];
+          const _structType = (_firstArray?.structureType || 'driven_pile');
+          const _pileSpacing = _firstArray?.pileSpacingFt ?? 8;
+          const _totalPanels = system.totalPanels;
+          return '<div class="section-title">Ground Mount Hardware Schedule</div>' + '<table class="equip-table"><thead><tr><th>Item</th><th>Description</th><th>Spec</th><th>Est. Qty</th><th>Unit</th></tr></thead><tbody>' + '<tr><td class="fw7">' + (_structType === 'concrete_pier' ? 'Concrete Piers' : 'Driven Piles') + '</td><td>' + (_structType === 'concrete_pier' ? 'Concrete form tube, rebar cage, 3000 psi min.' : 'Galvanized steel pipe pile, driven to refusal') + '</td><td>Per structural analysis</td><td class="tr">TBD</td><td>EA</td></tr>' + '<tr class="bg-lt"><td class="fw7">Racking Rails</td><td>Aluminum extrusion, anodized, ground mount series</td><td>2 rails per row, span per pile spacing</td><td class="tr">TBD</td><td>FT</td></tr>' + '<tr><td class="fw7">Module Clamps</td><td>Mid-clamp and end-clamp, UL 2703 listed</td><td>Aluminum, stainless hardware</td><td class="tr">' + (_totalPanels * 2) + '</td><td>EA</td></tr>' + '<tr class="bg-lt"><td class="fw7">Ground Rods</td><td>Copper-clad steel ground rod, 8 ft</td><td>One per array, NEC 250.52</td><td class="tr">TBD</td><td>EA</td></tr>' + '<tr><td class="fw7">Conduit (Underground)</td><td>Schedule 40 PVC or RMC for underground run</td><td>NEC 358/344, 18" min. cover</td><td class="tr">TBD</td><td>FT</td></tr>' + '</tbody></table>';
+        }
+        return ''; // roof â no additional hardware table
+      })()}
+
+      <div style="padding:var(--xs);margin-top:var(--sm);font-size:var(--f-md);line-height:1.5;border:2px solid #000;background:#fff;">
+        <strong>PAGE CONCLUSION â EQUIPMENT SCHEDULE:</strong>
+        This system utilizes 48 Ã Silfab SIL-400-HV modules
+        rated at 400W each for a total DC capacity of 19.20 kW.
+        All equipment is UL-listed and installed per manufacturer specifications. Wire sizing has been verified per NEC 690.8 with appropriate derating applied.
+        The equipment selection complies with NEC 2023 and applicable UL standards (UL 1741, UL 61730, UL 2703).
+      </div>
+    </div>
+  </div>
+  
+</body>
+</html>

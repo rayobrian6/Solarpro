@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Integration Staging Report — Exec Summary</title>
+  
+<style>
+  :root {
+    --ink: #1a1f2e;
+    --muted: #5a6478;
+    --line: #e3e7ee;
+    --bg: #ffffff;
+    --bg-alt: #f7f9fc;
+    --accent: #2e5bff;
+    --green: #1d9a5a;
+    --yellow: #b48a00;
+    --red: #c8372d;
+    --mono: 'SF Mono', Menlo, Monaco, 'Cascadia Mono', 'Roboto Mono', Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--bg);
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 40px 48px 120px;
+    line-height: 1.58;
+    font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  h1 + p, h1 + p + p { color: var(--muted); margin: 4px 0; }
+  h2 {
+    font-size: 22px;
+    font-weight: 650;
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+    letter-spacing: -0.01em;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 650;
+    margin: 32px 0 12px;
+    color: var(--ink);
+  }
+  h4 {
+    font-size: 15px;
+    font-weight: 650;
+    margin: 24px 0 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  p { margin: 10px 0; }
+  a { color: var(--accent); text-decoration: none; border-bottom: 1px dotted var(--accent); }
+  a:hover { border-bottom-style: solid; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+  code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg-alt);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--bg-alt);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: 13px; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--line);
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--bg-alt);
+    font-weight: 650;
+    color: var(--ink);
+  }
+  tbody tr:nth-child(even) { background: #fafbfd; }
+  ul, ol { padding-left: 22px; margin: 10px 0; }
+  li { margin: 4px 0; }
+  blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 16px 0;
+    padding: 4px 16px;
+    background: var(--bg-alt);
+    color: var(--muted);
+  }
+  /* Callouts */
+  .header-bar {
+    background: linear-gradient(135deg, #2e5bff, #1e3f99);
+    color: white;
+    margin: -40px -48px 32px;
+    padding: 36px 48px;
+    border-radius: 0 0 4px 4px;
+  }
+  .header-bar h1 { color: white; font-size: 30px; }
+  .header-bar p { color: rgba(255,255,255,0.9); }
+  /* Traffic-light emoji sizing inside tables */
+  td, th { font-size: 14px; }
+  /* Code inside table cells */
+  td code, th code { font-size: 12.5px; padding: 1px 5px; }
+  /* Print */
+  @media print {
+    body { max-width: none; padding: 20px; font-size: 11pt; }
+    h2 { page-break-after: avoid; }
+    table, pre { page-break-inside: avoid; }
+    .header-bar { background: #2e5bff; color: white; -webkit-print-color-adjust: exact; }
+  }
+</style>
+
+</head>
+<body>
+  <h1 id="integration-staging-report-exec-summary">Integration Staging Report — Exec Summary</h1>
+<p><strong>SolarPro ⇄ Site Survey App</strong> · 2026-04-23</p>
+<p><strong>SolarPro build:</strong> <code>v47.434a</code> (on disk, pending git push)
+<strong>Partner build:</strong> <code>kilby8/site_survey-app @ 2cc3537f</code> (phases 1–7 complete)</p>
+<hr />
+<h2 id="where-we-are-traffic-light">Where we are (traffic light)</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Inbound webhook wire-format compatibility</td>
+<td>🟢 aligned</td>
+</tr>
+<tr>
+<td>Inbound ingest pipeline (fetch + transform)</td>
+<td>🟡 SolarPro v47.435 in progress</td>
+</tr>
+<tr>
+<td>Outbound handoff JWT minter</td>
+<td>🟡 SolarPro v47.435/9.2b planned</td>
+</tr>
+<tr>
+<td>Shared secrets exchanged</td>
+<td>🔴 <strong>blocker</strong></td>
+</tr>
+<tr>
+<td>Staging environments networked</td>
+<td>🔴 <strong>blocker</strong></td>
+</tr>
+</tbody>
+</table>
+<h2 id="the-three-things-that-must-happen-first">The three things that must happen first</h2>
+<ol>
+<li><strong>Exchange <code>SURVEY_WEBHOOK_SECRET</code></strong> (partner signs, SolarPro verifies)</li>
+<li><strong>Exchange <code>SOLARPRO_HANDOFF_SECRET</code></strong> (SolarPro signs, partner verifies)</li>
+<li><strong>Wire staging deployments</strong> so partner staging can reach SolarPro staging <code>/api/webhooks/survey-complete</code></li>
+</ol>
+<p>Everything else can proceed on parallel tracks.</p>
+<h2 id="what-solarpro-just-shipped-v47434a">What SolarPro just shipped (v47.434a)</h2>
+<p>Three wire-format compatibility fixes so partner webhooks pass HMAC verification:</p>
+<ul>
+<li>Accept ISO-8601 timestamps in <code>X-Survey-Timestamp</code> (partner's format — <code>new Date().toISOString()</code>)</li>
+<li>Accept <code>sha256=&lt;hex&gt;</code> prefix on <code>X-Survey-Signature</code> (partner's format)</li>
+<li>Treat absent <code>schemaVersion</code> as implicit <code>'1.0'</code> (partner doesn't send it)</li>
+</ul>
+<p>Verified with 2142/2142 tests pass, TC=0, clean build. Legacy signers still work — zero regressions.</p>
+<h2 id="whats-next-on-each-side">What's next on each side</h2>
+<h3 id="solarpro">SolarPro</h3>
+<ul>
+<li><strong>v47.435 (Stage 9.2):</strong> full ingest pipeline — extract <code>project_id</code>/<code>project_name</code>/<code>inspector_name</code>/<code>site_name</code> from webhook envelope, fetch full survey via <code>GET /api/surveys/{id}</code>, transform to projects/Layout/project_files</li>
+<li><strong>v47.435/9.2b:</strong> outbound handoff JWT minter + deep-link builder (mint HS256 with <code>jti</code> + <code>project_id</code>)</li>
+<li><strong>v47.436 (Stage 9.3):</strong> photos/notes/checklist async ingest</li>
+<li><strong>v47.437 (Stage 9.4):</strong> contract doc + admin replay action</li>
+</ul>
+<h3 id="partner-what-we-need-from-you">Partner (what we need from you)</h3>
+<ol>
+<li>Confirm bearer auth scheme on <code>GET /api/surveys/{id}</code> — JWT or long-lived service token?</li>
+<li>Confirm photo URL scheme in full survey payload — signed URLs or bearer-required?</li>
+<li>Confirm handoff launch URL shape — <code>/launch?token=...</code>, <code>/new-survey?token=...</code>, or other?</li>
+<li>Decide: should partner enable the webhook in staging now (and tolerate 501 retries until SolarPro v47.435 ships), OR wait for v47.435 first?</li>
+</ol>
+<h2 id="important-friction-point-501-retry-churn">Important friction point — 501 retry churn</h2>
+<p>SolarPro v47.434a returns <code>501 INGEST_NOT_IMPLEMENTED</code> on successful HMAC + validation, because ingest ships in v47.435. Partner's queue will retry this up to 5 times (1min → 5min → 30min → 2h → 12h) before marking <code>permanent_failure</code>.</p>
+<p><strong>Three options (Q1 in the full report):</strong>
+- A. Don't enable partner → SolarPro webhook in staging until SolarPro v47.435 ships (~1–2 weeks)
+- B. SolarPro ships v47.434b returning <code>202</code> instead of <code>501</code> during the window (cosmetic change, stops retries)
+- C. Partner adds a retry-backoff exemption for 501 responses</p>
+<p>Decision needed from both teams within 1 week.</p>
+<h2 id="open-questions-full-list-in-main-report-9">Open questions (full list in main report §9)</h2>
+<p>10 questions total — ownership split:
+- 3 blocking v47.435 design (partner's bearer scheme, null <code>project_id</code> handling, fat-payload authoritativeness)
+- 2 blocking v47.435/9.2b (handoff URL shape, JWT TTL)
+- 1 blocking v47.436 (photo URL scheme)
+- 1 blocking production go-live (secret rotation protocol)
+- 3 lower priority (OpenAPI doc, metric naming, v47.434b decision)</p>
+<h2 id="joint-milestones">Joint milestones</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>M0 — Secrets exchanged</td>
+<td>ASAP</td>
+</tr>
+<tr>
+<td>M1 — Staging networked</td>
+<td>+3 days after M0</td>
+</tr>
+<tr>
+<td>M2 — First webhook reaches SolarPro</td>
+<td>+1 day after M1</td>
+</tr>
+<tr>
+<td>M3 — First ingest succeeds</td>
+<td>mid-May</td>
+</tr>
+<tr>
+<td>M4 — Handoff round-trip works</td>
+<td>end-May</td>
+</tr>
+<tr>
+<td>M5 — Production go-live</td>
+<td>June</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><em>Companion document: <code>INTEGRATION_STAGING_REPORT_v1.md</code> — full 10-section staging report with contract details, test plans, and appendices.</em></p>
+</body>
+</html>

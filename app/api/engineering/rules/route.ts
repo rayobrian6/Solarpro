@@ -1,0 +1,59 @@
+// Rules Engine API — Full NEC + ASCE deterministic rules
+// POST /api/engineering/rules
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getUserFromRequest } from '@/lib/auth';
+import { handleRouteDbError } from '@/lib/db-neon';
+import { runRulesEngine, RulesEngineInput } from '@/lib/rules-engine';
+import { OverrideEntry } from '@/lib/rules-engine';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 30;
+
+export async function POST(req: NextRequest) {
+  try {
+    // v48.6: Rate limiting — 10 req / 30s per IP (protects heavy compute + external APIs)
+        const _rl = await checkRateLimit('engineering', getClientIp(req));
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please slow down.' },
+        { status: 429 }
+      );
+    }
+
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+
+    const body = await req.json();
+    const { electrical, structural, engineeringMode = 'AUTO', overrides = [] } = body as RulesEngineInput;
+
+    if (!electrical || !structural) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required fields: electrical, structural' },
+        { status: 400 }
+      );
+    }
+
+    const result = runRulesEngine({ electrical, structural, engineeringMode, overrides });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        overallStatus: result.overallStatus,
+        errorCount: result.errorCount,
+        warningCount: result.warningCount,
+        autoFixCount: result.autoFixCount,
+        overrideCount: result.overrideCount,
+        rules: result.rules,
+        electricalResult: result.electricalResult,
+        structuralResult: result.structuralResult,
+        structuralAutoResolutions: result.structuralAutoResolutions,
+        dependencyChain: result.dependencyChain,
+      },
+    });
+  } catch (error: unknown) {
+    return handleRouteDbError('[R]', error);
+  }
+}

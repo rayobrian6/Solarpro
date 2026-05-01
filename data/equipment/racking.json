@@ -1,0 +1,101 @@
+{
+  "schemaVersion": "1.0",
+  "category": "racking",
+  "lastUpdated": "2026-03-31",
+  "items": [
+    {
+      "id": "sol-fence-nexus-section",
+      "manufacturer": "SOL Fence",
+      "model": "Nexus Solar Fence Section",
+      "sku": "SOL-NEXUS-SEC",
+      "category": "racking",
+      "subcategory": "fence",
+      "description": "SOL Fence Nexus racking system for vertical bifacial solar fence installations. Each section is 7'11\" wide x 5'10\" tall (metal to metal), accommodating 2x Philadelphia Solar PS-MNB108 430W panels per section for 860W total output. Posts are hot-dip galvanized steel driven minimum 3-4 feet into ground. Patent-pending design, AAMA compliant coating, American engineering.",
+      "certifications": [
+        "AAMA compliant coating",
+        "Patent-pending design",
+        "Tax credit eligible (ITC)"
+      ],
+      "specs": {
+        "systemType": "fence",
+        "sectionWidthIn": 95,
+        "sectionWidthFt": 7.917,
+        "sectionWidthM": 2.413,
+        "fenceHeightMetalToMetalIn": 70,
+        "fenceHeightMetalToMetalFt": 5.833,
+        "fenceHeightMetalToMetalM": 1.778,
+        "totalHeightMaxIn": 72,
+        "totalHeightMaxFt": 6.0,
+        "totalHeightMaxM": 1.829,
+        "groundClearanceIn": 2,
+        "groundClearanceM": 0.051,
+        "panelsPerSection": 2,
+        "wattagePerSection": 860,
+        "panelModel": "Philadelphia Solar PS-MNB108(HCBF)-430W",
+        "panelId": "philadelphia-solar-ps-mnb108-430w",
+        "postMaterial": "Hot-dip galvanized steel",
+        "postThicknessIn": 2.375,
+        "postThicknessM": 0.060,
+        "postBurialDepthMinFt": 3,
+        "postBurialDepthMinM": 0.914,
+        "postDrivenDepthMinFt": 4,
+        "postDrivenDepthMinM": 1.219,
+        "concreteDepthIn": 6,
+        "frameMaterial": "6061-T6 Aluminum",
+        "frameThicknessMil": 121,
+        "frameFinish": "Powder-coated",
+        "attachmentPoints": "2-3 per section",
+        "wireManagement": "Behind rear cover panel",
+        "mounting": "4-screw middle rail design",
+        "grounding": "Individual ground wire per panel",
+        "security": "Tamper-resistant screws available",
+        "optimizers": "Tigo TS4-A-O when needed",
+        "monitoring": "Panel monitoring and rapid shutdown via Tigo",
+        "tiltDeg": 90,
+        "orientation": "portrait",
+        "bifacial": true,
+        "expectedServiceLifeYears": 25
+      },
+      "installation": {
+        "postOptions": [
+          {
+            "type": "concrete_footing",
+            "description": "Posts buried minimum 3ft deep, concrete within 6in of surface, extends 6in below frost line",
+            "minBurialDepthFt": 3,
+            "concreteWithin6inOfSurface": true,
+            "extendsBelowFrostLine": true
+          },
+          {
+            "type": "driven_post",
+            "description": "Steel 2-3/8in posts driven 4ft minimum — faster installation option, ideal for various soil conditions",
+            "minDrivenDepthFt": 4,
+            "postSizeIn": 2.375
+          }
+        ],
+        "fenceStabilizers": "Connect systems for maximum stability",
+        "accessForMaintenance": "Ground-level design allows easy access for cleaning",
+        "professionalInstallation": true
+      },
+      "warranty": {
+        "frame": "Lifetime manufacturer warranty (6061-T6 aluminum, AAMA compliant coating)",
+        "panels": "12-year product / 30-year performance (Philadelphia Solar)",
+        "posts": "25+ years expected service life (hot-dip galvanized steel with stainless fasteners)"
+      },
+      "pricing": {
+        "msrpUsd": null,
+        "pricePerSection": null,
+        "pricePerWatt": null,
+        "notes": "Contact SOL Fence for pricing: sarah@solfence.solar | 812-760-8957 | www.solfence.solar"
+      },
+      "contact": {
+        "email": "sarah@solfence.solar",
+        "phone": "812-760-8957",
+        "website": "www.solfence.solar"
+      },
+      "datasheetUrl": null,
+      "isActive": true,
+      "isCustom": false,
+      "tags": ["fence", "sol-fence", "nexus", "vertical", "bifacial", "racking", "aluminum", "galvanized-steel"]
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "id": "sce",
+  "name": "Southern California Edison",
+  "states": ["CA"],
+  "preferredInterconnection": "LOAD_SIDE",
+  "maxLoadSideBreaker": 60,
+  "maxSystemSizeKw": 1000,
+  "allowsMainBreakerDerate": true,
+  "allowsLineSideTap": true,
+  "requiresVisibleDisconnect": true,
+  "requiresProductionMeter": true,
+  "requiresAntiIslanding": true,
+  "requiresSmartInverter": true,
+  "netMeteringAvailable": true,
+  "netMeteringMaxKw": 1000,
+  "netMeteringProgram": "NEM-3 (Net Billing Tariff)",
+  "interconnectionApplicationRequired": true,
+  "interconnectionApplicationUrl": "https://www.sce.com/business/generating-your-own-power/solar-photovoltaic",
+  "preApplicationRequired": false,
+  "preApplicationThresholdKw": 30,
+  "studyRequiredAboveKw": 30,
+  "ieee1547Compliant": true,
+  "ul1741Compliant": true,
+  "rule21Compliant": true,
+  "ruleReferences": [
+    { "rule": "CPUC Rule 21", "description": "California Rule 21 Smart Inverter requirements", "requirement": "All inverters must meet Rule 21 advanced functions" },
+    { "rule": "NEM-3 / Net Billing Tariff", "description": "Net Energy Metering 3.0", "requirement": "NEM-3 compensation applies to new systems after April 2023" },
+    { "rule": "Title 24 Part 3", "description": "California Electrical Code", "requirement": "All installations must comply with California Title 24 Part 3" }
+  ],
+  "disconnectRequirements": {
+    "acDisconnect": true,
+    "acDisconnectVisible": true,
+    "acDisconnectLockable": true,
+    "utilityAccessible": true,
+    "notes": "SCE requires a visible, lockable AC disconnect accessible to utility personnel."
+  },
+  "labelingRequirements": [
+    "NEC 705.10 — Identification of power sources",
+    "NEC 690.54 — Equipment identification",
+    "California Title 24 labeling requirements",
+    "SCE requires 'SOLAR ELECTRIC SYSTEM CONNECTED' placard at utility meter"
+  ],
+  "notes": "SCE follows CPUC Rule 21 smart inverter requirements. NEM-3 applies to new interconnections after April 2023."
+}

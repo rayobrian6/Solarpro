@@ -1,0 +1,48 @@
+{
+  "id": "egyptian-il",
+  "name": "Egyptian Electric Cooperative Association",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "Saline, Gallatin, White, Hamilton, and Hardin counties, southern Illinois",
+  "website": "https://www.egyptianelectric.coop",
+  "phone": "618-276-3351",
+  "interconnectionEmail": "office@egyptianelectric.coop",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies; southern IL territory"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Standard residential fee; engineering study required for systems > 10 kW",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R",
+    "avgRetailRatePerKwh": 0.1156,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 25.00,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines (ABP) available; rural southern IL — USDA REAP grants applicable"
+  },
+  "eia": {
+    "utilityId": "6097",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}

@@ -1,0 +1,48 @@
+{
+  "id": "shelby-il",
+  "name": "Shelby Electric Cooperative",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "Shelby, Effingham, Fayette, and parts of Christian counties, central Illinois",
+  "website": "https://www.shelbyelectric.coop",
+  "phone": "217-774-3986",
+  "interconnectionEmail": "office@shelbyelectric.coop",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Standard residential fee for systems ≤ 10 kW; engineering study required for larger systems",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application", "Shelby Electric Supplemental DG Form"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R",
+    "avgRetailRatePerKwh": 0.1195,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 27.00,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines (ABP) available for RECs; central IL territory"
+  },
+  "eia": {
+    "utilityId": "17539",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}

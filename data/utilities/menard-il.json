@@ -1,0 +1,48 @@
+{
+  "id": "menard-il",
+  "name": "Menard Electric Cooperative",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "Menard, Mason, Cass, and parts of Sangamon counties, Illinois",
+  "website": "https://www.menardelectric.coop",
+  "phone": "217-632-7718",
+  "interconnectionEmail": "office@menardelectric.coop",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Residential ≤ 10 kW standard fee; larger systems require engineering review",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application", "Menard Electric DG Agreement"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R",
+    "avgRetailRatePerKwh": 0.1210,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 27.00,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines (ABP) available for RECs; central IL territory"
+  },
+  "eia": {
+    "utilityId": "13248",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Google 3D Map Test</title>
+  <style>
+    html, body { height: 100%; margin: 0; padding: 0; }
+    #map { width: 100%; height: 100vh; }
+    #status { position: fixed; top: 10px; left: 10px; background: rgba(0,0,0,0.8); color: #fff; padding: 10px 16px; border-radius: 8px; font-family: monospace; font-size: 13px; z-index: 999; }
+  </style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+  <div id="status">Loading...</div>
+  <div id="map"></div>
+
+  <script>
+    const API_KEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+    const status = document.getElementById('status');
+
+    async function init() {
+      try {
+        status.textContent = 'Importing maps3d library...';
+        const { Map3DElement, MapMode } = await google.maps.importLibrary('maps3d');
+        status.textContent = 'Creating Map3DElement...';
+
+        const map3d = new Map3DElement({
+          center: { lat: 33.4484, lng: -112.0740, altitude: 0 },
+          tilt: 67.5,
+          heading: 0,
+          range: 300,
+          mode: MapMode.SATELLITE,
+        });
+
+        map3d.style.width = '100%';
+        map3d.style.height = '100vh';
+        document.getElementById('map').appendChild(map3d);
+
+        map3d.addEventListener('gmp-ready', () => {
+          status.style.background = 'rgba(34,197,94,0.9)';
+          status.textContent = '✅ 3D Map loaded successfully!';
+        });
+
+        setTimeout(() => {
+          status.style.background = 'rgba(234,179,8,0.9)';
+          status.textContent = '⚠️ Timeout - map may still be loading';
+        }, 8000);
+
+      } catch(err) {
+        status.style.background = 'rgba(239,68,68,0.9)';
+        status.textContent = '❌ Error: ' + err.message;
+        console.error(err);
+      }
+    }
+  </script>
+
+  <!-- Use the exact dynamic loader from Google docs -->
+  <script>
+    (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await(a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src="https://maps."+c+"apis.com/maps/api/js?"+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
+      key: "AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE",
+      v: "alpha",
+    });
+  </script>
+
+  <script>init();</script>
+</body>
+</html>

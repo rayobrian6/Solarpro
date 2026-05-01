@@ -1,0 +1,768 @@
+/**
+ * lib/proposal/buildCanonicalProposal.ts
+ * v48.3 — Deterministic Canonical Proposal Pipeline (Bill Rate → Proposal Connection)
+ *
+ * ARCHITECTURE:
+ *   This is the ONLY place calculations live.
+ *   The UI (page.tsx) calls this once and renders the result.
+ *   No math is permitted outside this file and proposalTruthEngine.ts.
+ *
+ * PIPELINE STEPS (strict order, each step depends on the previous):
+ *   1. PANEL      — validatePanelIntegrity() → resolved wattage / count / systemSizeKw
+ *   2. PRODUCTION — annualKwh, monthlyKwh[12]
+ *   3. UTILITY    — buildUtilityProfile() → rate, escalation, NEM type, export rate
+ *   4. FINANCIAL  — system cost, financing, monthly payments, ownership delta
+ *   5. TRUTH25YR  — calculate25yrProjection() → single netDifference savings definition
+ *   6. OFFSET     — percentage, remainingPercentage, isPartialOffset
+ *   7. POLICY     — SREC, incentivesAllowed, policyMessage, NEM/failsafe summaries
+ *   8. RETURN     — assembled CanonicalProposal
+ *
+ * SAVINGS DEFINITION (enforced in Step 5, no other version exists):
+ *   netDifference = utilityCostWithoutSolar - (solarCostTotal + remainingUtilityCost)
+ *
+ * v47.250 CHANGES:
+ *   - calculate25yrProjection now receives solarAnnualPayment, loanYears, panelDegradation
+ *   - yearlyFlow from iterative model wired into truth25yr (SPEC §5)
+ *   - projectionChart derived from yearlyFlow — no inline recomputation (SPEC §5)
+ *   - New utility fields wired: retail_rate_type, export_rate_monthly,
+ *     export_rate_annual_excess, true_up_period, policy_status, confidence
+ *   - srec_income_25yr wired into truth25yr
+ *
+ * DEV ASSERTION LOCK:
+ *   In development mode (NODE_ENV === 'development'), any truth violation
+ *   throws Error("TRUTH VIOLATION: <details>") immediately.
+ *   In production, violations are logged as console.error but never throw.
+ */
+
+import type { CanonicalProposal, CanonicalEnergyFlowYear, CanonicalIncentives } from './canonicalProposal';
+import {
+  isItcEnabled,
+  areStateIncentivesEnabled,
+  guardItcValue,
+  getIncentivesComplianceMessage,
+} from '../incentivesConfig';
+import {
+  resolveEscalationSource,
+  computeTruthConfidence,
+} from './utilityTruthEngine';
+import {
+  buildFinancialNarrative,
+  computePayoffYear,
+} from './financialNarrativeEngine';
+import {
+  validatePanelIntegrity,
+  buildUtilityProfile,
+  calculate25yrProjection,
+  calculateRemainingUtility,
+  getNetMeteringSummary,
+  getSrecSummary,
+  getPolicyMessage,
+  getFailsafeMessage,
+  type EnergyFlowYear,
+  type PanelSpec,
+} from '../proposalTruthEngine';
+import {
+  resolveDefaultFencePanelSpec,
+  getPanelDegradationRate,
+} from '../systemEquipmentResolver';
+import { getDbReady } from '@/lib/db-neon';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Input type for the pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface BuildCanonicalProposalInput {
+  // Panel data (from project.selectedPanel + layout)
+  panelSpec: PanelSpec | null | undefined;
+  panelCount: number;
+  layoutSystemSizeKw: number;   // from layout.systemSizeKw (used as hint only — P1 validates)
+
+  // Production data (from PVWatts or layout engine)
+  annualProductionKwh: number;
+  monthlyProductionKwh: number[];  // 12-element array
+
+  // Utility / client data
+  utilityName: string;
+  stateCode: string;              // 2-letter state code
+  clientState: string;            // full state name (fallback)
+  utilityRateOverride?: number;   // project-level rate override (must be > 0.10 to apply)
+  clientUtilityRate?: number;     // client bill-derived rate (fallback)
+  parsedBillRate?: number;        // v48.3: rate extracted from uploaded utility bill (highest priority)
+  dbUtilityRate?: number;         // v48.3: rate fetched from utility_policies DB (second priority)
+  annualUsageKwh: number;         // from client.annualKwh
+
+  // Pricing
+  systemType: 'roof' | 'ground' | 'fence' | 'carport' | string;
+  storedCashPrice: number;        // cost.cashPrice ?? cost.grossCost (0 if not stored)
+  roofPricePerWatt?: number;
+  groundPricePerWatt?: number;
+  fencePricePerWatt?: number;
+  carportPricePerWatt?: number;
+  defaultPricePerWatt?: number;   // fallback $/W
+
+  // Financing
+  loanApr?: number;               // % (e.g. 7.99)
+  loanTermYears?: number;         // e.g. 25
+  purchaseMode: 'finance' | 'cash';
+
+  // Policy / incentives
+  isCommercial?: boolean;
+  noItc?: boolean;              // suppress ITC display for clients who don't qualify (e.g. non-tax-liability residential)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+const SEASONAL_FACTORS = [0.85, 0.80, 0.90, 0.95, 1.05, 1.15, 1.25, 1.20, 1.10, 1.00, 0.88, 0.87] as const;
+// PANEL_DEGRADATION is now system-type-aware via getPanelDegradationRate()
+// Sol Fence (Philadelphia Solar Nexus): 0.004 (0.4%/yr) | All others: 0.005 (0.5%/yr)
+const PIPELINE_VERSION = 'v48.3';
+
+// Default $/W by system type (used only when storedCashPrice = 0)
+const DEFAULT_PPW: Record<string, number> = {
+  roof:    3.10,
+  ground:  2.35,
+  fence:   4.25,
+  carport: 3.75,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dev assertion lock
+// ─────────────────────────────────────────────────────────────────────────────
+
+function assertTruth(condition: boolean, message: string, warnings: string[]): void {
+  if (!condition) {
+    const fullMessage = `TRUTH VIOLATION: ${message}`;
+    if (process.env.NODE_ENV === 'development') {
+      throw new Error(fullMessage);
+    } else {
+      console.error(`[CanonicalPipeline][${PIPELINE_VERSION}]`, fullMessage);
+      warnings.push(fullMessage);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: map EnergyFlowYear → CanonicalEnergyFlowYear
+// Identity map — same fields, typed separately so UI consumers don't need
+// to import from proposalTruthEngine directly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function mapEnergyFlowYear(y: EnergyFlowYear): CanonicalEnergyFlowYear {
+  return {
+    year:                      y.year,
+    production_kwh:            y.production_kwh,
+    consumption_kwh:           y.consumption_kwh,
+    self_consumed_kwh:         y.self_consumed_kwh,
+    exported_kwh:              y.exported_kwh,
+    retail_rate:               y.retail_rate,
+    self_consumed_value:       y.self_consumed_value,
+    monthly_export_value:      y.monthly_export_value,
+    annual_excess_value:       y.annual_excess_value,
+    total_energy_value:        y.total_energy_value,
+    utility_cost_without_solar: y.utility_cost_without_solar,
+    utility_cost_with_solar:   y.utility_cost_with_solar,
+    srec_income:               y.srec_income,
+    cumulative_without_solar:  y.cumulative_without_solar,
+    cumulative_with_solar:     y.cumulative_with_solar,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v48.3: Async DB rate fetcher (mirrors fetchRateFromDb in billEnrichment.ts)
+// Call this BEFORE buildCanonicalProposal() from server-side callers and pass
+// the result as input.dbUtilityRate.  No-ops gracefully if DB is unavailable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function fetchProposalUtilityRate(
+  utilityName: string | null | undefined,
+  stateCode: string | null | undefined,
+): Promise<number | null> {
+  const RATE_MIN = 0.05;
+  const RATE_MAX = 0.50;
+  if (!utilityName) return null;
+  try {
+    const sql = await getDbReady();
+    // Exact match first
+    const rows = await sql`
+      SELECT retail_rate, default_residential_rate
+      FROM utility_policies
+      WHERE LOWER(TRIM(utility_name)) = LOWER(TRIM(${utilityName}))
+        ${stateCode ? sql`AND state = ${stateCode.toUpperCase()}` : sql``}
+      LIMIT 1
+    `;
+    if (rows.length > 0) {
+      const rate = (rows[0].retail_rate ?? rows[0].default_residential_rate) as number | null;
+      if (rate && rate >= RATE_MIN && rate <= RATE_MAX) return rate;
+    }
+    // Trigram fuzzy match fallback
+    if (stateCode) {
+      const fuzzyRows = await sql`
+        SELECT retail_rate, default_residential_rate
+        FROM utility_policies
+        WHERE state = ${stateCode.toUpperCase()}
+          AND similarity(LOWER(utility_name), LOWER(${utilityName})) > 0.45
+        ORDER BY similarity(LOWER(utility_name), LOWER(${utilityName})) DESC
+        LIMIT 1
+      `.catch(() => [] as any[]);
+      if (fuzzyRows.length > 0) {
+        const rate = (fuzzyRows[0].retail_rate ?? fuzzyRows[0].default_residential_rate) as number | null;
+        if (rate && rate >= RATE_MIN && rate <= RATE_MAX) return rate;
+      }
+    }
+  } catch {
+    // DB unavailable — callers fall through to next tier in rate chain
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function buildCanonicalProposal(
+  input: BuildCanonicalProposalInput
+): CanonicalProposal {
+  const warnings: string[] = [];
+  const builtAt = new Date().toISOString();
+
+  // ─── STEP 1: PANEL ──────────────────────────────────────────────────────────
+  // validatePanelIntegrity is the single authority on wattage, count, systemSizeKw.
+  // resolvedSystemSizeKw = (resolvedPanelCount × resolvedWattage) / 1000 — always.
+  // This value is used for ALL subsequent calculations. layoutSystemSizeKw is only
+  // passed to P1 for cross-validation — it is NEVER used downstream directly.
+  //
+  // v47.242: For Sol Fence systems with no panelSpec, inject the Philadelphia Solar
+  // Nexus PS-MNB108(HCBF)-440W as the default. Roof/ground are unaffected.
+  // Store full SolarPanel for extended display fields (cellType, bifacial, temperatureCoeff, warranty).
+
+  const sysTypeNorm = (input.systemType || 'roof').toLowerCase();
+  const isFenceSystem = sysTypeNorm === 'fence' || sysTypeNorm === 'sol_fence' || sysTypeNorm === 'solfence';
+
+  // Full SolarPanel object for fence default (has cellType, bifacial, etc.)
+  const _fenceDefaultPanel = isFenceSystem && !input.panelSpec ? resolveDefaultFencePanelSpec() : null;
+
+  const resolvedPanelSpec: PanelSpec | null = input.panelSpec ?? (
+    _fenceDefaultPanel ? {
+      manufacturer: _fenceDefaultPanel.manufacturer,
+      model:        _fenceDefaultPanel.model,
+      wattage:      _fenceDefaultPanel.wattage,
+      efficiency:   _fenceDefaultPanel.efficiency,
+      width:        _fenceDefaultPanel.width,
+      height:       _fenceDefaultPanel.height,
+    } : null
+  );
+
+  // Full panel detail source: fence default overrides input panelSpec for extended fields
+  // when the selected panel is still the generic default (no custom fence panel assigned).
+  const _fullPanelSource = _fenceDefaultPanel ?? (input.panelSpec as any) ?? null;
+
+  // System-type-aware panel degradation rate
+  const PANEL_DEGRADATION = getPanelDegradationRate(input.systemType);
+
+  const panelIntegrity = validatePanelIntegrity({
+    panelSpec:    resolvedPanelSpec,
+    panelCount:   input.panelCount,
+    systemSizeKw: input.layoutSystemSizeKw,
+  });
+
+  if (!panelIntegrity.passed) {
+    panelIntegrity.failures.forEach(f => {
+      assertTruth(false, f, warnings);
+    });
+  }
+  warnings.push(...panelIntegrity.warnings);
+
+  const resolvedWattage      = panelIntegrity.resolvedWattage;
+  const resolvedPanelCount   = panelIntegrity.resolvedPanelCount;
+  // CANONICAL system size: always (count × wattage) / 1000
+  const resolvedSystemSizeKw = resolvedPanelCount > 0 && resolvedWattage > 0
+    ? (resolvedPanelCount * resolvedWattage) / 1000
+    : panelIntegrity.resolvedSystemSizeKw;
+
+  // RULE 5 — DEV ASSERTION: system size truth lock
+  // If count and wattage are both valid, the canonical size MUST equal (count × wattage) / 1000.
+  // Any drift here means something upstream is overriding the canonical pipeline — catch it immediately.
+  if (process.env.NODE_ENV === 'development' && resolvedPanelCount > 0 && resolvedWattage > 0) {
+    const expectedKw = (resolvedPanelCount * resolvedWattage) / 1000;
+    if (Math.abs(expectedKw - resolvedSystemSizeKw) > 0.001) {
+      throw new Error(
+        `SYSTEM SIZE TRUTH VIOLATION: expected ${expectedKw.toFixed(3)} kW ` +
+        `(${resolvedPanelCount} panels × ${resolvedWattage}W) ` +
+        `but got ${resolvedSystemSizeKw.toFixed(3)} kW. ` +
+        `Do NOT override resolvedSystemSizeKw after canonical pipeline.`
+      );
+    }
+  }
+
+  const panel = {
+    manufacturer:     resolvedPanelSpec?.manufacturer ?? '',
+    model:            resolvedPanelSpec?.model ?? '',
+    wattage:          resolvedWattage,
+    count:            resolvedPanelCount,
+    systemSizeKw:     resolvedSystemSizeKw,
+    efficiency:       resolvedPanelSpec?.efficiency,
+    // Extended display fields — from fence default or selectedPanel
+    cellType:         _fullPanelSource?.cellType ?? null,
+    bifacial:         _fullPanelSource?.bifacial ?? false,
+    bifacialFactor:   _fullPanelSource?.bifacialFactor ?? 1.0,
+    temperatureCoeff: _fullPanelSource?.temperatureCoeff ?? null,
+    warranty:         _fullPanelSource?.warranty ?? 25,
+  };
+
+  // ─── STEP 2: PRODUCTION ─────────────────────────────────────────────────────
+  // Production comes from PVWatts/layout engine. We do NOT recalculate it.
+  // Monthly array must be 12 elements; pad with zeros if short.
+
+  const rawMonthly = input.monthlyProductionKwh ?? [];
+  const monthlyKwh: number[] = Array.from({ length: 12 }, (_, i) => rawMonthly[i] ?? 0);
+  const annualKwh  = input.annualProductionKwh > 0
+    ? input.annualProductionKwh
+    : monthlyKwh.reduce((a, b) => a + b, 0);
+
+  assertTruth(
+    annualKwh >= 0,
+    `annualProductionKwh is negative: ${annualKwh}`,
+    warnings
+  );
+
+  const production = { annualKwh, monthlyKwh };
+
+  // ─── STEP 3: UTILITY ────────────────────────────────────────────────────────
+  // buildUtilityProfile resolves rate, NEM type, export rate, escalation,
+  // SREC, and policy from structured data. No utility-name string logic.
+
+  // v48.3: 4-tier rate priority chain
+  // Tier 1: parsedBillRate  — extracted directly from uploaded utility bill (most accurate)
+  // Tier 2: dbUtilityRate   — fetched from utility_policies DB via fetchProposalUtilityRate()
+  // Tier 3: utilityRateOverride — project-level manual override
+  // Tier 4: clientUtilityRate   — client profile bill-derived rate
+  // Fallback: 0.15 hardcoded national average
+  function validRate(r: number | null | undefined): r is number {
+    return typeof r === 'number' && isFinite(r) && r >= 0.05 && r <= 0.50;
+  }
+  const utilityRatePerKwh =
+    validRate(input.parsedBillRate)      ? input.parsedBillRate      :
+    validRate(input.dbUtilityRate)       ? input.dbUtilityRate       :
+    validRate(input.utilityRateOverride) ? input.utilityRateOverride :
+    validRate(input.clientUtilityRate)   ? input.clientUtilityRate   :
+    0.15;
+
+  // v48.4: dev-only rate source trace — never logged in production
+  if (process.env.NODE_ENV !== 'production') {
+    const source =
+      validRate(input.parsedBillRate)      ? 'parsed'   :
+      validRate(input.dbUtilityRate)       ? 'db'        :
+      validRate(input.utilityRateOverride) ? 'override'  :
+      validRate(input.clientUtilityRate)   ? 'client'    :
+      'fallback';
+    console.log('[PROPOSAL_RATE_SOURCE]', {
+      source,
+      value: utilityRatePerKwh,
+      utility: input.utilityName ?? 'unknown',
+      state:   input.stateCode   ?? '??',
+    });
+  }
+
+  const builtProfile = buildUtilityProfile({
+    utilityName:       input.utilityName,
+    stateCode:         input.stateCode,
+    state:             input.clientState,
+    utilityRatePerKwh,
+  });
+
+  const utilityProfile   = builtProfile.profile;
+  const resolvedRate     = builtProfile.resolved_rate;
+  const escalationRate   = utilityProfile.escalation_rate || 0.03;
+  const exportRate       = builtProfile.financial_rules.export_rate;
+  const netMeteringType  = utilityProfile.net_metering_type;
+
+  // Resolve escalation rate source + label for truth-tagged UI display
+  const hasRateOverride = !!(
+    validRate(input.parsedBillRate) ||
+    validRate(input.dbUtilityRate) ||
+    validRate(input.utilityRateOverride) ||
+    validRate(input.clientUtilityRate)
+  );
+  const escalationSourceResult    = resolveEscalationSource(builtProfile, input.stateCode);
+  const escalationRateSource      = escalationSourceResult.source;
+  const escalationRateSourceLabel = escalationSourceResult.label;
+
+  // Build 10-year back-calculated rate history (estimated — no real historical source in pipeline).
+  // Back-calculate: rate_n_years_ago = currentRate / (1 + escalationRate)^n
+  const currentYear = new Date().getFullYear();
+  const rateHistory = Array.from({ length: 11 }, (_, i) => {
+    const yearsBack = 10 - i;
+    const year = currentYear - yearsBack;
+    const rate = parseFloat((resolvedRate / Math.pow(1 + escalationRate, yearsBack)).toFixed(4));
+    return { year, rate, estimated: true };
+  });
+
+  // v47.250: Wire new SPEC §1 fields from utilityProfile into canonical utility
+  const utilityRetailRateType    = utilityProfile.retail_rate_type ?? 'flat';
+  const utilityExportRateMonthly = utilityProfile.export_rate_monthly !== undefined
+    ? utilityProfile.export_rate_monthly
+    : exportRate;
+  const utilityExportRateAnnualExcess = utilityProfile.export_rate_annual_excess !== undefined
+    ? utilityProfile.export_rate_annual_excess
+    : (builtProfile.financial_rules as any).export_rate_annual_excess ?? null;
+  const utilityTrueUpPeriod  = utilityProfile.true_up_period ?? 'none';
+  const utilityPolicyStatus  = utilityProfile.policy_status ?? 'stable';
+  const utilityConfidence    = utilityProfile.confidence ?? utilityProfile.data_confidence ?? 'medium';
+
+  const utility = {
+    provider:                  input.utilityName || utilityProfile.utility_name_pattern || 'Unknown Utility',
+    rate:                      resolvedRate,
+    annualUsageKwh:            input.annualUsageKwh,
+    escalationRate,
+    escalationRateSource,
+    escalationRateSourceLabel,
+    netMeteringType,
+    exportRate,
+    // v47.250 new fields (SPEC §1)
+    retail_rate_type:           utilityRetailRateType,
+    export_rate_monthly:        utilityExportRateMonthly,
+    export_rate_annual_excess:  utilityExportRateAnnualExcess,
+    true_up_period:             utilityTrueUpPeriod,
+    policy_status:              utilityPolicyStatus,
+    confidence:                 utilityConfidence,
+    rateHistory,
+  };
+
+  // ─── STEP 4: FINANCIAL ──────────────────────────────────────────────────────
+  // System cost: stored cash price if available, else live calculated from $/W.
+  // effectiveFinal = baseCashPrice (no ITC deduction — IRC §25D compliance).
+
+  const sysType  = input.systemType || 'roof';
+  const livePpw  = (({
+    roof:    input.roofPricePerWatt    ?? input.defaultPricePerWatt ?? DEFAULT_PPW.roof,
+    ground:  input.groundPricePerWatt  ?? input.defaultPricePerWatt ?? DEFAULT_PPW.ground,
+    fence:   input.fencePricePerWatt   ?? input.defaultPricePerWatt ?? DEFAULT_PPW.fence,
+    carport: input.carportPricePerWatt ?? input.defaultPricePerWatt ?? DEFAULT_PPW.carport,
+  } as Record<string, number>)[sysType]) ?? (input.defaultPricePerWatt ?? DEFAULT_PPW.roof);
+
+  const systemSizeW          = resolvedSystemSizeKw * 1000;
+  const liveCalculatedPrice  = systemSizeW > 0 ? Math.round(systemSizeW * livePpw) : 0;
+  const baseCashPrice        = input.storedCashPrice > 0 ? input.storedCashPrice : liveCalculatedPrice;
+
+  // Section 1: effectiveFinal = baseCashPrice. IRC §25D tax credit is NOT a proposal item.
+  const effectiveFinal = baseCashPrice;
+
+  assertTruth(effectiveFinal >= 0, `effectiveFinal is negative: ${effectiveFinal}`, warnings);
+
+  // Financing
+  const financeAprDecimal  = ((input.loanApr ?? 7.99) / 100);
+  const financeTermYears   = input.loanTermYears ?? 25;
+  const financeMonthlyRate = financeAprDecimal / 12;
+  const financeTermMonths  = financeTermYears * 12;
+  const financeMonthlyPayment = effectiveFinal > 0 && financeMonthlyRate > 0
+    ? Math.round(
+        effectiveFinal *
+        (financeMonthlyRate * Math.pow(1 + financeMonthlyRate, financeTermMonths)) /
+        (Math.pow(1 + financeMonthlyRate, financeTermMonths) - 1)
+      )
+    : 0;
+
+  // Monthly usage
+  const avgMonthlyUsageKwh      = input.annualUsageKwh > 0 ? input.annualUsageKwh / 12 : 0;
+  const avgMonthlyProductionKwh = annualKwh > 0 ? annualKwh / 12 : 0;
+
+  // Profile-driven remaining utility monthly cost
+  const remaining_utility_monthly = Math.max(0, calculateRemainingUtility({
+    monthlyUsageKwh:      avgMonthlyUsageKwh,
+    monthlyProductionKwh: avgMonthlyProductionKwh,
+    profile:              utilityProfile,
+    retailRate:           resolvedRate,
+  }));
+
+  const solar_payment_monthly   = financeMonthlyPayment;
+  const total_energy_cost_monthly = solar_payment_monthly + remaining_utility_monthly;
+
+  // Monthly bill chart (before/after with seasonal factors)
+  const monthlyBillChart = MONTHS.map((month, i) => {
+    const monthlyUsage    = avgMonthlyUsageKwh > 0
+      ? avgMonthlyUsageKwh * SEASONAL_FACTORS[i]
+      : ((input.annualUsageKwh > 0 ? input.annualUsageKwh : 12000) / 12) * SEASONAL_FACTORS[i];
+    const monthlyProduced = monthlyKwh[i] ?? 0;
+    const before = Math.round(monthlyUsage * resolvedRate);
+    // v47.253: NEM-aware monthly bill — uses calculateRemainingUtility, not (usage-production)*rate
+    const after  = Math.max(0, calculateRemainingUtility({
+      monthlyUsageKwh:      monthlyUsage,
+      monthlyProductionKwh: monthlyProduced,
+      profile:              utilityProfile,
+      retailRate:           resolvedRate,
+    }));
+    return { month, before, after, savings: before - after };
+  });
+
+  const avgMonthlyBillBefore = Math.round(
+    monthlyBillChart.reduce((s, m) => s + m.before, 0) / 12
+  );
+  const ownershipDeltaMonthly = total_energy_cost_monthly - avgMonthlyBillBefore;
+
+  // Year 1 bill WITHOUT solar — correct: annual usage × retail rate
+  const year1BillWithoutSolar = Math.round(input.annualUsageKwh * resolvedRate);
+  // annualEnergyValue and year1BillWithSolar derived AFTER proj25 (see STEP 5 below)
+
+  // ── ITC — v47.251 Global Incentives Truth Rule ──────────────────────────────
+  // ITC is gated by GLOBAL_INCENTIVES_CONFIG.allow_itc (default: false).
+  // When disabled: itcRate=0, itcAmount=0, netCost=grossCost.
+  // When enabled: computed from program data — no hardcoded 30%.
+  // The per-project noItc flag is a secondary suppressor (still respected when ITC is globally on).
+  const itcGloballyEnabled = isItcEnabled();
+  const itcSuppressedByProject = !!(input.noItc);
+
+  // ITC rate: 0 unless globally enabled AND not suppressed by project
+  // When globally enabled: residential §25D rate (currently 0 per P.L. 119-21 repeal for 2026+);
+  // commercial §48E: 30%. Do not hardcode for residential — engine returns 0.
+  const itcRate = (!itcGloballyEnabled || itcSuppressedByProject)
+    ? 0
+    : (input.isCommercial ? 30 : 0);  // residential §25D = 0 (P.L. 119-21); commercial §48E = 30%
+
+  // SPEC §5 FAILSAFE: guardItcValue ensures no leak when config is off
+  const rawItcAmount = Math.round(effectiveFinal * itcRate / 100);
+  const itcAmount    = guardItcValue(rawItcAmount, 'buildCanonicalProposal');
+
+  // net_system_cost: gross when incentives disabled (SPEC §2)
+  const netCost = itcGloballyEnabled ? effectiveFinal - itcAmount : effectiveFinal;
+
+  // paybackBasis, paybackYears, financial object — defined after proj25/annualEnergyValue (see below)
+
+  // ── Canonical Incentives Block (SPEC §2) ─────────────────────────────────
+  // When incentives_enabled=false: ALL values zeroed, state_incentives=[].
+  // State incentives also gated by areStateIncentivesEnabled().
+  const incentivesBlock: CanonicalIncentives = {
+    itc_percent:        itcRate,
+    itc_value:          itcAmount,
+    state_incentives:   [],   // populated below only when state incentives are globally on
+    total_incentives:   itcAmount,
+    incentives_enabled: itcGloballyEnabled,
+  };
+
+  // ─── STEP 5: TRUTH25YR ──────────────────────────────────────────────────────
+  // Single savings definition. calculate25yrProjection is the authority.
+  //
+  // CASH BASIS (always): netDifference = utilityCostWithoutSolar - (cashPrice + remainingUtilityCost)
+  // This is the canonical "25-yr net savings" shown in the proposal — independent of purchase mode.
+  // Rationale: the loan is a financing vehicle, not the system cost. Showing financed total as "cost"
+  // penalizes financing buyers with a misleading negative savings figure. Cash basis is industry
+  // standard for proposal savings displays.
+  //
+  // FINANCE BASIS (separate): netDifferenceFinanced — for internal financing comparison only.
+  //
+  // v47.250: Pass solarAnnualPayment, loanYears, panelDegradation to calculate25yrProjection.
+  // The iterative model uses these to compute per-year utility_cost_with_solar correctly.
+
+  const financeTotal         = financeMonthlyPayment * financeTermMonths;
+  const solarAnnualPayment   = financeMonthlyPayment * 12;
+  const loanYears            = financeTermYears;
+
+  // Cash-basis projection (canonical savings display — always uses cash price, not loan total)
+  const proj25 = calculate25yrProjection({
+    annualProductionKwh:  annualKwh,
+    annualUsageKwh:       input.annualUsageKwh,
+    retailRate:           resolvedRate,
+    profile:              utilityProfile,
+    systemCost:           effectiveFinal,
+    financeTotal:         undefined,   // cash basis: netDifference independent of purchase mode
+    solarAnnualPayment,
+    loanYears,
+    panelDegradation:     PANEL_DEGRADATION,
+  });
+
+  // Finance-basis projection (for financing cost comparison only)
+  const proj25Finance = input.purchaseMode === 'finance' ? calculate25yrProjection({
+    annualProductionKwh:  annualKwh,
+    annualUsageKwh:       input.annualUsageKwh,
+    retailRate:           resolvedRate,
+    profile:              utilityProfile,
+    systemCost:           effectiveFinal,
+    financeTotal,
+    solarAnnualPayment,
+    loanYears,
+    panelDegradation:     PANEL_DEGRADATION,
+  }) : proj25;
+
+  // CANONICAL SAVINGS DEFINITION — cash basis, enforced here, used everywhere:
+  const netDifference = proj25.utility_cost_without_solar_25yr
+    - (proj25.solar_cost_total + proj25.remaining_utility_cost_total);
+
+  // Finance-basis difference (may be negative for high-APR/long-term loans)
+  const netDifferenceFinanced = proj25Finance.utility_cost_without_solar_25yr
+    - (proj25Finance.solar_cost_total + proj25Finance.remaining_utility_cost_total);
+
+  // v47.253: annualEnergyValue — Year 1 total energy value from the iterative flow engine
+  // SPEC v47.253 RULE: derive from yearlyFlow[0].total_energy_value, NOT annualKwh * resolvedRate
+  // yearlyFlow[0] = Year 1 of the 25-year iterative model (NEM-type-aware, self-consumption + export)
+  const annualEnergyValue = proj25.yearlyFlow.length > 0
+    ? proj25.yearlyFlow[0].total_energy_value
+    : 0;
+
+  // v47.253: year1BillWithSolar — from iterative model (NEM-aware remaining utility)
+  const year1BillWithSolar = proj25.yearlyFlow.length > 0
+    ? proj25.yearlyFlow[0].utility_cost_with_solar
+    : Math.round(Math.max(0, input.annualUsageKwh - annualKwh) * resolvedRate); // fallback only
+
+  // v47.253: payback derived from flow-based annualEnergyValue (not production*rate)
+  const paybackBasis = netCost;  // = effectiveFinal when ITC disabled (SPEC §3)
+  const paybackYears = paybackBasis > 0 && annualEnergyValue > 0
+    ? parseFloat((paybackBasis / annualEnergyValue).toFixed(1))
+    : 0;
+
+  // v47.254: energyValueBreakdown — identity map from yearlyFlow[0], NO recomputation
+  // selfConsumed = yearlyFlow[0].self_consumed_value
+  // exported     = yearlyFlow[0].monthly_export_value + yearlyFlow[0].annual_excess_value
+  // total        = yearlyFlow[0].total_energy_value (same as annualEnergyValue)
+  const y0 = proj25.yearlyFlow.length > 0 ? proj25.yearlyFlow[0] : null;
+  const energyValueBreakdown = {
+    selfConsumed: y0 ? y0.self_consumed_value : 0,
+    exported:     y0 ? (y0.monthly_export_value + y0.annual_excess_value) : 0,
+    total:        y0 ? y0.total_energy_value : 0,
+  };
+
+  const financial = {
+    gross_system_cost:    effectiveFinal,   // always gross, pre-incentives (SPEC §2)
+    systemCost:           effectiveFinal,
+    pricePerWatt:         livePpw,
+    solarPaymentMonthly:  solar_payment_monthly,
+    utilityBillMonthly:   remaining_utility_monthly,
+    totalMonthlyCost:     total_energy_cost_monthly,
+    currentMonthlyBill:   avgMonthlyBillBefore,
+    ownershipDeltaMonthly,
+    financeApr:           financeAprDecimal,
+    financeTermYears,
+    financeTermMonths,
+    annualEnergyValue,
+    year1BillWithoutSolar,
+    year1BillWithSolar,
+    itcRate,
+    itcAmount,
+    netCost,
+    paybackYears,
+    energyValueBreakdown,
+  };
+
+  // Assertion: netDifference must be consistent
+  assertTruth(
+    Math.abs(netDifference - (proj25.utility_cost_without_solar_25yr - proj25.solar_cost_total - proj25.remaining_utility_cost_total)) < 1,
+    `netDifference calculation inconsistency detected`,
+    warnings
+  );
+
+  // v47.250 SPEC §5: projectionChart derived from yearlyFlow — no inline recomputation.
+  // Each year's savings = total_energy_value from the iterative model.
+  // cumulative = cumulative_without_solar - cumulative_with_solar (net advantage at that year).
+  const yearlyFlow: CanonicalEnergyFlowYear[] = proj25.yearlyFlow.map(mapEnergyFlowYear);
+
+  const projectionChart = yearlyFlow.map((yr, i) => ({
+    year:       `Yr ${i + 1}`,
+    savings:    Math.round(yr.total_energy_value),
+    cumulative: Math.round(yr.cumulative_without_solar - yr.cumulative_with_solar),
+  }));
+
+  const truth25yr = {
+    utilityCostWithoutSolar: proj25.utility_cost_without_solar_25yr,
+    solarCostTotal:          proj25.solar_cost_total,
+    remainingUtilityCost:    proj25.remaining_utility_cost_total,
+    netDifference,
+    netDifferenceFinanced,
+    estimatedEnergyValue:    proj25.estimated_energy_value_25yr,
+    netFinancialDifference:  proj25.net_financial_difference_25yr,
+    srec_income_25yr:        proj25.srec_income_25yr,
+    monthlyBillChart,
+    projectionChart,
+    yearlyFlow,
+  };
+
+  // ─── STEP 6: OFFSET ─────────────────────────────────────────────────────────
+
+  const offsetPct = input.annualUsageKwh > 0
+    ? Math.min(Math.round((annualKwh / input.annualUsageKwh) * 100), 100)
+    : 0;
+
+  const offset = {
+    percentage:          offsetPct,
+    remainingPercentage: 100 - offsetPct,
+    isPartialOffset:     offsetPct < 100,
+  };
+
+  // ─── STEP 7: POLICY ─────────────────────────────────────────────────────────
+  // SREC, incentives, policy message, NEM summary, failsafe.
+  // incentivesAllowed = false when policy is 'at_risk' (removes incentive messaging).
+
+  const policyEffect     = utilityProfile.policy_effect;
+  const incentivesAllowed = policyEffect !== 'at_risk';
+  const policyMessage    = getPolicyMessage(utilityProfile);
+  const netMeteringSummary = getNetMeteringSummary(utilityProfile);
+  const srecSummary      = getSrecSummary(utilityProfile, annualKwh);
+  const failsafeMessage  = getFailsafeMessage(builtProfile);
+
+  const policy = {
+    srecAvailable:          utilityProfile.srec_available,
+    srecProgramName:        utilityProfile.srec_program_name,
+    srecPricePerMwh:        utilityProfile.srec_price_estimate,
+    incentivesAllowed,
+    policyMessage,
+    netMeteringSummary,
+    srecSummary,
+    failsafeMessage,
+    isSpecificUtilityMatch: builtProfile.is_specific_match,
+  };
+
+  // ─── STEP 8: RETURN ─────────────────────────────────────────────────────────
+
+  const hasWarnings = warnings.length > 0;
+
+  // Compute overall truth confidence for this proposal
+  const truthConfidenceResult = computeTruthConfidence(builtProfile, hasRateOverride, input.stateCode);
+  const truthConfidence = truthConfidenceResult.level;
+
+  // ─── STEP 8b: PAYOFF YEAR ───────────────────────────────────────────────────
+  // Canonical payoff year: when cumulative energy value produced >= systemCost.
+  const payoffYear = computePayoffYear(
+    annualEnergyValue,
+    escalationRate,
+    effectiveFinal,
+    PANEL_DEGRADATION,
+  );
+
+  // ─── STEP 8c: FINANCIAL NARRATIVE ───────────────────────────────────────────
+  const narrative = buildFinancialNarrative({
+    currentMonthlyBill:        avgMonthlyBillBefore,
+    solarPaymentMonthly:       solar_payment_monthly,
+    utilityBillMonthly:        remaining_utility_monthly,
+    escalationRate,
+    escalationRateSourceLabel,
+    payoffYear,
+    netSavings25yr:            Math.max(0, netDifference),
+    purchaseMode:              input.purchaseMode,
+    annualEnergyValue,
+    isPartialOffset:           offset.isPartialOffset,
+    offsetPct:                 offset.percentage,
+  });
+
+  const proposal: CanonicalProposal = {
+    panel,
+    production,
+    utility,
+    financial,
+    truth25yr,
+    offset,
+    policy,
+    incentives: incentivesBlock,
+    _meta: {
+      builtAt,
+      version:     PIPELINE_VERSION,
+      purchaseMode: input.purchaseMode,
+      hasWarnings,
+      warnings:    [...warnings],
+      truthConfidence,
+      payoffYear,
+      narrative,
+    },
+  };
+
+  return proposal;
+}

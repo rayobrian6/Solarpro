@@ -1,0 +1,104 @@
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+export const maxDuration = 30;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getUserFromRequest } from '@/lib/auth';
+import { getProjectById, getProjectWithDetails, updateProject, softDeleteProject, handleRouteDbError, isValidUUID} from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+type RouteContext = { params: Promise<{id: string}> };
+
+
+export async function GET(req: NextRequest, context: RouteContext) {
+  try {
+    const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+
+    // Use getProjectWithDetails to include layout, production, costEstimate, client
+    const project = await getProjectWithDetails(id, user.id);
+    if (!project) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true, data: project });
+  } catch (err: unknown) {
+    return handleRouteDbError('[GET /api/projects/[id]]', err);
+  }
+}
+
+export async function PUT(req: NextRequest, context: RouteContext) {
+  try {
+        const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
+    const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+
+    const body = await req.json();
+    const updated = await updateProject(id, user.id, body);
+    if (!updated) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true, data: updated });
+  } catch (err: unknown) {
+    return handleRouteDbError('[PUT /api/projects/[id]]', err);
+  }
+}
+
+export async function PATCH(req: NextRequest, context: RouteContext) {
+  try {
+        const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
+    const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+
+    const body = await req.json();
+    // PATCH accepts partial updates (e.g. { status: 'approved' })
+    const updated = await updateProject(id, user.id, body);
+    if (!updated) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true, data: updated });
+  } catch (err: unknown) {
+    return handleRouteDbError('[PATCH /api/projects/[id]]', err);
+  }
+}
+
+export async function DELETE(req: NextRequest, context: RouteContext) {
+  try {
+        const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
+    const { id } = await context.params;
+    if (!isValidUUID(id)) {
+      return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
+    }
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Authentication required' }, { status: 401 });
+
+    // Soft delete — sets deleted_at, never removes data
+    const deleted = await softDeleteProject(id, user.id);
+    if (!deleted) return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true, message: 'Project deleted' });
+  } catch (err: unknown) {
+    return handleRouteDbError('[DELETE /api/projects/[id]]', err);
+  }
+}

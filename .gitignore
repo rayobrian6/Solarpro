@@ -1,0 +1,84 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js build output
+.next/
+out/
+
+# Production build
+build/
+dist/
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Vercel
+.vercel
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# TypeScript
+*.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
+
+# Workspace outputs / temp files
+outputs/
+summarized_conversations/
+
+# Screenshots
+Screenshot*.png
+
+# Release zips (generated artifacts)
+*.zip
+
+# TypeScript build info
+tsconfig.tsbuildinfo
+# Development scripts / working files (root level)
+bump_v*.py
+bump_version.py
+compare_v*.py
+compare_v*.png
+crop_compare.py
+fix_*.py
+generate_*.py
+patch_*.py
+preview_cover*.html
+preview_cover*.pdf
+restore_*.py
+rewrite_*.py
+cover_*.png
+current_*.png
+real_aerial.jpg
+test_aerial.jpg
+
+# Scripts folder development artifacts
+scripts/*.png
+scripts/*.html
+scripts/*.pdf
+scripts/*.js
+!scripts/check-env.js
+scripts/gen_*.py
+scripts/fix_*.py
+scripts/upgrade_*.py
+scripts/rewrite_*.py
+scripts/bump_*.py
+scripts/patch_*.py
+scripts/preview_*.py
+build-output.log
+.commit-msg-*.txt

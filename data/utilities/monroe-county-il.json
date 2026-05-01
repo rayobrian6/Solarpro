@@ -1,0 +1,48 @@
+{
+  "id": "monroe-county-il",
+  "name": "Monroe County Electric Cooperative",
+  "type": "cooperative",
+  "state": "IL",
+  "territory": "Monroe and Randolph counties, southwestern Illinois",
+  "website": "https://www.monroecountyelectric.coop",
+  "phone": "618-939-7171",
+  "interconnectionEmail": "office@monroecountyelectric.coop",
+  "netMetering": {
+    "available": true,
+    "policy": "Net metering at retail rate for systems ≤ 40 kW",
+    "maxSystemSizeKw": 40,
+    "rateType": "retail",
+    "excessCreditPolicy": "Carried forward monthly; zeroed annually",
+    "annualTrueUp": true,
+    "notes": "Illinois Net Metering Act (220 ILCS 5/16-107.5) applies; near St. Louis metro area"
+  },
+  "interconnection": {
+    "applicationFee": 50,
+    "applicationFeeNotes": "Standard residential fee; engineering study for systems > 10 kW",
+    "maxResidentialKw": 40,
+    "requiresAntiIsland": true,
+    "requiresDisconnect": true,
+    "requiresInsurance": false,
+    "utilityInspectionRequired": true,
+    "estimatedApprovalDays": 30,
+    "forms": ["IL-ICC Interconnection Application"]
+  },
+  "rates": {
+    "residentialTariff": "Schedule R",
+    "avgRetailRatePerKwh": 0.1178,
+    "demandChargeApplies": false,
+    "fixedMonthlyCharge": 26.50,
+    "tieredRates": false,
+    "touRatesAvailable": false
+  },
+  "incentives": {
+    "stateRebate": false,
+    "utilityRebate": false,
+    "notes": "Illinois Shines (ABP) available; southwestern IL near Missouri border"
+  },
+  "eia": {
+    "utilityId": "13620",
+    "source": "EIA Form 861"
+  },
+  "lastUpdated": "2025-01-01"
+}
