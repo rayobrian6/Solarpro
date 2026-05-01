@@ -19,6 +19,10 @@ const DEV_PHRASES = [
   'this is the dev', "i'm the developer", 'im the developer',
   "i'm your creator", 'im your creator', "i built you", 'show debug',
   'enable debug', 'solardog debug', 'your father', 'dad here',
+  // v10.3: natural developer identification phrases
+  'i created you', 'i am the developer', 'i built this',
+  'i made you', 'i built solardog', 'i made solardog',
+  "i'm the creator", 'im the creator', 'developer here',
 ];
 
 export function detectMode(message: string, page: string): SolarDogMode {

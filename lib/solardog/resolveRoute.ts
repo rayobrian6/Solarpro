@@ -235,9 +235,10 @@ export function isValidLearnTarget(target: string): boolean {
     if (label === normalized || label === stripped) return true;
     if (route === normalized || route === stripped) return true;
     if (entry.aliases.some(a => normalizePhrase(a) === normalized || normalizePhrase(a) === stripped)) return true;
-    // Partial match: label contains the target or target contains the label
+    // Partial match: known label contains the stripped target (target is a prefix/subset of a label)
+    // e.g. 'engineer' matches 'Engineering'
+    // NOT: target contains label (avoids 'on engineering' matching 'Engineering')
     if (label.includes(stripped) && stripped.length >= 3) return true;
-    if (stripped.includes(label) && label.length >= 3) return true;
   }
   return false;
 }

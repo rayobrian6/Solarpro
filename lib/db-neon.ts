@@ -1997,3 +1997,178 @@ export async function solardogDeleteAlias(userId: string, phrase: string): Promi
     console.error('[SolarDog] solardogDeleteAlias error:', (err as Error)?.message ?? err);
   }
 }
+
+// ─── SolarPro Knowledge Base ─────────────────────────────────────────────────
+
+export interface KnowledgeItem {
+  id?:             string;
+  userId?:         string | null;
+  type:            'page' | 'button' | 'workflow' | 'equipment_brand' | 'feature' | 'route' | 'warning' | 'action' | 'preference';
+  key:             string;
+  label:           string;
+  description:     string;
+  route?:          string | null;
+  aliases:         string[];
+  relatedActions:  string[];
+  metadata:        Record<string, unknown>;
+  isGlobal:        boolean;
+  createdAt?:      string;
+  updatedAt?:      string;
+}
+
+/**
+ * Upsert a knowledge item (insert or update on type+key conflict).
+ * Pass userId=null for global items (shared across all users).
+ */
+export async function solardogKnowledgeUpsert(
+  userId:  string | null,
+  item:    Omit<KnowledgeItem, 'id' | 'createdAt' | 'updatedAt'>,
+): Promise<void> {
+  try {
+    if (userId && !isValidUUID(userId)) return;
+    const sql = await getDbReady();
+    await sql`
+      INSERT INTO solarpro_knowledge_items
+        (user_id, type, key, label, description, route, aliases, related_actions, metadata, is_global)
+      VALUES (
+        ${userId ?? null},
+        ${item.type},
+        ${item.key.toLowerCase().trim()},
+        ${item.label},
+        ${item.description},
+        ${item.route ?? null},
+        ${item.aliases as string[]},
+        ${item.relatedActions as string[]},
+        ${JSON.stringify(item.metadata)},
+        ${item.isGlobal ?? false}
+      )
+      ON CONFLICT (user_id, type, key) DO UPDATE SET
+        label           = EXCLUDED.label,
+        description     = EXCLUDED.description,
+        route           = EXCLUDED.route,
+        aliases         = EXCLUDED.aliases,
+        related_actions = EXCLUDED.related_actions,
+        metadata        = EXCLUDED.metadata,
+        is_global       = EXCLUDED.is_global,
+        updated_at      = NOW()
+    `;
+  } catch (err) {
+    console.error('[SolarDog] solardogKnowledgeUpsert error:', (err as Error)?.message ?? err);
+  }
+}
+
+/**
+ * Get all knowledge items visible to a user (their own + global items).
+ */
+export async function solardogKnowledgeGet(
+  userId: string,
+  type?:  KnowledgeItem['type'],
+): Promise<KnowledgeItem[]> {
+  try {
+    if (!isValidUUID(userId)) return [];
+    const sql = await getDbReady();
+    const rows = type
+      ? await sql`
+          SELECT * FROM solarpro_knowledge_items
+          WHERE (user_id = ${userId} OR is_global = TRUE)
+            AND type = ${type}
+          ORDER BY label ASC
+        `
+      : await sql`
+          SELECT * FROM solarpro_knowledge_items
+          WHERE (user_id = ${userId} OR is_global = TRUE)
+          ORDER BY type ASC, label ASC
+        `;
+    return rows.map(r => ({
+      id:             r.id as string,
+      userId:         r.user_id as string | null,
+      type:           r.type as KnowledgeItem['type'],
+      key:            r.key as string,
+      label:          r.label as string,
+      description:    r.description as string,
+      route:          r.route as string | null,
+      aliases:        (r.aliases as string[]) ?? [],
+      relatedActions: (r.related_actions as string[]) ?? [],
+      metadata:       (r.metadata as Record<string, unknown>) ?? {},
+      isGlobal:       r.is_global as boolean,
+      createdAt:      r.created_at as string,
+      updatedAt:      r.updated_at as string,
+    }));
+  } catch (err) {
+    console.error('[SolarDog] solardogKnowledgeGet error:', (err as Error)?.message ?? err);
+    return [];
+  }
+}
+
+/**
+ * Full-text search across knowledge items (label, description, aliases, key).
+ * Returns up to `limit` items sorted by relevance (label match first).
+ */
+export async function solardogKnowledgeSearch(
+  userId: string,
+  query:  string,
+  limit = 10,
+): Promise<KnowledgeItem[]> {
+  try {
+    if (!isValidUUID(userId)) return [];
+    const sql = await getDbReady();
+    const q = `%${query.toLowerCase().trim()}%`;
+    const rows = await sql`
+      SELECT * FROM solarpro_knowledge_items
+      WHERE (user_id = ${userId} OR is_global = TRUE)
+        AND (
+          LOWER(label)       LIKE ${q} OR
+          LOWER(description) LIKE ${q} OR
+          LOWER(key)         LIKE ${q} OR
+          EXISTS (
+            SELECT 1 FROM unnest(aliases) AS a
+            WHERE LOWER(a) LIKE ${q}
+          )
+        )
+      ORDER BY
+        CASE WHEN LOWER(label) LIKE ${q} THEN 0 ELSE 1 END,
+        label ASC
+      LIMIT ${limit}
+    `;
+    return rows.map(r => ({
+      id:             r.id as string,
+      userId:         r.user_id as string | null,
+      type:           r.type as KnowledgeItem['type'],
+      key:            r.key as string,
+      label:          r.label as string,
+      description:    r.description as string,
+      route:          r.route as string | null,
+      aliases:        (r.aliases as string[]) ?? [],
+      relatedActions: (r.related_actions as string[]) ?? [],
+      metadata:       (r.metadata as Record<string, unknown>) ?? {},
+      isGlobal:       r.is_global as boolean,
+      createdAt:      r.created_at as string,
+      updatedAt:      r.updated_at as string,
+    }));
+  } catch (err) {
+    console.error('[SolarDog] solardogKnowledgeSearch error:', (err as Error)?.message ?? err);
+    return [];
+  }
+}
+
+/**
+ * Delete a specific knowledge item by type+key for a user.
+ */
+export async function solardogKnowledgeDelete(
+  userId: string,
+  type:   KnowledgeItem['type'],
+  key:    string,
+): Promise<void> {
+  try {
+    if (!isValidUUID(userId)) return;
+    const sql = await getDbReady();
+    await sql`
+      DELETE FROM solarpro_knowledge_items
+      WHERE user_id = ${userId}
+        AND type    = ${type}
+        AND key     = ${key.toLowerCase().trim()}
+    `;
+  } catch (err) {
+    console.error('[SolarDog] solardogKnowledgeDelete error:', (err as Error)?.message ?? err);
+  }
+}

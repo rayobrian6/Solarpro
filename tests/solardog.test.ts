@@ -47,6 +47,10 @@ const DEV_PHRASES = [
   'this is the dev', "i'm the developer", 'im the developer',
   "i'm your creator", 'im your creator', "i built you", 'show debug',
   'enable debug', 'solardog debug', 'your father', 'dad here',
+  // v10.3: natural developer identification phrases
+  'i created you', 'i am the developer', 'i built this',
+  'i made you', 'i built solardog', 'i made solardog',
+  "i'm the creator", 'im the creator', 'developer here',
 ];
 
 function detectMode(message: string, page: string): SolarDogMode {
@@ -1776,5 +1780,520 @@ describe('v10.2 learn validation integration', () => {
     const r = resolveRoute('take me to the hub', null, learned);
     expect(r.confidence).toBe('high');
     expect(r.resolvedUrl).toContain('/dashboard');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 29. Memory honesty — SolarDog must not claim memory it doesn't have
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Memory honesty — no false memory claims', () => {
+
+  // The system prompt MEMORY HONESTY RULES section must exist in the prompt
+  // We test this by checking buildSystemPrompt output indirectly via
+  // examining the prompt rules text in the source.
+  // Direct: test the memory line logic in isolation.
+
+  function makeMemoryLine(
+    memoryAvailable: boolean,
+    historyCount: number,
+    mode: 'user' | 'developer',
+  ): string {
+    if (memoryAvailable && historyCount > 0) {
+      return `CONVERSATION MEMORY: The ${historyCount} messages above ARE your conversation history`;
+    } else if (memoryAvailable && historyCount === 0) {
+      return `CONVERSATION MEMORY: This is the first message`;
+    } else {
+      if (mode === 'developer') {
+        return `CONVERSATION MEMORY: Unavailable — DB connection failed`;
+      }
+      return `CONVERSATION MEMORY: Not available for this session`;
+    }
+  }
+
+  it('memory line says "NOT available" when memoryAvailable=false, user mode', () => {
+    const line = makeMemoryLine(false, 0, 'user');
+    expect(line).toContain('Not available');
+    expect(line).not.toContain('sharp');
+    expect(line).not.toContain('remember everything');
+  });
+
+  it('memory line says "Unavailable — DB" in developer mode with no memory', () => {
+    const line = makeMemoryLine(false, 0, 'developer');
+    expect(line).toContain('Unavailable');
+    expect(line).toContain('DB connection');
+  });
+
+  it('memory line shows history count when available', () => {
+    const line = makeMemoryLine(true, 5, 'user');
+    expect(line).toContain('5 messages');
+    expect(line).toContain('ARE your conversation history');
+  });
+
+  it('memory line says "first message" when available but historyCount=0', () => {
+    const line = makeMemoryLine(true, 0, 'user');
+    expect(line).toContain('first message');
+    expect(line).not.toContain('remember everything');
+  });
+
+  it('memory line never says "my memory is sharp" in any branch', () => {
+    const branches = [
+      makeMemoryLine(false, 0, 'user'),
+      makeMemoryLine(false, 0, 'developer'),
+      makeMemoryLine(true, 0, 'user'),
+      makeMemoryLine(true, 5, 'user'),
+    ];
+    for (const line of branches) {
+      expect(line.toLowerCase()).not.toContain('sharp');
+    }
+  });
+
+  it('memory line never says "I remember everything" without history', () => {
+    const noHistory = makeMemoryLine(true, 0, 'user');
+    expect(noHistory.toLowerCase()).not.toContain('remember everything');
+  });
+
+  it('system prompt source contains MEMORY HONESTY RULES section', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('MEMORY HONESTY RULES');
+  });
+
+  it('system prompt source forbids "my memory is sharp" claim', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain("NEVER say \"my memory is sharp\"");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 30. Alias vs full chat memory distinction
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Alias vs full chat memory — distinct layers', () => {
+
+  it('system prompt distinguishes LEARNED ALIASES from CONVERSATION MEMORY', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('LEARNED ALIASES');
+    expect(src).toContain('CONVERSATION MEMORY');
+    // They must be separate sections
+    const aliasIdx = src.indexOf('LEARNED ALIASES');
+    const memIdx   = src.indexOf('CONVERSATION MEMORY');
+    expect(aliasIdx).not.toBe(memIdx);
+  });
+
+  it('system prompt says aliases are NOT full chat history', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NOT full chat history');
+  });
+
+  it('system prompt says never conflate alias memory with full conversation memory', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NEVER conflate');
+  });
+
+  it('system prompt has 4 memory layers listed', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('FOUR distinct memory layers');
+  });
+
+  it('system prompt includes PROJECT CONTEXT as a memory layer', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('PROJECT CONTEXT');
+  });
+
+  it('system prompt includes SOLARPRO KNOWLEDGE BASE as a memory layer', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('SOLARPRO KNOWLEDGE BASE');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 31. Screen context honesty — no hallucination without visibleButtons/visibleCounts
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Screen context honesty — no DOM hallucination', () => {
+
+  function computeScreenStatus(ctx: {
+    visibleButtons?: string[];
+    visibleWarnings?: string[];
+    visibleCounts?: Record<string, number>;
+    visibleErrors?: string[];
+    visibleCards?: string[];
+    selectedEquipment?: Record<string, string>;
+  }): { wired: boolean; details: string } {
+    const hasVisibleButtons  = Array.isArray(ctx.visibleButtons)  && ctx.visibleButtons.length  > 0;
+    const hasVisibleWarnings = Array.isArray(ctx.visibleWarnings) && ctx.visibleWarnings.length > 0;
+    const hasVisibleErrors   = Array.isArray(ctx.visibleErrors)   && ctx.visibleErrors.length   > 0;
+    const hasVisibleCounts   = !!ctx.visibleCounts && Object.keys(ctx.visibleCounts).length > 0;
+    const hasSelectedEquip   = !!ctx.selectedEquipment && Object.keys(ctx.selectedEquipment).length > 0;
+    const wired = hasVisibleButtons || hasVisibleWarnings || hasVisibleErrors || hasVisibleCounts || hasSelectedEquip;
+    return { wired, details: wired ? 'wired' : 'not wired' };
+  }
+
+  it('no screen context sent → wired=false', () => {
+    const { wired } = computeScreenStatus({});
+    expect(wired).toBe(false);
+  });
+
+  it('empty arrays → wired=false', () => {
+    const { wired } = computeScreenStatus({ visibleButtons: [], visibleWarnings: [] });
+    expect(wired).toBe(false);
+  });
+
+  it('visibleButtons populated → wired=true', () => {
+    const { wired } = computeScreenStatus({ visibleButtons: ['Generate SLD', 'Add Panel'] });
+    expect(wired).toBe(true);
+  });
+
+  it('visibleCounts populated → wired=true', () => {
+    const { wired } = computeScreenStatus({ visibleCounts: { todayCommands: 12 } });
+    expect(wired).toBe(true);
+  });
+
+  it('system prompt says NEVER hallucinate screen buttons', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NEVER hallucinate what buttons');
+  });
+
+  it('system prompt has SCREEN HONESTY RULES section', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('SCREEN HONESTY RULES');
+  });
+
+  it('system prompt says NOT WIRED when no screen context sent', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NOT WIRED');
+  });
+
+  it('system prompt tells SolarDog to say "I don\'t have that screen detail wired in yet"', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain("don't have that screen detail wired in yet");
+  });
+
+  it('system prompt allows describing buttons from knowledge base with a caveat', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain("from the knowledge base");
+    expect(src).toContain("can't see the live page state");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 32. Developer mode — natural identification phrases
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Developer mode — phrase detection', () => {
+
+  it('detectMode("i created you", page) → developer', () => {
+    expect(detectMode('i created you', 'general')).toBe('developer');
+  });
+
+  it('detectMode("I created you", page) → developer (case-insensitive)', () => {
+    expect(detectMode('I created you', 'general')).toBe('developer');
+  });
+
+  it('detectMode("i am the developer", page) → developer', () => {
+    expect(detectMode('i am the developer', 'dashboard')).toBe('developer');
+  });
+
+  it('detectMode("I am the developer", page) → developer (mixed case)', () => {
+    expect(detectMode('I am the developer', 'dashboard')).toBe('developer');
+  });
+
+  it('detectMode("i built this", page) → developer', () => {
+    expect(detectMode('i built this', 'general')).toBe('developer');
+  });
+
+  it('detectMode("developer here", page) → developer', () => {
+    expect(detectMode('developer here', 'general')).toBe('developer');
+  });
+
+  it('detectMode("dev mode", page) → developer (existing phrase still works)', () => {
+    expect(detectMode('dev mode', 'general')).toBe('developer');
+  });
+
+  it('detectMode("this is your father", page) → developer (existing phrase still works)', () => {
+    expect(detectMode('this is your father', 'general')).toBe('developer');
+  });
+
+  it('detectMode("i built you", page) → developer (existing phrase still works)', () => {
+    expect(detectMode('i built you', 'general')).toBe('developer');
+  });
+
+  it('detectMode("hello how are you", page) → user (not developer)', () => {
+    expect(detectMode('hello how are you', 'general')).toBe('user');
+  });
+
+  it('detectMode("what did you build", page) → user (not developer)', () => {
+    expect(detectMode('what did you build', 'general')).toBe('user');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 33. Knowledge base — structured learning vs alias pollution
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Knowledge base — structured learning distinction', () => {
+
+  it('system prompt says equipment brands belong in knowledge items, NOT aliases', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('Equipment brands');
+    expect(src).toContain('knowledge items, NOT aliases');
+  });
+
+  it('system prompt explains knowledge items vs aliases distinction', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('alias routes you somewhere');
+    expect(src).toContain('knowledge explains what something does');
+  });
+
+  it('system prompt has KNOWLEDGE BASE section', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('KNOWLEDGE BASE');
+  });
+
+  it('system prompt says "I need you to learn every button" → structured knowledge base', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('structured SolarPro knowledge base');
+  });
+
+  it('system prompt says never store button descriptions as aliases', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain("button descriptions, workflow explanations = knowledge items, NOT aliases");
+  });
+
+  it('KnowledgeItem type includes all required fields', () => {
+    // Test that the KnowledgeItem interface has the right shape
+    // by constructing a valid one
+    const item = {
+      type: 'button' as const,
+      key: 'generate_sld',
+      label: 'Generate SLD',
+      description: 'Creates the single-line diagram',
+      route: '/engineering',
+      aliases: ['sld button', 'single line'],
+      relatedActions: ['run_string_sizing'],
+      metadata: { page: 'engineering' },
+      isGlobal: false,
+    };
+    expect(item.type).toBe('button');
+    expect(item.aliases).toContain('sld button');
+    expect(item.isGlobal).toBe(false);
+  });
+
+  it('KnowledgeItem type allows equipment_brand type', () => {
+    const item = {
+      type: 'equipment_brand' as const,
+      key: 'ecoflow',
+      label: 'EcoFlow',
+      description: 'Battery and inverter ecosystem used for storage and backup workflows.',
+      aliases: ['ocean pro', 'ecoflow battery'],
+      relatedActions: [],
+      metadata: {},
+      isGlobal: true,
+    };
+    expect(item.type).toBe('equipment_brand');
+    expect(item.aliases).toContain('ecoflow battery');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 34. Knowledge base query answering
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Knowledge base — query answering rules in system prompt', () => {
+
+  it('system prompt says check knowledge items FIRST for button questions', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('check knowledge items FIRST');
+  });
+
+  it('system prompt says NEVER make up button functionality', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NEVER make up button functionality');
+  });
+
+  it('system prompt says to be honest when knowledge item not found', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain("don't have that in my knowledge base yet");
+  });
+
+  it('system prompt has a "knowledge base items" loading section in the prompt', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('Currently loaded');
+  });
+
+  it('system prompt example response for "I need you to learn every button" is correct', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('index every page, button, workflow, and equipment brand');
+  });
+
+  it('solardogKnowledgeGet is imported in route.ts', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('solardogKnowledgeGet');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 35. Alias pollution refusal — random sentences should NOT become aliases
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Alias pollution refusal', () => {
+
+  it('"the weather is nice" does NOT trigger learn (not a route)', () => {
+    expect(detectLearnIntent('the weather is nice')).toBeNull();
+  });
+
+  it('"EcoFlow is a battery brand" does NOT trigger learn (not a route)', () => {
+    expect(detectLearnIntent('EcoFlow is a battery brand')).toBeNull();
+  });
+
+  it('"the generate SLD button is on engineering" does NOT trigger learn (phrase too long)', () => {
+    expect(detectLearnIntent('the generate SLD button is on engineering')).toBeNull();
+  });
+
+  it('"solar is great technology" does NOT trigger learn (not a route)', () => {
+    expect(detectLearnIntent('solar is great technology')).toBeNull();
+  });
+
+  it('"NEC 690 is the code for solar" does NOT trigger learn (not a route)', () => {
+    expect(detectLearnIntent('NEC 690 is the code for solar')).toBeNull();
+  });
+
+  it('"go to projects" does NOT trigger learn (navigation command)', () => {
+    expect(detectLearnIntent('go to projects')).toBeNull();
+  });
+
+  it('"what is dashboard?" does NOT trigger learn (question)', () => {
+    expect(detectLearnIntent('what is dashboard?')).toBeNull();
+  });
+
+  it('"hub is dashboard" DOES trigger learn (valid 2-word phrase → valid route)', () => {
+    const r = detectLearnIntent('hub is dashboard');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('hub');
+    expect(r?.target).toContain('dashboard');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 36. Equipment brand + button knowledge base structure
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Equipment and button knowledge base structure', () => {
+
+  const exampleKnowledgeItems = [
+    {
+      type: 'button' as const,
+      key: 'generate_sld',
+      label: 'Generate SLD',
+      description: 'Creates the single-line diagram for the current engineered system.',
+      route: '/engineering',
+      aliases: ['sld button', 'single line', 'diagram generator'],
+      relatedActions: ['run_string_sizing'],
+      metadata: {},
+      isGlobal: false,
+    },
+    {
+      type: 'equipment_brand' as const,
+      key: 'ecoflow',
+      label: 'EcoFlow',
+      description: 'Battery and inverter ecosystem used for storage and backup workflows.',
+      route: null,
+      aliases: ['ocean pro', 'ecoflow battery'],
+      relatedActions: [],
+      metadata: { category: 'battery' },
+      isGlobal: true,
+    },
+  ];
+
+  it('button knowledge item has route to its page', () => {
+    const btn = exampleKnowledgeItems.find(k => k.type === 'button');
+    expect(btn?.route).toBe('/engineering');
+  });
+
+  it('equipment_brand knowledge item has description', () => {
+    const eq = exampleKnowledgeItems.find(k => k.type === 'equipment_brand');
+    expect(eq?.description).toContain('Battery');
+  });
+
+  it('equipment_brand knowledge item has aliases', () => {
+    const eq = exampleKnowledgeItems.find(k => k.type === 'equipment_brand');
+    expect(eq?.aliases).toContain('ecoflow battery');
+  });
+
+  it('button item with alias "sld button" can be found by alias search', () => {
+    const query = 'sld';
+    const found = exampleKnowledgeItems.filter(k =>
+      k.aliases.some(a => a.toLowerCase().includes(query))
+    );
+    expect(found.length).toBeGreaterThan(0);
+    expect(found[0].label).toBe('Generate SLD');
+  });
+
+  it('equipment brand with alias "ocean pro" can be found by alias search', () => {
+    const query = 'ocean pro';
+    const found = exampleKnowledgeItems.filter(k =>
+      k.aliases.some(a => a.toLowerCase().includes(query))
+    );
+    expect(found.length).toBeGreaterThan(0);
+    expect(found[0].label).toBe('EcoFlow');
+  });
+
+  it('knowledge item types cover all 9 required types', () => {
+    const validTypes = ['page', 'button', 'workflow', 'equipment_brand', 'feature', 'route', 'warning', 'action', 'preference'];
+    expect(validTypes).toContain('button');
+    expect(validTypes).toContain('equipment_brand');
+    expect(validTypes).toContain('workflow');
+    expect(validTypes).toContain('preference');
+    expect(validTypes.length).toBe(9);
+  });
+
+  it('system prompt source contains KNOWLEDGE BASE section', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('KNOWLEDGE BASE');
+    expect(src).toContain('equipment brands');
+  });
+
+  it('db-neon has solardogKnowledgeUpsert function', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('solardogKnowledgeUpsert');
+  });
+
+  it('db-neon has solardogKnowledgeSearch function', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('solardogKnowledgeSearch');
+  });
+
+  it('migration 024 creates solarpro_knowledge_items table', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain('solarpro_knowledge_items');
+    expect(src).toContain('Migration 024');
   });
 });

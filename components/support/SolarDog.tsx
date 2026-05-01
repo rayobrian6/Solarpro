@@ -620,17 +620,30 @@ export default function SolarDog() {
     const pid  = resolvedProjectId;
     const page = getPageName(pathnameRef.current);
 
-    // Build rich context payload
-    const richContext: Record<string, unknown> = { page };
-    if (pid) richContext.projectId = pid;
+    // Build rich context payload (v10.3: extended screen context)
+    const richContext: Record<string, unknown> = {
+      page,
+      currentRoute: typeof window !== 'undefined' ? window.location.pathname : page,
+    };
+    if (pid) {
+      richContext.projectId        = pid;
+      richContext.currentProjectId = pid;
+    }
     if (typeof window !== 'undefined') {
       const tab = new URLSearchParams(window.location.search).get('tab');
-      if (tab) richContext.currentTab = tab;
+      if (tab) {
+        richContext.currentTab = tab;
+        richContext.activeTab  = tab;
+      }
     }
     if (storeActiveProject) {
-      richContext.projectName = storeActiveProject.name;
+      richContext.projectName        = storeActiveProject.name;
+      richContext.currentProjectName = storeActiveProject.name;
       if (storeActiveProject.systemSizeKw) richContext.systemSizeKw = storeActiveProject.systemSizeKw;
     }
+    // visibleButtons / visibleWarnings / visibleCounts / visibleCards / selectedEquipment
+    // are injected by individual page components via props or a global context bridge.
+    // Until wired, they are omitted so SolarDog knows not to claim screen visibility.
 
     console.info('[SOLARDOG] sending message', { page, pid, msgLen: msg.length });
 

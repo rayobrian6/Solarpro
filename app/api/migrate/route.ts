@@ -1527,6 +1527,34 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 023 (solardog_conversations): ${(e as Error).message}`);
     }
 
+    // -- Migration 024: SolarPro knowledge base --------------------------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS solarpro_knowledge_items (
+          id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id        UUID REFERENCES users(id) ON DELETE CASCADE,
+          type           TEXT NOT NULL CHECK (type IN ('page','button','workflow','equipment_brand','feature','route','warning','action','preference')),
+          key            TEXT NOT NULL,
+          label          TEXT NOT NULL,
+          description    TEXT NOT NULL DEFAULT '',
+          route          TEXT,
+          aliases        TEXT[]   NOT NULL DEFAULT '{}',
+          related_actions TEXT[]  NOT NULL DEFAULT '{}',
+          metadata       JSONB    NOT NULL DEFAULT '{}',
+          is_global      BOOLEAN  NOT NULL DEFAULT FALSE,
+          created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(user_id, type, key)
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS idx_spk_user_id    ON solarpro_knowledge_items(user_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_spk_type       ON solarpro_knowledge_items(type)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_spk_is_global  ON solarpro_knowledge_items(is_global)`;
+      results.push('\u2705 Migration 024 complete: solarpro_knowledge_items table ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 024 (solarpro_knowledge_items): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

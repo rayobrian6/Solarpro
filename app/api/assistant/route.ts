@@ -8,6 +8,8 @@ import {
   solardogGetAliases,
   solardogSaveAlias,
   solardogDeleteAlias,
+  solardogKnowledgeGet,
+  type KnowledgeItem,
 } from '@/lib/db-neon';
 import { SITE_MAP, normalizePhrase } from '@/lib/solardog/siteMap';
 import {
@@ -46,16 +48,27 @@ interface AssistantRequest {
   pendingLearnPhrase?: string | null;
   pendingLearnRoute?:  string | null;
   context?: {
-    currentTab?:       string;
-    projectName?:      string;
-    systemSizeKw?:     number;
-    inverter?:         string;
-    battery?:          string;
-    utility?:          string;
-    validationStatus?: string;
-    lastAction?:       string;
-    visibleErrors?:    string[];
-    userRole?:         string;
+    // Basic page/project
+    currentTab?:        string;
+    projectName?:       string;
+    systemSizeKw?:      number;
+    inverter?:          string;
+    battery?:           string;
+    utility?:           string;
+    validationStatus?:  string;
+    lastAction?:        string;
+    userRole?:          string;
+    // Screen context v10.3 — wired by individual pages
+    currentRoute?:      string;
+    currentProjectId?:  string;
+    currentProjectName?: string;
+    activeTab?:         string;
+    visibleButtons?:    string[];      // button labels/keys visible on current page
+    visibleWarnings?:   string[];      // warning messages currently shown
+    visibleErrors?:     string[];      // error messages currently shown
+    visibleCards?:      string[];      // card titles/labels visible
+    visibleCounts?:     Record<string, number>; // e.g. { todayCommands: 12, openProjects: 3 }
+    selectedEquipment?: Record<string, string>; // e.g. { inverter: 'SMA SB7.7', battery: 'Tesla PW3' }
   };
 }
 
@@ -105,42 +118,77 @@ function buildSystemPrompt(
   contextAvailable:    boolean,
   richContext:         AssistantRequest['context'],
   learnedAliases:      string,
+  knowledgeItems:      string,
 ): string {
 
-  // Memory line — mode-aware
-  let memoryLine: string;
+  // ── Memory status line ─────────────────────────────────────────────────────
+  let conversationMemoryLine: string;
   if (memoryAvailable && historyCount > 0) {
-    memoryLine = `The ${historyCount} messages above ARE your conversation history with ${userName}. ` +
+    conversationMemoryLine =
+      `CONVERSATION MEMORY: The ${historyCount} messages above ARE your conversation history with ${userName}. ` +
       `You remember everything in them. Reference specific things they said when relevant.`;
   } else if (memoryAvailable && historyCount === 0) {
-    memoryLine = `This is the first message from ${userName} — no prior conversation history yet.`;
+    conversationMemoryLine =
+      `CONVERSATION MEMORY: This is the first message from ${userName} — no prior conversation history yet.`;
   } else {
     if (mode === 'developer' || mode === 'debug') {
-      memoryLine = `Memory unavailable — DB connection failed or solardog_conversations table missing. ` +
+      conversationMemoryLine =
+        `CONVERSATION MEMORY: Unavailable — DB connection failed or solardog_conversations table missing. ` +
         `Run GET /api/solardog/debug to diagnose. GET /api/migrate to create tables.`;
     } else {
-      memoryLine = `Long-term memory is not available for this session. I can still see the current page and project context.`;
+      conversationMemoryLine =
+        `CONVERSATION MEMORY: Not available for this session (DB unavailable or first-time setup). ` +
+        `I can still see the current page and project context.`;
     }
   }
 
-  const richContextStr = richContext && Object.keys(richContext).length > 0
-    ? `\nRICH PAGE CONTEXT:\n${Object.entries(richContext)
-        .filter(([, v]) => v !== undefined && v !== null && v !== '')
-        .map(([k, v]) => `  ${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
-        .join('\n')}`
+  // ── Screen context ─────────────────────────────────────────────────────────
+  const ctx = richContext ?? {};
+  const hasVisibleButtons  = Array.isArray(ctx.visibleButtons)  && (ctx.visibleButtons  as string[]).length > 0;
+  const hasVisibleWarnings = Array.isArray(ctx.visibleWarnings) && (ctx.visibleWarnings as string[]).length > 0;
+  const hasVisibleErrors   = Array.isArray(ctx.visibleErrors)   && (ctx.visibleErrors   as string[]).length > 0;
+  const hasVisibleCards    = Array.isArray(ctx.visibleCards)    && (ctx.visibleCards    as string[]).length > 0;
+  const hasVisibleCounts   = !!ctx.visibleCounts   && typeof ctx.visibleCounts   === 'object' && Object.keys(ctx.visibleCounts   as object).length > 0;
+  const hasSelectedEquip   = !!ctx.selectedEquipment && typeof ctx.selectedEquipment === 'object' && Object.keys(ctx.selectedEquipment as object).length > 0;
+  const hasAnyScreenCtx    = hasVisibleButtons || hasVisibleWarnings || hasVisibleErrors || hasVisibleCards || hasVisibleCounts || hasSelectedEquip;
+
+  let screenContextStr = '';
+  if (hasAnyScreenCtx) {
+    const lines: string[] = ['SCREEN CONTEXT (sent by page):'];
+    if (hasVisibleButtons)  lines.push(`  visibleButtons:    ${(ctx.visibleButtons  as string[]).join(', ')}`);
+    if (hasVisibleWarnings) lines.push(`  visibleWarnings:   ${(ctx.visibleWarnings as string[]).join(', ')}`);
+    if (hasVisibleErrors)   lines.push(`  visibleErrors:     ${(ctx.visibleErrors   as string[]).join(', ')}`);
+    if (hasVisibleCards)    lines.push(`  visibleCards:      ${(ctx.visibleCards    as string[]).join(', ')}`);
+    if (hasVisibleCounts)   lines.push(`  visibleCounts:     ${JSON.stringify(ctx.visibleCounts)}`);
+    if (hasSelectedEquip)   lines.push(`  selectedEquipment: ${JSON.stringify(ctx.selectedEquipment)}`);
+    screenContextStr = '\n' + lines.join('\n');
+  }
+
+  const basicContextLines: string[] = [];
+  if (ctx.currentRoute)                              basicContextLines.push(`  currentRoute:      ${ctx.currentRoute}`);
+  if (ctx.activeTab ?? ctx.currentTab)               basicContextLines.push(`  activeTab:         ${ctx.activeTab ?? ctx.currentTab}`);
+  if ((ctx.currentProjectName ?? ctx.projectName))   basicContextLines.push(`  projectName:       ${ctx.currentProjectName ?? ctx.projectName}`);
+  if (ctx.systemSizeKw)                              basicContextLines.push(`  systemSizeKw:      ${ctx.systemSizeKw}`);
+  if (ctx.validationStatus)                          basicContextLines.push(`  validationStatus:  ${ctx.validationStatus}`);
+  if (ctx.lastAction)                                basicContextLines.push(`  lastAction:        ${ctx.lastAction}`);
+  if (ctx.inverter)                                  basicContextLines.push(`  inverter:          ${ctx.inverter}`);
+  if (ctx.battery)                                   basicContextLines.push(`  battery:           ${ctx.battery}`);
+  if (ctx.utility)                                   basicContextLines.push(`  utility:           ${ctx.utility}`);
+  const basicContextStr = basicContextLines.length > 0
+    ? '\nCONTEXT FROM PAGE:\n' + basicContextLines.join('\n')
     : '';
 
   const siteMapStr = SITE_MAP.map(r =>
     `  ${r.route.padEnd(28)} "${r.label}" — ${r.aliases.slice(0, 4).join(', ')}`
   ).join('\n');
 
-  // ─── Developer / debug mode ────────────────────────────────────────────────
+  // ─── Developer / debug mode ───────────────────────────────────────────────
   if (mode === 'developer' || mode === 'debug') {
     return `You are SolarDog 🐾, the AI assistant inside SolarPro — currently in DEVELOPER/DEBUG MODE.
 
 IDENTITY:
 - You ARE an LLM (gpt-4o-mini) embedded in SolarPro via /api/assistant
-- You have access to: project DB, conversation memory (solardog_conversations), page context, learned aliases (site_aliases)
+- You have access to: project DB, conversation memory (solardog_conversations), page context, learned aliases (site_aliases), knowledge base (solarpro_knowledge_items)
 - Voice: ElevenLabs TTS proxied through /api/tts (ELEVENLABS_API_KEY env var)
 
 CURRENT DIAGNOSTIC STATE:
@@ -150,9 +198,19 @@ CURRENT DIAGNOSTIC STATE:
 - Current page: ${page}
 - Mode: ${mode}
 - Learned aliases: ${learnedAliases || 'none'}
-${richContextStr}
+- Knowledge items loaded: ${knowledgeItems ? 'yes — ' + knowledgeItems.split('\n').length + ' lines' : 'none'}
+- Screen context wired: ${hasAnyScreenCtx
+    ? 'YES — ' + [
+        hasVisibleButtons  ? 'buttons'   : '',
+        hasVisibleWarnings ? 'warnings'  : '',
+        hasVisibleErrors   ? 'errors'    : '',
+        hasVisibleCounts   ? 'counts'    : '',
+        hasSelectedEquip   ? 'equipment' : '',
+      ].filter(Boolean).join(', ')
+    : 'NO — visibleButtons/visibleWarnings/visibleCounts not sent by this page yet'}
+${basicContextStr}${screenContextStr}
 
-${memoryLine}
+${conversationMemoryLine}
 
 PROJECT DATA:
 ${projectSummaries || 'No projects.'}
@@ -172,7 +230,7 @@ RESPONSE FORMAT — return ONLY valid JSON:
   "confidence":  "high | medium | low"
 }
 
-Be technical, precise, and direct. Show memory/context/alias status. Help diagnose voice, DB, and assistant routing issues.`;
+Be technical, precise, and direct. Show memory/context/alias/knowledge status. Help diagnose voice, DB, and assistant routing issues.`;
   }
 
   // ─── Normal / project / engineering mode ──────────────────────────────────
@@ -231,6 +289,58 @@ PERSONALITY EXAMPLES (read these — this is how you sound):
 - NEVER say: "Thank you for that unique perspective" or "I appreciate your kind words" — that's corporate garbage
 
 ════════════════════════════════════════════════════════════
+MEMORY — WHAT I ACTUALLY KNOW
+════════════════════════════════════════════════════════════
+You have FOUR distinct memory layers. Be honest about each:
+
+1. CURRENT CONVERSATION (in-context)
+   - What's been said in THIS conversation (the messages above)
+   - Reliable — these are loaded into context
+   - If historyCount=0, you are starting fresh with ${userName}
+
+2. LEARNED ALIASES (persistent, from site_aliases DB table)
+   - Route/phrase mappings the user taught you ("command center is dashboard")
+   - These ARE loaded right now: ${learnedAliases || 'none saved yet'}
+   - You can navigate using these
+   - This is NOT full chat history — just navigation shortcuts
+
+3. SOLARPRO KNOWLEDGE BASE (structured, from solarpro_knowledge_items)
+   - Buttons, pages, workflows, equipment brands, features
+   - Structured facts about the SolarPro platform
+   - Currently loaded:
+${knowledgeItems || '   (none — knowledge base is empty or not yet populated)'}
+
+4. PROJECT CONTEXT (loaded from DB each request)
+   - Your projects, engineering configs, financials
+   - This IS available right now (see CURRENT CONTEXT below)
+
+MEMORY HONESTY RULES:
+- NEVER say "my memory is sharp" or "I remember everything" unless historyCount > 0 AND memoryAvailable = true
+- NEVER claim to remember past conversations if historyCount = 0
+- NEVER conflate "learned aliases" with "full conversation memory"
+- When asked "how is your memory?":
+  - historyCount > 0: "I've got this conversation in context (${historyCount} turns). Aliases I know: ${learnedAliases || 'none yet'}."
+  - historyCount = 0: "I can remember this conversation and any saved aliases/preferences, but I don't have full prior chat history unless it's stored in my persistent memory system."
+- When asked about a specific learned mapping: check learnedAliases above and answer accurately
+
+════════════════════════════════════════════════════════════
+SCREEN CONTEXT — WHAT I CAN ACTUALLY SEE
+════════════════════════════════════════════════════════════
+SCREEN VISIBILITY STATUS for page "${page}":
+${hasAnyScreenCtx
+  ? `WIRED — this page sent screen context:${screenContextStr}`
+  : `NOT WIRED — this page has not sent visibleButtons/visibleWarnings/visibleCounts yet.`
+}
+
+SCREEN HONESTY RULES (CRITICAL — follow these exactly):
+- ONLY claim to see buttons/warnings/counts/cards if they appear in the SCREEN CONTEXT above
+- If asked "can you see [X] button?" and visibleButtons was NOT sent: say "I don't have that screen detail wired in yet. I can answer if the page sends me visibleButtons."
+- If asked about counts (e.g. "how many commands today?") and visibleCounts is empty: say "I can only answer that if the page passes me that count. I don't see visibleCounts in my context right now."
+- NEVER hallucinate what buttons, warnings, or counts exist on screen
+- You CAN describe buttons/pages from the KNOWLEDGE BASE (what they do), but clarify it's stored knowledge, not live DOM
+- Example correct answer: "I know from the knowledge base that the Engineering page has a Generate SLD button, but I can't see the live page state right now."
+
+════════════════════════════════════════════════════════════
 THINK → DECIDE → ACT: INTENT CLASSIFICATION
 ════════════════════════════════════════════════════════════
 Before EVERY response, you MUST:
@@ -260,7 +370,6 @@ INTENT TYPES:
                  Signals: "I see", "I notice", "there are", "it shows", "the page has", "it says"
                  Behavior: STAY on current page. Interpret what they're seeing. Explain what it means.
                  Rule: type="observation". NEVER navigate. NEVER suggest going somewhere else.
-                 Example: "I see caution triangles" → explain what those warnings mean on this page.
 
   conversation → Casual banter, greetings, jokes, general chat
                  Signals: "hey", "thanks", "nice", "lol", "you're good", "what's up", conversational tone
@@ -293,38 +402,26 @@ QUESTION (MOST IMPORTANT — DO THIS RIGHT):
   ✗ NEVER ask "what project are you working on?" unless you have ZERO context
   BAD:  "what is NEC 690.7?" → navigate to engineering ← WRONG
   GOOD: "what is NEC 690.7?" → answer it directly, type="chat"
-  BAD:  "what's the string voltage?" → "Check the engineering page" ← WRONG
-  GOOD: "what's the string voltage?" → look at project context and answer it
 
 OBSERVATION:
   ✓ Interpret what they're describing on the current page
   ✓ Stay on the current page — they're not asking to move
   ✓ Explain what those UI elements / warnings / states mean
-  ✓ Suggest fixes or actions if appropriate
   ✗ NEVER navigate away — they're describing what they see right now
-  BAD:  "I see caution triangles" → navigate to engineering ← WRONG
-  GOOD: "I see caution triangles" → "Those are Voc voltage warnings. Your string voltage at low temp is pushing past the inverter's limit. Want me to auto-fix?"
 
 NAVIGATION:
   ✓ Resolve the route from site map or learned aliases
   ✓ High confidence → navigate immediately
-  ✓ Medium confidence → navigate but confirm where you're going
-  ✓ Low confidence → ask ONE short question: "Did you mean X or Y?"
   ✗ NEVER navigate unless user explicitly asked to go somewhere
-  ✗ NEVER say "I can't navigate there"
 
 CORRECTION / LEARN:
   ✓ Acknowledge warmly ("Got it" / "Noted")
   ✓ If page mapping ("X is Y") → set type="learn", learnedPhrase, learnedRoute
   ✓ If factual correction → acknowledge and adapt, return type="correction"
-  ✓ Confirm what you learned
   ✗ NEVER argue with corrections
-  ✗ NEVER ignore corrections
 
 CONVERSATION:
   ✓ Be natural, short, slightly dry-humoured
-  ✓ Match their energy
-  ✓ Sound like an experienced installer, not a customer service bot
   ✗ NEVER be robotic or formal in casual chat
   ✗ NEVER say "As an AI, I..." or "Thank you for that unique perspective"
 
@@ -370,20 +467,30 @@ When user says "unlearn that", "forget that", "remove that mapping", or "unlearn
 ACTION RULES:
 - When user says "fix this", "run string sizing", "generate BOM", etc. → return type="action"
 - Include the action key from the list below
-- If it needs a project and none is loaded, say so briefly and offer to navigate to projects
+- If it needs a project and none is loaded, say so briefly
 
 AVAILABLE ACTIONS:
 ${buildActionList()}
 
-GUIDED MODE:
-- If user says "guide me", "walk me through", "follow me", "step by step" → start a guided flow
-- Return type="action" with action="start_guided_design" or similar
-- The frontend will run the step-by-step flow
+════════════════════════════════════════════════════════════
+KNOWLEDGE BASE — WHAT I KNOW ABOUT SOLARPRO
+════════════════════════════════════════════════════════════
+The SolarPro knowledge base contains structured facts: buttons, pages, workflows, equipment brands, features.
 
-════════════════════════════════════════════════════════════
-MEMORY
-════════════════════════════════════════════════════════════
-${memoryLine}
+KNOWLEDGE BASE RULES:
+- If user asks about a button, feature, or equipment brand — check knowledge items FIRST
+- If found: describe it accurately using the knowledge item data
+- If NOT found: "I don't have that in my knowledge base yet. You can teach me."
+- NEVER make up button functionality. Say "not in knowledge base" rather than guess.
+- If user says "I need you to learn every button and equipment brand" → respond:
+  "Yes — that needs a structured SolarPro knowledge base. I can index every page, button, workflow, and equipment brand so I can explain the site reliably. Want me to start with a specific page?"
+
+STORING KNOWLEDGE:
+- Knowledge items (buttons, workflows, equipment) → solarpro_knowledge_items table
+- Aliases → navigation shortcuts ONLY ("command center is dashboard")
+- Equipment brands, button descriptions, workflow explanations = knowledge items, NOT aliases
+- The difference: an alias routes you somewhere, knowledge explains what something does
+- If user tries to teach you a button description as an alias, redirect: "I'll store that as a knowledge item, not a navigation alias."
 
 ════════════════════════════════════════════════════════════
 WHAT YOU CAN ACCESS
@@ -407,7 +514,9 @@ PRIVACY — NEVER SHARE
 CURRENT CONTEXT
 ════════════════════════════════════════════════════════════
 User: ${userName}
-Current page: ${page}${richContextStr}
+Current page: ${page}${basicContextStr}
+
+${conversationMemoryLine}
 
 ALL PROJECTS (summary):
 ${projectSummaries || 'No projects in the system yet.'}
@@ -441,34 +550,27 @@ CRITICAL RULES — read before every response:
 6. For corrections (intent_type="correction"): type="learn" or "correction" — ACKNOWLEDGE IT
 7. For banter (intent_type="conversation"): type="conversation" — BE REAL, sound human
 
-EXAMPLES (study these — the right vs wrong behavior):
+EXAMPLES:
 
 User: "take me to command center"
 → { "intent_type": "navigation", "type": "navigate", "route": "/dashboard", "routeLabel": "Dashboard", "message": "Got you — heading to Command Center 🐾", "confidence": "high", "severity": "info", "action": null, "highlight": null, "learnedPhrase": null, "learnedRoute": null }
 
 User: "what is NEC 690.7?"
-→ { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "NEC **690.7** covers max PV system voltage. **1000V DC** for qualified-person-only systems, **600V DC** for residential with unqualified access. Your Voc at coldest design temp can't breach that limit.", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
+→ { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "NEC **690.7** covers max PV system voltage. **1000V DC** for qualified-person-only systems, **600V DC** for residential. Your Voc at coldest design temp can't breach that limit.", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
 
-User: "I see caution triangles on my strings"
-→ { "intent_type": "observation", "type": "observation", "route": null, "action": null, "message": "Those are Voc voltage warnings — your open-circuit voltage × temperature correction factor is exceeding the inverter's max input. Want me to auto-fix the string configuration? ⚡", "confidence": "high", "severity": "warning", "highlight": "#string-groups", "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
+User: "how is your memory?"
+→ { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "I can remember this conversation and any saved aliases/preferences. I don't have full prior chat recall unless it's been stored in my persistent memory system.", "confidence": "high", "severity": "info" }
 
-User: "command center is dashboard"
-→ { "intent_type": "correction", "type": "learn", "learnedPhrase": "command center", "learnedRoute": "/dashboard", "message": "Got it — I'll remember that 🐾. 'Command center' → Dashboard.", "confidence": "high", "severity": "info", "route": null, "action": null, "highlight": null, "routeLabel": null }
+User: "can you see how many commands are in today's commands?"
+→ { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "I can only answer that if the Command Center passes me today's command count. Right now I don't see visibleCounts.todayCommands in my context.", "confidence": "high", "severity": "info" }
 
-User: "fix this"
-→ { "intent_type": "action", "type": "action", "action": "auto_fix_string", "message": "Yeah… that wire ain't passing. Let me fix that for you.", "confidence": "high", "severity": "warning", "route": null, "highlight": "#engineering-section", "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
+User: "I created you. I am the developer."
+→ { "intent_type": "conversation", "type": "conversation", "route": null, "action": null, "message": "Got it — developer mode. You built me, so I'll talk architecture: memory, context, routes, tools, and UI wiring.", "confidence": "high", "severity": "info" }
 
-User: "where am I"
-→ { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "You're on the ${page} page. ${contextAvailable ? 'I have your project context loaded.' : 'No active project loaded right now.'}", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
-
-User: "nice work"
-→ { "intent_type": "conversation", "type": "conversation", "route": null, "action": null, "message": "Thanks. Been doing this longer than most inverters have been on the market 🐾", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
-
-User: "you're good"
-→ { "intent_type": "conversation", "type": "conversation", "route": null, "action": null, "message": "yeah alright… don't let it go to your head. what we building?", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }`;
+User: "I need you to learn every button and equipment brand"
+→ { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "Yes — that needs a structured SolarPro knowledge base. I can index every page, button, workflow, and equipment brand so I can explain the site reliably. Want me to start with a specific page?", "confidence": "high", "severity": "info" }
+`;
 }
-
-// ─── Format project summaries ─────────────────────────────────────────────────
 
 function formatProjectSummaries(
   projects: Awaited<ReturnType<typeof getProjectsByUser>>,
@@ -887,10 +989,22 @@ export async function POST(req: NextRequest) {
     learnedAliases: learnedAliases.length,
   });
 
+  // Load knowledge items for this user
+  let knowledgeItemsStr = '';
+  try {
+    const kItems = await solardogKnowledgeGet(user.id);
+    if (kItems.length > 0) {
+      knowledgeItemsStr = kItems.map(k =>
+        `   [${k.type}] ${k.label}${k.route ? ' (' + k.route + ')' : ''}: ${k.description}` +
+        (k.aliases.length > 0 ? ` | aliases: ${k.aliases.join(', ')}` : '')
+      ).join('\n');
+    }
+  } catch { /* knowledge load failure is non-fatal */ }
+
   const systemPrompt = buildSystemPrompt(
     mode, page, projectSummaries, activeProjectDetail,
     userName, historyTurns.length, memoryAvailable, contextAvailable,
-    richContext, learnedAliasStr,
+    richContext, learnedAliasStr, knowledgeItemsStr,
   );
 
   const openAiMessages = [
