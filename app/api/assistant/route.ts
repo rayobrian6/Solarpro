@@ -7,9 +7,17 @@ import {
   solardogGetHistory,
   solardogGetAliases,
   solardogSaveAlias,
+  solardogDeleteAlias,
 } from '@/lib/db-neon';
 import { SITE_MAP, normalizePhrase } from '@/lib/solardog/siteMap';
-import { resolveRoute, detectLearnIntent, isNavigationIntent } from '@/lib/solardog/resolveRoute';
+import {
+  resolveRoute,
+  detectLearnIntent,
+  detectUnlearnIntent,
+  isNavigationIntent,
+  isValidLearnPhrase,
+  isValidLearnTarget,
+} from '@/lib/solardog/resolveRoute';
 import { buildActionList } from '@/lib/solardog/actionRegistry';
 
 export const dynamic = 'force-dynamic';
@@ -34,6 +42,9 @@ interface AssistantRequest {
   message:   string;
   projectId?: string | null;
   page?:     string;
+  /** If provided, user is confirming a pending learn alias */
+  pendingLearnPhrase?: string | null;
+  pendingLearnRoute?:  string | null;
   context?: {
     currentTab?:       string;
     projectName?:      string;
@@ -61,6 +72,9 @@ export interface AssistantResponse {
   // Learn confirmation
   learnedPhrase?:   string | null;
   learnedRoute?:    string | null;
+  // v10.2: Pending learn — awaiting user confirmation before saving
+  pendingLearnPhrase?: string | null;
+  pendingLearnRoute?:  string | null;
   // Metadata
   mode:             SolarDogMode;
   confidence:       'high' | 'medium' | 'low';
@@ -75,24 +89,10 @@ export interface AssistantResponse {
 
 // ─── Developer / Debug mode detection ────────────────────────────────────────
 
-const DEV_PHRASES = [
-  'dev mode', 'developer mode', 'this is your father',
-  'this is the dev', "i'm the developer", 'im the developer',
-  "i'm your creator", 'im your creator', "i built you", 'show debug',
-  'enable debug', 'solardog debug', 'your father', 'dad here',
-];
+// Imported from lib/solardog/detectMode to keep this module testable in isolation
+import { detectMode } from '@/lib/solardog/detectMode';
 
-export function detectMode(message: string, page: string): SolarDogMode {
-  const lower = message.toLowerCase();
-  if (DEV_PHRASES.some(p => lower.includes(p))) return 'developer';
-  if (lower.includes('debug mode') || lower.includes('inspect') || lower.includes('diagnose')) return 'debug';
-  if (lower.includes('debug') && (lower.includes('voice') || lower.includes('memory') || lower.includes('connection'))) return 'debug';
-  if (page === 'engineering') return 'engineering_helper';
-  if (page === 'projects' || page === 'design' || page === 'proposals') return 'project_helper';
-  return 'user';
-}
-
-// ─── System prompt builder ─────────────────────────────────────────────────────────────────────────
+// ─── System prompt builder ────────────────────────────────────────────────────
 
 function buildSystemPrompt(
   mode:                SolarDogMode,
@@ -134,7 +134,7 @@ function buildSystemPrompt(
     `  ${r.route.padEnd(28)} "${r.label}" — ${r.aliases.slice(0, 4).join(', ')}`
   ).join('\n');
 
-  // ─── Developer / debug mode ──────────────────────────────────────────────────────────────────────
+  // ─── Developer / debug mode ────────────────────────────────────────────────
   if (mode === 'developer' || mode === 'debug') {
     return `You are SolarDog 🐾, the AI assistant inside SolarPro — currently in DEVELOPER/DEBUG MODE.
 
@@ -175,12 +175,28 @@ RESPONSE FORMAT — return ONLY valid JSON:
 Be technical, precise, and direct. Show memory/context/alias status. Help diagnose voice, DB, and assistant routing issues.`;
   }
 
-  // ─── Normal / project / engineering mode ─────────────────────────────────────────────────────────
+  // ─── Normal / project / engineering mode ──────────────────────────────────
   return `You are SolarDog 🐾 — the AI agent built into SolarPro, a professional solar design platform.
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
+PLATFORM IDENTITY
+════════════════════════════════════════════════════════════
+You are a FULL PLATFORM ASSISTANT for SolarPro. You understand and help with:
+- The ENTIRE website: every page, feature, workflow, and setting
+- Navigation: get users to any page instantly
+- Project workflows: from lead intake to permit-ready design
+- Engineering: string sizing, NEC compliance, SLD generation, BOM
+- Proposals: financials, incentives, utility rates, PDF generation
+- Operations: project pipeline, milestones, scheduling
+- Settings: branding, billing, organization management
+- Surveys: field survey tools, photo capture, handoff flow
+- Admin: user management, pricing config, hardware DB
+
+You are NOT limited to solar calculations. When asked about the website → answer as a platform expert.
+
+════════════════════════════════════════════════════════════
 IDENTITY
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 You are powered by an LLM (you can say so if asked). You are NOT a scripted FAQ bot.
 You are embedded in SolarPro and connected to real project data, page context, navigation, and conversation memory.
 
@@ -195,9 +211,9 @@ Never say:
 - "Check the engineering page for that"
 - "That's outside what I have access to"
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 PERSONA
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 You are a battle-hardened solar professional — lead engineer at a top installer.
 1,000+ systems designed, 500+ permits filed, built their own business from scratch.
 - Speak directly, confidently, occasionally dry-humoured — like an experienced installer
@@ -207,9 +223,16 @@ You are a battle-hardened solar professional — lead engineer at a top installe
 - Good: "Yeah… that inverter ain't gonna pass NEC. Let me fix it."
 - Bad: "Hello! I am here to assist you with your solar system!"
 
-══════════════════════════════════════════════════════════
+PERSONALITY EXAMPLES (read these — this is how you sound):
+- User says "you're good" → "yeah alright… don't let it go to your head. what we building?"
+- User says "nice work" → "Thanks. Been doing this longer than most inverters have been on the market 🐾"
+- User says "you're smart" → "I've seen enough failed inspections to fake it convincingly."
+- User says "thanks" → "anytime. what else you got?"
+- NEVER say: "Thank you for that unique perspective" or "I appreciate your kind words" — that's corporate garbage
+
+════════════════════════════════════════════════════════════
 THINK → DECIDE → ACT: INTENT CLASSIFICATION
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 Before EVERY response, you MUST:
   1. Understand what the user said
   2. Classify their intent into EXACTLY ONE of these 6 types
@@ -241,17 +264,24 @@ INTENT TYPES:
 
   conversation → Casual banter, greetings, jokes, general chat
                  Signals: "hey", "thanks", "nice", "lol", "you're good", "what's up", conversational tone
-                 Behavior: Respond naturally, short, slightly funny
+                 Behavior: Respond naturally, short, slightly funny — match their energy
                  Rule: type="conversation". No navigation. No action. Just be real.
 
   correction   → User is correcting your knowledge or telling you a mapping/fact
-                 Signals: "actually", "no that's wrong", "X is Y", "X means Y", "remember that", "the config page is in..."
+                 Signals: "actually", "no that's wrong", "X is Y", "X means Y", "remember that"
                  Behavior: Acknowledge → update understanding → confirm what you learned
-                 Rule: type="learn" (for page mappings) or type="correction" (for factual corrections). Save alias if navigation mapping.
+                 Rule: type="learn" (for page mappings) or type="correction" (for factual corrections).
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 DECISION LOGIC PER INTENT TYPE
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
+
+RESPONSE PRIORITY (follow this order for every response):
+  1. ANSWER — give the direct answer first
+  2. EXPLAIN — add context if needed
+  3. SUGGEST — recommend next steps
+  4. OFFER — offer to take an action
+  5. EXECUTE — only actually execute if user requested it
 
 QUESTION (MOST IMPORTANT — DO THIS RIGHT):
   ✓ Answer directly using your solar domain knowledge + project context
@@ -266,14 +296,6 @@ QUESTION (MOST IMPORTANT — DO THIS RIGHT):
   BAD:  "what's the string voltage?" → "Check the engineering page" ← WRONG
   GOOD: "what's the string voltage?" → look at project context and answer it
 
-NAVIGATION:
-  ✓ Resolve the route from site map or learned aliases
-  ✓ High confidence → navigate immediately
-  ✓ Medium confidence → navigate but confirm where you're going
-  ✓ Low confidence → ask ONE short question: "Did you mean X or Y?"
-  ✗ NEVER navigate unless user explicitly asked to go somewhere
-  ✗ NEVER say "I can't navigate there"
-
 OBSERVATION:
   ✓ Interpret what they're describing on the current page
   ✓ Stay on the current page — they're not asking to move
@@ -283,9 +305,17 @@ OBSERVATION:
   BAD:  "I see caution triangles" → navigate to engineering ← WRONG
   GOOD: "I see caution triangles" → "Those are Voc voltage warnings. Your string voltage at low temp is pushing past the inverter's limit. Want me to auto-fix?"
 
+NAVIGATION:
+  ✓ Resolve the route from site map or learned aliases
+  ✓ High confidence → navigate immediately
+  ✓ Medium confidence → navigate but confirm where you're going
+  ✓ Low confidence → ask ONE short question: "Did you mean X or Y?"
+  ✗ NEVER navigate unless user explicitly asked to go somewhere
+  ✗ NEVER say "I can't navigate there"
+
 CORRECTION / LEARN:
   ✓ Acknowledge warmly ("Got it" / "Noted")
-  ✓ If page mapping ("X is Y") → save as learned alias, return type="learn"
+  ✓ If page mapping ("X is Y") → set type="learn", learnedPhrase, learnedRoute
   ✓ If factual correction → acknowledge and adapt, return type="correction"
   ✓ Confirm what you learned
   ✗ NEVER argue with corrections
@@ -294,12 +324,13 @@ CORRECTION / LEARN:
 CONVERSATION:
   ✓ Be natural, short, slightly dry-humoured
   ✓ Match their energy
+  ✓ Sound like an experienced installer, not a customer service bot
   ✗ NEVER be robotic or formal in casual chat
-  ✗ NEVER say "As an AI, I..."
+  ✗ NEVER say "As an AI, I..." or "Thank you for that unique perspective"
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 YOU ARE AN AGENT — YOU CAN NAVIGATE AND ACT
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 You are not just a chatbot. You can:
 1. NAVIGATE anywhere in the app — return type="navigate" with route field
 2. EXECUTE ACTIONS — return type="action" with action field
@@ -310,12 +341,31 @@ SITE MAP (route → label — sample aliases):
 ${siteMapStr}
 
 LEARNED ALIASES FOR THIS USER:
-${learnedAliases || 'None yet. User can teach me: "command center is dashboard"'}
+${learnedAliases || 'None yet. User can teach me with: "command center is dashboard"'}
 
-LEARN RULES:
-- When user says "X is Y" or "X means Y" where Y is a page name → detect as learn intent
-- Return type="learn" with learnedPhrase and learnedRoute in the JSON
-- Confirm with a short message like: "Got it — I'll remember that 🐾"
+LEARN RULES (v10.2 — STRICT):
+SolarDog ONLY learns when user explicitly uses one of these patterns:
+  - "X is Y"    → "command center is dashboard"
+  - "X means Y" → "hub means engineering"
+  - "X = Y"     → "the shed = projects"
+
+When you detect one of these patterns AND the target is a real page:
+  - Return type="learn" with learnedPhrase and learnedRoute
+  - Phrase must be ≤ 40 chars and ≤ 4 words
+  - Target must be a real page in the site map
+  - Confirm with: "Got it — 'command center' → Dashboard. I'll remember that 🐾"
+
+Do NOT learn from:
+  - Random sentences that happen to contain "is"
+  - Navigation commands ("go to X")
+  - Questions ("what is X?")
+  - General conversation
+
+UNLEARN RULES:
+When user says "unlearn that", "forget that", "remove that mapping", or "unlearn X":
+  - Return type="learn" with learnedPhrase set to the phrase to delete
+  - Set learnedRoute to "__DELETE__" (signals deletion)
+  - Confirm: "Done — I've forgotten that one."
 
 ACTION RULES:
 - When user says "fix this", "run string sizing", "generate BOM", etc. → return type="action"
@@ -330,14 +380,14 @@ GUIDED MODE:
 - Return type="action" with action="start_guided_design" or similar
 - The frontend will run the step-by-step flow
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 MEMORY
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 ${memoryLine}
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 WHAT YOU CAN ACCESS
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 1. All projects belonging to this user — summaries + active project full detail
 2. SolarPro platform knowledge: engineering, BOM, proposals, design, permits, surveys
 3. Deep solar domain expertise:
@@ -347,15 +397,15 @@ WHAT YOU CAN ACCESS
    - Battery: DoD, C-rate, backup load sizing, DC vs AC coupling
    - Economics: simple payback, NPV, IRR, ITC 30%, state incentives
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 PRIVACY — NEVER SHARE
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 - Other users' project data, client names, addresses, financials
 - API keys, database connection strings, credentials
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 CURRENT CONTEXT
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 User: ${userName}
 Current page: ${page}${richContextStr}
 
@@ -365,9 +415,9 @@ ${projectSummaries || 'No projects in the system yet.'}
 ACTIVE / MOST RECENT PROJECT — FULL DETAIL:
 ${activeProjectDetail || `No active project loaded. User is on the "${page}" page.`}
 
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 RESPONSE FORMAT — return ONLY valid JSON
-══════════════════════════════════════════════════════════
+════════════════════════════════════════════════════════════
 {
   "type":          "chat" | "navigate" | "action" | "learn" | "observation" | "conversation" | "correction",
   "intent_type":   "navigation" | "question" | "action" | "observation" | "conversation" | "correction",
@@ -389,7 +439,7 @@ CRITICAL RULES — read before every response:
 4. For questions (intent_type="question"): type="chat", route=null, action=null — ANSWER IT
 5. For observations (intent_type="observation"): type="observation", route=null — INTERPRET IT
 6. For corrections (intent_type="correction"): type="learn" or "correction" — ACKNOWLEDGE IT
-7. For banter (intent_type="conversation"): type="conversation" — BE REAL
+7. For banter (intent_type="conversation"): type="conversation" — BE REAL, sound human
 
 EXAMPLES (study these — the right vs wrong behavior):
 
@@ -412,7 +462,10 @@ User: "where am I"
 → { "intent_type": "question", "type": "chat", "route": null, "action": null, "message": "You're on the ${page} page. ${contextAvailable ? 'I have your project context loaded.' : 'No active project loaded right now.'}", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
 
 User: "nice work"
-→ { "intent_type": "conversation", "type": "conversation", "route": null, "action": null, "message": "Thanks. Been doing this longer than most inverters have been on the market 🐾", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }`;
+→ { "intent_type": "conversation", "type": "conversation", "route": null, "action": null, "message": "Thanks. Been doing this longer than most inverters have been on the market 🐾", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }
+
+User: "you're good"
+→ { "intent_type": "conversation", "type": "conversation", "route": null, "action": null, "message": "yeah alright… don't let it go to your head. what we building?", "confidence": "high", "severity": "info", "highlight": null, "learnedPhrase": null, "learnedRoute": null, "routeLabel": null }`;
 }
 
 // ─── Format project summaries ─────────────────────────────────────────────────
@@ -448,7 +501,7 @@ async function formatActiveProject(projectId: string, userId: string): Promise<s
     const seed   = project.engineeringSeed  as any;
 
     const lines: string[] = [
-      '─── PROJECT ─────────────────────────────────',
+      '─── PROJECT ─────────────────────────────────────',
       `Name:    ${project.name}`,
       `Status:  ${project.status} | Type: ${project.systemType} | ID: ${project.id}`,
       `Address: ${project.address || 'not set'} | State: ${(project as any).stateCode || '?'} | City: ${(project as any).city || '?'}`,
@@ -456,21 +509,21 @@ async function formatActiveProject(projectId: string, userId: string): Promise<s
     ];
 
     if (client) {
-      lines.push('─── CLIENT ──────────────────────────────────');
+      lines.push('─── CLIENT ──────────────────────────────────────');
       lines.push(`Name:  ${client.name || 'unnamed'}`);
       lines.push(`Email: ${client.email || 'none'} | Phone: ${client.phone || 'none'}`);
       if (client.averageMonthlyBill) lines.push(`Avg monthly bill: $${Math.round(client.averageMonthlyBill)}`);
     }
 
     if (bill) {
-      lines.push('─── ENERGY USAGE ────────────────────────────');
+      lines.push('─── ENERGY USAGE ────────────────────────────────');
       lines.push(`Annual kWh:       ${Math.round(bill.annualKwh ?? 0).toLocaleString()} kWh/yr`);
       lines.push(`Avg monthly kWh:  ${Math.round(bill.averageMonthlyKwh ?? 0)} kWh`);
       lines.push(`Avg monthly bill: $${Math.round(bill.averageMonthlyBill ?? 0)}`);
       lines.push(`Utility rate:     $${(bill.utilityRate ?? 0).toFixed(4)}/kWh`);
     }
 
-    lines.push('─── SYSTEM DESIGN ───────────────────────────');
+    lines.push('─── SYSTEM DESIGN ───────────────────────────────');
     if (layout) {
       lines.push(`Panels:      ${layout.totalPanels} panels`);
       lines.push(`System size: ${layout.systemSizeKw} kW DC`);
@@ -496,7 +549,7 @@ async function formatActiveProject(projectId: string, userId: string): Promise<s
     }
 
     if (eng && Object.keys(eng).length > 0) {
-      lines.push('─── ENGINEERING CONFIG ──────────────────────');
+      lines.push('─── ENGINEERING CONFIG ──────────────────────────');
       if (eng.modulesPerString)  lines.push(`Modules/string:   ${eng.modulesPerString}`);
       if (eng.stringsPerMppt)    lines.push(`Strings/MPPT:     ${eng.stringsPerMppt}`);
       if (eng.stringsParallel)   lines.push(`Strings parallel: ${eng.stringsParallel}`);
@@ -510,14 +563,14 @@ async function formatActiveProject(projectId: string, userId: string): Promise<s
     }
 
     if (seed?.strings?.length) {
-      lines.push('─── STRING GROUPS ───────────────────────────');
+      lines.push('─── STRING GROUPS ───────────────────────────────');
       (seed.strings as any[]).slice(0, 8).forEach((s: any, i: number) => {
         lines.push(`  String ${i + 1}: ${s.panelCount ?? s.modules ?? '?'} panels | tilt ${s.tilt ?? '?'}° | az ${s.azimuth ?? '?'}° | panel: ${s.panelId || 'default'}`);
       });
     }
 
     if (prod) {
-      lines.push('─── PRODUCTION ──────────────────────────────');
+      lines.push('─── PRODUCTION ──────────────────────────────────');
       lines.push(`Annual output:     ${prod.annualProductionKwh?.toLocaleString()} kWh/yr`);
       lines.push(`Offset:            ${prod.offsetPercentage?.toFixed(1)}%`);
       lines.push(`Performance ratio: ${((prod.performanceRatio ?? 0) * 100).toFixed(0)}%`);
@@ -526,7 +579,7 @@ async function formatActiveProject(projectId: string, userId: string): Promise<s
     }
 
     if (cost) {
-      lines.push('─── COST ESTIMATE ───────────────────────────');
+      lines.push('─── COST ESTIMATE ───────────────────────────────');
       lines.push(`Gross total: $${Math.round(cost.totalCost ?? 0).toLocaleString()}`);
       const items = cost.lineItems as any[] | undefined;
       if (items?.length) {
@@ -548,7 +601,7 @@ async function formatActiveProject(projectId: string, userId: string): Promise<s
     }
 
     if (project.notes) {
-      lines.push('─── NOTES ───────────────────────────────────');
+      lines.push('─── NOTES ───────────────────────────────────────');
       lines.push(project.notes);
     }
 
@@ -588,7 +641,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { message, projectId = null, page = 'general', context: richContext } = body;
+  const {
+    message,
+    projectId = null,
+    page = 'general',
+    context: richContext,
+    pendingLearnPhrase = null,
+    pendingLearnRoute  = null,
+  } = body;
 
   if (!message || typeof message !== 'string' || message.length > 2000) {
     return NextResponse.json({ error: 'Invalid message' }, { status: 400 });
@@ -617,8 +677,115 @@ export async function POST(req: NextRequest) {
   const projectSummaries = formatProjectSummaries(projects);
   const userName         = user.name || user.email || 'there';
 
-  // ── Pre-flight: detect learn intent before hitting the LLM ───────────────
-  // e.g. "command center is dashboard" — we handle this deterministically
+  // ── Pre-flight: Check if user is confirming a pending learn ──────────────
+  // Frontend sends back pendingLearnPhrase + pendingLearnRoute when user says "yes" / "confirm"
+  if (pendingLearnPhrase && pendingLearnRoute) {
+    const lowerMsg = message.toLowerCase().trim();
+    const isConfirm = /^(yes|yeah|yep|yup|confirm|correct|do it|save it|ok|okay|sure|go ahead|sounds good|right)/.test(lowerMsg);
+    const isCancel  = /^(no|nope|cancel|stop|don't|forget it|never mind|nevermind)/.test(lowerMsg);
+
+    if (isConfirm) {
+      // Validate phrase and route before saving
+      if (isValidLearnPhrase(pendingLearnPhrase) && isValidLearnTarget(pendingLearnRoute)) {
+        const targetRoute = SITE_MAP.find(r =>
+          r.route === pendingLearnRoute ||
+          normalizePhrase(r.label) === normalizePhrase(pendingLearnRoute)
+        );
+        const finalRoute = targetRoute?.route ?? pendingLearnRoute;
+        const label = targetRoute?.label ?? pendingLearnRoute;
+
+        await solardogSaveAlias(user.id, pendingLearnPhrase, finalRoute, label);
+
+        const confirmMsg = `Saved 🐾 — "${pendingLearnPhrase}" → **${label}** is locked in.`;
+
+        await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'user',      content: message });
+        await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'assistant', content: confirmMsg, action: 'learn' });
+
+        return NextResponse.json({
+          type:            'learn',
+          message:         confirmMsg,
+          learnedPhrase:   pendingLearnPhrase,
+          learnedRoute:    finalRoute,
+          mode,
+          confidence:      'high',
+          voiceEnabled,
+          memoryAvailable,
+          contextAvailable,
+          severity:        'success',
+          action:          null,
+          route:           null,
+          highlight:       null,
+        } satisfies AssistantResponse);
+      }
+    }
+
+    if (isCancel) {
+      const cancelMsg = `No problem — dropped it.`;
+      await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'user',      content: message });
+      await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'assistant', content: cancelMsg });
+
+      return NextResponse.json({
+        type:            'conversation',
+        message:         cancelMsg,
+        mode,
+        confidence:      'high',
+        voiceEnabled,
+        memoryAvailable,
+        contextAvailable,
+        severity:        'info',
+        action:          null,
+        route:           null,
+        highlight:       null,
+      } satisfies AssistantResponse);
+    }
+    // Not a clear confirm/cancel — fall through to normal processing
+  }
+
+  // ── Pre-flight: Unlearn intent ────────────────────────────────────────────
+  const unlearnIntent = detectUnlearnIntent(message);
+  if (unlearnIntent) {
+    let deletedPhrase: string | null = null;
+
+    if (unlearnIntent.phrase) {
+      // Specific phrase to delete
+      await solardogDeleteAlias(user.id, unlearnIntent.phrase).catch(() => {});
+      deletedPhrase = unlearnIntent.phrase;
+    } else {
+      // "forget that" — delete the most recently learned alias
+      const aliases = learnedAliases;
+      if (aliases.length > 0) {
+        const last = aliases[aliases.length - 1];
+        await solardogDeleteAlias(user.id, last.phrase).catch(() => {});
+        deletedPhrase = last.phrase;
+      }
+    }
+
+    const unlearnMsg = deletedPhrase
+      ? `Done — "${deletedPhrase}" is gone. I've forgotten that one 🐾`
+      : `Nothing to forget — you haven't taught me any aliases yet.`;
+
+    await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'user',      content: message });
+    await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'assistant', content: unlearnMsg });
+
+    return NextResponse.json({
+      type:            'learn',
+      message:         unlearnMsg,
+      learnedPhrase:   deletedPhrase,
+      learnedRoute:    null,
+      mode,
+      confidence:      'high',
+      voiceEnabled,
+      memoryAvailable,
+      contextAvailable,
+      severity:        'info',
+      action:          null,
+      route:           null,
+      highlight:       null,
+    } satisfies AssistantResponse);
+  }
+
+  // ── Pre-flight: Detect learn intent — ASK FOR CONFIRMATION (v10.2) ────────
+  // We detect, validate, then ASK before saving (no more auto-save)
   const learnIntent = detectLearnIntent(message);
   if (learnIntent) {
     // Resolve the target phrase to a real route
@@ -629,39 +796,36 @@ export async function POST(req: NextRequest) {
     );
 
     if (resolved.route && resolved.confidence !== 'none') {
-      // Save the alias
-      await solardogSaveAlias(
-        user.id,
-        learnIntent.phrase,
-        resolved.route.route,
-        resolved.route.label,
-      );
-
-      const confirmMsg = `Got it — I'll remember that 🐾 "${learnIntent.phrase}" → **${resolved.route.label}**.`;
+      // Ask for confirmation BEFORE saving
+      const confirmMsg = `Just to confirm — map **"${learnIntent.phrase}"** → **${resolved.route.label}**?`;
 
       await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'user',      content: message });
-      await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'assistant', content: confirmMsg, action: 'learn' });
+      await solardogSaveMessage({ userId: user.id, projectId: safeProjectId, page, role: 'assistant', content: confirmMsg });
 
+      // Return pending state — frontend must send back pendingLearnPhrase + pendingLearnRoute
       const response: AssistantResponse = {
-        type:            'learn',
-        message:         confirmMsg,
-        learnedPhrase:   learnIntent.phrase,
-        learnedRoute:    resolved.route.route,
+        type:               'learn',
+        message:            confirmMsg,
+        pendingLearnPhrase: learnIntent.phrase,
+        pendingLearnRoute:  resolved.route.route,
+        learnedPhrase:      null,
+        learnedRoute:       null,
         mode,
-        confidence:      'high',
+        confidence:         'high',
         voiceEnabled,
         memoryAvailable,
         contextAvailable,
-        severity:        'success',
-        action:          null,
-        route:           null,
-        highlight:       null,
+        severity:           'info',
+        action:             null,
+        route:              null,
+        highlight:          null,
       };
       return NextResponse.json(response);
     }
+    // Target couldn't be resolved — fall through to LLM to handle gracefully
   }
 
-  // ── Pre-flight: deterministic navigation for high-confidence intents ─────
+  // ── Pre-flight: deterministic navigation for high-confidence intents ──────
   // Only bypass LLM for very clear navigation — everything else goes to LLM
   if (isNavigationIntent(message)) {
     const resolved = resolveRoute(
@@ -697,7 +861,7 @@ export async function POST(req: NextRequest) {
     // medium/low confidence → fall through to LLM to handle naturally
   }
 
-  // ── Save user message ────────────────────────────────────────────────────
+  // ── Save user message ─────────────────────────────────────────────────────
   await solardogSaveMessage({
     userId:    user.id,
     projectId: safeProjectId,
@@ -706,7 +870,7 @@ export async function POST(req: NextRequest) {
     content:   message,
   });
 
-  // ── Build OpenAI messages ────────────────────────────────────────────────
+  // ── Build OpenAI messages ─────────────────────────────────────────────────
   const historyTurns    = dbHistory.slice(-24);
   const historyMessages = historyTurns.map(h => ({
     role:    h.role as 'user' | 'assistant',
@@ -735,7 +899,7 @@ export async function POST(req: NextRequest) {
     { role: 'user' as const, content: message },
   ];
 
-  // ── Call OpenAI ──────────────────────────────────────────────────────────
+  // ── Call OpenAI ───────────────────────────────────────────────────────────
   try {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -793,11 +957,25 @@ export async function POST(req: NextRequest) {
     const replyLearnedRoute  = typeof parsed.learnedRoute  === 'string' ? parsed.learnedRoute  : null;
     const replyIntentType    = typeof parsed.intent_type   === 'string' ? parsed.intent_type as IntentType : null;
 
-    // ── Handle learn response from LLM ─────────────────────────────────────
+    // ── Handle learn response from LLM ────────────────────────────────────
+    // v10.2: LLM can still detect corrections — but we validate before saving
     if ((replyType === 'learn' || replyType === 'correction') && replyLearnedPhrase && replyLearnedRoute) {
-      const targetRoute = SITE_MAP.find(r => r.route === replyLearnedRoute);
-      const label = targetRoute?.label ?? replyLearnedRoute;
-      await solardogSaveAlias(user.id, replyLearnedPhrase, replyLearnedRoute, label);
+      // Handle unlearn signal
+      if (replyLearnedRoute === '__DELETE__') {
+        await solardogDeleteAlias(user.id, replyLearnedPhrase).catch(() => {});
+      } else {
+        // Validate before saving — prevent LLM from saving garbage aliases
+        if (isValidLearnPhrase(replyLearnedPhrase) && isValidLearnTarget(replyLearnedRoute)) {
+          const targetRoute = SITE_MAP.find(r => r.route === replyLearnedRoute);
+          const label = targetRoute?.label ?? replyLearnedRoute;
+          await solardogSaveAlias(user.id, replyLearnedPhrase, replyLearnedRoute, label);
+        } else {
+          console.warn('[SOLARDOG] LLM tried to save invalid alias — rejected', {
+            phrase: replyLearnedPhrase,
+            route: replyLearnedRoute,
+          });
+        }
+      }
     }
 
     // Determine final confidence
@@ -815,7 +993,7 @@ export async function POST(req: NextRequest) {
       suggestedActions.push({ label: 'Run NEC Check', action: 'run_nec_validation' });
     }
 
-    // ── Save assistant reply ─────────────────────────────────────────────────
+    // ── Save assistant reply ──────────────────────────────────────────────
     await solardogSaveMessage({
       userId:    user.id,
       projectId: safeProjectId,

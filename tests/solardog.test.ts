@@ -32,7 +32,7 @@
 import { describe, it, expect } from 'vitest';
 
 // ── Import lib functions directly ─────────────────────────────────────────────
-import { resolveRoute, detectLearnIntent, isNavigationIntent } from '../lib/solardog/resolveRoute';
+import { resolveRoute, detectLearnIntent, detectUnlearnIntent, isNavigationIntent, isValidLearnPhrase, isValidLearnTarget } from '../lib/solardog/resolveRoute';
 import { normalizePhrase, SITE_MAP, buildAliasMap } from '../lib/solardog/siteMap';
 import { ACTION_REGISTRY, buildActionList, getAction, getActionsByCategory } from '../lib/solardog/actionRegistry';
 
@@ -1458,5 +1458,323 @@ describe('isNavigationIntent — must NOT fire for questions or observations', (
 
   it('"go to dashboard" IS a navigation intent', () => {
     expect(isNavigationIntent('go to dashboard')).toBe(true);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// 24. detectLearnIntent — v10.2 STRICT mode (only "X is Y" / "X means Y" / "X = Y")
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('detectLearnIntent — v10.2 strict mode', () => {
+
+  // ── SHOULD match ──────────────────────────────────────────────────────────
+  it('"command center is dashboard" matches', () => {
+    const r = detectLearnIntent('command center is dashboard');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('command center');
+    expect(r?.target).toBe('dashboard');
+  });
+
+  it('"hub means engineering" matches', () => {
+    const r = detectLearnIntent('hub means engineering');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('hub');
+    expect(r?.target).toBe('engineering');
+  });
+
+  it('"the shed = projects" matches', () => {
+    const r = detectLearnIntent('the shed = projects');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('the shed');
+    expect(r?.target).toBe('projects');
+  });
+
+  it('"wiring = design" matches', () => {
+    const r = detectLearnIntent('wiring = design');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('wiring');
+    expect(r?.target).toBe('design');
+  });
+
+  it('"home base is dashboard" matches', () => {
+    const r = detectLearnIntent('home base is dashboard');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('home base');
+  });
+
+  // ── SHOULD NOT match (rejected by strict mode) ────────────────────────────
+  it('"take me to dashboard" does NOT match (navigation, not learn)', () => {
+    expect(detectLearnIntent('take me to dashboard')).toBeNull();
+  });
+
+  it('"what is the dashboard?" does NOT match (question)', () => {
+    expect(detectLearnIntent('what is the dashboard?')).toBeNull();
+  });
+
+  it('"I am working on a project" does NOT match (random sentence with "is")', () => {
+    // "I" is not a valid route target — isValidLearnTarget("i am working on a project") = false
+    expect(detectLearnIntent('I am working on a project')).toBeNull();
+  });
+
+  it('"it is a nice day" does NOT match (no valid route target)', () => {
+    expect(detectLearnIntent('it is a nice day')).toBeNull();
+  });
+
+  it('"fix this string sizing issue" does NOT match', () => {
+    expect(detectLearnIntent('fix this string sizing issue')).toBeNull();
+  });
+
+  it('"go to engineering" does NOT match (navigation)', () => {
+    expect(detectLearnIntent('go to engineering')).toBeNull();
+  });
+
+  it('"thanks for the help" does NOT match', () => {
+    expect(detectLearnIntent('thanks for the help')).toBeNull();
+  });
+
+  it('"remember when I said X" does NOT match (removed in v10.2)', () => {
+    expect(detectLearnIntent('remember when i said dashboard')).toBeNull();
+  });
+
+  it('"teach: hub -> engineering" does NOT match (removed in v10.2)', () => {
+    expect(detectLearnIntent('teach: hub -> engineering')).toBeNull();
+  });
+
+  it('"when i say hub go to engineering" does NOT match (removed in v10.2)', () => {
+    expect(detectLearnIntent('when i say hub go to engineering')).toBeNull();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// 25. isValidLearnPhrase and isValidLearnTarget — validation rules
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('isValidLearnPhrase — phrase length and word count limits', () => {
+
+  it('accepts short phrase (1 word)', () => {
+    expect(isValidLearnPhrase('hub')).toBe(true);
+  });
+
+  it('accepts 4-word phrase', () => {
+    expect(isValidLearnPhrase('command center main hub')).toBe(true);
+  });
+
+  it('rejects phrase with 5 words', () => {
+    expect(isValidLearnPhrase('take me to the engineering page')).toBe(false);
+  });
+
+  it('rejects phrase longer than 40 chars', () => {
+    expect(isValidLearnPhrase('this is a very long phrase that exceeds forty')).toBe(false);
+  });
+
+  it('rejects empty phrase', () => {
+    expect(isValidLearnPhrase('')).toBe(false);
+  });
+
+  it('rejects single char phrase', () => {
+    expect(isValidLearnPhrase('x')).toBe(false);
+  });
+
+  it('rejects navigation command as phrase', () => {
+    expect(isValidLearnPhrase('go to engineering')).toBe(false);
+  });
+
+  it('rejects "take me to X" as phrase', () => {
+    expect(isValidLearnPhrase('take me to dashboard')).toBe(false);
+  });
+});
+
+describe('isValidLearnTarget — must match a known route', () => {
+
+  it('accepts "dashboard" as valid target', () => {
+    expect(isValidLearnTarget('dashboard')).toBe(true);
+  });
+
+  it('accepts "engineering" as valid target', () => {
+    expect(isValidLearnTarget('engineering')).toBe(true);
+  });
+
+  it('accepts "projects" as valid target', () => {
+    expect(isValidLearnTarget('projects')).toBe(true);
+  });
+
+  it('accepts "design" as valid target', () => {
+    expect(isValidLearnTarget('design')).toBe(true);
+  });
+
+  it('rejects "banana" as invalid target', () => {
+    expect(isValidLearnTarget('banana')).toBe(false);
+  });
+
+  it('rejects "nice day" as invalid target', () => {
+    expect(isValidLearnTarget('nice day')).toBe(false);
+  });
+
+  it('rejects empty string', () => {
+    expect(isValidLearnTarget('')).toBe(false);
+  });
+
+  it('rejects single char', () => {
+    expect(isValidLearnTarget('x')).toBe(false);
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// 26. detectUnlearnIntent — "unlearn that", "forget that", "remove mapping for X"
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('detectUnlearnIntent — unlearn/forget patterns', () => {
+
+  it('"unlearn that" returns phrase=null (forget last)', () => {
+    const r = detectUnlearnIntent('unlearn that');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBeNull();
+  });
+
+  it('"forget that" returns phrase=null', () => {
+    const r = detectUnlearnIntent('forget that');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBeNull();
+  });
+
+  it('"remove that mapping" returns phrase=null', () => {
+    const r = detectUnlearnIntent('remove that mapping');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBeNull();
+  });
+
+  it('"delete that alias" returns phrase=null', () => {
+    const r = detectUnlearnIntent('delete that alias');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBeNull();
+  });
+
+  it('"unlearn command center" returns phrase="command center"', () => {
+    const r = detectUnlearnIntent('unlearn command center');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('command center');
+  });
+
+  it('"forget hub" returns phrase="hub"', () => {
+    const r = detectUnlearnIntent('forget hub');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('hub');
+  });
+
+  it('"remove mapping for the shed" returns phrase="the shed"', () => {
+    const r = detectUnlearnIntent('remove mapping for the shed');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('the shed');
+  });
+
+  it('"remove the mapping for wiring" returns phrase="wiring"', () => {
+    const r = detectUnlearnIntent('remove the mapping for wiring');
+    expect(r).not.toBeNull();
+    expect(r?.phrase).toBe('wiring');
+  });
+
+  it('"go to dashboard" does NOT match unlearn', () => {
+    expect(detectUnlearnIntent('go to dashboard')).toBeNull();
+  });
+
+  it('"what is NEC 690?" does NOT match unlearn', () => {
+    expect(detectUnlearnIntent('what is NEC 690?')).toBeNull();
+  });
+
+  it('"thanks" does NOT match unlearn', () => {
+    expect(detectUnlearnIntent('thanks')).toBeNull();
+  });
+
+  it('"command center is dashboard" does NOT match unlearn', () => {
+    expect(detectUnlearnIntent('command center is dashboard')).toBeNull();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// 27. System prompt v10.2 — platform identity + personality
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+// Access buildSystemPrompt indirectly through the system prompt content tests
+// (buildSystemPrompt is not exported — test via route imports or string inspection)
+
+describe('System prompt v10.2 — platform identity + personality', () => {
+
+  // We test the system prompt content by checking the route module exports
+  // and the system prompt building logic indirectly via the buildSystemPrompt call signature
+
+  it('detectMode is defined and callable', () => {
+    expect(typeof detectMode).toBe('function');
+  });
+
+  it('detectMode returns user for normal messages', () => {
+    expect(detectMode('hello', 'general')).toBe('user');
+  });
+
+  it('detectMode returns developer for dev phrases', () => {
+    expect(detectMode('dev mode', 'general')).toBe('developer');
+  });
+
+  it('detectMode returns engineering_helper for engineering page', () => {
+    expect(detectMode('help me', 'engineering')).toBe('engineering_helper');
+  });
+
+  it('detectMode returns project_helper for projects page', () => {
+    expect(detectMode('help me', 'projects')).toBe('project_helper');
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+// 28. v10.2 learn validation integration — detectLearnIntent respects isValidLearnTarget
+// ══════════════════════════════════════════════════════════════════════════════════════════════════════
+
+describe('v10.2 learn validation integration', () => {
+
+  it('learn intent with invalid target returns null', () => {
+    // "hub is banana" — "banana" is not a valid route
+    expect(detectLearnIntent('hub is banana')).toBeNull();
+  });
+
+  it('learn intent with valid short phrase and valid target succeeds', () => {
+    const r = detectLearnIntent('home is dashboard');
+    expect(r).not.toBeNull();
+    expect(r?.target).toBe('dashboard');
+  });
+
+  it('phrase with 5 words does NOT trigger learn (too many words)', () => {
+    // Even if target is valid, phrase with >4 words is rejected
+    expect(detectLearnIntent('this very long multi word phrase is dashboard')).toBeNull();
+  });
+
+  it('phrase longer than 40 chars does NOT trigger learn', () => {
+    const longPhrase = 'a'.repeat(41);
+    expect(detectLearnIntent(`${longPhrase} is dashboard`)).toBeNull();
+  });
+
+  it('unlearn phrase does NOT trigger learn', () => {
+    // "unlearn that" should be caught by detectUnlearnIntent, not detectLearnIntent
+    expect(detectLearnIntent('unlearn that')).toBeNull();
+  });
+
+  it('question "what is dashboard?" does NOT trigger learn', () => {
+    expect(detectLearnIntent('what is dashboard?')).toBeNull();
+  });
+
+  it('navigation "go to projects" does NOT trigger learn', () => {
+    expect(detectLearnIntent('go to projects')).toBeNull();
+  });
+
+  it('isValidLearnTarget accepts SITE_MAP label "Dashboard"', () => {
+    expect(isValidLearnTarget('dashboard')).toBe(true);
+  });
+
+  it('isValidLearnTarget accepts partial match "engineer" for engineering', () => {
+    expect(isValidLearnTarget('engineer')).toBe(true);
+  });
+
+  it('resolveRoute still works correctly for a learned alias after v10.2 changes', () => {
+    const learned = [{ phrase: 'the hub', route: '/dashboard', label: 'Dashboard' }];
+    const r = resolveRoute('take me to the hub', null, learned);
+    expect(r.confidence).toBe('high');
+    expect(r.resolvedUrl).toContain('/dashboard');
   });
 });

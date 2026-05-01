@@ -1,15 +1,15 @@
 'use client';
 
 /**
- * SolarDog v10.0 — Autonomous Agent
+ * SolarDog v10.2 — Selective Learning + Real Conversation
  *
- * Major upgrades vs v9.0:
- * - Navigation agent: resolves ANY destination and navigates immediately
- * - Action executor: run_string_sizing, auto_fix_wire, generate_bom, etc.
- * - Learn layer: user teaches aliases, saved to DB, used in future resolves
- * - Guided mode: step-by-step workflow runner
- * - Confidence-gated: high=act immediately, medium=confirm, low=ask
- * - Learned aliases loaded on mount, injected into context
+ * Upgrades vs v10.1:
+ * - Strict learn discipline: ONLY learns on explicit "X is Y" / "X means Y" / "X = Y"
+ * - Confirmation flow: asks before saving any alias (pendingLearnPhrase/pendingLearnRoute)
+ * - Unlearn support: "forget that", "unlearn X", "remove mapping for X"
+ * - Platform identity: full platform assistant, not just solar calc
+ * - Personality: dry humor, never corporate tone
+ * - Response priority: Answer → Explain → Suggest → Offer → Execute
  * - Response type handling: chat | navigate | action | learn | observation | conversation | correction
  * - Developer mode: diagnostics, alias dump, context inspector
  * - Voice: /api/tts proxy, volume slider, mute, no blocking on voice fail
@@ -235,6 +235,8 @@ export default function SolarDog() {
   const [guidedState,      setGuidedState]    = useState<GuidedState | null>(null);
   const [showAliases,      setShowAliases]    = useState(false);
   const [pendingConfirm,   setPendingConfirm] = useState<{ route: string; label: string; msg: string } | null>(null);
+  // v10.2: pending learn confirmation — set when SolarDog asks "Just to confirm — map X → Y?"
+  const [pendingLearnData, setPendingLearnData] = useState<{ phrase: string; route: string } | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const abortTourRef  = useRef(false);
@@ -606,8 +608,9 @@ export default function SolarDog() {
       setSubVisible(false);
     }
 
-    // Clear pending confirm
+    // Clear pending confirm + pending learn
     setPendingConfirm(null);
+    // Note: pendingLearnData is NOT cleared here — the current message may be a confirmation
 
     setMessages(prev => [...prev, { role: 'user', content: msg }]);
     setInput('');
@@ -640,6 +643,11 @@ export default function SolarDog() {
           projectId: pid,
           page,
           context:   richContext,
+          // v10.2: pass pending learn data so backend can confirm-then-save
+          ...(pendingLearnData ? {
+            pendingLearnPhrase: pendingLearnData.phrase,
+            pendingLearnRoute:  pendingLearnData.route,
+          } : {}),
         }),
       });
 
@@ -719,9 +727,17 @@ export default function SolarDog() {
 
         case 'learn':
         case 'correction':
-          // Both learn and correction may carry alias data — handle the same way
-          if (data.learnedPhrase && data.learnedRoute) {
+          // v10.2: Check for pending learn confirmation state
+          if (data.pendingLearnPhrase && data.pendingLearnRoute) {
+            // Backend is asking for confirmation — store pending state
+            setPendingLearnData({ phrase: data.pendingLearnPhrase, route: data.pendingLearnRoute });
+          } else if (data.learnedPhrase && data.learnedRoute) {
+            // Alias was saved (either confirmed or unlearned)
+            setPendingLearnData(null);
             await handleLearnResponse(data);
+          } else {
+            // No learn data — clear pending
+            setPendingLearnData(null);
           }
           break;
 
@@ -754,7 +770,7 @@ export default function SolarDog() {
       setDogPose('idle');
     }
   }, [input, isLoading, speak, resolvedProjectId, executeNavigation, executeAction,
-      handleLearnResponse, storeActiveProject, showSubtitle, hideSubtitle]);
+      handleLearnResponse, storeActiveProject, showSubtitle, hideSubtitle, pendingLearnData]);
 
   // ── Dog click ──────────────────────────────────────────────────────────────
   const handleDogClick = useCallback(() => {

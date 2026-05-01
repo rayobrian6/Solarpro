@@ -1,40 +1,46 @@
-# SolarDog v10.1 — "Think → Decide → Act" Master Prompt
+# SolarDog v10.2 + Login Fix
 
-## Phase 1: Audit current system prompt behavior
-- [x] Read full current buildSystemPrompt() in assistant/route.ts
-- [x] Identify gaps vs new intent classification spec
-- [x] Map what changes are needed vs what's already correct
+## Task A: SolarDog v10.2 — Selective Learning + Real Conversation
 
-## Phase 2: Update system prompt
-- [x] Add INTENT CLASSIFICATION section (6 types: navigation/question/action/observation/conversation/correction)
-- [x] Add DECISION LOGIC per intent type
-- [x] Fix question handling — answer first, never deflect, never navigate on questions
-- [x] Fix observation handling — stay on page, interpret meaning
-- [x] Fix correction handling — acknowledge + learn + confirm
-- [x] Fix conversation/banter — natural, slightly funny, short
-- [x] Update response format to include intent_type field
-- [x] Update examples in prompt (before/after style with BAD/GOOD)
+### A1: Fix detectLearnIntent() — strict patterns + validation
+- [ ] Rewrite detectLearnIntent() with strict "X is Y" / "X means Y" / "X = Y" only
+- [ ] Add isValidLearnPhrase() / isValidLearnTarget() helpers (≤40 chars, ≤4 words, valid route)
+- [ ] Add unlearn detection function detectUnlearnIntent()
+- [ ] Add pendingLearnPhrase/pendingLearnRoute to AssistantResponse interface
 
-## Phase 3: Update response types and frontend handling
-- [x] Add 'observation', 'conversation', 'correction' types to ResponseType
-- [x] Add IntentType type definition
-- [x] Add intent_type? to AssistantResponse interface
-- [x] Add 'observation' and 'conversation' handling to frontend switch
-- [x] Ensure navigation ONLY fires when type='navigate' — never on question/observation
-- [x] Ensure actions ONLY fire when type='action' — never on question
-- [x] Fix correction type → trigger learn flow (learnedPhrase + learnedRoute check)
+### A2: Update db-neon — deleteAlias support
+- [ ] Add solardogDeleteAlias() to db-neon.ts
 
-## Phase 4: Update tests
-- [x] Add tests for each intent type classification (group 17)
-- [x] Add tests for system prompt THINK→DECIDE→ACT section (group 18)
-- [x] Add tests for new response types: observation/conversation/correction (group 19)
-- [x] Add navigation guard tests — type=navigate is ONLY trigger (group 20)
-- [x] Add action guard tests — type=action is ONLY trigger (group 21)
-- [x] Add correction → learn flow tests (group 22)
-- [x] Add isNavigationIntent rejection tests for questions/observations (group 23)
-- [x] Run vitest — 201/201 passing
-- [x] Run tsc — 0 errors
+### A3: Fix system prompt — platform identity + personality + learn discipline
+- [ ] Add PLATFORM IDENTITY section
+- [ ] Fix CONVERSATION personality (dry humor, not corporate)
+- [ ] Add RESPONSE PRIORITY (Answer→Explain→Suggest→Offer→Execute)
+- [ ] Strengthen LEARN RULES (strict patterns, confirmation before saving)
+- [ ] Add UNLEARN section
 
-## Phase 5: Commit & Push
-- [x] git commit as v10.1 (commit: 6ac1079)
-- [x] git push origin dev (no remote configured — local repo, ready to push)
+### A4: Update route handler — confirmation flow + unlearn
+- [ ] Add unlearn detection + deleteAlias call in pre-flight
+- [ ] Add learn confirmation flow (pending state, confirm before saving)
+- [ ] Add pendingLearnPhrase/pendingLearnRoute to response
+
+### A5: Tests — v10.2 groups 24-28
+- [ ] Group 24: detectLearnIntent strict mode (X is Y / X means Y / X = Y only)
+- [ ] Group 25: Learn validation (phrase length/word count limits)
+- [ ] Group 26: detectUnlearnIntent detection
+- [ ] Group 27: System prompt platform identity + personality
+- [ ] Group 28: Response priority in system prompt
+- [ ] Run vitest — all passing, run tsc — 0 errors
+
+## Task B: Login Fix — Auth System Audit + Debug Endpoint
+
+### B1: Audit + fix auth issues
+- [ ] Check migrate/register for password_hash mutation
+- [ ] Verify cookie options correct
+- [ ] Add auth failure logging
+
+### B2: Add GET /api/admin/debug/auth-status endpoint
+- [ ] Returns: userExists, passwordValid, jwtValid, cookiePresent
+
+### B3: Commit & Push
+- [ ] git commit v10.2 + login fix
+- [ ] git push origin dev --force

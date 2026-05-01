@@ -1,7 +1,7 @@
 /**
  * lib/solardog/resolveRoute.ts
  *
- * SolarDog navigation resolver.
+ * SolarDog navigation resolver + intent detection.
  *
  * Resolves a user intent string to a SiteRoute using:
  *   1. Exact alias match (canonical + learned)
@@ -10,6 +10,10 @@
  *
  * Returns a ResolveResult with confidence and the matched route.
  * Never throws — returns { confidence: 'none' } if nothing matches.
+ *
+ * v10.2: detectLearnIntent() is now STRICT — only fires on explicit
+ *        "X is Y", "X means Y", or "X = Y" patterns with validation.
+ *        Added detectUnlearnIntent() for "unlearn that" / "remove that mapping".
  */
 
 import { SITE_MAP, SiteRoute, buildAliasMap, normalizePhrase } from './siteMap';
@@ -193,10 +197,64 @@ export function isNavigationIntent(message: string): boolean {
     || /\b(page|navigate|navigation|go to|take me|open the)\b/.test(lower);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// v10.2: STRICT Learn Intent Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Detect if a message is a "learn" intent.
- * e.g. "command center is dashboard", "command center means dashboard"
- * Returns { phrase, route } or null.
+ * Validate that a learn phrase is safe to store.
+ * Rules:
+ *   - At least 2 chars
+ *   - No more than 40 chars
+ *   - No more than 4 words
+ *   - Not a navigation phrase itself (avoid "go to X is Y" type confusion)
+ */
+export function isValidLearnPhrase(phrase: string): boolean {
+  if (!phrase || phrase.length < 2) return false;
+  if (phrase.length > 40) return false;
+  const words = phrase.trim().split(/\s+/);
+  if (words.length > 4) return false;
+  // Reject if it looks like a full navigation command
+  if (/^(take me to|go to|navigate to|open|show me)\b/i.test(phrase)) return false;
+  return true;
+}
+
+/**
+ * Validate that a learn target resolves to a known route.
+ * Target must match something in the SITE_MAP (exact label, route, or alias).
+ */
+export function isValidLearnTarget(target: string): boolean {
+  if (!target || target.length < 2) return false;
+  const normalized = normalizePhrase(target);
+  // Strip leading articles ("the", "a", "an") for matching
+  const stripped = normalized.replace(/^(the|a|an)\s+/, '');
+  // Check if target matches any known route, label, or alias
+  for (const entry of SITE_MAP) {
+    const label = normalizePhrase(entry.label);
+    const route = normalizePhrase(entry.route);
+    if (label === normalized || label === stripped) return true;
+    if (route === normalized || route === stripped) return true;
+    if (entry.aliases.some(a => normalizePhrase(a) === normalized || normalizePhrase(a) === stripped)) return true;
+    // Partial match: label contains the target or target contains the label
+    if (label.includes(stripped) && stripped.length >= 3) return true;
+    if (stripped.includes(label) && label.length >= 3) return true;
+  }
+  return false;
+}
+
+/**
+ * Detect if a message is a STRICT "learn" intent.
+ *
+ * v10.2: ONLY fires on:
+ *   "X is Y"     — "command center is dashboard"
+ *   "X means Y"  — "hub means engineering"
+ *   "X = Y"      — "the shed = projects"
+ *
+ * All other patterns from v10.1 have been REMOVED to prevent alias poisoning.
+ * The phrase must pass isValidLearnPhrase() validation.
+ * The target must pass isValidLearnTarget() validation.
+ *
+ * Returns { phrase, target } or null.
  */
 export function detectLearnIntent(message: string): { phrase: string; target: string } | null {
   const lower = message.toLowerCase().trim();
@@ -205,31 +263,104 @@ export function detectLearnIntent(message: string): { phrase: string; target: st
   if (/^(what|where|when|who|why|how|which|is|are|can|does|do|did)\b/.test(lower)) {
     return null;
   }
+
   // Bail on navigation intents — they're not learn intents
   if (isNavigationIntent(message)) return null;
 
-  // Pattern 1: "<phrase> is <target>" / "<phrase> means <target>"
-  const patterns = [
-    /^(.+?)\s+is\s+(?:the\s+)?(.+)$/,
-    /^(.+?)\s+means?\s+(?:the\s+)?(.+)$/,
-    /^(.+?)\s+=\s+(.+)$/,
-    /^call\s+(.+?)\s+(?:the\s+)?(.+)$/,
-    /^(?:when i say|if i say|whenever i say)\s+(.+?)[,\s]+(?:go to|it means?|open|navigate to|it'?s?)\s+(.+)$/,
-    /^(.+?)\s+(?:should go to|should open|should navigate to)\s+(.+)$/,
-    /^remember[,:]?\s+(.+?)\s+is\s+(.+)$/,
-    /^teach:?\s+(.+?)\s+→\s+(.+)$/,
-    /^teach:?\s+(.+?)\s+->\s+(.+)$/,
-  ];
+  // Bail on unlearn intents
+  if (detectUnlearnIntent(message)) return null;
 
-  for (const pattern of patterns) {
-    const m = lower.match(pattern);
-    if (m) {
-      const phrase  = normalizePhrase(m[1]).trim();
-      const target  = normalizePhrase(m[2]).trim();
-      if (phrase.length >= 2 && target.length >= 2) {
-        return { phrase, target };
-      }
+  // ── STRICT patterns only (v10.2) ──────────────────────────────────────────
+  // Pattern 1: "X is Y"
+  const isPattern = lower.match(/^(.+?)\s+is\s+(.+)$/);
+  if (isPattern) {
+    const phrase = normalizePhrase(isPattern[1]).trim();
+    const target = normalizePhrase(isPattern[2]).trim();
+    if (isValidLearnPhrase(phrase) && isValidLearnTarget(target)) {
+      return { phrase, target };
     }
   }
+
+  // Pattern 2: "X means Y"
+  const meansPattern = lower.match(/^(.+?)\s+means?\s+(.+)$/);
+  if (meansPattern) {
+    const phrase = normalizePhrase(meansPattern[1]).trim();
+    const target = normalizePhrase(meansPattern[2]).trim();
+    if (isValidLearnPhrase(phrase) && isValidLearnTarget(target)) {
+      return { phrase, target };
+    }
+  }
+
+  // Pattern 3: "X = Y"
+  const equalsPattern = lower.match(/^(.+?)\s*=\s*(.+)$/);
+  if (equalsPattern) {
+    const phrase = normalizePhrase(equalsPattern[1]).trim();
+    const target = normalizePhrase(equalsPattern[2]).trim();
+    if (isValidLearnPhrase(phrase) && isValidLearnTarget(target)) {
+      return { phrase, target };
+    }
+  }
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v10.2: Unlearn Intent Detection
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface UnlearnIntent {
+  /** The phrase to delete, if specified. Null if "forget that" type (frontend uses last phrase). */
+  phrase: string | null;
+}
+
+/**
+ * Detect if a message is an "unlearn" / "forget" intent.
+ *
+ * Matches:
+ *   "unlearn that"
+ *   "forget that"
+ *   "remove that mapping"
+ *   "delete that alias"
+ *   "unlearn X"
+ *   "forget X"
+ *   "remove the mapping for X"
+ */
+export function detectUnlearnIntent(message: string): UnlearnIntent | null {
+  const lower = message.toLowerCase().trim();
+
+  // "unlearn that" / "forget that" / "remove that mapping" / "delete that alias"
+  if (/^(unlearn|forget)\s+that\b/.test(lower)) {
+    return { phrase: null };
+  }
+  // "remove that mapping" / "delete that alias" — "that" must be present (no phrase)
+  if (/^(remove|delete)\s+that\s+(mapping|alias)\b/.test(lower)) {
+    return { phrase: null };
+  }
+  // "remove mapping" / "remove alias" bare (no "for X") — also no phrase
+  if (/^(remove|delete)\s+(mapping|alias)\s*$/.test(lower)) {
+    return { phrase: null };
+  }
+
+  // "unlearn X" — extract the phrase
+  const unlearnMatch = lower.match(/^unlearn\s+(.+)$/);
+  if (unlearnMatch) {
+    const phrase = normalizePhrase(unlearnMatch[1]).trim();
+    if (phrase.length >= 2) return { phrase };
+  }
+
+  // "forget X"
+  const forgetMatch = lower.match(/^forget\s+(.+)$/);
+  if (forgetMatch) {
+    const phrase = normalizePhrase(forgetMatch[1]).trim();
+    if (phrase.length >= 2) return { phrase };
+  }
+
+  // "remove the mapping for X" / "remove mapping for X"
+  const removeMatch = lower.match(/^(?:remove|delete)\s+(?:the\s+)?(?:mapping|alias)\s+(?:for\s+)?(.+)$/);
+  if (removeMatch) {
+    const phrase = normalizePhrase(removeMatch[1]).trim();
+    if (phrase.length >= 2) return { phrase };
+  }
+
   return null;
 }
