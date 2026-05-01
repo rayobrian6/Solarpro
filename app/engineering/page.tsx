@@ -3337,8 +3337,14 @@ function EngineeringPageInner() {
           dcDisconnect:   config.dcDisconnect,
           productionMeter: config.productionMeter,
           rapidShutdown:  config.rapidShutdown,
+          // v58.20: explicit hasBattery + batteryBrand so renderer always gets
+          // correct flags regardless of whether batteryKwh/Count are zero.
+          hasBattery:     !!(config.batteryId && (config.batteryCount ?? 0) > 0),
+          batteryBrand:   config.batteryBrand || undefined,
           batteryModel:   config.batteryBrand ? `${config.batteryBrand} ${config.batteryModel}` : undefined,
-          batteryKwh:     config.batteryKwh * config.batteryCount || undefined,
+          batteryKwh:     config.batteryKwh && config.batteryCount
+                            ? config.batteryKwh * config.batteryCount
+                            : (config.batteryKwh || undefined),
           // Battery backfeed breaker (NEC 705.12(B)) — from equipment-db
           batteryBackfeedA: config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
           // Generator fields
@@ -3361,22 +3367,36 @@ function EngineeringPageInner() {
           atsAmpRating: config.atsId
             ? (() => { const a = getATSById(config.atsId); return a?.ampRating ?? undefined; })()
             : undefined,
-          // Backup interface (Enphase IQ SC3, Tesla Gateway, etc.)
+          // Backup interface (Enphase IQ SC3, Tesla Gateway, EcoFlow Smart Home Panel, etc.)
           // If atsId is IQ SC3, resolve backupInterfaceId from BACKUP_INTERFACES
           // IQ SC3 in ATS_UNITS (id: enphase-iq-sc3-ats) maps to BACKUP_INTERFACES (id: enphase-iq-system-controller-3)
+          // v58.20: For ecosystem brands without a BACKUP_INTERFACES entry (EcoFlow, Sol-Ark, Growatt etc.)
+          // infer backupInterfaceBrand from batteryBrand / inverter brand so the renderer renders the correct BUI.
           ...(() => {
             const _atsId = config.atsId?.toLowerCase() ?? '';
             const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
             const _resolvedBuiId = config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : '');
             const _bi = _resolvedBuiId ? getBackupInterfaceById(_resolvedBuiId) : undefined;
+            // If we have a db entry, use it. Otherwise infer brand from battery/inverter brand.
+            const _inferredBrand = (() => {
+              if (_bi?.manufacturer) return _bi.manufacturer;
+              // Infer from batteryBrand for ecosystem brands (EcoFlow, Sol-Ark, Growatt, etc.)
+              if (config.batteryBrand) return config.batteryBrand;
+              // Infer from inverter manufacturer
+              const firstInvBrand = config.inverters?.[0]?.inverterId
+                ? (getInvById(config.inverters[0].inverterId, config.inverters[0].type) as any)?.manufacturer
+                : undefined;
+              return firstInvBrand ?? undefined;
+            })();
+            const _hasBui = !!(config.batteryId && (config.batteryCount ?? 0) > 0);
             return {
               backupInterfaceId:    _resolvedBuiId || undefined,
-              backupInterfaceBrand: _bi?.manufacturer ?? undefined,
+              backupInterfaceBrand: _hasBui ? (_inferredBrand ?? undefined) : undefined,
               backupInterfaceModel: _bi?.model ?? undefined,
               backupInterfaceIsATS: _bi?.islandingCapable ?? false,
-              hasBackupPanel:       !!_resolvedBuiId,
+              hasBackupPanel:       _hasBui,
               backupPanelAmps:      100,
-              backupPanelBrand:     _bi?.manufacturer ?? undefined,
+              backupPanelBrand:     _hasBui ? (_inferredBrand ?? undefined) : undefined,
             };
           })(),
           necVersion:     `NEC ${compliance.jurisdiction?.necVersion || '2023'}`,
@@ -9348,6 +9368,29 @@ function EngineeringPageInner() {
                                 acConduitType: config.conduitType ?? 'EMT',
                                 dcConduitType: config.conduitType ?? 'EMT',
                                 acWireLength: config.wireLength ?? 60,
+                                // v58.20: Battery + BUI fields for PDF SLD
+                                hasBattery:     !!(config.batteryId && (config.batteryCount ?? 0) > 0),
+                                batteryBrand:   config.batteryBrand || undefined,
+                                batteryModel:   config.batteryBrand ? `${config.batteryBrand} ${config.batteryModel}` : undefined,
+                                batteryKwh:     config.batteryKwh && config.batteryCount
+                                                  ? config.batteryKwh * config.batteryCount
+                                                  : (config.batteryKwh || undefined),
+                                batteryBackfeedA: config.batteryId ? calcBatteryBackfeedAmps(config.batteryId, config.batteryCount) : undefined,
+                                batteryId:      config.batteryId || undefined,
+                                ...(() => {
+                                  const _atsId = config.atsId?.toLowerCase() ?? '';
+                                  const _isIQSC3viaATS = _atsId.includes('enphase-iq-sc3') || _atsId.includes('enphase-iq-system-controller');
+                                  const _resolvedBuiId = config.backupInterfaceId || (_isIQSC3viaATS ? 'enphase-iq-system-controller-3' : '');
+                                  const _bi = _resolvedBuiId ? getBackupInterfaceById(_resolvedBuiId) : undefined;
+                                  const _inferredBrand = _bi?.manufacturer ?? config.batteryBrand ?? undefined;
+                                  const _hasBui = !!(config.batteryId && (config.batteryCount ?? 0) > 0);
+                                  return {
+                                    backupInterfaceId:    _resolvedBuiId || undefined,
+                                    backupInterfaceBrand: _hasBui ? (_inferredBrand ?? undefined) : undefined,
+                                    backupInterfaceModel: _bi?.model ?? undefined,
+                                    backupInterfaceIsATS: _bi?.islandingCapable ?? false,
+                                  };
+                                })(),
                                 deviceCount: computedSystem.isMicro ? totalPanels : undefined,
                                 microBranches: computedSystem.isMicro ? computedSystem.microBranches : undefined,
                                 branchWireGauge: computedSystem.isMicro ? computedSystem.runs?.find((r: any) => r.id === 'BRANCH_RUN')?.wireGauge : undefined,

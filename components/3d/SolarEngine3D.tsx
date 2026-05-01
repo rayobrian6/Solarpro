@@ -749,7 +749,9 @@ function SolarEngine3D({
         const terrainProvider = viewer.terrainProvider;
         if (terrainProvider && typeof C.sampleTerrainMostDetailed === 'function') {
           const positions = [C.Cartographic.fromDegrees(lng, lat)];
-          const sampledPositions = await C.sampleTerrainMostDetailed(terrainProvider, positions);
+          // PERF v58.19: 5s timeout guard
+          const _terrTimeout = new Promise<never>((_,rej)=>setTimeout(()=>rej(new Error('terrain timeout')),5000));
+          const sampledPositions = await Promise.race([C.sampleTerrainMostDetailed(terrainProvider, positions), _terrTimeout]) as any[];
           if (sampledPositions?.[0] && isFinite(sampledPositions[0].height) && sampledPositions[0].height > 0) {
             cesiumGroundElev = sampledPositions[0].height;
             addLog('FLY', `Terrain sampled: ${cesiumGroundElev.toFixed(1)}m (Google: ${googleGroundElev.toFixed(1)}m, geoidOffset: ${(cesiumGroundElev - googleGroundElev).toFixed(1)}m)`);
@@ -897,7 +899,7 @@ function SolarEngine3D({
               // maximumScreenSpaceError: controls tile quality vs performance tradeoff.
               // Lower = higher quality (more tiles loaded), higher = better performance (fewer tiles).
               // 4 is a good balance for rooftop-level detail. Default is 16.
-              maximumScreenSpaceError: 4,
+              maximumScreenSpaceError: 16, // PERF v58.19: start coarse; camera optimizer drops to 4 on zoom-in
               // skipLevelOfDetail: false ensures tiles load in order (no popping artifacts).
               // true would allow skipping LOD levels for faster load but causes visual glitches.
               skipLevelOfDetail: false,
@@ -984,7 +986,9 @@ function SolarEngine3D({
         const terrainProvider = viewer.terrainProvider;
         if (terrainProvider && typeof C.sampleTerrainMostDetailed === 'function') {
           const positions = [C.Cartographic.fromDegrees(lng, lat)];
-          const sampledPositions = await C.sampleTerrainMostDetailed(terrainProvider, positions);
+          // PERF v58.19: 5s timeout guard
+          const _terrTimeout = new Promise<never>((_,rej)=>setTimeout(()=>rej(new Error('terrain timeout')),5000));
+          const sampledPositions = await Promise.race([C.sampleTerrainMostDetailed(terrainProvider, positions), _terrTimeout]) as any[];
           if (sampledPositions?.[0] && isFinite(sampledPositions[0].height) && sampledPositions[0].height > 0) {
             cesiumGroundElev = sampledPositions[0].height;
             addLog('BOOT', `Cesium terrain sampled: ${cesiumGroundElev.toFixed(1)}m (Google: ${googleGroundElev.toFixed(1)}m, geoidOffset: ${(cesiumGroundElev - googleGroundElev).toFixed(1)}m)`);
@@ -1081,7 +1085,7 @@ function SolarEngine3D({
       const script = document.createElement('script');
       script.src = 'https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js';
       script.async = true;
-      const timeout = setTimeout(() => reject(new Error('CesiumJS load timeout')), 20000);
+      const timeout = setTimeout(() => reject(new Error('CesiumJS load timeout')), 45000); // PERF v58.19: CDN cold-start
       script.onload = () => {
         clearTimeout(timeout);
         if ((window as any).Cesium) resolve((window as any).Cesium);

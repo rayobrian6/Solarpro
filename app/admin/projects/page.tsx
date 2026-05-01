@@ -14,6 +14,7 @@ export default function AdminProjects() {
   const [total, setTotal]       = useState(0);
   const [page, setPage]         = useState(1);
   const [search, setSearch]     = useState('');
+  const [originFilter, setOriginFilter] = useState<'all' | 'survey' | 'manual' | 'bill_upload'>('all');
   const [loading, setLoading]   = useState(true);
   const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
   const LIMIT = 50;
@@ -23,19 +24,19 @@ export default function AdminProjects() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/projects?search=${encodeURIComponent(search)}&page=${page}&limit=${LIMIT}`);
+      const res = await fetch(`/api/admin/projects?search=${encodeURIComponent(search)}&page=${page}&limit=${LIMIT}&origin=${originFilter}`);
       const d = await res.json();
       if (d.success) { setProjects(d.projects); setTotal(d.total); }
     } finally { setLoading(false); }
-  }, [search, page]);
+  }, [search, page, originFilter]);
 
   useEffect(() => { load(); }, [load]);
 
-  const act = async (projectId: string, action: string) => {
+  const act = async (projectId: string, action: string, extra: Record<string,unknown> = {}) => {
     const res = await fetch('/api/admin/projects', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, action }),
+      body: JSON.stringify({ id: projectId, action, ...extra }),
     });
     const d = await res.json();
     if (d.success) { showToast(`✓ ${action}`); load(); }
@@ -54,6 +55,20 @@ export default function AdminProjects() {
         </button>
       </div>
 
+      {/* Origin filter tabs */}
+      <div className="flex items-center gap-2">
+        {(['all', 'survey', 'manual', 'bill_upload'] as const).map(o => (
+          <button key={o} onClick={() => { setOriginFilter(o); setPage(1); }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              originFilter === o
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                : 'text-slate-400 border border-white/10 hover:text-white hover:border-white/20'
+            }`}>
+            {o === 'all' ? 'All' : o === 'bill_upload' ? 'Bill Upload' : o.charAt(0).toUpperCase() + o.slice(1)}
+          </button>
+        ))}
+      </div>
+
       <div className="relative">
         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
         <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
@@ -66,21 +81,28 @@ export default function AdminProjects() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/2">
-                {['Project', 'Client', 'Owner', 'Address', 'System', 'Status', 'Created', 'Actions'].map(h => (
+                {['Project', 'Origin', 'Client', 'Owner', 'Address', 'System', 'Status', 'Created', 'Actions'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs text-slate-500 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-12 text-slate-500"><RefreshCw size={16} className="animate-spin inline mr-2" />Loading...</td></tr>
+                <tr><td colSpan={9} className="text-center py-12 text-slate-500"><RefreshCw size={16} className="animate-spin inline mr-2" />Loading...</td></tr>
               ) : projects.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-12 text-slate-500">No projects found</td></tr>
+                <tr><td colSpan={9} className="text-center py-12 text-slate-500">No projects found</td></tr>
               ) : projects.map(p => (
                 <tr key={p.id} className={`border-b border-white/5 hover:bg-white/2 transition-colors ${p.deleted_at ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3">
                     <div className="font-medium text-white text-xs">{p.name}</div>
                     <div className="text-slate-500 text-[10px] font-mono">{p.id.slice(0, 8)}…</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                      p.origin === 'survey' ? 'bg-cyan-500/15 text-cyan-400' :
+                      p.origin === 'bill_upload' ? 'bg-blue-500/15 text-blue-400' :
+                      'bg-slate-500/15 text-slate-400'
+                    }`}>{p.origin || 'manual'}</span>
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-400">{p.client_name || '—'}</td>
                   <td className="px-4 py-3">
@@ -105,9 +127,14 @@ export default function AdminProjects() {
                           <RotateCcw size={13} />
                         </button>
                       ) : (
-                        <button onClick={() => { if (confirm('Soft-delete this project?')) act(p.id, 'delete'); }} title="Delete" className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
-                          <Trash2 size={13} />
-                        </button>
+                        <>
+                          <button
+                            onClick={() => { if (confirm(`Hard-delete "${p.name}"? This cannot be undone.`)) act(p.id, 'delete'); }}
+                            title="Hard delete (permanent)"
+                            className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>

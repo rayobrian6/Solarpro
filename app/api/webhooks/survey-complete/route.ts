@@ -221,8 +221,12 @@ export async function POST(req: NextRequest) {
   // Returns null only if BOTH paths fail (claim invalid + default missing),
   // in which case we return 500 so the partner retries.
   const ownerResolution = await resolveIngestOwner(
-    envelope.solarpro_user_id ?? null,
+    envelope.solarpro_user_id    ?? null,
     deliveryId,
+    envelope.solarpro_email      ?? null,
+    envelope.solarpro_project_id ?? null,
+    envelope.inspector_email     ?? null,
+    envelope.inspector_name      ?? null,
   );
 
   if (!ownerResolution) {

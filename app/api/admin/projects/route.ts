@@ -15,37 +15,66 @@ export async function GET(req: NextRequest) {
   const searchRaw = searchParams.get('search') || '';
   // Length cap — prevent excessively long ILIKE patterns causing slow DB queries
   const search = searchRaw.slice(0, 200);
-  const page   = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const limit  = Math.min(100, parseInt(searchParams.get('limit') || '25'));
-  const offset = (page - 1) * limit;
+  const page        = Math.max(1, parseInt(searchParams.get('page') || '1'));
+  const limit       = Math.min(100, parseInt(searchParams.get('limit') || '25'));
+  const offset      = (page - 1) * limit;
+  const originFilter = searchParams.get('origin') || 'all'; // 'all' | 'survey' | 'manual' | etc.
 
   try {
     const sql = await getDbReady();
     const pattern = `%${search}%`;
 
     const [rows, countRows] = await Promise.all([
-      sql`
-        SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at,
-               u.name AS owner_name, u.email AS owner_email,
-               c.name AS client_name
-        FROM projects p
-        LEFT JOIN users u ON u.id = p.user_id
-        LEFT JOIN clients c ON c.id = p.client_id
-        WHERE p.name ILIKE ${pattern}
-           OR p.address ILIKE ${pattern}
-           OR u.name ILIKE ${pattern}
-           OR u.email ILIKE ${pattern}
-        ORDER BY p.created_at DESC
-        LIMIT ${limit} OFFSET ${offset}
-      `,
-      sql`
-        SELECT COUNT(*) AS total FROM projects p
-        LEFT JOIN users u ON u.id = p.user_id
-        WHERE p.name ILIKE ${pattern}
-           OR p.address ILIKE ${pattern}
-           OR u.name ILIKE ${pattern}
-           OR u.email ILIKE ${pattern}
-      `,
+      originFilter !== 'all'
+        ? sql`
+            SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at,
+                   p.origin, p.deleted_at, p.status,
+                   u.name AS owner_name, u.email AS owner_email,
+                   c.name AS client_name
+              FROM projects p
+              LEFT JOIN users u ON u.id = p.user_id
+              LEFT JOIN clients c ON c.id = p.client_id
+             WHERE p.origin = ${originFilter}
+               AND (p.name ILIKE ${pattern}
+                    OR p.address ILIKE ${pattern}
+                    OR u.name ILIKE ${pattern}
+                    OR u.email ILIKE ${pattern})
+             ORDER BY p.created_at DESC
+             LIMIT ${limit} OFFSET ${offset}
+          `
+        : sql`
+            SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at,
+                   p.origin, p.deleted_at, p.status,
+                   u.name AS owner_name, u.email AS owner_email,
+                   c.name AS client_name
+              FROM projects p
+              LEFT JOIN users u ON u.id = p.user_id
+              LEFT JOIN clients c ON c.id = p.client_id
+             WHERE p.name ILIKE ${pattern}
+                OR p.address ILIKE ${pattern}
+                OR u.name ILIKE ${pattern}
+                OR u.email ILIKE ${pattern}
+             ORDER BY p.created_at DESC
+             LIMIT ${limit} OFFSET ${offset}
+          `,
+      originFilter !== 'all'
+        ? sql`
+            SELECT COUNT(*) AS total FROM projects p
+            LEFT JOIN users u ON u.id = p.user_id
+            WHERE p.origin = ${originFilter}
+              AND (p.name ILIKE ${pattern}
+                   OR p.address ILIKE ${pattern}
+                   OR u.name ILIKE ${pattern}
+                   OR u.email ILIKE ${pattern})
+          `
+        : sql`
+            SELECT COUNT(*) AS total FROM projects p
+            LEFT JOIN users u ON u.id = p.user_id
+            WHERE p.name ILIKE ${pattern}
+               OR p.address ILIKE ${pattern}
+               OR u.name ILIKE ${pattern}
+               OR u.email ILIKE ${pattern}
+          `,
     ]);
 
     return NextResponse.json({
@@ -78,7 +107,12 @@ export async function PATCH(req: NextRequest) {
     if (!isValidUUID(id)) return NextResponse.json({ success: false, error: 'Invalid project ID format.' }, { status: 400 });
 
     if (action === 'delete') {
+      // Hard delete — used for test/survey projects from admin panel
       await sql`DELETE FROM projects WHERE id = ${id}`;
+    } else if (action === 'soft-delete') {
+      await sql`UPDATE projects SET deleted_at = now() WHERE id = ${id}`;
+    } else if (action === 'restore') {
+      await sql`UPDATE projects SET deleted_at = NULL WHERE id = ${id}`;
     } else if (action === 'reassign') {
       if (!userId) return NextResponse.json({ success: false, error: 'Missing userId for reassign' }, { status: 400 });
       if (!isValidUUID(userId)) return NextResponse.json({ success: false, error: 'Invalid userId format.' }, { status: 400 });

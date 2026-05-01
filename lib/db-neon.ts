@@ -161,6 +161,19 @@ function assertUUID(value: unknown, fieldName: string): string {
 // TYPE HELPERS
 // ============================================================
 
+/**
+ * Parse a PostgreSQL numeric/decimal column that arrives as a string in JSON.
+ * Postgres.js / Neon return NUMERIC/DECIMAL as strings to preserve precision.
+ * TypeScript `as number` is compile-time only -- it does NOT coerce at runtime.
+ * Without this helper, hasValidCoords() fails because typeof 8.707\ === \string\,
+ * causing the map to fall back to Phoenix default coords and geocode needlessly.
+ */
+function parseDbFloat(val: unknown): number | undefined {
+  if (val === null || val === undefined) return undefined;
+  const n = typeof val === 'number' ? val : parseFloat(val as string);
+  return isFinite(n) ? n : undefined;
+}
+
 function rowToClient(row: Record<string, unknown>): Client {
   return {
     id: row.id as string,
@@ -172,8 +185,8 @@ function rowToClient(row: Record<string, unknown>): Client {
     city: (row.city as string) || '',
     state: (row.state as string) || '',
     zip: (row.zip as string) || '',
-    lat: row.lat as number | undefined,
-    lng: row.lng as number | undefined,
+    lat: parseDbFloat(row.lat),
+    lng: parseDbFloat(row.lng),
     utilityProvider: (row.utility_provider as string) || '',
     monthlyKwh: (row.monthly_kwh as number[]) || [],
     annualKwh: (row.annual_kwh as number) || 0,
@@ -273,9 +286,9 @@ function rowToProject(row: Record<string, unknown>): Project {
     systemType: ((row.system_type as Project['systemType']) || 'roof') as Project['systemType'], // FIX v47.218: explicit fallback so updateProject merge never gets undefined
     notes: (row.notes as string) || '',
     address: (row.address as string) || '',
-    lat: row.lat as number | undefined,
-    lng: row.lng as number | undefined,
-    systemSizeKw: row.system_size_kw as number | undefined,
+    lat: parseDbFloat(row.lat),
+    lng: parseDbFloat(row.lng),
+    systemSizeKw: parseDbFloat(row.system_size_kw),
     billData: rawBillData,
     billAnalysis,
     utilityName,
@@ -862,6 +875,25 @@ export async function softDeleteProject(id: string, userId: string): Promise<boo
   return rows.length > 0;
 }
 
+export async function bulkSoftDeleteProjects(ids: string[], userId: string): Promise<string[]> {
+  if (!isValidUUID(userId)) return [];
+  const validIds = ids.filter(isValidUUID);
+  if (validIds.length === 0) return [];
+  const sql = await getDbReady();
+  // Use ordinary function call syntax so we can pass the array param directly.
+  // Neon serializes a JS string[] as a Postgres text array for ANY().
+  const rows = await sql(
+    `UPDATE projects
+     SET deleted_at = NOW(), updated_at = NOW()
+     WHERE id = ANY($1::uuid[])
+       AND user_id = $2
+       AND deleted_at IS NULL
+     RETURNING id`,
+    [validIds, userId]
+  );
+  return rows.map((r: Record<string, unknown>) => r.id as string);
+}
+
 // ============================================================
 // LAYOUTS
 // ============================================================
@@ -1403,9 +1435,9 @@ export async function getProjectWithDetails(
     systemType: ((row.system_type as import('@/types').Project['systemType']) || 'roof') as import('@/types').Project['systemType'], // FIX v47.218: explicit fallback
     notes: (row.notes as string) || '',
     address: (row.address as string) || '',
-    lat: row.lat as number | undefined,
-    lng: row.lng as number | undefined,
-    systemSizeKw: row.system_size_kw as number | undefined,
+    lat: parseDbFloat(row.lat),
+    lng: parseDbFloat(row.lng),
+    systemSizeKw: parseDbFloat(row.system_size_kw),
     billData: rawBillData,
     billAnalysis,
     utilityName,

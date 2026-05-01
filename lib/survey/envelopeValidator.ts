@@ -75,6 +75,15 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
   const solarpro_email =
     typeof r.solarpro_email === 'string' ? r.solarpro_email : null;
 
+  // F-06b: Inspector identity fields — sent by partner as top-level webhook fields.
+  // Used as fallback owner resolution when no SolarPro JWT claims are present.
+  const inspector_name =
+    typeof r.inspector_name === 'string' && r.inspector_name.trim()
+      ? r.inspector_name.trim() : null;
+  const inspector_email =
+    typeof r.inspector_email === 'string' && r.inspector_email.trim()
+      ? r.inspector_email.trim().toLowerCase() : null;
+
   return {
     ok: true,
     event: {
@@ -88,6 +97,9 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
       solarpro_user_id,
       solarpro_project_id,
       solarpro_email,
+      // F-06b: Inspector identity (from partner webhook body)
+      inspector_name,
+      inspector_email,
     },
   };
 }

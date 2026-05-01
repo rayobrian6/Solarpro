@@ -1,16 +1,18 @@
-# SolarPro Security Audit — Phase 37+
+# Cleanup Tasks
 
-## Phases 1–36 ✅ COMPLETE
-All prior phases committed and pushed (see git log).
+## 1. Work Queue — user can dismiss/archive items [dashboard]
+- [ ] Add "Dismiss from queue" option per WorkQueueRow (soft-archive via status or flag)
+- [ ] API: PATCH /api/projects/[id] to support `action=dismiss` (set queue_dismissed=true in survey_meta or a flag)
 
-## Phase 37 — Auth / Token Handling (IN PROGRESS)
-- [x] reset-password/route.ts — SHA-256 hash + parameterized DB lookup — SECURE
-- [ ] request-password-reset/route.ts — check for user enumeration
-- [ ] admin/impersonate/route.ts — review impersonation controls
-- [ ] Scan remaining routes for missing auth on mutations
-- [ ] Content-Type validation on JSON endpoints
-- [ ] Any remaining issues found during scan
+## 2. Admin — delete survey projects [admin/projects]
+- [ ] Add origin filter (show survey projects) + "Delete Survey" hard-delete button in admin projects page
+- [ ] Admin projects API: add `filter=survey` support to GET
 
-## Phase 38 — Commit & Push
-- [ ] Commit all Phase 37 fixes
-- [ ] Push to remote
+## 3. System size editable after set [projects/[id]]  
+- [ ] Find where system size is displayed as locked and add an edit pencil/inline edit
+- [ ] PATCH /api/projects/[id]/layout or direct project update to allow system size override
+
+## 4. Company hierarchy (org seats) — DB migration + UI
+- [ ] Migration: add organizations table + org_id to users
+- [ ] Settings: owner can invite members to their org
+- [ ] Admin: show org structure in companies page

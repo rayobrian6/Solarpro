@@ -1029,6 +1029,7 @@ interface IngestResponse {
   success:          boolean;
   surveysProcessed?: number;
   photosProcessed?:  number;
+  code?:             string;   // e.g. 'PARTNER_DB_NOT_CONFIGURED'
   results?:          Array<{
     surveyId:    string;
     siteName:    string;
@@ -1055,6 +1056,10 @@ function LiveSurveyDataView() {
   const [loadError, setLoadError]     = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<IngestResponse | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [fixingAll, setFixingAll]     = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [fixAllResult, setFixAllResult] = useState<string | null>(null);
+  const [fixingWebhook, setFixingWebhook]   = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [fixWebhookResult, setFixWebhookResult] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setLoadState('loading');
@@ -1164,7 +1169,17 @@ function LiveSurveyDataView() {
                 )}
               </span>
             ) : (
-              <span>✗ {ingestResult.error}</span>
+              <span className="space-y-1">
+                <span className="block">✗ {ingestResult.error}</span>
+                {ingestResult.code === 'PARTNER_DB_NOT_CONFIGURED' && (
+                  <span className="block text-amber-400/80 text-[10px] mt-1">
+                    Tip: The partner DB is not reachable from this environment.
+                    Use <strong>"⟳ Fix All Defaults"</strong> or{' '}
+                    <strong>"⟳ Fix from Webhook Log"</strong> below to reassign
+                    existing misowned surveys without needing the partner DB.
+                  </span>
+                )}
+              </span>
             )}
           </div>
         )}
@@ -1228,6 +1243,86 @@ function LiveSurveyDataView() {
               <span className="text-[10px] text-emerald-400/70 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                 origin=survey
               </span>
+              {/* v58.20: bulk-fix all surveys owned by fallback default user */}
+              <button
+                disabled={fixingAll === 'running'}
+                className="text-[10px] px-2.5 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={async () => {
+                  if (!confirm('Reassign ALL surveys currently owned by the fallback default user to their correct owners (based on solarpro_user_id claim)?\n\nThis will update all affected projects at once.')) return;
+                  setFixingAll('running');
+                  setFixAllResult(null);
+                  try {
+                    const res = await fetch('/api/admin/survey-reassign', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'fix-all-defaults' }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      const msg = data.fixed > 0
+                        ? `✓ Fixed ${data.fixed} / ${data.total} surveys (scanned ${data.scanned ?? data.total})` 
+                        : `– ${data.message ?? `No resolvable surveys found (scanned ${data.scanned ?? 0})`}`;
+                      setFixAllResult(msg);
+                      setFixingAll(data.fixed > 0 ? 'done' : 'idle');
+                      if (data.fixed > 0) await loadData();
+                    } else {
+                      setFixAllResult(`⚠ ${data.error}`);
+                      setFixingAll('error');
+                    }
+                  } catch (e) {
+                    setFixAllResult('Network error — check console');
+                    setFixingAll('error');
+                    console.error(e);
+                  }
+                }}
+              >
+                {fixingAll === 'running' ? '⏳ Fixing…' : '⟳ Fix All Defaults'}
+              </button>
+              {fixAllResult && (
+                <span className={`text-[10px] font-medium ${fixingAll === 'done' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {fixAllResult}
+                </span>
+              )}
+              {/* v58.20: backfill from webhook_deliveries.raw_body for pre-fix surveys */}
+              <button
+                disabled={fixingWebhook === 'running'}
+                className="text-[10px] px-2.5 py-1 rounded-md bg-violet-600/20 border border-violet-500/30 text-violet-400 hover:bg-violet-600/30 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={async () => {
+                  if (!confirm('Scan webhook delivery log and reassign surveys where solarpro_user_id is recorded in the raw webhook body?\n\nThis fixes surveys ingested before the JWT-forwarding fix.')) return;
+                  setFixingWebhook('running');
+                  setFixWebhookResult(null);
+                  try {
+                    const res = await fetch('/api/admin/survey-reassign', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ action: 'fix-from-webhook-log' }),
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                      const msg = data.fixed > 0
+                        ? `✓ Fixed ${data.fixed} surveys from webhook log`
+                        : (data.message ?? '✓ No fixable surveys found in webhook log');
+                      setFixWebhookResult(msg);
+                      setFixingWebhook('done');
+                      if (data.fixed > 0) await loadData();
+                    } else {
+                      setFixWebhookResult(`⚠ ${data.error}`);
+                      setFixingWebhook('error');
+                    }
+                  } catch (e) {
+                    setFixWebhookResult('Network error — check console');
+                    setFixingWebhook('error');
+                    console.error(e);
+                  }
+                }}
+              >
+                {fixingWebhook === 'running' ? '⏳ Scanning…' : '⟳ Fix from Webhook Log'}
+              </button>
+              {fixWebhookResult && (
+                <span className={`text-[10px] font-medium ${fixingWebhook === 'done' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {fixWebhookResult}
+                </span>
+              )}
             </div>
 
             {projects.map((project) => {
@@ -1296,7 +1391,7 @@ function LiveSurveyDataView() {
                   {isExpanded && (
                     <div className="border-t border-slate-800/60 px-4 py-3 space-y-3">
 
-                      {/* F-06: Ownership badge */}
+                      {/* F-06: Ownership badge + Fix Owner button */}
                       {(() => {
                         const meta = project.survey_meta as Record<string, unknown> | null;
                         const ownerSource = (meta?.owner_source as string) ?? null;
@@ -1304,19 +1399,147 @@ function LiveSurveyDataView() {
                         const solarproProjectId = (meta?.solarpro_project_id as string) ?? null;
                         const isDefault = ownerSource === 'default' || (!ownerSource && !solarproUserId);
                         return (
-                          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-medium ${
-                            isDefault
-                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                          }`}>
-                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDefault ? 'bg-amber-400' : 'bg-emerald-400'}`} />
-                            {isDefault ? (
-                              <span>⚠ Fallback Owner Used — no handoff JWT claim present</span>
-                            ) : (
-                              <span>✓ Owner Resolved from Handoff JWT — solarpro_user_id: <span className="font-mono opacity-80">{(solarproUserId ?? '').slice(0, 8)}…</span></span>
+                          <div className="space-y-1.5">
+                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[10px] font-medium ${
+                              isDefault
+                                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                            }`}>
+                              <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDefault ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                              {isDefault ? (
+                                <span>⚠ Fallback Owner Used — no handoff JWT claim present</span>
+                              ) : (
+                                <span>✓ Owner Resolved from Handoff JWT — solarpro_user_id: <span className="font-mono opacity-80">{(solarproUserId ?? '').slice(0, 8)}…</span></span>
+                              )}
+                              {solarproProjectId && (
+                                <span className="opacity-60 ml-1">project: <span className="font-mono">{solarproProjectId.slice(0, 8)}…</span></span>
+                              )}
+                            </div>
+                            {/* v58.20: Fix Owner button — shown when survey_meta has a solarpro_user_id claim */}
+                            {isDefault && solarproUserId && (
+                              <button
+                                className="text-[10px] px-3 py-1 rounded-md bg-blue-600/20 border border-blue-500/30 text-blue-400 hover:bg-blue-600/30 transition-colors font-medium"
+                                onClick={async () => {
+                                  if (!confirm(`Reassign this survey to solarpro_user_id:\n${solarproUserId}\n\nThis will change the project owner. Proceed?`)) return;
+                                  try {
+                                    const res = await fetch('/api/admin/survey-reassign', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'fix-one', projectId: project.id }),
+                                    });
+                                    const data = await res.json();
+                                    if (data.success) {
+                                      alert(`✓ Reassigned to ${data.newOwnerEmail ?? data.newOwnerId}`);
+                                      loadData();
+                                    } else {
+                                      alert(`⚠ Fix failed: ${data.error}`);
+                                    }
+                                  } catch (e) {
+                                    alert('Network error — check console');
+                                    console.error(e);
+                                  }
+                                }}
+                              >
+                                → Fix Owner (assign to solarpro_user_id claim)
+                              </button>
                             )}
-                            {solarproProjectId && (
-                              <span className="opacity-60 ml-1">project: <span className="font-mono">{solarproProjectId.slice(0, 8)}…</span></span>
+                            {/* v58.20: Manual reassign — always shown for default-owned surveys */}
+                            {isDefault && (
+                              <button
+                                className="text-[10px] px-3 py-1 rounded-md bg-slate-700/60 border border-slate-600/40 text-slate-400 hover:bg-slate-700 hover:text-slate-200 transition-colors font-medium"
+                                onClick={async () => {
+                                  const email = prompt(
+                                    `Manually reassign project "${project.name}" to a SolarPro user.\n` +
+                                    `Enter the user's email address:`,
+                                  );
+                                  if (!email?.trim()) return;
+                                  try {
+                                    const res = await fetch('/api/admin/survey-reassign', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({
+                                        action: 'reassign-to-email',
+                                        projectId: project.id,
+                                        targetEmail: email.trim(),
+                                      }),
+                                    });
+                                    const data = await res.json();
+                                    if (data.success) {
+                                      alert(data.alreadyCorrect
+                                        ? data.message
+                                        : `✓ Reassigned to ${data.newOwnerEmail}`);
+                                      loadData();
+                                    } else {
+                                      alert(`⚠ ${data.error}`);
+                                    }
+                                  } catch (e) {
+                                    alert('Network error — check console');
+                                    console.error(e);
+                                  }
+                                }}
+                              >
+                                ✎ Reassign to Email…
+                              </button>
+                            )}
+                            {/* Debug Claims - shows what claims are in the webhook log for this survey */}
+                            {isDefault && (
+                              <button
+                                className="text-[10px] px-3 py-1 rounded-md bg-violet-600/20 border border-violet-500/30 text-violet-400 hover:bg-violet-600/30 transition-colors font-medium"
+                                onClick={async () => {
+                                  try {
+                                    const res = await fetch('/api/admin/survey-reassign', {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ action: 'debug-claims', projectId: project.id }),
+                                    });
+                                    const data = await res.json();
+                                    if (!data.success) { alert(`⚠ ${data.error}`); return; }
+                                    const meta = (data.project.surveyMeta ?? {}) as Record<string,unknown>;
+                                    const lines: string[] = [
+                                      `Project: ${data.project.name}`,
+                                      `survey_meta.solarpro_user_id:    ${meta.solarpro_user_id ?? '(none)'}`,
+                                      `survey_meta.solarpro_email:       ${meta.solarpro_email ?? '(none)'}`,
+                                      `survey_meta.solarpro_project_id:  ${meta.solarpro_project_id ?? '(none)'}`,
+                                      `survey_meta.owner_source:         ${meta.owner_source ?? '(none)'}`,
+                                      '',
+                                      `Webhook deliveries found: ${data.deliveryCount}`,
+                                    ];
+                                    (data.webhookDeliveries as Record<string,unknown>[]).forEach((d, i) => {
+                                      const c = (d.claims ?? {}) as Record<string,unknown>;
+                                      lines.push(`--- Delivery ${i+1} (${d.status}) @ ${d.receivedAt} ---`);
+                                      lines.push(`  solarpro_user_id:    ${c.solarpro_user_id ?? '(none)'}`);
+                                      lines.push(`  solarpro_email:      ${c.solarpro_email ?? '(none)'}`);
+                                      lines.push(`  solarpro_project_id: ${c.solarpro_project_id ?? '(none)'}`);
+                                      lines.push('');
+                                      lines.push('  --- Partner fields ---');
+                                      lines.push(`  project_id:      ${c.project_id ?? '(none)'}`);
+                                      lines.push(`  project_name:    ${c.project_name ?? '(none)'}`);
+                                      lines.push(`  site_name:       ${c.site_name ?? '(none)'}`);
+                                      lines.push(`  inspector_name:  ${c.inspector_name ?? '(none)'}`);
+                                      lines.push(`  inspector_email: ${c.inspector_email ?? '(none)'}`);
+                                      lines.push(`  user_email:      ${c.user_email ?? '(none)'}`);
+                                      lines.push(`  user_id:         ${c.user_id ?? '(none)'}`);
+                                      lines.push('');
+                                      // Show all remaining fields
+                                      const af = (c.allFields ?? {}) as Record<string,unknown>;
+                                      const skipKeys = ['solarpro_user_id','solarpro_email','solarpro_project_id','project_id','project_name','site_name','inspector_name','inspector_email','user_email','user_id'];
+                                      const afKeys = Object.keys(af).filter(k => !skipKeys.includes(k));
+                                      if (afKeys.length > 0) {
+                                        lines.push('  --- All other raw_body fields ---');
+                                        afKeys.forEach(k => lines.push(`  ${k}: ${af[k] ?? '(none)'}`));
+                                      }
+                                      lines.push('');
+                                    });
+                                    if (data.deliveryCount === 0) lines.push('(no webhook_deliveries rows found for this project)');
+                                    alert(lines.join('\n'));
+                                  } catch (e) {
+                                    alert('Network error');
+                                    console.error(e);
+                                  }
+                                }}
+                              >
+                                ? Debug Claims
+                              </button>
                             )}
                           </div>
                         );
@@ -1330,6 +1553,8 @@ function LiveSurveyDataView() {
                           { label: 'Source',        value: project.source },
                           { label: 'Owner',         value: project.owner_email ?? project.user_id ?? null },
                           { label: 'Owner Source',  value: (project.survey_meta?.owner_source as string) ?? 'default' },
+                          { label: 'Claimed User ID', value: (project.survey_meta?.solarpro_user_id as string) ?? null },
+                          { label: 'Owner Fixed',   value: (project.survey_meta?.owner_fixed_by_admin as boolean) ? 'yes — admin fix' : null },
                           { label: 'Roof Material', value: project.roof_material },
                           { label: 'Mounting',      value: project.mounting_notes },
                           { label: 'Notes',         value: project.structural_notes },

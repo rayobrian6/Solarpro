@@ -480,12 +480,18 @@ function renderBattery(
     p.push(txt(cx, by2 + H2 + 34, `${backfeedA}A BACKFEED — NEC 705.12(B)`, {sz: F.tiny, anc: 'middle', fill: BAT_HDR}));
   }
 
-  // SOT: BAT_AC_OUT terminal via anchor 'ac_l1' (right side: native 180,55)
+  // BAT_AC_OUT: use bottom-centre of symbol so the wire drops straight down
+  // to the BUI BATTERY port (which is also at bottom-centre of the BUI box).
+  // Keep the right-side ac_l1 lug stub for visual authenticity but route
+  // the connection wire from the bottom lug.
   const acPt = getAnchorPoint('battery-ac', 'ac_l1', cx, cy, W2, H2);
-  const acOutX = acPt.x;
-  const acOutY = acPt.y;
-  p.push(ln(acOutX, acOutY, acOutX + 10, acOutY, {stroke: BAT_HDR, sw: SW_MED}));
-  console.log(`[SLD WIRE TYPE: AC] battery-ac.ac_l1 → (${acOutX.toFixed(1)},${acOutY.toFixed(1)})`);
+  // Right-side lug stub (decorative — shows AC terminals on symbol face)
+  p.push(ln(acPt.x, acPt.y, acPt.x + 10, acPt.y, {stroke: BAT_HDR, sw: SW_MED}));
+  // Bottom-centre AC output lug — this is the actual connection point to BUI
+  const acOutX = cx;            // centre X (aligns with BUI batPortX)
+  const acOutY = by2 + H2;      // bottom edge of battery symbol
+  p.push(ln(acOutX, acOutY - 4, acOutX, acOutY, {stroke: BAT_HDR, sw: SW_MED}));
+  console.log(`[SLD WIRE TYPE: AC] battery-ac.bottom → (${acOutX.toFixed(1)},${acOutY.toFixed(1)})`);
 
   p.push(callout(bx + W2 + 14, by2 - 5, calloutN));
   return {svg: p.join(''), lx: bx, rx: bx + W2, ty: by2, by: by2 + H2,
@@ -636,7 +642,7 @@ function renderBackupPanel(
 function renderBUI(
   cx: number, cy: number,
   brand: string, model: string, ampRating: number,
-  isEnphase: boolean, isTesla: boolean,
+  buiBrand: string,      // normalised lowercase brand key e.g. 'enphase', 'tesla', 'solark'
   hasGenerator: boolean, calloutN: number
 ): {svg: string; lx: number; rx: number; ty: number; by: number;
     batPortX: number; batPortY: number;
@@ -648,7 +654,22 @@ function renderBUI(
   const H2 = SLD_SYMBOL_MAP['bui-enphase'].height;  // 130
   console.log(`[SLD SYMBOL SIZE USED] bui-enphase: ${W2}×${H2}`);
   const bx = cx - W2/2, by2 = cy - H2/2;
-  const BUI_CLR = isEnphase ? '#0D47A1' : isTesla ? '#CC0000' : '#1565C0';
+  // ── Brand config table ────────────────────────────────────────────────────
+  // Each entry: [accentColour, headerText, defaultModel, necNote]
+  const BUI_BRAND_CONFIG: Record<string, [string, string, string, string]> = {
+    enphase:    ['#0D47A1', 'IQ SYSTEM CONTROLLER 3',  'IQ SC3',             'NEC 706 / NEC 230.82 / UL 1741-SA'],
+    tesla:      ['#CC0000', 'BACKUP GATEWAY 2',         'Backup Gateway 2',   'NEC 706 / UL 9540A'],
+    ecoflow:    ['#006D5B', 'SMART HOME PANEL',         'Smart Home Panel',   'NEC 706 / UL 1741 / UL 9540'],
+    solaredge:  ['#E8520A', 'BACKUP INTERFACE',         'Backup Interface',   'NEC 706 / UL 1741-SB'],
+    generac:    ['#1B5E20', 'PWRmanager',               'PWRmanager',         'NEC 706 / UL 1008 / UL 1741'],
+    solark:     ['#1A237E', 'SMART LOAD CENTER',        'Smart Load Center',  'NEC 706 / UL 1741-SB'],
+    growatt:    ['#2E7D32', 'ATS-S TRANSFER SWITCH',    'ATS-S 200A',         'NEC 706 / UL 1008'],
+  };
+  const _bCfg   = BUI_BRAND_CONFIG[buiBrand] ?? ['#1565C0', 'BACKUP INTERFACE UNIT', 'BUI', 'NEC 706 / UL 1741'];
+  const BUI_CLR = _bCfg[0];
+  const _buiHeaderText  = _bCfg[1];
+  const _buiDefaultModel = _bCfg[2];
+  const _buiNecNote     = _bCfg[3];
   const p: string[] = [];
 
   // v58.16 Phase 1.5 — Device illustration (painted as background so the
@@ -666,9 +687,7 @@ function renderBUI(
   p.push(ln(bx, by2+14, bx+W2, by2+14, {stroke: BUI_CLR, sw: SW_THIN}));
 
   // Header text
-  const headerText = isEnphase ? 'IQ SYSTEM CONTROLLER 3'
-    : isTesla ? 'BACKUP GATEWAY 2'
-    : 'BACKUP INTERFACE UNIT';
+  const headerText = _buiHeaderText;
   p.push(txt(cx, by2+10, headerText, {sz: 5.5, bold: true, anc: 'middle', fill: BUI_CLR}));
 
   // GRID input lug (left side, upper)
@@ -721,15 +740,11 @@ function renderBUI(
   p.push(ln(batPortX2, batPortY2-4, batPortX2, batPortY2, {stroke: BUI_CLR, sw: SW_MED}));
 
   // Labels below
-  const labelBrand = brand || (isEnphase ? 'Enphase' : isTesla ? 'Tesla' : 'BUI');
-  const labelModel = model || (isEnphase ? 'IQ SC3' : isTesla ? 'Gateway 2' : 'BUI');
+  const labelBrand = brand || (buiBrand ? buiBrand.charAt(0).toUpperCase() + buiBrand.slice(1) : 'BUI');
+  const labelModel = model || _buiDefaultModel;
   p.push(txt(cx, by2+H2+18, `${labelBrand} ${labelModel}`, {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
   p.push(txt(cx, by2+H2+27, ampRating > 0 ? `${ampRating}A` : '200A', {sz: F.tiny, anc: 'middle', bold: true, fill: BUI_CLR}));
-  if (isEnphase) {
-    p.push(txt(cx, by2+H2+36, 'NEC 706 / NEC 230.82 / UL 1741-SA', {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
-  } else {
-    p.push(txt(cx, by2+H2+36, 'NEC 706 / UL 1741', {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
-  }
+  p.push(txt(cx, by2+H2+36, _buiNecNote, {sz: F.tiny, anc: 'middle', italic: true, fill: BUI_CLR}));
 
   // Callout
   p.push(callout(bx+W2+14, by2-5, calloutN));
@@ -1953,12 +1968,30 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     console.log('[SLD BATTERY MISSING AT STAGE RENDERER] hasBattery=false — battery not rendered');
   }
   if (input.hasBattery) {
-    const isEnphase = !!(input.backupInterfaceBrand?.toLowerCase().includes('enphase') ||
-      input.inverterManufacturer?.toLowerCase().includes('enphase') ||
-      input.batteryModel?.toLowerCase().includes('enphase') ||
-      input.batteryModel?.toLowerCase().includes('iq battery'));
-    const isTesla = !!(input.backupInterfaceBrand?.toLowerCase().includes('tesla') ||
-      input.batteryModel?.toLowerCase().includes('powerwall'));
+    // Derive a normalised BUI brand key (mirrors normalizeDeviceBrandKey).
+    // Priority: explicit backupInterfaceBrand > inverter manufacturer > battery model sniff.
+    const _normBuiKey = (s?: string) =>
+      (s ?? '').toLowerCase().replace(/[\u00ae\u2122\u00a9]/g, '').replace(/[\s\-_.]+/g, '').trim();
+    const _buiBrandFromInput: string = (() => {
+      if (input.backupInterfaceBrand) return _normBuiKey(input.backupInterfaceBrand);
+      // Infer from inverter brand (Enphase micro system → IQ SC3; Tesla → Gateway 2)
+      const invKey = _normBuiKey(input.inverterManufacturer);
+      if (invKey === 'enphase') return 'enphase';
+      if (invKey === 'tesla')   return 'tesla';
+      // Infer from battery model string as last resort
+      const batM = (input.batteryModel ?? '').toLowerCase();
+      if (batM.includes('enphase') || batM.includes('iq battery')) return 'enphase';
+      if (batM.includes('powerwall'))                               return 'tesla';
+      if (batM.includes('ecoflow') || batM.includes('ocean'))       return 'ecoflow';
+      if (batM.includes('solaredge') || batM.includes('energy bank')) return 'solaredge';
+      if (batM.includes('generac') || batM.includes('pwrcell'))     return 'generac';
+      if (batM.includes('sol-ark') || batM.includes('solark'))      return 'solark';
+      if (batM.includes('growatt') || batM.includes('ark lv'))      return 'growatt';
+      return '';
+    })();
+    // Legacy compat flags (used by backupPanelBrand fallback below)
+    const isEnphase = _buiBrandFromInput === 'enphase';
+    const isTesla   = _buiBrandFromInput === 'tesla';
 
     // BUI positioned right of MSP, on the main bus line.
     // v58.11: Use grid-computed xBUI (full WIRE_GAP clearance on each side)
@@ -1968,23 +2001,30 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     const buiAmpRating = input.atsAmpRating ?? 200;
     buiResult = renderBUI(
       buiCX, buiCY,
-      input.backupInterfaceBrand ?? (isEnphase ? 'Enphase' : isTesla ? 'Tesla' : ''),
-      input.backupInterfaceModel ?? (isEnphase ? 'IQ System Controller 3' : isTesla ? 'Backup Gateway 2' : 'BUI'),
+      input.backupInterfaceBrand ?? '',
+      input.backupInterfaceModel ?? '',
       buiAmpRating,
-      isEnphase, isTesla,
+      _buiBrandFromInput,
       (input.generatorKw ?? 0) > 0,
       isMicro ? 7 : 8
     );
     parts.push(buiResult.svg);
     buiRX = buiResult.rx;
 
-    // Wire: MSP output → BUI GRID terminal (route to exact terminal coordinate)
-    // gridPortX is the left edge lug; gridPortY is cy-14 (upper-left terminal)
-    parts.push(ln(mspRX, buiResult.gridPortY, buiResult.gridPortX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
-    // Vertical stub from bus line down to GRID terminal if needed
-    if (Math.abs(buiResult.gridPortY - BUS_Y) > 2) {
-      parts.push(ln(mspRX, BUS_Y, mspRX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
+    // Wire: MSP busOut terminal → BUI GRID terminal (L-route)
+    // MSP busOut is at mspResult.busOutX/Y (anchor 'load_out' on MSP symbol).
+    // BUI GRID port is at buiResult.gridPortX/Y (left-edge lug, cy-14).
+    // Route: horizontal from busOut rightward to BUI left edge X, then
+    // vertical stub to match gridPortY if the two Ys differ.
+    const _mspToBuiX = buiResult.gridPortX;  // left edge of BUI
+    // Horizontal segment at MSP busOut Y level
+    parts.push(ln(mspResult.busOutX, mspResult.busOutY, _mspToBuiX, mspResult.busOutY, {stroke: BLK, sw: SW_MED}));
+    // Vertical jog from busOutY down/up to BUI gridPortY (always draw — tiny if same)
+    if (Math.abs(mspResult.busOutY - buiResult.gridPortY) > 1) {
+      parts.push(ln(_mspToBuiX, mspResult.busOutY, _mspToBuiX, buiResult.gridPortY, {stroke: BLK, sw: SW_MED}));
     }
+    // Final horizontal stub into BUI GRID lug (gridPortX is already the left edge lug)
+    // The lug itself is drawn inside renderBUI; we just need to terminate at it.
 
     // Backfeed breaker at MSP for battery (NEC 705.12(B))
     const bfA = input.batteryBackfeedA ?? 20;
@@ -2022,19 +2062,19 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
     );
     parts.push(batResult.svg);
 
-    // Wire: battery AC OUT terminal → BUI BATTERY port (vertical dashed blue line)
-    // Use explicit terminal coordinates: batResult.acOutX/Y → buiResult.batPortX/Y
+    // Wire: battery bottom-centre AC OUT → BUI BATTERY port
+    // Both share the same centre X (batCX == buiCX) so this is a clean
+    // vertical dashed line straight down.
     parts.push(ln(batResult.acOutX, batResult.acOutY, buiResult.batPortX, buiResult.batPortY, {stroke: '#1565C0', sw: SW_MED, dash: '6,3'}));
-    // Wire callout
-    // BUILD v24: Use computed conductorCallout from BATTERY_TO_BUI_RUN (NEC-sized)
-    // Fallback to legacy hardcoded gauge only if segment not computed
+    // Wire callout — placed to the right of the vertical wire at mid-height
     const batWireGauge = batToBuiRun?.wireGauge
       ? `${batToBuiRun.wireGauge} THWN-2`
       : (bfA <= 20 ? '#12 AWG THWN-2' : bfA <= 30 ? '#10 AWG THWN-2' : '#8 AWG THWN-2');
     const batCalloutLines = batToBuiRun?.conductorCallout
       ? batToBuiRun.conductorCallout.split('\n').filter((l:string)=>l.trim()).slice(0,2)
       : [batWireGauge, `${bfA}A CIRCUIT`];
-    parts.push(tspan(batResult.acOutX + 8, batResult.acOutY + (buiResult.batPortY - batResult.acOutY)/2,
+    const _batWireMidY = (batResult.acOutY + buiResult.batPortY) / 2;
+    parts.push(tspan(batResult.acOutX + 6, _batWireMidY,
       batCalloutLines,
       {sz: F.tiny, anc: 'start', fill: '#1565C0'}));
 
@@ -2185,12 +2225,15 @@ export function renderSLDProfessional(input: SLDProfessionalInput): string {
       `IN ${resolvedAcConduit} ${resolvedAcCondType}`,
     ];
     const {lines, cnt} = runLines(run, fb);
-    // Use MSP busOut terminal Y for precise routing; buiRX is the rightmost equipment edge
-    const segY = mspResult.busOutY;
-    const _s6Y = resolveSegY(buiRX, utilCX-mR-10, segY);
+    // Source: BUI LOAD port when battery present, else MSP busOut terminal.
+    // When BUI is present, the bus wire exits from BUI LOAD port (right-side lug).
+    // When no BUI, it exits from MSP busOut terminal.
+    const _seg6SrcX = buiResult ? buiResult.loadPortX : mspResult.busOutX;
+    const _seg6SrcY = buiResult ? buiResult.loadPortY : mspResult.busOutY;
+    const _s6Y = resolveSegY(_seg6SrcX, utilCX-mR-10, _seg6SrcY);
     console.log('[WIRE RUN CREATED] SEGMENT_6_MSP_TO_METER: AC service run');
     parts.push(renderWireRun(
-      buildWireRun('SEGMENT_6_MSP_TO_METER', buiRX, _s6Y, utilCX-mR-10, _s6Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
+      buildWireRun('SEGMENT_6_MSP_TO_METER', _seg6SrcX, _s6Y, utilCX-mR-10, _s6Y, run, lines, false, 'RACEWAY'),  // Phase 1: RACEWAY
       lines));
   }
 

@@ -798,7 +798,11 @@ export default function ProjectDetailPage() {
             </BillErrorBoundary>
           )}
           {activeTab === 'system' && (
-            <SystemSizeTab project={project} onRunAutoSize={handleRunAutoSize} />
+            <SystemSizeTab
+              project={project}
+              onRunAutoSize={handleRunAutoSize}
+              onSizeOverride={newKw => setProject(prev => prev ? { ...prev, systemSizeKw: newKw } : prev)}
+            />
           )}
           {activeTab === 'design' && (
             <DesignTab

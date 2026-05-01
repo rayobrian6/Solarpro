@@ -80,6 +80,16 @@ const TOOLS = [
     border: 'border-red-500/20',
     dangerous: true,
   },
+  {
+    id: 'seed_utility_policies',
+    label: 'Seed Utility Database',
+    description: 'Upsert ~120 major US utilities with real interconnection limits, buyback rates, and rate structures (NEM/TOU/Flat). Safe to re-run.',
+    icon: Zap,
+    color: 'text-yellow-400',
+    bg: 'bg-yellow-500/10',
+    border: 'border-yellow-500/20',
+    dangerous: false,
+  },
 ];
 
 export default function SystemToolsPage() {

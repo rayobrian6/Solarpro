@@ -59,18 +59,35 @@ const ACTION_LABELS: Record<string, string> = {
 };
 
 export default function ActivityLogPage() {
-  const [logs, setLogs]         = useState<any[]>([]);
-  const [total, setTotal]       = useState(0);
-  const [page, setPage]         = useState(1);
-  const [search, setSearch]     = useState('');
-  const [loading, setLoading]   = useState(true);
+  const [logs, setLogs]               = useState<any[]>([]);
+  const [total, setTotal]             = useState(0);
+  const [page, setPage]               = useState(1);
+  const [search, setSearch]           = useState('');
+  const [targetEmail, setTargetEmail] = useState('');
+  const [dateFrom, setDateFrom]       = useState('');
+  const [dateTo, setDateTo]           = useState('');
+  const [loading, setLoading]         = useState(true);
   const [migrationRequired, setMigrationRequired] = useState(false);
   const LIMIT = 50;
+
+  const hasFilters = !!(search || targetEmail || dateFrom || dateTo);
+
+  const clearFilters = () => {
+    setSearch(''); setTargetEmail(''); setDateFrom(''); setDateTo(''); setPage(1);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/activity-log?page=${page}&limit=${LIMIT}&action=${encodeURIComponent(search)}`);
+      const params = new URLSearchParams({
+        page:        String(page),
+        limit:       String(LIMIT),
+        action:      search,
+        targetEmail: targetEmail,
+        dateFrom:    dateFrom,
+        dateTo:      dateTo,
+      });
+      const res = await fetch(`/api/admin/activity-log?${params.toString()}`);
       const d = await res.json();
       if (d.success) {
         setLogs(d.logs || []);
@@ -78,7 +95,7 @@ export default function ActivityLogPage() {
         setMigrationRequired(!!d.migrationRequired);
       }
     } finally { setLoading(false); }
-  }, [page, search]);
+  }, [page, search, targetEmail, dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -124,14 +141,57 @@ export default function ActivityLogPage() {
       )}
 
       {/* Search / Filter */}
-      <div className="relative">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-        <input
-          value={search}
-          onChange={e => { setSearch(e.target.value); setPage(1); }}
-          placeholder="Filter by action (e.g. grant_free_pass, impersonate_user)..."
-          className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
-        />
+      <div className="rounded-xl border border-white/10 bg-white/2 p-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* Action search */}
+          <div className="relative">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Action type..."
+              className="w-full bg-white/5 border border-white/10 rounded-lg pl-8 pr-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
+            />
+          </div>
+          {/* Target user email */}
+          <div className="relative">
+            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              value={targetEmail}
+              onChange={e => { setTargetEmail(e.target.value); setPage(1); }}
+              placeholder="Target user email..."
+              className="w-full bg-white/5 border border-white/10 rounded-lg pl-8 pr-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
+            />
+          </div>
+          {/* Date from */}
+          <div>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => { setDateFrom(e.target.value); setPage(1); }}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50 [color-scheme:dark]"
+            />
+          </div>
+          {/* Date to */}
+          <div>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => { setDateTo(e.target.value); setPage(1); }}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50 [color-scheme:dark]"
+            />
+          </div>
+        </div>
+        {hasFilters && (
+          <div className="flex items-center gap-2 pt-1">
+            <span className="text-xs text-slate-500">Active filters:</span>
+            {search && <span className="text-xs bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-full">action: {search}</span>}
+            {targetEmail && <span className="text-xs bg-blue-500/15 text-blue-300 px-2 py-0.5 rounded-full">user: {targetEmail}</span>}
+            {dateFrom && <span className="text-xs bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-full">from: {dateFrom}</span>}
+            {dateTo && <span className="text-xs bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-full">to: {dateTo}</span>}
+            <button onClick={clearFilters} className="text-xs text-slate-500 hover:text-white ml-auto transition-colors">✕ Clear all</button>
+          </div>
+        )}
       </div>
 
       {/* Log Table */}

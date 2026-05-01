@@ -7,7 +7,8 @@ import {
   Star, Phone, Mail, MapPin, Calendar, Award,
   ChevronRight, BarChart2, Home, Sprout, Fence,
   Percent, Tag, Download, Printer, CheckCircle,
-  XCircle, Clock, AlertTriangle, ExternalLink, Info
+  XCircle, Clock, AlertTriangle, ExternalLink, Info,
+  Link2, Copy, PartyPopper, Sparkles
 } from 'lucide-react';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
@@ -67,6 +68,8 @@ function ProposalViewInner() {
   const [pricingCfg, setPricingCfg] = useState<any>(null);
   const [accepted, setAccepted] = useState(false);
   const [accepting, setAccepting] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -179,6 +182,52 @@ function ProposalViewInner() {
     }
   };
 
+  const handleDownloadPdf = async () => {
+    if (!proposal || downloadingPdf) return;
+    setDownloadingPdf(true);
+    try {
+      const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
+      const res = await fetch(`/api/proposals/${proposal.id}/pdf${tokenQuery}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert((err as any)?.error || 'PDF generation failed. Please try again.');
+        return;
+      }
+      const contentType = res.headers.get('content-type') || '';
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cd = res.headers.get('content-disposition') || '';
+      const match = cd.match(/filename="([^"]+)"/);
+      a.download = match?.[1] ?? `SolarPro-Proposal.${contentType.includes('pdf') ? 'pdf' : 'html'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Download failed. Please try again.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    const url = window.location.href;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    } else {
+      const el = document.createElement('textarea');
+      el.value = url;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2500);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center">
@@ -212,12 +261,17 @@ function ProposalViewInner() {
     accepted={accepted}
     accepting={accepting}
     onAccept={handleAccept}
+    downloadingPdf={downloadingPdf}
+    onDownloadPdf={handleDownloadPdf}
+    copiedLink={copiedLink}
+    onCopyLink={handleCopyLink}
   />;
 }
 
 // ── Public Proposal View ───────────────────────────────────────────────────
 function PublicProposalView({
-  proposal, branding, pricingCfg, accepted, accepting, onAccept
+  proposal, branding, pricingCfg, accepted, accepting, onAccept,
+  downloadingPdf, onDownloadPdf, copiedLink, onCopyLink
 }: {
   proposal: Proposal;
   branding: any;
@@ -225,6 +279,10 @@ function PublicProposalView({
   accepted: boolean;
   accepting: boolean;
   onAccept: () => void;
+  downloadingPdf?: boolean;
+  onDownloadPdf?: () => void;
+  copiedLink?: boolean;
+  onCopyLink?: () => void;
 }) {
   const proj = proposal.project;
   const client = proj?.client;
@@ -493,9 +551,34 @@ function PublicProposalView({
             <span className="text-slate-400 text-sm hidden sm:block truncate max-w-xs">{proposal.title}</span>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Share / copy link */}
+            <button
+              onClick={onCopyLink}
+              title="Copy proposal link"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs transition-colors"
+            >
+              {copiedLink ? <CheckCircle size={12} className="text-emerald-400" /> : <Link2 size={12} />}
+              <span className="hidden sm:inline">{copiedLink ? 'Copied!' : 'Share'}</span>
+            </button>
+            {/* Download PDF */}
+            <button
+              onClick={onDownloadPdf}
+              disabled={downloadingPdf}
+              title="Download PDF"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {downloadingPdf ? (
+                <span className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Download size={12} />
+              )}
+              <span className="hidden sm:inline">{downloadingPdf ? 'Generating…' : 'PDF'}</span>
+            </button>
+            {/* Print */}
             <button
               onClick={() => window.print()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs transition-colors"
+              title="Print"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:border-slate-600 text-xs transition-colors hidden sm:flex"
             >
               <Printer size={12} /> Print
             </button>
@@ -503,7 +586,7 @@ function PublicProposalView({
               <button
                 onClick={onAccept}
                 disabled={accepting}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-slate-900 font-semibold text-xs transition-all"
+                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-slate-900 font-semibold text-xs transition-all hover:opacity-90 active:scale-95"
                 style={{ background: primaryColor }}
               >
                 {accepting ? (
@@ -525,13 +608,20 @@ function PublicProposalView({
 
       {/* ── Accepted Banner ── */}
       {accepted && (
-        <div className="bg-emerald-500/10 border-b border-emerald-500/20 py-4 no-print">
-          <div className="max-w-5xl mx-auto px-4 flex items-center gap-3">
-            <CheckCircle size={20} className="text-emerald-400 flex-shrink-0" />
-            <div>
-              <p className="text-emerald-300 font-semibold text-sm">Proposal Accepted!</p>
-              <p className="text-emerald-400/70 text-xs mt-0.5">Your installer has been notified and will be in touch shortly to schedule next steps.</p>
+        <div className="no-print" style={{ background: 'linear-gradient(90deg, #064e3b 0%, #065f46 50%, #064e3b 100%)', borderBottom: '1px solid rgba(16,185,129,0.3)' }}>
+          <div className="max-w-5xl mx-auto px-4 py-4 flex items-center gap-4">
+            {/* Animated pulse ring */}
+            <div className="relative flex-shrink-0">
+              <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                <PartyPopper size={20} className="text-emerald-300" />
+              </div>
+              <div className="absolute inset-0 rounded-full border border-emerald-400/40 animate-ping" />
             </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-emerald-200 font-black text-sm tracking-wide">✨ Proposal Accepted!</p>
+              <p className="text-emerald-400/80 text-xs mt-0.5">Your installer has been notified and will be in touch within 24 hours to schedule next steps.</p>
+            </div>
+            <Sparkles size={18} className="text-emerald-400/50 flex-shrink-0 hidden sm:block" />
           </div>
         </div>
       )}
@@ -565,9 +655,9 @@ function PublicProposalView({
                 </p>
               </div>
               {systemSizeKw > 0 && (
-                <div className="text-right">
-                  <div className="text-3xl font-black" style={{ color: primaryColor }}>{systemSizeKw.toFixed(1)}</div>
-                  <div className="text-slate-400 text-sm font-medium">kW System</div>
+                <div className="text-right flex-shrink-0">
+                  <div className="text-5xl font-black leading-none" style={{ color: primaryColor }}>{systemSizeKw.toFixed(1)}</div>
+                  <div className="text-slate-300 text-sm font-bold tracking-wide mt-1">kW System</div>
                   {totalPanels > 0 && <div className="text-slate-500 text-xs mt-1">{totalPanels} panels</div>}
                 </div>
               )}
@@ -1497,17 +1587,20 @@ function PublicProposalView({
         </div>
 
         {/* CTA */}
-        {!accepted && (
-          <div className="proposal-sec rounded-2xl p-5 text-center border" data-block-id="cta" data-keep-together="true" style={{ background: `${primaryColor}08`, borderColor: `${primaryColor}25` }}>
-            <h2 className="text-xl font-black text-white mb-1">Ready to Go Solar?</h2>
-            <p className="text-slate-400 text-sm mb-4 max-w-md mx-auto">
+        {!accepted ? (
+          <div className="proposal-sec rounded-2xl p-6 text-center border" data-block-id="cta" data-keep-together="true" style={{ background: `${primaryColor}08`, borderColor: `${primaryColor}25` }}>
+            <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: `${primaryColor}20`, border: `1px solid ${primaryColor}40` }}>
+              <Sun size={22} style={{ color: primaryColor }} />
+            </div>
+            <h2 className="text-2xl font-black text-white mb-2">Ready to Go Solar?</h2>
+            <p className="text-slate-400 text-sm mb-5 max-w-md mx-auto">
               Accept this proposal to get started. Your installer will contact you within 24 hours to schedule next steps.
             </p>
             <button
               onClick={onAccept}
               disabled={accepting}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-slate-900 font-black text-base transition-all hover:opacity-90 active:scale-95"
-              style={{ background: primaryColor }}
+              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-slate-900 font-black text-base transition-all hover:opacity-90 active:scale-95 shadow-lg"
+              style={{ background: primaryColor, boxShadow: `0 8px 24px ${primaryColor}40` }}
             >
               {accepting ? (
                 <span className="w-5 h-5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
@@ -1516,7 +1609,58 @@ function PublicProposalView({
               )}
               Accept This Proposal
             </button>
-            <p className="text-slate-500 text-xs mt-4">No commitment required &mdash; accepting just notifies your installer.</p>
+            <div className="flex items-center justify-center gap-4 mt-4">
+              <p className="text-slate-500 text-xs">No commitment required &mdash; accepting just notifies your installer.</p>
+            </div>
+            {/* Secondary: Download PDF */}
+            <div className="border-t border-slate-700/40 mt-5 pt-4">
+              <button
+                onClick={onDownloadPdf}
+                disabled={downloadingPdf}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 text-sm transition-colors disabled:opacity-50"
+              >
+                {downloadingPdf ? (
+                  <span className="w-4 h-4 border border-slate-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Download size={14} />
+                )}
+                {downloadingPdf ? 'Generating PDF…' : 'Download as PDF'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="proposal-sec rounded-2xl p-6 text-center border border-emerald-500/30" data-block-id="cta" style={{ background: 'linear-gradient(135deg, #064e3b10 0%, #065f4620 100%)' }}>
+            <div className="relative w-16 h-16 mx-auto mb-4">
+              <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
+                <PartyPopper size={28} className="text-emerald-300" />
+              </div>
+              <div className="absolute inset-0 rounded-full border border-emerald-400/30 animate-ping" />
+            </div>
+            <h2 className="text-2xl font-black text-emerald-300 mb-2">✨ You’re Going Solar!</h2>
+            <p className="text-slate-400 text-sm max-w-md mx-auto">
+              Your proposal has been accepted. Your installer will be in touch within 24 hours to schedule your site visit and next steps.
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
+              <button
+                onClick={onDownloadPdf}
+                disabled={downloadingPdf}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10 text-sm font-semibold transition-colors disabled:opacity-50"
+              >
+                {downloadingPdf ? (
+                  <span className="w-4 h-4 border border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Download size={15} />
+                )}
+                {downloadingPdf ? 'Generating…' : 'Save a Copy (PDF)'}
+              </button>
+              <button
+                onClick={onCopyLink}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-slate-700 text-slate-400 hover:text-white hover:border-slate-600 text-sm font-semibold transition-colors"
+              >
+                {copiedLink ? <CheckCircle size={15} className="text-emerald-400" /> : <Copy size={15} />}
+                {copiedLink ? 'Link Copied!' : 'Share Proposal'}
+              </button>
+            </div>
           </div>
         )}
 

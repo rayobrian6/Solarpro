@@ -96,12 +96,12 @@ describe('validateEnvelope — v47.434a', () => {
       expect(result.event.event_id).toBe(partnerPayload.event_id);
       expect(result.event.survey_id).toBe(partnerPayload.survey_id);
       expect(result.event.completed_at).toBe(partnerPayload.completed_at);
-      // Extra fields are NOT on the typed event (they're silently dropped).
-      // v47.435 will extract them through a separate "partner metadata"
-      // code path, NOT by extending SurveyCompletedEvent.
+      // Extra partner fields: project_id, project_name, site_name are silently dropped
+      // (not on SurveyCompletedEvent). inspector_name IS a first-class field
+      // since commit 47b6784 (F-06b ownership resolution).
       expect('project_id' in result.event).toBe(false);
       expect('project_name' in result.event).toBe(false);
-      expect('inspector_name' in result.event).toBe(false);
+      expect('inspector_name' in result.event).toBe(true);   // promoted in F-06b
       expect('site_name' in result.event).toBe(false);
     }
   });

@@ -157,6 +157,18 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
     };
   }
 
+  // -- E-pre. Merge ownership claims into surveyMeta (F-06) ------------------
+  // Persists solarpro_user_id, owner_source, and solarpro_project_id into
+  // projects.survey_meta so that the admin "Fix Owner" endpoint can
+  // read back the original claim and reassign if needed.
+  transformOutput.surveyMeta = {
+    ...transformOutput.surveyMeta,
+    ...(context.event.solarpro_user_id    ? { solarpro_user_id:    context.event.solarpro_user_id    } : {}),
+    ...(context.event.solarpro_project_id ? { solarpro_project_id: context.event.solarpro_project_id } : {}),
+    ...(context.event.solarpro_email      ? { solarpro_email:      context.event.solarpro_email      } : {}),
+    owner_source: context.ownerSource,
+  };
+
   // Upsert project
   let projectId: string;
   let created: boolean;

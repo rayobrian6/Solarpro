@@ -74,22 +74,27 @@ const SETBACK_M = 0.5; // 0.5m setback from roof edges
 /**
  * Full automatic data pipeline for a property
  */
+// PERF v58.19: In-session cache — avoids re-fetching on navigation/tab-switch.
+const _twinCache = new Map<string, DigitalTwinData>();
+
 export async function buildDigitalTwin(
   lat: number,
   lng: number,
   address: string
 ): Promise<DigitalTwinData> {
+  const _ck = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+  if (_twinCache.has(_ck)) return _twinCache.get(_ck)!;
   // Run all API calls in parallel — including DSM for real roof geometry
-  const [elevationData, solarData, elevationGrid, dsmData] = await Promise.allSettled([
+  // PERF v58.19: Skip elevationGrid — 25 API calls not needed for panel placement.
+  const [elevationData, solarData, dsmData] = await Promise.allSettled([
     fetchElevation(lat, lng),
     fetchSolarData(lat, lng),
-    fetchElevationGrid(lat, lng, 5),
     fetchDsmRoofPlanes(lat, lng),
   ]);
 
   const elevation = elevationData.status === 'fulfilled' ? elevationData.value : 0;
   const solar     = solarData.status === 'fulfilled' ? solarData.value : null;
-  const grid      = elevationGrid.status === 'fulfilled' ? elevationGrid.value : [];
+  const grid: TerrainPoint[] = [];  // elevation grid skipped at boot for speed
   const dsm       = dsmData.status === 'fulfilled' ? dsmData.value : null;
 
   // Extract roof segments from Solar API (for sunshine hours, panel positions, etc.)
@@ -105,7 +110,7 @@ export async function buildDigitalTwin(
   const buildingFootprint = estimateBuildingFootprint(roofSegments, lat, lng);
   const parcel = estimateParcel(lat, lng, buildingFootprint);
 
-  return {
+  const _res: DigitalTwinData = {
     lat, lng, address, elevation,
     elevationGrid: grid,
     solarData: solar,
@@ -113,6 +118,8 @@ export async function buildDigitalTwin(
     roofSegments,
     buildingFootprint,
   };
+  _twinCache.set(_ck, _res);
+  return _res;
 }
 
 /**
@@ -281,7 +288,7 @@ export async function fetchElevationGrid(
  */
 export async function fetchSolarData(lat: number, lng: number): Promise<any> {
   const res = await fetch(
-    `/api/solar?endpoint=buildingInsights&lat=${lat}&lng=${lng}&quality=HIGH`
+    `/api/solar?endpoint=buildingInsights&lat=${lat}&lng=${lng}&quality=MEDIUM`  // PERF v58.19: MEDIUM saves ~2s vs HIGH
   );
   if (!res.ok) throw new Error(`Solar API: ${res.status}`);
   return res.json();

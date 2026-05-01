@@ -57,6 +57,8 @@ interface PartnerSurvey {
   solarpro_user_id:    string | null;
   solarpro_project_id: string | null;
   solarpro_email:      string | null;
+  // F-06b: Inspector identity fields (may be present even without JWT claims)
+  inspector_email:     string | null;
 }
 
 interface PartnerPhoto {
@@ -240,6 +242,20 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Connect to partner DB ─────────────────────────────────────────────────
+  // Guard: if PARTNER_SURVEY_DB_URL is not configured, return a clear error
+  // instead of letting pg.Pool default to localhost:5432 (ECONNREFUSED).
+  if (!PARTNER_DB_URL) {
+    return NextResponse.json({
+      success: false,
+      error:
+        'PARTNER_SURVEY_DB_URL is not configured. ' +
+        'Set this environment variable to the partner PostgreSQL connection string. ' +
+        'To fix existing misowned surveys without the partner DB, use the ' +
+        '"Fix All Defaults" button in the Live Survey Data panel instead.',
+      code: 'PARTNER_DB_NOT_CONFIGURED',
+    }, { status: 503 });
+  }
+
   const partnerPool = new pg.Pool({
     connectionString: PARTNER_DB_URL,
     ssl: { rejectUnauthorized: false },
@@ -254,7 +270,8 @@ export async function POST(req: NextRequest) {
         s.inspector_name, s.category_name, s.latitude, s.longitude,
         s.gps_accuracy, s.survey_date::text, s.status, s.notes,
         s.metadata, s.created_at::text,
-        s.solarpro_user_id, s.solarpro_project_id, s.solarpro_email
+        s.solarpro_user_id, s.solarpro_project_id, s.solarpro_email,
+        s.inspector_email
       FROM surveys s
       WHERE s.deleted_at IS NULL
         AND s.status = 'submitted'
@@ -295,8 +312,12 @@ export async function POST(req: NextRequest) {
       try {
         // F-06: Resolve owner per survey (claim → default fallback)
         const ownerResolution = await resolveIngestOwner(
-          survey.solarpro_user_id ?? null,
+          survey.solarpro_user_id    ?? null,
           `force-ingest:${survey.id}`,
+          survey.solarpro_email      ?? null,
+          survey.solarpro_project_id ?? null,
+          survey.inspector_email     ?? null,
+          survey.inspector_name      ?? null,
         );
         const surveyOwnerId = ownerResolution?.ownerId ?? ingestUserId;
         const surveyOwnerSource = ownerResolution?.ownerSource ?? 'default';
@@ -323,14 +344,26 @@ export async function POST(req: NextRequest) {
 
         if (existingRows.length > 0) {
           projectId = existingRows[0].id as string;
-          // Update address/name in case it changed
+          // Update address/name + refresh survey_meta ownership claims (F-06)
+          const updateMeta = JSON.stringify({
+            inspector:           survey.inspector_name,
+            category:            survey.category_name,
+            survey_date:         survey.survey_date,
+            site_name:           survey.site_name,
+            source:              'force_ingest',
+            metadata:            survey.metadata,
+            owner_source:        surveyOwnerSource,
+            solarpro_user_id:    survey.solarpro_user_id ?? null,
+            solarpro_project_id: survey.solarpro_project_id ?? null,
+          });
           await sql`
             UPDATE projects
-            SET name    = ${projectName},
-                address = ${address},
-                lat     = ${survey.latitude ?? null},
-                lng     = ${survey.longitude ?? null},
-                updated_at = now()
+            SET name        = ${projectName},
+                address     = ${address},
+                lat         = ${survey.latitude ?? null},
+                lng         = ${survey.longitude ?? null},
+                survey_meta = COALESCE(survey_meta, '{}'::jsonb) || ${updateMeta}::jsonb,
+                updated_at  = now()
             WHERE id = ${projectId}
           `;
           result.action = 'updated';
