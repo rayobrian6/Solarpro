@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import {
   Database, RefreshCw, Zap, Search, Trash2, Activity,
   CheckCircle, AlertCircle, Play, ChevronRight, Server,
-  Clock, Users, FolderOpen, FileText, Shield, Sparkles,
+  Clock, Users, FolderOpen, FileText, Shield,
 } from 'lucide-react';
 
 type ToastState = { msg: string; ok: boolean } | null;
@@ -80,6 +80,16 @@ const TOOLS = [
     border: 'border-red-500/20',
     dangerous: true,
   },
+  {
+    id: 'seed_utility_policies',
+    label: 'Seed Utility Database',
+    description: 'Upsert ~120 major US utilities with real interconnection limits, buyback rates, and rate structures (NEM/TOU/Flat). Safe to re-run.',
+    icon: Zap,
+    color: 'text-yellow-400',
+    bg: 'bg-yellow-500/10',
+    border: 'border-yellow-500/20',
+    dangerous: false,
+  },
 ];
 
 export default function SystemToolsPage() {
@@ -89,8 +99,6 @@ export default function SystemToolsPage() {
   const [migrations, setMigrations]   = useState<string[]>([]);
   const [selectedMig, setSelectedMig] = useState('');
   const [confirmTool, setConfirmTool] = useState<string | null>(null);
-  const [demoEmail, setDemoEmail]     = useState('');
-  const [confirmDemo, setConfirmDemo] = useState(false);
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok });
@@ -187,46 +195,6 @@ export default function SystemToolsPage() {
         })}
       </div>
 
-      {/* Demo Account Seeder */}
-      <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-5 space-y-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-violet-500/10 flex items-center justify-center">
-            <Sparkles size={18} className="text-violet-400" />
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <div className="font-semibold text-white text-sm">Demo Account Seeder</div>
-              <span className="text-[9px] bg-violet-500/20 text-violet-400 px-1.5 py-0.5 rounded-full font-semibold uppercase tracking-wider">Booth</span>
-            </div>
-            <div className="text-xs text-slate-400">
-              Drop 3 golden projects into any account — residential retrofit (10.4 kW), new construction (8.0 kW), commercial ground mount (49.6 kW)
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-3">
-          <input
-            type="email"
-            value={demoEmail}
-            onChange={e => setDemoEmail(e.target.value)}
-            placeholder="target user email..."
-            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-violet-500/50"
-          />
-          <button
-            onClick={() => demoEmail.trim() && setConfirmDemo(true)}
-            disabled={!demoEmail.trim() || !!running}
-            className="px-4 py-2 rounded-lg bg-violet-500/20 text-violet-400 hover:bg-violet-500/30 text-sm font-semibold transition-colors disabled:opacity-50 flex items-center gap-2"
-          >
-            {running === 'seed_demo_account' ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
-            Seed Demo
-          </button>
-        </div>
-
-        <p className="text-[11px] text-slate-500">
-          ⚠ Previous demo projects (tagged <code className="bg-white/5 px-1 rounded">[demo]</code>) for this account will be soft-deleted and replaced with fresh data.
-        </p>
-      </div>
-
       {/* Run Migration Section */}
       <div className="rounded-xl border border-white/10 bg-white/2 p-5 space-y-4">
         <div className="flex items-center gap-3">
@@ -315,39 +283,6 @@ export default function SystemToolsPage() {
                 className="flex-1 py-2 rounded-lg bg-red-500 text-white text-sm font-semibold hover:bg-red-400 transition-colors"
               >
                 Execute
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Demo Seed Confirm Modal */}
-      {confirmDemo && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0d1424] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-violet-500/20 flex items-center justify-center">
-                <Sparkles size={18} className="text-violet-400" />
-              </div>
-              <h2 className="text-base font-bold text-white">Seed Demo Account?</h2>
-            </div>
-            <p className="text-sm text-slate-300">
-              This will create <strong className="text-white">3 golden demo projects</strong> for:
-            </p>
-            <div className="bg-white/5 rounded-lg px-3 py-2 text-sm text-violet-300 font-mono break-all">{demoEmail}</div>
-            <ul className="text-xs text-slate-400 space-y-1 pl-1">
-              <li>🏠 Mitchell Residence – Roof Retrofit (10.4 kW, Phoenix AZ)</li>
-              <li>🏗 Greenfield Lot 14 – New Construction (8.0 kW, Austin TX)</li>
-              <li>🏭 RML Warehouse – Ground Mount (49.6 kW, Denver CO)</li>
-            </ul>
-            <p className="text-xs text-amber-400">Any existing <code className="bg-white/5 px-1 rounded">[demo]</code>-tagged projects for this account will be removed first.</p>
-            <div className="flex gap-3">
-              <button onClick={() => setConfirmDemo(false)} className="flex-1 py-2 rounded-lg border border-white/10 text-sm text-slate-400 hover:text-white transition-colors">Cancel</button>
-              <button
-                onClick={() => { setConfirmDemo(false); runTool('seed_demo_account', { userEmail: demoEmail.trim() }); }}
-                className="flex-1 py-2 rounded-lg bg-violet-500 text-white text-sm font-semibold hover:bg-violet-400 transition-colors"
-              >
-                Seed Now
               </button>
             </div>
           </div>
