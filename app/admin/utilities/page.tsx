@@ -4,9 +4,9 @@ import { Activity, Plus, Trash2, Edit2, RefreshCw, CheckCircle, AlertCircle,
          Save, X, ChevronDown, ChevronRight, Search, Filter } from 'lucide-react';
 
 // ─── utility type classifier ────────────────────────────────────────────────
-function classifyUtility(name: string, notes: string = ''): 'IOU' | 'Co-op' | 'Municipal' | 'PUD' {
-  const n = name.toLowerCase();
-  const no = notes.toLowerCase();
+function classifyUtility(name: string, notes?: string | null): 'IOU' | 'Co-op' | 'Municipal' | 'PUD' {
+  const n = (name ?? '').toLowerCase();
+  const no = (notes ?? '').toLowerCase();
   if (n.includes('coop') || n.includes('co-op') || n.includes('emc') ||
       n.includes('electric cooperative') || n.includes('cooperative') ||
       n.includes(' coop') || no.includes('co-op') || no.includes('rural') && no.includes('coop'))
