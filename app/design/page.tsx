@@ -46,9 +46,11 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
     try {
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(address)}&mode=search`);
       const data = await res.json();
-      // API returns { success, data: { lat, lng, ... } }
-      if (data.success && data.data?.lat != null && data.data?.lng != null) {
-        onLaunch(makeDemoProject(address, data.data.lat, data.data.lng));
+      if (data.success && data.results?.[0]) {
+        const r = data.results[0];
+        onLaunch(makeDemoProject(address, r.lat, r.lng));
+      } else if (data.lat && data.lng) {
+        onLaunch(makeDemoProject(address, data.lat, data.lng));
       } else {
         // Launch with a default center — design studio will let user search
         onLaunch(makeDemoProject(address, 39.8283, -98.5795));
