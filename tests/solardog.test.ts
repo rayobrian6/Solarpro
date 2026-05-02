@@ -35,6 +35,7 @@ import { describe, it, expect } from 'vitest';
 import { resolveRoute, detectLearnIntent, detectUnlearnIntent, isNavigationIntent, isValidLearnPhrase, isValidLearnTarget } from '../lib/solardog/resolveRoute';
 import { normalizePhrase, SITE_MAP, buildAliasMap } from '../lib/solardog/siteMap';
 import { ACTION_REGISTRY, buildActionList, getAction, getActionsByCategory } from '../lib/solardog/actionRegistry';
+import { SOLARPRO_KNOWLEDGE_SEED } from '../lib/solardog/knowledgeSeed';
 
 // ── Replicate route-internal logic for unit testing ───────────────────────────
 // (detectMode and buildMemoryLine are not exported from the route, so replicate here)
@@ -2296,4 +2297,526 @@ describe('Equipment and button knowledge base structure', () => {
     expect(src).toContain('solarpro_knowledge_items');
     expect(src).toContain('Migration 024');
   });
+});
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SolarDog v11 — "Knows the Website" test suite
+// Groups 37–44
+// ════════════════════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 37. Intent classification — 6 types, correct behavior per type
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Intent classification — 6 types (v11)', () => {
+
+  it('navigation intent: "take me to engineering" → isNavigationIntent=true', () => {
+    expect(isNavigationIntent('take me to engineering')).toBe(true);
+  });
+
+  it('navigation intent: "go to projects" → isNavigationIntent=true', () => {
+    expect(isNavigationIntent('go to projects')).toBe(true);
+  });
+
+  it('question intent: "what is NEC 690.7" → isNavigationIntent=false', () => {
+    expect(isNavigationIntent('what is NEC 690.7')).toBe(false);
+  });
+
+  it('question intent: "how does the SLD get generated" → isNavigationIntent=false', () => {
+    expect(isNavigationIntent('how does the SLD get generated')).toBe(false);
+  });
+
+  it('observation intent: "I see two warnings on the page" → isNavigationIntent=false', () => {
+    expect(isNavigationIntent('I see two warnings on the page')).toBe(false);
+  });
+
+  it('system prompt documents all 6 intent types', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('navigation');
+    expect(src).toContain('question');
+    expect(src).toContain('action');
+    expect(src).toContain('observation');
+    expect(src).toContain('conversation');
+    expect(src).toContain('correction');
+  });
+
+  it('system prompt has RESPONSE PRIORITY: Understand→Explain→Suggest→Offer→Execute', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('ANSWER');
+    expect(src).toContain('EXPLAIN');
+    expect(src).toContain('SUGGEST');
+    expect(src).toContain('OFFER');
+    expect(src).toContain('EXECUTE');
+  });
+
+  it('system prompt says NEVER navigate for questions', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NEVER navigate when user asks a question');
+  });
+
+  it('system prompt says NEVER navigate for observations', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NEVER navigate');
+  });
+
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 38. Guided mode triggers
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Guided mode — trigger detection and prompt (v11)', () => {
+
+  it('system prompt has GUIDED MODE section', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('GUIDED MODE');
+  });
+
+  it('system prompt describes "walk me through" as a guided mode trigger', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('walk me through');
+  });
+
+  it('system prompt describes "help me get this to pass" as a guided mode trigger', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('help me get this to pass');
+  });
+
+  it('system prompt says guided mode should present steps numbered', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('Present the steps clearly, numbered');
+  });
+
+  it('system prompt says guided mode should state which step and how many total', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('currentStep');
+    expect(src).toContain('totalSteps');
+  });
+
+  it('system prompt says guided mode returns suggestedSteps array', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('suggestedSteps');
+  });
+
+  it('system prompt says guided mode returns workflowKey', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('workflowKey');
+  });
+
+  it('AssistantResponse type includes workflowKey field', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toMatch(/workflowKey\??\s*:/);
+  });
+
+  it('AssistantResponse type includes suggestedSteps field', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toMatch(/suggestedSteps\??\s*:/);
+  });
+
+  it('system prompt has pass_engineering workflow key reference', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('pass_engineering');
+  });
+
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 39. Knowledge base — page explanations
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Knowledge base — page seed data (v11)', () => {
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains a page entry for "engineering"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'engineering');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('page');
+    expect(item.route).toBe('/engineering');
+  });
+
+  it('engineering page seed has description mentioning NEC validation', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'engineering');
+    expect(item.description.toLowerCase()).toMatch(/nec|string sizing|engineering/);
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains a page entry for "dashboard"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'dashboard');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('page');
+    expect(item.route).toBe('/dashboard');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains a page entry for "design"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'design');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('page');
+    expect(item.route).toBe('/design');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains a page entry for "proposals"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'proposals');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('page');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains at least 10 page entries', () => {
+    const pages = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'page');
+    expect(pages.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('all page seeds have a route field', () => {
+    const pages = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'page');
+    for (const page of pages) {
+      expect(page.route).toBeDefined();
+      expect(typeof page.route).toBe('string');
+    }
+  });
+
+  it('all page seeds have non-empty aliases array', () => {
+    const pages = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'page');
+    for (const page of pages) {
+      expect(Array.isArray(page.aliases)).toBe(true);
+      expect(page.aliases.length).toBeGreaterThan(0);
+    }
+  });
+
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 40. Knowledge base — button knowledge
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Knowledge base — button seed data (v11)', () => {
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "generate_sld" button', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'generate_sld');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('button');
+  });
+
+  it('generate_sld button description mentions single-line diagram or permit', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'generate_sld');
+    expect(item.description.toLowerCase()).toMatch(/single.line|sld|permit/);
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "run_nec_validation" button', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'run_nec_validation');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('button');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "auto_fix_strings" button', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'auto_fix_strings');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('button');
+  });
+
+  it('auto_fix_strings button description mentions Voc or MPPT or string', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'auto_fix_strings');
+    expect(item.description.toLowerCase()).toMatch(/voc|mppt|string/);
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "generate_bom" button', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'generate_bom');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('button');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains at least 5 button entries', () => {
+    const buttons = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'button');
+    expect(buttons.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('all button seeds have relatedActions array', () => {
+    const buttons = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'button');
+    for (const btn of buttons) {
+      expect(Array.isArray(btn.relatedActions)).toBe(true);
+    }
+  });
+
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 41. Knowledge base — workflow knowledge + steps
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Knowledge base — workflow seed data (v11)', () => {
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "pass_engineering" workflow', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'pass_engineering');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('workflow');
+  });
+
+  it('pass_engineering workflow has at least 5 steps', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'pass_engineering');
+    expect(Array.isArray(item.steps)).toBe(true);
+    expect(item.steps.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('pass_engineering workflow steps mention NEC validation', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'pass_engineering');
+    const allSteps = item.steps.join(' ').toLowerCase();
+    expect(allSteps).toMatch(/nec|validation/);
+  });
+
+  it('pass_engineering workflow steps mention string sizing', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'pass_engineering');
+    const allSteps = item.steps.join(' ').toLowerCase();
+    expect(allSteps).toMatch(/string/);
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "create_new_project" workflow', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'create_new_project');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('workflow');
+    expect(item.steps.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "submit_permit" workflow', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'submit_permit');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('workflow');
+  });
+
+  it('submit_permit workflow steps mention SLD', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'submit_permit');
+    const allSteps = item.steps.join(' ').toLowerCase();
+    expect(allSteps).toMatch(/sld|single.line|permit/);
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains at least 3 workflow entries', () => {
+    const workflows = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'workflow');
+    expect(workflows.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('all workflow seeds have steps array (not empty)', () => {
+    const workflows = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'workflow');
+    for (const wf of workflows) {
+      expect(Array.isArray(wf.steps)).toBe(true);
+      expect(wf.steps.length).toBeGreaterThan(0);
+    }
+  });
+
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 42. Knowledge base — equipment knowledge
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Knowledge base — equipment seed data (v11)', () => {
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "solfence" equipment', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'solfence');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('equipment');
+  });
+
+  it('solfence equipment description mentions ground-mounted or boundary', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'solfence');
+    expect(item.description.toLowerCase()).toMatch(/ground|boundary|fence/);
+  });
+
+  it('solfence equipment has aliases containing "solar fence" or similar', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'solfence');
+    const aliasesJoined = item.aliases.join(' ').toLowerCase();
+    expect(aliasesJoined).toMatch(/fence|solar fence/);
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "microinverter" equipment', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'microinverter');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('equipment');
+  });
+
+  it('microinverter equipment metadata has category=inverter', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'microinverter');
+    expect(item.metadata.category).toBe('inverter');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains "tesla_powerwall" equipment', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'tesla_powerwall');
+    expect(item).toBeDefined();
+    expect(item.type).toBe('equipment');
+  });
+
+  it('tesla_powerwall equipment description mentions 13.5 kWh', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find((k: { key: string }) => k.key === 'tesla_powerwall');
+    expect(item.description).toContain('13.5');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED contains at least 5 equipment entries', () => {
+    const equipment = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'equipment');
+    expect(equipment.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('all equipment seeds have metadata object', () => {
+    const equipment = SOLARPRO_KNOWLEDGE_SEED.filter((k: { type: string }) => k.type === 'equipment');
+    for (const eq of equipment) {
+      expect(typeof eq.metadata).toBe('object');
+    }
+  });
+
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 43. Response format — guided workflow fields (v11)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Response format — guided workflow fields (v11)', () => {
+
+  it('AssistantResponse type has workflowKey field', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toMatch(/workflowKey\??\s*:\s*string/);
+  });
+
+  it('AssistantResponse type has currentStep field', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toMatch(/currentStep\??\s*:\s*number/);
+  });
+
+  it('AssistantResponse type has totalSteps field', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toMatch(/totalSteps\??\s*:\s*number/);
+  });
+
+  it('AssistantResponse type has suggestedSteps field', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toMatch(/suggestedSteps\??\s*:\s*string\[\]/);
+  });
+
+  it('route handler extracts workflowKey from LLM response', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('replyWorkflowKey');
+  });
+
+  it('route handler extracts currentStep from LLM response', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('replyCurrentStep');
+  });
+
+  it('route handler extracts suggestedSteps from LLM response', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('replySuggestedSteps');
+  });
+
+  it('route handler passes workflowKey into final AssistantResponse', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('workflowKey:     replyWorkflowKey');
+  });
+
+  it('route handler passes suggestedSteps into final AssistantResponse', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('suggestedSteps:  replySuggestedSteps');
+  });
+
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 44. Forbidden behaviors (v11)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe('Forbidden behaviors — v11 compliance', () => {
+
+  it('system prompt says NEVER navigate on questions', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('NEVER navigate when user asks a question');
+  });
+
+  it('system prompt says NEVER hallucinate DOM (screen honesty rules)', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('SCREEN HONESTY RULES');
+    expect(src).toContain('NEVER hallucinate');
+  });
+
+  it('system prompt says NEVER give generic answers', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    // Generic chatbot phrases are explicitly banned
+    expect(src).toContain('Never say');
+  });
+
+  it('system prompt says NEVER store random sentences as aliases', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('LEARN RULES');
+  });
+
+  it('solardogSeedKnowledge function exists in db-neon.ts', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('solardogSeedKnowledge');
+  });
+
+  it('SOLARPRO_KNOWLEDGE_SEED is exported from db-neon.ts', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // Either inline export or re-export from knowledgeSeed module
+    const hasExport = src.includes('export const SOLARPRO_KNOWLEDGE_SEED') ||
+      src.includes('export { SOLARPRO_KNOWLEDGE_SEED }') ||
+      src.includes('SOLARPRO_KNOWLEDGE_SEED } from');
+    expect(hasExport).toBe(true);
+  });
+
+  it('solardogKnowledgeSeeded is exported from db-neon.ts', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('export async function solardogKnowledgeSeeded');
+  });
+
+  it('migrate route calls solardogSeedKnowledge (Migration 025)', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain('solardogSeedKnowledge');
+    expect(src).toContain('Migration 025');
+  });
+
+  it('KnowledgeItem interface has steps field', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('steps:');
+  });
+
+  it('KnowledgeItem type union includes "equipment"', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain("'equipment'");
+  });
+
+  it('mapKnowledgeRow helper exists in db-neon.ts (restores steps from metadata)', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('mapKnowledgeRow');
+  });
+
+  it('system prompt GUIDED MODE section references "pass_engineering" workflow', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('pass_engineering');
+  });
+
 });

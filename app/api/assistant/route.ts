@@ -88,6 +88,11 @@ export interface AssistantResponse {
   // v10.2: Pending learn — awaiting user confirmation before saving
   pendingLearnPhrase?: string | null;
   pendingLearnRoute?:  string | null;
+  // v11: Guided workflow fields
+  workflowKey?:      string | null;
+  currentStep?:      number | null;
+  totalSteps?:       number | null;
+  suggestedSteps?:   string[] | null;
   // Metadata
   mode:             SolarDogMode;
   confidence:       'high' | 'medium' | 'low';
@@ -473,25 +478,59 @@ AVAILABLE ACTIONS:
 ${buildActionList()}
 
 ════════════════════════════════════════════════════════════
+GUIDED MODE — STEP-BY-STEP WORKFLOWS
+════════════════════════════════════════════════════════════
+When a user says "walk me through", "help me get this to pass", "guide me", "step by step",
+"how do I do this", or similar — activate GUIDED MODE:
+
+GUIDED MODE RULES:
+1. Load the relevant workflow from the knowledge base
+2. Present the steps clearly, numbered
+3. State which step you're on and how many total
+4. Offer to execute the current step (if it has an action)
+5. After user completes a step, move to the next automatically
+6. Use context to skip steps already done (e.g. NEC already passed → skip that step)
+
+GUIDED MODE RESPONSE — include these extra fields when in guided mode:
+  \"workflowKey\":    \"pass_engineering\" | \"create_new_project\" | \"submit_permit\" | etc.
+  \"currentStep\":    1  (which step we are on, 1-indexed)
+  \"totalSteps\":     7  (total steps in workflow)
+  \"suggestedSteps\": [\"Step 1: ...\", \"Step 2: ...\", ...]  (ALL steps for UI display)
+
+GUIDED MODE EXAMPLE:
+User: \"help me get this system to pass\"
+→ Load workflow 'pass_engineering' from knowledge base
+→ Check context: warnings? validation status?
+→ Response: \"Alright — let's get this to pass.\\n\\n**Step 1 of 7:** Check warnings\\n**Step 2:** Fix string sizing\\n**Step 3:** Fix wire sizing\\n**Step 4:** Run NEC\\n**Step 5:** Fix violations\\n**Step 6:** Confirm zero errors\\n**Step 7:** Generate permit docs\\n\\nWant me to run the NEC check now?\"
+
+════════════════════════════════════════════════════════════
 KNOWLEDGE BASE — WHAT I KNOW ABOUT SOLARPRO
 ════════════════════════════════════════════════════════════
-The SolarPro knowledge base contains structured facts: buttons, pages, workflows, equipment brands, features.
+The SolarPro knowledge base is seeded with structured facts about every page, button, workflow, and equipment type.
+
+CURRENT KNOWLEDGE BASE (loaded for this user):
+${knowledgeItems || '   (empty — run /api/migrate to seed global knowledge)'}
 
 KNOWLEDGE BASE RULES:
-- If user asks about a button, feature, or equipment brand — check knowledge items FIRST
-- If found: describe it accurately using the knowledge item data
-- If NOT found: "I don't have that in my knowledge base yet. You can teach me."
-- NEVER make up button functionality. Say "not in knowledge base" rather than guess.
-- If user says "I need you to learn every button and equipment brand" → respond:
-  "Yes — that needs a structured SolarPro knowledge base. I can index every page, button, workflow, and equipment brand so I can explain the site reliably. Want me to start with a specific page?"
+- ALWAYS check knowledge items above BEFORE answering about buttons, pages, workflows, or equipment (check knowledge items FIRST)
+- If found: describe it accurately using the knowledge item data (description, steps, aliases, metadata)
+- For WORKFLOW items: present the steps[] as a numbered guide
+- For EQUIPMENT items: compare types using metadata (pros, cons, use_case, coupling, chemistry)
+- For BUTTON items: explain what it does, where it is, and what happens after clicking
+- If NOT found in knowledge base: say "I don't have that in my knowledge base yet. You can teach me." — then use your solar expertise
+- NEVER make up button functionality that contradicts what's in the knowledge base
+
+EQUIPMENT COMPARISON RULES:
+- When asked \"SolFence vs roof mount\" → compare equipment items from knowledge base + expertise
+- When asked \"microinverter vs string inverter\" → use equipment knowledge items
+- Always give a clear recommendation based on the use case
 
 STORING KNOWLEDGE:
 - Knowledge items (buttons, workflows, equipment) → solarpro_knowledge_items table
-- Aliases → navigation shortcuts ONLY ("command center is dashboard")
+- Aliases → navigation shortcuts ONLY (\"command center is dashboard\")
 - Equipment brands, button descriptions, workflow explanations = knowledge items, NOT aliases
 - The difference: an alias routes you somewhere, knowledge explains what something does
-- If user tries to teach you a button description as an alias, redirect: "I'll store that as a knowledge item, not a navigation alias."
-
+- If user tries to teach you a button description as an alias, redirect: \"I'll store that as a knowledge item, not a navigation alias.\"
 ════════════════════════════════════════════════════════════
 WHAT YOU CAN ACCESS
 ════════════════════════════════════════════════════════════
@@ -528,18 +567,23 @@ ${activeProjectDetail || `No active project loaded. User is on the "${page}" pag
 RESPONSE FORMAT — return ONLY valid JSON
 ════════════════════════════════════════════════════════════
 {
-  "type":          "chat" | "navigate" | "action" | "learn" | "observation" | "conversation" | "correction",
-  "intent_type":   "navigation" | "question" | "action" | "observation" | "conversation" | "correction",
-  "message":       "your response text (markdown **bold** ok)",
-  "route":         "/path/to/navigate or null",
-  "routeLabel":    "Human label for the route, e.g. 'Engineering' or null",
-  "action":        "action_key or null",
-  "learnedPhrase": "the phrase user is mapping, or null",
-  "learnedRoute":  "the resolved route, or null",
-  "highlight":     "CSS selector to flash, or null",
-  "severity":      "info | warning | error | success",
-  "confidence":    "high | medium | low"
+  \"type\":           \"chat\" | \"navigate\" | \"action\" | \"learn\" | \"observation\" | \"conversation\" | \"correction\",
+  \"intent_type\":    \"navigation\" | \"question\" | \"action\" | \"observation\" | \"conversation\" | \"correction\",
+  \"message\":        \"your response text (markdown **bold** ok)\",
+  \"route\":          \"/path/to/navigate or null\",
+  \"routeLabel\":     \"Human label for the route, e.g. 'Engineering' or null\",
+  \"action\":         \"action_key or null\",
+  \"learnedPhrase\":  \"the phrase user is mapping, or null\",
+  \"learnedRoute\":   \"the resolved route, or null\",
+  \"highlight\":      \"CSS selector to flash, or null\",
+  \"severity\":       \"info | warning | error | success\",
+  \"confidence\":     \"high | medium | low\",
+  \"workflowKey\":    \"workflow key if guided mode, or null\",
+  \"currentStep\":    1,
+  \"totalSteps\":     7,
+  \"suggestedSteps\": [\"Step 1: ...\", \"Step 2: ...\"]
 }
+
 
 CRITICAL RULES — read before every response:
 1. intent_type MUST always be set — it determines type
@@ -1070,6 +1114,13 @@ export async function POST(req: NextRequest) {
     const replyLearnedPhrase = typeof parsed.learnedPhrase === 'string' ? parsed.learnedPhrase : null;
     const replyLearnedRoute  = typeof parsed.learnedRoute  === 'string' ? parsed.learnedRoute  : null;
     const replyIntentType    = typeof parsed.intent_type   === 'string' ? parsed.intent_type as IntentType : null;
+    // v11: Guided workflow fields
+    const replyWorkflowKey   = typeof parsed.workflowKey   === 'string' ? parsed.workflowKey : null;
+    const replyCurrentStep   = typeof parsed.currentStep   === 'number' ? parsed.currentStep  : null;
+    const replyTotalSteps    = typeof parsed.totalSteps    === 'number' ? parsed.totalSteps   : null;
+    const replySuggestedSteps = Array.isArray(parsed.suggestedSteps)
+      ? (parsed.suggestedSteps as unknown[]).filter((s): s is string => typeof s === 'string')
+      : null;
 
     // ── Handle learn response from LLM ────────────────────────────────────
     // v10.2: LLM can still detect corrections — but we validate before saving
@@ -1128,6 +1179,11 @@ export async function POST(req: NextRequest) {
       action:          replyAction,
       learnedPhrase:   replyLearnedPhrase,
       learnedRoute:    replyLearnedRoute,
+      // v11: Guided workflow fields
+      workflowKey:     replyWorkflowKey,
+      currentStep:     replyCurrentStep,
+      totalSteps:      replyTotalSteps,
+      suggestedSteps:  replySuggestedSteps,
       mode,
       confidence,
       voiceEnabled,

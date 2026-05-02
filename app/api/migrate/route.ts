@@ -3,7 +3,7 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getDbReady , handleRouteDbError} from '@/lib/db-neon';
+import { getDbReady, handleRouteDbError, solardogSeedKnowledge } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export async function GET(_req: NextRequest) {
@@ -1553,6 +1553,57 @@ export async function POST(req: NextRequest) {
       results.push('\u2705 Migration 024 complete: solarpro_knowledge_items table ready');
     } catch (e: unknown) {
       results.push(`\u26a0\ufe0f Migration 024 (solarpro_knowledge_items): ${(e as Error).message}`);
+    }
+
+    // -- Migration 025: v11 — seed global SolarPro knowledge base ----------
+    try {
+      // Ensure equipment type is allowed in the CHECK constraint
+      // (ALTER the CHECK constraint to add 'equipment' if not present)
+      await sql`
+        DO $$
+        BEGIN
+          -- Drop old constraint and re-add with 'equipment' included
+          IF EXISTS (
+            SELECT 1 FROM information_schema.table_constraints
+            WHERE table_name = 'solarpro_knowledge_items'
+              AND constraint_type = 'CHECK'
+          ) THEN
+            -- Find and drop old type check constraint
+            EXECUTE (
+              SELECT 'ALTER TABLE solarpro_knowledge_items DROP CONSTRAINT ' || quote_ident(constraint_name)
+              FROM information_schema.table_constraints
+              WHERE table_name = 'solarpro_knowledge_items'
+                AND constraint_type = 'CHECK'
+                AND constraint_name LIKE '%type%'
+              LIMIT 1
+            );
+          END IF;
+        EXCEPTION WHEN OTHERS THEN
+          NULL; -- ignore if constraint doesn't exist or drop fails
+        END $$
+      `.catch(() => {}); // non-fatal
+
+      // Re-add constraint with 'equipment' included
+      await sql`
+        DO $$
+        BEGIN
+          ALTER TABLE solarpro_knowledge_items
+            ADD CONSTRAINT solarpro_ki_type_check
+            CHECK (type IN ('page','button','workflow','equipment','equipment_brand','feature','route','warning','action','preference'));
+        EXCEPTION WHEN duplicate_object THEN
+          NULL;
+        END $$
+      `.catch(() => {}); // non-fatal — constraint may already be correct
+
+      // Seed global knowledge items (idempotent)
+      const { seeded, errors: seedErrors } = await solardogSeedKnowledge();
+      if (seedErrors.length > 0) {
+        results.push(`\u26a0\ufe0f Migration 025 seed partial: ${seeded} items seeded, ${seedErrors.length} errors`);
+      } else {
+        results.push(`\u2705 Migration 025 complete: ${seeded} global knowledge items seeded`);
+      }
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 025 (knowledge seed): ${(e as Error).message}`);
     }
 
         return NextResponse.json({ success: true, results });

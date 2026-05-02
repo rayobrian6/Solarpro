@@ -194,7 +194,7 @@ function makeResult(
 export function isNavigationIntent(message: string): boolean {
   const lower = message.toLowerCase().trim();
   return /^(take me to|go to|go back to|navigate to|open|show me|bring me to|head to|switch to|i want to go to|let me see|take me|get me to|let's go to|lets go to|bring up|pull up|jump to|go)\b/.test(lower)
-    || /\b(page|navigate|navigation|go to|take me|open the)\b/.test(lower);
+    || /\b(navigate|navigation|go to|take me|open the)\b/.test(lower);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

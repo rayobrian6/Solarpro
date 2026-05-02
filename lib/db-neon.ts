@@ -2003,12 +2003,15 @@ export async function solardogDeleteAlias(userId: string, phrase: string): Promi
 export interface KnowledgeItem {
   id?:             string;
   userId?:         string | null;
-  type:            'page' | 'button' | 'workflow' | 'equipment_brand' | 'feature' | 'route' | 'warning' | 'action' | 'preference';
+  /** v11: added 'equipment' as a first-class type */
+  type:            'page' | 'button' | 'workflow' | 'equipment' | 'equipment_brand' | 'feature' | 'route' | 'warning' | 'action' | 'preference';
   key:             string;
   label:           string;
   description:     string;
   route?:          string | null;
   aliases:         string[];
+  /** v11: ordered steps for workflow items */
+  steps:           string[];
   relatedActions:  string[];
   metadata:        Record<string, unknown>;
   isGlobal:        boolean;
@@ -2027,19 +2030,23 @@ export async function solardogKnowledgeUpsert(
   try {
     if (userId && !isValidUUID(userId)) return;
     const sql = await getDbReady();
+    // Normalize type: 'equipment' is stored as 'equipment_brand' in DB (CHECK constraint compat)
+    // steps[] are stored in metadata.steps since the DB column doesn't exist yet pre-025
+    const dbType = (item.type === 'equipment' ? 'equipment_brand' : item.type) as string;
+    const meta = { ...item.metadata, steps: item.steps ?? [], itemType: item.type };
     await sql`
       INSERT INTO solarpro_knowledge_items
         (user_id, type, key, label, description, route, aliases, related_actions, metadata, is_global)
       VALUES (
         ${userId ?? null},
-        ${item.type},
+        ${dbType},
         ${item.key.toLowerCase().trim()},
         ${item.label},
         ${item.description},
         ${item.route ?? null},
         ${item.aliases as string[]},
         ${item.relatedActions as string[]},
-        ${JSON.stringify(item.metadata)},
+        ${JSON.stringify(meta)},
         ${item.isGlobal ?? false}
       )
       ON CONFLICT (user_id, type, key) DO UPDATE SET
@@ -2055,6 +2062,34 @@ export async function solardogKnowledgeUpsert(
   } catch (err) {
     console.error('[SolarDog] solardogKnowledgeUpsert error:', (err as Error)?.message ?? err);
   }
+}
+
+/** Map a raw DB row to a KnowledgeItem, extracting steps from metadata */
+function mapKnowledgeRow(r: Record<string, unknown>): KnowledgeItem {
+  const meta = (r.metadata as Record<string, unknown>) ?? {};
+  const steps = Array.isArray(meta.steps) ? (meta.steps as string[]) : [];
+  // Restore 'equipment' type from metadata.itemType if stored as equipment_brand
+  const rawType = r.type as string;
+  const itemType = (meta.itemType as string | undefined) ?? rawType;
+  const type = (['page','button','workflow','equipment','equipment_brand','feature','route','warning','action','preference'].includes(itemType)
+    ? itemType
+    : rawType) as KnowledgeItem['type'];
+  return {
+    id:             r.id as string,
+    userId:         r.user_id as string | null,
+    type,
+    key:            r.key as string,
+    label:          r.label as string,
+    description:    r.description as string,
+    route:          r.route as string | null,
+    aliases:        (r.aliases as string[]) ?? [],
+    steps,
+    relatedActions: (r.related_actions as string[]) ?? [],
+    metadata:       meta,
+    isGlobal:       r.is_global as boolean,
+    createdAt:      r.created_at as string,
+    updatedAt:      r.updated_at as string,
+  };
 }
 
 /**
@@ -2079,21 +2114,7 @@ export async function solardogKnowledgeGet(
           WHERE (user_id = ${userId} OR is_global = TRUE)
           ORDER BY type ASC, label ASC
         `;
-    return rows.map(r => ({
-      id:             r.id as string,
-      userId:         r.user_id as string | null,
-      type:           r.type as KnowledgeItem['type'],
-      key:            r.key as string,
-      label:          r.label as string,
-      description:    r.description as string,
-      route:          r.route as string | null,
-      aliases:        (r.aliases as string[]) ?? [],
-      relatedActions: (r.related_actions as string[]) ?? [],
-      metadata:       (r.metadata as Record<string, unknown>) ?? {},
-      isGlobal:       r.is_global as boolean,
-      createdAt:      r.created_at as string,
-      updatedAt:      r.updated_at as string,
-    }));
+    return rows.map(r => mapKnowledgeRow(r));
   } catch (err) {
     console.error('[SolarDog] solardogKnowledgeGet error:', (err as Error)?.message ?? err);
     return [];
@@ -2101,7 +2122,7 @@ export async function solardogKnowledgeGet(
 }
 
 /**
- * Full-text search across knowledge items (label, description, aliases, key).
+ * Full-text search across knowledge items (label, description, aliases, key, steps).
  * Returns up to `limit` items sorted by relevance (label match first).
  */
 export async function solardogKnowledgeSearch(
@@ -2130,21 +2151,7 @@ export async function solardogKnowledgeSearch(
         label ASC
       LIMIT ${limit}
     `;
-    return rows.map(r => ({
-      id:             r.id as string,
-      userId:         r.user_id as string | null,
-      type:           r.type as KnowledgeItem['type'],
-      key:            r.key as string,
-      label:          r.label as string,
-      description:    r.description as string,
-      route:          r.route as string | null,
-      aliases:        (r.aliases as string[]) ?? [],
-      relatedActions: (r.related_actions as string[]) ?? [],
-      metadata:       (r.metadata as Record<string, unknown>) ?? {},
-      isGlobal:       r.is_global as boolean,
-      createdAt:      r.created_at as string,
-      updatedAt:      r.updated_at as string,
-    }));
+    return rows.map(r => mapKnowledgeRow(r));
   } catch (err) {
     console.error('[SolarDog] solardogKnowledgeSearch error:', (err as Error)?.message ?? err);
     return [];
@@ -2171,4 +2178,53 @@ export async function solardogKnowledgeDelete(
   } catch (err) {
     console.error('[SolarDog] solardogKnowledgeDelete error:', (err as Error)?.message ?? err);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v11: SolarPro Platform Knowledge Seed
+// Seeds global knowledge items (pages, buttons, workflows, equipment) once.
+// All items are is_global=TRUE and user_id=NULL so every user sees them.
+// Idempotent: uses ON CONFLICT DO UPDATE so safe to re-run.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Seed data and SeedKnowledgeItem type — imported from pure data module
+export type { SeedKnowledgeItem } from './solardog/knowledgeSeed';
+import { SOLARPRO_KNOWLEDGE_SEED } from './solardog/knowledgeSeed';
+export { SOLARPRO_KNOWLEDGE_SEED };
+
+/**
+ * Check if global knowledge base has already been seeded.
+ * Returns true if at least one global item exists.
+ */
+export async function solardogKnowledgeSeeded(): Promise<boolean> {
+  try {
+    const sql = await getDbReady();
+    const rows = await sql`
+      SELECT 1 FROM solarpro_knowledge_items
+      WHERE is_global = TRUE
+      LIMIT 1
+    `;
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Seed the global SolarPro knowledge base.
+ * Idempotent — uses ON CONFLICT DO UPDATE so safe to call multiple times.
+ * Seeds all items as global (user_id = NULL, is_global = TRUE).
+ */
+export async function solardogSeedKnowledge(): Promise<{ seeded: number; errors: string[] }> {
+  const errors: string[] = [];
+  let seeded = 0;
+  for (const item of SOLARPRO_KNOWLEDGE_SEED) {
+    try {
+      await solardogKnowledgeUpsert(null, { ...item, isGlobal: true });
+      seeded++;
+    } catch (e) {
+      errors.push(`${item.key}: ${(e as Error).message}`);
+    }
+  }
+  return { seeded, errors };
 }
