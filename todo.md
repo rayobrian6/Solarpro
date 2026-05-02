@@ -1,39 +1,45 @@
-# SolarDog v11 — "Knows the Website"
+# SolarPro v61 — Control Modes + Locked Selections
 
-## A: DB Layer — Migration 025 (schema upgrade + seed data)
-- [ ] A1: Migration 025 — add steps[] column to solarpro_knowledge_items, add equipment type, seeded_global
-- [ ] A2: Seed function solardogSeedKnowledge() — seed all pages, buttons, workflows, equipment
-- [ ] A3: solardogKnowledgeSeeded() idempotent check
-- [ ] A4: Call seed in migrate route after Migration 025
+## A: Types & Core Data Model
+- [x] A1: Add ControlMode type + SystemConfigLocks interface to types/index.ts
+- [x] A2: Add controlMode + systemConfigLocks fields to Project interface
 
-## B: DB functions — extend knowledge base CRUD
-- [ ] B1: Update KnowledgeItem interface — add steps[], update type to include 'equipment'
-- [ ] B2: solardogKnowledgeGet — include seeded global items merged with user items
-- [ ] B3: solardogKnowledgeSearch — extend to search steps[] array too
+## B: DB Migration 026
+- [x] B1: Add Migration 026 to migrate route — ADD COLUMN control_mode + system_config_locks to projects table
 
-## C: System prompt — v11 overhaul
-- [ ] C1: Add GUIDED MODE section (workflow steps, step-by-step guidance)
-- [ ] C2: Intent classification — enforce Understand→Explain→Suggest→Offer→Execute
-- [ ] C3: Update KNOWLEDGE BASE section — workflows with steps, equipment comparisons
-- [ ] C4: Update response format — add suggestedSteps[], currentStep, totalSteps, workflowKey
-- [ ] C5: Update AssistantResponse type with guided workflow fields
+## C: DB Layer — db-neon.ts
+- [x] C1: Update rowToProject() to map control_mode + system_config_locks
+- [x] C2: Update createProject/updateProject to persist control_mode + system_config_locks
 
-## D: Knowledge seed data
-- [ ] D1: Seed all 15 pages from SITE_MAP
-- [ ] D2: Seed key buttons (generate_sld, run_nec, auto_fix, generate_bom, generate_proposal, etc.)
-- [ ] D3: Seed workflows (pass_engineering, create_project, submit_permit, proposal_workflow)
-- [ ] D4: Seed equipment brands (SolFence + major inverter/battery/panel brands)
+## D: Control Mode Engine — lib/solardog/controlMode.ts
+- [x] D1: Create pure lib/solardog/controlMode.ts module
+       - ControlMode type, SystemConfigLocks interface, DEFAULT_LOCKS
+       - shouldAllowOverride(field, mode, locks) → boolean
+       - lockField(locks, field) → SystemConfigLocks
+       - applySafely(field, mode, locks, apply, warn) → { applied, warned }
 
-## E: Tests — groups 37-44
-- [ ] E1: Group 37 — intent classification (6 types)
-- [ ] E2: Group 38 — guided mode triggers
-- [ ] E3: Group 39 — knowledge base page explanations
-- [ ] E4: Group 40 — button knowledge
-- [ ] E5: Group 41 — workflow knowledge + steps
-- [ ] E6: Group 42 — equipment knowledge
-- [ ] E7: Group 43 — response format validation (guided fields)
-- [ ] E8: Group 44 — forbidden behaviors
+## E: Engineering Page — Auto-Config Guard
+- [x] E1: Read controlMode + systemConfigLocks from project (default 'guided')
+- [x] E2: Wrap AUTO-APPLY effect with shouldAllowOverride check
+- [x] E3: Wrap hard DC/AC auto-heal override with shouldAllowOverride check
+- [x] E4: Wrap applySizingRecommendation panel swap with shouldAllowOverride check
+- [x] E5: When user edits panel/inverter — auto-lock that field in guided/manual mode
 
-## F: Commit & Push
-- [ ] F1: All tests passing | 0 TS errors
-- [ ] F2: git commit v11 + push to origin/dev
+## F: Suggestion UI — Guided Mode
+- [x] F1: Create components/engineering/ControlModeBanner.tsx
+- [x] F2: Create components/engineering/SuggestionCard.tsx
+- [x] F3: Wire ControlModeBanner + SuggestionCard into engineering page
+
+## G: SolarDog Knowledge Seed Update
+- [ ] G1: Add control mode knowledge items to knowledgeSeed.ts (4 items)
+- [ ] G2: Update SolarDog system prompt — explain control modes + lock behavior
+
+## H: Tests — groups 45-48
+- [ ] H1: Group 45 — controlMode shouldAllowOverride logic (unit tests)
+- [ ] H2: Group 46 — lockField + DEFAULT_LOCKS
+- [ ] H3: Group 47 — SolarDog knowledge seed (control modes)
+- [ ] H4: Group 48 — migration 026 present in migrate route
+
+## I: Commit & Push
+- [ ] I1: All tests passing | 0 TS errors
+- [ ] I2: git commit v61 + push to dev + merge to master

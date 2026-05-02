@@ -6,6 +6,36 @@ export type SystemType = 'roof' | 'ground' | 'fence';
 export type UserRole = 'admin' | 'designer' | 'sales';
 export type ProposalStatus = 'draft' | 'sent' | 'viewed' | 'signed' | 'accepted' | 'rejected' | 'archived';
 export type ProjectStatus = 'lead' | 'design' | 'proposal' | 'approved' | 'installed';
+// ─── v61: Control Modes + Field Locking ──────────────────────────────────────
+/**
+ * ControlMode governs how much autonomy the auto-config engine has.
+ *  auto    → engine has full control, overrides user selections silently
+ *  guided  → engine suggests changes; user must approve overrides (DEFAULT)
+ *  manual  → user selections are locked; engine can only warn, never override
+ */
+export type ControlMode = 'auto' | 'guided' | 'manual';
+
+/**
+ * Per-field lock map.  true = user has locked this field; auto-config must not override.
+ * All fields default to false (unlocked).
+ */
+export interface SystemConfigLocks {
+  panel:    boolean;
+  inverter: boolean;
+  battery:  boolean;
+  strings:  boolean;
+  wiring:   boolean;
+}
+
+/** Default locks — all fields unlocked */
+export const DEFAULT_LOCKS: SystemConfigLocks = {
+  panel:    false,
+  inverter: false,
+  battery:  false,
+  strings:  false,
+  wiring:   false,
+};
+
 
 // ─── Multi-Array Architecture ─────────────────────────────────────────────────
 // A SolarArray represents one discrete mounting zone (roof face, ground field,
@@ -644,6 +674,10 @@ export interface Project {
   engineeringUpdatedAt?: string;                // ISO timestamp of last engineering config save
   notes?: string;
   noItc?: boolean;             // v47.243: suppress ITC for clients who don't qualify (no tax liability)
+  /** v61: Control mode governs auto-config autonomy. Defaults to 'guided'. */
+  controlMode?: ControlMode;
+  /** v61: Per-field lock map — fields locked by user cannot be overridden by auto-config. */
+  systemConfigLocks?: SystemConfigLocks;
   createdAt: string;
   updatedAt: string;
 }

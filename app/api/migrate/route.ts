@@ -1606,6 +1606,18 @@ export async function POST(req: NextRequest) {
       results.push(`\u26a0\ufe0f Migration 025 (knowledge seed): ${(e as Error).message}`);
     }
 
+    // -- Migration 026: v61 — Control Modes + Field Locking ------------------
+    // Adds control_mode and system_config_locks to projects table.
+    // control_mode: 'auto' | 'guided' | 'manual'  (default: 'guided')
+    // system_config_locks: JSONB  { panel, inverter, battery, strings, wiring }
+    try {
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS control_mode TEXT NOT NULL DEFAULT 'guided'`;
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS system_config_locks JSONB DEFAULT '{}'`;
+      results.push('\u2705 Migration 026 complete: control_mode + system_config_locks added to projects');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 026 (control modes): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

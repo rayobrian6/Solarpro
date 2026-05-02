@@ -316,6 +316,13 @@ function rowToProject(row: Record<string, unknown>): Project {
       : undefined,
     engineeringUpdatedAt: row.engineering_updated_at as string | undefined,
     noItc: (row.no_itc as boolean) || false,   // v47.243: suppress ITC display
+    // v61: Control mode + field locks
+    controlMode: ((row.control_mode as string) || 'guided') as import('@/types').ControlMode,
+    systemConfigLocks: row.system_config_locks
+      ? (typeof row.system_config_locks === 'string'
+          ? JSON.parse(row.system_config_locks)
+          : row.system_config_locks) as import('@/types').SystemConfigLocks
+      : undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -831,6 +838,8 @@ export async function updateProject(
         lng           = ${merged.lng ?? null},
         system_size_kw= ${merged.systemSizeKw ?? null},
         no_itc        = ${merged.noItc ?? false},
+        control_mode  = ${(merged.controlMode ?? current.controlMode ?? 'guided')},
+        system_config_locks = ${merged.systemConfigLocks ? JSON.stringify(merged.systemConfigLocks) : (current.systemConfigLocks ? JSON.stringify(current.systemConfigLocks) : null)}::jsonb,
         bill_data     = ${billDataJson}::jsonb,
         updated_at    = NOW()
       WHERE id = ${id}
@@ -851,6 +860,8 @@ export async function updateProject(
         lng           = ${merged.lng ?? null},
         system_size_kw= ${merged.systemSizeKw ?? null},
         no_itc        = ${merged.noItc ?? false},
+        control_mode  = ${(merged.controlMode ?? current.controlMode ?? 'guided')},
+        system_config_locks = ${merged.systemConfigLocks ? JSON.stringify(merged.systemConfigLocks) : (current.systemConfigLocks ? JSON.stringify(current.systemConfigLocks) : null)}::jsonb,
         updated_at    = NOW()
       WHERE id = ${id}
         AND user_id = ${userId}
@@ -1470,6 +1481,13 @@ export async function getProjectWithDetails(
       : undefined,
     engineeringUpdatedAt: row.engineering_updated_at as string | undefined,
     noItc: (row.no_itc as boolean) || false,   // v47.243: suppress ITC display
+    // v61: Control mode + field locks
+    controlMode: ((row.control_mode as string) || 'guided') as import('@/types').ControlMode,
+    systemConfigLocks: row.system_config_locks
+      ? (typeof row.system_config_locks === 'string'
+          ? JSON.parse(row.system_config_locks)
+          : row.system_config_locks) as import('@/types').SystemConfigLocks
+      : undefined,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };

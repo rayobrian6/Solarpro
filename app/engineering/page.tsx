@@ -56,6 +56,10 @@ import { getUtilitiesByState } from '@/lib/utility-rules';
 // Phase B2 — Decision Consistency Lock: canonical DC/AC ratio helpers
 import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { DC_AC_TARGET } from '@/lib/system/dcAcConstants';
+import { shouldAllowOverride, DEFAULT_LOCKS, DEFAULT_CONTROL_MODE } from '@/lib/solardog/controlMode';
+import type { LockableField } from '@/lib/solardog/controlMode';
+import ControlModeBanner from '@/components/engineering/ControlModeBanner';
+import SuggestionCard, { type PendingSuggestion } from '@/components/engineering/SuggestionCard';
 import { getUtilitiesByStateNational, STATE_UTILITY_FALLBACK } from '@/lib/utilityDetector';
 import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
@@ -579,6 +583,11 @@ function EngineeringPageInner() {
         });
         // Store layout in component state so permit buttons can access panel positions
         if (layout) setProjectLayout(layout);
+        // v61: Load control mode + field locks from project (defaults if not set)
+        if (p.controlMode) setControlMode(p.controlMode);
+        if (p.systemConfigLocks && typeof p.systemConfigLocks === 'object') {
+          setConfigLocks({ ...DEFAULT_LOCKS, ...p.systemConfigLocks });
+        }
 
         // SAFETY NET: if p.layout came back null (e.g. user-id mismatch in join),
         // fetch the layout directly from the dedicated endpoint.
@@ -1357,6 +1366,10 @@ function EngineeringPageInner() {
   // Phase 11 — brand sizing recommendation UI state
   const [sizingAutoApply, setSizingAutoApply] = useState<boolean>(false);
   const [sizingDismissed, setSizingDismissed] = useState<boolean>(false);
+  // v61: Control mode + field locks + suggestion queue
+  const [controlMode, setControlMode] = useState<import('@/types').ControlMode>(DEFAULT_CONTROL_MODE);
+  const [configLocks, setConfigLocks] = useState<import('@/types').SystemConfigLocks>(DEFAULT_LOCKS);
+  const [pendingSuggestion, setPendingSuggestion] = useState<PendingSuggestion | null>(null);
   // User-controlled battery intent (decoupled from batteryId presence).
   // Sizing engine ONLY emits battery when batteryEnabled === true.
   const [batteryEnabled, setBatteryEnabled] = useState<boolean>(false);
@@ -2400,10 +2413,27 @@ function EngineeringPageInner() {
     const stringLayoutMismatch = detectStringLayoutMismatch(snap, rec);
     if (topologyMismatch || countMismatch || modelMismatch || stringLayoutMismatch) {
       console.log('🚨 [AUTO-APPLY] firing applySizingRecommendation (no user lock, mismatch detected)');
-      applySizingRecommendation(rec);
+      // v61: Check control mode + field locks before auto-applying
+      const canOverrideInverter = shouldAllowOverride('inverter', controlMode, configLocks);
+      if (canOverrideInverter) {
+        applySizingRecommendation(rec);
+      } else if (controlMode === 'guided' && !configLocks.inverter) {
+        // GUIDED mode: queue a suggestion instead of silently applying
+        const _rec = rec;
+        setPendingSuggestion({
+          field: 'inverter',
+          currentValue: 'Current inverter configuration',
+          recommendedValue: ((_rec.inverterModels[0] as any)?.name ?? (_rec.inverterModels[0] as any)?.id) ?? 'Recommended inverter',
+          reason: 'The sizing engine detected a mismatch. Review and accept or lock your selection.',
+          onAccept: () => { applySizingRecommendation(_rec); setPendingSuggestion(null); },
+          onKeep:   () => { setConfigLocks(l => ({ ...l, inverter: true })); setPendingSuggestion(null); },
+        });
+      } else {
+        console.log('[v61] AUTO-APPLY blocked by control mode:', controlMode, '| locks:', configLocks);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters]);
+  }, [sizingAutoApply, sizingRecommendation, config.userHasEditedInverters, controlMode, configLocks]);
 
      // ─── Phase 14.2 — HARD DC/AC ERROR AUTO-HEAL ─────────────────────────────────
      // When validationResult contains DC_AC_RATIO_AC_EXCEEDS_DC (ratio < 1.0) AND
@@ -2549,6 +2579,11 @@ function EngineeringPageInner() {
   const updateInverter = (id: string, patch: Partial<InverterConfig>) => {
     console.log('🔒 [USER EDIT] updateInverter — engaging user lock');
     setConfig(prev => ({ ...prev, inverters: prev.inverters.map(i => i.id === id ? { ...i, ...patch } : i), ...LOCK }));
+    // v61 E5: auto-lock inverter field when user explicitly changes it in guided/manual mode
+    if ('inverterId' in patch && (controlMode === 'guided' || controlMode === 'manual')) {
+      setConfigLocks(prev => ({ ...prev, inverter: true }));
+      console.log('[v61 E5] inverter field auto-locked (mode:', controlMode, ')');
+    }
   };
   const addString = (invId: string) => {
     console.log('🔒 [USER EDIT] addString — engaging user lock');
@@ -2561,6 +2596,11 @@ function EngineeringPageInner() {
   const updateString = (invId: string, strId: string, patch: Partial<StringConfig>) => {
     console.log('🔒 [USER EDIT] updateString — engaging user lock');
     setConfig(prev => ({ ...prev, inverters: prev.inverters.map(i => i.id === invId ? { ...i, strings: i.strings.map(s => s.id === strId ? { ...s, ...patch } : s) } : i), ...LOCK }));
+    // v61 E5: auto-lock panel field when user explicitly changes it in guided/manual mode
+    if ('panelId' in patch && (controlMode === 'guided' || controlMode === 'manual')) {
+      setConfigLocks(prev => ({ ...prev, panel: true }));
+      console.log('[v61 E5] panel field auto-locked (mode:', controlMode, ')');
+    }
   };
 
   // Topology switch: calls API to propagate ecosystem when inverter type changes
@@ -5747,6 +5787,42 @@ function EngineeringPageInner() {
         </div>
       )}
 
+      {/* ── v61: Control Mode Banner ── */}
+      <ControlModeBanner
+        mode={controlMode}
+        locks={configLocks}
+        onModeChange={(m) => {
+          setControlMode(m);
+          // persist to project
+          if (currentProjectId) {
+            fetch(`/api/projects/${currentProjectId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ controlMode: m }),
+            }).catch(console.error);
+          }
+        }}
+        onLocksChange={(l) => {
+          setConfigLocks(l);
+          // persist to project
+          if (currentProjectId) {
+            fetch(`/api/projects/${currentProjectId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ systemConfigLocks: l }),
+            }).catch(console.error);
+          }
+        }}
+        compact={false}
+      />
+
+      {/* ── v61: Pending Suggestion Card ── */}
+      {pendingSuggestion && (
+        <div className="px-6 pt-3 flex-shrink-0">
+          <SuggestionCard suggestion={pendingSuggestion} />
+        </div>
+      )}
+
       {/* ── Tab Bar ── */}
       <div className="flex gap-0 px-4 bg-slate-900/70 backdrop-blur-md border-b border-slate-700/50 flex-shrink-0 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700">
         {tabs.map((tab, idx) => {
@@ -6737,7 +6813,13 @@ function EngineeringPageInner() {
                         autoApply={sizingAutoApply}
                         onAutoApplyChange={setSizingAutoApply}
                         onApply={() => {
-                          applySizingRecommendation(sizingRecommendation);
+                          // v61: Control mode guard for hard DC/AC error auto-heal
+           const canHealDcAc = shouldAllowOverride('inverter', controlMode, configLocks) || controlMode === 'auto';
+           if (canHealDcAc) {
+             applySizingRecommendation(sizingRecommendation);
+           } else {
+             console.log('[v61] DC/AC auto-heal blocked by control mode:', controlMode, '— user must fix manually');
+           }
                         }}
                         hidden={config.inverters.length === 0}
                         panelCountSource={{

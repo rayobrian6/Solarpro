@@ -2820,3 +2820,460 @@ describe('Forbidden behaviors — v11 compliance', () => {
   });
 
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Groups 45–48  v61 — Control Modes + Locked Selections
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Group 45: shouldAllowOverride logic ──────────────────────────────────────
+import {
+  shouldAllowOverride,
+  shouldShowWarning,
+  applySafely,
+  effectiveLocks,
+  DEFAULT_LOCKS,
+  DEFAULT_CONTROL_MODE,
+  lockField,
+  unlockField,
+  lockAll,
+  unlockAll,
+  LOCKABLE_FIELDS,
+  CONTROL_MODE_LABELS,
+  FIELD_LABELS,
+} from '../lib/solardog/controlMode';
+
+describe('v61 — shouldAllowOverride logic (Group 45)', () => {
+  const unlocked = { ...DEFAULT_LOCKS };
+  const allLocked = { panel: true, inverter: true, battery: true, strings: true, wiring: true };
+  const panelLocked = { ...DEFAULT_LOCKS, panel: true };
+
+  it('AUTO mode + unlocked field → allows override', () => {
+    expect(shouldAllowOverride('panel', 'auto', unlocked)).toBe(true);
+    expect(shouldAllowOverride('inverter', 'auto', unlocked)).toBe(true);
+  });
+
+  it('GUIDED mode + unlocked field → blocks silent override', () => {
+    expect(shouldAllowOverride('panel', 'guided', unlocked)).toBe(false);
+    expect(shouldAllowOverride('inverter', 'guided', unlocked)).toBe(false);
+  });
+
+  it('MANUAL mode + unlocked field → blocks override', () => {
+    expect(shouldAllowOverride('panel', 'manual', unlocked)).toBe(false);
+    expect(shouldAllowOverride('inverter', 'manual', unlocked)).toBe(false);
+    expect(shouldAllowOverride('battery', 'manual', unlocked)).toBe(false);
+  });
+
+  it('AUTO mode + locked field → blocks override (lock wins over mode)', () => {
+    expect(shouldAllowOverride('panel', 'auto', panelLocked)).toBe(false);
+  });
+
+  it('AUTO mode + locked field → still allows unlocked sibling fields', () => {
+    expect(shouldAllowOverride('inverter', 'auto', panelLocked)).toBe(true);
+  });
+
+  it('GUIDED mode + locked field → blocks override', () => {
+    expect(shouldAllowOverride('panel', 'guided', panelLocked)).toBe(false);
+  });
+
+  it('All fields locked in any mode → all blocked', () => {
+    for (const field of LOCKABLE_FIELDS) {
+      expect(shouldAllowOverride(field, 'auto', allLocked)).toBe(false);
+      expect(shouldAllowOverride(field, 'guided', allLocked)).toBe(false);
+      expect(shouldAllowOverride(field, 'manual', allLocked)).toBe(false);
+    }
+  });
+
+  it('shouldShowWarning: AUTO + unlocked → no warning (system fixes silently)', () => {
+    expect(shouldShowWarning('panel', 'auto', unlocked)).toBe(false);
+    expect(shouldShowWarning('inverter', 'auto', unlocked)).toBe(false);
+  });
+
+  it('shouldShowWarning: GUIDED + unlocked → show warning (suggestion card)', () => {
+    expect(shouldShowWarning('panel', 'guided', unlocked)).toBe(true);
+  });
+
+  it('shouldShowWarning: MANUAL + any → always warn', () => {
+    expect(shouldShowWarning('panel', 'manual', unlocked)).toBe(true);
+    expect(shouldShowWarning('inverter', 'manual', allLocked)).toBe(true);
+  });
+
+  it('shouldShowWarning: AUTO + locked → show warning (cannot fix, user locked it)', () => {
+    expect(shouldShowWarning('panel', 'auto', panelLocked)).toBe(true);
+  });
+
+  it('effectiveLocks: MANUAL mode → all fields locked regardless of lock map', () => {
+    const result = effectiveLocks('manual', unlocked);
+    for (const field of LOCKABLE_FIELDS) {
+      expect(result[field]).toBe(true);
+    }
+  });
+
+  it('effectiveLocks: AUTO mode → returns actual lock map', () => {
+    const result = effectiveLocks('auto', panelLocked);
+    expect(result.panel).toBe(true);
+    expect(result.inverter).toBe(false);
+  });
+
+  it('effectiveLocks: GUIDED mode → returns actual lock map', () => {
+    const result = effectiveLocks('guided', panelLocked);
+    expect(result.panel).toBe(true);
+    expect(result.inverter).toBe(false);
+  });
+
+  it('applySafely: AUTO + unlocked → calls applyFn, returns applied=true', () => {
+    let applied = false;
+    let warned = false;
+    const result = applySafely('panel', 'auto', unlocked, () => { applied = true; }, () => { warned = true; });
+    expect(applied).toBe(true);
+    expect(warned).toBe(false);
+    expect(result.applied).toBe(true);
+    expect(result.warned).toBe(false);
+    expect(result.suggest).toBe(false);
+  });
+
+  it('applySafely: GUIDED + unlocked → calls warnFn, returns suggest=true', () => {
+    let applied = false;
+    let warned = false;
+    const result = applySafely('panel', 'guided', unlocked, () => { applied = true; }, () => { warned = true; });
+    expect(applied).toBe(false);
+    expect(warned).toBe(true);
+    expect(result.applied).toBe(false);
+    expect(result.suggest).toBe(true);
+  });
+
+  it('applySafely: MANUAL + unlocked → calls warnFn, suggest=false (not guided)', () => {
+    let applied = false;
+    let warned = false;
+    const result = applySafely('panel', 'manual', unlocked, () => { applied = true; }, () => { warned = true; });
+    expect(applied).toBe(false);
+    expect(warned).toBe(true);
+    expect(result.suggest).toBe(false);
+  });
+
+  it('applySafely: AUTO + locked → calls warnFn, not applied', () => {
+    let applied = false;
+    let warned = false;
+    const result = applySafely('panel', 'auto', panelLocked, () => { applied = true; }, () => { warned = true; });
+    expect(applied).toBe(false);
+    expect(warned).toBe(true);
+    expect(result.applied).toBe(false);
+  });
+
+  it('DEFAULT_CONTROL_MODE is "guided"', () => {
+    expect(DEFAULT_CONTROL_MODE).toBe('guided');
+  });
+});
+
+// ── Group 46: lockField + DEFAULT_LOCKS ──────────────────────────────────────
+describe('v61 — lockField + DEFAULT_LOCKS (Group 46)', () => {
+  it('DEFAULT_LOCKS has all 5 fields set to false', () => {
+    expect(DEFAULT_LOCKS.panel).toBe(false);
+    expect(DEFAULT_LOCKS.inverter).toBe(false);
+    expect(DEFAULT_LOCKS.battery).toBe(false);
+    expect(DEFAULT_LOCKS.strings).toBe(false);
+    expect(DEFAULT_LOCKS.wiring).toBe(false);
+  });
+
+  it('LOCKABLE_FIELDS contains exactly panel, inverter, battery, strings, wiring', () => {
+    expect(LOCKABLE_FIELDS).toContain('panel');
+    expect(LOCKABLE_FIELDS).toContain('inverter');
+    expect(LOCKABLE_FIELDS).toContain('battery');
+    expect(LOCKABLE_FIELDS).toContain('strings');
+    expect(LOCKABLE_FIELDS).toContain('wiring');
+    expect(LOCKABLE_FIELDS).toHaveLength(5);
+  });
+
+  it('lockField is immutable — does not mutate input', () => {
+    const original = { ...DEFAULT_LOCKS };
+    const result = lockField(original, 'panel');
+    expect(original.panel).toBe(false);  // original unchanged
+    expect(result.panel).toBe(true);     // new object has it locked
+  });
+
+  it('lockField locks only the specified field', () => {
+    const result = lockField(DEFAULT_LOCKS, 'inverter');
+    expect(result.inverter).toBe(true);
+    expect(result.panel).toBe(false);
+    expect(result.battery).toBe(false);
+    expect(result.strings).toBe(false);
+    expect(result.wiring).toBe(false);
+  });
+
+  it('unlockField unlocks only the specified field', () => {
+    const allLocked = lockAll();
+    const result = unlockField(allLocked, 'battery');
+    expect(result.battery).toBe(false);
+    expect(result.panel).toBe(true);
+    expect(result.inverter).toBe(true);
+    expect(result.strings).toBe(true);
+    expect(result.wiring).toBe(true);
+  });
+
+  it('lockAll returns all fields true', () => {
+    const result = lockAll();
+    for (const field of LOCKABLE_FIELDS) {
+      expect(result[field]).toBe(true);
+    }
+  });
+
+  it('unlockAll returns all fields false', () => {
+    const result = unlockAll();
+    for (const field of LOCKABLE_FIELDS) {
+      expect(result[field]).toBe(false);
+    }
+  });
+
+  it('CONTROL_MODE_LABELS has labels for auto, guided, manual', () => {
+    expect(CONTROL_MODE_LABELS.auto).toBe('Auto');
+    expect(CONTROL_MODE_LABELS.guided).toBe('Guided');
+    expect(CONTROL_MODE_LABELS.manual).toBe('Manual');
+  });
+
+  it('FIELD_LABELS has labels for all 5 lockable fields', () => {
+    expect(FIELD_LABELS.panel).toBe('Panel');
+    expect(FIELD_LABELS.inverter).toBe('Inverter');
+    expect(FIELD_LABELS.battery).toBe('Battery');
+    expect(FIELD_LABELS.strings).toBe('Strings');
+    expect(FIELD_LABELS.wiring).toBe('Wiring');
+  });
+});
+
+// ── Group 47: SolarDog knowledge seed — control modes ────────────────────────
+// Note: SOLARPRO_KNOWLEDGE_SEED is already imported at top of file (v11 tests)
+
+describe('v61 — SolarDog knowledge seed (control modes) (Group 47)', () => {
+  it('knowledge seed includes control_modes item', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_modes');
+    expect(item).toBeDefined();
+  });
+
+  it('control_modes item is type workflow', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_modes');
+    expect(item?.type).toBe('workflow');
+  });
+
+  it('control_modes description mentions all three modes', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_modes');
+    expect(item?.description).toContain('Auto');
+    expect(item?.description).toContain('Guided');
+    expect(item?.description).toContain('Manual');
+  });
+
+  it('control_modes aliases include "auto mode" and "manual mode"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_modes');
+    expect(item?.aliases).toContain('auto mode');
+    expect(item?.aliases).toContain('manual mode');
+  });
+
+  it('knowledge seed includes field_locking item', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'field_locking');
+    expect(item).toBeDefined();
+  });
+
+  it('field_locking description mentions lock icon and all 5 fields', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'field_locking');
+    expect(item?.description).toContain('panel');
+    expect(item?.description).toContain('inverter');
+  });
+
+  it('field_locking aliases include "lock field" and "lock inverter"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'field_locking');
+    expect(item?.aliases).toContain('lock field');
+    expect(item?.aliases).toContain('lock inverter');
+  });
+
+  it('knowledge seed includes control_mode_guided item', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_mode_guided');
+    expect(item).toBeDefined();
+  });
+
+  it('control_mode_guided has steps describing the suggestion card flow', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_mode_guided');
+    expect(Array.isArray(item?.steps)).toBe(true);
+    expect((item?.steps ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('control_mode_guided aliases include "suggestion card" and "accept suggestion"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_mode_guided');
+    expect(item?.aliases).toContain('suggestion card');
+    expect(item?.aliases).toContain('accept suggestion');
+  });
+
+  it('knowledge seed includes control_mode_auto_manual item', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_mode_auto_manual');
+    expect(item).toBeDefined();
+  });
+
+  it('control_mode_auto_manual aliases include "auto" and "manual"', () => {
+    const item = SOLARPRO_KNOWLEDGE_SEED.find(i => i.key === 'control_mode_auto_manual');
+    expect(item?.aliases).toContain('auto');
+    expect(item?.aliases).toContain('manual');
+  });
+
+  it('total knowledge seed has at least 37 items (33 original + 4 control mode)', () => {
+    expect(SOLARPRO_KNOWLEDGE_SEED.length).toBeGreaterThanOrEqual(37);
+  });
+});
+
+// ── Group 48: Migration 026 + DB layer ───────────────────────────────────────
+describe('v61 — Migration 026 + DB layer (Group 48)', () => {
+  it('migrate route contains Migration 026 comment', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain('Migration 026');
+  });
+
+  it('migrate route adds control_mode column', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain('control_mode');
+  });
+
+  it('migrate route adds system_config_locks column', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain('system_config_locks');
+  });
+
+  it('migrate route uses ADD COLUMN IF NOT EXISTS for control_mode', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain('ADD COLUMN IF NOT EXISTS control_mode');
+  });
+
+  it('migrate route sets control_mode default to guided', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain("DEFAULT 'guided'");
+  });
+
+  it('migrate route sets system_config_locks as JSONB', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/migrate/route.ts', 'utf8');
+    expect(src).toContain('JSONB');
+  });
+
+  it('db-neon.ts rowToProject maps control_mode to controlMode', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('control_mode');
+    expect(src).toContain('controlMode');
+  });
+
+  it('db-neon.ts rowToProject maps system_config_locks to systemConfigLocks', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    expect(src).toContain('system_config_locks');
+    expect(src).toContain('systemConfigLocks');
+  });
+
+  it('db-neon.ts updateProject persists control_mode', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // control_mode should appear in the UPDATE statement
+    const updateIdx = src.indexOf('UPDATE projects');
+    expect(updateIdx).toBeGreaterThan(-1);
+    const updateSection = src.slice(updateIdx, updateIdx + 2000);
+    expect(updateSection).toContain('control_mode');
+  });
+
+  it('db-neon.ts updateProject persists system_config_locks', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    const updateIdx = src.indexOf('UPDATE projects');
+    const updateSection = src.slice(updateIdx, updateIdx + 2000);
+    expect(updateSection).toContain('system_config_locks');
+  });
+
+  it('types/index.ts exports ControlMode type', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('types/index.ts', 'utf8');
+    expect(src).toContain("export type ControlMode");
+  });
+
+  it('types/index.ts exports SystemConfigLocks interface', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('types/index.ts', 'utf8');
+    expect(src).toContain('export interface SystemConfigLocks');
+  });
+
+  it('types/index.ts exports DEFAULT_LOCKS', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('types/index.ts', 'utf8');
+    expect(src).toContain('export const DEFAULT_LOCKS');
+  });
+
+  it('SolarDog system prompt contains CONTROL MODES section', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('CONTROL MODES');
+  });
+
+  it('SolarDog system prompt describes AUTO mode behavior', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('AUTO MODE');
+  });
+
+  it('SolarDog system prompt describes GUIDED mode suggestion cards', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('suggestion card');
+  });
+
+  it('SolarDog system prompt describes MANUAL mode warn-only behavior', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
+    expect(src).toContain('MANUAL MODE');
+  });
+
+  it('engineering page imports shouldAllowOverride from controlMode', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain('shouldAllowOverride');
+    expect(src).toContain('controlMode');
+  });
+
+  it('engineering page has controlMode state variable', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain('const [controlMode, setControlMode]');
+  });
+
+  it('engineering page has configLocks state variable', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain('const [configLocks, setConfigLocks]');
+  });
+
+  it('engineering page has pendingSuggestion state variable', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain('const [pendingSuggestion, setPendingSuggestion]');
+  });
+
+  it('engineering page imports ControlModeBanner', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain("import ControlModeBanner from '@/components/engineering/ControlModeBanner'");
+  });
+
+  it('engineering page imports SuggestionCard', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain("import SuggestionCard");
+  });
+
+  it('engineering page JSX renders ControlModeBanner', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain('<ControlModeBanner');
+  });
+
+  it('engineering page JSX renders SuggestionCard when pendingSuggestion exists', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync('app/engineering/page.tsx', 'utf8');
+    expect(src).toContain('<SuggestionCard');
+    expect(src).toContain('pendingSuggestion');
+  });
+});
