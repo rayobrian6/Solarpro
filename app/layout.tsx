@@ -4,7 +4,7 @@ import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
 import { UserProvider } from '@/contexts/UserContext';
-import SolarAIBot from '@/components/support/SolarAIBot';
+import SolarDog from '@/components/support/SolarDog';
 import { Suspense } from 'react';
 import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
 import { BUILD_VERSION } from '@/lib/version';
@@ -36,8 +36,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <ImpersonationBanner />
               </Suspense>
               {children}
-              {/* Free AI Support Bot — floating widget, visible on all pages */}
-              <SolarAIBot />
+              {/* SolarDog 🐾 — AI agent, floating widget, visible on all pages */}
+              <SolarDog />
               {/* Version indicator — always visible for deployment verification */}
               <div style={{
                 position: 'fixed', bottom: '4px', left: '4px',
