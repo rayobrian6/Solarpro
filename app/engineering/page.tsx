@@ -301,6 +301,15 @@ interface ProjectConfig {
   // for display, but it MUST NOT mutate the user's config once this lock
   // is engaged. Source of truth is always the user config.
   userHasEditedInverters?: boolean;
+  // v61.7 — CONFIG OVERWRITE KILL SWITCH.
+  // Set to `true` after any explicit user action (Apply Recommendation, manual edit,
+  // smart-defaults bootstrap). When true, ALL automatic config mutations are BLOCKED:
+  //   - CAD sync will only update panel count, never rearrange strings
+  //   - AUTO-APPLY is a hard no-op
+  //   - HARD DC/AC AUTO-HEAL is disabled (warning only)
+  //   - Ecosystem apply is blocked
+  // Only an explicit user action (Apply Recommendation, Reset System) may change inverters.
+  isUserControlled?: boolean;
 }
 
 interface ComplianceResult {
@@ -2721,6 +2730,10 @@ function EngineeringPageInner() {
       return prev;
     });
 
+    // v61.7: Mark config as user-controlled after explicit Apply action.
+    // This sets the master kill switch that prevents ALL automatic overwrites.
+    setConfig(prev => ({ ...prev, isUserControlled: true }));
+    console.log('[USER APPLY ACTION] applySizingRecommendation complete — isUserControlled=true set. Config is now final.');
     // Surface the dismissal reset so the panel stays visible but shows "matches".
     setSizingDismissed(false);
     // v61.2: after applying, return to 'current' — the applied config IS now current.
@@ -2747,8 +2760,8 @@ function EngineeringPageInner() {
     // Phase 13.1 — USER INTENT LOCK. Belt-and-suspenders: even if the
     // `defaultsApplied` sentinel somehow got cleared, never reapply
     // defaults over a config the user has already touched.
-    if (config.userHasEditedInverters) {
-      console.log('🔒 [SMART DEFAULTS] blocked — userHasEditedInverters=true');
+    if (config.userHasEditedInverters || config.isUserControlled) {
+      console.log('[CONFIG OVERWRITE BLOCKED] SMART DEFAULTS blocked —', config.isUserControlled ? 'isUserControlled=true' : 'userHasEditedInverters=true');
       return;
     }
 
@@ -2812,10 +2825,12 @@ function EngineeringPageInner() {
         });
       });
 
+      console.log('[CONFIG BUILD] Smart Defaults bootstrap complete — setting isUserControlled=true');
       return {
         ...prev,
         inverters: hydratedInverters,
         defaultsApplied: true,
+        isUserControlled: true,
         // Only stamp selectedBrand when defaults picked one (user hadn't).
         ...(result.patch.selectedBrand ? { selectedBrand: result.patch.selectedBrand } : {}),
       };
@@ -2842,6 +2857,11 @@ function EngineeringPageInner() {
     // user can still click "Apply Recommendation" explicitly.
     if (config.userHasEditedInverters) {
       console.log('🔒 [AUTO-APPLY] blocked — userHasEditedInverters=true (user config is source of truth)');
+      return;
+    }
+    // v61.7 — CONFIG OVERWRITE KILL SWITCH: isUserControlled is the master lock.
+    if (config.isUserControlled) {
+      console.log('[CONFIG OVERWRITE BLOCKED] AUTO-APPLY blocked — isUserControlled=true. Config is final until explicit user action.');
       return;
     }
     // Quick structural check: any mismatch triggers apply.
@@ -2875,6 +2895,7 @@ function EngineeringPageInner() {
       // v61: Check control mode + field locks before auto-applying
       const canOverrideInverter = shouldAllowOverride('inverter', controlMode, configLocks);
       if (canOverrideInverter) {
+        console.log('[USER APPLY ACTION] AUTO mode firing applySizingRecommendation');
         applySizingRecommendation(rec);
       } else if (controlMode === 'guided' && !configLocks.inverter) {
         // GUIDED mode: queue a suggestion instead of silently applying
@@ -2916,6 +2937,15 @@ function EngineeringPageInner() {
        const recRatio = calcDcAcRatio(dcKw, totalAcKw);
        if (recRatio < 1.0) {
          console.warn('[HARD DC/AC AUTO-HEAL] recommendation also has ratio < 1.0 — skipping', { recRatio });
+         return;
+       }
+       // v61.7: HARD DC/AC AUTO-HEAL respects isUserControlled.
+       // When user has explicitly controlled the config, we log a warning
+       // but do NOT silently override. The user must click Apply Recommendation.
+       if (config.isUserControlled) {
+         console.warn('[AUTO ATTEMPTED MUTATION] HARD DC/AC AUTO-HEAL blocked — isUserControlled=true. User must click Apply Recommendation.', {
+           recRatio: recRatio.toFixed(3),
+         });
          return;
        }
        console.log('⚡ [HARD DC/AC AUTO-HEAL] overriding user lock — applying correct config', {
@@ -3012,7 +3042,8 @@ function EngineeringPageInner() {
   // blocks auto-apply of the sizing recommendation. The user's config
   // becomes the source of truth; the recommendation stays visible but
   // read-only.
-  const LOCK = { userHasEditedInverters: true as const };
+  // v61.7: Every user edit stamps both flags to engage the kill switch.
+  const LOCK = { userHasEditedInverters: true as const, isUserControlled: true as const };
 
   const addInverter = (type: InverterType) => {
     console.log('🔒 [USER EDIT] addInverter(', type, ') — engaging user lock');
@@ -5163,11 +5194,15 @@ function EngineeringPageInner() {
         const _is1xNState = _pcInv0Type !== 'micro'
           && _allCurrentStrings.length === 1
           && (_allCurrentStrings[0]?.panelCount ?? 0) > 20;
-        if (layout.panelCount > 0 && (currentTotal !== layout.panelCount || _is1xNState)) {
-            if (_is1xNState) {
+        // v61.7 CONFIG LOCK: When isUserControlled=true, only update panel count
+        // if the total changed — NEVER rearrange strings via sizing engine.
+        // This prevents CAD sync from overwriting a user-configured string layout.
+        const _cadUserLocked = !!(config.isUserControlled || config.userHasEditedInverters);
+        if (layout.panelCount > 0 && (currentTotal !== layout.panelCount || (!_cadUserLocked && _is1xNState))) {
+            if (_is1xNState && !_cadUserLocked) {
               console.log('[EngineeringPage] PANEL COUNT FIX (1×N redistribution): 1 string with', _allCurrentStrings[0]?.panelCount, 'panels → redistributing via sizing engine');
-            } else {
-              console.log('[EngineeringPage] PANEL COUNT FIX:', currentTotal, '→', layout.panelCount);
+            } else if (currentTotal !== layout.panelCount) {
+              console.log('[EngineeringPage] PANEL COUNT FIX:', currentTotal, '→', layout.panelCount, _cadUserLocked ? '(user-controlled: panel count only, no string rearrange)' : '');
             }
             // v61.2 fix: pre-compute string layout using sizing engine BEFORE entering setConfig.
             // BUGS FIXED:
@@ -5209,7 +5244,42 @@ function EngineeringPageInner() {
                 }),
               }));
               setTimeout(() => runCalc(), 400);
-            } else {
+            } else if (_cadUserLocked && currentTotal !== layout.panelCount) {
+              // v61.7: User-controlled config: proportionally scale panel counts, no string rearrange.
+              console.log('[CONFIG BUILD] CAD panel count update (user-controlled, no rearrange):', currentTotal, '→', layout.panelCount);
+              setConfig(prev => {
+                const _oldTotal = prev.inverters.reduce((s, inv) => s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
+                if (_oldTotal <= 0) return prev;
+                const newInverters = prev.inverters.map((inv) => {
+                  const newStrings = inv.strings.map((str, si) => {
+                    const newPc = Math.max(1, Math.round((str.panelCount / _oldTotal) * layout.panelCount));
+                    return _buildStrCfg({
+                      index:          si,
+                      existingId:     str.id,
+                      label:          str.label,
+                      panelCount:     newPc,
+                      panelId:        str.panelId,
+                      wireGauge:      str.wireGauge,
+                      wireLength:     str.wireLength,
+                      tilt:           str.tilt,
+                      azimuth:        str.azimuth,
+                      roofType:       str.roofType as any,
+                      mountingSystem: str.mountingSystem,
+                    });
+                  });
+                  return _buildInvCfg({
+                    existingId:  inv.id,
+                    inverterId:  inv.inverterId,
+                    type:        inv.type,
+                    strings:     newStrings,
+                    optimizerPeripheralId: (inv as any).optimizerPeripheralId,
+                    deviceRatioOverride:   (inv as any).deviceRatioOverride,
+                  });
+                });
+                return { ...prev, inverters: newInverters };
+              });
+              setTimeout(() => runCalc(), 400);
+            } else if (!_cadUserLocked) {
               // String / optimizer / hybrid / ecoflow topology.
               // FIX 2: Use selectedBrand when inverterId is empty (avoids engine returning micro topology).
               // FIX 3: Group resulting strings by inverterIndex → correct multi-inverter layout.
@@ -7468,7 +7538,7 @@ function EngineeringPageInner() {
                             if (!ok) return;
                             // Clear ecosystem brand so picker reappears, and unlock
                             // userHasEditedInverters so auto-sizing can run fresh recommendations
-                            updateConfig({ ecosystemBrand: undefined, userHasEditedInverters: false } as any);
+                            updateConfig({ ecosystemBrand: undefined, userHasEditedInverters: false, isUserControlled: false } as any);
                             setAutoLoadBanner(`Ecosystem cleared — pick a new brand below.`);
                             setTimeout(() => setAutoLoadBanner(null), 5000);
                           }}
