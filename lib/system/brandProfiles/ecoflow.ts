@@ -56,13 +56,27 @@ export const ECOFLOW_PROFILE: BrandProfile = {
   ],
 
   // Sizing tiers — only use ACTIVE US SKUs (OCEAN Pro 11.5 / 24 kW).
-  // The sizing engine picks the smallest tier whose maxDcKw covers
-  // systemDcKw. With DC/AC ratio target ~1.25:
-  //   • 11.5 kW AC → 14 kW DC sweet spot, covers up to ~20 kW DC
-  //   • 24.0 kW AC → 30 kW DC sweet spot, covers up to 40 kW DC (datasheet max)
+  // v61.13: corrected tier boundary based on DC/AC ratio math.
+  //
+  // The engine uses pickRatioAwareTier() which evaluates ALL models and picks
+  // the one closest to the 1.25 preferred target while staying >= 1.0 floor.
+  // These legacy tier boundaries are only used as a FALLBACK when
+  // pickRatioAwareTier falls back to pickInverterTier (undersized=true path).
+  //
+  // Correct DC/AC analysis:
+  //   11.5 kW AC × 1.25 target = 14.4 kW DC sweet spot
+  //   11.5 kW AC × 1.70 EcoFlow max = 19.6 kW DC hard ceiling (per brand spec)
+  //   24.0 kW AC × 1.00 min floor  = 24.0 kW DC minimum for 24kW to be valid
+  //
+  // Gap zone 19.6–24.0 kW DC: only 11kW is valid (24kW ratio < 1.0).
+  // pickRatioAwareTier handles this correctly by choosing 11kW even though
+  // ratio > preferred window — no in-window option exists in that range.
+  //
+  //   • 11.5 kW AC → covers DC up to 19.6 kW (EcoFlow brand max 1.70)
+  //   • 24.0 kW AC → covers DC from 24.0 kW upward (ratio >= 1.0)
   sizingTiers: [
-    { minDcKw: 0,    maxDcKw: 20,       equipmentDbId: 'ecoflow-ocean-pro-11kw' },
-    { minDcKw: 20,   maxDcKw: Infinity, equipmentDbId: 'ecoflow-ocean-pro-24kw' },
+    { minDcKw: 0,    maxDcKw: 19.6,     equipmentDbId: 'ecoflow-ocean-pro-11kw' },
+    { minDcKw: 19.6, maxDcKw: Infinity, equipmentDbId: 'ecoflow-ocean-pro-24kw' },
   ],
 
   battery: {

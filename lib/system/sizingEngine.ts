@@ -387,7 +387,7 @@ function pickRatioAwareTier(
   totalDcKw: number,
   panelCount: number,
   ppu: (m: BrandInverterModelRef) => number,
-): { ref: BrandInverterModelRef; qty: number; undersized?: boolean } | undefined {
+): { ref: BrandInverterModelRef; qty: number; undersized?: boolean; noWindowCandidateAvailable?: boolean } | undefined {
   // Only applies to string / optimizer / hybrid topologies.
   // Micro topologies are handled separately (qty = ceil(panels / modulesPerDevice)).
   // v61.9: Also filter out active:false models. The equipment-db active flag marks
@@ -430,6 +430,11 @@ function pickRatioAwareTier(
   const inWindow = aboveFloor.filter(
     c => c.ratio >= PREFERRED_DC_AC_RATIO_MIN && c.ratio <= PREFERRED_DC_AC_RATIO_MAX,
   );
+  // v61.13: track whether ANY above-floor candidate could hit the preferred window.
+  // When false, the DC_AC_RATIO_OUTSIDE_PREFERRED advisory should be suppressed --
+  // the engine picked the best physically possible option; the advisory would be
+  // misleading (e.g. EcoFlow 11kW at 1.53 for 17.6 kW DC where 24kW = ratio 0.73).
+  const noWindowCandidateAvailable = inWindow.length === 0;
   const pool = inWindow.length > 0 ? inWindow : aboveFloor;
 
   // Step 3: pick the candidate closest to the target ratio (1.25).
@@ -444,7 +449,7 @@ function pickRatioAwareTier(
     return curr.model.equipmentDbId < prev.model.equipmentDbId ? curr : prev;
   });
 
-  return { ref: best.model, qty: best.qty };
+  return { ref: best.model, qty: best.qty, noWindowCandidateAvailable };
 }
 
 function resolveBrand(
@@ -1307,8 +1312,14 @@ function sizeInverters(
       message: `DC/AC ratio ${finalRatio.toFixed(2)} is outside ${brand.displayName}'s recommended range ${range.min}-${range.max}.`,
     });
   }
-  // Advisory: preferred design window 1.15-1.35.
+  // Advisory: preferred design window 1.20-1.40.
+  // v61.13: suppress when NO brand model could hit the preferred window for this
+  // array size (e.g. EcoFlow 11kW=1.53 valid, 24kW=0.73 below floor). Emitting
+  // the advisory in that case is misleading — the engine picked the best possible
+  // option. Only fire when the engine had an in-window option but didn't pick it.
+  const _noWindowOption = ratioAwarePick?.noWindowCandidateAvailable ?? false;
   if (
+    !_noWindowOption &&
     finalRatio >= 1.0 &&
     (finalRatio < PREFERRED_DC_AC_RATIO_MIN || finalRatio > PREFERRED_DC_AC_RATIO_MAX)
   ) {
