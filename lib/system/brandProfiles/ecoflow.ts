@@ -31,7 +31,7 @@ export const ECOFLOW_PROFILE: BrandProfile = {
   inverterType: 'ecoflow',
 
   supportedInverterModels: [
-    // v58.14 — US OCEAN Pro (primary US SKUs)
+    // v58.14 — US OCEAN Pro (primary US SKUs, active:true in equipment-db)
     {
       equipmentDbId: 'ecoflow-ocean-pro-11kw',
       acKw: 11.5,
@@ -48,31 +48,11 @@ export const ECOFLOW_PROFILE: BrandProfile = {
       minPanelsPerString: 4,
       maxPanelsPerString: 16,
     },
-    // Legacy EU/AU PowerOcean (inactive in DB, kept for back-compat)
-    {
-      equipmentDbId: 'ecoflow-power-ocean-5kw',
-      acKw: 5.0,
-      dcKwMax: 7.5,
-      mpptCount: 2,
-      minPanelsPerString: 6,
-      maxPanelsPerString: 14,
-    },
-    {
-      equipmentDbId: 'ecoflow-power-ocean-10kw',
-      acKw: 10.0,
-      dcKwMax: 15.0,
-      mpptCount: 3,
-      minPanelsPerString: 6,
-      maxPanelsPerString: 14,
-    },
-    {
-      equipmentDbId: 'ecoflow-power-ocean-20kw',
-      acKw: 20.0,
-      dcKwMax: 30.0,
-      mpptCount: 4,
-      minPanelsPerString: 6,
-      maxPanelsPerString: 14,
-    },
+    // NOTE v61.12: Legacy EU/AU PowerOcean SKUs (ecoflow-power-ocean-5kw/10kw/20kw)
+    // removed from supportedInverterModels. They are active:false in equipment-db
+    // and must not be selectable by the sizing engine. Stale projects that saved
+    // one of these IDs will be redirected to ocean-pro-11kw by the active:false
+    // guard in sizeInverters().
   ],
 
   // Sizing tiers — only use ACTIVE US SKUs (OCEAN Pro 11.5 / 24 kW).

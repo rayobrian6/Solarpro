@@ -946,7 +946,12 @@ function sizeInverters(
     const ref = brand.supportedInverterModels.find(
       m => m.equipmentDbId === input.selectedInverterId,
     );
-    if (ref) {
+    // v61.12: Skip active:false equipment DB entries. Stale saved configs may
+    // reference legacy/deactivated SKUs (e.g. ecoflow-power-ocean-5kw EU/AU).
+    // Treat them as if selectedInverterId was not set and fall through to auto-tier.
+    const refEquipment = ref ? STRING_INVERTERS.find(x => x.id === ref.equipmentDbId) : undefined;
+    const refIsActive = !refEquipment || refEquipment.active !== false;
+    if (ref && refIsActive) {
       // Micro topology: qty driven by panel count / modulesPerDevice.
       // Upsizing to a different micro model is not a common real-world
       // pattern (installers use one SKU across a job), so keep the

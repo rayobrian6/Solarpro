@@ -96,8 +96,10 @@ describe('Sizing Engine — Brand-driven equipment derivation', () => {
     });
     expect(result.brand.id).toBe('ecoflow');
     expect(result.topology).toBe('hybrid');
-    // 25 panels * 400W = 10 kW → ecoflow-power-ocean-10kw
-    expect(result.inverterModels[0].equipmentDbId).toBe('ecoflow-power-ocean-10kw');
+    // v61.12: Legacy ecoflow-power-ocean-10kw (EU/AU, active:false) removed from
+    // supportedInverterModels. 25 panels * 400W = 10 kW DC → ecoflow-ocean-pro-11kw
+    // (US OCEAN Pro, active:true, 11.5 kW AC / 40 kW DC max, 8 MPPTs).
+    expect(result.inverterModels[0].equipmentDbId).toBe('ecoflow-ocean-pro-11kw');
     expect(result.battery).not.toBeNull();
     expect(result.battery!.moduleCount).toBe(2);
     expect(result.battery!.installedKwh).toBe(10);
@@ -280,7 +282,8 @@ describe('Sizing Engine — 55-panel system (regression: string-capacity sizing)
     assertNoOrphans(r, 55);
   });
 
-  it('EcoFlow: 55 panels → PowerOcean 20kW with 4 MPPTs, no orphans', () => {
+  it('EcoFlow: 55 panels → OCEAN Pro hybrid, no orphans', () => {
+    // v61.12: Legacy PowerOcean 20kW removed; engine picks OCEAN Pro (11.5 or 24 kW).
     const r = sizeSystemFromBrand({ systemType: 'fence', panelCount: 55, selectedBrand: 'ecoflow' });
     expect(r.topology).toBe('hybrid');
     assertNoOrphans(r, 55);
