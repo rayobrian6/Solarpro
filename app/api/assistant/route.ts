@@ -200,6 +200,23 @@ function buildSystemPrompt(
     lines.push(`  system:                 ${es.systemKwDc} kW DC / ${es.systemKwAc} kW AC, ${es.topology}, ${es.stringCount} strings`);
     if (es.inverterModel)      lines.push(`  inverterModel:          ${es.inverterModel}`);
     if (es.complianceStatus)   lines.push(`  complianceStatus:       ${es.complianceStatus}`);
+    // v61.4 Truth Lock: always inject authoritative interpretation rules
+    lines.push('');
+    lines.push('INVERTER CONFIG TRUTH LOCK (v61.4) — follow these rules exactly:');
+    lines.push('  - config.inverters IS the authoritative state. Always report from this snapshot.');
+    lines.push('  - sizingRecommendation is a SUGGESTION only. Never report recommended values as current config.');
+    if (es.displayMode === 'recommended') {
+      lines.push('  - displayMode=recommended: user is previewing the engine suggestion, NOT their saved config.');
+      lines.push('    When answering "what is my system size / inverter / strings" — use config values, not the preview.');
+    }
+    if (es.panelCountMismatch) {
+      lines.push('  - panelCountMismatch=true: CAD panel count disagrees with string layout.');
+      lines.push('    Explain: "Your CAD shows X panels but the string config has Y. Apply the sizing recommendation to sync them."');
+      lines.push('    Never infer — state the mismatch and what the user must do.');
+    }
+    lines.push('  - NEVER infer inverter count, string count, or kW from topology alone.');
+    lines.push('  - NEVER say "you have N strings" unless stringCount is in this snapshot.');
+    lines.push('  - If engineeringState is absent: say "I don\'t have live engineering state right now."');
     engineeringStateStr = '\n' + lines.join('\n');
   }
 

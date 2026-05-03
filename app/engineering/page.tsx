@@ -55,6 +55,8 @@ import {
   buildStringConfig   as _buildStrCfgRaw,
   newInverterConfig   as _newInvCfgRaw,
   rebuildInverterStrings as _rebuildInvStringsRaw,
+  normalizeInverterConfig,
+  assertValidInverter,
   type BuildInverterOptions as _BuildInverterOptions,
   type BuildStringOptions   as _BuildStringOptions,
   type NewInverterOptions   as _NewInverterOptions,
@@ -1143,13 +1145,29 @@ function EngineeringPageInner() {
                     });
                     console.log('[savedConfig] corruption fixed: ' + _allStrings.length + ' × 1 → ' + _fixResult.strings.map((s: any) => s.panelCount).join('+'));
                   } else if (_invType0 === 'micro') {
-                    // Micro: set single string to total panel count
-                    merged.inverters = [{ ..._corrupted[0], strings: [{ ..._corrupted[0].strings[0], panelCount: _totalPanels }] }];
+                    // Micro: set single string to total panel count — use builder to maintain metadata
+                    const _microStr = _buildStrCfg({
+                      index:      0,
+                      existingId: _corrupted[0].strings[0]?.id,
+                      panelCount: _totalPanels,
+                      panelId:    _corrupted[0].strings[0]?.panelId,
+                      wireGauge:  _corrupted[0].strings[0]?.wireGauge,
+                    });
+                    merged.inverters = [_buildInvCfg({
+                      existingId: _corrupted[0].id,
+                      inverterId: _corrupted[0].inverterId,
+                      type:       'micro' as InverterConfig['type'],
+                      strings:    [_microStr],
+                    })];
                   }
                 } catch { /* keep corrupt state — at least it loads */ }
               }
             }
-            return merged;
+            // v61.4 Hydration Lock: normalise ALL inverters through the central
+            // builder before committing to state. This guarantees stringsPerInverter
+            // and modulesPerString metadata are always consistent with the actual
+            // strings array, even for configs that pre-date the Lock Architecture.
+            return normalizeInverterConfig(merged);
           });
         } else if (Object.keys(patches).length > 0) {
           // No saved config — use seed patches as before
@@ -1158,7 +1176,8 @@ function EngineeringPageInner() {
             // Phase 11: silent brand/panel reconciliation removed from load path.
             // Users now see their configured equipment on load; mismatches are
             // surfaced via the SizingRecommendation panel (apply = explicit).
-            return merged;
+            // v61.4 Hydration Lock: normalise seed patches inverters too.
+            return normalizeInverterConfig(merged);
           });
         }
 
@@ -1172,7 +1191,8 @@ function EngineeringPageInner() {
               const localConfig = JSON.parse(localRaw) as Partial<ProjectConfig>;
               if (localConfig && Object.keys(localConfig).length > 0) {
                 console.log('[EngineeringPage] Restoring from localStorage fallback (no DB config)');
-                setConfig(prev => ({ ...prev, ...localConfig }));
+                // v61.4 Hydration Lock: normalise localStorage inverters through the central builder.
+                setConfig(prev => normalizeInverterConfig({ ...prev, ...localConfig }));
               }
             }
           } catch { /* localStorage unavailable or corrupt — ignore */ }
@@ -2372,6 +2392,52 @@ function EngineeringPageInner() {
   // Clear snapshot on unmount so SolarDog doesn't show stale engineering state
   // when the user navigates away from the engineering page.
   useEffect(() => () => clearEngineeringSnapshot(), [clearEngineeringSnapshot]);
+
+  // ── v61.4 Phase 2: Global Runtime Guard ──────────────────────────────────────
+  // Auto-heal any config.inverters whose metadata is inconsistent with their
+  // strings arrays. This catches configs that slipped through hydration without
+  // going through normalizeInverterConfig (e.g. very old DB records, third-party
+  // integrations, or future code paths that miss the Phase 1 wrapping).
+  //
+  // Checks (mirrors assertInverterMetadata invariants):
+  //   A) stringsPerInverter !== strings.length  -- rebuild metadata
+  //   B) modulesPerString is missing/zero        -- rebuild metadata
+  //   C) any string.panelCount === 0            -- rebuild metadata
+  //
+  // Only fires when a violation is detected -- no-op on healthy configs.
+  useEffect(() => {
+    if (!Array.isArray(config.inverters) || config.inverters.length === 0) return;
+    const needsHeal = config.inverters.some((inv: any) =>
+      typeof inv.stringsPerInverter !== 'number' ||
+      inv.stringsPerInverter !== (inv.strings?.length ?? 0) ||
+      !inv.modulesPerString ||
+      (Array.isArray(inv.strings) && inv.strings.some((s: any) => !s.panelCount))
+    );
+    if (!needsHeal) return;
+    console.warn('[v61.4 RuntimeGuard] Detected stale inverter metadata -- auto-healing via normalizeInverterConfig');
+    setConfig(prev => normalizeInverterConfig(prev));
+  }, [config.inverters]);
+
+  // ── v61.4 Phase 5: Hard Assertion (dev mode) ─────────────────────────────────
+  // In development mode, assert that every InverterConfig in config.inverters
+  // satisfies the builder invariants. This fires on every render where
+  // config.inverters changes, catching any new code paths that bypass the
+  // central builder before they reach production.
+  //
+  // assertValidInverter throws in dev, logs in prod (see assertInverterMetadata).
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return;
+    if (!Array.isArray(config.inverters)) return;
+    config.inverters.forEach((inv, i) => {
+      try {
+        assertValidInverter(inv as any, `config.inverters[${i}]`);
+      } catch (err) {
+        // Surface as console.error in dev so it appears in the browser console
+        // without crashing the page. The runtime guard (Phase 2) will auto-heal.
+        console.error('[v61.4 AssertValidInverter] Invariant violation:', err);
+      }
+    });
+  }, [config.inverters]);
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
@@ -4932,12 +4998,26 @@ function EngineeringPageInner() {
             // FIX 1: Micro topology — just update total panel count on the single string.
             // Never create N×1 strings for micro.
             if (_pcInvType === 'micro') {
+              // v61.4 Phase 3: use builder — no raw string literals outside factory
               setConfig(prev => ({
                 ...prev,
-                inverters: prev.inverters.map((inv, ii) => ii === 0
-                  ? { ...inv, strings: [{ ...(inv.strings[0] ?? newString(0, prev.systemType)), panelCount: _pcPc }] }
-                  : inv
-                ),
+                inverters: prev.inverters.map((inv, ii) => {
+                  if (ii !== 0) return inv;
+                  const baseStr = inv.strings[0];
+                  const newStr = _buildStrCfg({
+                    index:      0,
+                    existingId: baseStr?.id,
+                    panelCount: _pcPc,
+                    panelId:    baseStr?.panelId,
+                    wireGauge:  baseStr?.wireGauge,
+                  });
+                  return _buildInvCfg({
+                    existingId: inv.id,
+                    inverterId: inv.inverterId,
+                    type:       inv.type as InverterConfig['type'],
+                    strings:    [newStr],
+                  });
+                }),
               }));
               setTimeout(() => runCalc(), 400);
             } else {

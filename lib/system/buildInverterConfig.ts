@@ -318,3 +318,79 @@ export function assertInverterMetadata(inv: InverterConfig, context = ''): void 
     console.error(msg);
   }
 }
+
+// ─── Hydration normalizer ────────────────────────────────────────────────────
+
+/**
+ * Normalize a single raw inverter object (possibly from DB / localStorage /
+ * legacy snapshot) into a fully-validated InverterConfig.
+ *
+ * Safe to call on already-normalized objects — it is idempotent.
+ *
+ * Repair strategy:
+ *  1. If `strings` is empty / missing, synthesize one string using panelCount
+ *     (or modulesPerString or 1 as last resort) so the builder never throws.
+ *  2. Pass through buildInverterConfig which enforces all metadata invariants.
+ */
+export function normalizeRawInverter(raw: Record<string, unknown>): InverterConfig {
+  const rawStrings = Array.isArray(raw.strings) ? (raw.strings as Record<string, unknown>[]) : [];
+
+  // Synthesise a minimal string when none exist
+  const strings: BuildStringOptions[] = rawStrings.length > 0
+    ? rawStrings.map((s, i) => ({
+        index:          i,
+        existingId:     typeof s.id === 'string' ? s.id : undefined,
+        label:          typeof s.label === 'string' ? s.label : `String ${i + 1}`,
+        panelCount:     typeof s.panelCount === 'number' && s.panelCount > 0 ? s.panelCount : 1,
+        panelId:        typeof s.panelId === 'string' ? s.panelId : undefined,
+        tilt:           typeof s.tilt === 'number' ? s.tilt : undefined,
+        azimuth:        typeof s.azimuth === 'number' ? s.azimuth : undefined,
+        roofType:       typeof s.roofType === 'string' ? (s.roofType as RoofType) : undefined,
+        mountingSystem: typeof s.mountingSystem === 'string' ? s.mountingSystem : undefined,
+        wireGauge:      typeof s.wireGauge === 'string' ? s.wireGauge : undefined,
+        wireLength:     typeof s.wireLength === 'number' ? s.wireLength : undefined,
+      }))
+    : [{
+        index:      0,
+        panelCount: typeof raw.modulesPerString === 'number' && raw.modulesPerString > 0
+          ? raw.modulesPerString
+          : typeof raw.panelCount === 'number' && raw.panelCount > 0
+            ? raw.panelCount
+            : 1,
+      }];
+
+  const builtStrings = strings.map(s => buildStringConfig(s));
+
+  return buildInverterConfig({
+    existingId:            typeof raw.id === 'string' ? raw.id : undefined,
+    inverterId:            typeof raw.inverterId === 'string' ? raw.inverterId : 'unknown',
+    type:                  typeof raw.type === 'string' ? (raw.type as InverterConfig['type']) : 'string',
+    strings:               builtStrings,
+    optimizerPeripheralId: typeof raw.optimizerPeripheralId === 'string' ? raw.optimizerPeripheralId : undefined,
+    deviceRatioOverride:   typeof raw.deviceRatioOverride === 'number' ? raw.deviceRatioOverride : undefined,
+  });
+}
+
+/**
+ * Normalize an entire ProjectConfig's inverters array.
+ * Pass any loaded config through this before calling setConfig().
+ *
+ * Idempotent — safe to call on already-normalized configs.
+ */
+export function normalizeInverterConfig<T extends { inverters?: unknown }>(config: T): T {
+  if (!Array.isArray(config.inverters) || config.inverters.length === 0) {
+    return config;
+  }
+  return {
+    ...config,
+    inverters: (config.inverters as Record<string, unknown>[]).map(normalizeRawInverter),
+  };
+}
+
+/**
+ * Phase 5 hard assertion — alias of assertInverterMetadata.
+ * Throws in dev mode, logs in prod. Use in dev-mode useEffect guards.
+ */
+export function assertValidInverter(inv: InverterConfig, context = ''): void {
+  assertInverterMetadata(inv, context);
+}
