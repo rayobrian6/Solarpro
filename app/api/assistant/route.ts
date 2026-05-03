@@ -69,6 +69,22 @@ interface AssistantRequest {
     visibleCards?:      string[];      // card titles/labels visible
     visibleCounts?:     Record<string, number>; // e.g. { todayCommands: 12, openProjects: 3 }
     selectedEquipment?: Record<string, string>; // e.g. { inverter: 'SMA SB7.7', battery: 'Tesla PW3' }
+    // Phase 7: Engineering page control-plane snapshot (from engineeringStore)
+    engineeringState?: {
+      controlMode:            string;
+      sizingAutoApply:        boolean;
+      userHasEditedInverters: boolean;
+      displayMode:            string;
+      panelCountSource:       string;
+      panelCount:             number;
+      panelCountMismatch:     boolean;
+      systemKwDc:             number;
+      systemKwAc:             number;
+      topology:               string;
+      inverterModel:          string;
+      stringCount:            number;
+      complianceStatus:       string | null;
+    };
   };
 }
 
@@ -169,6 +185,24 @@ function buildSystemPrompt(
     screenContextStr = '\n' + lines.join('\n');
   }
 
+  // Phase 7: engineering state awareness block
+  let engineeringStateStr = '';
+  if (ctx.engineeringState) {
+    const es = ctx.engineeringState as Record<string, unknown>;
+    const lines: string[] = ['ENGINEERING PAGE STATE:'];
+    lines.push(`  controlMode:            ${es.controlMode}   (auto=engine rules | guided=suggestions | manual=user-locked)`);
+    lines.push(`  sizingAutoApply:        ${es.sizingAutoApply}   (true=auto-apply sizing recommendation on mismatch)`);
+    lines.push(`  userHasEditedInverters: ${es.userHasEditedInverters}   (true=user has manual overrides; auto-apply + smart-defaults blocked)`);
+    lines.push(`  displayMode:            ${es.displayMode}   (current=user config | recommended=engine output)`);
+    lines.push(`  panelCountSource:       ${es.panelCountSource}   (cad=authoritative | config=fallback)`);
+    lines.push(`  panelCount:             ${es.panelCount}`);
+    if (es.panelCountMismatch) lines.push(`  panelCountMismatch:     true  ⚠ CAD panel count disagrees with string config`);
+    lines.push(`  system:                 ${es.systemKwDc} kW DC / ${es.systemKwAc} kW AC, ${es.topology}, ${es.stringCount} strings`);
+    if (es.inverterModel)      lines.push(`  inverterModel:          ${es.inverterModel}`);
+    if (es.complianceStatus)   lines.push(`  complianceStatus:       ${es.complianceStatus}`);
+    engineeringStateStr = '\n' + lines.join('\n');
+  }
+
   const basicContextLines: string[] = [];
   if (ctx.currentRoute)                              basicContextLines.push(`  currentRoute:      ${ctx.currentRoute}`);
   if (ctx.activeTab ?? ctx.currentTab)               basicContextLines.push(`  activeTab:         ${ctx.activeTab ?? ctx.currentTab}`);
@@ -213,7 +247,7 @@ CURRENT DIAGNOSTIC STATE:
         hasSelectedEquip   ? 'equipment' : '',
       ].filter(Boolean).join(', ')
     : 'NO — visibleButtons/visibleWarnings/visibleCounts not sent by this page yet'}
-${basicContextStr}${screenContextStr}
+${basicContextStr}${screenContextStr}${engineeringStateStr}
 
 ${conversationMemoryLine}
 

@@ -18,6 +18,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/appStore';
+import { useEngineeringStore, selectEngineeringSnapshot } from '@/store/engineeringStore';
 import type { AssistantResponse, SolarDogMode } from '@/app/api/assistant/route';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -196,6 +197,8 @@ export default function SolarDog() {
   const storeActiveProject = useAppStore(s =>
     s.activeProjectId ? s.projects.find(p => p.id === s.activeProjectId) ?? null : null
   );
+  // Phase 7: engineering page snapshot (control-plane awareness)
+  const engineeringSnapshot = useEngineeringStore(selectEngineeringSnapshot);
 
   // Resolved project ID
   const [resolvedProjectId, setResolvedProjectId] = useState<string | null>(null);
@@ -640,6 +643,25 @@ export default function SolarDog() {
       richContext.projectName        = storeActiveProject.name;
       richContext.currentProjectName = storeActiveProject.name;
       if (storeActiveProject.systemSizeKw) richContext.systemSizeKw = storeActiveProject.systemSizeKw;
+    }
+    // Phase 7: inject engineering page snapshot when it's fresh (updatedAt > 0)
+    // so SolarDog knows controlMode, displayMode, userHasEditedInverters, etc.
+    if (engineeringSnapshot.updatedAt > 0) {
+      richContext.engineeringState = {
+        controlMode:            engineeringSnapshot.controlMode,
+        sizingAutoApply:        engineeringSnapshot.sizingAutoApply,
+        userHasEditedInverters: engineeringSnapshot.userHasEditedInverters,
+        displayMode:            engineeringSnapshot.displayMode,
+        panelCountSource:       engineeringSnapshot.panelCountSource,
+        panelCount:             engineeringSnapshot.panelCount,
+        panelCountMismatch:     engineeringSnapshot.panelCountMismatch,
+        systemKwDc:             engineeringSnapshot.systemKwDc,
+        systemKwAc:             engineeringSnapshot.systemKwAc,
+        topology:               engineeringSnapshot.topology,
+        inverterModel:          engineeringSnapshot.inverterModel,
+        stringCount:            engineeringSnapshot.stringCount,
+        complianceStatus:       engineeringSnapshot.complianceStatus,
+      };
     }
     // visibleButtons / visibleWarnings / visibleCounts / visibleCards / selectedEquipment
     // are injected by individual page components via props or a global context bridge.

@@ -44,6 +44,8 @@
     "node_modules",
     "lib/engineering-core.test.ts",
     "scripts/**",
-    "debug_*.ts"
+    "debug_*.ts",
+    "**/__tests__/**",
+    "jest.config.ts"
   ]
 }

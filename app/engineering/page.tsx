@@ -48,6 +48,30 @@ import { diffNormalizedInverterState } from '@/lib/system/normalizedInverter';
 // source of system logic — this module is pure bookkeeping + a thin call
 // to sizeSystemFromBrand() and hydration of the result into config.
 import { applySmartDefaultsOnce } from '@/lib/system/smartDefaults';
+// Lock Architecture — single inverter builder (v61.3).
+// All InverterConfig construction must go through this factory.
+import {
+  buildInverterConfig as _buildInvCfgRaw,
+  buildStringConfig   as _buildStrCfgRaw,
+  newInverterConfig   as _newInvCfgRaw,
+  rebuildInverterStrings as _rebuildInvStringsRaw,
+  type BuildInverterOptions as _BuildInverterOptions,
+  type BuildStringOptions   as _BuildStringOptions,
+  type NewInverterOptions   as _NewInverterOptions,
+  type RebuildStringsOptions as _RebuildStringsOptions,
+} from '@/lib/system/buildInverterConfig';
+// Cast wrappers: builder types use wide `string` for roofType; page uses a
+// narrow RoofType union. Since the page's RoofType is a strict subset of
+// string, the cast is always safe. These wrappers are the ONLY call sites
+// that should ever produce InverterConfig objects.
+const _buildInvCfg    = (o: Omit<_BuildInverterOptions, 'strings'> & { strings: StringConfig[] }): InverterConfig =>
+  _buildInvCfgRaw(o as unknown as _BuildInverterOptions) as unknown as InverterConfig;
+const _buildStrCfg    = (o: _BuildStringOptions): StringConfig =>
+  _buildStrCfgRaw(o) as unknown as StringConfig;
+const _newInvCfg      = (o: _NewInverterOptions): InverterConfig =>
+  _newInvCfgRaw(o) as unknown as InverterConfig;
+const _rebuildInvStrings = (o: Omit<_RebuildStringsOptions, 'existing'> & { existing: InverterConfig }): InverterConfig =>
+  _rebuildInvStringsRaw(o as unknown as _RebuildStringsOptions) as unknown as InverterConfig;
 // Phase 13.7 — Feasibility-driven Fix Engine
 import { applyFeasibleFix } from '@/lib/system/fixEngine';
 // Phase 13.9 — Brand inference from current inverter (prevents stale selectedBrand mismatch loop)
@@ -67,6 +91,7 @@ import { getUtilitiesByStateNational, STATE_UTILITY_FALLBACK } from '@/lib/utili
 import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 import { searchAhj } from '@/lib/jurisdictions/ahj-national';
+import { useEngineeringStore, simplifyPanelCountSource } from '@/store/engineeringStore';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -414,16 +439,13 @@ function newInverter(type: InverterType, sysType?: string): InverterConfig {
   } else {
     defaultId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
   }
-  const strings = [newString(0, sysType)];
-  // v61.2: always set metadata so reconciliation step never trims new inverters.
-  return {
-    id: `inv-${Date.now()}`,
+  // v61.3: route through central builder — guarantees metadata invariants.
+  const firstString = newString(0, sysType);
+  return _buildInvCfg({
     inverterId: defaultId,
     type,
-    strings,
-    stringsPerInverter: strings.length,
-    modulesPerString: strings[0]?.panelCount ?? 10,
-  };
+    strings: [firstString],
+  });
 }
 
 const defaultProject: ProjectConfig = {
@@ -879,14 +901,12 @@ function EngineeringPageInner() {
           }
 
 
-          patches.inverters = [{
-            id:                'inv-seed-0',
+          patches.inverters = [_buildInvCfg({
+            existingId: 'inv-seed-0',
             inverterId,
-            type:              invType,
+            type:       invType,
             strings,
-            stringsPerInverter: strings.length,
-            modulesPerString:   strings[0]?.panelCount ?? 10,
-          }];
+          })];
 
           // ── Electrical / structural defaults from engCfg ──────────────────
           if (engCfg) {
@@ -974,14 +994,12 @@ function EngineeringPageInner() {
               wireGauge: '#10 AWG',
               wireLength: 50,
             }));
-            patches.inverters = [{
-              id:                'inv-auto-0',
-              inverterId:        p.selectedInverter?.id || (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus'),
-              type:              invType,
+            patches.inverters = [_buildInvCfg({
+              existingId: 'inv-auto-0',
+              inverterId: p.selectedInverter?.id || (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus'),
+              type:       invType,
               strings,
-              stringsPerInverter: strings.length,
-              modulesPerString:   strings[0]?.panelCount ?? 10,
-            }];
+            })];
           patches.mountingId = p.selectedMounting?.id || patches.mountingId;
           patches.utilityId = p.utilityId || patches.utilityId;
           if (panelCount > 0) {
@@ -1016,33 +1034,38 @@ function EngineeringPageInner() {
               // All engineering config fields from saved workspace (user's last state)
               ...savedConfig,
             };
-            // v61.2 reconciliation: if a saved config has stringsPerInverter metadata
+            // v61.2/v61.3 reconciliation: if a saved config has stringsPerInverter metadata
             // that disagrees with the actual inv.strings array length, trust
             // stringsPerInverter and trim/pad the strings array to match.
-            // This fixes configs saved before the stringsPerInverter-resize fix.
+            // C-09 fix: target is clamped to Math.max(1, target) — reconciler
+            //           can never trim an inverter to zero strings.
             if (Array.isArray(merged.inverters)) {
               merged.inverters = merged.inverters.map((inv: any) => {
                 if (typeof inv.stringsPerInverter !== 'number') return inv;
-                const target = inv.stringsPerInverter;
+                // C-09: enforce minimum of 1 — never trim to zero
+                const target = Math.max(1, inv.stringsPerInverter);
                 if (!Array.isArray(inv.strings) || inv.strings.length === target) return inv;
                 const modulesEach = inv.modulesPerString ?? inv.strings[0]?.panelCount ?? 10;
                 const panelId = inv.strings[0]?.panelId ?? 'panel-default';
                 const wireGauge = inv.strings[0]?.wireGauge ?? '#10 AWG';
                 if (target < inv.strings.length) {
+                  // Trim — ensure at least 1 remains (guarded by target >= 1 above)
                   return { ...inv, strings: inv.strings.slice(0, target) };
                 } else {
-                  const extra = Array.from({ length: target - inv.strings.length }, (_: any, k: number) => ({
-                    id: `str-hydrate-${Date.now()}-${k}`,
-                    label: `String ${inv.strings.length + k + 1}`,
-                    panelCount: modulesEach,
-                    panelId,
-                    wireGauge,
-                    wireLength: inv.strings[0]?.wireLength ?? 0,
-                    tilt: inv.strings[0]?.tilt ?? 20,
-                    azimuth: inv.strings[0]?.azimuth ?? 180,
-                    roofType: inv.strings[0]?.roofType ?? 'asphalt-shingle',
-                    mountingSystem: inv.strings[0]?.mountingSystem ?? 'flush',
-                  }));
+                  // v61.3: use central builder for padded strings
+                  const extra = Array.from({ length: target - inv.strings.length }, (_: any, k: number) =>
+                    _buildStrCfg({
+                      index:          inv.strings.length + k,
+                      panelCount:     modulesEach,
+                      panelId,
+                      wireGauge,
+                      wireLength:     inv.strings[0]?.wireLength ?? 0,
+                      tilt:           inv.strings[0]?.tilt ?? 20,
+                      azimuth:        inv.strings[0]?.azimuth ?? 180,
+                      roofType:       (inv.strings[0]?.roofType ?? 'shingle') as any,
+                      mountingSystem: inv.strings[0]?.mountingSystem ?? 'ironridge-xr100',
+                    })
+                  );
                   return { ...inv, strings: [...inv.strings, ...extra] };
                 }
               });
@@ -1409,14 +1432,12 @@ function EngineeringPageInner() {
           }));
         }
 
-        patches.inverters = [{
-          id:                'inv-restored-0',
+        patches.inverters = [_buildInvCfg({
+          existingId: 'inv-restored-0',
           inverterId,
-          type:              invType,
+          type:       invType,
           strings,
-          stringsPerInverter: strings.length,
-          modulesPerString:   strings[0]?.panelCount ?? 10,
-        }];
+        })];
 
         // Apply all patches
         if (Object.keys(patches).length > 0) {
@@ -2314,6 +2335,45 @@ function EngineeringPageInner() {
     }
   }, [sizingRecommendation, systemPanelCount]);
 
+  // ─── Phase 7: SolarDog awareness sync ────────────────────────────────────
+  // Write a lightweight snapshot of the engineering control-plane into
+  // the shared engineeringStore so SolarDog can read it without prop drilling.
+  // Runs whenever any of the tracked values change.
+  const { setEngineeringSnapshot, clearEngineeringSnapshot } = useEngineeringStore();
+  useEffect(() => {
+    const inv0 = config.inverters[0];
+    const rawTopology = inv0?.type ?? 'string';
+    const topology = rawTopology === 'ecoflow' ? 'hybrid' : rawTopology;
+    const invData = inv0 ? (getInvById(inv0.inverterId, inv0.type) as any) : null;
+    setEngineeringSnapshot({
+      projectId:              searchParams?.get('projectId') ?? null,
+      controlMode,
+      sizingAutoApply,
+      userHasEditedInverters: config.userHasEditedInverters ?? false,
+      displayMode,
+      panelCountSource:       simplifyPanelCountSource(resolvedPanelCount.source),
+      panelCount:             systemPanelCount,
+      panelCountMismatch:     resolvedPanelCount.mismatchedWithConfig,
+      systemKwDc:             Number(totalKw) || 0,
+      systemKwAc:             Number(totalInverterKw) || 0,
+      topology,
+      inverterModel:          invData?.model ?? inv0?.inverterId ?? '',
+      stringCount:            config.inverters.reduce((s, inv) => s + inv.strings.length, 0),
+      complianceStatus:       compliance.overallStatus ?? null,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    searchParams, controlMode, sizingAutoApply,
+    config.userHasEditedInverters, displayMode,
+    resolvedPanelCount.source, resolvedPanelCount.mismatchedWithConfig,
+    systemPanelCount, totalKw, totalInverterKw,
+    config.inverters, compliance.overallStatus,
+  ]);
+  // Clear snapshot on unmount so SolarDog doesn't show stale engineering state
+  // when the user navigates away from the engineering page.
+  useEffect(() => () => clearEngineeringSnapshot(), [clearEngineeringSnapshot]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   /**
    * Phase 11 — Apply recommended sizing. Overwrites inverters / strings
    * cleanly (no partial mutations). Never silently overrides — this only
@@ -2408,12 +2468,12 @@ function EngineeringPageInner() {
         const actualPanelCount = rec.input.panelCount > 0
           ? rec.input.panelCount
           : rec.microDeviceCount;
-        newInverters.push({
-          id: `inv-applied-${Date.now()}`,
+        newInverters.push(_buildInvCfg({
+          existingId: `inv-applied-${Date.now()}`,
           inverterId: primaryModel.equipmentDbId,
           type: 'micro',
           strings: [buildString(0, actualPanelCount, 'All Panels')],
-        });
+        }));
       } else {
         // string / optimizer / hybrid: group strings by inverterIndex.
         const stringsByInverter = new Map<number, typeof rec.strings>();
@@ -2428,12 +2488,12 @@ function EngineeringPageInner() {
             ? assigned.map((s, i) => buildString(i, s.panelCount, `String ${i + 1}`))
             // Fallback: one empty string (engine didn't assign — unlikely)
             : [buildString(0, 0, 'String 1')];
-          newInverters.push({
-            id: `inv-applied-${Date.now()}-${idx}`,
+          newInverters.push(_buildInvCfg({
+            existingId: `inv-applied-${Date.now()}-${idx}`,
             inverterId: primaryModel.equipmentDbId,
             type: uiType,
             strings: invStrings,
-          });
+          }));
         }
       }
 
@@ -2573,28 +2633,32 @@ function EngineeringPageInner() {
     // then override only the structural fields the sizing engine
     // decided (id, panelCount, panelId).
     setConfig(prev => {
+      // v61.3 P-06: route all Smart Defaults inverter construction through
+      // the central builder to guarantee stringsPerInverter + modulesPerString
+      // are always set correctly.
       const hydratedInverters: InverterConfig[] = result.patch.inverters!.map((inv, idx) => {
         const builtStrings = inv.strings.map((s, sIdx) => {
           const base = newString(sIdx, prev.systemType);
-          return {
-            ...base,
-            id: s.id,
-            label: `String ${String.fromCharCode(65 + idx)}${sIdx + 1}`,
-            panelCount: s.panelCount,
-            panelId: s.panelId || base.panelId,
-          };
+          return _buildStrCfg({
+            index:          sIdx,
+            existingId:     s.id,
+            label:          `String ${String.fromCharCode(65 + idx)}${sIdx + 1}`,
+            panelCount:     s.panelCount,
+            panelId:        s.panelId || base.panelId,
+            tilt:           base.tilt,
+            azimuth:        base.azimuth,
+            roofType:       base.roofType,
+            mountingSystem: base.mountingSystem,
+            wireGauge:      base.wireGauge,
+            wireLength:     base.wireLength,
+          });
         });
-        // v61.2: keep stringsPerInverter + modulesPerString in sync so the
-        // reconciliation step never trims these newly-built strings back down.
-        const _mps = builtStrings[0]?.panelCount ?? 10;
-        return {
-          id: inv.id,
+        return _buildInvCfg({
+          existingId: inv.id,
           inverterId: inv.inverterId,
-          type: inv.type as InverterType,
-          strings: builtStrings,
-          stringsPerInverter: builtStrings.length,
-          modulesPerString: _mps,
-        };
+          type:       inv.type as InverterType,
+          strings:    builtStrings,
+        });
       });
 
       return {
@@ -2749,8 +2813,18 @@ function EngineeringPageInner() {
     );
     if (allAligned) return;
 
+    // v61.3 P-11 FIX: respect controlMode — in manual mode the user has
+    // full authority over panel selection; only warn, never auto-heal.
+    if (controlMode === 'manual') {
+      console.warn(
+        '[v61.3 P-11] Panel compat mismatch detected but controlMode=manual — skipping auto-heal.',
+        { original: compat.originalPanelId, effective: target },
+      );
+      return;
+    }
+
     console.log(
-      '🔄🔧 [v47.424 AUTO-HEAL] Panel compatibility mismatch — writing gate\'s effective panel into config.',
+      '[v47.424 AUTO-HEAL] Panel compatibility mismatch — writing gate\'s effective panel into config.',
       {
         brand: compat.brand?.id,
         original: compat.originalPanelId,
@@ -2805,16 +2879,26 @@ function EngineeringPageInner() {
         const microId = MICROINVERTERS[0]?.id || 'enphase-iq8plus';
         // Preserve existing panelId if user had one (non-destructive); otherwise use system-type default
         const existingPanelId = prev.inverters[0]?.strings[0]?.panelId;
-        const microStrings = [{ ...newString(0, prev.systemType), panelId: existingPanelId || defaultPanelForSystemType(prev.systemType), panelCount: totalPanels }];
-        const inv: InverterConfig = {
-          id: `inv-${Date.now()}`,
+        // v61.3: route through central builder — guarantees metadata invariants.
+        const microBaseStr = newString(0, prev.systemType);
+        const microStr = _buildStrCfg({
+          index:          0,
+          systemType:     prev.systemType,
+          panelCount:     totalPanels,
+          panelId:        existingPanelId || defaultPanelForSystemType(prev.systemType),
+          existingId:     microBaseStr.id,
+          tilt:           microBaseStr.tilt,
+          azimuth:        microBaseStr.azimuth,
+          roofType:       microBaseStr.roofType as any,
+          mountingSystem: microBaseStr.mountingSystem,
+          wireGauge:      microBaseStr.wireGauge,
+          wireLength:     microBaseStr.wireLength,
+        });
+        const inv = _buildInvCfg({
           inverterId: microId,
           type: 'micro',
-          strings: microStrings,
-          // v61.2: keep metadata in sync so reconciler never trims micro string
-          stringsPerInverter: microStrings.length,
-          modulesPerString: totalPanels,
-        };
+          strings: [microStr],
+        });
         setExpandedInv(inv.id);
         return { ...prev, inverters: [inv], ...LOCK };
       });
@@ -2919,12 +3003,26 @@ function EngineeringPageInner() {
         const totalPanels = authoritativeCountForMicro ?? configDerivedTotal;
         console.log('Micro topology: collapsing ALL inverters into single entry, totalPanels=', totalPanels, '(authoritative:', authoritativeCountForMicro, ')');
         const firstStr = prev.inverters[0]?.strings[0] ?? newString(0, prev.systemType);
-        const singleMicroInv: InverterConfig = {
-          id: invId,
+        // v61.3: route through central builder — guarantees metadata invariants.
+        const microCollapseStr = _buildStrCfg({
+          index:          0,
+          systemType:     prev.systemType,
+          panelCount:     totalPanels,
+          panelId:        firstStr.panelId,
+          existingId:     firstStr.id,
+          tilt:           firstStr.tilt,
+          azimuth:        firstStr.azimuth,
+          roofType:       firstStr.roofType as any,
+          mountingSystem: firstStr.mountingSystem,
+          wireGauge:      firstStr.wireGauge,
+          wireLength:     firstStr.wireLength,
+        });
+        const singleMicroInv = _buildInvCfg({
           inverterId: newInverterId,
           type: 'micro',
-          strings: [{ ...firstStr, panelCount: totalPanels }],
-        };
+          strings: [microCollapseStr],
+          existingId: invId,
+        });
         return { ...prev, inverters: [singleMicroInv], userHasEditedInverters: true };
       });
     } else {
@@ -4582,14 +4680,15 @@ function EngineeringPageInner() {
             const unitStrings = fixStrings.filter(s => s.inverterIndex === unitIdx);
             const existingInv = config.inverters[unitIdx];
 
-            newInverters.push({
-              id:         existingInv?.id ?? `inv-fix-${unitIdx}`,
+            newInverters.push(_buildInvCfg({
+              existingId: existingInv?.id ?? `inv-fix-${unitIdx}`,
               inverterId: inverterModel.equipmentDbId,
               type:       (config.inverters[0]?.type ?? 'string') as typeof config.inverters[0]['type'],
               strings:    unitStrings.map((s, si) => {
                 const baseStr = existingInv?.strings[si] ?? config.inverters[0]?.strings[0];
-                return {
-                  id:             baseStr?.id             ?? `str-fix-${unitIdx}-${si}`,
+                return _buildStrCfg({
+                  index:          si,
+                  existingId:     baseStr?.id             ?? `str-fix-${unitIdx}-${si}`,
                   label:          `String ${s.index + 1}`,
                   panelCount:     s.panelCount,
                   panelId:        baseStr?.panelId        ?? fixFirstStr?.panelId ?? '',
@@ -4599,9 +4698,9 @@ function EngineeringPageInner() {
                   mountingSystem: baseStr?.mountingSystem ?? config.mountingId,
                   wireGauge:      baseStr?.wireGauge      ?? config.wireGauge,
                   wireLength:     baseStr?.wireLength     ?? 50,
-                };
+                });
               }),
-            });
+            }));
           }
 
           updateConfig({ inverters: newInverters, userHasEditedInverters: false });
@@ -4889,18 +4988,35 @@ function EngineeringPageInner() {
 
               setConfig(prev => {
                 const invCount = Math.max(prev.inverters.length, _pcFinalByInv.size);
+                // v61.3: route through central builder for all rebuilt inverters
                 const newInverters = Array.from({ length: invCount }, (_, idx) => {
                   const inv = prev.inverters[idx] ?? prev.inverters[0];
                   const assigned = _pcFinalByInv.get(idx);
                   if (!assigned || assigned.length === 0) return inv; // no strings assigned — keep as-is
                   const newStrings = assigned.map((s, si) => {
                     const existing = inv.strings[si] ?? inv.strings[0];
-                    return { ...existing, id: existing?.id ?? `str-sync-${idx}-${si}`, panelCount: s.panelCount };
+                    return _buildStrCfg({
+                      index:          si,
+                      panelCount:     s.panelCount,
+                      panelId:        existing?.panelId,
+                      existingId:     existing?.id ?? `str-sync-${idx}-${si}`,
+                      label:          existing?.label,
+                      tilt:           existing?.tilt,
+                      azimuth:        existing?.azimuth,
+                      roofType:       existing?.roofType as any,
+                      mountingSystem: existing?.mountingSystem,
+                      wireGauge:      existing?.wireGauge,
+                      wireLength:     existing?.wireLength,
+                    });
                   });
-                  // CRITICAL: sync stringsPerInverter + modulesPerString metadata with rebuilt layout
-                  // so UI dropdowns and the reconciliation step stay consistent.
-                  const _mps = assigned[0]?.panelCount ?? newStrings[0]?.panelCount ?? 10;
-                  return { ...inv, strings: newStrings, stringsPerInverter: newStrings.length, modulesPerString: _mps };
+                  return _buildInvCfg({
+                    inverterId:  inv.inverterId,
+                    type:        inv.type,
+                    strings:     newStrings,
+                    existingId:  inv.id,
+                    optimizerPeripheralId: (inv as any).optimizerPeripheralId,
+                    deviceRatioOverride:   (inv as any).deviceRatioOverride,
+                  });
                 });
                 return { ...prev, inverters: newInverters };
               });
@@ -7190,6 +7306,21 @@ function EngineeringPageInner() {
                           `Manual dropdowns remain editable below.`
                         );
                         setTimeout(() => setAutoLoadBanner(null), 6000);
+                        // v61.3 P-09 FIX: ecosystem apply changes inverterId/type but leaves
+                        // strings[] stale. In auto/free control mode, immediately rebuild strings
+                        // via the sizing recommendation so the STRINGS/ARRAYS section is never stale.
+                        if (controlMode !== 'manual' && sizingAutoApply) {
+                          setTimeout(() => {
+                            if (sizingRecommendation) {
+                              setConfig(prev => ({ ...prev, userHasEditedInverters: false }));
+                              setTimeout(() => {
+                                if (sizingRecommendation) {
+                                  applySizingRecommendation(sizingRecommendation);
+                                }
+                              }, 50);
+                            }
+                          }, 150);
+                        }
                       }}
                     />
                     )}
