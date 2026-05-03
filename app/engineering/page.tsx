@@ -550,12 +550,26 @@ function EngineeringPageInner() {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   // Debounced save ref - holds the debounced function so it can be cancelled on unmount.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // v61.2: guard ref — set to true during "Change Project" reset so the
+  // projectId useEffect doesn't re-fire with stale searchParams before the
+  // URL update completes. Cleared as soon as searchParams has no projectId.
+  const isResettingProjectRef = useRef(false);
 
   // Auto-load project data when ?projectId= is in the URL
   // Full seed hydration: reads engineeringSeed.synthetic_eng_config to populate
   // the exact inverter/panel/string config the engineering engine needs.
   useEffect(() => {
     const projectId = searchParams?.get('projectId');
+    // v61.2: if we're in the middle of a "Change Project" reset and the URL
+    // hasn't updated yet (searchParams still has the old projectId), ignore
+    // this effect run to prevent re-hydrating the old project.
+    if (isResettingProjectRef.current) {
+      if (!projectId) {
+        // URL has caught up — clear the guard
+        isResettingProjectRef.current = false;
+      }
+      return;
+    }
     if (!projectId) return;
     setCurrentProjectId(projectId);
     if (projectAutoLoaded) return;
@@ -1094,6 +1108,8 @@ function EngineeringPageInner() {
       .then(data => {
         if (data.success && Array.isArray(data.data)) {
           setSelectorProjects(data.data);
+          // Auto-open the dropdown so the user doesn't have to click into the search box
+          setSelectorOpen(true);
         }
       })
       .catch(() => {})
@@ -2662,7 +2678,48 @@ function EngineeringPageInner() {
   };
   const updateInverter = (id: string, patch: Partial<InverterConfig>) => {
     console.log('🔒 [USER EDIT] updateInverter — engaging user lock');
-    setConfig(prev => ({ ...prev, inverters: prev.inverters.map(i => i.id === id ? { ...i, ...patch } : i), ...LOCK }));
+    setConfig(prev => ({
+      ...prev,
+      inverters: prev.inverters.map(i => {
+        if (i.id !== id) return i;
+        const updated = { ...i, ...patch };
+
+        // v61.2: When stringsPerInverter changes, actually resize the strings array
+        // to match. Without this, the dropdown stores metadata but inv.strings stays
+        // stale — causing the STRINGS / ARRAYS section to show the wrong count.
+        if ('stringsPerInverter' in patch && typeof patch.stringsPerInverter === 'number') {
+          const targetCount = patch.stringsPerInverter;
+          const currentStrings = i.strings;
+          const modulesEach = i.modulesPerString ?? currentStrings[0]?.panelCount ?? 10;
+          if (targetCount > currentStrings.length) {
+            // Add strings
+            const extra = Array.from({ length: targetCount - currentStrings.length }, (_, k) => ({
+              ...newString(currentStrings.length + k, prev.systemType),
+              id: `str-resize-${Date.now()}-${k}`,
+              panelCount: modulesEach,
+              panelId: currentStrings[0]?.panelId ?? defaultPanelForSystemType(prev.systemType),
+              wireGauge: currentStrings[0]?.wireGauge ?? '#10 AWG',
+              wireLength: currentStrings[0]?.wireLength ?? 0,
+              tilt: currentStrings[0]?.tilt ?? 20,
+              azimuth: currentStrings[0]?.azimuth ?? 180,
+            }));
+            updated.strings = [...currentStrings, ...extra];
+          } else if (targetCount < currentStrings.length) {
+            // Remove strings from the end
+            updated.strings = currentStrings.slice(0, targetCount);
+          }
+        }
+
+        // v61.2: When modulesPerString changes, update panelCount on ALL strings
+        // so each string row reflects the new module count immediately.
+        if ('modulesPerString' in patch && typeof patch.modulesPerString === 'number') {
+          updated.strings = updated.strings.map(s => ({ ...s, panelCount: patch.modulesPerString! }));
+        }
+
+        return updated;
+      }),
+      ...LOCK,
+    }));
     // v61 E5: auto-lock inverter field when user explicitly changes it in guided/manual mode
     if ('inverterId' in patch && (controlMode === 'guided' || controlMode === 'manual')) {
       setConfigLocks(prev => ({ ...prev, inverter: true }));
@@ -5694,9 +5751,12 @@ function EngineeringPageInner() {
           <button
             className="text-xs text-amber-400 hover:text-amber-300 transition-colors underline-offset-2 hover:underline"
             onClick={() => {
-              // v61.2 fix: clear state BEFORE navigating so the project selector
-              // shows immediately. Previously the URL changed but currentProjectId
-              // stayed set, so !currentProjectId was never true and the selector hid.
+              // v61.2 fix: fully reset project state so the project selector
+              // shows immediately. Clear localStorage first so the auto-load
+              // effect at line ~1083 doesn't redirect back to the same project.
+              // Set the guard ref BEFORE any state changes so the projectId
+              // useEffect ignores stale searchParams during the reset.
+              isResettingProjectRef.current = true;
               if (typeof window !== 'undefined') {
                 window.localStorage.removeItem('eng:lastProjectId');
               }
@@ -5708,11 +5768,13 @@ function EngineeringPageInner() {
               setProjectLayout(null);
               setIsHydrated(false);
               setSelectorSearch('');
-              setSelectorOpen(false);
+              setSelectorOpen(true);
               setSelectorProjects([]);
               setDisplayMode('current');
               setSizingDismissed(false);
-              router.push('/engineering');
+              // Use replace to strip ?projectId= from URL without adding a history entry.
+              // This triggers the searchParams effect which fetches the project list.
+              router.replace('/engineering');
             }}
           >
             ↩ Change Project
