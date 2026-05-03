@@ -332,6 +332,12 @@ export interface ComputedSystemInput {
   // Pass this when the user's design specifies an explicit string layout so
   // that conductor counts in run segments match the SLD string count display.
   totalStrings?: number;
+  // v61.7 — Authoritative per-string panel counts from config.inverters[].strings.
+  // When provided, each string's Voc/Isc/OCPD calculation uses the ACTUAL panel count
+  // for that string instead of equally-divided totalPanels/totalStrings.
+  // This prevents false NEC_690_7_VOLTAGE errors from averaged string lengths.
+  // Length must equal totalStrings when both are provided.
+  configStringPanelCounts?: number[];
   panelWatts: number;
   panelVoc: number;
   panelIsc: number;
@@ -941,10 +947,20 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
   const strings: StringCalc[] = [];
 
   if (isString) {
+    // v61.7: Honor explicit configStringPanelCounts from config.inverters[].strings.
+    // This is the authoritative source — use actual per-string panel counts for NEC 690.7
+    // Voc checks instead of deriving from totalPanels / stringCount (equal division).
+    const authStringCounts: number[] | null =
+      Array.isArray(input.configStringPanelCounts) && input.configStringPanelCounts.length > 0
+        ? input.configStringPanelCounts
+        : null;
+
     // Honor explicit totalStrings override when provided (e.g. from sizing engine / user design).
     // This ensures conductor counts in run segments match the SLD string count display
     // instead of being recalculated from Voc physics which may differ from the design intent.
-    if (input.totalStrings && input.totalStrings > 0) {
+    if (authStringCounts) {
+      stringCount = authStringCounts.length;
+    } else if (input.totalStrings && input.totalStrings > 0) {
       stringCount = input.totalStrings;
     } else {
       // Auto-calculate: as few strings as possible while staying under maxPanelsPerString
@@ -970,7 +986,11 @@ export function computeSystem(input: ComputedSystemInput): ComputedSystem {
 
     // Build per-string calculations
     for (let i = 0; i < stringCount; i++) {
-      const pCount = i === stringCount - 1 ? lastStringPanels : panelsPerString;
+      // v61.7: Use actual panel count from config.inverters[].strings when available.
+      // Falls back to equal-division (legacy) only when configStringPanelCounts is absent.
+      const pCount = authStringCounts
+        ? (authStringCounts[i] ?? (i === stringCount - 1 ? lastStringPanels : panelsPerString))
+        : (i === stringCount - 1 ? lastStringPanels : panelsPerString);
       const stringVoc = vocCorrected * pCount;
       const stringVmp = input.panelVmp * pCount;
       // Isc correction: Isc_corrected = Isc × [1 + (tempCoeffIsc/100) × (Tmax - 25)]

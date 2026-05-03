@@ -81,6 +81,12 @@ export interface StringGeneratorInput {
   // for backwards compatibility.
   topology?:                  'string' | 'optimizer' | 'hybrid';
   optimizerMaxOutputCurrent?: number;  // A — used only when topology==='optimizer'
+  // v61.7 — Authoritative per-string panel counts from config.inverters[].strings.
+  // When provided, the string distribution loop uses these ACTUAL counts instead of
+  // re-deriving from totalModules. This prevents false NEC_690_7_VOLTAGE errors
+  // caused by uneven string lengths (e.g. [8,8,7] vs an averaged 7.67).
+  // Length determines string count; totalModules is still used for totals/power.
+  configStringPanelCounts?: number[];
 }
 
 // A single generated string
@@ -445,6 +451,20 @@ export function generateStringConfig(input: StringGeneratorInput): StringGenerat
       `${panelsPerFullStringFinal}) was rejected because the inverter has only ` +
       `${totalSlots} physical string inputs.`
     );
+  }
+
+  // v61.7: Override stringPanelCounts with the authoritative layout from
+  // config.inverters[].strings when provided. This ensures NEC 690.7 Voc
+  // checks use the real per-string panel counts instead of re-derived equal
+  // splits. Overrides only when the caller explicitly provides the counts.
+  if (
+    Array.isArray(input.configStringPanelCounts) &&
+    input.configStringPanelCounts.length > 0
+  ) {
+    stringPanelCounts.length = 0;
+    for (const c of input.configStringPanelCounts) {
+      if (c > 0) stringPanelCounts.push(c);
+    }
   }
 
   const totalStrings = stringPanelCounts.length;

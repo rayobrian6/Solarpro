@@ -1931,6 +1931,12 @@ function EngineeringPageInner() {
       totalStrings: topology !== 'micro'
         ? config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || undefined
         : undefined,
+      // v61.7: Pass actual per-string panel counts from config.inverters[].strings so
+      // computeSystem() performs NEC 690.7 Voc checks on the REAL string lengths,
+      // not on equally-divided totalPanels/totalStrings. Prevents false Voc violations.
+      configStringPanelCounts: topology !== 'micro'
+        ? config.inverters.flatMap(inv => inv.strings.map(s => s.panelCount))
+        : undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
       // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading
@@ -1992,6 +1998,43 @@ function EngineeringPageInner() {
 
   // Shorthand aliases from ComputedSystem
   const cs = computedSystem;
+
+  // ──────────────────────────────────────────────────────────────────
+  // v61.7 — STRING PIPELINE GUARDRAIL
+  // Dev-mode assertion: verifies that cs.strings (computed by computeSystem)
+  // are driven by config.inverters[].strings and not a phantom source.
+  // Fires in NODE_ENV=development only — no-op in production.
+  // ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return;
+    if (!Array.isArray(cs.strings) || cs.strings.length === 0) return;
+    if (cs.isMicro) return; // micro has no DC strings
+
+    // Authoritative string panel counts from config.inverters
+    const authCounts = config.inverters
+      .flatMap(inv => inv.strings.map(s => s.panelCount))
+      .filter(n => n > 0)
+      .sort((a, b) => a - b);
+
+    // cs.strings panel counts
+    const csCounts = cs.strings
+      .map((s: any) => s.panelCount as number)
+      .filter(n => n > 0)
+      .sort((a, b) => a - b);
+
+    const countsMatch =
+      authCounts.length === csCounts.length &&
+      authCounts.every((n, i) => n === csCounts[i]);
+
+    if (!countsMatch) {
+      console.error(
+        '[INVALID STRING PIPELINE] computeSystem.strings does not match config.inverters[].strings.' +
+        ' auth=' + JSON.stringify(authCounts) +
+        ' cs=' + JSON.stringify(csCounts) +
+        ' — Check configStringPanelCounts is being passed correctly.'
+      );
+    }
+  }, [cs.strings, cs.isMicro, config.inverters]);
 
   // ──────────────────────────────────────────────────────────────────
   // Phase 11 — Brand-driven sizing recommendation
@@ -7678,51 +7721,37 @@ function EngineeringPageInner() {
                                 );
                               })
                             ) : (
-                              /* String inverter bars — prefer sizingRecommendation (engine truth) over stale config */
+                              /* String Layout — v61.7: config.inverters is the ONLY source of truth.
+                                 Render per-inverter, per-string. Never use sizingRecommendation.strings
+                                 as the display source — that is a proposal, not the committed config. */
                               (() => {
-                                // Single source of truth: use engine-computed strings when available.
-                                // config.inverters strings may be stale (e.g. 36x1-panel from old seed).
-                                const recStrings = sizingRecommendation?.strings;
-                                const _panelWatts = config.inverters[0]?.strings?.[0]
-                                  ? (getPanelById(config.inverters[0].strings[0].panelId)?.watts || 400)
-                                  : 400;
                                 const _maxPanels = 25;
-                                if (recStrings && recStrings.length > 0) {
-                                  return recStrings.map((str: any, si: number) => {
-                                    const kw = (str.panelCount * _panelWatts / 1000);
+                                const invColors = ['text-amber-400', 'text-sky-400', 'text-emerald-400', 'text-violet-400'];
+                                const invBg     = ['bg-amber-500/40 border-amber-500/20', 'bg-sky-500/40 border-sky-500/20', 'bg-emerald-500/40 border-emerald-500/20', 'bg-violet-500/40 border-violet-500/20'];
+                                return config.inverters.flatMap((inv, invIdx) => {
+                                  const colorCls = invColors[invIdx % invColors.length];
+                                  const bgCls    = invBg[invIdx % invBg.length];
+                                  const invLabel = config.inverters.length > 1
+                                    ? `Inv ${invIdx + 1}`
+                                    : null;
+                                  return inv.strings.map((str, si) => {
+                                    const panel = getPanelById(str.panelId);
+                                    const kw = (str.panelCount * (panel?.watts || 400) / 1000);
+                                    const label = invLabel ? `${invLabel} · S${si + 1}` : str.label;
                                     return (
-                                      <div key={`rec-str-${si}`} className="flex items-center gap-2">
-                                        <span className="text-[10px] text-amber-400 font-mono w-14 shrink-0">String {si + 1}</span>
+                                      <div key={str.id} className="flex items-center gap-2">
+                                        <span className={`text-[10px] font-mono w-14 shrink-0 ${colorCls}`}>{label}</span>
                                         <div className="flex gap-0.5 flex-1">
                                           {Array.from({ length: Math.min(str.panelCount, _maxPanels) }, (_, pi) => (
-                                            <div key={pi} className="h-3 flex-1 rounded-sm bg-amber-500/40 border border-amber-500/20 min-w-[4px] max-w-[14px]" />
+                                            <div key={pi} className={`h-3 flex-1 rounded-sm border min-w-[4px] max-w-[14px] ${bgCls}`} />
                                           ))}
-                                          {str.panelCount > _maxPanels && <span className="text-[9px] text-amber-400 ml-1">+{str.panelCount - _maxPanels}</span>}
+                                          {str.panelCount > _maxPanels && <span className={`text-[9px] ml-1 ${colorCls}`}>+{str.panelCount - _maxPanels}</span>}
                                         </div>
                                         <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
                                       </div>
                                     );
                                   });
-                                }
-                                // Fallback: config.inverters (only if no recommendation yet)
-                                return config.inverters.flatMap(inv =>
-                                  inv.strings.map((str, si) => {
-                                    const panel = getPanelById(str.panelId);
-                                    const kw = (str.panelCount * (panel?.watts || 400) / 1000);
-                                    return (
-                                      <div key={str.id} className="flex items-center gap-2">
-                                        <span className="text-[10px] text-amber-400 font-mono w-14 shrink-0">{str.label}</span>
-                                        <div className="flex gap-0.5 flex-1">
-                                          {Array.from({ length: Math.min(str.panelCount, _maxPanels) }, (_, pi) => (
-                                            <div key={pi} className="h-3 flex-1 rounded-sm bg-amber-500/40 border border-amber-500/20 min-w-[4px] max-w-[14px]" />
-                                          ))}
-                                          {str.panelCount > _maxPanels && <span className="text-[9px] text-amber-400 ml-1">+{str.panelCount - _maxPanels}</span>}
-                                        </div>
-                                        <span className="text-[10px] text-slate-400 font-mono w-16 text-right shrink-0">{str.panelCount}p · {kw.toFixed(1)}kW</span>
-                                      </div>
-                                    );
-                                  })
-                                );
+                                });
                               })()
                             )}
                             {cs.isMicro && cs.acBranchCount > 8 && (

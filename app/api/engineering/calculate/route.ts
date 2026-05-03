@@ -150,6 +150,13 @@ export async function POST(req: NextRequest) {
                 ? firstInv.optimizerMaxOutputCurrent
                 : undefined;
 
+            // v61.7: Collect actual per-string panel counts from config.inverters[].strings.
+            // This anchors NEC 690.7 Voc checks to the real committed string layout
+            // instead of re-deriving equal-division strings from totalModules.
+            const actualStringPanelCounts: number[] = (electrical.inverters || []).flatMap(
+              (inv: any) => (inv.strings || []).map((str: any) => str.panelCount as number)
+            ).filter((n: number) => n > 0);
+
             stringConfig = generateStringConfig({
               totalModules,
               moduleSpecs,
@@ -158,6 +165,10 @@ export async function POST(req: NextRequest) {
               // v47.408 — topology-aware per-string design current.
               topology: topologyFamily,
               optimizerMaxOutputCurrent,
+              // v61.7 — pass actual string layout to avoid re-deriving from totalModules.
+              configStringPanelCounts: actualStringPanelCounts.length > 0
+                ? actualStringPanelCounts
+                : undefined,
             });
 
             // ──────────────────────────────────────────────────────────────

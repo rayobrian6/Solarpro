@@ -1,39 +1,43 @@
-# SolarPro v61.6 — String Commit Integrity
+# SolarPro v61.7 — String Pipeline Unification
 
-## Root Cause Analysis
-The bug: config.inverters[0].strings = [{ panelCount: 44 }] for non-micro inverter with maxPanelsPerString=7.
-This is a STRUCTURALLY VALID config (stringsPerInverter=1, modulesPerString=44 are consistent).
-The v61.4/v61.5 builder enforces metadata consistency but NOT electrical validity.
-normalizeInverterConfig preserves the bad layout because it is "consistent".
+## Objective
+Destroy all non-authoritative string sources.
+config.inverters[].strings is the ONLY truth.
 
-## The fix: detect 1×N electrical violation and rebuild via sizeSystemFromBrand
+## Phase 1 — Audit ALL string sources
+- [ ] Search for stringLayout, systemStrings, derivedStrings, aggregateStrings, panelGroups
+- [ ] Search for computeSystem string generation logic
+- [ ] Search for UI string grid rendering code
+- [ ] Search for electrical validation string source
+- [ ] Map: File | Function | Used by | Source of truth? | Must delete?
 
-### Phase 1 — Create electricalNormalize utility
-- [ ] Create lib/system/electricalNormalize.ts
-- [ ] isElectricallyInvalid(inv, inverterId, topology): detects 1×N when panelCount > maxPanelsPerString
-- [ ] electricallyNormalizeInverterConfig(config, panelCount): rebuilds 1×N inverters via sizeSystemFromBrand
-- [ ] Uses getBrandProfileByInverterId → maxPanelsPerString lookup
-- [ ] Falls back to sizeSystemFromBrand for actual string layout
+## Phase 2 — Delete aggregated string logic
+- [ ] Remove any code combining inverters into fake system strings
+- [ ] Remove totalPanels / stringCount derived layouts
+- [ ] Remove visual string layout generators separate from config.inverters
 
-### Phase 2 — Wire into all entry points
-- [ ] Page load (savedConfig, seed, localStorage): wrap setConfig with electricallyNormalizeInverterConfig
-- [ ] Runtime guard useEffect: add electrical validity check alongside metadata check
-- [ ] applySizingRecommendation: fix buildString helper to use _buildStrCfg (Phase 4 from prompt)
-- [ ] Ecosystem apply: after inverterId change, trigger electrical normalization
+## Phase 3 — Fix UI String Grid
+- [ ] Render directly from config.inverters per inverter
+- [ ] Group strings by inverter (never merge/average)
 
-### Phase 3 — Add debug logs
-- [ ] [STRING NORMALIZE INPUT/OUTPUT] logs at each normalization point
-- [ ] [APPLY RECOMMENDATION COMMIT] log
+## Phase 4 — Fix computeSystem()
+- [ ] Pass flatten(config.inverters[].strings) only
+- [ ] Remove internal string recomputation
 
-### Phase 4 — Tests
-- [ ] 1×44 string for Solis/string inverter → electricallyNormalizeInverterConfig rebuilds to multi-string
-- [ ] Healthy multi-string config → no-op
-- [ ] Micro topology with 44 panels → preserved (micro allows it)
-- [ ] normalizeInverterConfig + electricallyNormalize together are idempotent
+## Phase 5 — Fix electrical validation
+- [ ] Per-inverter, per-string Voc/Vmp/MPPT checks
+- [ ] Never run system-wide string averages
 
-### Phase 5 — TypeScript + all tests pass
+## Phase 6 — Fix SLD / BOM / Permit
+- [ ] All downstream systems consume config.inverters[]
+
+## Phase 7 — Tests
+- [ ] Multi-inverter system: correct per-inverter layout
+- [ ] UI grid matches config exactly
+- [ ] computeSystem uses only inverter strings
+- [ ] No derived string layouts
+
+## Final
 - [ ] npx tsc --noEmit = 0
 - [ ] All tests pass
-
-### Final
 - [ ] git commit + push
