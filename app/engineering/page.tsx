@@ -1033,6 +1033,62 @@ function EngineeringPageInner() {
                   return { ...inv, strings: [...inv.strings, ...extra] };
                 }
               });
+
+              // v61.2 corruption detector: if the saved config has ALL strings with
+              // panelCount=1 AND more than 4 strings total, this is the N×1 bug state
+              // (from the old micro-fallback in the panel count fix path, now fixed).
+              // Rebuild strings via sizing engine so the correct layout is auto-saved
+              // over the corrupt DB record on the next config change.
+              const _allStrings = merged.inverters.flatMap((inv: any) => inv.strings ?? []);
+              const _isCorrupt = _allStrings.length > 4 && _allStrings.every((s: any) => s.panelCount === 1);
+              if (_isCorrupt) {
+                console.warn('[savedConfig] corrupt N×1 strings detected (n=' + _allStrings.length + ') — rebuilding via sizing engine');
+                const _corrupted = merged.inverters;
+                const _invType0: string = (_corrupted[0]?.type ?? 'string');
+                const _invId0: string = (_corrupted[0]?.inverterId ?? '');
+                const _panelId0: string = (_corrupted[0]?.strings?.[0]?.panelId ?? 'qcells-peak-duo-400');
+                const _panelObj = (SOLAR_PANELS as any[]).find((pp: any) => pp.id === _panelId0);
+                const _totalPanels: number = _allStrings.length; // each was 1 panel → total = count
+                try {
+                  const _fixInput: Parameters<typeof sizeSystemFromBrand>[0] = {
+                    systemType: 'roof',
+                    panelCount: _totalPanels,
+                    panelWattage: _panelObj?.watts ?? 400,
+                    panelVoc: _panelObj?.voc ?? 49.6,
+                    panelTempCoeffVoc: _panelObj?.tempCoeffVoc ?? -0.27,
+                    designTempMin: -10,
+                    optimizerMaxOutputCurrent: 15.0,
+                  };
+                  if (_invId0) _fixInput.selectedInverterId = _invId0;
+                  else if (merged.selectedBrand) _fixInput.selectedBrand = merged.selectedBrand;
+                  const _fixResult = sizeSystemFromBrand(_fixInput);
+                  if (_fixResult.strings.length > 0 && _fixResult.topology !== 'micro' && _invType0 !== 'micro') {
+                    // Group by inverterIndex and rebuild
+                    const _fixByInv = new Map<number, typeof _fixResult.strings>();
+                    for (const s of _fixResult.strings) {
+                      const idx = s.inverterIndex ?? 0;
+                      if (!_fixByInv.has(idx)) _fixByInv.set(idx, []);
+                      _fixByInv.get(idx)!.push(s);
+                    }
+                    const _invCount = Math.max(_corrupted.length, _fixByInv.size);
+                    merged.inverters = Array.from({ length: _invCount }, (_: any, idx: number) => {
+                      const inv = _corrupted[idx] ?? _corrupted[0];
+                      const assigned = _fixByInv.get(idx);
+                      if (!assigned || assigned.length === 0) return inv;
+                      const newStrings = assigned.map((s: any, si: number) => ({
+                        ...(inv.strings[si] ?? inv.strings[0] ?? {}),
+                        id: `str-recovered-${Date.now()}-${idx}-${si}`,
+                        panelCount: s.panelCount,
+                      }));
+                      return { ...inv, strings: newStrings };
+                    });
+                    console.log('[savedConfig] corruption fixed: ' + _allStrings.length + ' × 1 → ' + _fixResult.strings.map((s: any) => s.panelCount).join('+'));
+                  } else if (_invType0 === 'micro') {
+                    // Micro: set single string to total panel count
+                    merged.inverters = [{ ..._corrupted[0], strings: [{ ..._corrupted[0].strings[0], panelCount: _totalPanels }] }];
+                  }
+                } catch { /* keep corrupt state — at least it loads */ }
+              }
             }
             return merged;
           });
@@ -1250,10 +1306,11 @@ function EngineeringPageInner() {
 
         if (storedStrings.length > 0) {
           // Restore from stored string config (most accurate)
-          strings = storedStrings.map((s: any, i: number) => ({
+          const _rawRestored = storedStrings.map((s: any, i: number) => ({
             id:            s.id || `str-restored-${i}`,
             label:         s.label || `String ${i + 1}`,
-            panelCount:    s.panelCount || s.panel_count || 1,
+            // v61.2 fix: use ?? so panelCount:0 doesn't fall back to 1 prematurely.
+            panelCount:    Number(s.panelCount ?? s.panel_count ?? 0) || 1,
             panelId:       s.panelId || s.panel_id || panelId,
             tilt:          s.tilt ?? roofPitch,
             azimuth:       s.azimuth ?? 180,
@@ -1262,7 +1319,18 @@ function EngineeringPageInner() {
             wireGauge:     s.wireGauge || s.wire_gauge || run.wireGauge || '#10 AWG THWN-2',
             wireLength:    s.wireLength || s.wire_length || 50,
           }));
-        } else {
+          // v61.2 corruption guard: if ALL stored strings have panelCount=1 AND count > 4,
+          // this is a corrupt N×1 state from the old micro-fallback bug. Fall through to
+          // sizing-engine reconstruction instead of restoring garbage data.
+          const _storedCorrupt = _rawRestored.length > 4 && _rawRestored.every(s => s.panelCount === 1);
+          if (_storedCorrupt) {
+            console.warn('[inv-restored-0] corrupt storedStrings (all panelCount=1, n=' + _rawRestored.length + ') — rebuilding via sizing engine');
+            strings = []; // force fallback below
+          } else {
+            strings = _rawRestored;
+          }
+        }
+        if (storedStrings.length === 0 || strings!.length === 0) {
           // Reconstruct from panel count — use sizing engine (single source of truth).
           // The old heuristic Math.min(panelCount, 13) has been removed; all string
           // distribution must come from sizeSystemFromBrand() using datasheet values.
@@ -4686,58 +4754,97 @@ function EngineeringPageInner() {
           s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
         if (layout.panelCount > 0 && currentTotal !== layout.panelCount) {
             console.log('[EngineeringPage] PANEL COUNT FIX:', currentTotal, '→', layout.panelCount);
-            // Pre-compute string layout using the sizing engine BEFORE entering setConfig.
-            // This ensures datasheet-derived string counts replace the old Math.min(pc, 13) heuristic.
+            // v61.2 fix: pre-compute string layout using sizing engine BEFORE entering setConfig.
+            // BUGS FIXED:
+            //   1. Micro fallback: _pcInvType==='micro' used to create N×1 strings (1 panel each).
+            //      Now micro topology just updates the single string's total panel count.
+            //   2. inverterIndex ignored: old code jammed ALL strings into inverters[0].
+            //      Now we group strings by inverterIndex → correct multi-inverter layout.
+            //   3. selectedInverterId='' → engine returned topology:micro+strings:[] → fallback
+            //      created N×1 strings. Now we use selectedBrand when inverterId is empty/unknown.
             const _pcInv0 = config.inverters[0];
             const _pcInvType = _pcInv0?.type ?? 'string';
             const _pcInverterId = _pcInv0?.inverterId ?? '';
             const _pcPanelId = _pcInv0?.strings?.[0]?.panelId ?? 'qcells-peak-duo-400';
             const _pcPanel = SOLAR_PANELS.find((pp: any) => pp.id === _pcPanelId) as any;
             const _pcPc = layout.panelCount;
-            let _pcEngStrings: { panelCount: number }[] | null = null;
-            if (_pcInvType !== 'micro') {
+
+            // FIX 1: Micro topology — just update total panel count on the single string.
+            // Never create N×1 strings for micro.
+            if (_pcInvType === 'micro') {
+              setConfig(prev => ({
+                ...prev,
+                inverters: prev.inverters.map((inv, ii) => ii === 0
+                  ? { ...inv, strings: [{ ...(inv.strings[0] ?? newString(0, prev.systemType)), panelCount: _pcPc }] }
+                  : inv
+                ),
+              }));
+              setTimeout(() => runCalc(), 400);
+            } else {
+              // String / optimizer / hybrid / ecoflow topology.
+              // FIX 2: Use selectedBrand when inverterId is empty (avoids engine returning micro topology).
+              // FIX 3: Group resulting strings by inverterIndex → correct multi-inverter layout.
+              let _pcEngStrings: { panelCount: number; inverterIndex?: number }[] | null = null;
               try {
-                const _pcResult = sizeSystemFromBrand({
+                const _pcSizingInput: Parameters<typeof sizeSystemFromBrand>[0] = {
                   systemType: 'roof',
                   panelCount: _pcPc,
                   panelWattage: _pcPanel?.watts ?? 400,
                   panelVoc: _pcPanel?.voc ?? 49.6,
                   panelTempCoeffVoc: _pcPanel?.tempCoeffVoc ?? -0.27,
                   designTempMin: -10,
-                  selectedInverterId: _pcInverterId,
                   optimizerMaxOutputCurrent: 15.0,
-                });
-                if (_pcResult.strings.length > 0) _pcEngStrings = _pcResult.strings;
+                };
+                // Prefer inverterId when set; fall back to brand to avoid empty-ID micro misfire
+                if (_pcInverterId) {
+                  _pcSizingInput.selectedInverterId = _pcInverterId;
+                } else if (config.selectedBrand) {
+                  _pcSizingInput.selectedBrand = config.selectedBrand;
+                }
+                const _pcResult = sizeSystemFromBrand(_pcSizingInput);
+                if (_pcResult.strings.length > 0 && _pcResult.topology !== 'micro') {
+                  _pcEngStrings = _pcResult.strings; // includes inverterIndex
+                }
               } catch { /* fall through to fallback */ }
-            }
-            if (!_pcEngStrings) {
-              // Fallback: even split capped at 14 (datasheet ceiling for 380V × 15A optimizers)
-              const _pcPps = _pcInvType === 'micro' ? 1 : Math.min(_pcPc, 14);
-              const _pcSc  = _pcInvType === 'micro' ? _pcPc : Math.max(1, Math.ceil(_pcPc / _pcPps));
-              _pcEngStrings = Array.from({ length: _pcSc }, (_, i) => ({
-                panelCount: i === _pcSc - 1 ? _pcPc - _pcPps * (_pcSc - 1) : _pcPps,
-              }));
-            }
-            const _pcFinalStrings = _pcEngStrings;
-            setConfig(prev => {
-              const newInverters = prev.inverters.map((inv, ii) => {
-                if (ii === 0) {
-                  // Use pre-computed engine string layout (datasheet-accurate)
-                  const newStrings = _pcFinalStrings.map((s, si) => {
-                    const existing = inv.strings[si] || inv.strings[0];
-                    return { ...existing, id: existing?.id || `str-sync-${si}`, panelCount: s.panelCount };
+
+              if (!_pcEngStrings) {
+                // Fallback: even split capped at 14 (datasheet ceiling for 380V × 15A optimizers)
+                const _pcPps = Math.min(_pcPc, 14);
+                const _pcSc  = Math.max(1, Math.ceil(_pcPc / _pcPps));
+                _pcEngStrings = Array.from({ length: _pcSc }, (_, i) => ({
+                  panelCount: i === _pcSc - 1 ? _pcPc - _pcPps * (_pcSc - 1) : _pcPps,
+                  inverterIndex: 0,
+                }));
+              }
+
+              // FIX 3: Group by inverterIndex — mirror what applySizingRecommendation does
+              const _pcByInv = new Map<number, { panelCount: number }[]>();
+              for (const s of _pcEngStrings) {
+                const idx = (s as any).inverterIndex ?? 0;
+                if (!_pcByInv.has(idx)) _pcByInv.set(idx, []);
+                _pcByInv.get(idx)!.push(s);
+              }
+              const _pcFinalByInv = _pcByInv;
+
+              setConfig(prev => {
+                const invCount = Math.max(prev.inverters.length, _pcFinalByInv.size);
+                const newInverters = Array.from({ length: invCount }, (_, idx) => {
+                  const inv = prev.inverters[idx] ?? prev.inverters[0];
+                  const assigned = _pcFinalByInv.get(idx);
+                  if (!assigned || assigned.length === 0) return inv; // no strings assigned — keep as-is
+                  const newStrings = assigned.map((s, si) => {
+                    const existing = inv.strings[si] ?? inv.strings[0];
+                    return { ...existing, id: existing?.id ?? `str-sync-${idx}-${si}`, panelCount: s.panelCount };
                   });
                   return { ...inv, strings: newStrings };
-                }
-                return inv;
+                });
+                return { ...prev, inverters: newInverters };
               });
-              return { ...prev, inverters: newInverters };
-            });
-            // Trigger recalculation with correct panel count
-          setTimeout(() => {
-            console.log('[EngineeringPage] Auto-recalculating after panel count sync');
-            runCalc();
-          }, 400);
+              setTimeout(() => {
+                console.log('[EngineeringPage] Auto-recalculating after panel count sync');
+                runCalc();
+              }, 400);
+            }
         }
 
         // Log pipeline diagnostics
