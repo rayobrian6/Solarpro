@@ -871,10 +871,12 @@ function EngineeringPageInner() {
 
 
           patches.inverters = [{
-            id: 'inv-seed-0',
+            id:                'inv-seed-0',
             inverterId,
-            type: invType,
+            type:              invType,
             strings,
+            stringsPerInverter: strings.length,
+            modulesPerString:   strings[0]?.panelCount ?? 10,
           }];
 
           // ── Electrical / structural defaults from engCfg ──────────────────
@@ -964,11 +966,13 @@ function EngineeringPageInner() {
               wireLength: 50,
             }));
             patches.inverters = [{
-            id: 'inv-auto-0',
-            inverterId: p.selectedInverter?.id || (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus'),
-            type: invType,
-            strings,
-          }];
+              id:                'inv-auto-0',
+              inverterId:        p.selectedInverter?.id || (MICROINVERTERS[0]?.id ?? 'enphase-iq8plus'),
+              type:              invType,
+              strings,
+              stringsPerInverter: strings.length,
+              modulesPerString:   strings[0]?.panelCount ?? 10,
+            }];
           patches.mountingId = p.selectedMounting?.id || patches.mountingId;
           patches.utilityId = p.utilityId || patches.utilityId;
           if (panelCount > 0) {
@@ -1095,7 +1099,15 @@ function EngineeringPageInner() {
                         id: `str-recovered-${Date.now()}-${idx}-${si}`,
                         panelCount: s.panelCount,
                       }));
-                      return { ...inv, strings: newStrings };
+                      // CRITICAL: also update stringsPerInverter + modulesPerString metadata
+                      // so the reconciliation step (above) and UI dropdowns reflect reality.
+                      const _mps = assigned[0]?.panelCount ?? newStrings[0]?.panelCount ?? 10;
+                      return {
+                        ...inv,
+                        strings: newStrings,
+                        stringsPerInverter: newStrings.length,
+                        modulesPerString: _mps,
+                      };
                     });
                     console.log('[savedConfig] corruption fixed: ' + _allStrings.length + ' × 1 → ' + _fixResult.strings.map((s: any) => s.panelCount).join('+'));
                   } else if (_invType0 === 'micro') {
@@ -1389,10 +1401,12 @@ function EngineeringPageInner() {
         }
 
         patches.inverters = [{
-          id:        'inv-restored-0',
+          id:                'inv-restored-0',
           inverterId,
-          type:      invType,
+          type:              invType,
           strings,
+          stringsPerInverter: strings.length,
+          modulesPerString:   strings[0]?.panelCount ?? 10,
         }];
 
         // Apply all patches
@@ -4862,7 +4876,10 @@ function EngineeringPageInner() {
                     const existing = inv.strings[si] ?? inv.strings[0];
                     return { ...existing, id: existing?.id ?? `str-sync-${idx}-${si}`, panelCount: s.panelCount };
                   });
-                  return { ...inv, strings: newStrings };
+                  // CRITICAL: sync stringsPerInverter + modulesPerString metadata with rebuilt layout
+                  // so UI dropdowns and the reconciliation step stay consistent.
+                  const _mps = assigned[0]?.panelCount ?? newStrings[0]?.panelCount ?? 10;
+                  return { ...inv, strings: newStrings, stringsPerInverter: newStrings.length, modulesPerString: _mps };
                 });
                 return { ...prev, inverters: newInverters };
               });
