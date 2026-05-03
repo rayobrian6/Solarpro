@@ -1,43 +1,20 @@
-# SolarPro v61.7 — String Pipeline Unification
+# Audit & Fix Todo — v61.9 Post-Audit
 
-## Objective
-Destroy all non-authoritative string sources.
-config.inverters[].strings is the ONLY truth.
+## Status
+- [x] Repo cloned and dev branch checked out
+- [x] TypeScript: 0 errors
+- [x] Tests run: 2 failing test files, 24 failing tests
 
-## Phase 1 — Audit ALL string sources
-- [ ] Search for stringLayout, systemStrings, derivedStrings, aggregateStrings, panelGroups
-- [ ] Search for computeSystem string generation logic
-- [ ] Search for UI string grid rendering code
-- [ ] Search for electrical validation string source
-- [ ] Map: File | Function | Used by | Source of truth? | Must delete?
+## Failures to Fix
 
-## Phase 2 — Delete aggregated string logic
-- [ ] Remove any code combining inverters into fake system strings
-- [ ] Remove totalPanels / stringCount derived layouts
-- [ ] Remove visual string layout generators separate from config.inverters
+### Fix 1: hydrationLock.test.ts — jest.spyOn → vi.spyOn (3 tests)
+- [ ] Replace `jest.spyOn` with `vi.spyOn` + add `import { vi } from 'vitest'` in hydrationLock.test.ts
 
-## Phase 3 — Fix UI String Grid
-- [ ] Render directly from config.inverters per inverter
-- [ ] Group strings by inverter (never merge/average)
+### Fix 2: brandOnboardingSmoke.test.ts — Sungrow all-inactive inverters (21 tests)
+- [ ] Activate sungrow-sg5rs, sungrow-sg7.6rs, sungrow-sg10rs in equipment-db.ts
+- [ ] Keep sungrow-sg15rs as active: false (not in US residential catalog)
 
-## Phase 4 — Fix computeSystem()
-- [ ] Pass flatten(config.inverters[].strings) only
-- [ ] Remove internal string recomputation
-
-## Phase 5 — Fix electrical validation
-- [ ] Per-inverter, per-string Voc/Vmp/MPPT checks
-- [ ] Never run system-wide string averages
-
-## Phase 6 — Fix SLD / BOM / Permit
-- [ ] All downstream systems consume config.inverters[]
-
-## Phase 7 — Tests
-- [ ] Multi-inverter system: correct per-inverter layout
-- [ ] UI grid matches config exactly
-- [ ] computeSystem uses only inverter strings
-- [ ] No derived string layouts
-
-## Final
-- [ ] npx tsc --noEmit = 0
-- [ ] All tests pass
-- [ ] git commit + push
+## Verification
+- [ ] All tests passing after fixes
+- [ ] TypeScript 0 errors
+- [ ] Commit to dev branch
