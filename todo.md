@@ -1,20 +1,15 @@
-# Audit & Fix Todo — v61.9 Post-Audit
+# v61.13d — Hybrid DC/AC Floor Fix
 
-## Status
-- [x] Repo cloned and dev branch checked out
-- [x] TypeScript: 0 errors
-- [x] Tests run: 2 failing test files, 24 failing tests
-
-## Failures to Fix
-
-### Fix 1: hydrationLock.test.ts — jest.spyOn → vi.spyOn (3 tests)
-- [ ] Replace `jest.spyOn` with `vi.spyOn` + add `import { vi } from 'vitest'` in hydrationLock.test.ts
-
-### Fix 2: brandOnboardingSmoke.test.ts — Sungrow all-inactive inverters (21 tests)
-- [ ] Activate sungrow-sg5rs, sungrow-sg7.6rs, sungrow-sg10rs in equipment-db.ts
-- [ ] Keep sungrow-sg15rs as active: false (not in US residential catalog)
-
-## Verification
-- [ ] All tests passing after fixes
-- [ ] TypeScript 0 errors
-- [ ] Commit to dev branch
+## Tasks
+- [x] Read all relevant files (sizingEngine.ts, ecoflow.ts, types.ts, equipment-db.ts, dcAcConstants.ts)
+- [x] Add HYBRID_MIN_DC_AC_RATIO = 0.75 constant to sizingEngine.ts
+- [x] Add maxUnits field to BrandInverterModelRef type (types.ts)
+- [x] Update EcoFlow profile: maxUnits=2 on 11kW model, dcAcRatioRange.min 1.0→0.75
+- [x] Update pickRatioAwareTier() — topology-aware floor + multi-unit expansion
+- [x] Update attemptDownsize() — topology-aware floor + respect maxUnits
+- [x] Update applyFeasibilityHardGate() — topology-aware floor (_fhg_floor)
+- [x] Update sizeInverters() — _sizeFloor variable replacing MIN_DC_AC_RATIO throughout
+- [x] TypeScript compile — CLEAN (0 errors)
+- [x] Jest tests — 210/210 PASS
+- [x] Verification script confirms correct engine behavior across 5 test scenarios
+- [x] Commit as v61.13d

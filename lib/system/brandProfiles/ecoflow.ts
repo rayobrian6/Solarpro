@@ -39,6 +39,13 @@ export const ECOFLOW_PROFILE: BrandProfile = {
       mpptCount: 8,
       minPanelsPerString: 4,
       maxPanelsPerString: 16,
+      // v61.13d — EF-PCS-24 datasheet: "Power Scalability: Up to 2 units (48 kW)".
+      // Allows the sizing engine to consider 2x 11kW when the DC array sits in
+      // the 14.4-19.6 kW range where 1x 11kW gives ratio 1.25-1.70 and 1x 24kW
+      // gives ratio 0.60-0.82 (below hybrid floor). 2x 11kW at e.g. 17.6 kW DC
+      // gives ratio 0.765 per unit -- valid ESS operation since battery supplements
+      // AC output when DC is below inverter rating. Hybrid DC/AC floor = 0.75.
+      maxUnits: 2,
     },
     {
       equipmentDbId: 'ecoflow-ocean-pro-24kw',
@@ -47,6 +54,9 @@ export const ECOFLOW_PROFILE: BrandProfile = {
       mpptCount: 8,
       minPanelsPerString: 4,
       maxPanelsPerString: 16,
+      // Single-unit only -- 2x 24kW = 48 kW AC for residential is over-provisioned
+      // and the datasheet maximum is 2 units combined (same physical chassis).
+      // The engine uses 1x 24kW when DC array >= 24 kW (ratio >= 1.00).
     },
     // NOTE v61.12: Legacy EU/AU PowerOcean SKUs (ecoflow-power-ocean-5kw/10kw/20kw)
     // removed from supportedInverterModels. They are active:false in equipment-db
@@ -56,24 +66,27 @@ export const ECOFLOW_PROFILE: BrandProfile = {
   ],
 
   // Sizing tiers — only use ACTIVE US SKUs (OCEAN Pro 11.5 / 24 kW).
-  // v61.13: corrected tier boundary based on DC/AC ratio math.
+  // v61.13d: corrected tier boundaries to reflect hybrid multi-unit design space.
   //
-  // The engine uses pickRatioAwareTier() which evaluates ALL models and picks
-  // the one closest to the 1.25 preferred target while staying >= 1.0 floor.
+  // The engine uses pickRatioAwareTier() which evaluates ALL models (including
+  // multi-unit configs when maxUnits > 1) and picks the one closest to the 1.25
+  // preferred target while staying >= HYBRID_MIN_DC_AC_RATIO (0.75).
   // These legacy tier boundaries are only used as a FALLBACK when
   // pickRatioAwareTier falls back to pickInverterTier (undersized=true path).
   //
-  // Correct DC/AC analysis:
-  //   11.5 kW AC × 1.25 target = 14.4 kW DC sweet spot
-  //   11.5 kW AC × 1.70 EcoFlow max = 19.6 kW DC hard ceiling (per brand spec)
-  //   24.0 kW AC × 1.00 min floor  = 24.0 kW DC minimum for 24kW to be valid
+  // v61.13d DC/AC analysis with hybrid floor (0.75) and maxUnits=2 for 11kW:
   //
-  // Gap zone 19.6–24.0 kW DC: only 11kW is valid (24kW ratio < 1.0).
-  // pickRatioAwareTier handles this correctly by choosing 11kW even though
-  // ratio > preferred window — no in-window option exists in that range.
+  //   Zone A:  0 - 14.4 kW DC   -> 1x 11kW  (ratio 1.00-1.25, sweet spot)
+  //   Zone B: 14.4 - 19.6 kW DC -> 1x 11kW  (ratio 1.25-1.70, EcoFlow brand max)
+  //            (2x 11kW ratio 0.63-0.85 -- only valid if >= 0.75 hybrid floor)
+  //   Zone C: 17.25 - 24.0 kW DC -> 2x 11kW (ratio 0.75-1.04, hybrid-valid)
+  //            (1x 24kW ratio 0.72-1.00 -- below hybrid floor until 18.0 kW DC)
+  //   Zone D: 24.0 kW+ DC        -> 1x 24kW (ratio 1.00+)
   //
-  //   • 11.5 kW AC → covers DC up to 19.6 kW (EcoFlow brand max 1.70)
-  //   • 24.0 kW AC → covers DC from 24.0 kW upward (ratio >= 1.0)
+  // pickRatioAwareTier selects the option closest to 1.25 target in each zone.
+  // For 17.6 kW DC: 1x 11kW=1.53, 2x 11kW=0.765 -- engine picks 1x 11kW (closer
+  // to 1.25 than 0.765). For 20 kW DC: 1x 11kW=1.74 (above brand max 1.70),
+  // 2x 11kW=0.87 (hybrid-valid, closer to 1.25 than 1.74).
   sizingTiers: [
     { minDcKw: 0,    maxDcKw: 19.6,     equipmentDbId: 'ecoflow-ocean-pro-11kw' },
     { minDcKw: 19.6, maxDcKw: Infinity, equipmentDbId: 'ecoflow-ocean-pro-24kw' },
@@ -140,7 +153,15 @@ export const ECOFLOW_PROFILE: BrandProfile = {
     // technically possible but outside our supported install patterns.
     incompatibleTopologies: ['micro'],
     incompatibleBrands: ['enphase'],
-    dcAcRatioRange: { min: 1.0, max: 1.7 },  // OCEAN Pro supports up to 40 kW DC on 24 kW AC = 1.67
+    // v61.13d: lowered min from 1.0 → 0.75 to reflect hybrid ESS reality.
+    // For hybrid inverters, DC/AC < 1.0 is valid: battery bank supplements AC
+    // output when solar DC is below the inverter's AC rating. The OCEAN Pro
+    // explicitly supports 2-unit parallel configs (datasheet: "Power Scalability:
+    // Up to 2 units (48 kW)") -- a 2x 11kW config for a 17.6 kW array gives
+    // ratio=0.765 per combined system, which is within the 0.75 hybrid floor.
+    // Industry minimum for hybrid ESS: ~0.75-0.80. String inverter floor (1.0)
+    // does NOT apply here.
+    dcAcRatioRange: { min: 0.75, max: 1.7 },  // OCEAN Pro: 40 kW DC on 24 kW AC = 1.67 max
     maxDcKwPerInverter: 40,                   // datasheet: 40 kW max STC input
   },
 

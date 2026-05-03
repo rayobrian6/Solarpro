@@ -85,6 +85,25 @@ export interface BrandInverterModelRef {
    * Default: false (drift-guard enforces value equality).
    */
   overridesEquipmentDb?: boolean;
+
+  /**
+   * v61.13d — Maximum number of units of this model that may be installed
+   * in parallel. Used by the sizing engine for hybrid ESS inverters that
+   * explicitly support multi-unit configurations (e.g. EcoFlow OCEAN Pro:
+   * "Power Scalability: Up to 2 units (48 kW)" per EF-PCS-24 datasheet).
+   *
+   * For hybrid topology the DC/AC floor is lowered to HYBRID_MIN_DC_AC_RATIO
+   * (0.75) rather than MIN_DC_AC_RATIO (1.00), because the battery bank
+   * supplements AC output when DC array power is below inverter AC rating.
+   * Without this flag the engine never considers a 2-unit config whose
+   * combined ratio falls below 1.0 even when it is a physically valid and
+   * superior design (more MPPTs, better peak resilience, closer to the 1.25
+   * preferred target per unit).
+   *
+   * Default: undefined (treated as 1 — no multi-unit stacking).
+   * Only set for hybrid ESS inverters with explicit datasheet support.
+   */
+  maxUnits?: number;
 }
 
 // ─── Required BOS component family ─────────────────────────────────

@@ -355,16 +355,33 @@ function pickInverterTier(
 }
 
 /**
- * Ratio-aware inverter tier selection (v60.0).
+ * Ratio-aware inverter tier selection (v60.0, updated v61.13d).
  *
  * Unlike the legacy pickInverterTier() — which blindly returns the tier whose
  * DC-kW window contains totalDcKw — this function scans EVERY non-micro model
  * registered in the brand, computes the DC/AC ratio at the minimum required
  * unit count, and picks the model that:
  *
- *   1. Produces a DC/AC ratio >= MIN_DC_AC_RATIO (1.00) — hard floor.
+ *   1. Produces a DC/AC ratio >= effective floor — hard floor.
+ *      - String/optimizer topology: floor = MIN_DC_AC_RATIO (1.00)
+ *      - Hybrid ESS topology: floor = HYBRID_MIN_DC_AC_RATIO (0.75)
+ *        Hybrid inverters are battery-backed; DC/AC < 1.0 is valid because
+ *        the battery bank supplements AC output when DC array < AC rating.
  *   2. Is closest to PREFERRED_DC_AC_RATIO_TARGET (1.25) among all candidates
  *      that pass the hard floor (in-window candidates 1.20–1.40 take priority).
+ *
+ * v61.13d — Multi-unit hybrid expansion:
+ *   For hybrid ESS models with maxUnits > 1 (e.g. EcoFlow OCEAN Pro 11kW,
+ *   maxUnits=2 per datasheet "Power Scalability: Up to 2 units (48 kW)"),
+ *   this function generates ADDITIONAL candidates at each valid unit count
+ *   (1 through maxUnits) so the engine can evaluate whether e.g. 2× 11kW
+ *   gives a better DC/AC ratio than 1× 11kW for a large DC array.
+ *
+ *   Example: 17.6 kW DC array with EcoFlow:
+ *     1× 11kW: ratio = 17.6/11.5 = 1.53  (above floor, outside preferred window)
+ *     2× 11kW: ratio = 17.6/23.0 = 0.765 (above hybrid floor 0.75, closer to 1.25)
+ *     1× 24kW: ratio = 17.6/24.0 = 0.733 (below hybrid floor 0.75 — rejected)
+ *   Engine picks 2× 11kW (ratio 0.765 is closer to 1.25 than 1.53). ✓
  *
  * If NO model satisfies the hard floor (e.g. 4.8 kW DC array with a brand
  * whose smallest inverter is 8 kW AC), the function falls back to the legacy
@@ -402,16 +419,43 @@ function pickRatioAwareTier(
   });
   if (stringModels.length === 0) return undefined;
 
-  // Evaluate every model: compute the minimum qty needed and the resulting ratio.
-  type Candidate = { model: BrandInverterModelRef; qty: number; ratio: number };
-  const candidates: Candidate[] = stringModels.map(m => {
-    const qty   = unitsRequired(m, panelCount, totalDcKw, ppu(m));
-    const ratio = dcAcRatio(m, qty, totalDcKw);
-    return { model: m, qty, ratio };
-  });
+  // v61.13d — topology-aware hard floor.
+  // Hybrid ESS: battery supplements AC when DC < AC rating → DC/AC < 1.0 is valid.
+  // String/optimizer: no supplemental source → DC must meet or exceed AC nameplate.
+  const isHybrid = brand.topology === 'hybrid';
+  const effectiveFloor = isHybrid ? HYBRID_MIN_DC_AC_RATIO : MIN_DC_AC_RATIO;
 
-  // Step 1: candidates that satisfy the hard floor (ratio >= 1.00).
-  const aboveFloor = candidates.filter(c => c.ratio >= MIN_DC_AC_RATIO);
+  // Evaluate every model: compute the minimum qty needed and the resulting ratio.
+  // v61.13d: For hybrid models with maxUnits > 1, generate one candidate per valid
+  // unit count (1 through maxUnits) so the engine considers all multi-unit configs.
+  type Candidate = { model: BrandInverterModelRef; qty: number; ratio: number };
+  const candidates: Candidate[] = [];
+
+  for (const m of stringModels) {
+    const baseQty = unitsRequired(m, panelCount, totalDcKw, ppu(m));
+    const maxAllowedUnits = isHybrid ? (m.maxUnits ?? 1) : 1;
+
+    // Always evaluate the minimum-required qty first.
+    const baseRatio = dcAcRatio(m, baseQty, totalDcKw);
+    candidates.push({ model: m, qty: baseQty, ratio: baseRatio });
+
+    // v61.13d: For hybrid models with explicit maxUnits > baseQty, also evaluate
+    // each additional unit count up to maxUnits. This lets the engine discover
+    // that e.g. 2x 11kW (ratio=0.765) is closer to 1.25 than 1x 11kW (ratio=1.53).
+    if (isHybrid && maxAllowedUnits > baseQty) {
+      for (let extraQty = baseQty + 1; extraQty <= maxAllowedUnits; extraQty++) {
+        const extraRatio = dcAcRatio(m, extraQty, totalDcKw);
+        // Only add if above the hybrid floor — we don't want to propose a 2-unit
+        // config that's below even the hybrid minimum.
+        if (extraRatio >= effectiveFloor) {
+          candidates.push({ model: m, qty: extraQty, ratio: extraRatio });
+        }
+      }
+    }
+  }
+
+  // Step 1: candidates that satisfy the effective hard floor.
+  const aboveFloor = candidates.filter(c => c.ratio >= effectiveFloor);
 
   if (aboveFloor.length === 0) {
     // No model in this brand can produce a valid ratio for this array size.
@@ -613,11 +657,40 @@ function unitsRequired(
  * in any auto-selected configuration. Manual overrides allowed by UI but
  * validation engine surfaces a blocking error for review.
  * Preferred target range: 1.15-1.35 (industry best-practice).
+ *
+ * NOTE: This floor applies to STRING and OPTIMIZER topologies only.
+ * For HYBRID ESS topology, use HYBRID_MIN_DC_AC_RATIO (0.75) instead.
+ * See v61.13d comment block below.
  */
 export const MIN_DC_AC_RATIO = 1.00;
 // v58.1: Hard floor is 1.00 but engine TARGETS ~1.25 to minimize clipping.
 // A ratio of exactly 1.0 = zero clipping headroom; inverter runs at 100%
 // nameplate continuously at peak irradiance. Industry best-practice: 1.20-1.40.
+
+/**
+ * v61.13d — Minimum DC/AC ratio for HYBRID ESS topology (battery-backed inverters).
+ *
+ * For hybrid inverters (e.g. EcoFlow OCEAN Pro, Sol-Ark), the battery bank
+ * supplements AC output when the solar DC array is producing less than the
+ * inverter's AC rating. This means DC/AC < 1.0 is NOT a design flaw — it is
+ * normal and expected in whole-home backup ESS configurations.
+ *
+ * Setting the floor to 1.0 (the string-inverter floor) incorrectly rejects
+ * valid multi-unit hybrid configurations. For example:
+ *   - EcoFlow OCEAN Pro 2× 11kW for a 17.6 kW DC array:
+ *       combined ratio = 17.6 / 23.0 = 0.765
+ *       Valid ESS design (battery covers the 5.4 kW AC headroom at peak sun).
+ *   - This gives 16 MPPTs (vs 8 for 1x unit), better resiliency, and the
+ *     datasheet explicitly supports it: "Power Scalability: Up to 2 units (48 kW)".
+ *
+ * Industry minimum for residential hybrid ESS: ~0.75–0.80.
+ * We use 0.75 as the hard floor, matching EcoFlow's brand minimum (brand
+ * profile dcAcRatioRange.min = 0.75).
+ *
+ * This constant is used by pickRatioAwareTier() and attemptDownsize() when
+ * brand.topology === 'hybrid'.
+ */
+export const HYBRID_MIN_DC_AC_RATIO = 0.75;
 
 /** Preferred DC/AC ratio target window (advisory, not hard-blocked). */
 /** v58.1: widened to 1.20-1.40, target 1.25 for optimal clipping tradeoff. */
@@ -659,12 +732,19 @@ function dcAcRatio(model: BrandInverterModelRef, qty: number, totalDcKw: number)
    ): { model: BrandInverterModelRef; qty: number } {
      const currentRatio = dcAcRatio(currentModel, currentQty, totalDcKw);
 
+     // v61.13d: topology-aware hard floor.
+     const _isHybrid = brand.topology === 'hybrid';
+     const _floor = _isHybrid ? HYBRID_MIN_DC_AC_RATIO : MIN_DC_AC_RATIO;
+
      // v58.1 — Downsize strategy targeting ~1.25 DC/AC for optimal clipping.
      //
      // Rules (in priority order):
      //   1. NEVER increase unit count — consolidation is done by upsize rules.
      //      A system that fits in 1 inverter must stay at 1 inverter.
-     //   2. Hard floor: ratio must be >= MIN_DC_AC_RATIO (1.00) — AC ≤ DC.
+     //      EXCEPTION (v61.13d): For hybrid topology with maxUnits > 1, allow
+     //      increase up to maxUnits when current ratio is above the preferred max.
+     //   2. Hard floor: ratio must be >= effective floor — AC ≤ DC (string) or
+     //      battery supplements shortfall (hybrid). See HYBRID_MIN_DC_AC_RATIO.
      //   3. Target: prefer candidates closest to PREFERRED_DC_AC_RATIO_TARGET (1.25).
      //      Candidates in PREFERRED window (1.20–1.40) take priority.
      //   4. Only switch when the candidate is a genuine improvement:
@@ -690,15 +770,18 @@ function dcAcRatio(model: BrandInverterModelRef, qty: number, totalDcKw: number)
      for (const candidate of candidates) {
        const qty = unitsRequired(candidate, panelCount, totalDcKw, ppu(candidate));
        // RULE 1 (v60.0): Allow unit count increase ONLY when the current selection
-       // is below the hard DC/AC floor (ratio < 1.00). In that case, adding more
-       // units of a smaller model is the correct real-world answer (e.g. 2× Sol-Ark
-       // 8K-2P for a 9.6 kW array gives ratio 1.20 — valid vs. 1× at 0.60 — invalid).
-       // When the current ratio is already >= floor, consolidation still wins (fewer
-       // units = simpler BOS), so the original rule is preserved.
-       if (qty > currentQty && currentRatio >= MIN_DC_AC_RATIO) continue;
+       // is below the hard DC/AC floor. In that case, adding more units of a smaller
+       // model is the correct real-world answer (e.g. 2× Sol-Ark 8K-2P for a 9.6 kW
+       // array gives ratio 1.20 — valid vs. 1× at 0.60 — invalid).
+       // v61.13d: For hybrid topology, also allow up to candidate.maxUnits when the
+       // current ratio is above PREFERRED_MAX (e.g. 1x 11kW at ratio=1.53 → try
+       // 2x 11kW at ratio=0.765 which is closer to the 1.25 target).
+       const candidateMaxUnits = _isHybrid ? (candidate.maxUnits ?? 1) : 1;
+       if (qty > currentQty && currentRatio >= _floor && qty > candidateMaxUnits) continue;
+       if (qty > candidateMaxUnits) continue; // never exceed brand's stated max units
        const ratio = dcAcRatio(candidate, qty, totalDcKw);
        // RULE 2: Hard floor.
-       if (ratio < MIN_DC_AC_RATIO) continue;
+       if (ratio < _floor) continue;
        viable.push({ model: candidate, qty, ratio });
      }
 
@@ -721,7 +804,7 @@ function dcAcRatio(model: BrandInverterModelRef, qty: number, totalDcKw: number)
      });
 
      // RULE 4: Only switch when it's a genuine improvement.
-     const currentBelowFloor = currentRatio < MIN_DC_AC_RATIO;
+     const currentBelowFloor = currentRatio < _floor;
      const currentAboveMax   = currentRatio > PREFERRED_DC_AC_RATIO_MAX;
      const currentBelowMin   = currentRatio < PREFERRED_DC_AC_RATIO_MIN;
      const bestInWindow       = best.ratio >= PREFERRED_DC_AC_RATIO_MIN &&
@@ -768,6 +851,11 @@ function sizeInverters(
       _va_topology,
     );
   }
+
+  // v61.13d: topology-aware DC/AC hard floor for this brand.
+  // Hybrid ESS: battery supplements AC when DC below AC nameplate, floor=0.75.
+  // String / optimizer: no supplemental source, floor=1.00.
+  const _sizeFloor = brand.topology === 'hybrid' ? HYBRID_MIN_DC_AC_RATIO : MIN_DC_AC_RATIO;
 
   // ── Phase 14.1: Feasibility Hard Gate ────────────────────────────────────
   //
@@ -915,12 +1003,14 @@ function sizeInverters(
     // (ratio=0.90) as substitute — which then triggers DC_AC_RATIO_AC_EXCEEDS_DC error.
     // The substitute is electrically valid per feasibility but ratio-invalid per the
     // validation engine. Keep the original model and emit a softer advisory instead.
+    // v61.13d: use topology-aware floor (hybrid = 0.75, string/optimizer = 1.00).
+    const _fhg_floor = brand.topology === 'hybrid' ? HYBRID_MIN_DC_AC_RATIO : MIN_DC_AC_RATIO;
     const originalTotalAc = resolved[0].acKw * (resolved[0].qty ?? 1);
     const substituteTotalAc = recRef.acKw * substituteQty;
     const originalRatio = totalDcKw / Math.max(originalTotalAc, 0.001);
     const substituteRatio = totalDcKw / Math.max(substituteTotalAc, 0.001);
 
-    if (originalRatio >= MIN_DC_AC_RATIO && substituteRatio < MIN_DC_AC_RATIO) {
+    if (originalRatio >= _fhg_floor && substituteRatio < _fhg_floor) {
       warnings.push({
         severity: 'info',
         code: 'FEASIBILITY_CHOSEN_INFEASIBLE',
@@ -1040,10 +1130,11 @@ function sizeInverters(
         // v60.2: compare ratio-validity, not just dcKwMax. The ratio-aware tier
         // model may have a smaller or equal AC rating but a valid ratio while the
         // user's selection is below the floor.
+        // v61.13d: use topology-aware floor (_sizeFloor).
         (tierRecModel.dcKwMax > ref.dcKwMax ||
          (tierRatioRec !== undefined && !tierRatioRec.undersized &&
-          dcAcRatio(tierRecModel, tierRatioRec.qty, totalDcKw) >= MIN_DC_AC_RATIO &&
-          dcAcRatio(ref, qtySelected, totalDcKw) < MIN_DC_AC_RATIO));
+          dcAcRatio(tierRecModel, tierRatioRec.qty, totalDcKw) >= _sizeFloor &&
+          dcAcRatio(ref, qtySelected, totalDcKw) < _sizeFloor));
 
       // Phase 14.3 — Pre-compute the feasibility-rejected set so Rules 1 and 2
       // never upsize to a model the hard gate would immediately reverse.
@@ -1094,16 +1185,17 @@ function sizeInverters(
           const biggerStrings = vaPPU(m) > panelsPerUnitSelected;
           if (!biggerDc && !biggerStrings) return false;
           // Phase 14.3: Never upsize to a model the feasibility gate will reject,
-          // UNLESS the candidate has a valid DC/AC ratio (>= MIN_DC_AC_RATIO at qty=1).
+          // UNLESS the candidate has a valid DC/AC ratio (>= effective floor at qty=1).
           // Rationale (v60.2): applyFeasibilityHardGate now has a ratio-regression guard:
           // if the gate rejects a ratio-valid candidate and would substitute a ratio-invalid
           // one (e.g. rejects 12K-2P×1 ratio=1.20 → substitutes 2×8K-2P ratio=0.90), it
           // keeps the original. Pre-filtering a ratio-valid candidate here is counter-productive:
           // Rule 1 skips 12K-2P (best ratio) and falls to Rule 3 (2×8K-2P, ratio=0.90).
           // Let ratio-valid candidates through — the gate will preserve them.
+          // v61.13d: use topology-aware floor (_sizeFloor).
           if (feasibilityRejectedIds.has(m.equipmentDbId)) {
             const candidateRatioAt1 = dcAcRatio(m, 1, totalDcKw);
-            if (candidateRatioAt1 < MIN_DC_AC_RATIO) return false;
+            if (candidateRatioAt1 < _sizeFloor) return false;
             // ratio-valid but feasibility-rejected: allow through so applyFeasibilityHardGate
             // can apply its ratio-regression guard and keep it.
           }
@@ -1129,11 +1221,12 @@ function sizeInverters(
         });
 
       // Rule 1: fewer-unit candidate available → upsize to it.
-      // v60.2: only consider candidates with ratio >= MIN_DC_AC_RATIO (1.00).
+      // v60.2: only consider candidates with ratio >= effective floor.
       // Oversized candidates (e.g. 30K-3P at ratio=0.48) that merely need fewer
       // units are not improvements — the feasibility gate rejects them and falls
       // back to the broken original config. Filter to valid-ratio candidates.
-      const validCandidates = candidates.filter(c => c.ratio >= MIN_DC_AC_RATIO);
+      // v61.13d: use topology-aware floor (_sizeFloor).
+      const validCandidates = candidates.filter(c => c.ratio >= _sizeFloor);
       const fewerUnitsCandidate = validCandidates.find(c => c.qty < qtySelected);
       if (fewerUnitsCandidate) {
         warnings.push({
@@ -1169,7 +1262,8 @@ function sizeInverters(
       const selectedRatio = dcAcRatio(ref, qtySelected, totalDcKw);
       // Rule 2 also respects the feasibility-rejected set: if the tier-recommended
       // model is itself infeasible, skip the upsize and fall through to Rule 3.
-      if (userIsUndersizedVsTier && tierRecModel && selectedRatio < MIN_DC_AC_RATIO &&
+      // v61.13d: use topology-aware floor (_sizeFloor).
+      if (userIsUndersizedVsTier && tierRecModel && selectedRatio < _sizeFloor &&
           !feasibilityRejectedIds.has(tierRecModel.equipmentDbId)) {
         const qtyTier = unitsRequired(tierRecModel, input.panelCount, totalDcKw, vaPPU(tierRecModel));
         warnings.push({
@@ -1235,8 +1329,8 @@ function sizeInverters(
   // String / optimizer / hybrid: use sizing tiers
   // v60.0 — Ratio-aware tier selection: scan all brand models and pick the one
   // that produces a DC/AC ratio closest to PREFERRED_DC_AC_RATIO_TARGET (1.25)
-  // while staying >= MIN_DC_AC_RATIO (1.00). Falls back to legacy tier lookup
-  // only when no model in the brand can satisfy the hard floor.
+  // while staying >= effective floor (_sizeFloor: 0.75 hybrid, 1.00 string).
+  // Falls back to legacy tier lookup only when no model can satisfy the floor.
   const ratioAwarePick = pickRatioAwareTier(brand, brand.sizingTiers, totalDcKw, input.panelCount, vaPPU);
   if (!ratioAwarePick) {
     warnings.push({
@@ -1272,7 +1366,7 @@ function sizeInverters(
         message:
           `Array (${totalDcKw.toFixed(1)} kW DC, ${input.panelCount} panels) is too small for ${brand.displayName}: ` +
           `smallest model (${_smallestId}, ${_smallestAcKw} kW AC) gives DC/AC ` +
-          `${(totalDcKw / Math.max(_smallestAcKw, 0.001)).toFixed(2)} — below the 1.00 floor. ` +
+          `${(totalDcKw / Math.max(_smallestAcKw, 0.001)).toFixed(2)} — below the ${_sizeFloor.toFixed(2)} floor. ` +
           `Need at least ${_minPanelsNeeded} panels for a valid ratio. ` +
           `Consider microinverters (Enphase / APsystems) for arrays under ${_minPanelsNeeded} panels.`,
       });
@@ -1320,7 +1414,7 @@ function sizeInverters(
   const _noWindowOption = ratioAwarePick?.noWindowCandidateAvailable ?? false;
   if (
     !_noWindowOption &&
-    finalRatio >= 1.0 &&
+    finalRatio >= _sizeFloor &&
     (finalRatio < PREFERRED_DC_AC_RATIO_MIN || finalRatio > PREFERRED_DC_AC_RATIO_MAX)
   ) {
     warnings.push({
