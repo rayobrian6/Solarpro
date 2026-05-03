@@ -414,7 +414,16 @@ function newInverter(type: InverterType, sysType?: string): InverterConfig {
   } else {
     defaultId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
   }
-  return { id: `inv-${Date.now()}`, inverterId: defaultId, type, strings: [newString(0, sysType)] };
+  const strings = [newString(0, sysType)];
+  // v61.2: always set metadata so reconciliation step never trims new inverters.
+  return {
+    id: `inv-${Date.now()}`,
+    inverterId: defaultId,
+    type,
+    strings,
+    stringsPerInverter: strings.length,
+    modulesPerString: strings[0]?.panelCount ?? 10,
+  };
 }
 
 const defaultProject: ProjectConfig = {
@@ -2564,11 +2573,8 @@ function EngineeringPageInner() {
     // then override only the structural fields the sizing engine
     // decided (id, panelCount, panelId).
     setConfig(prev => {
-      const hydratedInverters: InverterConfig[] = result.patch.inverters!.map((inv, idx) => ({
-        id: inv.id,
-        inverterId: inv.inverterId,
-        type: inv.type as InverterType,
-        strings: inv.strings.map((s, sIdx) => {
+      const hydratedInverters: InverterConfig[] = result.patch.inverters!.map((inv, idx) => {
+        const builtStrings = inv.strings.map((s, sIdx) => {
           const base = newString(sIdx, prev.systemType);
           return {
             ...base,
@@ -2577,8 +2583,19 @@ function EngineeringPageInner() {
             panelCount: s.panelCount,
             panelId: s.panelId || base.panelId,
           };
-        }),
-      }));
+        });
+        // v61.2: keep stringsPerInverter + modulesPerString in sync so the
+        // reconciliation step never trims these newly-built strings back down.
+        const _mps = builtStrings[0]?.panelCount ?? 10;
+        return {
+          id: inv.id,
+          inverterId: inv.inverterId,
+          type: inv.type as InverterType,
+          strings: builtStrings,
+          stringsPerInverter: builtStrings.length,
+          modulesPerString: _mps,
+        };
+      });
 
       return {
         ...prev,
@@ -2788,11 +2805,15 @@ function EngineeringPageInner() {
         const microId = MICROINVERTERS[0]?.id || 'enphase-iq8plus';
         // Preserve existing panelId if user had one (non-destructive); otherwise use system-type default
         const existingPanelId = prev.inverters[0]?.strings[0]?.panelId;
+        const microStrings = [{ ...newString(0, prev.systemType), panelId: existingPanelId || defaultPanelForSystemType(prev.systemType), panelCount: totalPanels }];
         const inv: InverterConfig = {
           id: `inv-${Date.now()}`,
           inverterId: microId,
           type: 'micro',
-          strings: [{ ...newString(0, prev.systemType), panelId: existingPanelId || defaultPanelForSystemType(prev.systemType), panelCount: totalPanels }],
+          strings: microStrings,
+          // v61.2: keep metadata in sync so reconciler never trims micro string
+          stringsPerInverter: microStrings.length,
+          modulesPerString: totalPanels,
         };
         setExpandedInv(inv.id);
         return { ...prev, inverters: [inv], ...LOCK };
