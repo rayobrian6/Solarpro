@@ -988,20 +988,54 @@ function EngineeringPageInner() {
         if (savedConfig && Object.keys(savedConfig).length > 0) {
           console.log('[EngineeringPage] Restoring from engineering_config (auto-saved workspace)');
           // Merge: project-level fields from patches, all engineering fields from savedConfig
-          setConfig(prev => ({
-            ...prev,
-            // Project-level identity fields from patches (address, name, state, city, etc.)
-            projectName: patches.projectName ?? prev.projectName,
-            address:     patches.address     ?? prev.address,
-            clientName:  patches.clientName  ?? prev.clientName,
-            state:       patches.state       ?? prev.state,
-            city:        patches.city        ?? prev.city,
-            county:      patches.county      ?? prev.county,
-            zip:         patches.zip         ?? prev.zip,
-            systemType:  patches.systemType  ?? prev.systemType,
-            // All engineering config fields from saved workspace (user's last state)
-            ...savedConfig,
-          }));
+          setConfig(prev => {
+            const merged: any = {
+              ...prev,
+              // Project-level identity fields from patches (address, name, state, city, etc.)
+              projectName: patches.projectName ?? prev.projectName,
+              address:     patches.address     ?? prev.address,
+              clientName:  patches.clientName  ?? prev.clientName,
+              state:       patches.state       ?? prev.state,
+              city:        patches.city        ?? prev.city,
+              county:      patches.county      ?? prev.county,
+              zip:         patches.zip         ?? prev.zip,
+              systemType:  patches.systemType  ?? prev.systemType,
+              // All engineering config fields from saved workspace (user's last state)
+              ...savedConfig,
+            };
+            // v61.2 reconciliation: if a saved config has stringsPerInverter metadata
+            // that disagrees with the actual inv.strings array length, trust
+            // stringsPerInverter and trim/pad the strings array to match.
+            // This fixes configs saved before the stringsPerInverter-resize fix.
+            if (Array.isArray(merged.inverters)) {
+              merged.inverters = merged.inverters.map((inv: any) => {
+                if (typeof inv.stringsPerInverter !== 'number') return inv;
+                const target = inv.stringsPerInverter;
+                if (!Array.isArray(inv.strings) || inv.strings.length === target) return inv;
+                const modulesEach = inv.modulesPerString ?? inv.strings[0]?.panelCount ?? 10;
+                const panelId = inv.strings[0]?.panelId ?? 'panel-default';
+                const wireGauge = inv.strings[0]?.wireGauge ?? '#10 AWG';
+                if (target < inv.strings.length) {
+                  return { ...inv, strings: inv.strings.slice(0, target) };
+                } else {
+                  const extra = Array.from({ length: target - inv.strings.length }, (_: any, k: number) => ({
+                    id: `str-hydrate-${Date.now()}-${k}`,
+                    label: `String ${inv.strings.length + k + 1}`,
+                    panelCount: modulesEach,
+                    panelId,
+                    wireGauge,
+                    wireLength: inv.strings[0]?.wireLength ?? 0,
+                    tilt: inv.strings[0]?.tilt ?? 20,
+                    azimuth: inv.strings[0]?.azimuth ?? 180,
+                    roofType: inv.strings[0]?.roofType ?? 'asphalt-shingle',
+                    mountingSystem: inv.strings[0]?.mountingSystem ?? 'flush',
+                  }));
+                  return { ...inv, strings: [...inv.strings, ...extra] };
+                }
+              });
+            }
+            return merged;
+          });
         } else if (Object.keys(patches).length > 0) {
           // No saved config — use seed patches as before
           setConfig(prev => {
