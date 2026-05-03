@@ -1034,21 +1034,36 @@ function EngineeringPageInner() {
                 }
               });
 
-              // v61.2 corruption detector: if the saved config has ALL strings with
-              // panelCount=1 AND more than 4 strings total, this is the N×1 bug state
-              // (from the old micro-fallback in the panel count fix path, now fixed).
-              // Rebuild strings via sizing engine so the correct layout is auto-saved
-              // over the corrupt DB record on the next config change.
+              // v61.2 corruption detector: catches two corrupt states:
+              //   A) N×1 bug: ALL strings have panelCount=1 AND there are more than 4 strings.
+              //      (from the old micro-fallback in the panel count fix path, now fixed)
+              //   B) 1×N bug: exactly 1 string with panelCount > 20 (over the max panels/string
+              //      ceiling). This happens when a single large panel count gets saved without
+              //      proper string distribution (e.g. panelCount:44 on a string inverter).
+              // In both cases, rebuild via sizing engine so the correct layout overwrites the
+              // corrupt DB record on the next config change.
               const _allStrings = merged.inverters.flatMap((inv: any) => inv.strings ?? []);
-              const _isCorrupt = _allStrings.length > 4 && _allStrings.every((s: any) => s.panelCount === 1);
+              const _invType0Check: string = (merged.inverters[0]?.type ?? 'string');
+              const _isNx1Corrupt = _allStrings.length > 4 && _allStrings.every((s: any) => s.panelCount === 1);
+              const _is1xNCorrupt = _invType0Check !== 'micro'
+                && _allStrings.length === 1
+                && (_allStrings[0]?.panelCount ?? 0) > 20;
+              const _isCorrupt = _isNx1Corrupt || _is1xNCorrupt;
               if (_isCorrupt) {
-                console.warn('[savedConfig] corrupt N×1 strings detected (n=' + _allStrings.length + ') — rebuilding via sizing engine');
+                const _corruptLabel = _is1xNCorrupt
+                  ? `1×${_allStrings[0]?.panelCount ?? '?'} (single over-sized string)`
+                  : `${_allStrings.length}×1 (every string has 1 panel)`;
+                console.warn('[savedConfig] corrupt string layout detected (' + _corruptLabel + ') — rebuilding via sizing engine');
                 const _corrupted = merged.inverters;
                 const _invType0: string = (_corrupted[0]?.type ?? 'string');
                 const _invId0: string = (_corrupted[0]?.inverterId ?? '');
                 const _panelId0: string = (_corrupted[0]?.strings?.[0]?.panelId ?? 'qcells-peak-duo-400');
                 const _panelObj = (SOLAR_PANELS as any[]).find((pp: any) => pp.id === _panelId0);
-                const _totalPanels: number = _allStrings.length; // each was 1 panel → total = count
+                // N×1 case: each string has 1 panel → total = string count
+                // 1×N case: single string holds all panels → total = that string's panelCount
+                const _totalPanels: number = _is1xNCorrupt
+                  ? (_allStrings[0]?.panelCount ?? _allStrings.length)
+                  : _allStrings.length;
                 try {
                   const _fixInput: Parameters<typeof sizeSystemFromBrand>[0] = {
                     systemType: 'roof',
@@ -4749,11 +4764,22 @@ function EngineeringPageInner() {
         }
 
         // ── CRITICAL: update config panel count from layout ────────────────
-        // Only update if current config has wrong panel count
+        // Update if: (a) total panel count differs, OR (b) total matches but string
+        // distribution is wrong — specifically the 1×N corrupt state where a single
+        // string has all N panels on a non-micro inverter (should be split by engine).
         const currentTotal = config.inverters.reduce((s, inv) =>
           s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
-        if (layout.panelCount > 0 && currentTotal !== layout.panelCount) {
-            console.log('[EngineeringPage] PANEL COUNT FIX:', currentTotal, '→', layout.panelCount);
+        const _allCurrentStrings = config.inverters.flatMap(inv => inv.strings);
+        const _pcInv0Type = config.inverters[0]?.type ?? 'string';
+        const _is1xNState = _pcInv0Type !== 'micro'
+          && _allCurrentStrings.length === 1
+          && (_allCurrentStrings[0]?.panelCount ?? 0) > 20;
+        if (layout.panelCount > 0 && (currentTotal !== layout.panelCount || _is1xNState)) {
+            if (_is1xNState) {
+              console.log('[EngineeringPage] PANEL COUNT FIX (1×N redistribution): 1 string with', _allCurrentStrings[0]?.panelCount, 'panels → redistributing via sizing engine');
+            } else {
+              console.log('[EngineeringPage] PANEL COUNT FIX:', currentTotal, '→', layout.panelCount);
+            }
             // v61.2 fix: pre-compute string layout using sizing engine BEFORE entering setConfig.
             // BUGS FIXED:
             //   1. Micro fallback: _pcInvType==='micro' used to create N×1 strings (1 panel each).
