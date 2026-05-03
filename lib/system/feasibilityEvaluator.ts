@@ -34,11 +34,46 @@ import type { StringInverter } from '../equipment-db';
 
 /** Acceptable DC/AC ratio band. Below / above → reject outright. */
 export const DC_AC_ACCEPTABLE_MIN = 0.9;
-export const DC_AC_ACCEPTABLE_MAX = 1.55;
+// v61.9: Raised from 1.55 → 2.00.
+// 1.55 was rejecting the EcoFlow OCEAN Pro 11.5 kW (ratio 1.683 for 19.36 kW DC)
+// and every other hybrid inverter in the 1.55–2.00 range.
+// The 1.55 threshold is an ECONOMIC warning, NOT an electrical invalidity boundary.
+// Electrical invalidity is voltage/current-based; DC/AC ratio only governs clipping.
+// The feasibility evaluator's job is to find physically buildable configurations.
+// Economic clipping is surfaced as a warning by validationEngine / ValidationPanel.
+// Threshold 2.00 matches validationEngine's DC_AC_RATIO_SEVERE (error) boundary —
+// above 2.00 the system is so clipped it's not viable as a recommendation.
+export const DC_AC_ACCEPTABLE_MAX = 2.00;
 
 /** Ideal DC/AC band. Outside this but inside acceptable → score penalty. */
 export const DC_AC_IDEAL_MIN = 1.1;
-export const DC_AC_IDEAL_MAX = 1.3;
+export const DC_AC_IDEAL_MAX = 1.4;
+
+/**
+ * v61.9 — Clipping severity bands for feasibility scoring and UI display.
+ * These are advisory thresholds; they do NOT cause feasibility rejection.
+ *   ≤ 1.30: normal / pass
+ *   1.30–1.55: mild oversize / info
+ *   1.55–1.75: warning / aggressive oversize
+ *   1.75–2.00: severe clipping warning
+ *   > 2.00: critical — reject as infeasible (DC_AC_ACCEPTABLE_MAX boundary)
+ */
+export const DC_AC_CLIPPING = {
+  NORMAL_MAX:   1.30,  // ≤ this: no clipping concern
+  MILD_MAX:     1.55,  // ≤ this: mild oversize / info
+  WARNING_MAX:  1.75,  // ≤ this: aggressive oversize / warning
+  SEVERE_MAX:   2.00,  // ≤ this: severe clipping / strong recommendation to upsize
+  // > SEVERE_MAX: reject outright (DC_AC_ACCEPTABLE_MAX)
+} as const;
+
+/** Returns the clipping severity label for a given DC/AC ratio. */
+export function dcAcClippingSeverity(ratio: number): 'normal' | 'mild' | 'warning' | 'severe' | 'critical' {
+  if (ratio <= DC_AC_CLIPPING.NORMAL_MAX)  return 'normal';
+  if (ratio <= DC_AC_CLIPPING.MILD_MAX)    return 'mild';
+  if (ratio <= DC_AC_CLIPPING.WARNING_MAX) return 'warning';
+  if (ratio <= DC_AC_CLIPPING.SEVERE_MAX)  return 'severe';
+  return 'critical';
+}
 
 /** Default parallel strings per MPPT when brand / equipment-db is silent. */
 export const DEFAULT_PARALLEL_STRINGS_PER_MPPT = 2;

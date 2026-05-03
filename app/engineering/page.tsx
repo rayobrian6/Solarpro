@@ -2276,6 +2276,56 @@ function EngineeringPageInner() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [systemPanelCount, config.inverters, sizingRecommendation, currentProjectId]);
 
+  // v61.9 CLIPPING RECOMMENDATION TRACE
+  // Fires whenever DC/AC ratio or sizing recommendation changes.
+  // Captures the full clipping decision context for debugging.
+  useEffect(() => {
+    if (systemPanelCount <= 0 || !sizingRecommendation) return;
+    const _crPrimaryInv = config.inverters[0];
+    const _crPanelData = _crPrimaryInv?.strings[0]
+      ? (SOLAR_PANELS.find(p => p.id === _crPrimaryInv.strings[0].panelId) as any)
+      : null;
+    const _crPanelWatts: number = _crPanelData?.watts ?? 400;
+    const _crDcKw: number = (systemPanelCount * _crPanelWatts) / 1000;
+    const _crCurrentAcKw: number = config.inverters.reduce((s, inv) => {
+      const invData = (getInvById as any)?.(inv.inverterId, inv.type);
+      return s + ((invData as any)?.acOutputKw ?? 0);
+    }, 0);
+    const _crRecAcKw: number = sizingRecommendation.inverterModels.reduce(
+      (s, m) => s + m.acKw * m.qty, 0
+    );
+    const _crCurrentRatio: number = _crCurrentAcKw > 0 ? _crDcKw / _crCurrentAcKw : 0;
+    const _crRecRatio: number = _crRecAcKw > 0 ? _crDcKw / _crRecAcKw : 0;
+    const _crRecInvId = sizingRecommendation.inverterModels[0]?.equipmentDbId ?? '(none)';
+    const _crRecLayout = sizingRecommendation.strings?.map((s: any) => s.panelCount) ?? [];
+    const _crCurrentLayout = config.inverters.flatMap(inv => inv.strings.map(s => s.panelCount));
+
+    // Clipping severity
+    const _crSeverityOf = (r: number) =>
+      r <= 1.30 ? 'normal' : r <= 1.55 ? 'mild' : r <= 1.75 ? 'warning' : r <= 2.00 ? 'severe' : 'critical';
+
+    console.log(
+      `[CLIPPING RECOMMENDATION TRACE]` +
+      `\n  projectId: ${currentProjectId}` +
+      `\n  panelCount: ${systemPanelCount}` +
+      `\n  panelWatts: ${_crPanelWatts}` +
+      `\n  dcKw: ${_crDcKw.toFixed(2)}` +
+      `\n  currentInverterModel: ${_crPrimaryInv?.inverterId ?? '(none)'}` +
+      `\n  currentInverterCount: ${config.inverters.length}` +
+      `\n  currentAcKw: ${_crCurrentAcKw.toFixed(2)}` +
+      `\n  currentDcAcRatio: ${_crCurrentRatio.toFixed(3)}` +
+      `\n  currentClippingSeverity: ${_crSeverityOf(_crCurrentRatio)}` +
+      `\n  currentConfigLayout: [${_crCurrentLayout.join(',')}]` +
+      `\n  recommendedInverterModel: ${_crRecInvId}` +
+      `\n  recommendedAcKw: ${_crRecAcKw.toFixed(2)}` +
+      `\n  recommendedDcAcRatio: ${_crRecRatio.toFixed(3)}` +
+      `\n  recommendedLayout: [${_crRecLayout.join(',')}]` +
+      `\n  isUserControlled: ${config.isUserControlled}` +
+      `\n  selectedBrand: ${config.selectedBrand ?? '(none)'}`
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemPanelCount, config.inverters, sizingRecommendation, currentProjectId]);
+
      // Phase C1 — Single Source of Truth: derive displayedEcosystemComponents from
      // sizingRecommendation.requiredComponents (engine truth). The UI never computes
      // component quantities locally; it always reflects what sizeSystemFromBrand()

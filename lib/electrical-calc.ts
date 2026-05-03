@@ -16,7 +16,7 @@ import {
   getConductorArea,
   getConductorByMinAmpacity,
 } from './manufacturer-specs';
-import { DC_AC_TARGET } from './system/dcAcConstants';
+import { DC_AC_TARGET, DC_AC_CLIPPING_BANDS, getDcAcClippingSeverity } from './system/dcAcConstants';
 import { calcDcAcRatio } from './system/calcDcAcRatio';
 
 // ─── Input Types ──────────────────────────────────────────────────────────────
@@ -1018,14 +1018,46 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
 
   // ── DC/AC Ratio ───────────────────────────────────────────────────────────
   const dcAcRatio = calcDcAcRatio(totalDcKw, totalAcKw);
-  if (dcAcRatio > DC_AC_TARGET.hardMax) {
+  // v61.9: Use clipping severity bands for graded warnings.
+  // Recommendation priority: inverter upsizing ALWAYS before panel reduction.
+  const _clippingSeverity = getDcAcClippingSeverity(dcAcRatio);
+  if (_clippingSeverity === 'critical') {
     allWarnings.push({
       code: 'W-DCAC-RATIO',
       severity: 'warning',
-      message: `DC/AC ratio (${dcAcRatio.toFixed(2)}) is high — inverter may clip production`,
+      message: `DC/AC ratio (${dcAcRatio.toFixed(2)}) is critically high — severe production clipping expected.`,
       value: dcAcRatio.toFixed(2),
-      limit: String(DC_AC_TARGET.hardMax),
-      suggestion: `Add inverter or reduce panel count to stay below ${DC_AC_TARGET.hardMax} DC/AC ratio`,
+      limit: String(DC_AC_CLIPPING_BANDS.CRITICAL_THRESHOLD),
+      suggestion: `Upsize inverter to increase AC capacity. ` +
+        `Reducing panel count is a last resort only if no larger inverter is available.`,
+    });
+  } else if (_clippingSeverity === 'severe') {
+    allWarnings.push({
+      code: 'W-DCAC-RATIO',
+      severity: 'warning',
+      message: `DC/AC ratio (${dcAcRatio.toFixed(2)}) is high — significant clipping expected. ` +
+        `System is electrically valid but economically suboptimal.`,
+      value: dcAcRatio.toFixed(2),
+      limit: String(DC_AC_CLIPPING_BANDS.SEVERE_MAX),
+      suggestion: `Consider a larger inverter (e.g. next tier up) to bring DC/AC ratio to 1.20–1.50.`,
+    });
+  } else if (_clippingSeverity === 'warning') {
+    allWarnings.push({
+      code: 'W-DCAC-RATIO',
+      severity: 'warning',
+      message: `DC/AC ratio (${dcAcRatio.toFixed(2)}) is moderately high — some clipping expected.`,
+      value: dcAcRatio.toFixed(2),
+      limit: String(DC_AC_CLIPPING_BANDS.WARNING_MAX),
+      suggestion: `System is electrically feasible. Consider inverter upsizing if clipping is a concern.`,
+    });
+  } else if (_clippingSeverity === 'mild') {
+    allWarnings.push({
+      code: 'W-DCAC-RATIO',
+      severity: 'info',
+      message: `DC/AC ratio (${dcAcRatio.toFixed(2)}) — mild oversize, normal for optimized systems.`,
+      value: dcAcRatio.toFixed(2),
+      limit: String(DC_AC_CLIPPING_BANDS.MILD_MAX),
+      suggestion: `No action required. Mild oversize maximizes production at lower irradiance.`,
     });
   }
 

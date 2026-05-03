@@ -28,6 +28,7 @@ import type { SystemDefinition, SystemType } from './systemDefinition';
 import type { StructuralBOMItem } from '../bom-system-profiles';
 import { getBrandProfile } from './brandProfiles';
 import type { TopologyFamily } from './brandProfiles/types';
+import { DC_AC_CLIPPING_BANDS } from './dcAcConstants';
 // Phase 15 — centralized compatibility matrix.
 import {
   evaluateCompatibility,
@@ -280,21 +281,43 @@ export function validateDcAcRatio(input: ValidationInput): ValidationIssue[] {
   }
 
   // Absolute thresholds.
-  if (ratio > 2.0) {
+  if (ratio > DC_AC_CLIPPING_BANDS.CRITICAL_THRESHOLD) {
     issues.push({
       code: 'DC_AC_RATIO_SEVERE',
       severity: 'error',
-      message: `DC/AC ratio ${roundedRatio} exceeds 2.0 — severe clipping expected.`,
-      context: { ratio, totalDcKw, totalAcKw, threshold: 2.0 },
-      recommendation: 'Add another inverter or upsize to a larger model.',
+      // v61.9: Explicit upsizing-first language. Never imply panel reduction is primary fix.
+      message: `DC/AC ratio ${roundedRatio} exceeds ${DC_AC_CLIPPING_BANDS.CRITICAL_THRESHOLD} ` +
+        `(${totalDcKw.toFixed(2)} kW DC / ${totalAcKw.toFixed(2)} kW AC) — severe economic clipping. ` +
+        `The system is not electrically invalid, but will lose significant production.`,
+      context: { ratio, totalDcKw, totalAcKw, threshold: DC_AC_CLIPPING_BANDS.CRITICAL_THRESHOLD },
+      recommendation:
+        `Upsize inverter to a larger model or add a second unit. ` +
+        `For EcoFlow: the OCEAN Pro 24 kW would bring ratio to ${(totalDcKw/24).toFixed(2)}. ` +
+        `Do not reduce panel count unless inverter upsizing is impossible.`,
     });
-  } else if (ratio > 1.6) {
+  } else if (ratio > DC_AC_CLIPPING_BANDS.WARNING_MAX) {
+    // 1.75 < ratio ≤ 2.0 — severe clipping
     issues.push({
       code: 'DC_AC_RATIO_HIGH',
       severity: 'warning',
-      message: `DC/AC ratio ${roundedRatio} exceeds 1.6 — mild clipping expected.`,
-      context: { ratio, totalDcKw, totalAcKw, threshold: 1.6 },
-      recommendation: 'Review design — consider a larger inverter or fewer modules.',
+      // v61.9: Explicit upsizing-first recommendation. Panel reduction is last resort.
+      message: `DC/AC ratio ${roundedRatio} is high (${totalDcKw.toFixed(2)} kW DC / ${totalAcKw.toFixed(2)} kW AC) — ` +
+        `significant clipping expected. System is electrically valid but may lose production during peak irradiance.`,
+      context: { ratio, totalDcKw, totalAcKw, threshold: DC_AC_CLIPPING_BANDS.WARNING_MAX },
+      recommendation:
+        `Preferred fix: upsize inverter to a larger model or add a second unit to increase AC capacity. ` +
+        `Reducing panel count is a last resort only if no larger inverter option exists.`,
+    });
+  } else if (ratio > DC_AC_CLIPPING_BANDS.MILD_MAX) {
+    // 1.55 < ratio ≤ 1.75 — warning / aggressive oversize
+    issues.push({
+      code: 'DC_AC_RATIO_HIGH',
+      severity: 'warning',
+      message: `DC/AC ratio ${roundedRatio} is moderately high (${totalDcKw.toFixed(2)} kW DC / ${totalAcKw.toFixed(2)} kW AC) — ` +
+        `some clipping expected at peak irradiance.`,
+      context: { ratio, totalDcKw, totalAcKw, threshold: DC_AC_CLIPPING_BANDS.MILD_MAX },
+      recommendation:
+        `System is electrically feasible. Consider inverter upsizing to bring ratio to 1.20–1.55 if clipping is a concern.`,
     });
   } else if (ratio < 0.8) {
     // Note: ratio < 1.0 is already blocked above. This branch only fires

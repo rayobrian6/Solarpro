@@ -390,9 +390,16 @@ function pickRatioAwareTier(
 ): { ref: BrandInverterModelRef; qty: number; undersized?: boolean } | undefined {
   // Only applies to string / optimizer / hybrid topologies.
   // Micro topologies are handled separately (qty = ceil(panels / modulesPerDevice)).
-  const stringModels = brand.supportedInverterModels.filter(
-    m => (m.modulesPerDevice ?? 0) === 0,
-  );
+  // v61.9: Also filter out active:false models. The equipment-db active flag marks
+  // legacy/deactivated SKUs (e.g. EcoFlow PowerOcean EU/AU-only models).
+  // pickRatioAwareTier must not recommend phantom models the UI cannot select.
+  const stringModels = brand.supportedInverterModels.filter(m => {
+    if ((m.modulesPerDevice ?? 0) !== 0) return false; // micro — skip
+    // Check active flag against equipment-db. If the DB entry marks it inactive, skip.
+    const eq = STRING_INVERTERS.find(x => x.id === m.equipmentDbId);
+    if (eq && eq.active === false) return false; // explicitly inactive
+    return true;
+  });
   if (stringModels.length === 0) return undefined;
 
   // Evaluate every model: compute the minimum qty needed and the resulting ratio.
@@ -801,8 +808,14 @@ function sizeInverters(
     // all SolarEdge inverters because the panel-method current (15.3A) exceeds
     // the MPPT cap (20A) when multiplied by 4 parallel strings = 61.3A, while
     // the correct optimizer-method current (15.0A) fits 2 strings x 20A = 40A.
+    // v61.9: Filter active:false models before passing to feasibility evaluator.
+    const activeModelRefs = brand.supportedInverterModels.filter(m => {
+      if ((m.modulesPerDevice ?? 0) !== 0) return true; // micro — always include
+      const eq = eqMap.get(m.equipmentDbId);
+      return !(eq && (eq as any).active === false);
+    });
     const bestFit = generateFeasibleSystems({
-      modelRefs:      brand.supportedInverterModels,
+      modelRefs:      activeModelRefs,
       equipmentSpecs: eqMap,
       panel,
       totalPanels:    input.panelCount,
