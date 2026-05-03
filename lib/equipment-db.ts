@@ -573,7 +573,7 @@ export const STRING_INVERTERS: StringInverter[] = [
     // v47.400 — ecosystem tag (Stage 2)
     ecosystemBrand: 'sungrow',
     ecosystemFamily: 'sg-rs',
-    active: false, // v47.404: Sungrow has no US residential catalog; deactivated pending SKU confirmation
+    active: true, // v61.10: Sungrow RS models activated — UL 1741 listed, available via Sungrow US distributors
   },
   // ── SolarEdge HD-Wave expanded lineup ─────────────────────────────────────
   {
@@ -850,7 +850,7 @@ export const STRING_INVERTERS: StringInverter[] = [
     // v47.400 — ecosystem tag (Stage 2)
     ecosystemBrand: 'sungrow',
     ecosystemFamily: 'sg-rs',
-    active: false, // v47.404: Sungrow has no US residential catalog; deactivated pending SKU confirmation
+    active: true, // v61.10: Sungrow RS models activated — UL 1741 listed, available via Sungrow US distributors
     isNew: true,
   },
   {
@@ -873,7 +873,7 @@ export const STRING_INVERTERS: StringInverter[] = [
     // v47.400 — ecosystem tag (Stage 2)
     ecosystemBrand: 'sungrow',
     ecosystemFamily: 'sg-rs',
-    active: false, // v47.404: Sungrow has no US residential catalog; deactivated pending SKU confirmation
+    active: true, // v61.10: Sungrow RS models activated — UL 1741 listed, available via Sungrow US distributors
     isNew: true,
   },
   {

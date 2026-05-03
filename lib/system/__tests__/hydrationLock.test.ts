@@ -1,8 +1,9 @@
 // ============================================================
 // Tests — v61.4 Hydration Lock
 // ============================================================
-// Run with: npx jest lib/system/__tests__/hydrationLock.test.ts
+// Run with: npx vitest run lib/system/__tests__/hydrationLock.test.ts
 
+import { vi } from 'vitest';
 import {
   buildStringConfig,
   buildInverterConfig,
@@ -238,7 +239,7 @@ describe('normalizeInverterConfig', () => {
 describe('assertValidInverter', () => {
   it('does not throw and does not log for a healthy InverterConfig', () => {
     const inv = makeHealthy(2, 12);
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => assertValidInverter(inv)).not.toThrow();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
@@ -249,7 +250,7 @@ describe('assertValidInverter', () => {
       ...makeHealthy(2, 12),
       stringsPerInverter: 5, // wrong
     };
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     // In test env: logs, does not throw
     expect(() => assertValidInverter(inv, 'test context')).not.toThrow();
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('stringsPerInverter'));
@@ -261,7 +262,7 @@ describe('assertValidInverter', () => {
       ...makeHealthy(2, 12),
       modulesPerString: 0, // wrong
     };
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(() => assertValidInverter(inv, 'test context')).not.toThrow();
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('modulesPerString'));
     spy.mockRestore();
