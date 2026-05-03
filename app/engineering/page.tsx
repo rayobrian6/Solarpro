@@ -58,6 +58,9 @@ import { calcDcAcRatio } from '@/lib/system/calcDcAcRatio';
 import { DC_AC_TARGET } from '@/lib/system/dcAcConstants';
 import { shouldAllowOverride, DEFAULT_LOCKS, DEFAULT_CONTROL_MODE } from '@/lib/solardog/controlMode';
 import type { LockableField } from '@/lib/solardog/controlMode';
+
+// v61.2 — Display Mode: controls which source ALL UI components read from.
+type DisplayMode = 'current' | 'recommended';
 import ControlModeBanner from '@/components/engineering/ControlModeBanner';
 import SuggestionCard, { type PendingSuggestion } from '@/components/engineering/SuggestionCard';
 import { getUtilitiesByStateNational, STATE_UTILITY_FALLBACK } from '@/lib/utilityDetector';
@@ -1366,6 +1369,8 @@ function EngineeringPageInner() {
   // Phase 11 — brand sizing recommendation UI state
   const [sizingAutoApply, setSizingAutoApply] = useState<boolean>(false);
   const [sizingDismissed, setSizingDismissed] = useState<boolean>(false);
+  // v61.2 — Display Mode. Default 'current' so user always sees their own config first.
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('current');
   // v61: Control mode + field locks + suggestion queue
   const [controlMode, setControlMode] = useState<import('@/types').ControlMode>(DEFAULT_CONTROL_MODE);
   const [configLocks, setConfigLocks] = useState<import('@/types').SystemConfigLocks>(DEFAULT_LOCKS);
@@ -2027,8 +2032,17 @@ function EngineeringPageInner() {
       topologyChangeLog: [],
       autoResolutions: compliance.electrical?.autoResolutions || [],
       notes: config.notes,
+      // v61.2 — Display Mode context for SolarDog
+      displayMode,
+      currentStrings: config.inverters.reduce((s, inv) => s + inv.strings.length, 0),
+      recommendedStrings: sizingRecommendation && sizingRecommendation.topology !== 'micro'
+        ? sizingRecommendation.strings.length
+        : 0,
+      displayedStrings: displayMode === 'recommended' && sizingRecommendation && sizingRecommendation.topology !== 'micro'
+        ? sizingRecommendation.strings.length
+        : config.inverters.reduce((s, inv) => s + inv.strings.length, 0),
     };
-  }, [config, compliance, engineeringMode, displayedEcosystemComponents, sizingRecommendation]);
+  }, [config, compliance, engineeringMode, displayedEcosystemComponents, sizingRecommendation, displayMode]);
 
   // Snapshot of current config for diffing.
     // v58.0 — Canonical AC output kW.
@@ -2041,6 +2055,62 @@ function EngineeringPageInner() {
     const canonicalAcKw = _recInverterAcKw > 0
       ? _recInverterAcKw
       : Number(totalInverterKw);
+
+  // ─── v61.2 SINGLE SOURCE OF TRUTH ──────────────────────────────────────────
+  // ALL UI components read from displayConfig — never mix sources.
+  //   displayMode === 'current'     → currentDisplayConfig  (user config)
+  //   displayMode === 'recommended' → recommendedDisplayConfig (engine output)
+  //
+  // Hard rules:
+  //   ✅ stringCount   = displayConfig.totalStrings
+  //   ✅ inverterModel = displayConfig.inverterModel
+  //   ✅ acKw          = displayConfig.acKw
+  //   ✅ panelCount    = displayConfig.panelCount
+  //   [!!] NEVER mix current in one component + recommended in another
+  // ──────────────────────────────────────────────────────────────────────────
+  const currentDisplayConfig = {
+    totalStrings: config.inverters.reduce((s, inv) => s + inv.strings.length, 0),
+    stringPanelCounts: config.inverters.flatMap(inv => inv.strings.map(st => st.panelCount)),
+    inverterModel: (() => {
+      const _i = config.inverters[0];
+      if (!_i) return 'No inverter';
+      const _d = getInvById(_i.inverterId, _i.type) as any;
+      return _d?.model ?? _i.inverterId ?? 'Inverter';
+    })(),
+    inverterId: config.inverters[0]?.inverterId ?? '',
+    inverterCount: config.inverters.length,
+    acKw: Number(totalInverterKw),
+    panelCount: systemPanelCount > 0 ? systemPanelCount : totalPanels,
+    topology: (() => {
+      const _t = config.inverters[0]?.type ?? 'string';
+      return (_t === 'ecoflow' ? 'hybrid' : _t) as string;
+    })(),
+  };
+
+  const recommendedDisplayConfig = sizingRecommendation ? {
+    totalStrings: sizingRecommendation.topology === 'micro'
+      ? 0
+      : sizingRecommendation.strings.length,
+    stringPanelCounts: sizingRecommendation.strings.map(s => s.panelCount),
+    inverterModel: (() => {
+      const _m = sizingRecommendation.inverterModels[0];
+      const _d = _m
+        ? ((STRING_INVERTERS.find(x => x.id === _m.equipmentDbId) as any)
+           ?? (MICROINVERTERS.find(x => x.id === _m.equipmentDbId) as any))
+        : null;
+      return _d?.model ?? (_m as any)?.name ?? _m?.equipmentDbId ?? 'Recommended inverter';
+    })(),
+    inverterId: sizingRecommendation.inverterModels[0]?.equipmentDbId ?? '',
+    inverterCount: sizingRecommendation.inverterCount,
+    acKw: sizingRecommendation.inverterModels.reduce((s, m) => s + m.acKw * m.qty, 0),
+    panelCount: sizingRecommendation.input.panelCount,
+    topology: sizingRecommendation.topology as string,
+  } : currentDisplayConfig;
+
+  // THE single selector — every component reads from here
+  const displayConfig = displayMode === 'recommended' && sizingRecommendation
+    ? recommendedDisplayConfig
+    : currentDisplayConfig;
 
   const sizingCurrentSnapshot = useMemo<CurrentConfigSnapshot>(() => {
     const primary = config.inverters[0];
@@ -2286,6 +2356,8 @@ function EngineeringPageInner() {
 
     // Surface the dismissal reset so the panel stays visible but shows "matches".
     setSizingDismissed(false);
+    // v61.2: after applying, return to 'current' — the applied config IS now current.
+    setDisplayMode('current');
   }, []);
 
   // ─── Phase 13 — Smart Defaults (once-only bootstrap) ────────────────
@@ -5622,9 +5694,24 @@ function EngineeringPageInner() {
           <button
             className="text-xs text-amber-400 hover:text-amber-300 transition-colors underline-offset-2 hover:underline"
             onClick={() => {
+              // v61.2 fix: clear state BEFORE navigating so the project selector
+              // shows immediately. Previously the URL changed but currentProjectId
+              // stayed set, so !currentProjectId was never true and the selector hid.
               if (typeof window !== 'undefined') {
                 window.localStorage.removeItem('eng:lastProjectId');
               }
+              setCurrentProjectId(null);
+              setCurrentClientId(null);
+              setProjectAutoLoaded(false);
+              setAutoLoadBanner(null);
+              setConfig(defaultProject);
+              setProjectLayout(null);
+              setIsHydrated(false);
+              setSelectorSearch('');
+              setSelectorOpen(false);
+              setSelectorProjects([]);
+              setDisplayMode('current');
+              setSizingDismissed(false);
               router.push('/engineering');
             }}
           >
@@ -5839,6 +5926,50 @@ function EngineeringPageInner() {
         </div>
       )}
 
+      {/* ── v61.2 Display Mode Toggle ── */}
+      {sizingRecommendation && !sizingDismissed && (
+        <div className="bg-slate-900/50 border-b border-slate-700/40 px-6 py-2 flex-shrink-0 flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-slate-500 mr-1 font-medium select-none">Viewing:</span>
+          <button
+            onClick={() => setDisplayMode('current')}
+            className={`text-xs px-3 py-1 rounded-full border transition-all font-medium ${
+              displayMode === 'current'
+                ? 'bg-slate-700 border-slate-500 text-white shadow-sm'
+                : 'border-slate-700 text-slate-400 hover:text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            Current Configuration
+          </button>
+          <button
+            onClick={() => setDisplayMode('recommended')}
+            className={`text-xs px-3 py-1 rounded-full border transition-all font-medium ${
+              displayMode === 'recommended'
+                ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 shadow-sm'
+                : 'border-slate-700 text-slate-400 hover:text-amber-400 hover:border-amber-500/40'
+            }`}
+          >
+            Recommended
+          </button>
+          {displayMode === 'recommended' && (
+            <span className="text-xs text-amber-400/70 ml-1 italic select-none">
+              Preview only — apply below to make this your config
+            </span>
+          )}
+          {displayMode === 'current' && (() => {
+            const _cStr = currentDisplayConfig.totalStrings;
+            const _rStr = recommendedDisplayConfig.totalStrings;
+            const _sDiff = _cStr !== _rStr;
+            const _iDiff = currentDisplayConfig.inverterId !== recommendedDisplayConfig.inverterId;
+            if (!_sDiff && !_iDiff) return null;
+            return (
+              <span className="text-xs text-slate-500 ml-1 select-none">
+                Recommendation differs:{_sDiff && <> {_cStr}→{_rStr} strings</>}{_iDiff && <> · inverter upgrade suggested</>}
+              </span>
+            );
+          })()}
+        </div>
+      )}
+
       {/* ── Tab Bar ── */}
       <div className="flex gap-0 px-4 bg-slate-900/70 backdrop-blur-md border-b border-slate-700/50 flex-shrink-0 overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700">
         {tabs.map((tab, idx) => {
@@ -5923,16 +6054,16 @@ function EngineeringPageInner() {
             const _invData0   = getInvById(_inv0?.inverterId ?? '', _inv0?.type ?? 'string') as any;
             const _panel0     = getPanelById(_inv0?.strings[0]?.panelId ?? '') as any;
             const _totalKwNum = parseFloat(totalKw) || 0;
-            // v58.0: use canonicalAcKw (component-scope, prefers sizingRecommendation)
-            const _acKwNum = canonicalAcKw;
+            // v61.2: use displayConfig.acKw — single source of truth per display mode
+            const _acKwNum = displayConfig.acKw > 0 ? displayConfig.acKw : canonicalAcKw;
             const _dcAcRatio  = _acKwNum > 0 ? calcDcAcRatio(_totalKwNum, _acKwNum).toFixed(2) : '—';
-            // String/branch count: prefer sizing recommendation strings when available.
-            const _recStringCount = sizingRecommendation && !cs.isMicro
-              ? sizingRecommendation.strings.length
-              : 0;
-            const _branchCount = cs.isMicro ? cs.acBranchCount
-              : _recStringCount > 0 ? _recStringCount
-              : config.inverters.reduce((s, i) => s + i.strings.length, 0);
+            // v61.2 — Single Source of Truth: string/branch count from displayConfig only.
+            // NEVER mix recommendation strings in one place and current config in another.
+            const _branchCount = cs.isMicro
+              ? cs.acBranchCount
+              : displayConfig.totalStrings > 0
+                ? displayConfig.totalStrings
+                : config.inverters.reduce((s, i) => s + i.strings.length, 0);
             const _genData    = config.generatorId ? getGeneratorById(config.generatorId) : null;
             const _atsData    = config.atsId ? getATSById(config.atsId) : null;
             const _batData    = config.batteryId ? getBatteryById(config.batteryId) : null;
