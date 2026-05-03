@@ -1,47 +1,41 @@
-# SolarPro v61.4 — Hydration Lock Master Prompt
+# SolarPro v61.5 — Final Lock Master Prompt
 
-## Phase 1: Hydration Lock — normalizeInverterConfig() utility
-- [x] Create normalizeInverterConfig() in buildInverterConfig.ts
-- [x] Fix </thinking> artifact in buildInverterConfig.ts
-- [x] Add normalizeInverterConfig import to page.tsx
-- [x] Wrap savedConfig merge setConfig with normalizeInverterConfig()
-- [x] Wrap seed patches setConfig with normalizeInverterConfig()
-- [x] Wrap localStorage fallback setConfig with normalizeInverterConfig()
+## Audit: what was already done from the prompt (v61.4)
+- [x] Task 1 (normalizeConfig on load): normalizeInverterConfig() wraps all 3 hydration paths
+- [x] Task 3 (runtime guard useEffect): implemented in v61.4 Phase 2
+- [x] Task 4 (assertValidInverter dev useEffect): implemented in v61.4 Phase 5
+- [x] Task 5 (ban raw strings): raw patterns outside builder already cleaned in v61.4 Phase 3
 
-## Phase 2: Global Runtime Guard
-- [x] Add useEffect guard that auto-heals any invalid config.inverters on every render
-- [x] Guard checks: stringsPerInverter !== strings.length OR !modulesPerString OR strings[].panelCount=0
+## New fixes in v61.5
 
-## Phase 3: Kill Legacy Fallbacks
-- [x] Fix micro corruption path to use _buildStrCfg + _buildInvCfg (not raw object)
-- [x] Fix micro panel count update path to use builder (not raw string literal)
-- [x] Audit remaining patterns — all others are calc payloads or registry data (safe)
+### T2-A: Ecosystem Apply — inverter object bypasses builder
+- [x] Line ~7339: updatedInverters[0] = { ...firstInv, type, inverterId } → replaced with _buildInvCfg()
 
-## Phase 4: Force Single Entry Point (audit)
-- [x] Audit all remaining InverterConfig creation sites — 100% use _buildInvCfg
-- [x] smartDefaults.ts uses SmartDefaultsInverter type, converted via _buildInvCfg in page.tsx
+### T2-B/C: updateInverter() — raw spread at exit point bypasses builder
+- [x] Exit point wrapped with _buildInvCfg() — all patches (inverterId, type, strings, etc.) rebuild metadata
+- [x] stringsPerInverter resize: new strings now use _buildStrCfg (was newString() spread)
+- [x] modulesPerString change: strings rebuilt via _buildStrCfg (not raw spread)
+- [x] Minimum-1 guard added (never trim to zero)
 
-## Phase 5: Hard Assertion (dev mode)
-- [x] assertValidInverter() added to buildInverterConfig.ts (alias of assertInverterMetadata)
-- [x] Wire into dev-mode useEffect on config.inverters in page.tsx
+### T2-D: addString() — used newString() without builder
+- [x] Replaced with _buildStrCfg() + _buildInvCfg() rebuild
 
-## Phase 6: UI Trust Fix
-- [x] Confirmed compliance engine reads config.inverters (via buildCalcPayload)
-- [x] Confirmed string layout reads displayConfig (which maps to config when displayMode=current)
-- [x] No sizingRecommendation reads bypass displayConfig abstraction
+### T2-E: removeString() — raw { ...i, strings: filtered } without builder
+- [x] Replaced with _buildInvCfg() rebuild + never-trim-to-zero guard
 
-## Phase 7: SolarDog Truth Lock
-- [x] Added INVERTER CONFIG TRUTH LOCK block to engineeringStateStr in assistant/route.ts
-- [x] Added mismatch-explanation rule (explains what user must do when panelCountMismatch=true)
-- [x] Added never-infer rules (never say "you have N strings" without snapshot data)
+### T2-F: updateString() — raw { ...s, ...patch } without builder
+- [x] Patched string rebuilt through _buildStrCfg(); inverter rebuilt through _buildInvCfg()
 
-## Phase 8: Tests
-- [x] normalizeRawInverter idempotent test (8 tests)
-- [x] normalizeInverterConfig idempotent + auto-heal tests (6 tests)
-- [x] assertValidInverter dev mode tests (3 tests)
-- [x] Builder invariants hold after hydration (4 tests)
+### T2-G: savedConfig reconciliation (trim/pad path)
+- [x] Both trim and pad branches now use _buildInvCfg() at exit (was { ...inv, strings: ... })
+
+### T2-H: Auto-Apply Strings button
+- [x] newStrings now built via _buildStrCfg() (was newString() spread)
+
+## Tests
+- [x] 6 new mutation path invariant tests (v61.5)
+- [x] 89 total tests pass
 - [x] npx tsc --noEmit = 0 errors
-- [x] All 83 tests pass (3 suites)
 
 ## Final
 - [ ] git commit + push

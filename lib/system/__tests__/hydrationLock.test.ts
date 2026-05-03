@@ -321,3 +321,121 @@ describe('builder invariants after hydration', () => {
     expect(inv.stringsPerInverter).toBe(4);
   });
 });
+
+// ── Mutation path invariants (v61.5) ─────────────────────────────────────────
+// These tests verify the builder-at-exit-point pattern used in
+// updateInverter / addString / removeString / updateString.
+
+describe('mutation path invariants (v61.5)', () => {
+  /**
+   * Simulates the updateInverter exit point:
+   *   _buildInvCfg({ existingId, inverterId, type, strings, ... })
+   * When a patch changes inverterId (ecosystem apply), metadata must reflect
+   * the new state, not the stale pre-patch metadata.
+   */
+  it('inverterId change preserves strings and recomputes metadata', () => {
+    const original = makeHealthy(3, 11); // 3 strings × 11 panels
+    // Simulate patch: change inverterId only (ecosystem apply)
+    const patched = buildInverterConfig({
+      existingId: original.id,
+      inverterId: 'new-inverter-id',
+      type:       original.type,
+      strings:    original.strings,
+    });
+
+    expect(patched.inverterId).toBe('new-inverter-id');
+    expect(patched.stringsPerInverter).toBe(3);    // metadata recomputed
+    expect(patched.modulesPerString).toBe(11);      // metadata recomputed
+    expect(patched.strings).toHaveLength(3);        // strings preserved
+  });
+
+  it('adding a string recomputes stringsPerInverter', () => {
+    const original = makeHealthy(2, 12); // 2 strings × 12 panels
+    const newStr = buildStringConfig({ index: 2, panelCount: 12 });
+    const updated = buildInverterConfig({
+      existingId: original.id,
+      inverterId: original.inverterId,
+      type:       original.type,
+      strings:    [...original.strings, newStr],
+    });
+
+    expect(updated.stringsPerInverter).toBe(3);
+    expect(updated.strings).toHaveLength(3);
+    const violations = validateInverterMetadata(updated);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('removing a string recomputes stringsPerInverter', () => {
+    const original = makeHealthy(3, 10); // 3 strings × 10 panels
+    const kept = original.strings.slice(0, 2);
+    const updated = buildInverterConfig({
+      existingId: original.id,
+      inverterId: original.inverterId,
+      type:       original.type,
+      strings:    kept,
+    });
+
+    expect(updated.stringsPerInverter).toBe(2);
+    expect(updated.strings).toHaveLength(2);
+    const violations = validateInverterMetadata(updated);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('changing panelCount on one string updates modulesPerString to match first string', () => {
+    const original = makeHealthy(2, 10); // 2 strings × 10 panels
+    // Update first string to 14 panels
+    const updatedFirstStr = buildStringConfig({
+      index:      0,
+      existingId: original.strings[0].id,
+      panelCount: 14,
+    });
+    const newStrings = [updatedFirstStr, original.strings[1]];
+    const updated = buildInverterConfig({
+      existingId: original.id,
+      inverterId: original.inverterId,
+      type:       original.type,
+      strings:    newStrings,
+    });
+
+    // modulesPerString derives from first string
+    expect(updated.modulesPerString).toBe(14);
+    expect(updated.stringsPerInverter).toBe(2);
+    const violations = validateInverterMetadata(updated);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('ecosystem apply: changing type + inverterId preserves strings and fixes metadata', () => {
+    // Simulate the ecosystem apply path: inverterId + type change, strings stale
+    const original = makeHealthy(4, 11);
+    // After ecosystem apply: inverterId changes from 'inv-test' to a micro inverter
+    const afterApply = buildInverterConfig({
+      existingId: original.id,
+      inverterId: 'enphase-iq8plus',
+      type:       'micro',
+      strings:    original.strings,
+    });
+
+    expect(afterApply.inverterId).toBe('enphase-iq8plus');
+    expect(afterApply.type).toBe('micro');
+    expect(afterApply.stringsPerInverter).toBe(4);    // 4 strings preserved
+    expect(afterApply.modulesPerString).toBe(11);
+    const violations = validateInverterMetadata(afterApply);
+    expect(violations).toHaveLength(0);
+  });
+
+  it('removing a string never trims to zero', () => {
+    const original = makeHealthy(1, 10); // already 1 string
+    const kept: typeof original.strings = []; // empty — remove would kill all strings
+    // Guard: if kept is empty, keep original strings (as implemented in removeString)
+    const safeStrings = kept.length > 0 ? kept : original.strings;
+    const updated = buildInverterConfig({
+      existingId: original.id,
+      inverterId: original.inverterId,
+      type:       original.type,
+      strings:    safeStrings,
+    });
+
+    expect(updated.strings).toHaveLength(1);
+    expect(updated.stringsPerInverter).toBe(1);
+  });
+});

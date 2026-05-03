@@ -1052,9 +1052,17 @@ function EngineeringPageInner() {
                 const wireGauge = inv.strings[0]?.wireGauge ?? '#10 AWG';
                 if (target < inv.strings.length) {
                   // Trim — ensure at least 1 remains (guarded by target >= 1 above)
-                  return { ...inv, strings: inv.strings.slice(0, target) };
+                  // v61.5: rebuild through _buildInvCfg to sync metadata
+                  return _buildInvCfg({
+                    existingId: inv.id,
+                    inverterId: inv.inverterId,
+                    type:       inv.type as InverterConfig['type'],
+                    strings:    inv.strings.slice(0, target) as any,
+                    optimizerPeripheralId: inv.optimizerPeripheralId,
+                    deviceRatioOverride:   inv.deviceRatioOverride,
+                  });
                 } else {
-                  // v61.3: use central builder for padded strings
+                  // v61.3/v61.5: use central builder for padded strings + rebuild inverter metadata
                   const extra = Array.from({ length: target - inv.strings.length }, (_: any, k: number) =>
                     _buildStrCfg({
                       index:          inv.strings.length + k,
@@ -1068,7 +1076,14 @@ function EngineeringPageInner() {
                       mountingSystem: inv.strings[0]?.mountingSystem ?? 'ironridge-xr100',
                     })
                   );
-                  return { ...inv, strings: [...inv.strings, ...extra] };
+                  return _buildInvCfg({
+                    existingId: inv.id,
+                    inverterId: inv.inverterId,
+                    type:       inv.type as InverterConfig['type'],
+                    strings:    [...inv.strings, ...extra] as any,
+                    optimizerPeripheralId: inv.optimizerPeripheralId,
+                    deviceRatioOverride:   inv.deviceRatioOverride,
+                  });
                 }
               });
 
@@ -2994,31 +3009,58 @@ function EngineeringPageInner() {
           const currentStrings = i.strings;
           const modulesEach = i.modulesPerString ?? currentStrings[0]?.panelCount ?? 10;
           if (targetCount > currentStrings.length) {
-            // Add strings
-            const extra = Array.from({ length: targetCount - currentStrings.length }, (_, k) => ({
-              ...newString(currentStrings.length + k, prev.systemType),
-              id: `str-resize-${Date.now()}-${k}`,
-              panelCount: modulesEach,
-              panelId: currentStrings[0]?.panelId ?? defaultPanelForSystemType(prev.systemType),
-              wireGauge: currentStrings[0]?.wireGauge ?? '#10 AWG',
-              wireLength: currentStrings[0]?.wireLength ?? 0,
-              tilt: currentStrings[0]?.tilt ?? 20,
-              azimuth: currentStrings[0]?.azimuth ?? 180,
-            }));
+            // Add strings — v61.5: use _buildStrCfg for each new string
+            const extra = Array.from({ length: targetCount - currentStrings.length }, (_, k) =>
+              _buildStrCfg({
+                index:          currentStrings.length + k,
+                panelCount:     modulesEach,
+                panelId:        currentStrings[0]?.panelId ?? defaultPanelForSystemType(prev.systemType),
+                wireGauge:      currentStrings[0]?.wireGauge,
+                wireLength:     currentStrings[0]?.wireLength,
+                tilt:           currentStrings[0]?.tilt,
+                azimuth:        currentStrings[0]?.azimuth,
+                roofType:       (currentStrings[0] as any)?.roofType,
+                mountingSystem: (currentStrings[0] as any)?.mountingSystem,
+              })
+            );
             updated.strings = [...currentStrings, ...extra];
           } else if (targetCount < currentStrings.length) {
-            // Remove strings from the end
-            updated.strings = currentStrings.slice(0, targetCount);
+            // Remove strings from the end (minimum 1 — guard against trimming to zero)
+            updated.strings = currentStrings.slice(0, Math.max(1, targetCount));
           }
         }
 
         // v61.2: When modulesPerString changes, update panelCount on ALL strings
         // so each string row reflects the new module count immediately.
+        // v61.5: rebuild each string through the builder to keep metadata in sync.
         if ('modulesPerString' in patch && typeof patch.modulesPerString === 'number') {
-          updated.strings = updated.strings.map(s => ({ ...s, panelCount: patch.modulesPerString! }));
+          updated.strings = updated.strings.map((s, si) =>
+            _buildStrCfg({
+              index:          si,
+              existingId:     s.id,
+              panelCount:     patch.modulesPerString!,
+              panelId:        s.panelId,
+              wireGauge:      s.wireGauge,
+              wireLength:     s.wireLength,
+              tilt:           s.tilt,
+              azimuth:        s.azimuth,
+              roofType:       (s as any).roofType,
+              mountingSystem: (s as any).mountingSystem,
+            })
+          );
         }
 
-        return updated;
+        // v61.5: Route final result through _buildInvCfg so stringsPerInverter
+        // and modulesPerString are always recomputed from the actual strings[].
+        // This is the single-exit-point guarantee for all updateInverter callers.
+        return _buildInvCfg({
+          existingId:            updated.id,
+          inverterId:            updated.inverterId,
+          type:                  updated.type as InverterConfig['type'],
+          strings:               updated.strings as StringConfig[],
+          optimizerPeripheralId: (updated as any).optimizerPeripheralId,
+          deviceRatioOverride:   (updated as any).deviceRatioOverride,
+        });
       }),
       ...LOCK,
     }));
@@ -3030,15 +3072,92 @@ function EngineeringPageInner() {
   };
   const addString = (invId: string) => {
     console.log('🔒 [USER EDIT] addString — engaging user lock');
-    setConfig(prev => ({ ...prev, inverters: prev.inverters.map(i => i.id === invId ? { ...i, strings: [...i.strings, newString(i.strings.length, prev.systemType)] } : i), ...LOCK }));
+    setConfig(prev => ({
+      ...prev,
+      inverters: prev.inverters.map(i => {
+        if (i.id !== invId) return i;
+        const baseStr = i.strings[0];
+        const newStr = _buildStrCfg({
+          index:          i.strings.length,
+          panelCount:     i.modulesPerString ?? baseStr?.panelCount ?? 10,
+          panelId:        baseStr?.panelId,
+          wireGauge:      baseStr?.wireGauge,
+          wireLength:     baseStr?.wireLength,
+          tilt:           baseStr?.tilt,
+          azimuth:        baseStr?.azimuth,
+          roofType:       (baseStr as any)?.roofType,
+          mountingSystem: (baseStr as any)?.mountingSystem,
+        });
+        // v61.5: rebuild through _buildInvCfg to update stringsPerInverter metadata
+        return _buildInvCfg({
+          existingId: i.id,
+          inverterId: i.inverterId,
+          type:       i.type as InverterConfig['type'],
+          strings:    [...i.strings, newStr] as StringConfig[],
+          optimizerPeripheralId: (i as any).optimizerPeripheralId,
+          deviceRatioOverride:   (i as any).deviceRatioOverride,
+        });
+      }),
+      ...LOCK,
+    }));
   };
   const removeString = (invId: string, strId: string) => {
     console.log('🔒 [USER EDIT] removeString — engaging user lock');
-    setConfig(prev => ({ ...prev, inverters: prev.inverters.map(i => i.id === invId ? { ...i, strings: i.strings.filter(s => s.id !== strId) } : i), ...LOCK }));
+    setConfig(prev => ({
+      ...prev,
+      inverters: prev.inverters.map(i => {
+        if (i.id !== invId) return i;
+        const kept = i.strings.filter(s => s.id !== strId);
+        // Guard: never trim to zero strings
+        const newStrings = kept.length > 0 ? kept : i.strings;
+        // v61.5: rebuild through _buildInvCfg to update stringsPerInverter metadata
+        return _buildInvCfg({
+          existingId: i.id,
+          inverterId: i.inverterId,
+          type:       i.type as InverterConfig['type'],
+          strings:    newStrings as StringConfig[],
+          optimizerPeripheralId: (i as any).optimizerPeripheralId,
+          deviceRatioOverride:   (i as any).deviceRatioOverride,
+        });
+      }),
+      ...LOCK,
+    }));
   };
   const updateString = (invId: string, strId: string, patch: Partial<StringConfig>) => {
     console.log('🔒 [USER EDIT] updateString — engaging user lock');
-    setConfig(prev => ({ ...prev, inverters: prev.inverters.map(i => i.id === invId ? { ...i, strings: i.strings.map(s => s.id === strId ? { ...s, ...patch } : s) } : i), ...LOCK }));
+    setConfig(prev => ({
+      ...prev,
+      inverters: prev.inverters.map(i => {
+        if (i.id !== invId) return i;
+        // Apply the patch to the target string, then rebuild through _buildStrCfg
+        const newStrings = i.strings.map((s, si) => {
+          if (s.id !== strId) return s;
+          const patched = { ...s, ...patch };
+          return _buildStrCfg({
+            index:          si,
+            existingId:     patched.id,
+            panelCount:     patched.panelCount,
+            panelId:        patched.panelId,
+            wireGauge:      patched.wireGauge,
+            wireLength:     patched.wireLength,
+            tilt:           patched.tilt,
+            azimuth:        patched.azimuth,
+            roofType:       (patched as any).roofType,
+            mountingSystem: (patched as any).mountingSystem,
+          });
+        });
+        // v61.5: rebuild the inverter wrapper to update modulesPerString metadata
+        return _buildInvCfg({
+          existingId: i.id,
+          inverterId: i.inverterId,
+          type:       i.type as InverterConfig['type'],
+          strings:    newStrings as StringConfig[],
+          optimizerPeripheralId: (i as any).optimizerPeripheralId,
+          deviceRatioOverride:   (i as any).deviceRatioOverride,
+        });
+      }),
+      ...LOCK,
+    }));
     // v61 E5: auto-lock panel field when user explicitly changes it in guided/manual mode
     if ('panelId' in patch && (controlMode === 'guided' || controlMode === 'manual')) {
       setConfigLocks(prev => ({ ...prev, panel: true }));
@@ -7326,16 +7445,18 @@ function EngineeringPageInner() {
                             })();
                             // v58.6: Store BOTH central inverter (for sizing/brand inference)
                             // AND peripheral optimizer ID (for BOM Stage 1 optimizer line items).
-                            updatedInverters[0] = {
-                              ...firstInv,
-                              type: invType,
+                            // v61.5 FIX: Route through _buildInvCfg so stringsPerInverter +
+                            // modulesPerString metadata are always in sync with strings[].
+                            updatedInverters[0] = _buildInvCfg({
+                              existingId: firstInv.id,
                               inverterId: centralInvId,
-                              // If we resolved a different central inverter, preserve the original
-                              // peripheral ID so BOM can emit the correct optimizer SKU in Stage 1.
+                              type:       invType as InverterConfig['type'],
+                              strings:    firstInv.strings as StringConfig[],
+                              // Preserve optimizer peripheral ID for BOM Stage 1 line items
                               ...(isOptimizer && centralInvId !== invId
                                 ? { optimizerPeripheralId: invId }
                                 : {}),
-                            };
+                            });
                             updates.inverters = updatedInverters;
                           }
                         }
@@ -7705,13 +7826,20 @@ function EngineeringPageInner() {
                                                     </div>
                                                     <button
                                                       onClick={() => {
-                                                        const newStrings = Array.from({ length: autoStrings }, (_, i) => ({
-                                                          ...newString(i, config.systemType),
-                                                          panelCount: i === autoStrings - 1 ? autoLastStr : autoPerStr,
-                                                          panelId: inv.strings[0]?.panelId ?? defaultPanelForSystemType(config.systemType),
-                                                          wireGauge: inv.strings[0]?.wireGauge ?? '#10 AWG',
-                                                          wireLength: inv.strings[0]?.wireLength ?? 50,
-                                                        }));
+                                                        // v61.5: use _buildStrCfg for each new string
+                                                        const newStrings = Array.from({ length: autoStrings }, (_, i) =>
+                                                          _buildStrCfg({
+                                                            index:          i,
+                                                            panelCount:     i === autoStrings - 1 ? autoLastStr : autoPerStr,
+                                                            panelId:        inv.strings[0]?.panelId ?? defaultPanelForSystemType(config.systemType),
+                                                            wireGauge:      inv.strings[0]?.wireGauge,
+                                                            wireLength:     inv.strings[0]?.wireLength ?? 50,
+                                                            tilt:           inv.strings[0]?.tilt,
+                                                            azimuth:        inv.strings[0]?.azimuth,
+                                                            roofType:       (inv.strings[0] as any)?.roofType,
+                                                            mountingSystem: (inv.strings[0] as any)?.mountingSystem,
+                                                          })
+                                                        );
                                                         updateInverter(inv.id, { strings: newStrings } as any);
                                                         logDecision('Auto-String Applied', `${autoStrings} strings × ${autoPerStr} panels (NEC 690.7 @ ${designTemp}°C)`, 'auto');
                                                       }}
