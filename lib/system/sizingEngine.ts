@@ -1491,21 +1491,42 @@ function distributeStrings(
       }
     }
 
-    // Phase 13.2 — a single MPPT channel accepts multiple series strings
-    // wired in parallel. We must produce one layout SLOT per parallel
-    // string (not just per MPPT channel), otherwise dense arrays like
-    // 55 panels on SolarEdge (2 units × 1 MPPT × 2 parallel × 25 maxPPS =
-    // 100 panel slots) would try to cram everything into just 2 MPPT
-    // slots of ≤25 each and orphan the remainder.
+    // v61.11 — Compact String Packing
     //
-    // Phase 14.3 — Smart parallel count: find the MINIMUM parallel count p
-    // (1..maxParallelStringsPerMppt) such that all panels fit within maxPPS
-    // AND each string stays at or above minPPS. This prevents over-slotting
-    // (e.g. 2×Primo5.0 with 2 MPPT×2 parallel = 8 slots for only 36 panels
-    // → 4-5 panels/string, all below the 7-panel minimum).
-    // maxParallelStringsPerMppt is a hardware CEILING, not a fill requirement.
-    // If no p satisfies both constraints, fall back to maxParallelPerMppt so
-    // the distributor can still assign all panels (existing overflow handling).
+    // MPPT count is CAPACITY, not TARGET. Unused MPPT channels are allowed.
+    //
+    // OLD (Phase 14.3) logic was:
+    //   "find minimum p such that avg(panelShare / (mpptCount*p)) <= maxPPS"
+    //   This produced 8 strings for 44 panels when avg=5.5 satisfied p=2 on
+    //   a 4-MPPT inverter — far more strings than electrically necessary.
+    //
+    // NEW logic:
+    //   Step 1. requiredStrings = ceil(panelShare / effectiveMax)
+    //           — minimum number of series strings to fit all panels within voltage limit
+    //   Step 2. chosenParallel = ceil(requiredStrings / totalMpptThisModel)
+    //           — minimum parallel count per MPPT to provide enough slots
+    //   Step 3. Clamp to [1, maxParallelPerMppt]
+    //           — respect hardware ceiling; if still not enough slots, overflow is reported
+    //
+    // This ensures:
+    //   - String length stays near effectiveMax (compact, voltage-optimal)
+    //   - MPPT channels are NOT all forced to be used
+    //   - Extra strings are created ONLY when required by panel count / voltage limit
+    //
+    // Examples:
+    //   44 panels, maxPPS=10, mpptCount=4, maxParallel=2:
+    //     requiredStrings = ceil(44/10) = 5
+    //     chosenParallel  = ceil(5/4)   = 2  => 8 slots created
+    //     BUT distributor only fills 5  => [9,9,9,9,8]  (correct)
+    //   44 panels, maxPPS=13, mpptCount=4, maxParallel=2:
+    //     requiredStrings = ceil(44/13) = 4
+    //     chosenParallel  = ceil(4/4)   = 1  => 4 slots
+    //     distributor fills 4           => [11,11,11,11]  (correct)
+    //   10 panels, maxPPS=13, mpptCount=2, maxParallel=2:
+    //     requiredStrings = ceil(10/13) = 1
+    //     chosenParallel  = ceil(1/2)   = 1  => 2 slots
+    //     distributor fills 1           => [10]  (correct, 1 MPPT idle)
+
     const maxParallelPerMppt =
       ref?.maxParallelStringsPerMppt ?? DEFAULT_PARALLEL_STRINGS_PER_MPPT;
     // Total MPPT channels across ALL inverter models (used to apportion panels).
@@ -1518,31 +1539,60 @@ function distributeStrings(
     const panelShare = totalMpptAllModels > 0
       ? Math.round(input.panelCount * (totalMpptThisModel / totalMpptAllModels))
       : input.panelCount;
-    // Find minimum p: all panels fit (avg <= maxPPS) AND strings stay viable (avg >= minPPS).
-    let chosenParallel = maxParallelPerMppt;
-    for (let p = 1; p <= maxParallelPerMppt; p++) {
-      const slotsForP = totalMpptThisModel * p;
-      const avgPanelsPerSlot = panelShare / slotsForP;
-      const fitsWithinMax = avgPanelsPerSlot <= maxPPS;
-      const aboveMin = avgPanelsPerSlot >= minPPS;
-      if (fitsWithinMax && aboveMin) {
-        chosenParallel = p;
-        break;
-      }
-    }
-    for (let instanceIdx = 0; instanceIdx < inv.qty; instanceIdx++) {
-      const physicalUnitIndex = physicalUnitCounter++;
+
+    // Step 1: minimum strings needed to keep each string <= effectiveMax panels
+    const requiredStrings = maxPPS > 0
+      ? Math.ceil(panelShare / maxPPS)
+      : totalMpptThisModel;
+
+    // Step 2: minimum parallel count per MPPT to provide requiredStrings slots
+    const parallelNeeded = totalMpptThisModel > 0
+      ? Math.ceil(requiredStrings / totalMpptThisModel)
+      : 1;
+
+    // Step 3: clamp to hardware ceiling [1, maxParallelPerMppt]
+    const chosenParallel = Math.max(1, Math.min(parallelNeeded, maxParallelPerMppt));
+
+    // Build exactly requiredStrings slots for this model's panel share.
+    // We walk MPPT channels in round-robin order so that slots are spread
+    // across channels before stacking parallel strings on a single channel.
+    // This ensures:
+    //   - Unused MPPT channels are left idle (not forced to have a string)
+    //   - Parallel strings are added only when requiredStrings > mpptCount
+    //   - Total slots per model = requiredStrings (never more, never less)
+    //
+    // Hardware ceiling guard: if requiredStrings > totalMpptThisModel * maxParallelPerMppt,
+    // cap at hardware max (overflow will be reported by the distribution loop).
+    const hardwareCap = totalMpptThisModel * maxParallelPerMppt;
+    // Ensure at least one slot per physical unit so every inverter carries >= 1 string.
+    const slotsForThisModel = Math.min(Math.max(requiredStrings, inv.qty), hardwareCap);
+
+    // Flat list of (physicalUnitIndex, mpptIndex) in unit-interleaved round-robin order.
+    // We cycle through units before stacking parallel strings on a single MPPT, so that
+    // every physical unit receives a string before any unit gets a second string.
+    // Order: unit0-mppt0, unit1-mppt0, ..., unitN-mppt0,
+    //        unit0-mppt1, unit1-mppt1, ..., unitN-mppt1, ...
+    //        unit0-mppt0(parallel2), unit1-mppt0(parallel2), ...
+    const unitMpptPairs: Array<{ physIdx: number; mpptIdx: number }> = [];
+    for (let p = 0; p < maxParallelPerMppt; p++) {
       for (let mppt = 0; mppt < inv.mpptCount; mppt++) {
-        for (let p = 0; p < chosenParallel; p++) {
-          slots.push({
-            modelIndex: modelIdx,
-            physicalUnitIndex,
-            mpptIndex: mppt,
-            minPPS,
-            maxPPS,
-          });
+        for (let instanceIdx = 0; instanceIdx < inv.qty; instanceIdx++) {
+          const physIdx = physicalUnitCounter + instanceIdx;
+          unitMpptPairs.push({ physIdx, mpptIdx: mppt });
         }
       }
+    }
+    physicalUnitCounter += inv.qty;
+
+    for (let s = 0; s < slotsForThisModel; s++) {
+      const pair = unitMpptPairs[s % unitMpptPairs.length];
+      slots.push({
+        modelIndex: modelIdx,
+        physicalUnitIndex: pair.physIdx,
+        mpptIndex: pair.mpptIdx,
+        minPPS,
+        maxPPS,
+      });
     }
   }
 

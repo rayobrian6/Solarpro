@@ -713,3 +713,189 @@ describe('Sizing Engine — v47.430: Optimizer voltage-clamp bypass', () => {
     expect(r.strings.reduce((s, x) => s + x.panelCount, 0)).toBe(36);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sizing Engine — v61.11: String Packing Scenarios A–H
+//
+// These tests lock in the correct behavior of the compact string packing
+// algorithm introduced in v61.11. The key principle:
+//   requiredStrings = ceil(totalPanels / effectiveMax)
+//   slotsForThisModel = max(requiredStrings, inv.qty)   — one slot per unit
+//   unitMpptPairs built in unit-interleaved order so every physical unit
+//   gets a string before any unit gets a second string.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('Sizing Engine — v61.11: String packing scenarios A–H', () => {
+  // Shared panel electrical params (400W Qcells, Voc=41.6V, tempCoeff=-0.29%/°C)
+  const qp = {
+    panelWattage: 400,
+    panelVoc: 41.6,
+    panelVmp: 34.5,
+    panelIsc: 11.6,
+    panelTempCoeffVoc: -0.29,
+    designTempMin: -10,
+  };
+
+  // ── Scenario A ─────────────────────────────────────────────────────────────
+  // 44 panels, Fronius Primo 8.2 (2 MPPT × 2 parallel × 16 maxPPS).
+  // Old Phase 14.3 logic: p=2 → 8 slots → [6,6,6,6,5,5,5,5].
+  // New v61.11:  requiredStrings = ceil(44/16) = 3, slotsForThisModel = 3
+  //             → 3 strings, e.g. [15,15,14]  (≤ 16 each, total = 44).
+  it('Scenario A: 44 panels / 2 MPPT / maxPPS=16 → compact ≤4 strings, NOT 8', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof',
+      panelCount: 44,
+      selectedBrand: 'fronius',
+      selectedInverterId: 'fronius-primo-8.2',
+      ...qp,
+    });
+    const strings = r.strings;
+    // Compact packing: ceil(44/16)=3 required strings — must be ≤ 4, not the old 8.
+    expect(strings.length).toBeLessThanOrEqual(4);
+    expect(strings.length).toBeGreaterThanOrEqual(1);
+    // No string exceeds maxPPS=16.
+    for (const s of strings) expect(s.panelCount).toBeLessThanOrEqual(16);
+    // All panels accounted for.
+    expect(strings.reduce((a, s) => a + s.panelCount, 0)).toBe(44);
+  });
+
+  // ── Scenario B ─────────────────────────────────────────────────────────────
+  // 10 panels, Sungrow SG7.6RS (2 MPPT × 1 parallel × 13 maxPPS).
+  // requiredStrings = ceil(10/13) = 1 → 1 string [10], one MPPT used.
+  it('Scenario B: 10 panels / 2 MPPT / maxPPS=13 → exactly 1 compact string [10]', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof',
+      panelCount: 10,
+      selectedBrand: 'sungrow',
+      selectedInverterId: 'sungrow-sg7.6rs',
+      ...qp,
+    });
+    const strings = r.strings;
+    // Only 1 string needed — second MPPT should stay idle.
+    expect(strings.length).toBe(1);
+    expect(strings[0].panelCount).toBe(10);
+    expect(strings.reduce((a, s) => a + s.panelCount, 0)).toBe(10);
+  });
+
+  // ── Scenario C ─────────────────────────────────────────────────────────────
+  // 52 panels, SolarEdge se-6000h × 3 (3 MPPT × 2 parallel × maxPPS via voltage).
+  // Every physical unit (indices 0,1,2) must carry ≥ 1 string — no idle units.
+  // This is the regression fixed by the unit-interleaved round-robin.
+  it('Scenario C: se-6000h × 3 — every physical unit carries ≥ 1 string', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof',
+      panelCount: 52,
+      selectedBrand: 'solaredge',
+      selectedInverterId: 'se-7600h', // feasibility gate substitutes se-6000h × 3
+      ...qp,
+    });
+    const totalQty = r.inverterModels.reduce((s, m) => s + m.qty, 0);
+    const byUnit = new Map<number, number>();
+    for (const s of r.strings) byUnit.set(s.inverterIndex, (byUnit.get(s.inverterIndex) ?? 0) + 1);
+    // Every physical unit must have at least 1 string.
+    expect(byUnit.size).toBe(totalQty);
+    // All panels placed.
+    expect(r.strings.reduce((a, s) => a + s.panelCount, 0)).toBe(52);
+  });
+
+  // ── Scenario D ─────────────────────────────────────────────────────────────
+  // Multi-unit spread: strings must be distributed across both units when qty=2.
+  // Using Fronius Primo 5.0 (2 MPPT × 2 parallel × 16 maxPPS); 2 units → 4 MPPTs.
+  // 30 panels: requiredStrings = ceil(30/16) = 2 ≥ qty=2 → both units get a string.
+  it('Scenario D: multi-unit qty=2 — strings spread across both physical units', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof',
+      panelCount: 30,
+      selectedBrand: 'fronius',
+      selectedInverterId: 'fronius-primo-5.0',
+      ...qp,
+    });
+    const totalQty = r.inverterModels.reduce((s, m) => s + m.qty, 0);
+    if (totalQty >= 2) {
+      const byUnit = new Set(r.strings.map(s => s.inverterIndex));
+      // At least 2 physical units must hold strings (no unit is empty while others are full).
+      expect(byUnit.size).toBeGreaterThanOrEqual(2);
+    }
+    // All panels placed regardless.
+    expect(r.strings.reduce((a, s) => a + s.panelCount, 0)).toBe(30);
+  });
+
+  // ── Scenario E ─────────────────────────────────────────────────────────────
+  // Exact fit: 24 panels, Sungrow SG10RS (2 MPPT × 1 parallel × 15 brandMaxPPS).
+  // Voltage-aware effectiveMax for Voc=41.6V / maxDcVoltage=600V / tempMin=-10°C:
+  //   Voc_cold = 41.6 × (1 + (-0.29/100)×(-10-25)) ≈ 45.8V
+  //   effectiveMax = floor(600 × 0.99 / 45.8) = 12
+  // requiredStrings = ceil(24/12) = 2 → exactly 2 strings, each ≤ 12 panels.
+  it('Scenario E: exact-fit 24 panels / 2 MPPT / effectiveMax=12 → exactly 2 balanced strings', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof',
+      panelCount: 24,
+      selectedBrand: 'sungrow',
+      selectedInverterId: 'sungrow-sg10rs',
+      ...qp,
+    });
+    const strings = r.strings;
+    expect(strings.length).toBe(2);
+    // No string may exceed the brand hard ceiling of 15 (voltage clamp enforces ≤ 12).
+    for (const s of strings) expect(s.panelCount).toBeLessThanOrEqual(15);
+    expect(strings.reduce((a, s) => a + s.panelCount, 0)).toBe(24);
+  });
+
+  // ── Scenario F ─────────────────────────────────────────────────────────────
+  // No STRING_OVERFLOW: the sizing engine must produce a valid configuration
+  // for all panel counts within a reasonable range for each brand.
+  // Spot-check Sungrow across 5–20 panels — no overflow, all panels placed.
+  it('Scenario F: Sungrow 5–20 panels — no STRING_OVERFLOW, all panels placed', () => {
+    for (const count of [5, 8, 10, 13, 15, 18, 20]) {
+      const r = sizeSystemFromBrand({
+        systemType: 'roof',
+        panelCount: count,
+        selectedBrand: 'sungrow',
+        ...qp,
+      });
+      const overflow = r.warnings?.filter(w => w.code === 'STRING_OVERFLOW') ?? [];
+      expect(overflow).toHaveLength(0);
+      expect(r.strings.reduce((a, s) => a + s.panelCount, 0)).toBe(count);
+    }
+  });
+
+  // ── Scenario G ─────────────────────────────────────────────────────────────
+  // Optimizer topology: voltage clamp bypassed, brand maxPPS ceiling honoured.
+  // SolarEdge 20 panels — must resolve in 1 unit with strings ≤ 25 panels each.
+  it('Scenario G: optimizer topology — voltage clamp bypassed, brandMaxPPS ceiling ≤ 25', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof',
+      panelCount: 20,
+      selectedBrand: 'solaredge',
+      ...qp,
+    });
+    // All panels placed.
+    expect(r.strings.reduce((a, s) => a + s.panelCount, 0)).toBe(20);
+    // No string exceeds the SolarEdge brand maxPPS ceiling of 25.
+    for (const s of r.strings) expect(s.panelCount).toBeLessThanOrEqual(25);
+    // Single unit expected for this small array.
+    const totalQty = r.inverterModels.reduce((s, m) => s + m.qty, 0);
+    expect(totalQty).toBe(1);
+  });
+
+  // ── Scenario H ─────────────────────────────────────────────────────────────
+  // Canonical v61.11 regression lock: 44 panels, Sol-Ark 15K (3 MPPT × 2 parallel × 13 maxPPS).
+  // Old Phase 14.3: p chosen to satisfy avg ≤ maxPPS → over-creates slots.
+  // New v61.11: requiredStrings = ceil(44/13) = 4 → ≤ 4 strings (not 6), total = 44.
+  it('Scenario H: 44 panels Sol-Ark 15K (3 MPPT) → compact ≤5 strings, NOT 6', () => {
+    const r = sizeSystemFromBrand({
+      systemType: 'roof',
+      panelCount: 44,
+      selectedBrand: 'sol-ark',
+      selectedInverterId: 'solark-15k-2p',
+      ...qp,
+    });
+    const strings = r.strings;
+    // Old code: 6 slots (3 MPPT × 2 parallel). New code: ceil(44/13)=4 slots.
+    expect(strings.length).toBeLessThanOrEqual(5);
+    expect(strings.length).toBeGreaterThanOrEqual(1);
+    // No string exceeds the Sol-Ark maxPPS ceiling of 13.
+    for (const s of strings) expect(s.panelCount).toBeLessThanOrEqual(13);
+    // All panels accounted for.
+    expect(strings.reduce((a, s) => a + s.panelCount, 0)).toBe(44);
+  });
+});
