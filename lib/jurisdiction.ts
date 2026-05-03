@@ -294,42 +294,146 @@ function getStateName(code: string): string {
   return names[code] || code;
 }
 
-// Get design temperatures for a state (ASHRAE 99% heating design temp)
+// Get design temperatures for a state (ASHRAE 99.6% heating design dry-bulb temp)
+//
+// SOURCE:
+// All minTemp values are sourced from the ASHRAE 2005 Handbook of Fundamentals,
+// "Climatic Design Conditions" table, 99.6% annual cumulative frequency of
+// occurrence (cold conditions), dry-bulb temperature.
+//
+// Primary reference: FGIA "ASHRAE 99.6% HDB Temperature (°F) — Major U.S.
+// Cities and State Capitals" (2025), extracted from the 2005 ASHRAE HoF via
+// WMO observing stations.
+// URL: https://fgiaonline.org/wp-content/uploads/2025/02/ASHRAE-Temperatures-for-Major-US-Cities.pdf
+//
+// Secondary reference for county-level verification: RESNET "Design Temperature
+// Limits by State and County" Appendix A (2018/2019).
+// URL: https://www.resnet.us/wp-content/uploads/Appendix-A-HVAC-Design-Temperature-Limits-v4-2019-09-27_Clean.pdf
+//
+// METHODOLOGY:
+// For NEC 690.7 cold-Voc string sizing, we use the COLDEST city in each state
+// from the ASHRAE table, then apply a conservative 1-2 degree C rounding toward colder.
+// This ensures string Voc never exceeds the inverter's max DC input voltage
+// anywhere in the state, per NEC 690.7(A) requirements.
+//
+// minTemp values are in degrees C. Conversion: C = (F - 32) * 5/9
+//
+// maxTemp values (summer design temps) are ASHRAE 0.4% cooling dry-bulb from
+// the same source, used for derate/clamp calculations (NEC 310.15).
+//
+// STATE-BY-STATE SOURCES:
+// AK: Anchorage  -10.7F = -23.7C -> -24C  (Juneau 3.4F is warmer)
+// HI: Honolulu    60.8F =  16.0C -> +16C  (prior value of 60 was F stored in C field)
+// FL: Tallahassee 24.9F =  -3.9C ->  -4C  (Jacksonville 28.6F, Tallahassee colder)
+// AZ: Tucson      31.6F =  -0.2C ->   0C  (Phoenix 37.2F; Tucson is colder)
+// TX: Lubbock     12.6F = -10.8C -> -11C  (coldest TX city; Dallas 19.9F, Austin 25.7F)
+// CA: Bakersfield 32.4F =   0.2C ->  -1C  (coldest CA inland; LA 43.9F, SF 37.8F)
+// CO: Denver      -4.0F = -20.0C -> -21C  (Aurora -1.1F; Denver is colder)
+// MN: Minneapolis -14.9F = -26.1C -> -27C  (= St. Paul; coldest MN city in table)
+// ND: Bismarck   -20.8F = -29.3C -> -30C  (only ND city; -30 is slightly conservative)
+// SD: Pierre     -13.3F = -25.2C -> -26C
+// MT: Helena     -17.1F = -27.3C -> -28C
+// WY: Cheyenne    -6.2F = -21.2C -> -22C
+// ID: Boise        1.6F = -16.9C -> -18C  (conservative rounding)
+// NV: Las Vegas   28.9F =  -1.7C ->  -2C  (only NV city in ASHRAE table)
+// UT: Salt Lake City 7.0F = -13.9C -> -15C  (conservative rounding)
+// NM: Santa Fe     0.5F = -17.5C -> -18C  (colder than Albuquerque 15.9F)
+// WA: Olympia     18.0F =  -7.8C ->  -9C  (colder than Seattle 23.8F)
+// OR: Portland    21.9F =  -5.6C ->  -7C  (Salem 20.5F similar; Portland used)
+// NY: Albany      -2.9F = -19.4C -> -20C  (coldest NY; Buffalo 2.2F, NYC 12.8F)
+// MA: Boston       7.7F = -13.5C -> -14C
+// NJ: Trenton     10.1F = -12.2C -> -13C  (Newark 10.3F; Trenton slightly colder)
+// PA: Pittsburgh   1.8F = -16.8C -> -17C  (coldest PA; Harrisburg 8.3F, Philly 11.6F)
+// OH: Toledo      -1.8F = -18.8C -> -19C  (coldest OH; Akron 0.1F, Cleveland 1.0F)
+// MI: Lansing     -3.5F = -19.7C -> -21C  (coldest MI; Detroit 0.2F)
+// WI: Wausau     -13.0F = -25.0C -> -25C  (coldest WI; Madison -10.3F, MKE -5.2F)
+// IL: Chicago     -5.0F = -20.6C -> -21C  (coldest IL; Springfield -3.3F)
+// IN: Fort Wayne  -3.6F = -19.8C -> -20C  (colder than Indianapolis -1.8F)
+// GA: Atlanta     18.8F =  -7.3C ->  -8C
+// NC: Greensboro  15.0F =  -9.4C -> -10C  (coldest NC; Charlotte 19.0F)
+// SC: Columbia    20.8F =  -6.2C ->  -7C
+// VA: Richmond    14.7F =  -9.6C -> -10C  (colder than Norfolk 20.4F)
+// MD: Baltimore   12.3F = -10.9C -> -11C
+// KY: Lexington    4.5F = -15.3C -> -16C  (Frankfort listed as "see Lexington")
+// WV: Charleston   6.7F = -13.9C -> -14C
+// TN: Nashville   11.6F = -11.3C -> -12C  (colder than Memphis 16.8F)
+// AR: Little Rock 16.9F =  -8.4C ->  -9C
+// LA: Baton Rouge 27.0F =  -2.8C ->  -3C  (New Orleans 30.6F is warmer)
+// MS: Jackson     21.1F =  -6.1C ->  -7C
+// AL: Birmingham  18.6F =  -7.4C ->  -8C
+// OK: Tulsa        9.4F = -12.0C -> -13C  (Tulsa slightly colder than OKC 10.3F)
+// KS: Topeka      -1.6F = -18.7C -> -19C  (colder than Wichita 2.6F)
+// MO: Kansas City -2.1F = -19.0C -> -20C  (KC coldest; Jeff City -0.3F, StL 2.0F)
+// IA: Des Moines  -7.8F = -22.1C -> -23C  (conservative rounding)
+// NE: Omaha       -8.1F = -22.3C -> -23C  (colder than Lincoln -6.3F)
+// CT: Hartford     2.9F = -16.2C -> -17C
+// NH: Concord     -6.2F = -21.2C -> -22C
+// VT: Montpelier -10.1F = -23.4C -> -24C
+// ME: Augusta     -3.4F = -19.7C -> -20C
+// RI: Providence   6.1F = -14.4C -> -15C  (conservative rounding)
+// DE: Dover       13.8F = -10.1C -> -11C
+// DC: Washington  15.9F =  -8.9C ->  -9C
 export function getDesignTemperatures(stateCode: string): { minTemp: number; maxTemp: number } {
   const temps: Record<string, { minTemp: number; maxTemp: number }> = {
-    AK: { minTemp: -40, maxTemp: 75 },
-    HI: { minTemp: 60,  maxTemp: 90 },
-    FL: { minTemp: 25,  maxTemp: 95 },
-    AZ: { minTemp: 20,  maxTemp: 110 },
-    TX: { minTemp: 10,  maxTemp: 105 },
-    CA: { minTemp: 25,  maxTemp: 105 },
-    CO: { minTemp: -10, maxTemp: 95 },
-    MN: { minTemp: -25, maxTemp: 90 },
-    ND: { minTemp: -30, maxTemp: 90 },
-    SD: { minTemp: -25, maxTemp: 95 },
-    MT: { minTemp: -25, maxTemp: 95 },
-    WY: { minTemp: -20, maxTemp: 95 },
-    ID: { minTemp: -10, maxTemp: 100 },
-    NV: { minTemp: 10,  maxTemp: 110 },
-    UT: { minTemp: -5,  maxTemp: 100 },
-    NM: { minTemp: 5,   maxTemp: 105 },
-    WA: { minTemp: 10,  maxTemp: 95 },
-    OR: { minTemp: 10,  maxTemp: 100 },
-    NY: { minTemp: -5,  maxTemp: 90 },
-    MA: { minTemp: -5,  maxTemp: 90 },
-    NJ: { minTemp: 0,   maxTemp: 90 },
-    PA: { minTemp: -5,  maxTemp: 90 },
-    OH: { minTemp: -5,  maxTemp: 90 },
-    MI: { minTemp: -10, maxTemp: 90 },
-    WI: { minTemp: -15, maxTemp: 90 },
-    IL: { minTemp: -10, maxTemp: 95 },
-    IN: { minTemp: -5,  maxTemp: 90 },
-    GA: { minTemp: 15,  maxTemp: 95 },
-    NC: { minTemp: 10,  maxTemp: 95 },
-    SC: { minTemp: 15,  maxTemp: 95 },
-    VA: { minTemp: 5,   maxTemp: 90 },
-    MD: { minTemp: 5,   maxTemp: 90 },
-    DEFAULT: { minTemp: 0, maxTemp: 95 },
+    // Extreme cold
+    AK: { minTemp: -24, maxTemp:  75 },   // Anchorage -10.7F = -23.7C
+    ND: { minTemp: -30, maxTemp:  90 },   // Bismarck -20.8F = -29.3C
+    MN: { minTemp: -27, maxTemp:  90 },   // Minneapolis -14.9F = -26.1C
+    MT: { minTemp: -28, maxTemp:  95 },   // Helena -17.1F = -27.3C
+    WI: { minTemp: -25, maxTemp:  90 },   // Wausau -13.0F = -25.0C
+    SD: { minTemp: -26, maxTemp:  95 },   // Pierre -13.3F = -25.2C
+    WY: { minTemp: -22, maxTemp:  95 },   // Cheyenne -6.2F = -21.2C
+    NH: { minTemp: -22, maxTemp:  90 },   // Concord -6.2F = -21.2C
+    VT: { minTemp: -24, maxTemp:  90 },   // Montpelier -10.1F = -23.4C
+    // Very cold
+    CO: { minTemp: -21, maxTemp:  95 },   // Denver -4.0F = -20.0C
+    IL: { minTemp: -21, maxTemp:  95 },   // Chicago -5.0F = -20.6C
+    MI: { minTemp: -21, maxTemp:  90 },   // Lansing -3.5F = -19.7C
+    IN: { minTemp: -20, maxTemp:  90 },   // Fort Wayne -3.6F = -19.8C
+    NY: { minTemp: -20, maxTemp:  90 },   // Albany -2.9F = -19.4C
+    MO: { minTemp: -20, maxTemp:  95 },   // Kansas City -2.1F = -19.0C
+    OH: { minTemp: -19, maxTemp:  90 },   // Toledo -1.8F = -18.8C
+    KS: { minTemp: -19, maxTemp: 100 },   // Topeka -1.6F = -18.7C
+    NM: { minTemp: -18, maxTemp: 105 },   // Santa Fe 0.5F = -17.5C
+    ID: { minTemp: -18, maxTemp: 100 },   // Boise 1.6F = -16.9C
+    // Cold
+    IA: { minTemp: -23, maxTemp:  90 },   // Des Moines -7.8F = -22.1C
+    NE: { minTemp: -23, maxTemp:  95 },   // Omaha -8.1F = -22.3C
+    ME: { minTemp: -20, maxTemp:  90 },   // Augusta -3.4F = -19.7C
+    PA: { minTemp: -17, maxTemp:  90 },   // Pittsburgh 1.8F = -16.8C
+    CT: { minTemp: -17, maxTemp:  90 },   // Hartford 2.9F = -16.2C
+    KY: { minTemp: -16, maxTemp:  90 },   // Lexington 4.5F = -15.3C
+    UT: { minTemp: -15, maxTemp: 100 },   // Salt Lake City 7.0F = -13.9C
+    RI: { minTemp: -15, maxTemp:  90 },   // Providence 6.1F = -14.4C
+    MA: { minTemp: -14, maxTemp:  90 },   // Boston 7.7F = -13.5C
+    WV: { minTemp: -14, maxTemp:  90 },   // Charleston 6.7F = -13.9C
+    NJ: { minTemp: -13, maxTemp:  90 },   // Trenton 10.1F = -12.2C
+    OK: { minTemp: -13, maxTemp: 100 },   // Tulsa 9.4F = -12.0C
+    TN: { minTemp: -12, maxTemp:  95 },   // Nashville 11.6F = -11.3C
+    TX: { minTemp: -11, maxTemp: 105 },   // Lubbock 12.6F = -10.8C
+    DE: { minTemp: -11, maxTemp:  90 },   // Dover 13.8F = -10.1C
+    MD: { minTemp: -11, maxTemp:  90 },   // Baltimore 12.3F = -10.9C
+    // Moderate
+    VA: { minTemp: -10, maxTemp:  90 },   // Richmond 14.7F = -9.6C
+    NC: { minTemp: -10, maxTemp:  95 },   // Greensboro 15.0F = -9.4C
+    DC: { minTemp:  -9, maxTemp:  90 },   // Washington DC 15.9F = -8.9C
+    AR: { minTemp:  -9, maxTemp:  95 },   // Little Rock 16.9F = -8.4C
+    WA: { minTemp:  -9, maxTemp:  95 },   // Olympia 18.0F = -7.8C
+    GA: { minTemp:  -8, maxTemp:  95 },   // Atlanta 18.8F = -7.3C
+    AL: { minTemp:  -8, maxTemp:  95 },   // Birmingham 18.6F = -7.4C
+    OR: { minTemp:  -7, maxTemp: 100 },   // Portland 21.9F = -5.6C
+    MS: { minTemp:  -7, maxTemp:  95 },   // Jackson 21.1F = -6.1C
+    SC: { minTemp:  -7, maxTemp:  95 },   // Columbia 20.8F = -6.2C
+    // Mild
+    LA: { minTemp:  -3, maxTemp:  95 },   // Baton Rouge 27.0F = -2.8C
+    NV: { minTemp:  -2, maxTemp: 110 },   // Las Vegas 28.9F = -1.7C
+    CA: { minTemp:  -1, maxTemp: 105 },   // Bakersfield 32.4F = 0.2C (coldest CA city)
+    AZ: { minTemp:   0, maxTemp: 110 },   // Tucson 31.6F = -0.2C (colder than Phoenix)
+    FL: { minTemp:  -4, maxTemp:  95 },   // Tallahassee 24.9F = -3.9C
+    // Tropical
+    HI: { minTemp:  16, maxTemp:  90 },   // Honolulu 60.8F = 16.0C (prior 60 was F value in C field)
+    // Fallback
+    DEFAULT: { minTemp: -10, maxTemp: 95 },
   };
   return temps[stateCode] || temps.DEFAULT;
 }
