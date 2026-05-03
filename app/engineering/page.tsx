@@ -7948,13 +7948,12 @@ function EngineeringPageInner() {
                         autoApply={sizingAutoApply}
                         onAutoApplyChange={setSizingAutoApply}
                         onApply={() => {
-                          // v61: Control mode guard for hard DC/AC error auto-heal
-           const canHealDcAc = shouldAllowOverride('inverter', controlMode, configLocks) || controlMode === 'auto';
-           if (canHealDcAc) {
-             applySizingRecommendation(sizingRecommendation);
-           } else {
-             console.log('[v61] DC/AC auto-heal blocked by control mode:', controlMode, '— user must fix manually');
-           }
+                          // v61.13 FIX: explicit user click on "Apply Recommended Configuration"
+                          // MUST always fire — the click itself IS the user approval.
+                          // The previous guard (shouldAllowOverride / controlMode === 'auto')
+                          // was copy-pasted from the auto-apply useEffect and incorrectly
+                          // blocked the button in guided + manual modes. Removed entirely.
+                          applySizingRecommendation(sizingRecommendation);
                         }}
                         hidden={config.inverters.length === 0}
                         panelCountSource={{
