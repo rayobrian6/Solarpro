@@ -402,9 +402,12 @@ function reconcileFenceEcoFlowDefault(
     //  - current type is 'string' (our default topology), AND
     //  - inverterId is a hardcoded default (user never picked it explicitly)
     if (inv.type === 'string' && HARDCODED_DEFAULT_INVERTERS.has(inv.inverterId)) {
-      console.log(`[INVERTER RECONCILE] Fence project detected — promoting inverter ${inv.inverterId} → ecoflow-power-ocean-10kw`);
+      // v61.13: dynamic lookup — never hardcode a potentially-inactive model.
+      const _activeEF = STRING_INVERTERS.find(x => x.ecosystemBrand === 'ecoflow' && x.active !== false);
+      const _ecoflowId = _activeEF?.id ?? 'ecoflow-ocean-pro-11kw';
+      console.log(`[INVERTER RECONCILE] Fence project detected — promoting inverter ${inv.inverterId} → ${_ecoflowId}`);
       changed = true;
-      return { ...inv, type: 'ecoflow' as InverterType, inverterId: 'ecoflow-power-ocean-10kw' };
+      return { ...inv, type: 'ecoflow' as InverterType, inverterId: _ecoflowId };
     }
     return inv;
   });
@@ -447,7 +450,9 @@ function newInverter(type: InverterType, sysType?: string): InverterConfig {
   if (type === 'micro') {
     defaultId = MICROINVERTERS[0]?.id ?? 'enphase-iq8plus';
   } else if (type === 'ecoflow') {
-    defaultId = 'ecoflow-power-ocean-10kw';
+    // v61.13: dynamic lookup — never hardcode a potentially-inactive model.
+    const _activeEF = STRING_INVERTERS.find(x => x.ecosystemBrand === 'ecoflow' && x.active !== false);
+    defaultId = _activeEF?.id ?? 'ecoflow-ocean-pro-11kw';
   } else {
     defaultId = STRING_INVERTERS[0]?.id ?? 'se-7600h';
   }
@@ -1088,12 +1093,21 @@ function EngineeringPageInner() {
         ) {
           const _savedPrimaryInvId: string = (savedConfig as any).inverters[0]?.inverterId ?? '';
           const _savedEqEntry = STRING_INVERTERS.find(x => x.id === _savedPrimaryInvId);
-          if (_savedEqEntry && _savedEqEntry.active === false) {
+          // v61.13: also discard when the ID is not found in STRING_INVERTERS at all but
+          // matches a known-inactive legacy prefix — covers the escape hatch where
+          // _savedEqEntry is undefined (ID was fully removed from equipment-db).
+          const _isKnownInactiveLegacy = !_savedEqEntry && (
+            _savedPrimaryInvId.startsWith('ecoflow-power-ocean-') ||
+            _savedPrimaryInvId.startsWith('ecoflow-powerocean-')
+          );
+          if ((_savedEqEntry && _savedEqEntry.active === false) || _isKnownInactiveLegacy) {
             console.warn(
               '[HYDRATION STALE INVERTER DISCARD]',
               '\n  projectId:', projectId,
               '\n  inverterId:', _savedPrimaryInvId,
-              '\n  reason: saved inverterId is active:false in equipment-db (deactivated SKU)',
+              '\n  reason:', _isKnownInactiveLegacy
+                ? 'saved inverterId matches known-inactive legacy prefix (not found in equipment-db)'
+                : 'saved inverterId is active:false in equipment-db (deactivated SKU)',
               '\n  action: discarded savedConfig.inverters and cleared user lock/default stamp'
             );
             delete (savedConfig as any).inverters;
@@ -2196,7 +2210,12 @@ function EngineeringPageInner() {
       // with what the user is already looking at.
       const inferredBrand =
         primary?.inverterId
-          ? getBrandProfileByInverterId(primary.inverterId)?.id
+          ? (getBrandProfileByInverterId(primary.inverterId)?.id
+              // v61.13: fallback — if the ID was removed from supportedInverterModels
+              // (e.g. legacy ecoflow-power-ocean-* after v61.12 clean-up), infer brand
+              // via STRING_INVERTERS.ecosystemBrand so effectiveBrand stays correct
+              // and the sizing engine recommends the right brand (not a stale fallback).
+              ?? STRING_INVERTERS.find(x => x.id === primary.inverterId)?.ecosystemBrand)
           : undefined;
       // Phase 14.5 — Micro-topology safety net.
       // If the current inverter is typed as 'micro' but getBrandProfileByInverterId
@@ -8055,7 +8074,8 @@ function EngineeringPageInner() {
                           const invList = inv.type === 'micro'
                             ? MICROINVERTERS
                             : inv.type === 'ecoflow'
-                              ? STRING_INVERTERS.filter(i => i.id.startsWith('ecoflow-'))
+                              // v61.13: only show active EcoFlow models in dropdown
+                              ? STRING_INVERTERS.filter(i => i.id.startsWith('ecoflow-') && i.active !== false)
                               : inv.type === 'hybrid'
                                 ? STRING_INVERTERS.filter(i => !i.id.startsWith('ecoflow-'))
                                 : STRING_INVERTERS.filter(i => !i.id.startsWith('ecoflow-'));
@@ -8117,7 +8137,11 @@ function EngineeringPageInner() {
                                           if (inv.type !== t) {
                                             let defaultId: string;
                                             if (t === 'micro') defaultId = MICROINVERTERS[0]?.id || inv.inverterId;
-                                            else if (t === 'ecoflow') defaultId = 'ecoflow-power-ocean-10kw';
+                                            else if (t === 'ecoflow') {
+                                              // v61.13: dynamic lookup — never hardcode a potentially-inactive model.
+                                              const _activeEF = STRING_INVERTERS.find(x => x.ecosystemBrand === 'ecoflow' && x.active !== false);
+                                              defaultId = _activeEF?.id ?? 'ecoflow-ocean-pro-11kw';
+                                            }
                                             else defaultId = STRING_INVERTERS[0]?.id || inv.inverterId;
                                             // Clear ecosystemBrand when user manually switches topology
                                             // so the EcosystemPicker reappears for the new topology type
