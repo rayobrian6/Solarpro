@@ -31,15 +31,15 @@
 - [x] F3: Wire ControlModeBanner + SuggestionCard into engineering page
 
 ## G: SolarDog Knowledge Seed Update
-- [ ] G1: Add control mode knowledge items to knowledgeSeed.ts (4 items)
-- [ ] G2: Update SolarDog system prompt — explain control modes + lock behavior
+- [x] G1: Add control mode knowledge items to knowledgeSeed.ts (4 items)
+- [x] G2: Update SolarDog system prompt — explain control modes + lock behavior
 
 ## H: Tests — groups 45-48
-- [ ] H1: Group 45 — controlMode shouldAllowOverride logic (unit tests)
-- [ ] H2: Group 46 — lockField + DEFAULT_LOCKS
-- [ ] H3: Group 47 — SolarDog knowledge seed (control modes)
-- [ ] H4: Group 48 — migration 026 present in migrate route
+- [x] H1: Group 45 — controlMode shouldAllowOverride logic (unit tests)
+- [x] H2: Group 46 — lockField + DEFAULT_LOCKS
+- [x] H3: Group 47 — SolarDog knowledge seed (control modes)
+- [x] H4: Group 48 — migration 026 present in migrate route
 
 ## I: Commit & Push
-- [ ] I1: All tests passing | 0 TS errors
-- [ ] I2: git commit v61 + push to dev + merge to master
+- [x] I1: All tests passing | 0 TS errors — 3191/3191 ✅
+- [x] I2: git commit v61 + push to dev + merge to master ✅

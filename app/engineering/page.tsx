@@ -1696,6 +1696,14 @@ function EngineeringPageInner() {
       panelBusRating: config.panelBusRating ?? config.mainPanelAmps ?? 200,
       interconnectionMethod: config.interconnectionMethod ?? 'LOAD_SIDE',
       branchCount: topology === 'micro' ? Math.ceil(totalPanels / (modulesPerDevice * branchLimit)) : undefined,
+      // B1 FIX: Pass the actual string count from config.inverters so computeSystem()
+      // uses the user's layout rather than auto-calculating from NEC 690.7 physics.
+      // Without this, the UI SLD display shows a different string count than the
+      // user's applied configuration (e.g. 3 physics-derived strings vs 2 user strings).
+      // Only applies to string/optimizer/hybrid topology — micro has no DC strings.
+      totalStrings: topology !== 'micro'
+        ? config.inverters.reduce((s, inv) => s + inv.strings.length, 0) || undefined
+        : undefined,
       maxACVoltageDropPct: 2,
       maxDCVoltageDropPct: 3,
       // Battery NEC 705.12(B) bus impact — AC-coupled batteries add backfeed breaker to bus loading
@@ -2548,12 +2556,16 @@ function EngineeringPageInner() {
   const addInverter = (type: InverterType) => {
     console.log('🔒 [USER EDIT] addInverter(', type, ') — engaging user lock');
     if (type === 'micro') {
-      // MICRO: replace ALL existing inverters with a single micro entry
-      // Collect total panel count from all existing inverters
+      // MICRO: replace ALL existing inverters with a single micro entry.
+      // B5 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
+      // config fallback) over the stale config-derived sum. When CAD placed 36 panels
+      // but the string config still shows 20, the micro entry must use 36.
+      const authoritativePanelCount = systemPanelCount > 0 ? systemPanelCount : undefined;
       setConfig(prev => {
-        const totalPanels = prev.inverters.reduce(
+        const configDerivedTotal = prev.inverters.reduce(
           (sum, i) => sum + i.strings.reduce((s, str) => s + str.panelCount, 0), 0
         ) || 20;
+        const totalPanels = authoritativePanelCount ?? configDerivedTotal;
         const microId = MICROINVERTERS[0]?.id || 'enphase-iq8plus';
         // Preserve existing panelId if user had one (non-destructive); otherwise use system-type default
         const existingPanelId = prev.inverters[0]?.strings[0]?.panelId;
@@ -2614,13 +2626,17 @@ function EngineeringPageInner() {
     console.log('🔒 [USER EDIT] handleTopologySwitch — engaging user lock');
 
     // When switching to micro: REPLACE ALL inverters with a single micro entry
-    // Collect total panels from ALL inverters — micro is always a single unified system
+    // B4 FIX: Prefer the authoritative systemPanelCount (CAD > SystemDefinition >
+    // config fallback) over the stale config-derived sum. When CAD placed 36 panels
+    // but the string config shows 20, the micro entry must use 36.
+    const authoritativeCountForMicro = systemPanelCount > 0 ? systemPanelCount : undefined;
     if (newType === 'micro') {
       setConfig(prev => {
-        const totalPanels = prev.inverters.reduce(
+        const configDerivedTotal = prev.inverters.reduce(
           (sum, i) => sum + i.strings.reduce((s, str) => s + str.panelCount, 0), 0
         ) || 20;
-        console.log('Micro topology: collapsing ALL inverters into single entry, totalPanels=', totalPanels);
+        const totalPanels = authoritativeCountForMicro ?? configDerivedTotal;
+        console.log('Micro topology: collapsing ALL inverters into single entry, totalPanels=', totalPanels, '(authoritative:', authoritativeCountForMicro, ')');
         const firstStr = prev.inverters[0]?.strings[0] ?? newString(0, prev.systemType);
         const singleMicroInv: InverterConfig = {
           id: invId,
