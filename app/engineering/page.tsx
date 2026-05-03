@@ -62,6 +62,7 @@ import {
   type NewInverterOptions   as _NewInverterOptions,
   type RebuildStringsOptions as _RebuildStringsOptions,
 } from '@/lib/system/buildInverterConfig';
+import { electricallyNormalizeInverterConfig, isElectricallyInvalid } from '@/lib/system/electricalNormalize';
 // Cast wrappers: builder types use wide `string` for roofType; page uses a
 // narrow RoofType union. Since the page's RoofType is a strict subset of
 // string, the cast is always safe. These wrappers are the ONLY call sites
@@ -1182,7 +1183,10 @@ function EngineeringPageInner() {
             // builder before committing to state. This guarantees stringsPerInverter
             // and modulesPerString metadata are always consistent with the actual
             // strings array, even for configs that pre-date the Lock Architecture.
-            return normalizeInverterConfig(merged);
+            // v61.6 Electrical Integrity: also detect + repair 1×N electrical violations
+            // (e.g. strings:[{panelCount:44}] for a Solis inverter with maxPanelsPerString=13).
+            const _metaNorm = normalizeInverterConfig(merged);
+            return electricallyNormalizeInverterConfig(_metaNorm).config;
           });
         } else if (Object.keys(patches).length > 0) {
           // No saved config — use seed patches as before
@@ -1192,7 +1196,9 @@ function EngineeringPageInner() {
             // Users now see their configured equipment on load; mismatches are
             // surfaced via the SizingRecommendation panel (apply = explicit).
             // v61.4 Hydration Lock: normalise seed patches inverters too.
-            return normalizeInverterConfig(merged);
+            // v61.6 Electrical Integrity: repair 1×N violations in seed patches.
+            const _metaNorm2 = normalizeInverterConfig(merged);
+            return electricallyNormalizeInverterConfig(_metaNorm2).config;
           });
         }
 
@@ -1207,7 +1213,11 @@ function EngineeringPageInner() {
               if (localConfig && Object.keys(localConfig).length > 0) {
                 console.log('[EngineeringPage] Restoring from localStorage fallback (no DB config)');
                 // v61.4 Hydration Lock: normalise localStorage inverters through the central builder.
-                setConfig(prev => normalizeInverterConfig({ ...prev, ...localConfig }));
+                // v61.6 Electrical Integrity: also repair 1×N violations.
+                setConfig(prev => {
+                  const _metaMerge = normalizeInverterConfig({ ...prev, ...localConfig });
+                  return electricallyNormalizeInverterConfig(_metaMerge).config;
+                });
               }
             }
           } catch { /* localStorage unavailable or corrupt — ignore */ }
@@ -2408,29 +2418,33 @@ function EngineeringPageInner() {
   // when the user navigates away from the engineering page.
   useEffect(() => () => clearEngineeringSnapshot(), [clearEngineeringSnapshot]);
 
-  // ── v61.4 Phase 2: Global Runtime Guard ──────────────────────────────────────
+  // ── v61.4/v61.6 Phase 2: Global Runtime Guard ──────────────────────────────
   // Auto-heal any config.inverters whose metadata is inconsistent with their
-  // strings arrays. This catches configs that slipped through hydration without
-  // going through normalizeInverterConfig (e.g. very old DB records, third-party
-  // integrations, or future code paths that miss the Phase 1 wrapping).
+  // strings arrays, OR that are electrically invalid (1×N violation).
   //
-  // Checks (mirrors assertInverterMetadata invariants):
+  // Checks:
   //   A) stringsPerInverter !== strings.length  -- rebuild metadata
   //   B) modulesPerString is missing/zero        -- rebuild metadata
   //   C) any string.panelCount === 0            -- rebuild metadata
+  //   D) 1×N violation: 1 string with panelCount > maxPanelsPerString (v61.6)
   //
   // Only fires when a violation is detected -- no-op on healthy configs.
   useEffect(() => {
     if (!Array.isArray(config.inverters) || config.inverters.length === 0) return;
-    const needsHeal = config.inverters.some((inv: any) =>
+    const needsMetaHeal = config.inverters.some((inv: any) =>
       typeof inv.stringsPerInverter !== 'number' ||
       inv.stringsPerInverter !== (inv.strings?.length ?? 0) ||
       !inv.modulesPerString ||
       (Array.isArray(inv.strings) && inv.strings.some((s: any) => !s.panelCount))
     );
-    if (!needsHeal) return;
-    console.warn('[v61.4 RuntimeGuard] Detected stale inverter metadata -- auto-healing via normalizeInverterConfig');
-    setConfig(prev => normalizeInverterConfig(prev));
+    const needsElecHeal = config.inverters.some(inv => isElectricallyInvalid(inv as any));
+    if (!needsMetaHeal && !needsElecHeal) return;
+    if (needsMetaHeal) console.warn('[v61.4 RuntimeGuard] Detected stale inverter metadata -- auto-healing via normalizeInverterConfig');
+    if (needsElecHeal) console.warn('[v61.6 RuntimeGuard] Detected 1×N electrical violation -- auto-healing via electricallyNormalizeInverterConfig');
+    setConfig(prev => {
+      const metaNorm = needsMetaHeal ? normalizeInverterConfig(prev) : prev;
+      return needsElecHeal ? electricallyNormalizeInverterConfig(metaNorm).config : metaNorm;
+    });
   }, [config.inverters]);
 
   // ── v61.4 Phase 5: Hard Assertion (dev mode) ─────────────────────────────────
@@ -2514,25 +2528,25 @@ function EngineeringPageInner() {
       const primaryModel = rec.inverterModels[0];
       if (!primaryModel) return prev;
 
-      // Helper: build a fresh string using the canonical newString() then
-      // overlay panelId + panelCount. Preserves tilt/azimuth/mountingSystem
-      // defaults and any roof-type-aware defaults inside newString().
-      const buildString = (idx: number, panelCount: number, reuseLabel?: string) => {
+      // Helper: build a fresh string through _buildStrCfg (canonical path).
+      // Preserves tilt/azimuth/mountingSystem defaults and any roof-type-aware
+      // defaults, while guaranteeing all required StringConfig fields are set.
+      const buildString = (idx: number, panelCount: number, reuseLabel?: string): StringConfig => {
         const base = newString(idx, prev.systemType);
-        return {
-          ...base,
-          id: `str-applied-${Date.now()}-${idx}`,
-          label: reuseLabel ?? base.label,
-          panelId: existingPanelId,
+        return _buildStrCfg({
+          index:          idx,
+          existingId:     `str-applied-${Date.now()}-${idx}`,
+          label:          reuseLabel ?? base.label,
+          panelId:        existingPanelId,
           panelCount,
           // Preserve user-configured wire length / gauge where possible.
-          wireGauge: existingStr?.wireGauge ?? base.wireGauge,
-          wireLength: existingStr?.wireLength ?? base.wireLength,
-          tilt: existingStr?.tilt ?? base.tilt,
-          azimuth: existingStr?.azimuth ?? base.azimuth,
-          roofType: existingStr?.roofType ?? base.roofType,
+          wireGauge:      existingStr?.wireGauge      ?? base.wireGauge,
+          wireLength:     existingStr?.wireLength     ?? base.wireLength,
+          tilt:           existingStr?.tilt           ?? base.tilt,
+          azimuth:        existingStr?.azimuth        ?? base.azimuth,
+          roofType:       existingStr?.roofType       ?? base.roofType,
           mountingSystem: existingStr?.mountingSystem ?? base.mountingSystem,
-        };
+        });
       };
 
       const newInverters: InverterConfig[] = [];
@@ -2577,6 +2591,19 @@ function EngineeringPageInner() {
           }));
         }
       }
+
+      // v61.6: Debug log for [APPLY RECOMMENDATION COMMIT]
+      console.log('📋 [APPLY RECOMMENDATION COMMIT]', {
+        inverterCount: newInverters.length,
+        inverterId: primaryModel.equipmentDbId,
+        uiType,
+        inverters: newInverters.map(inv => ({
+          id: inv.inverterId,
+          stringsPerInverter: inv.stringsPerInverter,
+          modulesPerString: inv.modulesPerString,
+          strings: inv.strings.map(s => ({ panelCount: s.panelCount, label: s.label })),
+        })),
+      });
 
       // Battery fields — follow the sizing engine verdict.
       // Phase 13.1 — USER INTENT LOCK: an EXPLICIT "Apply Recommendation"
@@ -7499,6 +7526,18 @@ function EngineeringPageInner() {
                         }
                         // Lock to prevent auto-sizing engine from overwriting ecosystem selection
                         updates.userHasEditedInverters = true;
+                        // v61.6 Phase 5: After ecosystem apply changes inverterId, the existing
+                        // strings[] may be electrically invalid for the new inverter model.
+                        // Normalize before committing so we never write 1×N violations.
+                        if (updates.inverters && Array.isArray(updates.inverters)) {
+                          const _ecoNorm = electricallyNormalizeInverterConfig(
+                            { ...config, ...updates } as any
+                          );
+                          if (_ecoNorm.rebuiltCount > 0) {
+                            console.log('[ECOSYSTEM APPLY] electrical normalization repaired', _ecoNorm.rebuiltCount, 'inverter(s)');
+                            updates.inverters = _ecoNorm.config.inverters;
+                          }
+                        }
                         updateConfig(updates);
                         const appliedCount = Object.values(payload.selections).filter(Boolean).length;
                         setAutoLoadBanner(
