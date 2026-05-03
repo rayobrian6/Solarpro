@@ -1026,8 +1026,56 @@ function EngineeringPageInner() {
         // applied as a base (for project-level fields like address/state/client)
         // but all equipment / string / config fields are overwritten by the
         // saved engineering_config.
-        const savedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
+        // v61.8 HYDRATION GATE: Compute the authoritative expected panel count
+        // from the best available source (layout > seed).
+        // Used below to detect stale inverter configs saved before CAD loaded.
+        // Priority: layout.panels.length > layout.totalPanels > seed.panel_count
+        // NOTE: intentionally NOT using savedConfig.inverters as truth here.
+        const _hydLayoutPanelCount: number =
+          (layout as any)?.panels?.length ?? (layout as any)?.totalPanels ?? 0;
+        const _hydSeedPanelCount: number =
+          (seed as any)?.synthetic_eng_config?.panelCount
+          ?? (seed as any)?.panel_count
+          ?? 0;
+        const expectedHydrationPanelCount: number =
+          _hydLayoutPanelCount > 0 ? _hydLayoutPanelCount : _hydSeedPanelCount;
+
+                const savedConfig = p.engineeringConfig as Partial<ProjectConfig> | undefined;
         console.log('[HYDRATION] p.engineeringConfig:', savedConfig ? `${Object.keys(savedConfig).length} keys` : 'null/undefined');
+        // v61.8 PRIMARY FIX: Panel count mismatch gate.
+        // If savedConfig.inverters totals a panel count different from the
+        // authoritative project panel count, the saved inverter layout is STALE
+        // (auto-saved before CAD loaded, likely from newString() default panelCount:10).
+        // Discard only the stale inverter fields + locks. Preserve all other saved fields.
+        if (
+          savedConfig &&
+          Array.isArray((savedConfig as any).inverters) &&
+          expectedHydrationPanelCount > 0
+        ) {
+          const _savedInvTotal: number = ((savedConfig as any).inverters as any[]).reduce(
+            (s: number, inv: any) =>
+              s + ((inv.strings ?? []) as any[]).reduce(
+                (s2: number, str: any) => s2 + (str.panelCount ?? 0), 0
+              ),
+            0
+          );
+          if (_savedInvTotal > 0 && _savedInvTotal !== expectedHydrationPanelCount) {
+            console.warn(
+              '[HYDRATION STALE CONFIG DISCARD]',
+              '\n  projectId:', projectId,
+              '\n  expectedPanelCount:', expectedHydrationPanelCount,
+              '\n  savedInverterPanelTotal:', _savedInvTotal,
+              '\n  reason: saved inverter panel total does not match authoritative project panel count',
+              '\n  action: discarded savedConfig.inverters and cleared user lock/default stamp'
+            );
+            // Discard only stale inverter layout + locks that protect it.
+            // All other fields (wire settings, mounting, utility, etc.) are preserved.
+            delete (savedConfig as any).inverters;
+            delete (savedConfig as any).isUserControlled;
+            delete (savedConfig as any).defaultsApplied;
+          }
+        }
+
         if (savedConfig && Object.keys(savedConfig).length > 0) {
           console.log('[EngineeringPage] Restoring from engineering_config (auto-saved workspace)');
           // Merge: project-level fields from patches, all engineering fields from savedConfig
@@ -1108,9 +1156,18 @@ function EngineeringPageInner() {
               const _allStrings = merged.inverters.flatMap((inv: any) => inv.strings ?? []);
               const _invType0Check: string = (merged.inverters[0]?.type ?? 'string');
               const _isNx1Corrupt = _allStrings.length > 4 && _allStrings.every((s: any) => s.panelCount === 1);
+              // v61.8: semantic mismatch replaces magic threshold > 20.
+              // A 1×N is corrupt if: non-micro, 1 string, and the single string
+              // panelCount doesn't match expectedHydrationPanelCount (or > 20 fallback).
+              const _savedSinglePc = _allStrings.length === 1 ? (_allStrings[0]?.panelCount ?? 0) : 0;
               const _is1xNCorrupt = _invType0Check !== 'micro'
                 && _allStrings.length === 1
-                && (_allStrings[0]?.panelCount ?? 0) > 20;
+                && _savedSinglePc > 1
+                && (
+                  expectedHydrationPanelCount > 0
+                    ? _savedSinglePc !== expectedHydrationPanelCount  // semantic mismatch (preferred)
+                    : _savedSinglePc > 20                             // fallback when no reference count yet
+                );
               const _isCorrupt = _isNx1Corrupt || _is1xNCorrupt;
               if (_isCorrupt) {
                 const _corruptLabel = _is1xNCorrupt
@@ -1542,6 +1599,33 @@ function EngineeringPageInner() {
         window.localStorage.setItem(`eng-config-${currentProjectId}`, JSON.stringify(config));
       }
     } catch { /* quota exceeded or private mode — ignore */ }
+
+    // v61.8 AUTO-SAVE GUARD: Block auto-save when config.inverters looks like
+    // a stale placeholder (1 string, small panel count < systemPanelCount).
+    // Prevents newString() default 1×10 from being persisted before CAD loads.
+    {
+      const _asConfigTotal = config.inverters.reduce(
+        (s: number, inv: any) => s + ((inv.strings ?? []) as any[]).reduce(
+          (s2: number, str: any) => s2 + (str.panelCount ?? 0), 0
+        ), 0
+      );
+      const _asSystemPc = resolvedPanelCount.value;
+      const _asIsPlaceholder =
+        config.inverters.length === 1 &&
+        ((config.inverters[0] as any).strings ?? []).length === 1 &&
+        _asConfigTotal <= 20 &&
+        _asSystemPc > _asConfigTotal * 2;
+      if (_asIsPlaceholder) {
+        console.warn(
+          '[AUTO-SAVE BLOCKED: STALE INVERTER CONFIG]',
+          '\n  projectId:', currentProjectId,
+          '\n  expectedPanelCount:', _asSystemPc,
+          '\n  configInverterTotal:', _asConfigTotal,
+          '\n  reason: config.inverters appears to be newString() placeholder — not persisting stale layout'
+        );
+        return;
+      }
+    }
 
     // Cancel any pending debounced save and schedule a new one
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
@@ -2174,6 +2258,23 @@ function EngineeringPageInner() {
     config.batteryKwh,
   ]);
 
+
+  // v61.8 INVERTER TRUTH TRACE
+  // Makes it impossible to confuse CAD panel count, sizing engine count,
+  // config.inverters panel count, and validation string layout.
+  // Fires whenever systemPanelCount, config.inverters, or sizingRecommendation changes.
+  useEffect(() => {
+    const _ttConfigTotal = config.inverters.reduce(
+      (s, inv) => s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0
+    );
+    const _ttSizingLayout = sizingRecommendation?.strings?.map((s: any) => s.panelCount) ?? [];
+    const _ttConfigLayout = config.inverters.flatMap(inv => inv.strings.map(s => s.panelCount));
+    const _ttMismatch = systemPanelCount > 0 && _ttConfigTotal !== systemPanelCount;
+    console.log(
+      `[INVERTER TRUTH TRACE]\n  projectId: ${currentProjectId}\n  expectedPanelCount (systemPanelCount): ${systemPanelCount}\n  panelCountSource: ${resolvedPanelCount.source}\n  currentConfigInverterTotal: ${_ttConfigTotal}\n  sizingRecommendation layout: ${_ttSizingLayout.join('+') || '(none)'}\n  config string layout: ${_ttConfigLayout.join('+') || '(none)'}\n  isUserControlled: ${config.isUserControlled}\n  defaultsApplied: ${config.defaultsApplied}\n  mismatchDetected: ${_ttMismatch}`
+    );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemPanelCount, config.inverters, sizingRecommendation, currentProjectId]);
 
      // Phase C1 — Single Source of Truth: derive displayedEcosystemComponents from
      // sizingRecommendation.requiredComponents (engine truth). The UI never computes
@@ -2825,12 +2926,26 @@ function EngineeringPageInner() {
         });
       });
 
-      console.log('[CONFIG BUILD] Smart Defaults bootstrap complete — setting isUserControlled=true');
+      // v61.8 SMART DEFAULTS FIX: Only stamp isUserControlled=true after
+      // confirming the built config represents the real panel count.
+      // Stamping on a stale/wrong count would lock a contaminated config.
+      const _sdBuiltTotal = hydratedInverters.reduce(
+        (s, inv) => s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0
+      );
+      const _sdCountOk = systemPanelCount > 0 && _sdBuiltTotal === systemPanelCount;
+      if (!_sdCountOk) {
+        console.warn(
+          '[SMART DEFAULTS] built config total (' + _sdBuiltTotal + ') !== systemPanelCount (' +
+          systemPanelCount + ') — NOT stamping isUserControlled to avoid protecting stale config'
+        );
+      } else {
+        console.log('[CONFIG BUILD] Smart Defaults bootstrap complete — setting isUserControlled=true');
+      }
       return {
         ...prev,
         inverters: hydratedInverters,
         defaultsApplied: true,
-        isUserControlled: true,
+        isUserControlled: _sdCountOk,
         // Only stamp selectedBrand when defaults picked one (user hadn't).
         ...(result.patch.selectedBrand ? { selectedBrand: result.patch.selectedBrand } : {}),
       };
@@ -5191,9 +5306,17 @@ function EngineeringPageInner() {
           s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
         const _allCurrentStrings = config.inverters.flatMap(inv => inv.strings);
         const _pcInv0Type = config.inverters[0]?.type ?? 'string';
+        // v61.8: semantic mismatch replaces magic > 20 threshold.
+        const _cadExpected = layout.panelCount;
+        const _csSinglePc = _allCurrentStrings.length === 1 ? (_allCurrentStrings[0]?.panelCount ?? 0) : 0;
         const _is1xNState = _pcInv0Type !== 'micro'
           && _allCurrentStrings.length === 1
-          && (_allCurrentStrings[0]?.panelCount ?? 0) > 20;
+          && _csSinglePc > 1
+          && (
+            _cadExpected > 0
+              ? _csSinglePc !== _cadExpected  // semantic mismatch (preferred)
+              : _csSinglePc > 20              // fallback when no CAD count yet
+          );
         // v61.7 CONFIG LOCK: When isUserControlled=true, only update panel count
         // if the total changed — NEVER rearrange strings via sizing engine.
         // This prevents CAD sync from overwriting a user-configured string layout.
@@ -5246,39 +5369,58 @@ function EngineeringPageInner() {
               setTimeout(() => runCalc(), 400);
             } else if (_cadUserLocked && currentTotal !== layout.panelCount) {
               // v61.7: User-controlled config: proportionally scale panel counts, no string rearrange.
-              console.log('[CONFIG BUILD] CAD panel count update (user-controlled, no rearrange):', currentTotal, '→', layout.panelCount);
-              setConfig(prev => {
-                const _oldTotal = prev.inverters.reduce((s, inv) => s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
-                if (_oldTotal <= 0) return prev;
-                const newInverters = prev.inverters.map((inv) => {
-                  const newStrings = inv.strings.map((str, si) => {
-                    const newPc = Math.max(1, Math.round((str.panelCount / _oldTotal) * layout.panelCount));
-                    return _buildStrCfg({
-                      index:          si,
-                      existingId:     str.id,
-                      label:          str.label,
-                      panelCount:     newPc,
-                      panelId:        str.panelId,
-                      wireGauge:      str.wireGauge,
-                      wireLength:     str.wireLength,
-                      tilt:           str.tilt,
-                      azimuth:        str.azimuth,
-                      roofType:       str.roofType as any,
-                      mountingSystem: str.mountingSystem,
+              // v61.8 CAD SYNC FIX: if the current config is a placeholder (1 string,
+              // small panel count), treat it as stale — reset locks and let sizing re-run
+              // instead of proportionally scaling a meaningless placeholder.
+              const _cadAllStr = config.inverters.flatMap(inv => inv.strings);
+              const _cadIsPlaceholder = config.inverters.length === 1
+                && _cadAllStr.length === 1
+                && currentTotal <= 20
+                && layout.panelCount > currentTotal * 2;
+              if (_cadIsPlaceholder) {
+                console.log('[CONFIG BUILD] CAD sync placeholder contamination detected (', currentTotal, '→', layout.panelCount, ') — clearing locks, re-sizing will fire');
+                setConfig(prev => ({
+                  ...prev,
+                  isUserControlled: false,
+                  userHasEditedInverters: false,
+                  defaultsApplied: false,
+                }));
+                // Smart Defaults / AUTO-APPLY will correct the layout on next render
+              } else {
+                console.log('[CONFIG BUILD] CAD panel count update (user-controlled, no rearrange):', currentTotal, '→', layout.panelCount);
+                setConfig(prev => {
+                  const _oldTotal = prev.inverters.reduce((s, inv) => s + inv.strings.reduce((s2, str) => s2 + str.panelCount, 0), 0);
+                  if (_oldTotal <= 0) return prev;
+                  const newInverters = prev.inverters.map((inv) => {
+                    const newStrings = inv.strings.map((str, si) => {
+                      const newPc = Math.max(1, Math.round((str.panelCount / _oldTotal) * layout.panelCount));
+                      return _buildStrCfg({
+                        index:          si,
+                        existingId:     str.id,
+                        label:          str.label,
+                        panelCount:     newPc,
+                        panelId:        str.panelId,
+                        wireGauge:      str.wireGauge,
+                        wireLength:     str.wireLength,
+                        tilt:           str.tilt,
+                        azimuth:        str.azimuth,
+                        roofType:       str.roofType as any,
+                        mountingSystem: str.mountingSystem,
+                      });
+                    });
+                    return _buildInvCfg({
+                      existingId:  inv.id,
+                      inverterId:  inv.inverterId,
+                      type:        inv.type,
+                      strings:     newStrings,
+                      optimizerPeripheralId: (inv as any).optimizerPeripheralId,
+                      deviceRatioOverride:   (inv as any).deviceRatioOverride,
                     });
                   });
-                  return _buildInvCfg({
-                    existingId:  inv.id,
-                    inverterId:  inv.inverterId,
-                    type:        inv.type,
-                    strings:     newStrings,
-                    optimizerPeripheralId: (inv as any).optimizerPeripheralId,
-                    deviceRatioOverride:   (inv as any).deviceRatioOverride,
-                  });
+                  return { ...prev, inverters: newInverters };
                 });
-                return { ...prev, inverters: newInverters };
-              });
-              setTimeout(() => runCalc(), 400);
+                setTimeout(() => runCalc(), 400);
+              }
             } else if (!_cadUserLocked) {
               // String / optimizer / hybrid / ecoflow topology.
               // FIX 2: Use selectedBrand when inverterId is empty (avoids engine returning micro topology).
