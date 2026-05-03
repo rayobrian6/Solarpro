@@ -1076,6 +1076,32 @@ function EngineeringPageInner() {
           }
         }
 
+        // v61.12: Active-flag stale inverter discard.
+        // If the saved primary inverterId resolves to an active:false equipment DB
+        // entry (e.g. legacy ecoflow-power-ocean-5kw EU/AU SKU), the config is stale
+        // and must be re-sized. Discard the inverter layout + locks so the sizing
+        // engine runs fresh and picks the correct active model.
+        if (
+          savedConfig &&
+          Array.isArray((savedConfig as any).inverters) &&
+          (savedConfig as any).inverters.length > 0
+        ) {
+          const _savedPrimaryInvId: string = (savedConfig as any).inverters[0]?.inverterId ?? '';
+          const _savedEqEntry = STRING_INVERTERS.find(x => x.id === _savedPrimaryInvId);
+          if (_savedEqEntry && _savedEqEntry.active === false) {
+            console.warn(
+              '[HYDRATION STALE INVERTER DISCARD]',
+              '\n  projectId:', projectId,
+              '\n  inverterId:', _savedPrimaryInvId,
+              '\n  reason: saved inverterId is active:false in equipment-db (deactivated SKU)',
+              '\n  action: discarded savedConfig.inverters and cleared user lock/default stamp'
+            );
+            delete (savedConfig as any).inverters;
+            delete (savedConfig as any).isUserControlled;
+            delete (savedConfig as any).defaultsApplied;
+          }
+        }
+
         if (savedConfig && Object.keys(savedConfig).length > 0) {
           console.log('[EngineeringPage] Restoring from engineering_config (auto-saved workspace)');
           // Merge: project-level fields from patches, all engineering fields from savedConfig
