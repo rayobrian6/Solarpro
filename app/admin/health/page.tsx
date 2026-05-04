@@ -21,6 +21,11 @@ interface HealthData {
     project_files: number;
   };
   tableSizes: Array<{ table: string; size: string; sizeBytes: number }>;
+  _timing?: {
+    authMs: number;
+    dbBatchMs: number;
+    totalMs: number;
+  };
 }
 
 interface ServiceStatus {
@@ -224,6 +229,36 @@ export default function SystemHealthPage() {
           ) : <p className="text-slate-500 text-sm">No data</p>}
         </div>
       </div>
+
+      {/* Server-side timing breakdown — only shown when _timing is present in response */}
+      {health?._timing && (
+        <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Zap className="w-4 h-4 text-amber-400" />
+            <span className="text-white font-semibold text-sm">Server-Side Timing Breakdown</span>
+            <span className="text-slate-500 text-xs ml-2">(pinpoints where API time is spent)</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: 'Auth (JWT+DB)', ms: health._timing.authMs, note: 'requireAdminApi' },
+              { label: 'DB Batch (9 queries)', ms: health._timing.dbBatchMs, note: 'Promise.all' },
+              { label: 'Server Total', ms: health._timing.totalMs, note: 'function execution' },
+              { label: 'Network+Cold Start', ms: apiLatency! - health._timing.totalMs, note: 'browser round-trip overhead' },
+            ].map(({ label, ms, note }) => (
+              <div key={label} className="bg-slate-700/40 rounded-lg p-3">
+                <div className={`text-2xl font-bold font-mono ${ms < 100 ? 'text-emerald-400' : ms < 400 ? 'text-amber-400' : 'text-red-400'}`}>
+                  {ms}<span className="text-sm font-normal text-slate-400">ms</span>
+                </div>
+                <div className="text-white text-xs font-medium mt-1">{label}</div>
+                <div className="text-slate-500 text-xs">{note}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 pt-3 border-t border-slate-700/50 text-slate-500 text-xs">
+            High "Network+Cold Start" = Vercel function cold start. High "Auth" = DB role lookup slow. High "DB Batch" = Neon query overhead.
+          </div>
+        </div>
+      )}
 
       <div>
         <h2 className="text-white font-semibold mb-3 flex items-center gap-2"><Database className="w-4 h-4 text-amber-400" />Database Row Counts</h2>
