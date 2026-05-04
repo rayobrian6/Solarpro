@@ -965,13 +965,37 @@ export default function SolarDog() {
           <div id="sd-messages" role="log" aria-live="polite">
             {messages.length === 0 ? (
               <div id="sd-welcome">
-                <p>I'm <strong>SolarDog</strong> — your AI agent.</p>
-                <p>I run on a real language model. I can navigate anywhere, run actions, and learn your shortcuts.</p>
-                <p>Try: <em>"take me to engineering"</em> or <em>"fix the wire sizing"</em></p>
+                <p><strong>SolarDog</strong> — what are we building?</p>
+                <p>I know your projects, the full platform, and NEC cold. Navigate, fix issues, or ask me anything.</p>
                 <div id="sd-welcome-actions">
-                  <button className="sd-quick-btn" onClick={() => sendMessage('take me to dashboard')}>Go to Dashboard</button>
-                  <button className="sd-quick-btn" onClick={() => sendMessage('what can you do')}>What can you do?</button>
-                  <button className="sd-quick-btn" onClick={runTour}>Give me a tour</button>
+                  {getPageName(pathname) === 'engineering' ? (
+                    <>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('what warnings do I have')}>⚠️ My warnings</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('explain my DC/AC ratio')}>📊 DC/AC ratio</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('help me get this to pass')}>✅ Get to pass</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('explain the STRING_VOC_VOLTAGE_CLAMP warning')}>🔌 VOC clamp</button>
+                    </>
+                  ) : getPageName(pathname) === 'projects' ? (
+                    <>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('show me my projects')}>📁 My projects</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('create a new project')}>➕ New project</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('what can you do')}>What can you do?</button>
+                    </>
+                  ) : getPageName(pathname) === 'dashboard' ? (
+                    <>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('take me to engineering')}>⚡ Engineering</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('show me my projects')}>📁 Projects</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('what can you do')}>What can you do?</button>
+                      <button className="sd-quick-btn" onClick={runTour}>🐾 Tour</button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('take me to engineering')}>⚡ Engineering</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('show me my projects')}>📁 Projects</button>
+                      <button className="sd-quick-btn" onClick={() => sendMessage('what can you do')}>What can you do?</button>
+                      <button className="sd-quick-btn" onClick={runTour}>🐾 Tour</button>
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
@@ -1090,12 +1114,35 @@ export default function SolarDog() {
             </button>
           </div>
 
-          {/* Suggested actions */}
+          {/* Suggested actions — context-aware per page */}
           <div id="sd-suggestions">
-            <button className="sd-sugg-btn" onClick={() => sendMessage('where am I')}>📍 Where am I</button>
-            <button className="sd-sugg-btn" onClick={() => sendMessage('go home')}>🏠 Go home</button>
-            <button className="sd-sugg-btn" onClick={() => sendMessage('take me to engineering')}>⚡ Engineering</button>
-            <button className="sd-sugg-btn" onClick={() => sendMessage('guide me through design')}>📋 Guide me</button>
+            {getPageName(pathname) === 'engineering' ? (
+              <>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('what warnings do I have')}>⚠️ warnings</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('help me get this to pass')}>✅ get to pass</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('explain my DC/AC ratio')}>📊 DC/AC</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('take me to engineering BOM')}>🔩 BOM</button>
+              </>
+            ) : getPageName(pathname) === 'design' ? (
+              <>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('how do I place panels')}>🏠 place panels</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('take me to engineering')}>⚡ engineering</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('what is auto layout')}>🤖 auto layout</button>
+              </>
+            ) : getPageName(pathname) === 'projects' ? (
+              <>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('show me my projects')}>📁 projects</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('take me to engineering')}>⚡ engineering</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('create a new project')}>➕ new project</button>
+              </>
+            ) : (
+              <>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('where am I')}>📍 where am I</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('go home')}>🏠 home</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('take me to engineering')}>⚡ engineering</button>
+                <button className="sd-sugg-btn" onClick={() => sendMessage('guide me through design')}>📋 guide me</button>
+              </>
+            )}
           </div>
 
         </div>
@@ -1151,7 +1198,7 @@ const WIDGET_CSS = `
 /* ── Base ───────────────────────────────────────── */
 #sd-widget {
   position: fixed;
-  bottom: 20px;
+  bottom: clamp(90px, 12vh, 140px);
   right: 24px;
   z-index: 9999;
   cursor: pointer;
@@ -1197,7 +1244,7 @@ const WIDGET_CSS = `
 /* ── Subtitle bar ───────────────────────────────── */
 #sd-subtitle {
   position: fixed;
-  bottom: 112px;
+  bottom: calc(clamp(90px, 12vh, 140px) + 92px);
   right: 24px;
   z-index: 9999;
   background: rgba(15,23,42,0.95);
@@ -1226,7 +1273,7 @@ const WIDGET_CSS = `
 /* ── Chat panel ─────────────────────────────────── */
 #sd-chat {
   position: fixed;
-  bottom: 110px;
+  bottom: calc(clamp(90px, 12vh, 140px) + 90px);
   right: 24px;
   z-index: 9999;
   width: 360px;
@@ -1627,7 +1674,7 @@ const WIDGET_CSS = `
 /* ── Tour overlay ───────────────────────────────── */
 #sd-tour-overlay {
   position: fixed;
-  bottom: 110px;
+  bottom: calc(clamp(90px, 12vh, 140px) + 90px);
   right: 24px;
   z-index: 9998;
   pointer-events: none;
