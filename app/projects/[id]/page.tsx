@@ -60,6 +60,7 @@ import ProposalTab from '@/components/project/ProposalTab';
 import OperationsTab from '@/components/project/OperationsTab';
 import FieldSurveyPanel from '@/components/project/FieldSurveyPanel';
 import FieldSurveyCard from '@/components/project/FieldSurveyCard';
+import QRCode from 'react-qr-code';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TabId = 'bill' | 'system' | 'design' | 'engineering' | 'proposal' | 'operations' | 'survey';
@@ -236,7 +237,8 @@ export default function ProjectDetailPage() {
   const [showBillModal, setShowBillModal] = useState(false);
   const [savingBill, setSavingBill] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
-  const [qrToken, setQrToken] = useState<string | null>(null);
+  const [qrToken, setQrToken]   = useState<string | null>(null);  // deep link (window.open)
+  const [qrWebUrl, setQrWebUrl] = useState<string | null>(null);  // web URL for QR code image
 
   useEffect(() => {
     const existing = projects.find(p => p.id === id);
@@ -514,10 +516,12 @@ export default function ProjectDetailPage() {
     if (!id) return;
     setSurveyHandoffLoading(true);
     try {
-      const res = await fetch(`/api/projects/${id}/survey-handoff`, { method: 'POST', credentials: 'include' });
+      const res  = await fetch(`/api/projects/${id}/survey-handoff`, { method: 'POST', credentials: 'include' });
       const data = await res.json();
       if (res.ok && data.url) {
         setQrToken(data.url);
+        // webUrl is the browser-scannable https:// URL; fall back to url if not present
+        setQrWebUrl(data.webUrl ?? data.url);
         setShowQRModal(true);
       } else {
         alert(data.error || 'Failed to generate QR code');
@@ -898,24 +902,17 @@ export default function ProjectDetailPage() {
                 &times;
               </button>
             </div>
-            {/* QR via Google Charts API — no extra dependency */}
+            {/* QR Code — generated client-side via react-qr-code (no external service) */}
             <div className="flex items-center justify-center p-4 bg-white rounded-xl">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrToken)}`}
-                alt="Survey QR Code"
-                width={200}
-                height={200}
-                className="rounded"
-              />
+              {qrWebUrl && <QRCode value={qrWebUrl} size={200} />}
             </div>
             <div className="bg-slate-800 rounded-lg p-3">
               <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Survey Link</p>
-              <p className="text-xs text-slate-300 break-all font-mono">{qrToken}</p>
+              <p className="text-xs text-slate-300 break-all font-mono">{qrWebUrl ?? qrToken}</p>
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => { navigator.clipboard?.writeText(qrToken); }}
+                onClick={() => { navigator.clipboard?.writeText(qrWebUrl ?? qrToken ?? ''); }}
                 className="flex-1 py-2 rounded-xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-300 transition-all"
               >
                 Copy Link

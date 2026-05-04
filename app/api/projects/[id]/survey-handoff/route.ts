@@ -93,6 +93,7 @@ export async function POST(
   }
 
   let url: string;
+  let webUrl: string;
   try {
     const result = mintHandoffToken({
       project_id: project.id as string,
@@ -112,10 +113,15 @@ export async function POST(
       const errResult = result as { ok: false; error: string };
       throw new Error(errResult.error);
     }
-      // Build a deep link URL for the mobile app.
-      // The mobile app registers the 'sitesurvey://' URI scheme and handles
-      // sitesurvey://new-survey?token=<jwt> to open the NewSurveyScreen.
-      url = `sitesurvey://new-survey?token=${encodeURIComponent(result.token)}`;
+    // Build a deep link URL for the mobile app.
+    // The mobile app registers the 'sitesurvey://' URI scheme and handles
+    // sitesurvey://new-survey?token=<jwt> to open the NewSurveyScreen.
+    url = `sitesurvey://new-survey?token=${encodeURIComponent(result.token)}`;
+    // webUrl is the web-safe survey URL on this app (/survey/<token>).
+    // Used by the QR code modal so the QR is scannable by any mobile browser.
+    // NEXT_PUBLIC_APP_URL must be set in Vercel env (e.g. https://solarpro.solutions).
+    const appBase = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/$/, '');
+    webUrl = appBase ? `${appBase}/survey/${result.token}` : `/survey/${result.token}`;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[survey-handoff] token mint failed: ${msg}`);
@@ -134,5 +140,7 @@ export async function POST(
     `[HANDOFF OWNER] projectId=${projectId} solarpro_user_id=${user.id} solarpro_project_id=${projectId}`,
   );
 
-  return NextResponse.json({ url }, { status: 200 });
+  // url     = sitesurvey:// deep link (for window.open on desktop / native app)
+  // webUrl  = https://solarpro.solutions/survey/<token> (for QR code — browser scannable)
+  return NextResponse.json({ url, webUrl }, { status: 200 });
 }

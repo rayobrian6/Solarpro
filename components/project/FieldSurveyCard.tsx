@@ -1,14 +1,15 @@
 // ============================================================================
-// FieldSurveyCard — First-class Field Survey module for the Project page
+// FieldSurveyCard -- First-class Field Survey module for the Project page
 //
-// Always visible on the project page (not hidden behind a tab).
+// Data source: GET /api/projects/[id]/survey-context  (ProjectSurveyContext)
+// Single fetch returns: surveys[], latest survey, files, typed V2 payload.
+//
 // Two states:
-//   STATE 1 — No survey: large CTA with Start Survey + QR Code buttons
-//   STATE 2 — Survey exists: summary card (status, date, creator, address,
-//             photo count) + View / Retake / Send to Field actions
+//   STATE 1 -- No survey: large CTA with Start Survey + QR Code buttons
+//   STATE 2 -- Survey exists: summary card (status, date, creator, address,
+//             photo count, source_survey_id backlink) + View / Retake actions
 //
-// Purely presentational data fetching via /api/projects/[id]/site-surveys
-// Pure ASCII, no Unicode in code. No dependencies on engineering pipeline.
+// Pure presentational. No schema changes. No ingest changes.
 // ============================================================================
 
 'use client';
@@ -18,9 +19,20 @@ import Link from 'next/link';
 import {
   Camera, RefreshCw, ChevronRight, CheckCircle, Clock,
   AlertTriangle, QrCode, Send, RotateCcw, Eye,
-  MapPin, User, Calendar, Image as ImageIcon,
+  MapPin, User, Calendar, ImageIcon, ArrowRight,
 } from 'lucide-react';
-import type { SiteSurvey } from '@/lib/db-neon';
+import type { SiteSurvey, SiteSurveyFile } from '@/lib/db-neon';
+import type { SurveyV2Payload } from '@/lib/survey/v2/types';
+
+// ---------------------------------------------------------------------------
+// ProjectSurveyContext shape (mirrors lib/survey/getProjectSurveyContext.ts)
+// ---------------------------------------------------------------------------
+interface ProjectSurveyContext {
+  surveys: SiteSurvey[];
+  latest: SiteSurvey | null;
+  files: SiteSurveyFile[];
+  payload: SurveyV2Payload | null;
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -69,7 +81,7 @@ function formatDate(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// NoSurveyState — CTA when no survey exists yet
+// NoSurveyState -- CTA when no survey exists yet
 // ---------------------------------------------------------------------------
 function NoSurveyState({
   onStartSurvey,
@@ -137,16 +149,18 @@ function NoSurveyState({
 }
 
 // ---------------------------------------------------------------------------
-// SurveyExistsCard — summary when survey record(s) exist
+// SurveyExistsCard -- summary when survey record(s) exist
 // ---------------------------------------------------------------------------
 function SurveyExistsCard({
   survey,
+  fileCount,
   projectId,
   onRetake,
   onSendToField,
   retakeLoading,
 }: {
   survey: SiteSurvey;
+  fileCount: number;
   projectId: string;
   onRetake?: () => void;
   onSendToField?: () => void;
@@ -174,6 +188,21 @@ function SurveyExistsCard({
         </span>
       </div>
 
+      {/* Source backlink banner */}
+      <div className="flex items-center gap-2 px-3 py-2 mb-3 rounded-lg bg-cyan-500/5 border border-cyan-500/15">
+        <CheckCircle size={11} className="text-cyan-400 flex-shrink-0" />
+        <span className="text-[11px] text-slate-400 flex-1 min-w-0">
+          Engineering data populated from this survey on {formatDate(survey.createdAt)}
+          {survey.inspectorName ? ` by ${survey.inspectorName}` : ''}
+        </span>
+        <Link
+          href={`/projects/${projectId}/survey/${survey.id}`}
+          className="flex items-center gap-1 text-[11px] font-semibold text-cyan-400 hover:text-cyan-300 transition-colors flex-shrink-0"
+        >
+          View <ArrowRight size={10} />
+        </Link>
+      </div>
+
       {/* Key metadata */}
       <div className="grid grid-cols-2 gap-2 mb-4">
         {survey.addressSnapshot && (
@@ -198,12 +227,12 @@ function SurveyExistsCard({
             </div>
           </div>
         )}
-        {survey.fileCount !== undefined && survey.fileCount > 0 && (
+        {fileCount > 0 && (
           <div className="flex items-center gap-2 p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/40">
             <ImageIcon size={12} className="text-slate-400 flex-shrink-0" />
             <div>
               <p className="text-[9px] text-slate-500 uppercase tracking-wider">Photos</p>
-              <p className="text-xs text-slate-200 font-medium">{survey.fileCount}</p>
+              <p className="text-xs text-slate-200 font-medium">{fileCount}</p>
             </div>
           </div>
         )}
@@ -247,7 +276,7 @@ function SurveyExistsCard({
 }
 
 // ---------------------------------------------------------------------------
-// FieldSurveyCard — main export
+// FieldSurveyCard -- main export
 // ---------------------------------------------------------------------------
 export default function FieldSurveyCard({
   projectId,
@@ -255,21 +284,21 @@ export default function FieldSurveyCard({
   surveyHandoffLoading = false,
   onShowQR,
 }: FieldSurveyCardProps) {
-  const [surveys, setSurveys] = useState<SiteSurvey[]>([]);
-  const [loading, setLoading]  = useState(true);
-  const [error, setError]      = useState<string | null>(null);
+  const [context, setContext] = useState<ProjectSurveyContext | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/projects/${projectId}/site-surveys`);
+      const res  = await fetch(`/api/projects/${projectId}/survey-context`);
       const json = await res.json();
       if (!json.success) {
         setError(json.error || 'Failed to load surveys');
         return;
       }
-      setSurveys(json.data ?? []);
+      setContext(json.data as ProjectSurveyContext);
     } catch {
       setError('Network error loading surveys');
     } finally {
@@ -320,7 +349,7 @@ export default function FieldSurveyCard({
   }
 
   // No survey yet
-  if (!surveys.length) {
+  if (!context?.latest) {
     return (
       <NoSurveyState
         onStartSurvey={onStartSurvey}
@@ -330,12 +359,10 @@ export default function FieldSurveyCard({
     );
   }
 
-  // Show most recent survey
-  const latest = surveys[0];
-
   return (
     <SurveyExistsCard
-      survey={latest}
+      survey={context.latest}
+      fileCount={context.files.length}
       projectId={projectId}
       onRetake={onStartSurvey}
       onSendToField={onStartSurvey}
