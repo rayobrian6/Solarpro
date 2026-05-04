@@ -236,6 +236,11 @@ export interface EngineeringModel {
   conduitFillPct: number;          // e.g. 33.1
   grounding: string;               // e.g. "#10 CU"
   systemVoltage: number;           // e.g. 240
+  // Multi-inverter support
+  inverterCount: number;           // number of inverters in system (for disconnect sizing)
+  totalAcKw: number;               // total combined AC output kW
+  perInverterAcKw: number;         // per-inverter AC output kW (for separate disconnect sizing)
+  perInverterDisconnectAmps: number; // per-inverter disconnect rating (for separate approach)
   // Validation
   isValid: boolean;
   validationErrors: string[];
@@ -1148,6 +1153,13 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   const acSizingGrounding = getEGCSize(acSizingOcpdAmps);
 
   // Build canonical engineeringModel — single source of truth
+  // Per-inverter sizing for separate disconnect approach
+  const invCount = input.inverters.length;
+  const perInvAcKw = invCount > 0 ? totalAcKw / invCount : totalAcKw;
+  const perInvCurrentAmps = (perInvAcKw * 1000) / input.systemVoltage;
+  const perInvContinuousAmps = perInvCurrentAmps * 1.25;
+  const perInvDisconnectAmps = nextStandardOCPD(perInvContinuousAmps);
+
   const engineeringModelData: EngineeringModel = {
     ocpd: acSizingOcpdAmps,
     disconnectRating: acSizingDisconnectAmps,
@@ -1160,6 +1172,11 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
     conduitFillPct: Math.round(acSizingConduitFillPct * 10) / 10,
     grounding: acSizingGrounding,
     systemVoltage: input.systemVoltage,
+    // Multi-inverter fields
+    inverterCount: invCount,
+    totalAcKw,
+    perInverterAcKw: perInvAcKw,
+    perInverterDisconnectAmps: perInvDisconnectAmps,
     isValid: true,
     validationErrors: [],
   };

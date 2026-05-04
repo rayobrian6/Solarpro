@@ -21,6 +21,7 @@ import {
   EngineeringModel,
   validateEngineeringModel,
 } from './electrical-calc';
+import { nextStandardOCPD } from './manufacturer-specs';
 import { getJurisdictionInfo, parseStateFromAddress, JurisdictionInfo } from './jurisdiction';
 import { getUtilityRules, getUtilitiesByState, UtilityRuleEntry } from './utility-rules';
 import { getRecommendedInterconnection } from './utility-rules';
@@ -278,31 +279,98 @@ export function getAhjById(id: string): AhjEntry {
 let _bomIdCounter = 1;
 function bomId(): string { return `cp-bom-${(_bomIdCounter++).toString().padStart(4, '0')}`; }
 
-function deriveBomItems(sizing: ElectricalSizing, inputs: ProjectInputs): BomItem[] {
+// ─── NEC standard OCPD lookup (local helper) ─────────────────────────────────
+const STANDARD_OCPD = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200, 225, 250, 300, 350, 400];
+function _nextStdOCPD(amps: number): number {
+  return STANDARD_OCPD.find(s => s >= amps) ?? Math.ceil(amps / 10) * 10;
+}
+
+// ─── GEC sizing per NEC 250.66 (based on OCPD amps) ──────────────────────────
+function gecSizeForOcpd(ocpdAmps: number): string {
+  if (ocpdAmps <= 60)  return '#8 AWG';
+  if (ocpdAmps <= 100) return '#6 AWG';
+  if (ocpdAmps <= 200) return '#4 AWG';
+  return '#2 AWG';
+}
+
+// ─── Conduit fitting quantity helpers ────────────────────────────────────────
+function conduitConnectorQty(conduitFt: number): number {
+  // Estimate: 2 per inverter (in + out) + 2 at panel end — minimum 4
+  return Math.max(4, Math.ceil(conduitFt / 20) + 2);
+}
+function conduitCouplingQty(conduitFt: number): number {
+  // 1 coupling per 10 ft section minus 1
+  return Math.max(0, Math.ceil(conduitFt / 10) - 1);
+}
+function conduitStrapQty(conduitFt: number): number {
+  // NEC 358.30: EMT must be supported every 10 ft and within 3 ft of boxes
+  // Use 5 ft spacing for solar roof runs
+  return Math.ceil(conduitFt / 5);
+}
+
+function deriveBomItems(
+  sizing: ElectricalSizing,
+  inputs: ProjectInputs,
+  opts: ComputePlanOptions,
+): BomItem[] {
   _bomIdCounter = 1;
   const items: BomItem[] = [];
 
-  // AC Disconnect Switch — always present
+  const em = sizing.engineeringModel;
+  const inverterCount  = em.inverterCount  ?? 1;
+  const useCombined    = opts.useCombinedDisconnect !== false; // default true
   const discFusibleLabel = sizing.disconnectType === 'fused' ? 'Fusible' : 'Non-Fusible';
-  items.push({
-    id: bomId(),
-    stage: 'stage4_ac_wiring',
-    stageLabel: 'Stage 4 — AC Wiring',
-    category: 'disconnects',
-    manufacturer: 'Square D',
-    model: `${sizing.disconnectAmps}A ${discFusibleLabel} AC Disconnect Switch`,
-    partNumber: `DU${sizing.disconnectAmps}${sizing.disconnectType === 'fused' ? 'FB' : 'RB'}`,
-    quantity: 1,
-    unit: 'ea',
-    necReference: 'NEC 690.14',
-    derivedFrom: 'electricalSizing.disconnectAmps + disconnectType',
-    _source: 'computePlan',
-  });
 
-  // Fuses — ONLY if disconnectType === 'fused'
-  // Rule: non-fused → NO fuse items; fused → exactly fuseCount items
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 4 — AC DISCONNECT
+  //   Combined approach  (default): 1 disconnect sized for total AC output
+  //   Separate approach (opt-out) : 1 disconnect per inverter, individually sized
+  // ═══════════════════════════════════════════════════════════════════════════
+  if (useCombined || inverterCount <= 1) {
+    // ── Combined / Single inverter ──────────────────────────────────────────
+    const disconnectAmps = sizing.disconnectAmps; // already = nextStdOCPD(totalContinuous)
+    devLog('BOM:disconnect', 'combined', { inverterCount, disconnectAmps });
+    items.push({
+      id: bomId(),
+      stage: 'stage4_ac_wiring',
+      stageLabel: 'Stage 4 — AC Wiring',
+      category: 'disconnects',
+      manufacturer: 'Square D',
+      model: `${disconnectAmps}A ${discFusibleLabel} AC Disconnect Switch`,
+      partNumber: `DU${disconnectAmps}${sizing.disconnectType === 'fused' ? 'FB' : 'RB'}`,
+      quantity: 1,
+      unit: 'ea',
+      necReference: 'NEC 690.14',
+      derivedFrom: `combined: totalAcKw=${em.totalAcKw?.toFixed(1)}kW → ${disconnectAmps}A`,
+      _source: 'computePlan',
+    });
+  } else {
+    // ── Separate per-inverter disconnects ───────────────────────────────────
+    const perInvAmps = em.perInverterDisconnectAmps ?? sizing.disconnectAmps;
+    devLog('BOM:disconnect', 'separate', { inverterCount, perInvAmps });
+    items.push({
+      id: bomId(),
+      stage: 'stage4_ac_wiring',
+      stageLabel: 'Stage 4 — AC Wiring',
+      category: 'disconnects',
+      manufacturer: 'Square D',
+      model: `${perInvAmps}A ${discFusibleLabel} AC Disconnect Switch`,
+      partNumber: `DU${perInvAmps}${sizing.disconnectType === 'fused' ? 'FB' : 'RB'}`,
+      quantity: inverterCount,
+      unit: 'ea',
+      necReference: 'NEC 690.14',
+      derivedFrom: `separate: ${inverterCount} inverters × ${perInvAmps}A each`,
+      _source: 'computePlan',
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 4 — FUSES (only when fused disconnect type)
+  // ═══════════════════════════════════════════════════════════════════════════
   if (sizing.disconnectType === 'fused' && sizing.fuseAmps !== null && sizing.fuseCount > 0) {
-    devLog('BOM:fuses', 'electricalSizing.disconnectType=fused', { fuseAmps: sizing.fuseAmps, fuseCount: sizing.fuseCount });
+    devLog('BOM:fuses', 'fused disconnect', { fuseAmps: sizing.fuseAmps, fuseCount: sizing.fuseCount });
+    // fuseCount per disconnect × number of disconnects
+    const disconnectQty = (useCombined || inverterCount <= 1) ? 1 : inverterCount;
     items.push({
       id: bomId(),
       stage: 'stage4_ac_wiring',
@@ -311,17 +379,19 @@ function deriveBomItems(sizing: ElectricalSizing, inputs: ProjectInputs): BomIte
       manufacturer: 'Littelfuse',
       model: `${sizing.fuseAmps}A, 250V, Class R Fuse`,
       partNumber: `LLNRK${sizing.fuseAmps}SP`,
-      quantity: sizing.fuseCount,
+      quantity: sizing.fuseCount * disconnectQty,
       unit: 'ea',
       necReference: 'NEC 690.9',
-      derivedFrom: 'electricalSizing.fuseAmps × fuseCount',
+      derivedFrom: `fuseCount=${sizing.fuseCount} × disconnects=${disconnectQty}`,
       _source: 'computePlan',
     });
   } else {
-    devLog('BOM:fuses', 'electricalSizing.disconnectType=non-fused → NO fuse items added');
+    devLog('BOM:fuses', 'non-fused → no fuse items');
   }
 
-  // AC Conductor
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 4 — AC CONDUCTOR
+  // ═══════════════════════════════════════════════════════════════════════════
   items.push({
     id: bomId(),
     stage: 'stage4_ac_wiring',
@@ -337,7 +407,10 @@ function deriveBomItems(sizing: ElectricalSizing, inputs: ProjectInputs): BomIte
     _source: 'computePlan',
   });
 
-  // Conduit
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 4 — EMT CONDUIT
+  // ═══════════════════════════════════════════════════════════════════════════
+  const conduitFt = Math.ceil(inputs.wireLength * 1.15); // 15% overage for bends/waste
   items.push({
     id: bomId(),
     stage: 'stage4_ac_wiring',
@@ -346,14 +419,87 @@ function deriveBomItems(sizing: ElectricalSizing, inputs: ProjectInputs): BomIte
     manufacturer: 'Allied Tube',
     model: `${sizing.conduitSize}" ${sizing.conduitType} Conduit`,
     partNumber: `${sizing.conduitType}-${sizing.conduitSize.replace('"', '')}`,
-    quantity: Math.ceil(inputs.wireLength * 1.15),
+    quantity: conduitFt,
     unit: 'ft',
     necReference: 'NEC Chapter 9',
     derivedFrom: 'electricalSizing.conduitSize + conduitType',
     _source: 'computePlan',
   });
 
-  // Grounding conductor
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 4 — CONDUIT FITTINGS (NEC 300.15 / 358.30)
+  // Previously missing — now auto-calculated from conduit length
+  // ═══════════════════════════════════════════════════════════════════════════
+  const connQty    = conduitConnectorQty(conduitFt);
+  const couplingQt = conduitCouplingQty(conduitFt);
+  const strapQt    = conduitStrapQty(conduitFt);
+  const conduitSizeClean = sizing.conduitSize.replace('"', '');
+
+  items.push({
+    id: bomId(),
+    stage: 'stage4_ac_wiring',
+    stageLabel: 'Stage 4 — AC Wiring',
+    category: 'conduit_fittings',
+    manufacturer: 'Steel City',
+    model: `${sizing.conduitSize}" Set-Screw EMT Connector`,
+    partNumber: `C50-${conduitSizeClean}`,
+    quantity: connQty,
+    unit: 'ea',
+    necReference: 'NEC 300.15',
+    derivedFrom: `conduitFt=${conduitFt} → ${connQty} connectors`,
+    _source: 'computePlan',
+  });
+
+  if (couplingQt > 0) {
+    items.push({
+      id: bomId(),
+      stage: 'stage4_ac_wiring',
+      stageLabel: 'Stage 4 — AC Wiring',
+      category: 'conduit_fittings',
+      manufacturer: 'Steel City',
+      model: `${sizing.conduitSize}" Set-Screw EMT Coupling`,
+      partNumber: `C53-${conduitSizeClean}`,
+      quantity: couplingQt,
+      unit: 'ea',
+      necReference: 'NEC 300.15',
+      derivedFrom: `conduitFt=${conduitFt} ÷ 10ft sections`,
+      _source: 'computePlan',
+    });
+  }
+
+  items.push({
+    id: bomId(),
+    stage: 'stage4_ac_wiring',
+    stageLabel: 'Stage 4 — AC Wiring',
+    category: 'conduit_fittings',
+    manufacturer: 'Crouse-Hinds',
+    model: `${sizing.conduitSize}" Insulated EMB Bushing`,
+    partNumber: `EMB-${conduitSizeClean}`,
+    quantity: connQty,
+    unit: 'ea',
+    necReference: 'NEC 300.18',
+    derivedFrom: `1 bushing per connector (${connQty})`,
+    _source: 'computePlan',
+  });
+
+  items.push({
+    id: bomId(),
+    stage: 'stage4_ac_wiring',
+    stageLabel: 'Stage 4 — AC Wiring',
+    category: 'conduit_fittings',
+    manufacturer: 'Steel City',
+    model: `${sizing.conduitSize}" Rain-Tight EMT Strap`,
+    partNumber: `R50-${conduitSizeClean}`,
+    quantity: strapQt,
+    unit: 'ea',
+    necReference: 'NEC 358.30',
+    derivedFrom: `conduitFt=${conduitFt} ÷ 5ft spacing`,
+    _source: 'computePlan',
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 4 — EQUIPMENT GROUNDING CONDUCTOR (EGC)
+  // ═══════════════════════════════════════════════════════════════════════════
   items.push({
     id: bomId(),
     stage: 'stage4_ac_wiring',
@@ -362,14 +508,120 @@ function deriveBomItems(sizing: ElectricalSizing, inputs: ProjectInputs): BomIte
     manufacturer: 'Southwire',
     model: `${sizing.groundingConductor} Bare Copper EGC`,
     partNumber: `SW-${sizing.groundingConductor.replace(/[^0-9/]/g, '')}-BARE`,
-    quantity: 1,
-    unit: 'per plan',
-    necReference: 'NEC 250.66',
-    derivedFrom: 'electricalSizing.groundingConductor',
+    quantity: conduitFt,
+    unit: 'ft',
+    necReference: 'NEC 250.122',
+    derivedFrom: 'electricalSizing.groundingConductor — runs full conduit length',
     _source: 'computePlan',
   });
 
-  devLog('BOM:total', 'deriveBomItems', `${items.length} items (fuses: ${sizing.disconnectType === 'fused' ? sizing.fuseCount : 0})`);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 4 — GROUNDING ELECTRODE SYSTEM (NEC 250.50 / 250.52 / 250.66)
+  // Ground rod + GEC — required for all PV systems
+  // Previously missing — now always included unless site has existing rod
+  // ═══════════════════════════════════════════════════════════════════════════
+  const hasExistingRod = opts.hasExistingGroundRod === true;
+  const totalAcKwForGec = em.totalAcKw ?? (sizing.acCurrentAmps * inputs.electricalCalcInput.systemVoltage / 1000);
+  const gecSize = gecSizeForOcpd(sizing.ocpdAmps);
+  const rodQty  = (!hasExistingRod) ? (totalAcKwForGec > 10 ? 2 : 1) : 0;
+
+  if (!hasExistingRod) {
+    items.push({
+      id: bomId(),
+      stage: 'stage4_ac_wiring',
+      stageLabel: 'Stage 4 — AC Wiring',
+      category: 'grounding',
+      manufacturer: 'Erico Cadweld',
+      model: '8ft × 5/8" Copper-Bonded Ground Rod',
+      partNumber: 'GROD-58-8FT',
+      quantity: rodQty,
+      unit: 'ea',
+      necReference: 'NEC 250.52(A)(5)',
+      derivedFrom: `systemKw=${totalAcKwForGec.toFixed(1)} → ${rodQty} rod(s)`,
+      _source: 'computePlan',
+    });
+
+    items.push({
+      id: bomId(),
+      stage: 'stage4_ac_wiring',
+      stageLabel: 'Stage 4 — AC Wiring',
+      category: 'grounding',
+      manufacturer: 'Burndy',
+      model: '5/8" Ground Rod Clamp',
+      partNumber: 'GRC-58',
+      quantity: rodQty,
+      unit: 'ea',
+      necReference: 'NEC 250.70',
+      derivedFrom: `1 clamp per rod (${rodQty})`,
+      _source: 'computePlan',
+    });
+  }
+
+  // GEC — always required (runs from inverter/disconnect to grounding electrode)
+  const gecLengthFt = 50; // conservative default; site-specific routing may reduce this
+  items.push({
+    id: bomId(),
+    stage: 'stage4_ac_wiring',
+    stageLabel: 'Stage 4 — AC Wiring',
+    category: 'grounding',
+    manufacturer: 'Southwire',
+    model: `${gecSize} THWN-2 Copper GEC`,
+    partNumber: `SW-${gecSize.replace(/[^0-9/]/g, '')}-THWN2-GEC`,
+    quantity: gecLengthFt,
+    unit: 'ft',
+    necReference: 'NEC 250.66',
+    derivedFrom: `ocpdAmps=${sizing.ocpdAmps} → ${gecSize} GEC`,
+    _source: 'computePlan',
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // STAGE 6 — MONITORING / COMMUNICATION CABLES
+  // SolarEdge systems require communication cable from each inverter to gateway
+  // Previously missing — now auto-added for SolarEdge inverter type
+  // ═══════════════════════════════════════════════════════════════════════════
+  const isSolarEdge = (
+    (opts.inverterManufacturer ?? '').toLowerCase().includes('solaredge') ||
+    (opts.inverterType ?? '').toLowerCase().includes('optimizer') ||
+    (opts.inverterModel ?? '').toLowerCase().includes('se')
+  );
+
+  if (isSolarEdge && inverterCount > 0) {
+    // Communication cable: 1 per inverter, connects to Energy Hub Gateway
+    items.push({
+      id: bomId(),
+      stage: 'stage6_monitoring',
+      stageLabel: 'Stage 6 — Monitoring',
+      category: 'monitoring',
+      manufacturer: 'SolarEdge',
+      model: 'RS485 Communication Cable, 10m',
+      partNumber: 'SE-RCBL-10M',
+      quantity: inverterCount,
+      unit: 'ea',
+      necReference: 'SolarEdge Install Guide',
+      derivedFrom: `inverterCount=${inverterCount} — 1 cable per SE inverter to gateway`,
+      _source: 'computePlan',
+    });
+
+    // Optional CT kit for consumption monitoring
+    if (opts.includeConsumptionMonitoring === true) {
+      items.push({
+        id: bomId(),
+        stage: 'stage6_monitoring',
+        stageLabel: 'Stage 6 — Monitoring',
+        category: 'monitoring',
+        manufacturer: 'SolarEdge',
+        model: 'Slim CT for Energy Meters, 200A',
+        partNumber: 'SE-TS-200A',
+        quantity: 2,
+        unit: 'ea',
+        necReference: 'SolarEdge Install Guide',
+        derivedFrom: 'includeConsumptionMonitoring=true — 2 CTs for 240V service',
+        _source: 'computePlan',
+      });
+    }
+  }
+
+  devLog('BOM:total', 'deriveBomItems', `${items.length} items generated`);
   return items;
 }
 
@@ -616,6 +868,14 @@ export interface ComputePlanOptions {
   inverterManufacturer?: string;
   inverterModel?: string;
   inverterCount?: number;
+  // Disconnect configuration
+  // true (default) = one combined disconnect sized for all inverters combined
+  // false = one separate disconnect per inverter
+  useCombinedDisconnect?: boolean;
+  // Grounding electrode options
+  hasExistingGroundRod?: boolean; // true = skip ground rod in BOM (existing rod on site)
+  // Monitoring options
+  includeConsumptionMonitoring?: boolean; // true = add CTs for home consumption monitoring
 }
 
 export function computePlan(opts: ComputePlanOptions): ComputedPlan {
@@ -682,7 +942,7 @@ export function computePlan(opts: ComputePlanOptions): ComputedPlan {
   devLog('ElectricalSizing', 'acSizing', { ocpd: electricalSizing.ocpdAmps, disconnect: electricalSizing.disconnectLabel, fuses: electricalSizing.fuseLabel });
 
   // ── 4. Derive BOM from electricalSizing (single source of truth) ──────────
-  const bomItems = deriveBomItems(electricalSizing, inputs);
+  const bomItems = deriveBomItems(electricalSizing, inputs, opts);
 
   // ── 5. Derive compliance issues ───────────────────────────────────────────
   const complianceIssues = deriveComplianceIssues(rawResult, electricalSizing, inputs, utility, jurisdiction);
@@ -778,5 +1038,6 @@ export function deriveBomItemsForTest(sizing: Partial<ElectricalSizing> & {
     rapidShutdown: true, acDisconnect: true, dcDisconnect: true, productionMeter: true,
     electricalCalcInput: {} as any,
   };
-  return deriveBomItems(fullSizing, minimalInputs);
+  const minimalOpts: ComputePlanOptions = { inputs: minimalInputs };
+  return deriveBomItems(fullSizing, minimalInputs, minimalOpts);
 }

@@ -421,10 +421,13 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
 
     // DC Disconnect
     if (input.requiresDCDisconnect !== false) {
-      items.push(addItem('dc', 'disconnect', 'Square D', `${input.dcOCPD}A DC Disconnect`,
-        'DU30RB', `${input.dcOCPD}A DC disconnect switch per NEC 690.15`,
+      // DC disconnect: part number derived from dcOCPD (e.g. DU30RB = 30A, DU60RB = 60A)
+      const dcDiscAmps = nextStandardBreaker(input.dcOCPD > 0 ? input.dcOCPD : 30);
+      const dcDiscPartNum = `DU${dcDiscAmps}RB`;
+      items.push(addItem('dc', 'disconnect', 'Square D', `${dcDiscAmps}A DC Disconnect`,
+        dcDiscPartNum, `${dcDiscAmps}A DC disconnect switch per NEC 690.15`,
         input.inverterCount, 'ea', 'NEC 690.15', 'inverterCount', 'inverters', true));
-      log.push({ stageId: 'dc', category: 'dc_disconnect', item: `${input.dcOCPD}A DC Disconnect`,
+      log.push({ stageId: 'dc', category: 'dc_disconnect', item: `${dcDiscAmps}A DC Disconnect`,
         quantity: input.inverterCount, derivedFrom: 'inverterCount', formula: 'inverters', necReference: 'NEC 690.15' });
     }
 
@@ -742,21 +745,100 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       'acWireLength x 1.15', `${input.acWireLength} x 1.15`, true));
   }
 
-  // AC Disconnect
+  // ── Conduit Fittings (NEC 300.15 / 358.30) ─────────────────────────────────
+  // Auto-derived from total conduit length across all runs.
+  // Rule of thumb: 1 connector + 1 coupling per 10 ft of conduit.
+  {
+    const totalConduitFt = (() => {
+      if (input.runs && input.runs.length > 0) {
+        return input.runs
+          .filter((r: any) => !r.isUtilityOwned)
+          .reduce((sum: number, r: any) =>
+            sum + Math.ceil(((r as any).onewayLengthFt ?? (r as any).lengthFt ?? 30) * 1.15), 0);
+      }
+      return conduitLength(input.acWireLength);
+    })();
+
+    const conduitType = input.conduitType ?? 'EMT';
+    const conduitSize = input.conduitSizeInch ?? '3/4';
+
+    // Connectors — 1 per 10 ft (termination at each end + mid-run joins)
+    const connQty = Math.max(2, Math.ceil(totalConduitFt / 10));
+    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Connector`,
+      `${conduitType}-CONN-${conduitSize.replace('/', '-')}`,
+      `${conduitSize}" ${conduitType} set-screw connector — NEC 300.15`,
+      connQty, 'ea', 'NEC 300.15 / 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+
+    // Couplings — 1 per 10 ft (joins 10-ft sticks)
+    const couplingQty = Math.max(1, Math.ceil(totalConduitFt / 10));
+    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} Coupling`,
+      `${conduitType}-COUP-${conduitSize.replace('/', '-')}`,
+      `${conduitSize}" ${conduitType} coupling — joins conduit sticks`,
+      couplingQty, 'ea', 'NEC 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+
+    // Insulated bushings — 1 per conduit termination end (min 2 per run segment)
+    const bushingQty = Math.max(2, Math.ceil(totalConduitFt / 50) * 2);
+    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" Insulated Bushing`,
+      `BUSH-INS-${conduitSize.replace('/', '-')}`,
+      `${conduitSize}" insulated throat bushing — protects conductors at conduit end per NEC 300.15`,
+      bushingQty, 'ea', 'NEC 300.15', 'ceil(totalConduitFt/50)*2', `ceil(${totalConduitFt}/50)*2`, true));
+
+    // One-hole straps — 1 per 10 ft (NEC 358.30 support every 10 ft)
+    const strapQty = Math.max(2, Math.ceil(totalConduitFt / 10));
+    items.push(addItem('ac', 'conduit_fitting', 'Raco/Allied', `${conduitSize}" ${conduitType} One-Hole Strap`,
+      `${conduitType}-STRAP-${conduitSize.replace('/', '-')}`,
+      `${conduitSize}" ${conduitType} one-hole strap — NEC 358.30 support every 10 ft`,
+      strapQty, 'ea', 'NEC 358.30', 'ceil(totalConduitFt / 10)', `ceil(${totalConduitFt} / 10)`, true));
+
+    log.push({ stageId: 'ac', category: 'conduit_fitting', item: 'Conduit Fittings Set',
+      quantity: connQty + couplingQty + bushingQty + strapQty,
+      derivedFrom: 'totalConduitFt',
+      formula: 'connectors + couplings + bushings + straps derived from total conduit footage',
+      necReference: 'NEC 300.15 / 358.30' });
+  }
+
+  // AC Disconnect — NEC 690.14 / NEC 705.60
+  // Each inverter requires its own AC disconnect (NEC 690.14(C)(1)).
+  // Size: total AC continuous current × 125% → nextStandardBreaker (NEC 705.60).
+  // For multi-inverter systems, each gets a separately-sized per-inverter disconnect.
   if (input.requiresACDisconnect !== false) {
-    // FIX: If acOCPD is 0 or missing, calculate from system output (NEC 705.60: 125% of continuous output)
+    // Resolve OCPD: prefer explicit acOCPD, else derive from backfeedAmps or systemKw
+    // NEC 705.60: 125% of continuous output current
+    const acVoltage = input.acVoltage ?? 240;
     const resolvedAcOcpd = input.acOCPD > 0
       ? input.acOCPD
       : (input.backfeedAmps > 0
           ? input.backfeedAmps
-          : Math.ceil(Math.round((input.systemKw * 1000) / 240) * 1.25 / 5) * 5);
-    const acDiscAmps = nextStandardBreaker(resolvedAcOcpd);
+          : Math.ceil(Math.round((input.systemKw * 1000) / acVoltage) * 1.25 / 5) * 5);
+
+    // Per-inverter sizing for multi-inverter systems
+    // Combined OCPD applies to total system; each inverter gets its share
+    const invCount = Math.max(1, input.inverterCount ?? 1);
+    const perInvOcpd = resolvedAcOcpd / invCount;
+    const perInvDiscAmps = nextStandardBreaker(Math.ceil(perInvOcpd / 5) * 5);
+    const combinedDiscAmps = nextStandardBreaker(resolvedAcOcpd);
+
+    // Use combined disconnect for single inverter; per-inverter for multi
+    const acDiscAmps = invCount <= 1 ? combinedDiscAmps : perInvDiscAmps;
+    const acDiscQty  = invCount;
+
+    // Part number: Square D DU series — DU{amps}RB (e.g. DU60RB, DU100RB)
+    const acDiscPartNum = `DU${acDiscAmps}RB`;
+
     items.push(addItem('ac', 'disconnect', 'Square D', `${acDiscAmps}A AC Disconnect`,
-      'DU30RB', `${acDiscAmps}A AC disconnect switch per NEC 690.14`,
-      1, 'ea', 'NEC 690.14', 'perSystem', '1', true));
+      acDiscPartNum,
+      `${acDiscAmps}A AC disconnect switch per NEC 690.14 — ${invCount > 1 ? `${invCount}× per-inverter` : 'combined system'}`,
+      acDiscQty, 'ea', 'NEC 690.14', 'inverterCount', 'inverters', true));
     log.push({ stageId: 'ac', category: 'ac_disconnect', item: `${acDiscAmps}A AC Disconnect`,
-      quantity: 1, derivedFrom: 'perSystem', formula: '1', necReference: 'NEC 690.14' });
-    complianceNotes.push(`NEC 690.14: AC disconnect ${acDiscAmps}A — sized for ${resolvedAcOcpd}A backfeed`);
+      quantity: acDiscQty, derivedFrom: 'inverterCount',
+      formula: invCount > 1
+        ? `ceil(resolvedAcOcpd / inverterCount / 5) * 5 → nextStandardBreaker, qty = inverterCount`
+        : `nextStandardBreaker(resolvedAcOcpd)`,
+      necReference: 'NEC 690.14' });
+    complianceNotes.push(
+      `NEC 690.14 / NEC 705.60: ${acDiscQty}× ${acDiscAmps}A AC disconnect(s) — ` +
+      `${invCount > 1 ? `per-inverter (${invCount} inverters × ${acDiscAmps}A each)` : `combined system, sized for ${resolvedAcOcpd}A`}`
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -904,11 +986,58 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
     }
   }
 
-  // Grounding wire (always required)
-  const groundWireQty = conduitLength(input.acWireLength);
-  items.push(addItem('structural', 'wire', 'Southwire', '#6 AWG Bare Copper Ground',
-    'BARE-CU-6', '#6 AWG bare copper grounding conductor',
-    groundWireQty, 'ft', 'NEC 690.43', 'acWireLength × 1.15', `${input.acWireLength} × 1.15`, true));
+  // ── Grounding Electrode System (NEC 250.52 / 690.43 / 250.66) ───────────────
+  // EGC: Equipment Grounding Conductor — runs inside conduit alongside AC conductors
+  {
+    const egcLength = conduitLength(input.acWireLength);
+    // EGC gauge: NEC 250.122 — based on OCPD size
+    const ocpdForEgc = input.acOCPD > 0 ? input.acOCPD : nextStandardBreaker(
+      Math.ceil((input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25 / 5) * 5
+    );
+    const egcGauge = ocpdForEgc <= 60 ? '#10 AWG' : ocpdForEgc <= 100 ? '#8 AWG' : '#6 AWG';
+    items.push(addItem('structural', 'wire', 'Southwire', `${egcGauge} THWN-2 Green EGC`,
+      `THWN2-GRN-${egcGauge.replace('#', '').replace(' AWG', '')}`,
+      `${egcGauge} green THWN-2 equipment grounding conductor — NEC 250.122`,
+      egcLength, 'ft', 'NEC 690.43 / 250.122', 'acWireLength × 1.15', `${input.acWireLength} × 1.15`, true));
+    log.push({ stageId: 'structural', category: 'wire', item: `${egcGauge} EGC`,
+      quantity: egcLength, derivedFrom: 'acWireLength × 1.15',
+      formula: 'acWireLength * 1.15', necReference: 'NEC 690.43 / 250.122' });
+  }
+
+  // Ground Rod & GEC — NEC 250.52(A)(5) / 250.66
+  // Required for grounding electrode system unless existing ground rod on site
+  {
+    // Ground rod: 8-ft copper-clad per NEC 250.52(A)(5)
+    items.push(addItem('structural', 'grounding', 'Erico/Harger', '5/8" × 8 ft Copper-Clad Ground Rod',
+      'GR-5/8-8',
+      '5/8" × 8 ft copper-clad steel ground rod — NEC 250.52(A)(5)',
+      1, 'ea', 'NEC 250.52(A)(5)', 'perSystem', '1', true));
+
+    // Ground rod clamp
+    items.push(addItem('structural', 'grounding', 'Erico/Harger', '5/8" Ground Rod Acorn Clamp',
+      'GRC-5/8',
+      '5/8" ground rod acorn clamp — bonds GEC to ground rod per NEC 250.70',
+      1, 'ea', 'NEC 250.70', 'perSystem', '1', true));
+
+    // GEC: Grounding Electrode Conductor — NEC 250.66
+    // Sized by largest service conductor or 6 AWG minimum for PV systems ≤ 200A
+    const gecOcpd = input.acOCPD > 0 ? input.acOCPD
+      : nextStandardBreaker(Math.ceil((input.systemKw * 1000) / (input.acVoltage ?? 240) * 1.25 / 5) * 5);
+    const gecGauge = gecOcpd <= 60 ? '#6 AWG' : gecOcpd <= 100 ? '#4 AWG' : '#2 AWG';
+    const gecLength = 50; // standard 50-ft run from inverter to grounding electrode
+    items.push(addItem('structural', 'wire', 'Southwire', `${gecGauge} Bare Copper GEC`,
+      `BARE-CU-${gecGauge.replace('#', '').replace(' AWG', '')}`,
+      `${gecGauge} bare copper grounding electrode conductor — NEC 250.66`,
+      gecLength, 'ft', 'NEC 250.66', 'perSystem', '50', true));
+
+    log.push({ stageId: 'structural', category: 'grounding', item: 'Grounding Electrode System',
+      quantity: 3, derivedFrom: 'perSystem',
+      formula: '1 ground rod + 1 clamp + 50ft GEC',
+      necReference: 'NEC 250.52 / 250.66 / 250.70' });
+    complianceNotes.push(
+      `NEC 250.52(A)(5): 5/8"×8ft copper-clad ground rod + acorn clamp + ${gecGauge} GEC (50ft) required`
+    );
+  }
 
   // STAGE 5b REMOVED (MASTER TASK): Structural items now handled by merge layer.
   // V4 engine owns ONLY electrical. Structural (fence/ground) is derived by
@@ -930,6 +1059,23 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
         monitoringAcc.description, 1, 'ea',
         monitoringAcc.necReference ?? 'NEC 690.4', 'perSystem', '1', false));
     }
+  }
+
+  // SolarEdge RS485 communication cables — 1 per inverter to SEG-HUB-1 gateway
+  // Required for all SolarEdge optimizer-based systems (STRING_WITH_OPTIMIZER topology)
+  if (inverterEntry && inverterEntry.manufacturer === 'SolarEdge' &&
+      (norm === 'STRING_WITH_OPTIMIZER' || norm === 'HYBRID_INVERTER' || norm === 'DC_COUPLED_BATTERY')) {
+    const rs485Qty = Math.max(1, input.inverterCount ?? 1);
+    items.push(addItem('monitoring', 'communication_cable', 'SolarEdge', 'RS485 Communication Cable',
+      'SE-RS485-10FT',
+      `RS485 communication cable — inverter to SEG-HUB-1 gateway (${rs485Qty} inverter${rs485Qty > 1 ? 's' : ''})`,
+      rs485Qty, 'ea', 'NEC 690.4', 'inverterCount', 'inverters', true));
+    log.push({ stageId: 'monitoring', category: 'communication_cable', item: 'RS485 Communication Cable',
+      quantity: rs485Qty, derivedFrom: 'inverterCount', formula: 'inverters',
+      necReference: 'NEC 690.4' });
+    complianceNotes.push(
+      `SolarEdge RS485: ${rs485Qty} communication cable(s) required — inverter(s) to SEG-HUB-1 gateway`
+    );
   }
 
   // ── STAGE 7: LABELS ──────────────────────────────────────────────────────────
