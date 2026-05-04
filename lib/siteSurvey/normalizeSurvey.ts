@@ -25,6 +25,7 @@
 //   - Mirrors the billEnrichment step-by-step + log pattern exactly
 // ============================================================================
 
+// PIPELINE STATUS: WIRED — imported by app/api/engineering/generate, permit, preliminary
 import {
   SITE_SURVEY_PIPELINE_VERSION,
   type RawSurveyPayload,

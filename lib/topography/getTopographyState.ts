@@ -272,7 +272,11 @@ export async function getTopographyState(projectId: string): Promise<TopographyS
 
   const capturedCount = fieldUsage.filter((f) => f.captured).length;
 
-  // -- 3. project_site_surveys (new Phase 1-10 pipeline) ---------------------
+  // -- 3. site_surveys (canonical survey storage — migration 016) -------------
+  // NOTE: The old code queried `project_site_surveys`, a table that was NEVER
+  // created by any migration (confirmed: grep migrations/ = 0 results).
+  // The canonical table is `site_surveys` (migration 016_site_surveys.sql).
+  // Fixed in Phase 2 data-integrity pass.
   let newPipelineExists = false;
   let newPipelineUpdatedAt: string | null = null;
   let newPipelineEnriched = false;
@@ -280,24 +284,23 @@ export async function getTopographyState(projectId: string): Promise<TopographyS
   try {
     const rows = await sql`
       SELECT
-        enriched,
-        updated_at
-      FROM project_site_surveys
+        survey_data,
+        created_at
+      FROM site_surveys
       WHERE project_id = ${projectId}
-      ORDER BY updated_at DESC
+      ORDER BY created_at DESC
       LIMIT 1
     `;
 
     if (rows.length > 0) {
       newPipelineExists = true;
       const r = rows[0] as Record<string, unknown>;
-      newPipelineUpdatedAt = r.updated_at ? String(r.updated_at) : null;
-      // enriched column is non-null when the enrichment step succeeded
-      newPipelineEnriched = r.enriched !== null && r.enriched !== undefined;
+      newPipelineUpdatedAt = r.created_at ? String(r.created_at) : null;
+      // survey_data is non-null when the full SurveyV2Payload was stored
+      newPipelineEnriched = r.survey_data !== null && r.survey_data !== undefined;
     }
-  } catch {
-    // project_site_surveys table may not exist in all environments — silently skip
-    // Don't push to errors since absence is expected in many deployments
+  } catch (err) {
+    errors.push(`site_surveys: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // -- 4. Engineering report -------------------------------------------------

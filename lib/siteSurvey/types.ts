@@ -554,7 +554,24 @@ export interface SurveyValidationResult {
 
 // ─── Storage Types ────────────────────────────────────────────────────────────
 
-/** Stored in project_site_surveys table */
+/**
+ * SiteSurveyRow — legacy interface stub, never persisted.
+ *
+ * HISTORY: This interface referenced a `project_site_surveys` table that was
+ * NEVER created by any database migration. The canonical survey storage table
+ * is `site_surveys` (created by migration 016_site_surveys.sql).
+ *
+ * The `site_surveys` table stores:
+ *   - survey_data JSONB  — full SurveyV2Payload (source of truth)
+ *   - status             — pending | completed | reviewed
+ *   - inspector_name, address_snapshot, external_survey_id, delivery_id
+ *
+ * This interface is kept for reference only. Do NOT write new code that
+ * reads or writes `project_site_surveys` — it does not exist.
+ *
+ * @deprecated Use the `site_surveys` table and `createSiteSurvey()` /
+ *   `getSiteSurveysByProject()` from lib/db-neon.ts instead.
+ */
 export interface SiteSurveyRow {
   id: string;
   project_id: string;

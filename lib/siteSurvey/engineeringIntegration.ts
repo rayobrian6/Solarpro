@@ -30,6 +30,8 @@
 //   Each field resolved: log source, value, and confidence.
 // ============================================================================
 
+// PIPELINE STATUS: DORMANT — 0 callers in app/ routes as of Phase 2 audit (2025).
+//   Function is built and correct; wire into engineering/generate when structural overrides are needed.
 import {
   SITE_SURVEY_PIPELINE_VERSION,
   type EnrichedSiteSurvey,

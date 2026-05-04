@@ -30,6 +30,8 @@
 //   Dev logging: [SURVEY PHOTOS ATTACHED] with total + per-category counts.
 // ============================================================================
 
+// PIPELINE STATUS: WIRED — imported by app/api/engineering/generate, permit, preliminary
+//   Reads: project_physical_data + project_files (NOT project_site_surveys — that table does not exist)
 import { getProjectFiles, type Photo } from '@/lib/files/getProjectFiles';
 import type { RawSurveyPayload, SurveyPhotoRef } from './types';
 

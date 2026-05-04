@@ -32,6 +32,7 @@
 //   - Survey-derived roof planes are added to project.roofPlanes (merged, not replaced)
 // ============================================================================
 
+// PIPELINE STATUS: WIRED — imported by app/api/engineering/permit/route.ts
 import {
   SITE_SURVEY_PIPELINE_VERSION,
   type EnrichedSiteSurvey,

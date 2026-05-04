@@ -32,6 +32,7 @@
 //   - Returns a SurveyOverrideContext with full audit trail
 // ============================================================================
 
+// PIPELINE STATUS: WIRED — imported by app/api/engineering/generate/route.ts
 import {
   type SystemDefinition,
   type LayoutDefinition,

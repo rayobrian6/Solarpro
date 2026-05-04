@@ -27,6 +27,7 @@
 //   - ALL derived fields are computed here — never passed in from caller
 // ============================================================================
 
+// PIPELINE STATUS: WIRED — imported by app/api/engineering/generate, permit, preliminary
 import {
   SITE_SURVEY_PIPELINE_VERSION,
   type NormalizedSiteSurvey,
