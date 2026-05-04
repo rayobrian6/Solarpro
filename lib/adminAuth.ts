@@ -1,7 +1,10 @@
 import { cookies } from 'next/headers';
 import { NextRequest } from 'next/server';
 import { verifyToken } from '@/lib/auth';
-import { getDbReady } from '@/lib/db-neon';
+// Import directly from db-ready (not db-neon) to avoid pulling the entire 2244-line
+// db-neon.ts + utility-rules.ts (1341 lines) into auth-related route bundles.
+// db-ready.ts exports only the connection/retry primitives needed here.
+import { getDbWithRetry } from '@/lib/db-ready';
 import { redirect } from 'next/navigation';
 
 export type AdminUser = {
@@ -70,7 +73,7 @@ export async function requireAdmin(): Promise<AdminUser> {
   let dbError: string | null = null;
 
   try {
-    const sql = await getDbReady();
+    const sql = await getDbWithRetry();
     const rows = await sql`
       SELECT id, name, email, role
       FROM users
@@ -132,7 +135,7 @@ export async function requireAdminApi(req: NextRequest): Promise<AdminUser | nul
   if (cached) return cached;
 
   try {
-    const sql = await getDbReady();
+    const sql = await getDbWithRetry();
     const rows = await sql`
       SELECT id, name, email, role
       FROM users

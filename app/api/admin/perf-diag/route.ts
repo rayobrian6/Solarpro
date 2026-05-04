@@ -18,8 +18,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady } from '@/lib/db-neon';
 import { verifyToken } from '@/lib/auth';
+// Import directly from db-ready to keep bundle small
 import { getDbWithRetry } from '@/lib/db-ready';
 
 export const dynamic = 'force-dynamic';
@@ -63,10 +63,10 @@ export async function GET(req: NextRequest) {
     steps.push({ step: '3_getDbWithRetry', ms: elapsed(probeStart), note: `ERROR: ${(e as Error).message}` });
   }
 
-  // ── Step 4: get sql executor ─────────────────────────────────────────────────
+  // ── Step 4: get sql executor (warm — should be instant) ─────────────────────
   const sqlStart = t();
-  const sql = await getDbReady();
-  steps.push({ step: '4_getDbReady', ms: elapsed(sqlStart), note: 'should be 0ms (warm)' });
+  const sql = await getDbWithRetry();
+  steps.push({ step: '4_getDbReady', ms: elapsed(sqlStart), note: 'should be 0ms (warm, _instanceWarm=true)' });
 
   // ── Step 5: Single SELECT 1 (measures per-query HTTP overhead) ───────────────
   const q1Start = t();
