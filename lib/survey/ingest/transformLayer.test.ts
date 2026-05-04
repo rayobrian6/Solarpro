@@ -348,8 +348,8 @@ describe('buildTransformSummary', () => {
       projectName: 'P', address: null, lat: null, lng: null,
       surveyMeta: {},
       files: [
-        { externalId: 'f1', name: 'a.jpg', url: 'http://x.com/a.jpg', mimeType: 'image/jpeg' },
-        { externalId: 'f2', name: 'b.jpg', url: 'http://x.com/b.jpg', mimeType: 'image/jpeg' },
+        { externalId: 'f1', name: 'a.jpg', url: 'http://x.com/a.jpg', mimeType: 'image/jpeg', category: null },
+        { externalId: 'f2', name: 'b.jpg', url: 'http://x.com/b.jpg', mimeType: 'image/jpeg', category: null },
       ],
       physicalData: null,
     };

@@ -254,6 +254,7 @@ export interface PhysicalDataOutput {
   // Constraints
   obstructions:            unknown[];
   usable_roof_pct:         number | null;
+  setback_notes:           string | null;
 
   // Survey metadata
   inspector_name:          string | null;
@@ -299,6 +300,12 @@ export interface TransformFile {
   url: string;
   /** MIME type guess. */
   mimeType: string;
+  /**
+   * Photo category from SurveyV2 upload (e.g. 'main_panel_open', 'roof_overview').
+   * Used as site_survey_files.label — avoids lossy filename-based guessing.
+   * NULL for v1.0 / partner payload photos (no category in that schema).
+   */
+  category: string | null;
 }
 
 // ---------------------------------------------------------------------------

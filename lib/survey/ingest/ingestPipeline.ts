@@ -193,10 +193,12 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
   // This is the critical engineering data write. Best-effort because the
   // project was already created successfully. On failure, ops can replay
   // the delivery to re-run this write.
+  // NOTE: source_survey_id backlink is set in a second pass after E2 creates
+  // the site_surveys row (we need the UUID first).
   if (transformOutput.physicalData !== null) {
     log(`STEP_E upserting project_physical_data for projectId=${projectId}`);
     try {
-      await _upsertPhysicalData(sql, projectId, transformOutput);
+      await _upsertPhysicalData(sql, projectId, transformOutput, null);
       log(`STEP_E project_physical_data upsert OK`);
     } catch (physErr) {
       const msg = physErr instanceof Error ? physErr.message : String(physErr);
@@ -206,27 +208,44 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
     log(`STEP_E physicalData is null — project_physical_data not written (degraded mode)`);
   }
 
-  // Insert files (best-effort - file failures do NOT fail the ingest)
+  // Insert files into project_files (engineering pipeline read path).
+  // This is separate from site_survey_files — project_files serves the older
+  // lib/siteSurvey/ normalization pipeline and fromPhysicalData() bridge.
   if (transformOutput.files.length > 0) {
-    log(`STEP_E inserting ${transformOutput.files.length} file(s)`);
+    log(`STEP_E inserting ${transformOutput.files.length} file(s) into project_files`);
     try {
       await _insertFiles(sql, projectId, transformOutput);
-      log(`STEP_E files inserted OK`);
+      log(`STEP_E project_files insert OK`);
     } catch (fileErr) {
       const msg = fileErr instanceof Error ? fileErr.message : String(fileErr);
-      warn(`STEP_E file insert failed (non-fatal): ${msg}`);
+      warn(`STEP_E project_files insert failed (non-fatal): ${msg}`);
       // Non-fatal: project was created successfully. Files can be re-fetched
       // via replay (v47.437). Log the warning but continue to 'ingested'.
     }
   }
 
-  // -- E2. Create site_surveys row (best-effort) ----------------------------
-  // Creates the canonical Field Data Layer record. Best-effort: failure does
-  // not affect the ingest result — the project row was already written.
-  // Resolves client_id from: selectedClientId > selectedProjectId lookup >
-  // linkResolution.projectId lookup (for PM-initiated handoff).
+  // -- E2. Create site_surveys row (canonical Field Data Layer) ---------------
+  //
+  // site_surveys is the single source of truth for field survey submissions.
+  // This step:
+  //   1. Resolves client_id from the freshly upserted project row (guaranteed
+  //      to exist at this point). Falls back to picker selections.
+  //   2. Creates the site_surveys row with the FULL rawPayload as survey_data.
+  //   3. Inserts site_survey_files rows with category as label (no guessing).
+  //   4. Backfills source_survey_id on project_physical_data.
+  //
+  // If client_id cannot be resolved (orphan project with no client), the
+  // site_surveys row cannot be created (client_id is NOT NULL). This is logged
+  // prominently — ops must assign the project to a client to recover.
+  //
+  // NOTE: This step is wrapped in try/catch to prevent E2 bugs from failing a
+  // successful ingest, but failures ARE logged at ERROR level (not just warn).
+  let siteSurveyId: string | null = null;
   try {
-    const clientId = await _resolveClientIdForSurvey(sql, ownerId, linkResolution, context);
+    // Resolve client_id — query the project we just upserted for its client_id.
+    // This is the most reliable source: the project row always exists at this point.
+    const clientId = await _resolveClientIdForSurvey(sql, ownerId, linkResolution, context, projectId);
+
     if (clientId) {
       // standalone: no project_id in JWT, or explicit picker selections present
       const isStandalone = !context.event.solarpro_project_id
@@ -242,32 +261,65 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
         source,
         status:           'completed',
         addressSnapshot:  transformOutput.address ?? null,
-        surveyData:       transformOutput.surveyMeta ?? null,
+        // Pass the FULL SurveyV2Payload (rawPayload) as survey_data.
+        // This makes site_surveys the single source of truth for all field data.
+        surveyData:       (rawPayload as Record<string, unknown>) ?? null,
         inspectorName:    transformOutput.physicalData?.inspector_name ?? null,
         externalSurveyId: event.survey_id ?? null,
         deliveryId:       deliveryId ?? null,
       });
 
-      log(`STEP_E2 site_surveys row created id=${siteSurvey.id} clientId=${clientId}`);
+      siteSurveyId = siteSurvey.id;
+      log(`STEP_E2 site_surveys row created id=${siteSurvey.id} clientId=${clientId} source=${source}`);
 
-      // Insert survey files into site_survey_files
+      // Insert survey photos into site_survey_files.
+      // Use file.category directly — this is the canonical SurveyV2 slot key
+      // (e.g. 'main_panel_open', 'roof_overview'). Never guess from filename.
       if (transformOutput.files.length > 0) {
         const surveyFiles = transformOutput.files.map(f => ({
           surveyId: siteSurvey.id,
           fileUrl:  f.url,
           fileType: 'photo' as const,
-          label:    _guessPhotoLabel(f.name ?? f.url),
+          // category is the v2.0 slot key; fall back to filename guess only for
+          // v1.0 partner payloads where category is null.
+          label:    f.category ?? _guessPhotoLabel(f.name ?? f.url),
           filename: f.name ?? null,
+          mimeType: f.mimeType ?? null,
         }));
         const insertedCount = await bulkAddSiteSurveyFiles(surveyFiles);
         log(`STEP_E2 site_survey_files inserted count=${insertedCount}`);
       }
+
+      // Backfill source_survey_id on project_physical_data now that we have
+      // the site_surveys UUID. This links the flat engineering table back to
+      // the canonical survey record.
+      if (transformOutput.physicalData !== null) {
+        try {
+          await sql`
+            UPDATE project_physical_data
+               SET source_survey_id = ${siteSurveyId}
+             WHERE project_id = ${projectId}
+          `;
+          log(`STEP_E2 project_physical_data.source_survey_id backfilled id=${siteSurveyId}`);
+        } catch (backfillErr) {
+          const msg = backfillErr instanceof Error ? backfillErr.message : String(backfillErr);
+          warn(`STEP_E2 source_survey_id backfill failed (non-fatal): ${msg}`);
+        }
+      }
     } else {
-      warn(`STEP_E2 could not resolve client_id — site_surveys row NOT created (non-fatal)`);
+      // client_id could not be resolved — site_surveys row NOT created.
+      // This means the project has no client assigned. The FieldSurveyCard
+      // on the project page will show "No Survey" until a client is assigned
+      // and the delivery is replayed.
+      error(
+        `STEP_E2 CRITICAL: could not resolve client_id for projectId=${projectId} ` +
+        `survey_id=${event.survey_id} — site_surveys row NOT created. ` +
+        `Assign a client to this project and replay delivery=${deliveryId} to recover.`,
+      );
     }
   } catch (e2Err) {
     const msg = e2Err instanceof Error ? e2Err.message : String(e2Err);
-    warn(`STEP_E2 site_surveys creation failed (non-fatal): ${msg}`);
+    error(`STEP_E2 site_surveys creation failed: ${msg} — survey_id=${event.survey_id} projectId=${projectId}`);
   }
 
   // -- F. Mark delivery as ingested -----------------------------------------
@@ -505,6 +557,11 @@ async function _upsertProject(
 // Uses ON CONFLICT (project_id) DO UPDATE so re-deliveries and replays are
 // idempotent. A re-submitted survey always overwrites with the latest data.
 //
+// siteSurveyId: the site_surveys.id UUID created in Step E2. Written to
+//   source_survey_id so engineering can trace which survey populated this row.
+//   Pass null on the initial write (E step) — the backfill is done in E2 after
+//   the site_surveys row is created.
+//
 // Engineering reads this table at report generation time. If this write
 // fails, the engineering engine falls back to hardcoded defaults — which is
 // survivable but sub-optimal. The failure is logged for ops replay.
@@ -513,6 +570,7 @@ async function _upsertPhysicalData(
   sql: Awaited<ReturnType<typeof getDbReady>>,
   projectId: string,
   transformOutput: TransformOutput,
+  siteSurveyId: string | null,
 ): Promise<void> {
   const d = transformOutput.physicalData;
   if (!d) return;
@@ -537,13 +595,15 @@ async function _upsertPhysicalData(
       sub_panel_rating_amps,
       obstructions,
       usable_roof_pct,
+      setback_notes,
       inspector_name,
       surveyed_at,
       access_notes,
       mounting_notes,
       electrical_notes,
       structure_type,
-      stories
+      stories,
+      source_survey_id
     ) VALUES (
       ${projectId},
       'survey',
@@ -563,13 +623,15 @@ async function _upsertPhysicalData(
       ${d.sub_panel_rating_amps},
       ${JSON.stringify(d.obstructions)}::jsonb,
       ${d.usable_roof_pct},
+      ${d.setback_notes},
       ${d.inspector_name},
       ${d.surveyed_at ? new Date(d.surveyed_at).toISOString() : null},
       ${d.access_notes},
       ${d.mounting_notes},
       ${d.electrical_notes},
       ${d.structure_type},
-      ${d.stories}
+      ${d.stories},
+      ${siteSurveyId}
     )
     ON CONFLICT (project_id)
     DO UPDATE SET
@@ -590,6 +652,7 @@ async function _upsertPhysicalData(
       sub_panel_rating_amps   = EXCLUDED.sub_panel_rating_amps,
       obstructions            = EXCLUDED.obstructions,
       usable_roof_pct         = EXCLUDED.usable_roof_pct,
+      setback_notes           = EXCLUDED.setback_notes,
       inspector_name          = EXCLUDED.inspector_name,
       surveyed_at             = EXCLUDED.surveyed_at,
       access_notes            = EXCLUDED.access_notes,
@@ -636,14 +699,19 @@ async function _insertFiles(
 //
 // Priority:
 //   1. context.selectedClientId (standalone: field worker picked a client)
-//   2. project's client_id (both attach and create_under_client flows)
-//   3. Look up via linkResolution.projectId (PM-initiated: attach action)
+//   2. create_under_client action has clientId directly
+//   3. Look up client_id from the freshly upserted project row (most reliable —
+//      the project always exists at this point in the pipeline).
+//   4. Look up via linkResolution.projectId (fallback for attach action)
+//
+// projectId: the UUID returned by _upsertProject() — used as primary lookup.
 // ---------------------------------------------------------------------------
 async function _resolveClientIdForSurvey(
   sql: Awaited<ReturnType<typeof getDbReady>>,
   ownerId: string,
   linkResolution: LinkResolution,
   context: IngestContext,
+  projectId: string,
 ): Promise<string | null> {
   // Priority 1: explicit client selection from on-device picker
   if (context.selectedClientId && isValidUUID(context.selectedClientId)) {
@@ -655,7 +723,24 @@ async function _resolveClientIdForSurvey(
     return linkResolution.clientId;
   }
 
-  // Priority 3: attach to existing project — look up project's client_id
+  // Priority 3: look up client_id from the project we just upserted.
+  // This covers all cases: attach, create, triage, create_under_client.
+  // The project row is guaranteed to exist at this point.
+  if (isValidUUID(projectId)) {
+    try {
+      const rows = await sql`
+        SELECT client_id FROM projects
+        WHERE id = ${projectId} AND user_id = ${ownerId} AND deleted_at IS NULL
+        LIMIT 1
+      `;
+      const clientId = (rows[0] as Record<string, unknown> | undefined)?.client_id as string | null;
+      if (clientId && isValidUUID(clientId)) return clientId;
+    } catch {
+      // fall through to legacy fallback
+    }
+  }
+
+  // Priority 4: fallback — look up via linkResolution.projectId (attach action)
   if (linkResolution.action === 'attach' && isValidUUID(linkResolution.projectId)) {
     try {
       const rows = await sql`

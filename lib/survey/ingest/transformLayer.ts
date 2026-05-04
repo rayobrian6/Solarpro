@@ -261,6 +261,7 @@ function extractPhysicalData(payload: SurveyV2Payload): PhysicalDataOutput {
                                obs.estimatedUsableRoofPct <= 100)
                                ? Math.round(obs.estimatedUsableRoofPct)
                                : null,
+    setback_notes:           obs?.setbackNotes?.trim() || null,
 
     // Survey metadata
     inspector_name:   payload.inspectorName?.trim() || null,
@@ -450,9 +451,13 @@ function extractPhotos(
     // url is the blob/S3 URL after upload — always present for v2 SurveyPhoto
     if (!photo?.url) continue;
 
+    // category is the canonical survey slot key (e.g. 'main_panel_open', 'roof_overview').
+    // This is written directly to site_survey_files.label — no filename guessing needed.
+    const category = photo.category?.trim() || null;
+
     // Prefer tag (human label e.g. 'roof_overview') over category for filename
     const photoLabel = photo.tag?.trim()
-      || photo.category?.trim()
+      || category
       || 'photo';
     const photoName = `${photoLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${i + 1}.jpg`;
 
@@ -461,6 +466,7 @@ function extractPhotos(
       name:       photoName,
       url:        photo.url,
       mimeType:   'image/jpeg',
+      category,
     });
   }
 
@@ -600,6 +606,7 @@ function extractPhysicalDataLegacy(payload: SurveyRawPayload): import('./types')
       sub_panel_rating_amps:   null,
       obstructions:            [],
       usable_roof_pct:         null,
+      setback_notes:           null,
       inspector_name:          inspectorName,
       surveyed_at:             surveyedAt,
       access_notes:            null,
@@ -663,7 +670,7 @@ function extractFilesLegacy(
         : typeof item?.content_type === 'string' ? item.content_type
         : 'image/jpeg';
 
-      files.push({ externalId, name, url, mimeType });
+      files.push({ externalId, name, url, mimeType, category: null });
     }
 
     if (files.length > 0) return files;
