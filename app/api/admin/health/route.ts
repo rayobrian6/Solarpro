@@ -30,14 +30,14 @@ export async function GET(req: NextRequest) {
       sql`SELECT COUNT(*) AS cnt FROM clients`,
     ]);
 
-    // Table sizes
+    // Table sizes — limit to top 5 to avoid erratic scans
     const tableSizes = await sql`
       SELECT relname AS table_name,
              pg_size_pretty(pg_total_relation_size(relid)) AS size,
              pg_total_relation_size(relid) AS size_bytes
       FROM pg_catalog.pg_statio_user_tables
       ORDER BY pg_total_relation_size(relid) DESC
-      LIMIT 15
+      LIMIT 5
     `;
 
     // DB total size
