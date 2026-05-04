@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import { useParams } from 'next/navigation';
 import type { Client, Project } from '@/types';
@@ -8,12 +8,14 @@ import {
   ArrowLeft, Mail, Phone, MapPin, Zap, DollarSign,
   Building2, Plus, Edit, BarChart2, Sun,
   FolderOpen, Map, FileText, ChevronRight, Calendar,
-  User, CheckCircle, AlertCircle, Clock
+  User, CheckCircle, AlertCircle, Clock, Camera,
+  RefreshCw, AlertTriangle, Eye,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
+import type { SiteSurvey } from '@/lib/db-neon';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -38,6 +40,143 @@ const TYPE_ICONS: Record<string, string> = { roof: '🏠', ground: '🌱', fence
 const TYPE_BG: Record<string, string> = {
   roof: 'bg-amber-500/10', ground: 'bg-teal-500/10', fence: 'bg-purple-500/10',
 };
+
+// ---------------------------------------------------------------------------
+// SiteSurveysSection — inline survey list for the client page
+// ---------------------------------------------------------------------------
+function SiteSurveysSection({ clientId }: { clientId: string }) {
+  const [surveys, setSurveys]   = useState<SiteSurvey[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/site-surveys`);
+      const json = await res.json();
+      if (!json.success) { setError(json.error ?? 'Failed to load'); return; }
+      setSurveys(json.data ?? []);
+    } catch {
+      setError('Network error');
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const statusCls: Record<string, string> = {
+    completed: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25',
+    reviewed:  'bg-cyan-500/15 text-cyan-400 border border-cyan-500/25',
+    draft:     'bg-amber-500/15 text-amber-400 border border-amber-500/25',
+  };
+
+  return (
+    <div className="card overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
+        <div className="flex items-center gap-2">
+          <Camera size={15} className="text-cyan-400" />
+          <h3 className="font-semibold text-white text-sm">Site Surveys</h3>
+          {!loading && (
+            <span className="text-xs text-slate-500 bg-slate-700/50 px-2 py-0.5 rounded-full">
+              {surveys.length}
+            </span>
+          )}
+        </div>
+        <button
+          onClick={load}
+          className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-all"
+        >
+          <RefreshCw size={12} />
+        </button>
+      </div>
+
+      {/* Body */}
+      {loading ? (
+        <div className="p-6 flex items-center justify-center">
+          <div className="spinner w-5 h-5" />
+        </div>
+      ) : error ? (
+        <div className="p-5 flex items-center gap-3">
+          <AlertTriangle size={14} className="text-red-400" />
+          <span className="text-xs text-red-400">{error}</span>
+        </div>
+      ) : surveys.length === 0 ? (
+        <div className="p-8 text-center">
+          <Camera size={24} className="text-slate-600 mx-auto mb-2" />
+          <p className="text-slate-400 text-sm font-medium">No site surveys yet</p>
+          <p className="text-slate-500 text-xs mt-1">
+            Surveys will appear here once a field tech completes one for this client.
+          </p>
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-700/30">
+          {surveys.map(s => (
+            <div key={s.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-700/20 transition-colors group">
+              {/* Status dot */}
+              <div className="w-2 h-2 rounded-full flex-shrink-0 bg-emerald-500 mt-0.5" />
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-white truncate">
+                    {s.addressSnapshot ?? 'Site Survey'}
+                  </span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${statusCls[s.status] ?? statusCls.completed}`}>
+                    {s.status.charAt(0).toUpperCase() + s.status.slice(1)}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 capitalize">
+                    {s.source === 'standalone' ? 'Standalone' : 'Handoff'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
+                  <span className="flex items-center gap-1">
+                    <Calendar size={10} />
+                    {new Date(s.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </span>
+                  {s.projectName && (
+                    <span className="flex items-center gap-1 text-amber-400/70">
+                      <FolderOpen size={10} /> {s.projectName}
+                    </span>
+                  )}
+                  {s.fileCount !== undefined && s.fileCount > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Camera size={10} /> {s.fileCount} photo{s.fileCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                {s.projectId && (
+                  <Link
+                    href={`/projects/${s.projectId}/survey/${s.id}`}
+                    className="btn-ghost p-1.5 rounded-lg"
+                    title="View survey detail"
+                  >
+                    <Eye size={13} />
+                  </Link>
+                )}
+                {s.projectId && (
+                  <Link
+                    href={`/projects/${s.projectId}`}
+                    className="btn-ghost p-1.5 rounded-lg"
+                    title="Go to project"
+                  >
+                    <ChevronRight size={14} />
+                  </Link>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ClientDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -288,6 +427,9 @@ export default function ClientDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Site Surveys */}
+        <SiteSurveysSection clientId={id} />
 
         {/* Monthly Usage Chart */}
         <div className="card p-5">

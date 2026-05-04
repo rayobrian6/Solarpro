@@ -42,7 +42,7 @@ import type {
 import { resolveProjectLink } from './projectLinkResolver';
 import { transform, buildTransformSummary, type TransformResult } from './transformLayer';
 import { fetchFullPayload } from './payloadFetcher';
-import { getDbReady } from '@/lib/db-neon';
+import { getDbReady, createSiteSurvey, bulkAddSiteSurveyFiles, isValidUUID } from '@/lib/db-neon';
 
 // ---------------------------------------------------------------------------
 // runIngestPipeline - main entry point.
@@ -218,6 +218,56 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
       // Non-fatal: project was created successfully. Files can be re-fetched
       // via replay (v47.437). Log the warning but continue to 'ingested'.
     }
+  }
+
+  // -- E2. Create site_surveys row (best-effort) ----------------------------
+  // Creates the canonical Field Data Layer record. Best-effort: failure does
+  // not affect the ingest result — the project row was already written.
+  // Resolves client_id from: selectedClientId > selectedProjectId lookup >
+  // linkResolution.projectId lookup (for PM-initiated handoff).
+  try {
+    const clientId = await _resolveClientIdForSurvey(sql, ownerId, linkResolution, context);
+    if (clientId) {
+      // standalone: no project_id in JWT, or explicit picker selections present
+      const isStandalone = !context.event.solarpro_project_id
+        || context.event.solarpro_project_id === '__standalone__'
+        || !!(context.selectedClientId || context.selectedProjectId);
+      const source: 'project_handoff' | 'standalone' =
+        isStandalone ? 'standalone' : 'project_handoff';
+
+      const siteSurvey = await createSiteSurvey({
+        clientId,
+        projectId,
+        createdBy:        ownerId,
+        source,
+        status:           'completed',
+        addressSnapshot:  transformOutput.address ?? null,
+        surveyData:       transformOutput.surveyMeta ?? null,
+        inspectorName:    transformOutput.physicalData?.inspector_name ?? null,
+        externalSurveyId: event.survey_id ?? null,
+        deliveryId:       deliveryId ?? null,
+      });
+
+      log(`STEP_E2 site_surveys row created id=${siteSurvey.id} clientId=${clientId}`);
+
+      // Insert survey files into site_survey_files
+      if (transformOutput.files.length > 0) {
+        const surveyFiles = transformOutput.files.map(f => ({
+          surveyId: siteSurvey.id,
+          fileUrl:  f.url,
+          fileType: 'photo' as const,
+          label:    _guessPhotoLabel(f.name ?? f.url),
+          filename: f.name ?? null,
+        }));
+        const insertedCount = await bulkAddSiteSurveyFiles(surveyFiles);
+        log(`STEP_E2 site_survey_files inserted count=${insertedCount}`);
+      }
+    } else {
+      warn(`STEP_E2 could not resolve client_id — site_surveys row NOT created (non-fatal)`);
+    }
+  } catch (e2Err) {
+    const msg = e2Err instanceof Error ? e2Err.message : String(e2Err);
+    warn(`STEP_E2 site_surveys creation failed (non-fatal): ${msg}`);
   }
 
   // -- F. Mark delivery as ingested -----------------------------------------
@@ -579,6 +629,64 @@ async function _insertFiles(
       DO NOTHING
     `;
   }
+}
+
+// ---------------------------------------------------------------------------
+// _resolveClientIdForSurvey — find the client_id for the site_surveys row.
+//
+// Priority:
+//   1. context.selectedClientId (standalone: field worker picked a client)
+//   2. project's client_id (both attach and create_under_client flows)
+//   3. Look up via linkResolution.projectId (PM-initiated: attach action)
+// ---------------------------------------------------------------------------
+async function _resolveClientIdForSurvey(
+  sql: Awaited<ReturnType<typeof getDbReady>>,
+  ownerId: string,
+  linkResolution: LinkResolution,
+  context: IngestContext,
+): Promise<string | null> {
+  // Priority 1: explicit client selection from on-device picker
+  if (context.selectedClientId && isValidUUID(context.selectedClientId)) {
+    return context.selectedClientId;
+  }
+
+  // Priority 2: create_under_client action has clientId directly
+  if (linkResolution.action === 'create_under_client' && isValidUUID(linkResolution.clientId)) {
+    return linkResolution.clientId;
+  }
+
+  // Priority 3: attach to existing project — look up project's client_id
+  if (linkResolution.action === 'attach' && isValidUUID(linkResolution.projectId)) {
+    try {
+      const rows = await sql`
+        SELECT client_id FROM projects
+        WHERE id = ${linkResolution.projectId} AND user_id = ${ownerId} AND deleted_at IS NULL
+        LIMIT 1
+      `;
+      const clientId = (rows[0] as Record<string, unknown> | undefined)?.client_id as string | null;
+      if (clientId && isValidUUID(clientId)) return clientId;
+    } catch {
+      // best-effort
+    }
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// _guessPhotoLabel — infer a display label from a photo filename/URL.
+// Returns one of: 'roof' | 'panel' | 'meter' | 'attic' | 'exterior' | null
+// ---------------------------------------------------------------------------
+function _guessPhotoLabel(nameOrUrl: string | null | undefined): string | null {
+  if (!nameOrUrl) return null;
+  const n = nameOrUrl.toLowerCase();
+  if (n.includes('roof') || n.includes('shingle') || n.includes('tile')) return 'roof';
+  if (n.includes('panel') || n.includes('electrical') || n.includes('breaker')) return 'panel';
+  if (n.includes('meter')) return 'meter';
+  if (n.includes('attic') || n.includes('rafter') || n.includes('joist')) return 'attic';
+  if (n.includes('exterior') || n.includes('front') || n.includes('side') || n.includes('back')) return 'exterior';
+  if (n.includes('utility') || n.includes('service')) return 'utility';
+  return null;
 }
 
 // ---------------------------------------------------------------------------

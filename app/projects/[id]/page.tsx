@@ -59,6 +59,7 @@ import DesignTab from '@/components/project/DesignTab';
 import ProposalTab from '@/components/project/ProposalTab';
 import OperationsTab from '@/components/project/OperationsTab';
 import FieldSurveyPanel from '@/components/project/FieldSurveyPanel';
+import FieldSurveyCard from '@/components/project/FieldSurveyCard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TabId = 'bill' | 'system' | 'design' | 'engineering' | 'proposal' | 'operations' | 'survey';
@@ -234,6 +235,8 @@ export default function ProjectDetailPage() {
   const [surveyHandoffLoading, setSurveyHandoffLoading] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
   const [savingBill, setSavingBill] = useState(false);
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrToken, setQrToken] = useState<string | null>(null);
 
   useEffect(() => {
     const existing = projects.find(p => p.id === id);
@@ -507,6 +510,25 @@ export default function ProjectDetailPage() {
     }
   }, [id]);
 
+  const handleShowQR = useCallback(async () => {
+    if (!id) return;
+    setSurveyHandoffLoading(true);
+    try {
+      const res = await fetch(`/api/projects/${id}/survey-handoff`, { method: 'POST', credentials: 'include' });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        setQrToken(data.url);
+        setShowQRModal(true);
+      } else {
+        alert(data.error || 'Failed to generate QR code');
+      }
+    } catch {
+      alert('Network error - could not generate QR code');
+    } finally {
+      setSurveyHandoffLoading(false);
+    }
+  }, [id]);
+
   if (loading) {
     return (
       <AppShell>
@@ -758,6 +780,14 @@ export default function ProjectDetailPage() {
           </div>
         )}
 
+        {/* -- Field Survey Card (always visible, above tabs) -- */}
+        <FieldSurveyCard
+          projectId={id}
+          onStartSurvey={handleStartSurvey}
+          surveyHandoffLoading={surveyHandoffLoading}
+          onShowQR={handleShowQR}
+        />
+
         {/* ── Tab Navigation ──────────────────────────────────────────────── */}
         <div className="flex gap-0.5 border-b border-slate-700/50 overflow-x-auto">
           {TABS.map(tab => {
@@ -842,6 +872,61 @@ export default function ProjectDetailPage() {
                 onClose={() => setShowBillModal(false)}
               />
             </BillErrorBoundary>
+          </div>
+        </div>
+      )}
+
+      {/* QR Code Modal */}
+      {showQRModal && qrToken && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => setShowQRModal(false)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-white font-bold text-sm">Survey QR Code</h3>
+                <p className="text-slate-400 text-xs mt-0.5">Scan to open survey on a mobile device</p>
+              </div>
+              <button
+                onClick={() => setShowQRModal(false)}
+                className="text-slate-500 hover:text-white transition-colors text-lg leading-none"
+              >
+                &times;
+              </button>
+            </div>
+            {/* QR via Google Charts API — no extra dependency */}
+            <div className="flex items-center justify-center p-4 bg-white rounded-xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrToken)}`}
+                alt="Survey QR Code"
+                width={200}
+                height={200}
+                className="rounded"
+              />
+            </div>
+            <div className="bg-slate-800 rounded-lg p-3">
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Survey Link</p>
+              <p className="text-xs text-slate-300 break-all font-mono">{qrToken}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { navigator.clipboard?.writeText(qrToken); }}
+                className="flex-1 py-2 rounded-xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-300 transition-all"
+              >
+                Copy Link
+              </button>
+              <button
+                onClick={() => setShowQRModal(false)}
+                className="flex-1 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 hover:border-cyan-500/60 text-xs font-semibold text-cyan-400 transition-all"
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
