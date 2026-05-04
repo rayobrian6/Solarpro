@@ -251,6 +251,11 @@ export async function POST(req: NextRequest) {
     ownerId: ownerResolution.ownerId,
     ownerSource: ownerResolution.ownerSource,
     partnerProjectId: envelope.solarpro_project_id ?? null,
+    // v47.438: on-device picker selections from standalone surveys.
+    // These are forwarded by /api/survey/submit from the SurveyV2Payload.
+    // Null for all PM-initiated surveys (where partnerProjectId is set instead).
+    selectedProjectId: envelope.solarpro_selected_project_id ?? null,
+    selectedClientId:  envelope.solarpro_selected_client_id  ?? null,
     receivedAt: new Date().toISOString(),
     traceId: deliveryId,
   };

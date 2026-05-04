@@ -35,6 +35,8 @@ function makeContext(overrides: Partial<IngestContext> = {}): IngestContext {
     ownerId: 'user-owner-pipeline',
     ownerSource: 'default',
     partnerProjectId: null,
+    selectedProjectId: null,
+    selectedClientId: null,
     receivedAt: '2025-04-23T10:00:01.000Z',
     traceId: 'delivery-pipeline-001',
     ...overrides,

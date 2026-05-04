@@ -61,6 +61,16 @@ export interface IngestContext {
    *  Null when the thin event carries no project reference. */
   partnerProjectId: string | null;
 
+  // v47.438: On-device picker selections from standalone surveys.
+  // Set when the field worker used the client/project picker.
+  // Both are null for project-specific surveys (where partnerProjectId is set).
+  /** SolarPro project UUID selected by field worker on-device. Takes priority
+   *  over partnerProjectId when present. Resolver attaches to this project. */
+  selectedProjectId: string | null;
+  /** SolarPro client UUID selected by field worker on-device. Used when
+   *  selectedProjectId is null — resolver creates a new project under this client. */
+  selectedClientId: string | null;
+
   /** ISO-8601 timestamp when the route received the request.
    *  Used to set processed_at on the delivery row. */
   receivedAt: string;
@@ -146,6 +156,7 @@ export const DEFAULT_SURVEY_PROJECT_LINK_STRATEGY: SurveyProjectLinkStrategy = '
 export type LinkResolution =
   | LinkResolutionAttach
   | LinkResolutionCreate
+  | LinkResolutionCreateUnderClient
   | LinkResolutionTriage
   | LinkResolutionError;
 
@@ -161,6 +172,15 @@ export interface LinkResolutionCreate {
   surveyExternalId: string;
   /** The strategy that decided to create (for logging). */
   strategy: 'CREATE_ORPHAN';
+}
+
+// v47.438: Create a new project under a specific client (on-device picker selected a client).
+export interface LinkResolutionCreateUnderClient {
+  action: 'create_under_client';
+  /** SolarPro client UUID to attach the new project to. */
+  clientId: string;
+  /** survey_external_id to use as the idempotency key on INSERT. */
+  surveyExternalId: string;
 }
 
 export interface LinkResolutionTriage {

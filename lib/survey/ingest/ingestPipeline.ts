@@ -403,6 +403,47 @@ async function _upsertProject(
     };
   }
 
+  if (linkResolution.action === 'create_under_client') {
+    // v47.438: Field worker picked a client on-device. Create a new project
+    // under that client, scoped to ownerId. Uses survey_external_id for
+    // idempotency, same as CREATE_ORPHAN but with client_id populated.
+    const rows = await sql`
+      INSERT INTO projects (
+        user_id, client_id, name, status, system_type, notes, address, lat, lng,
+        origin, survey_external_id, survey_meta
+      ) VALUES (
+        ${ownerId},
+        ${linkResolution.clientId},
+        ${transformOutput.projectName},
+        'lead',
+        'roof',
+        '',
+        ${transformOutput.address ?? ''},
+        ${transformOutput.lat ?? null},
+        ${transformOutput.lng ?? null},
+        'survey',
+        ${linkResolution.surveyExternalId},
+        ${surveyMetaJson}::jsonb
+      )
+      ON CONFLICT (user_id, survey_external_id)
+        WHERE survey_external_id IS NOT NULL
+      DO UPDATE SET
+        name        = EXCLUDED.name,
+        client_id   = EXCLUDED.client_id,
+        address     = EXCLUDED.address,
+        lat         = EXCLUDED.lat,
+        lng         = EXCLUDED.lng,
+        survey_meta = EXCLUDED.survey_meta,
+        updated_at  = now()
+      RETURNING id, (xmax = 0) AS inserted
+    `;
+    const row = rows[0];
+    return {
+      projectId: row.id as string,
+      created: row.inserted === true || row.inserted === 'true',
+    };
+  }
+
   // TypeScript exhaustiveness - linkResolution.action='error' was already
   // handled upstream in runIngestPipeline before _upsertProject is called.
   throw new Error(`_upsertProject called with unhandled action="${(linkResolution as { action: string }).action}"`);

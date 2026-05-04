@@ -1,11 +1,16 @@
 // ============================================================================
-// v47.437 - Survey V2: Draft Defaults + JWT Pre-fill
+// v47.438 - Survey V2: Draft Defaults + JWT Pre-fill
 //
 // buildInitialDraft() creates a blank SurveyV2Draft pre-filled from the
 // decoded JWT handoff token claims. Called on first load of /survey/[token].
 //
 // If the token has already been started (localStorage key exists), the
 // existing draft is returned instead.
+//
+// v47.438: Standalone survey support.
+//   - decodeTokenClaims now accepts project_id === "__standalone__"
+//   - buildInitialDraft sets standalone=true and selectedClientId/ProjectId=null
+//     so the Step 1 picker is shown to the field worker.
 // ============================================================================
 
 import type {
@@ -16,13 +21,17 @@ import type {
   SurveyObstructions,
   SurveyPhotos,
 } from './types';
+import { STANDALONE_PROJECT_ID } from './types';
 
 // ---------------------------------------------------------------------------
 // HandoffClaims - decoded JWT payload shape (matches tokenMinter.ts)
 // ---------------------------------------------------------------------------
 export interface HandoffClaims {
   jti: string;
+  // project_id is "__standalone__" for field-worker self-initiated surveys.
   project_id: string;
+  // v47.438: standalone flag from the JWT.
+  standalone?: boolean;
   project_name?: string;
   site_name?: string;
   site_address?: string;
@@ -110,12 +119,29 @@ function blankPhotos(): SurveyPhotos {
 // buildInitialDraft
 //
 // Creates a fresh SurveyV2Draft from decoded JWT claims.
+//
+// For standalone surveys (project_id === "__standalone__"):
+//   - standalone: true is set
+//   - projectId: "__standalone__"
+//   - projectName: "" (field worker will set via picker)
+//   - selectedClientId/ProjectId: null (field worker will pick)
 // ---------------------------------------------------------------------------
 export function buildInitialDraft(claims: HandoffClaims): SurveyV2Draft {
+  const isStandalone =
+    claims.standalone === true || claims.project_id === STANDALONE_PROJECT_ID;
+
   return {
     token: '',
     projectId: claims.project_id,
-    projectName: claims.project_name ?? claims.site_name ?? claims.project_id,
+    projectName: isStandalone
+      ? ''
+      : (claims.project_name ?? claims.site_name ?? claims.project_id),
+
+    // v47.438: standalone fields
+    standalone: isStandalone || undefined,
+    selectedClientId: isStandalone ? null : undefined,
+    selectedProjectId: isStandalone ? null : undefined,
+
     siteOverview: blankSiteOverview(claims),
     roofConditions: blankRoofConditions(),
     electricalService: blankElectricalService(),
@@ -172,7 +198,10 @@ export function clearDraft(jti: string): void {
 // decodeTokenClaims
 //
 // Client-side JWT decode (no verification - server verifies on submit).
-// Returns null if token is malformed.
+// Returns null if token is malformed or missing required fields.
+//
+// v47.438: Accepts project_id === "__standalone__" as valid.
+// Previously required project_id to be a real project UUID.
 // ---------------------------------------------------------------------------
 export function decodeTokenClaims(token: string): HandoffClaims | null {
   try {
@@ -184,7 +213,10 @@ export function decodeTokenClaims(token: string): HandoffClaims | null {
     const pad = padded.length % 4;
     const paddedStr = pad ? padded + '='.repeat(4 - pad) : padded;
     const decoded = JSON.parse(atob(paddedStr));
-    if (!decoded.project_id || !decoded.jti) return null;
+    // Must have jti
+    if (!decoded.jti) return null;
+    // Must have project_id (can be "__standalone__" or a real UUID)
+    if (!decoded.project_id) return null;
     return decoded as HandoffClaims;
   } catch {
     return null;

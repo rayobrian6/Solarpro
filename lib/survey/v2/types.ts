@@ -1,5 +1,5 @@
 // ============================================================================
-// v47.437 - Survey V2: Core Types
+// v47.438 - Survey V2: Core Types
 //
 // SurveyV2Draft is the in-progress survey state stored in localStorage.
 // SurveyV2Payload is the final submitted payload sent to the ingest pipeline.
@@ -8,6 +8,10 @@
 //   - CAD engine: roof material, pitch, rafter spacing, obstructions
 //   - Electrical sizing: panel brand, rating, slots, interconnection
 //   - Permit plan set: stories, structure type, meter socket, service entrance
+//
+// v47.438 adds standalone survey support:
+//   - standalone: true when field worker self-initiates (no JWT project_id)
+//   - selectedClientId / selectedProjectId: on-device picker result
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -177,13 +181,43 @@ export interface SurveyPhotos {
 }
 
 // ---------------------------------------------------------------------------
+// SurveyLookupItem - returned by GET /api/survey/lookup-data
+// Used by the on-device client/project picker in standalone surveys.
+// ---------------------------------------------------------------------------
+export interface SurveyLookupClient {
+  id: string;
+  name: string;
+  address: string;
+}
+
+export interface SurveyLookupProject {
+  id: string;
+  name: string;
+  clientId: string | null;
+  clientName: string | null;
+  address: string | null;
+}
+
+export interface SurveyLookupData {
+  clients: SurveyLookupClient[];
+  projects: SurveyLookupProject[];
+}
+
+// ---------------------------------------------------------------------------
 // SurveyV2Draft - full in-progress state (stored in localStorage)
 // ---------------------------------------------------------------------------
 export interface SurveyV2Draft {
   // Token metadata
   token: string;
-  projectId: string;
+  projectId: string;     // "__standalone__" for self-initiated surveys
   projectName: string;
+
+  // v47.438: standalone survey fields
+  // standalone: true when survey was self-initiated (no JWT project_id).
+  // selectedClientId / selectedProjectId: set by on-device picker in Step 1.
+  standalone?: boolean;
+  selectedClientId?: string | null;
+  selectedProjectId?: string | null;
 
   // Step data
   siteOverview: SurveySiteOverview;
@@ -204,7 +238,7 @@ export interface SurveyV2Draft {
 export interface SurveyV2Payload {
   schemaVersion: '2.0';
   surveyId: string;         // jti from JWT
-  projectId: string;
+  projectId: string;        // "__standalone__" for standalone surveys
   submittedAt: string;
   inspectorName: string;
   siteOverview: SurveySiteOverview;
@@ -212,6 +246,10 @@ export interface SurveyV2Payload {
   electricalService: SurveyElectricalService;
   obstructions: SurveyObstructions;
   photos: SurveyPhoto[];
+
+  // v47.438: on-device picker selections (standalone surveys only)
+  selectedClientId?: string | null;
+  selectedProjectId?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -233,3 +271,8 @@ export const SURVEY_STEPS: SurveyStepConfig[] = [
   { id: 5, key: 'photos',      label: 'Photos',                   shortLabel: 'Photos',  required: true },
   { id: 6, key: 'review',      label: 'Review & Submit',          shortLabel: 'Submit',  required: true },
 ];
+
+// ---------------------------------------------------------------------------
+// Sentinel value for standalone surveys
+// ---------------------------------------------------------------------------
+export const STANDALONE_PROJECT_ID = '__standalone__';

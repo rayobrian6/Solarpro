@@ -31,6 +31,10 @@ interface SurveyShellProps {
   onNext: () => void;
   onSubmit: () => void;
   children: React.ReactNode;
+  /** True when the survey was started from standalone-handoff (no pre-linked project) */
+  standalone?: boolean;
+  /** True once the field worker has picked a client or project in Step 1 */
+  hasSelection?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +52,8 @@ export function SurveyShell({
   onNext,
   onSubmit,
   children,
+  standalone,
+  hasSelection,
 }: SurveyShellProps) {
   const isFirstStep = currentStep === 1;
   const isLastStep = currentStep === SURVEY_STEPS.length;
@@ -76,9 +82,16 @@ export function SurveyShell({
             <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
               Site Survey
             </p>
-            <h1 className="text-sm font-bold text-gray-900 truncate">
-              {projectName || 'Untitled Project'}
-            </h1>
+            {standalone && !hasSelection ? (
+              /* Amber prompt: nudges field worker to pick a client/project */
+              <h1 className="text-sm font-bold text-amber-500 truncate flex items-center gap-1">
+                Select a client or project
+              </h1>
+            ) : (
+              <h1 className="text-sm font-bold text-gray-900 truncate">
+                {projectName || 'Untitled Project'}
+              </h1>
+            )}
           </div>
 
           {/* Right: save status */}

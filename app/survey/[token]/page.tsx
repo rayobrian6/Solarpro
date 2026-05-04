@@ -1,11 +1,19 @@
 // ============================================================================
-// v47.437 - Survey V2: /survey/[token] page
+// v47.438 - Survey V2: /survey/[token] page
 //
 // Entry point for the field survey flow. On mount:
 //   1. Decodes the JWT token from the URL (client-side, no verification)
 //   2. Loads existing draft from localStorage (if resuming)
 //   3. Builds a fresh draft from JWT claims (if new survey)
 //   4. Renders the SurveyShell + current step component
+//
+// v47.438: Standalone survey support.
+//   When claims.standalone === true (project_id === "__standalone__"):
+//   - Fetches GET /api/survey/lookup-data?token=<jwt> to get clients+projects
+//   - Passes lookup data + picker callbacks to StepSiteOverview
+//   - Updates draft.selectedClientId / selectedProjectId on picker change
+//   - canAdvanceStep(1) requires a client OR project selection for standalone
+//   - Payload includes selectedClientId + selectedProjectId on submit
 //
 // All state is managed here and passed down to step components.
 // Draft is auto-saved to localStorage on every change (debounced 800ms).
@@ -21,9 +29,14 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import type { SurveyV2Draft, SurveyPhoto, SurveyV2Payload } from '../../../lib/survey/v2/types';
-import { REQUIRED_PHOTO_CATEGORIES } from '../../../lib/survey/v2/types';
+import { useParams } from 'next/navigation';
+import type {
+  SurveyV2Draft,
+  SurveyPhoto,
+  SurveyV2Payload,
+  SurveyLookupData,
+} from '../../../lib/survey/v2/types';
+import { REQUIRED_PHOTO_CATEGORIES, STANDALONE_PROJECT_ID } from '../../../lib/survey/v2/types';
 import {
   buildInitialDraft,
   decodeTokenClaims,
@@ -38,11 +51,12 @@ import { StepElectrical } from '../../../components/survey/StepElectrical';
 import { StepObstructions } from '../../../components/survey/StepObstructions';
 import { StepPhotos } from '../../../components/survey/StepPhotos';
 import { StepReview } from '../../../components/survey/StepReview';
-import type { SurveySiteOverview } from '../../../lib/survey/v2/types';
-import type { SurveyRoofConditions } from '../../../lib/survey/v2/types';
-import type { SurveyElectricalService } from '../../../lib/survey/v2/types';
-import type { SurveyObstructions } from '../../../lib/survey/v2/types';
-import type { SurveyPhotos } from '../../../lib/survey/v2/types';
+import type {
+  SurveySiteOverview,
+  SurveyRoofConditions,
+  SurveyElectricalService,
+  SurveyObstructions,
+} from '../../../lib/survey/v2/types';
 
 // ---------------------------------------------------------------------------
 // canAdvanceStep - validates required fields before allowing Next
@@ -51,6 +65,11 @@ function canAdvanceStep(draft: SurveyV2Draft, step: number): boolean {
   switch (step) {
     case 1: {
       const s = draft.siteOverview;
+      // v47.438: standalone surveys also require a client or project selection
+      if (draft.standalone) {
+        const hasSelection = !!(draft.selectedProjectId || draft.selectedClientId);
+        if (!hasSelection) return false;
+      }
       return !!(
         s.projectName.trim() &&
         s.siteAddress.trim() &&
@@ -97,16 +116,20 @@ function canAdvanceStep(draft: SurveyV2Draft, step: number): boolean {
 // ---------------------------------------------------------------------------
 export default function SurveyPage() {
   const params = useParams();
-  const router = useRouter();
   const token = typeof params?.token === 'string' ? params.token : '';
 
-  // State
+  // Core survey state
   const [draft, setDraft] = useState<SurveyV2Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitDone, setSubmitDone] = useState(false);
+
+  // v47.438: lookup data for standalone survey picker
+  const [lookupData, setLookupData] = useState<SurveyLookupData | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   // Auto-save debounce ref
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -141,6 +164,24 @@ export default function SurveyPage() {
     } else {
       const fresh = buildInitialDraft(claims);
       setDraft({ ...fresh, token });
+    }
+
+    // v47.438: if standalone, fetch lookup data for the client/project picker
+    const isStandalone =
+      claims.standalone === true || claims.project_id === STANDALONE_PROJECT_ID;
+    if (isStandalone) {
+      setLookupLoading(true);
+      fetch(`/api/survey/lookup-data?token=${encodeURIComponent(token)}`)
+        .then((res) => res.json())
+        .then((body) => {
+          if (body.success && body.data) {
+            setLookupData(body.data as SurveyLookupData);
+          } else {
+            setLookupError(body.error ?? 'Failed to load client list');
+          }
+        })
+        .catch(() => setLookupError('Network error loading client list'))
+        .finally(() => setLookupLoading(false));
     }
   }, [token]);
 
@@ -212,6 +253,42 @@ export default function SurveyPage() {
     });
   }
 
+  // v47.438: picker callbacks
+  function handleSelectClient(clientId: string, clientName: string) {
+    updateDraft({
+      selectedClientId: clientId,
+      selectedProjectId: null,
+      // Auto-fill projectName hint for the field worker
+      siteOverview: draft
+        ? { ...draft.siteOverview, projectName: draft.siteOverview.projectName || clientName }
+        : draft?.siteOverview ?? {} as SurveySiteOverview,
+    });
+  }
+
+  function handleSelectProject(projectId: string, projectName: string) {
+    // Find client info from lookup data for pre-filling
+    const proj = lookupData?.projects.find((p) => p.id === projectId);
+    updateDraft({
+      selectedProjectId: projectId,
+      selectedClientId: proj?.clientId ?? null,
+      projectName,
+      siteOverview: draft
+        ? {
+            ...draft.siteOverview,
+            projectName: projectName,
+            siteAddress: draft.siteOverview.siteAddress || (proj?.address ?? ''),
+          }
+        : draft?.siteOverview ?? {} as SurveySiteOverview,
+    });
+  }
+
+  function handleClearSelection() {
+    updateDraft({
+      selectedClientId: null,
+      selectedProjectId: null,
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Navigation
   // ---------------------------------------------------------------------------
@@ -260,6 +337,9 @@ export default function SurveyPage() {
         electricalService: draft.electricalService,
         obstructions: draft.obstructions,
         photos: draft.photos.photos,
+        // v47.438: include picker selections for standalone surveys
+        selectedClientId: draft.selectedClientId ?? null,
+        selectedProjectId: draft.selectedProjectId ?? null,
       };
 
       const res = await fetch('/api/survey/submit', {
@@ -324,7 +404,7 @@ export default function SurveyPage() {
           <h1 className="text-base font-bold text-gray-900">Survey Submitted!</h1>
           <p className="text-sm text-gray-500">
             Your survey for{' '}
-            <span className="font-semibold">{draft?.projectName}</span> has been
+            <span className="font-semibold">{draft?.projectName || draft?.siteOverview?.projectName}</span> has been
             submitted successfully.
           </p>
           <p className="text-xs text-gray-400">
@@ -357,9 +437,18 @@ export default function SurveyPage() {
   // ---------------------------------------------------------------------------
   const canAdvance = canAdvanceStep(draft, draft.currentStep);
 
+  // Shell header: show "Select client..." amber text when standalone + no selection yet
+  const displayProjectName = (() => {
+    if (!draft.standalone) return draft.projectName;
+    if (draft.selectedProjectId || draft.selectedClientId) {
+      return draft.projectName || draft.siteOverview.projectName || 'Survey In Progress';
+    }
+    return '';  // SurveyShell shows "Untitled Project" fallback — we override below
+  })();
+
   return (
     <SurveyShell
-      projectName={draft.projectName}
+      projectName={displayProjectName}
       currentStep={draft.currentStep}
       completedSteps={draft.completedSteps}
       lastSavedAt={draft.lastSavedAt}
@@ -369,12 +458,24 @@ export default function SurveyPage() {
       onBack={handleBack}
       onNext={handleNext}
       onSubmit={handleSubmit}
+      standalone={draft.standalone}
+      hasSelection={!!(draft.selectedProjectId || draft.selectedClientId)}
     >
       {draft.currentStep === 1 && (
         <StepSiteOverview
           data={draft.siteOverview}
           onChange={handleSiteOverview}
           disabled={submitting}
+          standalone={draft.standalone}
+          lookupClients={lookupData?.clients ?? []}
+          lookupProjects={lookupData?.projects ?? []}
+          lookupLoading={lookupLoading}
+          lookupError={lookupError}
+          selectedClientId={draft.selectedClientId}
+          selectedProjectId={draft.selectedProjectId}
+          onSelectClient={handleSelectClient}
+          onSelectProject={handleSelectProject}
+          onClearSelection={handleClearSelection}
         />
       )}
       {draft.currentStep === 2 && (

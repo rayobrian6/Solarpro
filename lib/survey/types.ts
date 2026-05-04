@@ -85,6 +85,16 @@ export interface SurveyCompletedEvent {
   inspector_name?: string | null;
   /** Inspector email if sent by the partner app. Used for email-based owner resolution. */
   inspector_email?: string | null;
+  // -- v47.438: On-device picker selections (standalone surveys only) ---------
+  // Set when the field worker used the client/project picker on Step 1.
+  // Null/absent for project-specific surveys (project_id was in the JWT).
+  /** SolarPro project UUID selected by the field worker on-device. When present,
+   *  ingest attaches the survey directly to this project. */
+  solarpro_selected_project_id?: string | null;
+  /** SolarPro client UUID selected by the field worker on-device. When present
+   *  (and solarpro_selected_project_id is absent), ingest creates a new project
+   *  under this client and attaches the survey to it. */
+  solarpro_selected_client_id?: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -35,6 +35,8 @@ const baseContext: IngestContext = {
   ownerId: 'user-owner-test',
   ownerSource: 'default',
   partnerProjectId: null,
+  selectedProjectId: null,
+  selectedClientId: null,
   receivedAt: '2025-04-23T10:00:01.000Z',
   traceId: 'delivery-test-001',
 };

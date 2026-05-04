@@ -1,22 +1,28 @@
 // ============================================================================
-// v47.435 Stage 9.2 — Survey Ingest: Project Link Resolver
+// v47.438 - Survey Ingest: Project Link Resolver
 //
 // Determines WHERE in SolarPro a survey delivery should be written.
 //
-// Q8 (BLOCKING): "What should we do when the thin event carries no
-// project_id?" — answered via SURVEY_PROJECT_LINK_STRATEGY env var.
+// Resolution priority (highest to lowest):
 //
-// Until Q8 is answered the default strategy is CREATE_ORPHAN:
-//   - Every new survey creates a new SolarPro project with origin='survey'
-//     and survey_external_id=event.survey_id for idempotency.
-//   - If a project with that survey_external_id already exists for the owner,
-//     the pipeline updates it (idempotency guarantee from the
-//     idx_projects_survey_external_id_user unique index).
+//   1. selectedProjectId (v47.438) — field worker picked an existing project
+//      on-device via the standalone survey picker. Attach directly to it.
 //
-// When Q8 is answered, switch SURVEY_PROJECT_LINK_STRATEGY to the chosen
-// value and implement the ATTACH_TO_EXISTING / TRIAGE_QUEUE branches below.
-// The pipeline calls this resolver and acts on the returned LinkResolution —
-// zero changes to runIngestPipeline() are needed for strategy changes.
+//   2. selectedClientId (v47.438) — field worker picked a client on-device.
+//      Create a new project under that client (create_under_client action).
+//      The ingest pipeline will also check if the field worker selected an
+//      existing project from that client's list (handled by selectedProjectId).
+//
+//   3. partnerProjectId — JWT had a project_id (PM-initiated flow, unchanged).
+//      Attach to that project.
+//
+//   4. No project reference — create orphan (existing fallback, unchanged).
+//
+//   TRIAGE_QUEUE env override — bypasses all per-event routing.
+//
+// This function is PURE with respect to the DB — it does not query anything.
+// All DB operations are performed in ingestPipeline.ts after receiving the
+// LinkResolution.
 // ============================================================================
 
 import type {
@@ -28,12 +34,10 @@ import {
   SURVEY_PROJECT_LINK_STRATEGIES,
   DEFAULT_SURVEY_PROJECT_LINK_STRATEGY,
 } from './types';
+import { isValidUUID } from '@/lib/db-neon';
 
 // ---------------------------------------------------------------------------
 // resolveProjectLinkStrategy — reads env var, validates, returns strategy.
-//
-// Exported separately so tests can verify strategy resolution without a
-// full IngestContext.
 // ---------------------------------------------------------------------------
 export function resolveProjectLinkStrategy(): SurveyProjectLinkStrategy {
   const raw = process.env.SURVEY_PROJECT_LINK_STRATEGY?.trim().toUpperCase();
@@ -55,68 +59,88 @@ export function resolveProjectLinkStrategy(): SurveyProjectLinkStrategy {
 // resolveProjectLink — main entry point.
 //
 // Accepts the full IngestContext so each strategy branch has access to
-// event fields, partnerProjectId, ownerId, and traceId.
-//
-// This function is PURE with respect to the DB — it does not query anything.
-// The pipeline orchestrator (ingestPipeline.ts) performs any required DB
-// lookups AFTER receiving the resolution. This keeps the resolver fast,
-// synchronous, and easily testable.
-//
-// Exception: ATTACH_TO_EXISTING will need a DB lookup to verify the project
-// exists and belongs to ownerId. That lookup is done in the pipeline using
-// the returned projectId hint. The resolver just decides the action and
-// provides the necessary identifiers.
+// event fields, partnerProjectId, selectedProjectId, selectedClientId,
+// ownerId, and traceId.
 // ---------------------------------------------------------------------------
 export function resolveProjectLink(
   context: IngestContext,
   strategy?: SurveyProjectLinkStrategy,
 ): LinkResolution {
   const effectiveStrategy = strategy ?? resolveProjectLinkStrategy();
-  const { event, partnerProjectId, traceId } = context;
+  const {
+    event,
+    partnerProjectId,
+    selectedProjectId,
+    selectedClientId,
+    traceId,
+  } = context;
 
-  // Q8 ANSWERED (v60.5): per-event routing.
-  //   Case 1 — event carries solarpro_project_id (partnerProjectId):
-  //            ATTACH to that project. This is the "Start Survey from project"
-  //            flow - JWT had project_id.
-  //   Case 2 — event carries NO solarpro_project_id:
-  //            CREATE a new project automatically under the SSO user's
-  //            account. This is the "user logs into app and starts a
-  //            survey from scratch" flow. The owner is already resolved
-  //            upstream via resolveIngestOwner(solarpro_user_id).
-  //
-  // The env-configured strategy is honoured as an OVERRIDE only when it is
-  // TRIAGE_QUEUE (ops wants manual review of everything). Otherwise per-event
-  // routing is the default behaviour.
-  if (effectiveStrategy !== 'TRIAGE_QUEUE') {
-    if (partnerProjectId) {
-      return {
-        action: 'attach',
-        projectId: partnerProjectId,
-      };
-    }
-    // No project_id on the event — auto-create under the SSO user.
+  // TRIAGE_QUEUE is an ops-level override — park everything for manual review
+  // regardless of any per-event routing.
+  if (effectiveStrategy === 'TRIAGE_QUEUE') {
+    console.log(
+      `[projectLinkResolver] TRIAGE_QUEUE override active — triaging survey_id=${event.survey_id} traceId=${traceId}`,
+    );
     return {
-      action: 'create',
+      action: 'triage',
       surveyExternalId: event.survey_id,
-      strategy: 'CREATE_ORPHAN',
+      reason:
+        'TRIAGE_QUEUE strategy is configured. All survey deliveries require ' +
+        'manual ops review before project linkage.',
     };
   }
 
-  // At this point effectiveStrategy === 'TRIAGE_QUEUE' by the guard above.
-  // (The other two enum values are handled by per-event routing.)
-  //
-  // TRIAGE_QUEUE is an ops-level "pause the world" switch: every survey is
-  // parked for manual review regardless of whether partnerProjectId is set.
-  // We explicitly log traceId so ops can correlate triage rows back to the
-  // originating webhook delivery.
+  // -------------------------------------------------------------------------
+  // Per-event routing (priority order)
+  // -------------------------------------------------------------------------
+
+  // Priority 1 (v47.438): On-device picker — field worker selected an
+  // existing project. Attach directly to it.
+  if (selectedProjectId && isValidUUID(selectedProjectId)) {
+    console.log(
+      `[projectLinkResolver] Strategy: attach (on-device project pick) ` +
+      `projectId=${selectedProjectId} survey_id=${event.survey_id} traceId=${traceId}`,
+    );
+    return {
+      action: 'attach',
+      projectId: selectedProjectId,
+    };
+  }
+
+  // Priority 2 (v47.438): On-device picker — field worker selected a client.
+  // Create a new project under that client.
+  if (selectedClientId && isValidUUID(selectedClientId)) {
+    console.log(
+      `[projectLinkResolver] Strategy: create_under_client (on-device client pick) ` +
+      `clientId=${selectedClientId} survey_id=${event.survey_id} traceId=${traceId}`,
+    );
+    return {
+      action: 'create_under_client',
+      clientId: selectedClientId,
+      surveyExternalId: event.survey_id,
+    };
+  }
+
+  // Priority 3: PM-initiated flow — JWT had project_id. Attach to it.
+  if (partnerProjectId) {
+    console.log(
+      `[projectLinkResolver] Strategy: attach (JWT project_id) ` +
+      `projectId=${partnerProjectId} survey_id=${event.survey_id} traceId=${traceId}`,
+    );
+    return {
+      action: 'attach',
+      projectId: partnerProjectId,
+    };
+  }
+
+  // Priority 4: No project reference — auto-create orphan under SSO user.
   console.log(
-    `[projectLinkResolver] TRIAGE_QUEUE override active — triaging survey_id=${event.survey_id} traceId=${traceId}`,
+    `[projectLinkResolver] Strategy: create orphan ` +
+    `survey_id=${event.survey_id} traceId=${traceId}`,
   );
   return {
-    action: 'triage',
+    action: 'create',
     surveyExternalId: event.survey_id,
-    reason:
-      'TRIAGE_QUEUE strategy is configured. All survey deliveries require ' +
-      'manual ops review before project linkage.',
+    strategy: 'CREATE_ORPHAN',
   };
 }
