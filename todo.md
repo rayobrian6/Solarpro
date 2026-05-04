@@ -16,11 +16,12 @@
 - [x] Update JSON schema in prompt to include suggestedActions[] + nextStep
 
 ## Phase 4: Frontend — SolarDog.tsx
-- [ ] Add suggestedActions rendering (clickable action buttons from LLM response)
-- [ ] Add postUIEvent() helper to send actionId events back on button click
-- [ ] Wire engineering page context (visibleWarnings, visibleButtons, etc.) from live state
-- [ ] Accept recentEvents in sendMessage() context payload
+- [x] Add suggestedActions rendering (clickable action buttons from LLM response)
+- [x] Add postUIEvent() helper to send actionId events back on button click
+- [x] Accept recentEvents in sendMessage() context payload + clear after send
+- [x] Add nextStep pill display under assistant messages
+- [x] ChatMessage interface: suggestedActions[], nextStep fields
 
 ## Phase 5: Verify
-- [ ] TypeScript compile (tsc --noEmit)
-- [ ] Commit + push to dev
+- [x] TypeScript compile (tsc --noEmit) — 0 errors
+- [x] Commit + push to dev (e8249e2)
