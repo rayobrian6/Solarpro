@@ -25,6 +25,7 @@ import { buildContext, formatContextMessage, type UIEvent } from '@/lib/solardog
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 60; // SolarDog: DB queries + optional OpenAI call needs headroom
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

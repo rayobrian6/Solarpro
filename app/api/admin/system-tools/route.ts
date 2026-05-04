@@ -9,6 +9,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 60; // seed_utility_policies runs ~120 upserts; needs headroom
 
 // POST /api/admin/system-tools  { tool: string }
 export async function POST(req: NextRequest) {
@@ -788,26 +789,32 @@ export async function POST(req: NextRequest) {
           { name: 'El Paso Electric',            state: 'NM', nm: true,  limit_kw: 80,    buyback: 0.118, structure: 'Flat',            notes: 'NM NEM retail; RS flat; NM/TX border 2024' },
         ];
 
+        // PERF FIX: Replaced ~240 serial DB queries with batched parallel upserts.
+        // Process utilities in batches of 20 concurrent upserts to stay within
+        // Neon connection limits while still being much faster than sequential.
         let seedCount = 0;
         const seedLog: string[] = [];
-        for (const u of utilitySeeds) {
-          try {
-            const updated = await sql`
-              UPDATE utility_policies SET
-                net_metering             = ${u.nm},
-                interconnection_limit_kw = ${u.limit_kw},
-                buyback_rate             = ${u.buyback},
-                rate_structure           = ${u.structure},
-                notes                    = ${u.notes},
-                updated_at               = NOW()
-              WHERE LOWER(TRIM(utility_name)) = LOWER(TRIM(${u.name}))
-                AND state = ${u.state}
-              RETURNING id
-            `;
-            if (updated.length > 0) {
-              seedCount++;
-              seedLog.push(`updated: ${u.name} (${u.state})`);
-            } else {
+        const BATCH_SIZE = 20;
+
+        for (let i = 0; i < utilitySeeds.length; i += BATCH_SIZE) {
+          const batch = utilitySeeds.slice(i, i + BATCH_SIZE);
+          const results = await Promise.allSettled(
+            batch.map(async (u) => {
+              const updated = await sql`
+                UPDATE utility_policies SET
+                  net_metering             = ${u.nm},
+                  interconnection_limit_kw = ${u.limit_kw},
+                  buyback_rate             = ${u.buyback},
+                  rate_structure           = ${u.structure},
+                  notes                    = ${u.notes},
+                  updated_at               = NOW()
+                WHERE LOWER(TRIM(utility_name)) = LOWER(TRIM(${u.name}))
+                  AND state = ${u.state}
+                RETURNING id
+              `;
+              if (updated.length > 0) {
+                return { action: 'updated', name: u.name, state: u.state };
+              }
               await sql`
                 INSERT INTO utility_policies
                   (utility_name, state, country, net_metering,
@@ -817,11 +824,17 @@ export async function POST(req: NextRequest) {
                    ${u.limit_kw}, ${u.buyback}, ${u.structure}, ${u.notes}, 'seeded')
                 ON CONFLICT DO NOTHING
               `;
+              return { action: 'inserted', name: u.name, state: u.state };
+            })
+          );
+
+          for (const result of results) {
+            if (result.status === 'fulfilled') {
               seedCount++;
-              seedLog.push(`inserted: ${u.name} (${u.state})`);
+              seedLog.push(`${result.value.action}: ${result.value.name} (${result.value.state})`);
+            } else {
+              seedLog.push(`FAILED: ${(result.reason as Error).message}`);
             }
-          } catch (e: unknown) {
-            seedLog.push(`FAILED: ${u.name} (${u.state}) — ${(e as Error).message}`);
           }
         }
         await logAdminAction({

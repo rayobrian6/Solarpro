@@ -1,27 +1,16 @@
-# Context Injection Layer — Implementation
+# SolarPro API Audit & Fix
 
-## Phase 1: Core files
-- [x] Create lib/solardog/uiMap.ts — canonical UI_MAP with engineering actions/panels
-- [x] Create lib/solardog/workflow.ts — WORKFLOW graph for all major flows
-- [x] Create lib/solardog/buildContext.ts — buildContext() assembling full CONTEXT_JSON
+## P0 Fixes (1166ms root causes)
+- [ ] Fix `productions` JOIN — wrap in LATERAL LIMIT 1 in getProjectsByUser + getProjectsByClient
+- [ ] Reduce BASE_DELAY_MS 300→50ms in db-ready.ts
+- [ ] Add 60s role cache to requireAdminApi in adminAuth.ts
+- [ ] Fix API latency thresholds in health dashboard (500→800 ok, 1500→2000 warning)
+- [ ] Add maxDuration=30 to assistant route + other missing routes
+- [ ] Add maxDuration to system-tools route + fix seed_utility_policies sequential loop
+- [ ] Add migration 018 for site_aliases table, remove CREATE TABLE from runtime
 
-## Phase 2: API layer
-- [x] Update AssistantRequest type in route.ts to accept uiContext + recentEvents
-- [x] Add suggestedActions[] to AssistantResponse type (id, label, confidence)
-- [x] Inject CONTEXT_JSON as second system message in the LLM call
-- [x] Add recentEvents support (UI_EVENTs posted from frontend)
+## P1 Fixes
+- [ ] Verify migration 017 and commit all changes to dev
 
-## Phase 3: System prompt patch
-- [x] Add CONTEXT_JSON truth rules to system prompt
-- [x] Update JSON schema in prompt to include suggestedActions[] + nextStep
-
-## Phase 4: Frontend — SolarDog.tsx
-- [x] Add suggestedActions rendering (clickable action buttons from LLM response)
-- [x] Add postUIEvent() helper to send actionId events back on button click
-- [x] Accept recentEvents in sendMessage() context payload + clear after send
-- [x] Add nextStep pill display under assistant messages
-- [x] ChatMessage interface: suggestedActions[], nextStep fields
-
-## Phase 5: Verify
-- [x] TypeScript compile (tsc --noEmit) — 0 errors
-- [x] Commit + push to dev (e8249e2)
+## Completion
+- [ ] Push all changes to origin/dev

@@ -3,6 +3,7 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
+export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
+export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 

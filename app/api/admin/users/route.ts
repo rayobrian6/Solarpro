@@ -5,6 +5,7 @@ import { logAdminAction } from '@/lib/adminActivityLog';
 import crypto from 'crypto';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
+export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 

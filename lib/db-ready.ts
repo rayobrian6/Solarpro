@@ -64,8 +64,11 @@ type SqlExecutor = NeonQueryFunction<false, false>;
 // v47.9: Reduced from 3 retries (1s/2s/4s = 7s) to 5 retries (300ms/600ms/1200ms/2400ms/4800ms = 9.1s)
 // Shorter initial delays mean Neon wakes before retry 2 in most cases.
 // Total budget ~9s fits within maxDuration=30 on auth routes with room for the actual query.
+// PERF FIX: Reduced BASE_DELAY_MS from 300ms to 50ms. Neon typically wakes within 200-800ms
+// so a 50ms first retry wastes far less wall-clock time than the previous 300ms.
+// Retry schedule: 50ms, 100ms, 200ms, 400ms, 800ms (total budget ~1.55s vs old ~9.1s)
 const MAX_RETRIES   = 5;
-const BASE_DELAY_MS = 300;  // 300ms, 600ms, 1200ms, 2400ms, 4800ms
+const BASE_DELAY_MS = 50;  // 50ms, 100ms, 200ms, 400ms, 800ms
 
 // ─── Module-level singleton ───────────────────────────────────────────────────
 //

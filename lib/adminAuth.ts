@@ -11,6 +11,33 @@ export type AdminUser = {
   role: 'admin' | 'super_admin';
 };
 
+// ─── In-memory role cache ────────────────────────────────────────────────────
+// Caches DB role lookups for 60 seconds per function instance.
+// Eliminates one DB round-trip per admin API request on warm instances.
+// Security: role changes propagate within 60s max (cache TTL).
+// This cache is per-Vercel-function-instance (module scope) — not shared globally.
+interface RoleCacheEntry {
+  user: AdminUser;
+  expiresAt: number;
+}
+const _roleCache = new Map<string, RoleCacheEntry>();
+const ROLE_CACHE_TTL_MS = 60_000; // 60 seconds
+
+function getRoleCached(userId: string): AdminUser | null {
+  const entry = _roleCache.get(userId);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    _roleCache.delete(userId);
+    return null;
+  }
+  return entry.user;
+}
+
+function setRoleCached(user: AdminUser): void {
+  _roleCache.set(user.id, { user, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function isAdminRole(role?: string | null): role is 'admin' | 'super_admin' {
   return role === 'admin' || role === 'super_admin';
 }
@@ -86,8 +113,11 @@ export async function requireAdmin(): Promise<AdminUser> {
 
 /**
  * API ROUTE admin guard.
- * Role is NEVER read from JWT — always fetched from DB.
+ * Role is NEVER read from JWT — always fetched from DB (or 60s in-memory cache).
  * Uses getDbReady() with retry to handle Vercel cold starts after deployment.
+ *
+ * PERF: In-memory role cache (60s TTL) eliminates the per-request DB round-trip
+ * on warm function instances. Cache is per-Vercel-function-instance (module scope).
  */
 export async function requireAdminApi(req: NextRequest): Promise<AdminUser | null> {
   const cookieHeader = req.headers.get('cookie') || '';
@@ -96,6 +126,10 @@ export async function requireAdminApi(req: NextRequest): Promise<AdminUser | nul
 
   const jwtUser = verifyToken(match[1]);
   if (!jwtUser?.id) return null;
+
+  // Check in-memory cache first — avoids DB hit on warm instances
+  const cached = getRoleCached(jwtUser.id);
+  if (cached) return cached;
 
   try {
     const sql = await getDbReady();
@@ -110,12 +144,16 @@ export async function requireAdminApi(req: NextRequest): Promise<AdminUser | nul
     const dbUser = rows[0] as { id: string; name: string; email: string; role: string };
     if (!isAdminRole(dbUser.role)) return null;
 
-    return {
+    const adminUser: AdminUser = {
       id:    dbUser.id,
       name:  dbUser.name,
       email: dbUser.email,
       role:  dbUser.role as 'admin' | 'super_admin',
     };
+
+    // Cache the result for 60 seconds
+    setRoleCached(adminUser);
+    return adminUser;
   } catch {
     return null;
   }

@@ -610,7 +610,11 @@ export async function getProjectsByUser(userId: string): Promise<Project[]> {
              lo.map_center AS _lo_map_center, lo.map_zoom AS _lo_map_zoom,
              lo.created_at AS _lo_created_at, lo.updated_at AS _lo_updated_at
       FROM projects p
-      LEFT JOIN productions prod ON prod.project_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT data_json FROM productions pr
+        WHERE pr.project_id = p.id
+        ORDER BY pr.calculated_at DESC LIMIT 1
+      ) prod ON true
       LEFT JOIN LATERAL (
         SELECT * FROM proposals pr2
         WHERE pr2.project_id = p.id AND pr2.user_id = ${userId}
@@ -662,7 +666,11 @@ export async function getProjectsByClient(clientId: string, userId: string): Pro
              lo.map_center AS _lo_map_center, lo.map_zoom AS _lo_map_zoom,
              lo.created_at AS _lo_created_at, lo.updated_at AS _lo_updated_at
       FROM projects p
-      LEFT JOIN productions prod ON prod.project_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT data_json FROM productions pr
+        WHERE pr.project_id = p.id
+        ORDER BY pr.calculated_at DESC LIMIT 1
+      ) prod ON true
       LEFT JOIN LATERAL (
         SELECT * FROM proposals pr2
         WHERE pr2.project_id = p.id AND pr2.user_id = ${userId}
@@ -1942,19 +1950,8 @@ export async function solardogSaveAlias(
     if (!isValidUUID(userId)) return;
     const sql = await getDbReady();
 
-    // Auto-create table if missing
-    await sql`
-      CREATE TABLE IF NOT EXISTS site_aliases (
-        id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id    UUID NOT NULL,
-        phrase     TEXT NOT NULL,
-        route      TEXT NOT NULL,
-        label      TEXT NOT NULL DEFAULT '',
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        UNIQUE(user_id, phrase)
-      )
-    `;
-
+    // NOTE: site_aliases table is created by migration 018_site_aliases.sql
+    // The previous runtime CREATE TABLE IF NOT EXISTS has been moved to the migration.
     await sql`
       INSERT INTO site_aliases (user_id, phrase, route, label)
       VALUES (${userId}, ${phrase.toLowerCase().trim().substring(0, 200)}, ${route.substring(0, 500)}, ${label.substring(0, 200)})

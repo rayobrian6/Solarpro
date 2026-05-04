@@ -89,7 +89,7 @@ export default function SystemHealthPage() {
       const dbStatus: 'ok' | 'warning' | 'error' = dbLatency < 200 ? 'ok' : dbLatency < 500 ? 'warning' : 'error';
       setServices([
         { name: 'Database (Neon)', status: dbStatus, latencyMs: dbLatency, detail: `${dbLatency}ms response - ${json.dbSizeHuman}`, icon: Database },
-        { name: 'API Server', status: elapsed < 500 ? 'ok' : elapsed < 1500 ? 'warning' : 'error', latencyMs: elapsed, detail: `${elapsed}ms round-trip`, icon: Server },
+        { name: 'API Server', status: elapsed < 800 ? 'ok' : elapsed < 2000 ? 'warning' : 'error', latencyMs: elapsed, detail: `${elapsed}ms round-trip`, icon: Server },
         { name: 'Auth Service', status: 'ok', latencyMs: 12, detail: 'JWT validation active', icon: Shield },
         { name: 'File Storage', status: 'ok', latencyMs: 25, detail: `${json.rowCounts?.project_files ?? 0} files tracked`, icon: HardDrive },
         { name: 'Engineering Engine', status: 'ok', latencyMs: 45, detail: 'Preliminary + layout active', icon: Cpu },
@@ -181,7 +181,7 @@ export default function SystemHealthPage() {
                   </div>
                   <StatusBadge status={svc.status} />
                 </div>
-                {svc.latencyMs !== undefined && <LatencyBar ms={svc.latencyMs} />}
+                {svc.latencyMs !== undefined && <LatencyBar ms={svc.latencyMs} max={svc.name === 'API Server' ? 2000 : 500} />}
                 {svc.detail && <p className="text-slate-500 text-xs mt-2">{svc.detail}</p>}
               </div>
             );

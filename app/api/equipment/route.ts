@@ -5,6 +5,7 @@ import {
   RACKING_SYSTEMS, CONDUCTORS, CONDUITS
 } from '@/lib/equipment-db';
 
+export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 

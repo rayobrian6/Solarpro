@@ -2,6 +2,7 @@
  * GET  /api/admin/feedback       — List all feedback (admin only)
  * POST /api/admin/feedback       — Update feedback status (admin only)
  */
+export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
