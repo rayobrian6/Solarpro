@@ -123,14 +123,45 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     }
 
-    // Save version snapshot (async, non-blocking for response)
+    // Save version snapshot (async, non-blocking for response).
+    // PERF FIX: Strip heavy per-panel computed fields (ECEF vectors, legacy pixel coords)
+    // before storing. These are re-computed at render time and bloat each snapshot row.
+    // We retain all fields needed for restore: lat/lng, tilt, azimuth, wattage, planeId,
+    // gridRow/gridCol, orientation, systemType, arrayId, and the metric coordinate fields.
+    const trimmedPanels = (savedLayout.panels ?? []).map((p) => ({
+      id: p.id,
+      layoutId: p.layoutId,
+      lat: p.lat,
+      lng: p.lng,
+      xFeet: p.xFeet,
+      yFeet: p.yFeet,
+      widthFeet: p.widthFeet,
+      heightFeet: p.heightFeet,
+      tilt: p.tilt,
+      azimuth: p.azimuth,
+      wattage: p.wattage,
+      bifacialGain: p.bifacialGain,
+      row: p.row,
+      col: p.col,
+      systemType: p.systemType,
+      arrayId: p.arrayId,
+      orientation: p.orientation,
+      planeId: p.planeId,
+      gridRow: p.gridRow,
+      gridCol: p.gridCol,
+      placementType: p.placementType,
+      layoutSource: p.layoutSource,
+      // Note: ecefNx/Ny/Nz, ecefUx/Uy/Uz, x, y, xMeters, yMeters intentionally omitted
+      // (re-computed at render time — not needed for version restore)
+    }));
+    const trimmedLayout = { ...savedLayout, panels: trimmedPanels };
     saveProjectVersion({
       projectId,
       userId: user.id,
       snapshot: {
         projectId,
         projectName: project.name,
-        layout:      savedLayout,
+        layout:      trimmedLayout,
         savedAt:     new Date().toISOString(),
       },
       panelsCount:   totalPanels,

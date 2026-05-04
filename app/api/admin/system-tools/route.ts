@@ -192,6 +192,84 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      case 'perf_audit': {
+        // Phase 1: Table sizes and row counts
+        const tableSizes = await sql`
+          SELECT
+            relname AS table_name,
+            pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
+            pg_size_pretty(pg_relation_size(relid)) AS table_size,
+            pg_size_pretty(pg_total_relation_size(relid) - pg_relation_size(relid)) AS index_size,
+            n_live_tup AS live_rows,
+            n_dead_tup AS dead_rows,
+            last_vacuum,
+            last_autovacuum,
+            last_analyze,
+            last_autoanalyze
+          FROM pg_stat_user_tables
+          ORDER BY pg_total_relation_size(relid) DESC
+          LIMIT 20
+        `.catch(() => []);
+
+        // Phase 2: Index usage stats
+        const indexStats = await sql`
+          SELECT
+            schemaname,
+            tablename,
+            indexname,
+            idx_scan AS scans,
+            idx_tup_read AS tuples_read,
+            idx_tup_fetch AS tuples_fetched,
+            pg_size_pretty(pg_relation_size(indexrelid)) AS index_size
+          FROM pg_stat_user_indexes
+          WHERE tablename IN ('project_versions','layouts','proposals','productions','projects')
+          ORDER BY tablename, idx_scan DESC
+        `.catch(() => []);
+
+        // Phase 3: Slow query candidates — check project_versions row count
+        const versionStats = await sql`
+          SELECT
+            project_id,
+            COUNT(*) AS version_count,
+            MAX(version_number) AS max_version,
+            pg_size_pretty(SUM(octet_length(snapshot::text))::bigint) AS total_snapshot_bytes
+          FROM project_versions
+          GROUP BY project_id
+          ORDER BY version_count DESC
+          LIMIT 10
+        `.catch(() => []);
+
+        // Phase 4: Avg snapshot size
+        const snapshotSizeStats = await sql`
+          SELECT
+            COUNT(*) AS total_versions,
+            pg_size_pretty(AVG(octet_length(snapshot::text))::bigint) AS avg_snapshot_size,
+            pg_size_pretty(MAX(octet_length(snapshot::text))::bigint) AS max_snapshot_size,
+            pg_size_pretty(SUM(octet_length(snapshot::text))::bigint) AS total_snapshot_size
+          FROM project_versions
+        `.catch(() => []);
+
+        // Phase 5: Check which indexes exist on project_versions
+        const versionIndexes = await sql`
+          SELECT indexname, indexdef
+          FROM pg_indexes
+          WHERE tablename = 'project_versions'
+        `.catch(() => []);
+
+        await logAdminAction({ adminId: admin.id, action: 'perf_audit', metadata: {} });
+        return NextResponse.json({
+          success: true,
+          audit: {
+            tableSizes,
+            indexStats,
+            versionStats,
+            snapshotSizeStats,
+            versionIndexes,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+
       case 'repair_system_types': {
         // Fix corrupted system_type values in projects and layouts tables
         // Scans project names for fence/ground/carport keywords and corrects system_type

@@ -601,7 +601,7 @@ export async function getProjectsByUser(userId: string): Promise<Project[]> {
              prop.data_json AS _prop_data_json,
              lo.id AS _lo_id, lo.project_id AS _lo_project_id,
              lo.system_type AS _lo_system_type,
-             lo.panels AS _lo_panels, lo.roof_planes AS _lo_roof_planes,
+             NULL::jsonb AS _lo_panels, NULL::jsonb AS _lo_roof_planes,
              lo.ground_tilt AS _lo_ground_tilt, lo.ground_azimuth AS _lo_ground_azimuth,
              lo.row_spacing AS _lo_row_spacing, lo.ground_height AS _lo_ground_height,
              lo.fence_azimuth AS _lo_fence_azimuth, lo.fence_height AS _lo_fence_height,
@@ -653,7 +653,7 @@ export async function getProjectsByClient(clientId: string, userId: string): Pro
              prop.data_json AS _prop_data_json,
              lo.id AS _lo_id, lo.project_id AS _lo_project_id,
              lo.system_type AS _lo_system_type,
-             lo.panels AS _lo_panels, lo.roof_planes AS _lo_roof_planes,
+             NULL::jsonb AS _lo_panels, NULL::jsonb AS _lo_roof_planes,
              lo.ground_tilt AS _lo_ground_tilt, lo.ground_azimuth AS _lo_ground_azimuth,
              lo.row_spacing AS _lo_row_spacing, lo.ground_height AS _lo_ground_height,
              lo.fence_azimuth AS _lo_fence_azimuth, lo.fence_height AS _lo_fence_height,
@@ -1052,28 +1052,22 @@ export async function saveProjectVersion(data: {
   assertUUID(data.userId, 'userId');
   const sql = await getDbReady();
 
-  // Get next version number
-  const versionResult = await sql`
-    SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
-    FROM project_versions
-    WHERE project_id = ${data.projectId}
-  `;
-  const nextVersion = versionResult[0].next_version as number;
-
+  // PERF FIX: Compute next version number atomically inside the INSERT using a subquery.
+  // Eliminates the extra SELECT round-trip that previously doubled latency on every save.
   const snapshotJson = JSON.stringify(data.snapshot);
   const rows = await sql`
     INSERT INTO project_versions (
       project_id, user_id, version_number, snapshot,
       panels_count, system_size_kw, change_summary
-    ) VALUES (
+    )
+    SELECT
       ${data.projectId},
       ${data.userId},
-      ${nextVersion},
+      COALESCE((SELECT MAX(version_number) FROM project_versions WHERE project_id = ${data.projectId}), 0) + 1,
       ${snapshotJson}::jsonb,
       ${data.panelsCount ?? 0},
       ${data.systemSizeKw ?? 0},
       ${data.changeSummary || ''}
-    )
     RETURNING *
   `;
 
@@ -1091,11 +1085,16 @@ export async function saveProjectVersion(data: {
   };
 }
 
+// PERF FIX: Returns version metadata only — no snapshot JSON blob.
+// The version list panel only needs id/number/summary/counts to render the list.
+// Snapshot is only fetched when user actually clicks "restore" (getProjectVersion).
 export async function getProjectVersions(projectId: string, userId: string): Promise<ProjectVersion[]> {
   if (!isValidUUID(projectId) || !isValidUUID(userId)) return [];
   const sql = await getDbReady();
   const rows = await sql`
-    SELECT * FROM project_versions
+    SELECT id, project_id, user_id, version_number,
+           panels_count, system_size_kw, change_summary, created_at
+    FROM project_versions
     WHERE project_id = ${projectId}
       AND user_id = ${userId}
     ORDER BY version_number DESC
@@ -1106,7 +1105,7 @@ export async function getProjectVersions(projectId: string, userId: string): Pro
     projectId: row.project_id as string,
     userId: row.user_id as string,
     versionNumber: row.version_number as number,
-    snapshot: row.snapshot as Record<string, unknown>,
+    snapshot: {} as Record<string, unknown>,  // not loaded in list — fetch via getProjectVersion
     panelsCount: row.panels_count as number,
     systemSizeKw: row.system_size_kw as number,
     changeSummary: row.change_summary as string,
