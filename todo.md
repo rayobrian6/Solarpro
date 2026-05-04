@@ -1,15 +1,26 @@
-# v61.13d — Hybrid DC/AC Floor Fix
+# Context Injection Layer — Implementation
 
-## Tasks
-- [x] Read all relevant files (sizingEngine.ts, ecoflow.ts, types.ts, equipment-db.ts, dcAcConstants.ts)
-- [x] Add HYBRID_MIN_DC_AC_RATIO = 0.75 constant to sizingEngine.ts
-- [x] Add maxUnits field to BrandInverterModelRef type (types.ts)
-- [x] Update EcoFlow profile: maxUnits=2 on 11kW model, dcAcRatioRange.min 1.0→0.75
-- [x] Update pickRatioAwareTier() — topology-aware floor + multi-unit expansion
-- [x] Update attemptDownsize() — topology-aware floor + respect maxUnits
-- [x] Update applyFeasibilityHardGate() — topology-aware floor (_fhg_floor)
-- [x] Update sizeInverters() — _sizeFloor variable replacing MIN_DC_AC_RATIO throughout
-- [x] TypeScript compile — CLEAN (0 errors)
-- [x] Jest tests — 210/210 PASS
-- [x] Verification script confirms correct engine behavior across 5 test scenarios
-- [x] Commit as v61.13d
+## Phase 1: Core files
+- [x] Create lib/solardog/uiMap.ts — canonical UI_MAP with engineering actions/panels
+- [x] Create lib/solardog/workflow.ts — WORKFLOW graph for all major flows
+- [x] Create lib/solardog/buildContext.ts — buildContext() assembling full CONTEXT_JSON
+
+## Phase 2: API layer
+- [x] Update AssistantRequest type in route.ts to accept uiContext + recentEvents
+- [x] Add suggestedActions[] to AssistantResponse type (id, label, confidence)
+- [x] Inject CONTEXT_JSON as second system message in the LLM call
+- [x] Add recentEvents support (UI_EVENTs posted from frontend)
+
+## Phase 3: System prompt patch
+- [x] Add CONTEXT_JSON truth rules to system prompt
+- [x] Update JSON schema in prompt to include suggestedActions[] + nextStep
+
+## Phase 4: Frontend — SolarDog.tsx
+- [ ] Add suggestedActions rendering (clickable action buttons from LLM response)
+- [ ] Add postUIEvent() helper to send actionId events back on button click
+- [ ] Wire engineering page context (visibleWarnings, visibleButtons, etc.) from live state
+- [ ] Accept recentEvents in sendMessage() context payload
+
+## Phase 5: Verify
+- [ ] TypeScript compile (tsc --noEmit)
+- [ ] Commit + push to dev

@@ -20,6 +20,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAppStore } from '@/store/appStore';
 import { useEngineeringStore, selectEngineeringSnapshot } from '@/store/engineeringStore';
 import type { AssistantResponse, SolarDogMode } from '@/app/api/assistant/route';
+import type { UIEvent as SolarDogUIEvent } from '@/lib/solardog/buildContext';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,9 @@ interface ChatMessage {
   highlight?: string | null;
   action?:    string | null;
   type?:      string;
+  // v61.16: Structured suggested actions from LLM
+  suggestedActions?: Array<{ id: string; label: string; confidence: number }>;
+  nextStep?:  string | null;
 }
 
 type VoiceStatus =
@@ -240,6 +244,20 @@ export default function SolarDog() {
   const [pendingConfirm,   setPendingConfirm] = useState<{ route: string; label: string; msg: string } | null>(null);
   // v10.2: pending learn confirmation — set when SolarDog asks "Just to confirm — map X → Y?"
   const [pendingLearnData, setPendingLearnData] = useState<{ phrase: string; route: string } | null>(null);
+
+  // v61.16: Recent UI events — buffer of actions user has clicked, sent on next message
+  const [recentEvents, setRecentEvents] = useState<SolarDogUIEvent[]>([]);
+
+  // v61.16: Post a UI event (called when user clicks a suggested action button)
+  const postUIEvent = useCallback((actionId: string, result?: string) => {
+    const ev: SolarDogUIEvent = {
+      actionId,
+      page: getPageName(pathnameRef.current),
+      timestamp: new Date().toISOString(),
+      result,
+    };
+    setRecentEvents(prev => [...prev.slice(-9), ev]); // keep last 10
+  }, []);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const abortTourRef  = useRef(false);
@@ -683,6 +701,8 @@ export default function SolarDog() {
             pendingLearnPhrase: pendingLearnData.phrase,
             pendingLearnRoute:  pendingLearnData.route,
           } : {}),
+          // v61.16: pass recent UI events buffer
+          ...(recentEvents.length > 0 ? { recentEvents } : {}),
         }),
       });
 
@@ -724,8 +744,12 @@ export default function SolarDog() {
         highlight,
         action:   data.action ?? data.type,
         type:     data.type,
+        // v61.16: context suggestions
+        suggestedActions: data.suggestedActions ?? undefined,
+        nextStep:         data.nextStep ?? null,
       }]);
       setIsLoading(false);
+      setRecentEvents([]);          // v61.16: clear after send
 
       if (highlight) setTimeout(() => highlightElement(highlight), 300);
 
@@ -805,7 +829,8 @@ export default function SolarDog() {
       setDogPose('idle');
     }
   }, [input, isLoading, speak, resolvedProjectId, executeNavigation, executeAction,
-      handleLearnResponse, storeActiveProject, showSubtitle, hideSubtitle, pendingLearnData]);
+      handleLearnResponse, storeActiveProject, showSubtitle, hideSubtitle, pendingLearnData,
+      recentEvents, postUIEvent, setRecentEvents]);
 
   // ── Dog click ──────────────────────────────────────────────────────────────
   const handleDogClick = useCallback(() => {
@@ -1023,6 +1048,31 @@ export default function SolarDog() {
                       >
                         🔍 Show me
                       </button>
+                    )}
+                    {/* v61.16: Suggested action buttons */}
+                    {m.role === 'assistant' && m.suggestedActions && m.suggestedActions.length > 0 && (
+                      <div className="sd-suggested-actions">
+                        <span className="sd-sugg-label">Suggested actions:</span>
+                        {m.suggestedActions.map(sa => (
+                          <button
+                            key={sa.id}
+                            className="sd-sugg-action-btn"
+                            style={{ opacity: 0.6 + sa.confidence * 0.4 }}
+                            onClick={() => {
+                              executeAction(sa.id);
+                              postUIEvent(sa.id, 'clicked');
+                            }}
+                          >
+                            {sa.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {/* v61.16: Next step pill */}
+                    {m.role === 'assistant' && m.nextStep && (
+                      <div className="sd-next-step-pill">
+                        <span>Next: {m.nextStep}</span>
+                      </div>
                     )}
                   </div>
                 );
@@ -1446,6 +1496,49 @@ const WIDGET_CSS = `
   max-width: 92%;
 }
 .sd-msg-text { display: block; }
+
+.sd-suggested-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+.sd-sugg-label {
+  font-size: 10px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  width: 100%;
+  margin-bottom: 2px;
+}
+.sd-sugg-action-btn {
+  background: rgba(255,165,0,0.15);
+  border: 1px solid rgba(255,165,0,0.4);
+  color: #f5a623;
+  border-radius: 12px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.sd-sugg-action-btn:hover {
+  background: rgba(255,165,0,0.3);
+}
+.sd-next-step-pill {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  background: rgba(100,200,100,0.12);
+  border: 1px solid rgba(100,200,100,0.35);
+  border-radius: 10px;
+  padding: 2px 10px;
+  font-size: 10px;
+  color: #5bc85b;
+}
+.sd-next-step-pill span::before {
+  content: "→  ";
+}
 .sd-type-badge {
   display: inline-block;
   font-size: 9px;

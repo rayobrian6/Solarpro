@@ -21,6 +21,7 @@ import {
   isValidLearnTarget,
 } from '@/lib/solardog/resolveRoute';
 import { buildActionList } from '@/lib/solardog/actionRegistry';
+import { buildContext, formatContextMessage, type UIEvent } from '@/lib/solardog/buildContext';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -85,6 +86,8 @@ interface AssistantRequest {
       stringCount:            number;
       complianceStatus:       string | null;
     };
+    // v61.16: Recent UI events — actions user clicked since last message
+    recentEvents?: UIEvent[];
   };
 }
 
@@ -117,7 +120,14 @@ export interface AssistantResponse {
   contextAvailable: boolean;
   highlight?:       string | null;
   severity?:        string;
-  suggestedActions?: Array<{ label: string; action: string }>;
+  // v61.16: Structured suggested actions with confidence (from CONTEXT_JSON / UI_MAP)
+  suggestedActions?: Array<{
+    id:         string;   // matches UIAction.id / ACTION_REGISTRY key
+    label:      string;
+    confidence: number;   // 0–1
+  }>;
+  // v61.16: Next workflow step recommendation
+  nextStep?:        string | null;
   _debug?:          Record<string, unknown>;
 }
 
@@ -741,9 +751,11 @@ RESPONSE FORMAT — return ONLY valid JSON
   \"workflowKey\":    \"workflow key if guided mode, or null\",
   \"currentStep\":    1,
   \"totalSteps\":     7,
-  \"suggestedSteps\": [\"Step 1: ...\", \"Step 2: ...\"]
-}
-
+  \"suggestedSteps\": [\"Step 1: ...\", \"Step 2: ...\"],
+  \"suggestedActions\": [
+    { \"id\": \"action_key_from_uiMap\", \"label\": \"Human label\", \"confidence\": 0.9 }
+  ],
+  \"nextStep\": \"workflow_step_id_or_null\"
 
 CRITICAL RULES — read before every response:
 1. intent_type MUST always be set — it determines type
@@ -1211,8 +1223,13 @@ export async function POST(req: NextRequest) {
     richContext, learnedAliasStr, knowledgeItemsStr,
   );
 
+  // v61.16: Build CONTEXT_JSON and inject as second system message
+  const contextPayload = buildContext(page, safeProjectId, richContext as Parameters<typeof buildContext>[2]);
+  const contextMessage = formatContextMessage(contextPayload);
+
   const openAiMessages = [
     { role: 'system' as const, content: systemPrompt },
+    { role: 'system' as const, content: contextMessage },
     ...historyMessages,
     { role: 'user' as const, content: message },
   ];
@@ -1281,6 +1298,22 @@ export async function POST(req: NextRequest) {
     const replySuggestedSteps = Array.isArray(parsed.suggestedSteps)
       ? (parsed.suggestedSteps as unknown[]).filter((s): s is string => typeof s === 'string')
       : null;
+    // v61.16: Structured suggested actions + nextStep from CONTEXT_JSON / UI_MAP
+    const replyNextStep = typeof parsed.nextStep === 'string' ? parsed.nextStep : null;
+    const replySuggestedActions: AssistantResponse['suggestedActions'] = (() => {
+      if (!Array.isArray(parsed.suggestedActions)) return undefined;
+      const valid = (parsed.suggestedActions as unknown[]).filter(
+        (a): a is { id: string; label: string; confidence: number } =>
+          typeof a === 'object' && a !== null &&
+          typeof (a as Record<string,unknown>).id    === 'string' &&
+          typeof (a as Record<string,unknown>).label === 'string'
+      ).map(a => ({
+        id:         a.id,
+        label:      a.label,
+        confidence: typeof a.confidence === 'number' ? Math.min(1, Math.max(0, a.confidence)) : 0.8,
+      }));
+      return valid.length > 0 ? valid : undefined;
+    })();
 
     // ── Handle learn response from LLM ────────────────────────────────────
     // v10.2: LLM can still detect corrections — but we validate before saving
@@ -1308,15 +1341,18 @@ export async function POST(req: NextRequest) {
       replyLlmConfidence ??
       (contextAvailable ? 'high' : projects.length > 0 ? 'medium' : 'low');
 
-    // Build suggested actions for context
-    const suggestedActions: AssistantResponse['suggestedActions'] = [];
-    const isChat = replyType === 'chat' || replyType === 'conversation' || replyType === 'observation';
-    if (isChat && !replyAction && page === 'dashboard' && projects.length > 0) {
-      suggestedActions.push({ label: 'View Projects', action: 'open_projects' });
-    }
-    if (isChat && !replyAction && page === 'engineering') {
-      suggestedActions.push({ label: 'Run NEC Check', action: 'run_nec_validation' });
-    }
+    // Build suggested actions — prefer LLM-returned ones, fall back to heuristic defaults
+    const suggestedActions: AssistantResponse['suggestedActions'] = replySuggestedActions ?? (() => {
+      const fallback: NonNullable<AssistantResponse['suggestedActions']> = [];
+      const isChat = replyType === 'chat' || replyType === 'conversation' || replyType === 'observation';
+      if (isChat && !replyAction && page === 'dashboard' && projects.length > 0) {
+        fallback.push({ id: 'open_projects', label: 'View Projects', confidence: 0.7 });
+      }
+      if (isChat && !replyAction && page === 'engineering') {
+        fallback.push({ id: 'run_nec_validation', label: 'Run NEC Check', confidence: 0.75 });
+      }
+      return fallback.length > 0 ? fallback : undefined;
+    })();
 
     // ── Save assistant reply ──────────────────────────────────────────────
     await solardogSaveMessage({
@@ -1344,6 +1380,9 @@ export async function POST(req: NextRequest) {
       currentStep:     replyCurrentStep,
       totalSteps:      replyTotalSteps,
       suggestedSteps:  replySuggestedSteps,
+      // v61.16: Structured suggested actions + next step
+      suggestedActions,
+      nextStep:         replyNextStep,
       mode,
       confidence,
       voiceEnabled,
@@ -1351,7 +1390,6 @@ export async function POST(req: NextRequest) {
       contextAvailable,
       highlight:        replyHighlight,
       severity:         replySeverity,
-      suggestedActions: suggestedActions.length > 0 ? suggestedActions : undefined,
     };
 
     // Dev/debug mode: attach diagnostics
