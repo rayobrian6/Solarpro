@@ -250,9 +250,58 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
   // ─── Racking / Mounting ────────────────────────────────────────────────────
   {
     partNumber: 'RT-MINI-01',
-    description: 'IronRidge RT Mini Rail-Free Mount',
+    description: 'RoofTech RT Mini Rail-Free Mount',
     category: 'racking', unit: 'ea',
     listPrice: 18.50, netPrice: 14.80,
+    source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'RT-MINI-ASSY',
+    description: 'RoofTech RT Mini Pad Assembly',
+    category: 'racking', unit: 'ea',
+    listPrice: 8.50, netPrice: 6.80,
+    source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'RT-MINI-FLASH',
+    description: 'RoofTech RT Mini Flashing Kit',
+    category: 'racking', unit: 'ea',
+    listPrice: 12.50, netPrice: 10.00,
+    source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'LAG-516-3-SS',
+    description: '5/16" × 3" Stainless Steel Lag Bolt',
+    category: 'racking', unit: 'ea',
+    listPrice: 0.65, netPrice: 0.52,
+    source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'LFT-001-B',
+    description: 'IronRidge L-Foot Universal Attachment',
+    category: 'racking', unit: 'ea',
+    listPrice: 16.00, netPrice: 12.80,
+    source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'UFO-MID-01',
+    description: 'IronRidge UFO Mid Clamp',
+    category: 'racking', unit: 'ea',
+    listPrice: 3.50, netPrice: 2.80,
+    source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'UFO-END-01',
+    description: 'IronRidge UFO End Clamp',
+    category: 'racking', unit: 'ea',
+    listPrice: 3.75, netPrice: 3.00,
+    source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'WEEB-LUG-6.7',
+    description: 'Wiley Electronics WEEB Lug 6.7 (Grounding Lug)',
+    category: 'racking', unit: 'ea',
+    listPrice: 4.50, netPrice: 3.60,
     source: 'CED', asOf: '2025-01-15',
   },
   {
@@ -345,6 +394,13 @@ export const DISTRIBUTOR_PRICE_CATALOG: DistributorPriceEntry[] = [
     category: 'racking', unit: 'ea',
     listPrice: 14.00, netPrice: 11.20,
     source: 'CED', asOf: '2025-01-15',
+  },
+  {
+    partNumber: 'BARE-CU-6',
+    description: 'Southwire #6 AWG Bare Copper Ground Wire',
+    category: 'wire', unit: 'ft',
+    listPrice: 1.05, netPrice: 0.85,
+    source: 'KWh', asOf: '2025-01-15',
   },
 ];
 
