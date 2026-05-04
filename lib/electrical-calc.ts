@@ -1109,8 +1109,10 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   // Step 3: OCPD — next standard breaker size ≥ continuous current (NEC 240.6)
   const acSizingOcpdAmps = nextStandardOCPD(acSizingContinuousAmps);
 
-  // Step 4: Disconnect — must be rated ≥ OCPD (NEC 690.14)
-  const acSizingDisconnectAmps = acSizingOcpdAmps;
+  // Step 4: Disconnect — enclosure must be rated ≥ OCPD (NEC 690.14)
+  // Placeholder: final enclosure size is computed in Step 5 after fuse sizing.
+  // We pre-set to OCPD here; Step 5 will override with proper enclosure size.
+  const acSizingDisconnectAmps_preliminary = acSizingOcpdAmps;
 
   // Step 5: Conductor — NEC 310.16 75°C column, ampacity ≥ continuous current
   // FIX NEC 310.16: conductor ampacity must be >= OCPD rating (not just >= continuous current)
@@ -1119,21 +1121,53 @@ export function runElectricalCalc(input: ElectricalCalcInput): ElectricalCalcRes
   const acSizingConductorGauge = acSizingConductor?.gauge ?? acWireGauge;
   const acSizingConductorAmpacity = acSizingConductor?.ampacity_75c ?? 0;
 
-  // Step 5: Disconnect Type Logic
-  // Standard residential solar: non-fused disconnect + OCPD breaker at panel
-  // Fused disconnect: used when no separate OCPD breaker (e.g. supply-side tap)
-  // Default: non-fused (most common for load-side interconnection)
-  // Default: non-fused (most common for load-side interconnection)
-  // To use fused disconnect, change this value — validation will enforce consistency
-  const acSizingDisconnectType = ('non-fused' as DisconnectType);
-
-  // Step 6: Fuse — only applies if disconnectType === 'fused'
-  // NEC 690.9: fuse in fused disconnect sized at 2/3 of disconnect rating
+  // ── Step 5: Disconnect Type Engine (NEC 690.14 / 705.60 / 705.11) ─────────
+  //
+  // FUSED disconnect:
+  //   Use when interconnection = SUPPLY_SIDE_TAP (NEC 705.11).
+  //   No backfed breaker at panel → the fused disconnect IS the OCPD.
+  //   Fuse sized = next standard size ≥ continuous AC current (NEC 705.60).
+  //   Enclosure sized = next standard enclosure ≥ fuse rating.
+  //
+  // NON-FUSED disconnect:
+  //   Use for LOAD_SIDE / MAIN_BREAKER_DERATE / PANEL_UPGRADE (NEC 705.12).
+  //   The backfed breaker at the panel IS the OCPD.
+  //   Disconnect only needs to interrupt — no fuse required.
+  //   Enclosure = next standard size ≥ continuous current (NEC 690.14).
+  //
+  // Standard disconnect enclosure sizes (residential/light-commercial catalog):
+  //   30A, 60A, 100A, 200A, 400A, 600A
+  //
   const STANDARD_FUSE_SIZES = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
+  const STANDARD_DISC_ENCLOSURES = [30, 60, 100, 200, 400, 600]; // standard enclosure ratings
+
+  function nextFuseSize(amps: number): number {
+    return STANDARD_FUSE_SIZES.find(f => f >= amps) ?? Math.ceil(amps / 10) * 10;
+  }
+  function nextEnclosureSize(amps: number): number {
+    return STANDARD_DISC_ENCLOSURES.find(e => e >= amps) ?? Math.ceil(amps / 100) * 100;
+  }
+
+  // Determine fused vs non-fused from interconnection method
+  const acSizingDisconnectType: DisconnectType =
+    icMethod === 'SUPPLY_SIDE_TAP' ? 'fused' : 'non-fused';
+
+  // Fuse: sized at next standard ≥ continuous current (NEC 705.60)
+  // This is the same as the OCPD — the fuse IS the overcurrent protection for supply-side
   const acSizingFuseAmps: number | null = acSizingDisconnectType === 'fused'
-    ? ([...STANDARD_FUSE_SIZES].reverse().find(f => f <= acSizingDisconnectAmps * (2 / 3)) ?? 40)
+    ? nextFuseSize(acSizingContinuousAmps)
     : null;
-  const acSizingFuseCount = acSizingDisconnectType === 'fused' ? 2 : 0;
+  const acSizingFuseCount = acSizingDisconnectType === 'fused' ? 2 : 0; // 2-pole for 240V
+
+  // Disconnect enclosure rating:
+  //   Fused: enclosure ≥ fuse rating → next standard enclosure size above fuse
+  //   Non-fused: enclosure ≥ OCPD (continuous current) → next standard enclosure size
+  const acSizingEnclosureRequirement = acSizingDisconnectType === 'fused'
+    ? (acSizingFuseAmps ?? acSizingOcpdAmps)
+    : acSizingContinuousAmps;
+  // Override disconnectAmps with proper enclosure size (not just OCPD)
+  // e.g. 79A continuous → 80A fuse → 100A enclosure (DU100RB or DPF222RP)
+  const acSizingDisconnectAmps = nextEnclosureSize(acSizingEnclosureRequirement);
 
   // Step 7: Conduit Fill — NEC Chapter 9 Table 5 areas
   // 240V single-phase: 3 current-carrying conductors (L1, L2, N) + 1 EGC = 4 total

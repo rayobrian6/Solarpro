@@ -217,10 +217,24 @@ export const COMBINER_BOXES: CombinerBox[] = [
 
 // ── AC Disconnects ────────────────────────────────────────────
 export const AC_DISCONNECTS: ACDisconnect[] = [
+  // ── Non-Fusible (load-side interconnection — backfed breaker at panel is OCPD) ──
+  {
+    id: 'acd-square-d-30a',
+    manufacturer: 'Square D',
+    model: 'DU100RB (30A Non-Fusible)',
+    voltageRating: 240,
+    currentRating: 30,
+    poles: 2,
+    nemaRating: 'NEMA 3R',
+    fusible: false,
+    lockable: true,
+    utilityGradeVisible: true,
+    priceEach: 55,
+  },
   {
     id: 'acd-square-d-60a',
     manufacturer: 'Square D',
-    model: 'QO260L200PG (60A)',
+    model: 'DU60RB (60A Non-Fusible)',
     voltageRating: 240,
     currentRating: 60,
     poles: 2,
@@ -228,12 +242,12 @@ export const AC_DISCONNECTS: ACDisconnect[] = [
     fusible: false,
     lockable: true,
     utilityGradeVisible: true,
-    priceEach: 85,
+    priceEach: 75,
   },
   {
     id: 'acd-square-d-100a',
     manufacturer: 'Square D',
-    model: 'QO2100L200PG (100A)',
+    model: 'DU100RB (100A Non-Fusible)',
     voltageRating: 240,
     currentRating: 100,
     poles: 2,
@@ -241,20 +255,34 @@ export const AC_DISCONNECTS: ACDisconnect[] = [
     fusible: false,
     lockable: true,
     utilityGradeVisible: true,
-    priceEach: 125,
+    priceEach: 95,
   },
   {
-    id: 'acd-siemens-60a',
-    manufacturer: 'Siemens',
-    model: 'W0202L1125S (60A)',
+    id: 'acd-square-d-200a',
+    manufacturer: 'Square D',
+    model: 'DU200RB (200A Non-Fusible)',
     voltageRating: 240,
-    currentRating: 60,
+    currentRating: 200,
     poles: 2,
     nemaRating: 'NEMA 3R',
     fusible: false,
     lockable: true,
     utilityGradeVisible: true,
-    priceEach: 78,
+    priceEach: 185,
+  },
+  // ── Fusible (supply-side tap — fused disconnect IS the OCPD, NEC 705.11) ──
+  {
+    id: 'acd-eaton-30a-fusible',
+    manufacturer: 'Eaton',
+    model: 'DPF221RP (30A Fusible)',
+    voltageRating: 240,
+    currentRating: 30,
+    poles: 2,
+    nemaRating: 'NEMA 3R',
+    fusible: true,
+    lockable: true,
+    utilityGradeVisible: true,
+    priceEach: 72,
   },
   {
     id: 'acd-eaton-60a-fusible',
@@ -267,12 +295,39 @@ export const AC_DISCONNECTS: ACDisconnect[] = [
     fusible: true,
     lockable: true,
     utilityGradeVisible: true,
-    priceEach: 95,
+    priceEach: 88,
   },
+  {
+    id: 'acd-eaton-100a-fusible',
+    manufacturer: 'Eaton',
+    model: 'DPF222RB (100A Fusible)',
+    voltageRating: 240,
+    currentRating: 100,
+    poles: 2,
+    nemaRating: 'NEMA 3R',
+    fusible: true,
+    lockable: true,
+    utilityGradeVisible: true,
+    priceEach: 135,
+  },
+  {
+    id: 'acd-eaton-200a-fusible',
+    manufacturer: 'Eaton',
+    model: 'DPF224RB (200A Fusible)',
+    voltageRating: 240,
+    currentRating: 200,
+    poles: 2,
+    nemaRating: 'NEMA 3R',
+    fusible: true,
+    lockable: true,
+    utilityGradeVisible: true,
+    priceEach: 225,
+  },
+  // ── 3-Phase (commercial systems) ──
   {
     id: 'acd-eaton-200a-3ph',
     manufacturer: 'Eaton',
-    model: 'DH365FGK (200A 3-Phase)',
+    model: 'DH365FGK (200A 3-Phase Fusible)',
     voltageRating: 480,
     currentRating: 200,
     poles: 3,
@@ -436,6 +491,33 @@ export function getCombinerBoxById(id: string): CombinerBox | undefined {
 
 export function getACDisconnectById(id: string): ACDisconnect | undefined {
   return AC_DISCONNECTS.find(d => d.id === id);
+}
+
+/**
+ * Select the correct AC disconnect from the catalog based on system requirements.
+ *
+ * Rules:
+ *   - fusible: true  → supply-side tap (NEC 705.11) — disconnect IS the OCPD
+ *   - fusible: false → load-side (NEC 705.12) — backfed breaker at panel is OCPD
+ *   - currentRating  → enclosure must be ≥ required amps
+ *   - phases         → 2-pole for single-phase, 3-pole for 3-phase
+ *
+ * @param requiredAmps  - minimum enclosure rating (enclosure ≥ fuse for fused; ≥ continuous for non-fused)
+ * @param fusible       - true = fused disconnect (supply-side), false = non-fused (load-side)
+ * @param phases        - 1 (single-phase) or 3 (three-phase)
+ * @returns             - matching ACDisconnect, or undefined if not in catalog
+ */
+export function selectACDisconnect(
+  requiredAmps: number,
+  fusible: boolean,
+  phases: 1 | 3 = 1,
+): ACDisconnect | undefined {
+  const poles = phases === 3 ? 3 : 2;
+  return AC_DISCONNECTS.find(d =>
+    d.fusible === fusible &&
+    d.poles === poles &&
+    d.currentRating >= requiredAmps
+  );
 }
 
 export function getDCDisconnectById(id: string): DCDisconnect | undefined {

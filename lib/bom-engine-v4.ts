@@ -797,47 +797,95 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
       necReference: 'NEC 300.15 / 358.30' });
   }
 
-  // AC Disconnect — NEC 690.14 / NEC 705.60
-  // Each inverter requires its own AC disconnect (NEC 690.14(C)(1)).
-  // Size: total AC continuous current × 125% → nextStandardBreaker (NEC 705.60).
-  // For multi-inverter systems, each gets a separately-sized per-inverter disconnect.
+  // Interconnection method — needed for fused/non-fused disconnect decision
+  // (also used below in Backfeed Breaker section)
+  const interconMethod = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+  const isSupplySideTap = interconMethod === 'SUPPLY_SIDE_TAP' ||
+    interconMethod.includes('SUPPLY_SIDE') ||
+    interconMethod.includes('LINE_SIDE') ||
+    interconMethod.includes('LINE_TAP');
+
+  // ── AC Disconnect Sizing Engine — NEC 690.14 / 705.60 / 705.11 ─────────────
+  //
+  // ONE combined disconnect for the whole system (NEC 690.14).
+  // Sizing:
+  //   1. Continuous current = systemKw × 1000 ÷ voltage  (NEC 705.60)
+  //   2. Required amps      = continuous × 1.25           (125% continuous load rule)
+  //   3. Fuse size          = next standard fuse ≥ required amps (fused disconnect only)
+  //   4. Enclosure size     = next standard enclosure ≥ required amps
+  //      Standard enclosures: 30A, 60A, 100A, 200A, 400A, 600A
+  //
+  // Fused vs Non-Fused:
+  //   SUPPLY_SIDE_TAP (NEC 705.11) → FUSED — disconnect IS the OCPD (no panel breaker)
+  //   LOAD_SIDE / MAIN_BREAKER_DERATE / PANEL_UPGRADE (NEC 705.12) → NON-FUSED
+  //     — backfed breaker at panel IS the OCPD; disconnect just interrupts
+  //
   if (input.requiresACDisconnect !== false) {
-    // Resolve OCPD: prefer explicit acOCPD, else derive from backfeedAmps or systemKw
-    // NEC 705.60: 125% of continuous output current
     const acVoltage = input.acVoltage ?? 240;
-    const resolvedAcOcpd = input.acOCPD > 0
-      ? input.acOCPD
-      : (input.backfeedAmps > 0
-          ? input.backfeedAmps
-          : Math.ceil(Math.round((input.systemKw * 1000) / acVoltage) * 1.25 / 5) * 5);
 
-    // Per-inverter sizing for multi-inverter systems
-    // Combined OCPD applies to total system; each inverter gets its share
-    const invCount = Math.max(1, input.inverterCount ?? 1);
-    const perInvOcpd = resolvedAcOcpd / invCount;
-    const perInvDiscAmps = nextStandardBreaker(Math.ceil(perInvOcpd / 5) * 5);
-    const combinedDiscAmps = nextStandardBreaker(resolvedAcOcpd);
+    // Step 1-2: Continuous current × 125%
+    const acContCurrent = (input.systemKw * 1000) / acVoltage;
+    const acRequiredAmps = acContCurrent * 1.25;
 
-    // Use combined disconnect for single inverter; per-inverter for multi
-    const acDiscAmps = invCount <= 1 ? combinedDiscAmps : perInvDiscAmps;
-    const acDiscQty  = invCount;
+    // Step 3: Determine fused or non-fused from interconnection method
+    const isFusedDisc = isSupplySideTap; // supply-side = fused; load-side = non-fused
 
-    // Part number: Square D DU series — DU{amps}RB (e.g. DU60RB, DU100RB)
-    const acDiscPartNum = `DU${acDiscAmps}RB`;
+    // Step 4: Standard sizes
+    const STD_FUSE_SIZES   = [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 110, 125, 150, 175, 200];
+    const STD_ENCLOSURES   = [30, 60, 100, 200, 400, 600];
+    const nextFuse         = (a: number) => STD_FUSE_SIZES.find(f => f >= a) ?? Math.ceil(a / 10) * 10;
+    const nextEnclosure    = (a: number) => STD_ENCLOSURES.find(e => e >= a) ?? Math.ceil(a / 100) * 100;
 
-    items.push(addItem('ac', 'disconnect', 'Square D', `${acDiscAmps}A AC Disconnect`,
+    // Fuse size = next standard fuse ≥ required amps (fused only)
+    const fuseAmps = isFusedDisc ? nextFuse(acRequiredAmps) : null;
+
+    // Enclosure size = next standard enclosure ≥ required amps
+    // For fused: enclosure must hold the fuse, so enclosure ≥ fuse amps
+    // For non-fused: enclosure ≥ required amps
+    const enclosureRequirement = isFusedDisc ? (fuseAmps ?? acRequiredAmps) : acRequiredAmps;
+    const acDiscAmps = nextEnclosure(enclosureRequirement);
+
+    // Part number:
+    //   Non-fused: Square D DU{amps}RB  (e.g. DU60RB, DU100RB)
+    //   Fused:     Eaton DPF2{code}RP   (30A→DPF221RP, 60A→DPF222RP, 100A→DPF222RB, 200A→DPF224RB)
+    const nonFusedPartNum = `DU${acDiscAmps}RB`;
+    const fusedPartNumMap: Record<number, string> = {
+      30: 'DPF221RP', 60: 'DPF222RP', 100: 'DPF222RB', 200: 'DPF224RB',
+    };
+    const fusedPartNum = fusedPartNumMap[acDiscAmps] ?? `DPF-${acDiscAmps}A`;
+    const acDiscPartNum = isFusedDisc ? fusedPartNum : nonFusedPartNum;
+    const acDiscMfr     = isFusedDisc ? 'Eaton' : 'Square D';
+    const discTypeLabel = isFusedDisc ? 'Fusible' : 'Non-Fusible';
+
+    items.push(addItem('ac', 'disconnect', acDiscMfr,
+      `${acDiscAmps}A ${discTypeLabel} AC Disconnect`,
       acDiscPartNum,
-      `${acDiscAmps}A AC disconnect switch per NEC 690.14 — ${invCount > 1 ? `${invCount}× per-inverter` : 'combined system'}`,
-      acDiscQty, 'ea', 'NEC 690.14', 'inverterCount', 'inverters', true));
-    log.push({ stageId: 'ac', category: 'ac_disconnect', item: `${acDiscAmps}A AC Disconnect`,
-      quantity: acDiscQty, derivedFrom: 'inverterCount',
-      formula: invCount > 1
-        ? `ceil(resolvedAcOcpd / inverterCount / 5) * 5 → nextStandardBreaker, qty = inverterCount`
-        : `nextStandardBreaker(resolvedAcOcpd)`,
+      `${acDiscAmps}A ${discTypeLabel} AC disconnect — NEC 690.14` +
+        (isFusedDisc ? ` / NEC 705.11 supply-side (fuse: ${fuseAmps}A)` : ' / NEC 705.12 load-side'),
+      1, 'ea', 'NEC 690.14', 'perSystem',
+      `nextEnclosure(${acRequiredAmps.toFixed(1)}A × 1.25) = ${acDiscAmps}A`, true));
+
+    // Add fuse line item for fused disconnect
+    if (isFusedDisc && fuseAmps !== null) {
+      items.push(addItem('ac', 'fuse', 'Littelfuse',
+        `${fuseAmps}A Class RK5 Fuse`,
+        `LLNRK${fuseAmps}SP`,
+        `${fuseAmps}A 250V Class RK5 time-delay fuse — 2 per fused disconnect (NEC 690.9)`,
+        2, 'ea', 'NEC 690.9', 'perSystem', '2 per fused disconnect', true));
+      log.push({ stageId: 'ac', category: 'fuse', item: `${fuseAmps}A Class RK5 Fuse`,
+        quantity: 2, derivedFrom: 'fused disconnect',
+        formula: `nextFuse(continuous × 1.25) = ${fuseAmps}A × 2 poles`,
+        necReference: 'NEC 690.9' });
+    }
+
+    log.push({ stageId: 'ac', category: 'ac_disconnect', item: `${acDiscAmps}A ${discTypeLabel} AC Disconnect`,
+      quantity: 1, derivedFrom: 'perSystem',
+      formula: `nextEnclosure(${acContCurrent.toFixed(1)}A × 1.25 = ${acRequiredAmps.toFixed(1)}A) = ${acDiscAmps}A enclosure`,
       necReference: 'NEC 690.14' });
     complianceNotes.push(
-      `NEC 690.14 / NEC 705.60: ${acDiscQty}× ${acDiscAmps}A AC disconnect(s) — ` +
-      `${invCount > 1 ? `per-inverter (${invCount} inverters × ${acDiscAmps}A each)` : `combined system, sized for ${resolvedAcOcpd}A`}`
+      `NEC 690.14 / NEC 705.60: 1× ${acDiscAmps}A ${discTypeLabel} disconnect — ` +
+      `${acContCurrent.toFixed(1)}A output × 1.25 = ${acRequiredAmps.toFixed(1)}A → ${acDiscAmps}A enclosure` +
+      (isFusedDisc ? ` + ${fuseAmps}A fuse (NEC 705.11 supply-side)` : ' (NEC 705.12 load-side)')
     );
   }
 
@@ -857,17 +905,12 @@ export function generateBOMV4(input: BOMGenerationInputV4): BOMGenerationResultV
   //   PANEL_UPGRADE                → new panel with headroom.
   //                                   No dedicated backfed breaker.
   // ─────────────────────────────────────────────────────────────────────────
-  const interconMethod = String(input.interconnectionMethod ?? 'LOAD_SIDE').toUpperCase();
+  // interconMethod and isSupplySideTap already declared above (before AC Disconnect block)
   // LOAD_SIDE and BACKFED_BREAKER both require a backfed breaker per NEC 705.12(B)
   const isLoadSide = interconMethod === 'LOAD_SIDE' ||
     interconMethod === 'BACKFED_BREAKER' ||
     (interconMethod.includes('BACKFED') && !interconMethod.includes('SUPPLY')) ||
     (interconMethod.includes('LOAD') && !interconMethod.includes('SUPPLY'));
-  // Supply-side tap (NEC 705.11) — no backfed breaker in load center
-  const isSupplySideTap = interconMethod === 'SUPPLY_SIDE_TAP' ||
-    interconMethod.includes('SUPPLY_SIDE') ||
-    interconMethod.includes('LINE_SIDE') ||
-    interconMethod.includes('LINE_TAP');
   // Main breaker derate or panel upgrade — no separate backfed breaker
   const isMainBreakerDerate = interconMethod === 'MAIN_BREAKER_DERATE';
   const isPanelUpgrade = interconMethod === 'PANEL_UPGRADE';
