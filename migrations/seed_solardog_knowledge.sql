@@ -1,11 +1,23 @@
 -- ============================================
--- SolarDog Knowledge Base Seed
+-- SolarDog Knowledge Base Schema + Seed
 -- Populates solarpro_knowledge_items with:
 -- - All pages and their routes
 -- - All buttons and what they do
 -- - All workflows
 -- - All key equipment brands/features
 -- ============================================
+
+-- Create the table if it doesn't exist
+CREATE TABLE IF NOT EXISTS solarpro_knowledge_items (
+  id SERIAL PRIMARY KEY,
+  type TEXT NOT NULL,              -- 'page', 'button', 'workflow', 'warning', 'equipment', 'mode', 'workflow'
+  label TEXT NOT NULL,             -- Display name
+  route TEXT,                      -- URL route (for pages/buttons), nullable
+  description TEXT NOT NULL,       -- What it does / explanation
+  aliases TEXT[],                  -- Alternative names the user might say
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
 
 -- Clear existing data (safe to re-run)
 TRUNCATE TABLE solarpro_knowledge_items CASCADE;
