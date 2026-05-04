@@ -1198,7 +1198,7 @@ const WIDGET_CSS = `
 /* ── Base ───────────────────────────────────────── */
 #sd-widget {
   position: fixed;
-  bottom: clamp(90px, 12vh, 140px);
+  bottom: 20px;
   right: 24px;
   z-index: 9999;
   cursor: pointer;
@@ -1244,7 +1244,7 @@ const WIDGET_CSS = `
 /* ── Subtitle bar ───────────────────────────────── */
 #sd-subtitle {
   position: fixed;
-  bottom: calc(clamp(90px, 12vh, 140px) + 92px);
+  bottom: calc(20px + 92px);
   right: 24px;
   z-index: 9999;
   background: rgba(15,23,42,0.95);
@@ -1273,7 +1273,7 @@ const WIDGET_CSS = `
 /* ── Chat panel ─────────────────────────────────── */
 #sd-chat {
   position: fixed;
-  bottom: calc(clamp(90px, 12vh, 140px) + 90px);
+  bottom: calc(20px + 90px);
   right: 24px;
   z-index: 9999;
   width: 360px;
@@ -1674,7 +1674,7 @@ const WIDGET_CSS = `
 /* ── Tour overlay ───────────────────────────────── */
 #sd-tour-overlay {
   position: fixed;
-  bottom: calc(clamp(90px, 12vh, 140px) + 90px);
+  bottom: calc(20px + 90px);
   right: 24px;
   z-index: 9998;
   pointer-events: none;
