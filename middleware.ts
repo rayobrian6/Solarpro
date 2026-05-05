@@ -39,6 +39,12 @@ const PUBLIC_PATHS = [
   '/api/portal/login',
   '/api/portal/logout',
 
+  // ── Mobile app endpoints (validated internally via Bearer JWT) ──
+  // Middleware only understands session cookies. The mobile field app sends
+  // a Bearer token (SOLARPRO_HANDOFF_SECRET-signed JWT). Let requests through
+  // here — the route handlers verify the Bearer token themselves.
+  '/api/mobile/',
+
   // ── External webhooks (validated internally via signature) ──
   '/api/stripe/webhook',
   '/api/webhooks/survey-complete',  // site-survey partner webhook (HMAC-signed)
