@@ -77,6 +77,30 @@ export function resolveMobileUser(
   console.log(`[MOBILE_AUTH] ${routeLabel} — Bearer token received (len=${token.length})`);
 
   // STEP 3 — Verify the JWT signature + expiry
+  //
+  // Check SOLARPRO_HANDOFF_SECRET first so we can give a precise error.
+  // verifyHandoffToken silently returns null when the secret is missing —
+  // we surface that clearly here so it shows up in logs.
+  const handoffSecretPresent = !!process.env.SOLARPRO_HANDOFF_SECRET;
+  const handoffSecretLen     = process.env.SOLARPRO_HANDOFF_SECRET?.length ?? 0;
+
+  if (!handoffSecretPresent) {
+    console.error(
+      `[MOBILE_AUTH_FAIL] ${routeLabel} — SOLARPRO_HANDOFF_SECRET is not set in environment. ` +
+      `Add this env var in Vercel → Settings → Environment Variables. ` +
+      `It must match the secret used to sign tokens in the mobile app.`
+    );
+    return null;
+  }
+
+  if (handoffSecretLen < 32) {
+    console.error(
+      `[MOBILE_AUTH_FAIL] ${routeLabel} — SOLARPRO_HANDOFF_SECRET is too short ` +
+      `(${handoffSecretLen} chars, minimum 32). Update the env var.`
+    );
+    return null;
+  }
+
   let decoded: ReturnType<typeof verifyHandoffToken>;
   try {
     decoded = verifyHandoffToken(token);
@@ -87,9 +111,20 @@ export function resolveMobileUser(
   }
 
   if (!decoded) {
+    // Secret is set but token still failed — decode header to get more info
+    let tokenAlg = 'unknown';
+    try {
+      const headerB64 = token.split('.')[0];
+      const header = JSON.parse(Buffer.from(headerB64, 'base64').toString('utf8'));
+      tokenAlg = header.alg ?? 'unknown';
+    } catch { /* ignore */ }
+
     console.error(
-      `[MOBILE_AUTH_FAIL] ${routeLabel} — verifyHandoffToken returned null ` +
-      `(expired, wrong secret, or malformed JWT)`
+      `[MOBILE_AUTH_FAIL] ${routeLabel} — verifyHandoffToken returned null. ` +
+      `Secret IS set (len=${handoffSecretLen}). Token alg=${tokenAlg}. ` +
+      `Likely causes: (1) wrong secret value — secret used to sign token ` +
+      `does not match SOLARPRO_HANDOFF_SECRET in Vercel env, ` +
+      `(2) token expired, (3) token signed with different algorithm than HS256.`
     );
     return null;
   }
