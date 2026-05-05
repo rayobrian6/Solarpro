@@ -13,6 +13,7 @@ type User = {
   name: string;
   email: string;
   company: string | null;
+  role: string;
 };
 
 type Lead = {
@@ -57,6 +58,7 @@ export default function AdminLeadDetail() {
   const [users, setUsers]         = useState<User[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState('');
 
   // Editable fields
   const [editName, setEditName]     = useState('');
@@ -95,12 +97,12 @@ export default function AdminLeadDetail() {
   const loadUsers = useCallback(async () => {
     setUsersLoading(true);
     try {
-      const res = await fetch(`/api/admin/users?limit=100`);
+      const res = await fetch(`/api/admin/staff`);
       const d = await res.json();
       if (d.success) {
-        setUsers(d.users || []);
+        setUsers(d.staff || []);
       } else {
-        console.error('Failed to load users:', d.error);
+        console.error('Failed to load staff:', d.error);
       }
     } finally {
       setUsersLoading(false);
@@ -154,18 +156,19 @@ export default function AdminLeadDetail() {
     }
   };
 
-  const handleAssignUser = async (userId: string) => {
-    if (!userId || !confirm('Assign this user as the lead owner?')) return;
+  const handleAssignUser = async () => {
+    if (!selectedUserId) return;
     setAssigning(true);
     try {
       const res = await fetch(`/api/admin/leads/${id}/assign-user`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ userId: selectedUserId }),
       });
       const d = await res.json();
       if (d.success) {
         showToast('Owner assigned successfully');
+        setSelectedUserId('');
         await load();
       } else {
         showToast(d.error || 'Failed to assign owner', false);
@@ -251,40 +254,43 @@ export default function AdminLeadDetail() {
           </Link>
         )}
       </div>
-
       {/* Assign Owner Section */}
       {!lead.user_id && (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-amber-400 font-medium flex items-center gap-2">
-                <AlertCircle size={14} />
-                Owner Not Assigned
-              </p>
-              <p className="text-slate-400 mt-1 text-xs">
-                This lead needs an owner assigned before it can be converted to a project.
-              </p>
-            </div>
-            <div className="min-w-[250px]">
-              <select
-                disabled={assigning || usersLoading || users.length === 0}
-                onChange={(e) => e.target.value && handleAssignUser(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50 disabled:opacity-50"
-              >
-                <option value="" className="bg-slate-900">
-                  {usersLoading ? 'Loading users...' : users.length === 0 ? 'No users available' : 'Assign Owner...'}
+          <p className="text-amber-400 font-medium flex items-center gap-2 mb-2">
+            <AlertCircle size={14} />
+            Owner Not Assigned
+          </p>
+          <p className="text-slate-400 text-xs mb-3">
+            Assign a staff member as owner before converting this lead to a project.
+          </p>
+          <div className="flex items-center gap-2">
+            <select
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              disabled={assigning || usersLoading}
+              className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50 disabled:opacity-50"
+            >
+              <option value="" className="bg-slate-900">
+                {usersLoading ? 'Loading staff...' : users.length === 0 ? 'No staff available' : '— Select staff member —'}
+              </option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id} className="bg-slate-900">
+                  {u.name} ({u.role === 'super_admin' ? 'Super Admin' : 'Admin'})
                 </option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id} className="bg-slate-900">
-                    {u.name} {u.company ? `(${u.company})` : ''} &lt;{u.email}&gt;
-                  </option>
-                ))}
-              </select>
-            </div>
+              ))}
+            </select>
+            <button
+              onClick={handleAssignUser}
+              disabled={!selectedUserId || assigning}
+              className="flex items-center gap-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 text-amber-400 px-4 py-2 rounded-lg text-sm font-medium transition-all disabled:opacity-40"
+            >
+              {assigning ? <RefreshCw size={13} className="animate-spin" /> : <UserPlus size={13} />}
+              Assign
+            </button>
           </div>
         </div>
       )}
-
       {/* Converted notice */}
       {isConverted && (
         <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 text-sm">
