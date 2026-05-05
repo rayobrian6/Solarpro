@@ -32,7 +32,7 @@ const ROUTE = '[GET /api/mobile/clients]';
 
 export async function GET(req: NextRequest) {
   try {
-    // ── Rate limit ────────────────────────────────────────────────────────────
+    // -- Rate limit ----------------------------------------------------------
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
@@ -41,7 +41,24 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // ── Auth (REQUIRED — no exceptions) ──────────────────────────────────────
+    // -- Auth (REQUIRED — no exceptions) ------------------------------------
+    // DIAGNOSTIC: log service key env state before calling resolveMobileUser
+    const _svcKeyTrimmed = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
+    const _svcKeySet     = !!_svcKeyTrimmed;
+    const _svcKeyLen     = _svcKeyTrimmed?.length ?? 0;
+    const _svcUserIdSet  = !!process.env.MOBILE_SERVICE_USER_ID;
+    const _authHdr       = req.headers.get('authorization') ?? '(none)';
+    const _bearerTok     = _authHdr.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
+    const _bearerLen     = _bearerTok?.length ?? 0;
+    const _keysMatch     = _svcKeyTrimmed && _bearerTok ? (_bearerTok === _svcKeyTrimmed) : false;
+    console.log(
+      `${ROUTE} [DIAG] svcKeySet=${_svcKeySet} svcKeyLen=${_svcKeyLen} ` +
+      `svcUserIdSet=${_svcUserIdSet} bearerLen=${_bearerLen} ` +
+      `bearerFirst8=${_bearerTok?.slice(0,8) ?? 'n/a'} ` +
+      `keyFirst8=${_svcKeyTrimmed?.slice(0,8) ?? 'n/a'} ` +
+      `directMatch=${_keysMatch}`
+    );
+
     const auth = resolveMobileUser(req, ROUTE);
     if (!auth) {
       return mobileAuthError(ROUTE, req);
@@ -58,7 +75,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // ── DB query ──────────────────────────────────────────────────────────────
+    // -- DB query ------------------------------------------------------------
     const sql = await getDbReady();
 
     const rows = await sql`

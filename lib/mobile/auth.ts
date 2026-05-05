@@ -50,7 +50,7 @@ export function resolveMobileUser(
   routeLabel: string,
 ): MobileAuthResult | null {
 
-  // ── Path A: Session cookie ─────────────────────────────────────────────────
+  // -- Path A: Session cookie ------------------------------------------------
   try {
     const sessionUser = getUserFromRequest(req);
     if (sessionUser?.id && isValidUUID(sessionUser.id)) {
@@ -61,16 +61,29 @@ export function resolveMobileUser(
     console.warn(`[MOBILE_AUTH_FAIL] ${routeLabel} session cookie parse error: ${msg}`);
   }
 
-  // ── Path B: Service-to-service API key (Render backend → SolarPro) ─────────
+  // -- Path B: Service-to-service API key (Render backend -> SolarPro) ------
   //
   // The Render backend (site-survey-api-bpyz.onrender.com) proxies mobile
   // requests to SolarPro using SOLARPRO_API_KEY as a Bearer token.
   // On SolarPro (Vercel), set MOBILE_SERVICE_API_KEY to the same value.
   // When matched, we use MOBILE_SERVICE_USER_ID (or SURVEY_INGEST_DEFAULT_USER_ID)
   // as the scoped userId for DB queries.
-  const authHeader = req.headers.get('authorization') ?? null;
-  const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+  const authHeader  = req.headers.get('authorization') ?? null;
+  // IMPORTANT: trim() both sides to eliminate any whitespace/newline edge cases
+  const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
   const serviceApiKey = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
+
+  // Diagnostic log for service key path (helps debug mismatch)
+  if (serviceApiKey) {
+    console.log(
+      `[MOBILE_AUTH] ${routeLabel} Path B check: ` +
+      `serviceKey(len=${serviceApiKey.length} first8=${serviceApiKey.slice(0,8)}) ` +
+      `bearer(len=${bearerToken?.length ?? 0} first8=${bearerToken?.slice(0,8) ?? 'n/a'}) ` +
+      `match=${bearerToken === serviceApiKey}`
+    );
+  } else {
+    console.warn(`[MOBILE_AUTH] ${routeLabel} Path B: MOBILE_SERVICE_API_KEY not set in env`);
+  }
 
   if (serviceApiKey && bearerToken && bearerToken === serviceApiKey) {
     // Resolve the user ID to scope DB queries
@@ -92,7 +105,7 @@ export function resolveMobileUser(
     return { userId: serviceUserId, source: 'service_api_key' };
   }
 
-  // ── Path C: Bearer JWT (handoff token) ────────────────────────────────────
+  // -- Path C: Bearer JWT (handoff token) -----------------------------------
 
   // STEP 1 — Is the Authorization header present?
   if (!authHeader) {
@@ -123,7 +136,7 @@ export function resolveMobileUser(
   if (!handoffSecretPresent) {
     console.error(
       `[MOBILE_AUTH_FAIL] ${routeLabel} — SOLARPRO_HANDOFF_SECRET is not set in environment. ` +
-      `Add this env var in Vercel → Settings → Environment Variables. ` +
+      `Add this env var in Vercel -> Settings -> Environment Variables. ` +
       `It must match the secret used to sign tokens in the mobile app.`
     );
     return null;
@@ -175,7 +188,7 @@ export function resolveMobileUser(
   //   version of the mobile app / token minter produced them.
   //   Future phase will standardize all tokens to solarpro_user_id only.
   //
-  //   Priority: solarpro_user_id → userId → sub
+  //   Priority: solarpro_user_id -> userId -> sub
   const d   = decoded as unknown as Record<string, unknown>;
   const uid = (d.solarpro_user_id ?? d.userId ?? d.sub) as string | undefined;
 
