@@ -84,6 +84,18 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
     typeof r.inspector_email === 'string' && r.inspector_email.trim()
       ? r.inspector_email.trim().toLowerCase() : null;
 
+  // v47.438: On-device picker selections — forwarded by /api/survey/submit from
+  // the SurveyV2Payload. These determine which project/client the survey lands on.
+  // MUST be passed through here or they are silently dropped before reaching
+  // the ingest context, causing surveys to create orphan projects instead of
+  // attaching to the field worker's selected project.
+  const solarpro_selected_project_id =
+    typeof r.solarpro_selected_project_id === 'string' && r.solarpro_selected_project_id.trim()
+      ? r.solarpro_selected_project_id.trim() : null;
+  const solarpro_selected_client_id =
+    typeof r.solarpro_selected_client_id === 'string' && r.solarpro_selected_client_id.trim()
+      ? r.solarpro_selected_client_id.trim() : null;
+
   return {
     ok: true,
     event: {
@@ -100,6 +112,9 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
       // F-06b: Inspector identity (from partner webhook body)
       inspector_name,
       inspector_email,
+      // v47.438: On-device picker selections (null for PM-initiated surveys)
+      solarpro_selected_project_id,
+      solarpro_selected_client_id,
     },
   };
 }
