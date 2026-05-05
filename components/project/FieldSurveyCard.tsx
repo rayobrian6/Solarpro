@@ -1,15 +1,15 @@
 // ============================================================================
-// FieldSurveyCard -- First-class Field Survey module for the Project page
+// FieldSurveyCard -- Field Survey summary card for the Project page
 //
 // Data source: GET /api/projects/[id]/survey-context  (ProjectSurveyContext)
 // Single fetch returns: surveys[], latest survey, files, typed V2 payload.
 //
 // Two states:
-//   STATE 1 -- No survey: large CTA with Start Survey + QR Code buttons
-//   STATE 2 -- Survey exists: summary card (status, date, creator, address,
-//             photo count, source_survey_id backlink) + View / Retake actions
+//   STATE 1 -- No survey: informational message (survey comes from mobile app)
+//   STATE 2 -- Survey exists: summary card with View Survey link
 //
-// Pure presentational. No schema changes. No ingest changes.
+// Read-only. Survey data arrives via webhook from mobile app.
+// SolarPro does not initiate surveys.
 // ============================================================================
 
 'use client';
@@ -17,8 +17,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
-  Camera, RefreshCw, ChevronRight, CheckCircle, Clock,
-  AlertTriangle, QrCode, Send, RotateCcw, Eye,
+  Camera, RefreshCw, CheckCircle, Clock,
+  AlertTriangle, Eye,
   MapPin, User, Calendar, ImageIcon, ArrowRight,
 } from 'lucide-react';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db-neon';
@@ -39,11 +39,6 @@ interface ProjectSurveyContext {
 // ---------------------------------------------------------------------------
 interface FieldSurveyCardProps {
   projectId: string;
-  /** Callback to trigger the existing project survey-handoff flow */
-  onStartSurvey?: () => void;
-  surveyHandoffLoading?: boolean;
-  /** Callback to show QR code modal */
-  onShowQR?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,17 +76,9 @@ function formatDate(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// NoSurveyState -- CTA when no survey exists yet
+// NoSurveyState -- shown when no survey exists yet
 // ---------------------------------------------------------------------------
-function NoSurveyState({
-  onStartSurvey,
-  onShowQR,
-  loading,
-}: {
-  onStartSurvey?: () => void;
-  onShowQR?: () => void;
-  loading?: boolean;
-}) {
+function NoSurveyState() {
   return (
     <div className="card p-6">
       {/* Header row */}
@@ -109,39 +96,12 @@ function NoSurveyState({
       <div className="py-4 text-center space-y-2 border-t border-b border-slate-800">
         <p className="text-slate-300 text-sm font-medium">No site survey completed yet</p>
         <p className="text-slate-500 text-xs max-w-sm mx-auto leading-relaxed">
-          Capture physical and electrical data in the field.
-          Survey data drives accurate CAD layouts, permit packages, and engineering calculations.
+          Survey data is captured by the field technician using the mobile app
+          and automatically appears here once submitted.
         </p>
       </div>
 
-      {/* Actions */}
-      <div className="flex gap-2 mt-4 flex-wrap">
-        {onStartSurvey && (
-          <button
-            onClick={onStartSurvey}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/30
-              hover:border-cyan-500/60 text-xs font-semibold text-cyan-400 transition-all
-              hover:bg-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Camera size={13} />
-            {loading ? 'Generating link...' : 'Start Survey'}
-            {!loading && <ChevronRight size={11} />}
-          </button>
-        )}
-        {onShowQR && (
-          <button
-            onClick={onShowQR}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700
-              hover:border-slate-600 text-xs font-semibold text-slate-300 transition-all hover:bg-slate-700"
-          >
-            <QrCode size={13} />
-            Generate QR Code
-          </button>
-        )}
-      </div>
-
-      <p className="text-slate-600 text-xs mt-3">
+      <p className="text-slate-600 text-xs mt-4">
         Engineering uses estimated defaults until real field data is captured.
       </p>
     </div>
@@ -155,16 +115,10 @@ function SurveyExistsCard({
   survey,
   fileCount,
   projectId,
-  onRetake,
-  onSendToField,
-  retakeLoading,
 }: {
   survey: SiteSurvey;
   fileCount: number;
   projectId: string;
-  onRetake?: () => void;
-  onSendToField?: () => void;
-  retakeLoading?: boolean;
 }) {
   const statusCfg = STATUS_CONFIG[survey.status] ?? STATUS_CONFIG.completed;
 
@@ -248,28 +202,6 @@ function SurveyExistsCard({
           <Eye size={12} />
           View Survey
         </Link>
-        {onRetake && (
-          <button
-            onClick={onRetake}
-            disabled={retakeLoading}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700
-              hover:border-slate-600 text-xs font-semibold text-slate-300 transition-all hover:bg-slate-700
-              disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <RotateCcw size={12} />
-            {retakeLoading ? 'Generating...' : 'Retake Survey'}
-          </button>
-        )}
-        {onSendToField && (
-          <button
-            onClick={onSendToField}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 border border-slate-700
-              hover:border-slate-600 text-xs font-semibold text-slate-300 transition-all hover:bg-slate-700"
-          >
-            <Send size={12} />
-            Send to Field
-          </button>
-        )}
       </div>
     </div>
   );
@@ -278,12 +210,7 @@ function SurveyExistsCard({
 // ---------------------------------------------------------------------------
 // FieldSurveyCard -- main export
 // ---------------------------------------------------------------------------
-export default function FieldSurveyCard({
-  projectId,
-  onStartSurvey,
-  surveyHandoffLoading = false,
-  onShowQR,
-}: FieldSurveyCardProps) {
+export default function FieldSurveyCard({ projectId }: FieldSurveyCardProps) {
   const [context, setContext] = useState<ProjectSurveyContext | null>(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
@@ -350,13 +277,7 @@ export default function FieldSurveyCard({
 
   // No survey yet
   if (!context?.latest) {
-    return (
-      <NoSurveyState
-        onStartSurvey={onStartSurvey}
-        onShowQR={onShowQR}
-        loading={surveyHandoffLoading}
-      />
-    );
+    return <NoSurveyState />;
   }
 
   return (
@@ -364,9 +285,6 @@ export default function FieldSurveyCard({
       survey={context.latest}
       fileCount={context.files.length}
       projectId={projectId}
-      onRetake={onStartSurvey}
-      onSendToField={onStartSurvey}
-      retakeLoading={surveyHandoffLoading}
     />
   );
 }

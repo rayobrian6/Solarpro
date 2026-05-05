@@ -20,7 +20,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Home, Zap, AlertTriangle, ClipboardList,
   CheckCircle, XCircle, Clock, User,
-  ChevronRight, Camera, RefreshCw,
+  Camera, RefreshCw,
 } from 'lucide-react';
 import type { ProjectPhysicalData } from '@/lib/engineering/types';
 
@@ -28,9 +28,6 @@ import type { ProjectPhysicalData } from '@/lib/engineering/types';
 
 interface FieldSurveyPanelProps {
   projectId: string;
-  onStartSurvey?: () => void;
-  /** If true, the "Start Survey" button triggers the parent's handoff flow */
-  surveyHandoffLoading?: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -95,13 +92,7 @@ function CardGroup({ icon, title, accent, children }: CardGroupProps) {
 
 // ─── No-data CTA ─────────────────────────────────────────────────────────────
 
-function NoDataState({
-  onStartSurvey,
-  loading,
-}: {
-  onStartSurvey?: () => void;
-  loading?: boolean;
-}) {
+function NoDataState() {
   return (
     <div className="card p-8 text-center space-y-4">
       <div className="w-14 h-14 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mx-auto">
@@ -110,21 +101,10 @@ function NoDataState({
       <div>
         <h3 className="text-white font-semibold text-sm mb-1">No Field Survey Data</h3>
         <p className="text-slate-400 text-xs max-w-xs mx-auto leading-relaxed">
-          Send a field tech to capture physical and electrical data.
-          Survey data drives accurate CAD layouts, electrical design, and permit packages.
+          Survey data is captured by the field technician using the mobile app
+          and automatically appears here once submitted.
         </p>
       </div>
-      {onStartSurvey && (
-        <button
-          onClick={onStartSurvey}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/30 hover:border-cyan-500/60 text-xs font-semibold text-cyan-400 transition-all hover:bg-cyan-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Camera size={13} />
-          {loading ? 'Generating link…' : 'Start Survey'}
-          {!loading && <ChevronRight size={12} />}
-        </button>
-      )}
       <p className="text-slate-600 text-xs">
         Engineering uses defaults until real data is captured.
       </p>
@@ -134,11 +114,7 @@ function NoDataState({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function FieldSurveyPanel({
-  projectId,
-  onStartSurvey,
-  surveyHandoffLoading = false,
-}: FieldSurveyPanelProps) {
+export default function FieldSurveyPanel({ projectId }: FieldSurveyPanelProps) {
   const [data, setData] = useState<ProjectPhysicalData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,12 +175,7 @@ export default function FieldSurveyPanel({
 
   // ── No survey data yet ────────────────────────────────────────────────────
   if (!hasData || !data) {
-    return (
-      <NoDataState
-        onStartSurvey={onStartSurvey}
-        loading={surveyHandoffLoading}
-      />
-    );
+    return <NoDataState />;
   }
 
   // ── Survey data present ───────────────────────────────────────────────────

@@ -60,7 +60,6 @@ import ProposalTab from '@/components/project/ProposalTab';
 import OperationsTab from '@/components/project/OperationsTab';
 import FieldSurveyPanel from '@/components/project/FieldSurveyPanel';
 import FieldSurveyCard from '@/components/project/FieldSurveyCard';
-import QRCode from 'react-qr-code';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TabId = 'bill' | 'system' | 'design' | 'engineering' | 'proposal' | 'operations' | 'survey';
@@ -214,7 +213,7 @@ interface QuickAction {
   label: string;
   icon: React.ReactNode;
   color: string;
-  action: 'tab' | 'link' | 'handoff';
+  action: 'tab' | 'link';
   target: string;
   enabled: (p: Project) => boolean;
   disabledReason?: string;
@@ -233,12 +232,8 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('bill');
   const [showAllWarnings, setShowAllWarnings] = useState(false);
-  const [surveyHandoffLoading, setSurveyHandoffLoading] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
   const [savingBill, setSavingBill] = useState(false);
-  const [showQRModal, setShowQRModal] = useState(false);
-  const [qrToken, setQrToken]   = useState<string | null>(null);  // deep link (window.open)
-  const [qrWebUrl, setQrWebUrl] = useState<string | null>(null);  // web URL for QR code image
 
   useEffect(() => {
     const existing = projects.find(p => p.id === id);
@@ -494,44 +489,7 @@ export default function ProjectDetailPage() {
     setActiveTab('system');
   }, []);
 
-  const handleStartSurvey = useCallback(async () => {
-    if (!id) return;
-    setSurveyHandoffLoading(true);
-    try {
-      const res = await fetch(`/api/projects/${id}/survey-handoff`, { method: 'POST', credentials: 'include' });
-      const data = await res.json();
-      if (res.ok && data.url) {
-        window.open(data.url, '_blank', 'noopener,noreferrer');
-      } else {
-        alert(data.error || 'Failed to generate survey link');
-      }
-    } catch (err) {
-      alert('Network error - could not generate survey link');
-    } finally {
-      setSurveyHandoffLoading(false);
-    }
-  }, [id]);
-
-  const handleShowQR = useCallback(async () => {
-    if (!id) return;
-    setSurveyHandoffLoading(true);
-    try {
-      const res  = await fetch(`/api/projects/${id}/survey-handoff`, { method: 'POST', credentials: 'include' });
-      const data = await res.json();
-      if (res.ok && data.url) {
-        setQrToken(data.url);
-        // webUrl is the browser-scannable https:// URL; fall back to url if not present
-        setQrWebUrl(data.webUrl ?? data.url);
-        setShowQRModal(true);
-      } else {
-        alert(data.error || 'Failed to generate QR code');
-      }
-    } catch {
-      alert('Network error - could not generate QR code');
-    } finally {
-      setSurveyHandoffLoading(false);
-    }
-  }, [id]);
+  
 
   if (loading) {
     return (
@@ -605,14 +563,7 @@ export default function ProjectDetailPage() {
       enabled: p => p.status === 'proposal' || p.status === 'approved' || p.status === 'installed',
       disabledReason: 'Complete engineering first',
     },
-    {
-      label: surveyHandoffLoading ? 'Opening...' : 'Start Survey',
-      icon: <Camera size={14} />,
-      color: 'text-cyan-400',
-      action: 'handoff',
-      target: '',
-      enabled: () => true,
-    },
+    
   ];
 
   return (
@@ -724,19 +675,7 @@ export default function ProjectDetailPage() {
                 </button>
               );
             }
-            if (qa.action === 'handoff') {
-              return (
-                <button
-                  key={qa.label}
-                  onClick={handleStartSurvey}
-                  disabled={surveyHandoffLoading}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 hover:border-cyan-500/60 text-xs font-medium text-cyan-400 transition-all whitespace-nowrap flex-shrink-0 hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <span className="text-cyan-400">{qa.icon}</span>
-                  {qa.label}
-                </button>
-              );
-            }
+            
             return (
               <div
                 key={qa.label}
@@ -785,12 +724,7 @@ export default function ProjectDetailPage() {
         )}
 
         {/* -- Field Survey Card (always visible, above tabs) -- */}
-        <FieldSurveyCard
-          projectId={id}
-          onStartSurvey={handleStartSurvey}
-          surveyHandoffLoading={surveyHandoffLoading}
-          onShowQR={handleShowQR}
-        />
+        <FieldSurveyCard projectId={id} />
 
         {/* ── Tab Navigation ──────────────────────────────────────────────── */}
         <div className="flex gap-0.5 border-b border-slate-700/50 overflow-x-auto">
@@ -856,11 +790,7 @@ export default function ProjectDetailPage() {
             <OperationsTab projectId={id} />
           )}
           {activeTab === 'survey' && (
-            <FieldSurveyPanel
-              projectId={id}
-              onStartSurvey={handleStartSurvey}
-              surveyHandoffLoading={surveyHandoffLoading}
-            />
+            <FieldSurveyPanel projectId={id} />
           )}
         </div>
 
@@ -880,53 +810,7 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
-      {/* QR Code Modal */}
-      {showQRModal && qrToken && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
-          onClick={() => setShowQRModal(false)}
-        >
-          <div
-            className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-white font-bold text-sm">Survey QR Code</h3>
-                <p className="text-slate-400 text-xs mt-0.5">Scan to open survey on a mobile device</p>
-              </div>
-              <button
-                onClick={() => setShowQRModal(false)}
-                className="text-slate-500 hover:text-white transition-colors text-lg leading-none"
-              >
-                &times;
-              </button>
-            </div>
-            {/* QR Code — generated client-side via react-qr-code (no external service) */}
-            <div className="flex items-center justify-center p-4 bg-white rounded-xl">
-              {qrWebUrl && <QRCode value={qrWebUrl} size={200} />}
-            </div>
-            <div className="bg-slate-800 rounded-lg p-3">
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1">Survey Link</p>
-              <p className="text-xs text-slate-300 break-all font-mono">{qrWebUrl ?? qrToken}</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => { navigator.clipboard?.writeText(qrWebUrl ?? qrToken ?? ''); }}
-                className="flex-1 py-2 rounded-xl bg-slate-800 border border-slate-700 hover:border-slate-600 text-xs font-semibold text-slate-300 transition-all"
-              >
-                Copy Link
-              </button>
-              <button
-                onClick={() => setShowQRModal(false)}
-                className="flex-1 py-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 hover:border-cyan-500/60 text-xs font-semibold text-cyan-400 transition-all"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      
 
     </AppShell>
   );
