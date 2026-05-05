@@ -93,7 +93,7 @@ export async function GET(req: NextRequest) {
     }));
 
     return NextResponse.json(
-      { success: true, data: { clients } },
+      { clients },
       { status: 200 },
     );
   } catch (err: unknown) {

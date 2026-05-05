@@ -124,11 +124,14 @@ export async function GET(
       name: String(r.name),
       clientId: r.client_id ? String(r.client_id) : null,
       clientName: r.client_name ? String(r.client_name) : null,
+      // snake_case aliases for mobile app compatibility
+      client_id: r.client_id ? String(r.client_id) : null,
+      client_name: r.client_name ? String(r.client_name) : null,
       address: String(r.address ?? ''),
     }));
 
     return NextResponse.json(
-      { success: true, data: { projects } },
+      { projects },
       { status: 200 },
     );
   } catch (err: unknown) {
