@@ -48,7 +48,6 @@ export async function GET(req: NextRequest) {
     const client = clients[0];
 
     // Fetch projects for this client — ONLY homeowner_stage, NOT project_status
-    // Read-only fields: id, name, address, system_size_kw, homeowner_stage, updated_at, created_at
     const projects = await sql`
       SELECT
         id,
@@ -64,6 +63,24 @@ export async function GET(req: NextRequest) {
       ORDER BY created_at DESC
     `;
 
+    // Fetch stage history for all client projects (homeowner-safe: stage + date only)
+    const projectIds = projects.map((p: { id: string }) => p.id);
+    let stageHistory: { project_id: string; stage: string; created_at: string }[] = [];
+    if (projectIds.length > 0) {
+      const historyRows = await sql`
+        SELECT project_id, stage, created_at
+        FROM project_homeowner_stage_history
+        WHERE project_id = ANY(${projectIds})
+        ORDER BY created_at DESC
+        LIMIT 20
+      `;
+      stageHistory = historyRows.map((r: Record<string, unknown>) => ({
+        project_id: r.project_id as string,
+        stage: r.stage as string,
+        created_at: r.created_at as string,
+      }));
+    }
+
     return NextResponse.json({
       success: true,
       client: {
@@ -77,6 +94,7 @@ export async function GET(req: NextRequest) {
         zip:     client.zip || null,
       },
       projects,
+      stageHistory,
     });
   } catch (e: unknown) {
     return handleRouteDbError('[api/portal/dashboard]', e);
