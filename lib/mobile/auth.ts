@@ -1,21 +1,28 @@
 // ============================================================================
 // lib/mobile/auth.ts
 //
-// PHASE 4.15.2 — Shared mobile Bearer JWT authentication helper.
+// PHASE 4.15.2 / 4.15.3 — Shared mobile Bearer JWT authentication helper.
 //
 // ALL /api/mobile/* routes MUST call resolveMobileUser() for auth.
 // No exceptions — unauthenticated access is never permitted.
 //
-// Auth flow:
-//   1. Session cookie  (SolarPro web user, same browser session)
-//   2. Bearer JWT      (mobile field app, SOLARPRO_HANDOFF_SECRET-signed HS256)
+// Auth flow (tried in order):
+//   1. Session cookie      (SolarPro web user, same browser session)
+//   2. Service API key     (Render backend proxy, MOBILE_SERVICE_API_KEY)
+//   3. Bearer JWT          (handoff JWT, SOLARPRO_HANDOFF_SECRET-signed HS256)
+//
+// Service-to-service flow (Render → SolarPro):
+//   The Render backend (site-survey-api-bpyz.onrender.com) proxies
+//   /api/mobile/clients to SolarPro using SOLARPRO_API_KEY as a Bearer token.
+//   On SolarPro, set MOBILE_SERVICE_API_KEY to the same value.
+//   When matched, returns a fixed service userId (MOBILE_SERVICE_USER_ID)
+//   OR uses SURVEY_INGEST_DEFAULT_USER_ID as fallback.
 //
 // Returns:
 //   MobileAuthResult   on success (userId + source)
 //   null               on failure — caller MUST return mobileAuthError()
 //
-// All failure paths are logged with [MOBILE_AUTH_FAIL] tag so they are
-// immediately visible in Vercel function logs.
+// All failure paths are logged with [MOBILE_AUTH_FAIL] tag.
 // ============================================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -28,7 +35,7 @@ import { isValidUUID } from '@/lib/db-neon';
 // ---------------------------------------------------------------------------
 export interface MobileAuthResult {
   userId: string;
-  source: 'session_cookie' | 'bearer_jwt';
+  source: 'session_cookie' | 'service_api_key' | 'bearer_jwt';
 }
 
 // ---------------------------------------------------------------------------
@@ -54,8 +61,38 @@ export function resolveMobileUser(
     console.warn(`[MOBILE_AUTH_FAIL] ${routeLabel} session cookie parse error: ${msg}`);
   }
 
-  // ── Path B: Bearer JWT ─────────────────────────────────────────────────────
+  // ── Path B: Service-to-service API key (Render backend → SolarPro) ─────────
+  //
+  // The Render backend (site-survey-api-bpyz.onrender.com) proxies mobile
+  // requests to SolarPro using SOLARPRO_API_KEY as a Bearer token.
+  // On SolarPro (Vercel), set MOBILE_SERVICE_API_KEY to the same value.
+  // When matched, we use MOBILE_SERVICE_USER_ID (or SURVEY_INGEST_DEFAULT_USER_ID)
+  // as the scoped userId for DB queries.
   const authHeader = req.headers.get('authorization') ?? null;
+  const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
+  const serviceApiKey = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
+
+  if (serviceApiKey && bearerToken && bearerToken === serviceApiKey) {
+    // Resolve the user ID to scope DB queries
+    const serviceUserId =
+      process.env.MOBILE_SERVICE_USER_ID?.trim() ||
+      process.env.SURVEY_INGEST_DEFAULT_USER_ID?.trim() ||
+      null;
+
+    if (!serviceUserId || !isValidUUID(serviceUserId)) {
+      console.error(
+        `[MOBILE_AUTH_FAIL] ${routeLabel} — service API key matched but ` +
+        `MOBILE_SERVICE_USER_ID / SURVEY_INGEST_DEFAULT_USER_ID is not set or not a valid UUID. ` +
+        `Set one of these env vars in Vercel to a valid SolarPro user UUID.`
+      );
+      return null;
+    }
+
+    console.log(`[MOBILE_AUTH] ${routeLabel} — authenticated via service_api_key userId=${serviceUserId}`);
+    return { userId: serviceUserId, source: 'service_api_key' };
+  }
+
+  // ── Path C: Bearer JWT (handoff token) ────────────────────────────────────
 
   // STEP 1 — Is the Authorization header present?
   if (!authHeader) {
@@ -64,8 +101,7 @@ export function resolveMobileUser(
   }
 
   // STEP 2 — Does it match "Bearer <token>"?
-  const bearerMatch = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!bearerMatch) {
+  if (!bearerToken) {
     console.warn(
       `[MOBILE_AUTH_FAIL] ${routeLabel} — Authorization header not Bearer format` +
       ` (received: "${authHeader.slice(0, 40)}...")`
@@ -73,8 +109,8 @@ export function resolveMobileUser(
     return null;
   }
 
-  const token = bearerMatch[1];
-  console.log(`[MOBILE_AUTH] ${routeLabel} — Bearer token received (len=${token.length})`);
+  const token = bearerToken;
+  console.log(`[MOBILE_AUTH] ${routeLabel} — Bearer token received (len=${token.length}), attempting JWT verify`);
 
   // STEP 3 — Verify the JWT signature + expiry
   //
