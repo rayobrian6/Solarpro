@@ -103,8 +103,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { userId, name, phone, email, address, notes, status } = body;
 
-    if (!userId || typeof userId !== 'string') {
-      return NextResponse.json({ success: false, error: 'userId is required' }, { status: 400 });
+    // userId is optional for inline lead creation (not yet tied to a system user)
+    if (userId && typeof userId !== 'string') {
+      return NextResponse.json({ success: false, error: 'Invalid userId' }, { status: 400 });
     }
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
       return NextResponse.json({ success: false, error: 'name must be at least 2 characters' }, { status: 400 });
@@ -114,19 +115,51 @@ export async function POST(req: NextRequest) {
     const leadStatus = validStatuses.includes(status) ? status : 'new';
 
     const sql = await getDbReady();
-    const rows = await sql`
-      INSERT INTO leads (user_id, name, phone, email, address, notes, status)
-      VALUES (
-        ${userId},
-        ${name.trim()},
-        ${phone || null},
-        ${email ? email.trim().toLowerCase() : null},
-        ${address || null},
-        ${notes || null},
-        ${leadStatus}
-      )
-      RETURNING *
-    `;
+
+    // Try insert. If user_id NOT NULL constraint fails, run migration and retry.
+    let rows;
+    try {
+      rows = await sql`
+        INSERT INTO leads (user_id, name, phone, email, address, notes, status)
+        VALUES (
+          ${userId || null},
+          ${name.trim()},
+          ${phone || null},
+          ${email ? email.trim().toLowerCase() : null},
+          ${address || null},
+          ${notes || null},
+          ${leadStatus}
+        )
+        RETURNING *
+      `;
+    } catch (insertErr: any) {
+      // Check if error is about user_id NOT NULL constraint
+      if (insertErr?.code === '23502' && insertErr?.column === 'user_id') {
+        // Run migration to make user_id nullable
+        try {
+          await sql`ALTER TABLE leads ALTER COLUMN user_id DROP NOT NULL`;
+          // Retry insert
+          rows = await sql`
+            INSERT INTO leads (user_id, name, phone, email, address, notes, status)
+            VALUES (
+              ${userId || null},
+              ${name.trim()},
+              ${phone || null},
+              ${email ? email.trim().toLowerCase() : null},
+              ${address || null},
+              ${notes || null},
+              ${leadStatus}
+            )
+            RETURNING *
+          `;
+        } catch (migrateErr: unknown) {
+          return handleRouteDbError('[POST /api/admin/leads] migrate', migrateErr);
+        }
+      } else {
+        // Some other error
+        throw insertErr;
+      }
+    }
 
     return NextResponse.json({ success: true, lead: rows[0] }, { status: 201 });
   } catch (err: unknown) {
