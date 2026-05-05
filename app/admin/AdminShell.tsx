@@ -26,7 +26,7 @@ const NAV_SECTIONS = [
       { href: '/admin/companies', label: 'Companies',     icon: Building2 },
       { href: '/admin/projects',  label: 'Projects',      icon: FolderOpen },
       { href: '/admin/leads',          label: 'Leads',             icon: UserPlus },
-      { href: '/admin/portal-dashboard', label: 'Portal Dashboard',  icon: LayoutTemplate },
+      { href: '/admin/portal-dashboard', label: 'Homeowner Dashboard', icon: LayoutTemplate },
     ],
   },
   {

@@ -37,7 +37,7 @@ export async function GET(
   try {
     const sql = await getDbReady();
 
-    const [rows, historyRows] = await Promise.all([
+    const [rows, historyRows, fileRows] = await Promise.all([
       sql`
         SELECT
           p.id, p.name, p.address, p.system_size_kw, p.status,
@@ -66,16 +66,37 @@ export async function GET(
         ORDER BY h.created_at DESC
         LIMIT 50
       `,
+      sql`
+        SELECT
+          file_name,
+          file_type,
+          COALESCE(file_name, file_type, 'Document') AS label,
+          created_at::text AS uploaded_at
+        FROM project_files
+        WHERE project_id = ${id}
+          AND (file_url IS NOT NULL OR file_data IS NOT NULL)
+          AND status != 'failed'
+        ORDER BY created_at DESC
+        LIMIT 50
+      `,
     ]);
 
     if (rows.length === 0) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }
 
+    // Normalize document labels for display
+    const documents = fileRows.map((r: Record<string, unknown>) => ({
+      file_type:   r.file_type ? String(r.file_type) : undefined,
+      label:       String(r.label ?? r.file_name ?? 'Document'),
+      uploaded_at: String(r.uploaded_at),
+    }));
+
     return NextResponse.json({
       success: true,
       project: rows[0],
       stageHistory: historyRows,
+      documents,
     });
   } catch (e: unknown) {
     return handleRouteDbError('[api/admin/projects/[id]] GET', e);

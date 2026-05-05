@@ -5,9 +5,10 @@ import {
   Sun, RefreshCw, Search, ChevronDown,
   MapPin, Clock, CheckCircle2, Circle,
   AlertCircle, Zap, TrendingUp, Home, Phone, Mail,
+  FileCheck,
 } from 'lucide-react';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type HomeownerStage =
   | 'lead_submitted'
@@ -31,7 +32,35 @@ interface Project {
   owner_name: string;
 }
 
-// ─── Stage Definitions ────────────────────────────────────────────────────────
+interface ProjectDocument {
+  file_type?: string;
+  label: string;
+  uploaded_at: string;
+}
+
+// ─── Label normalizer (mirrors lib/normalizeDocumentLabel) ───────────────────
+
+const LABEL_MAP: Array<[RegExp, string]> = [
+  [/\butility[_\s-]?bill[_\s-]?summary\b/i, 'Utility Bill'],
+  [/\butility[_\s-]?bill\b/i,               'Utility Bill'],
+  [/\bbill\b/i,                              'Utility Bill'],
+  [/\broof[_\s-]?photo/i,                   'Roof Photos'],
+  [/\bmain[_\s-]?panel/i,                   'Main Panel Photos'],
+  [/\bsite[_\s-]?survey/i,                  'Site Survey'],
+  [/\bcontract\b/i,                          'Contract'],
+  [/\bproposal\b/i,                          'Proposal'],
+  [/\bpermit\b/i,                            'Permit'],
+  [/\binspection\b/i,                        'Inspection Report'],
+];
+
+function normalizeLabel(raw: string): string {
+  for (const [pattern, label] of LABEL_MAP) {
+    if (pattern.test(raw)) return label;
+  }
+  return raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// ─── Stage Definitions ───────────────────────────────────────────────────────
 
 type StageContent = {
   roadmapLabel: string;
@@ -219,7 +248,7 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
 
 // ─── Homeowner View ───────────────────────────────────────────────────────────
 
-function HomeownerView({ project }: { project: Project }) {
+function HomeownerView({ project, documents }: { project: Project; documents: ProjectDocument[] }) {
   const stage       = project.homeowner_stage;
   const content     = stage ? STAGE_CONTENT[stage] : null;
   const stageIdx    = getStageIndex(stage);
@@ -250,7 +279,7 @@ function HomeownerView({ project }: { project: Project }) {
         </div>
       </div>
 
-      {/* ── 2. ROADMAP (dominant) ── */}
+      {/* ── 2. ROADMAP ── */}
       <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] px-6 sm:px-10 py-8">
         <div className="flex items-center justify-between mb-1">
           <div>
@@ -269,7 +298,7 @@ function HomeownerView({ project }: { project: Project }) {
         </div>
       </div>
 
-      {/* ── 3. CURRENT STAGE — single narrative block ── */}
+      {/* ── 3. CURRENT STAGE ── */}
       {content && (
         <div className="rounded-2xl border border-amber-500/[0.12] bg-amber-500/[0.04] px-6 sm:px-10 py-8">
           <div className="flex items-center gap-2 mb-5">
@@ -298,7 +327,7 @@ function HomeownerView({ project }: { project: Project }) {
         </div>
       )}
 
-      {/* ── 4. PROJECT DETAILS (small) ── */}
+      {/* ── 4. PROJECT DETAILS ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -328,7 +357,43 @@ function HomeownerView({ project }: { project: Project }) {
         </div>
       </div>
 
-      {/* ── 5. CONTACT ── */}
+      {/* ── 5. YOUR DOCUMENTS ── */}
+      <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-6 h-6 rounded-lg bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center">
+            <FileCheck size={12} className="text-emerald-400" />
+          </div>
+          <h3 className="text-sm font-bold text-white">Your Documents</h3>
+        </div>
+        {documents.length === 0 ? (
+          <p className="text-xs text-slate-600 py-2">No documents uploaded yet.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {documents.map((doc, i) => (
+              <div key={i} className="flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/[0.04] px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-6 h-6 rounded-md bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                    <CheckCircle2 size={11} className="text-emerald-400" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-white">{normalizeLabel(doc.label)}</p>
+                    <p className="text-[10px] text-slate-600 uppercase tracking-wide mt-0.5">
+                      {doc.file_type === 'utility_bill' ? 'Utility Bill' : 'Document'} · Received
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] text-slate-600">
+                    {new Date(doc.uploaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── 6. CONTACT ── */}
       <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
         <h3 className="text-sm font-bold text-white mb-1">Have a question?</h3>
         <p className="text-xs text-slate-600 mb-5">Reach out to your project team anytime.</p>
@@ -368,14 +433,17 @@ function HomeownerView({ project }: { project: Project }) {
 
 // ─── Admin Wrapper ────────────────────────────────────────────────────────────
 
-export default function AdminPortalDashboardPage() {
+export default function AdminHomeownerDashboardPage() {
   const [projects,   setProjects]   = useState<Project[]>([]);
   const [selected,   setSelected]   = useState<Project | null>(null);
+  const [documents,  setDocuments]  = useState<ProjectDocument[]>([]);
   const [filtered,   setFiltered]   = useState<Project[]>([]);
   const [loading,    setLoading]    = useState(true);
+  const [docLoading, setDocLoading] = useState(false);
   const [search,     setSearch]     = useState('');
   const [showPicker, setShowPicker] = useState(false);
 
+  // Load all projects (for picker)
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -391,7 +459,30 @@ export default function AdminPortalDashboardPage() {
     } finally { setLoading(false); }
   }, []);
 
+  // Load per-project detail (documents + stage history)
+  const loadProjectDetail = useCallback(async (projectId: string) => {
+    setDocLoading(true);
+    setDocuments([]);
+    try {
+      const res = await fetch(`/api/admin/projects/${projectId}`);
+      if (!res.ok) return;
+      const d = await res.json();
+      if (d.success) {
+        setDocuments(d.documents ?? []);
+        // Also update the selected project with fresh homeowner_stage
+        if (d.project) {
+          setSelected(prev => prev?.id === projectId ? { ...prev, ...d.project } : prev);
+        }
+      }
+    } finally { setDocLoading(false); }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+
+  // When selected project changes, fetch its detail
+  useEffect(() => {
+    if (selected?.id) loadProjectDetail(selected.id);
+  }, [selected?.id, loadProjectDetail]);
 
   useEffect(() => {
     const q = search.toLowerCase();
@@ -409,8 +500,8 @@ export default function AdminPortalDashboardPage() {
       {/* Admin bar */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-black text-white">Portal Dashboard Preview</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Viewing the homeowner experience. Select a project below.</p>
+          <h1 className="text-xl font-black text-white">Homeowner Dashboard</h1>
+          <p className="text-xs text-slate-500 mt-0.5">Preview the homeowner experience for any project.</p>
         </div>
         <button onClick={load} disabled={loading}
           className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-white/5 border border-white/10 px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 flex-shrink-0">
@@ -469,6 +560,7 @@ export default function AdminPortalDashboardPage() {
           <div className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/15 rounded-lg px-3 py-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
             <span className="text-xs text-blue-300 font-medium">Admin Preview — {selected.client_name ?? selected.name}</span>
+            {docLoading && <RefreshCw size={10} className="text-blue-400 animate-spin ml-1" />}
           </div>
           <a href={`/admin/projects/${selected.id}`}
             className="text-xs text-slate-400 hover:text-white border border-white/8 hover:border-white/15 rounded-lg px-3 py-1.5 transition-all">
@@ -482,7 +574,7 @@ export default function AdminPortalDashboardPage() {
           <RefreshCw size={16} className="animate-spin mr-2" /> Loading projects…
         </div>
       ) : selected ? (
-        <HomeownerView key={selected.id} project={selected} />
+        <HomeownerView key={selected.id} project={selected} documents={documents} />
       ) : (
         <div className="flex items-center justify-center h-64 rounded-2xl border border-white/8 bg-white/2">
           <p className="text-slate-600 text-sm">No projects found.</p>
