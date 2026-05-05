@@ -276,7 +276,7 @@ export default function AdminLeadDetail() {
                 </option>
                 {users.map((u) => (
                   <option key={u.id} value={u.id} className="bg-slate-900">
-                    {u.name} {u.company ? `(${u.company})` : ''} <{u.email}>
+                    {u.name} {u.company ? `(${u.company})` : ''} &lt;{u.email}&gt;
                   </option>
                 ))}
               </select>
