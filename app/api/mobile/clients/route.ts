@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { verifyHandoffToken } from '@/lib/survey/handoff/tokenMinter';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import type { SurveyLookupClient } from '@/lib/survey/v2/types';
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,14 @@ function resolveUserId(req: NextRequest): string | null {
 
 export async function GET(req: NextRequest) {
   try {
+    const rl = await checkRateLimit('standard', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please slow down.' },
+        { status: 429 },
+      );
+    }
+
     const userId = resolveUserId(req);
     if (!userId) {
       return NextResponse.json(
