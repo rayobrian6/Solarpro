@@ -303,6 +303,45 @@ export default function AdminLeadDetail() {
         </div>
       </div>
 
+      {/* Portal Access */}
+      <div className="bg-white/3 border border-white/8 rounded-xl p-5 space-y-3">
+        <h2 className="text-sm font-bold text-white">Portal Access</h2>
+
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <p className="text-xs text-slate-400">
+              Email on file:{' '}
+              <span className="text-white font-medium">{lead.email || '—'}</span>
+            </p>
+            {lead.converted_project_id && (
+              <p className="text-xs text-slate-400">
+                Project ID:{' '}
+                <span className="text-white font-mono text-[10px]">
+                  {lead.converted_project_id}
+                </span>
+              </p>
+            )}
+          </div>
+
+          {isConverted && lead.converted_project_id ? (
+            <span className="flex items-center gap-1.5 text-xs font-semibold text-green-400 bg-green-500/10 border border-green-500/20 rounded-lg px-3 py-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+              Portal Active
+            </span>
+          ) : (
+            <span className="text-xs text-slate-600 italic">Not yet converted</span>
+          )}
+        </div>
+
+        {isConverted && lead.email && (
+          <p className="text-xs text-slate-500">
+            Homeowner can log in at{' '}
+            <span className="font-mono text-slate-400">/portal/login</span>{' '}
+            using <span className="text-slate-300">{lead.email}</span>.
+          </p>
+        )}
+      </div>
+
       {/* Toast */}
       {toast && (
         <div className={`fixed bottom-6 right-6 px-4 py-3 rounded-xl text-sm font-medium shadow-lg z-50 ${

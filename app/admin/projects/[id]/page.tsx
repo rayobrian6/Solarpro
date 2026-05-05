@@ -310,6 +310,44 @@ export default function AdminProjectDetail() {
         </div>
       </div>
 
+      {/* ── Homeowner Portal ─────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-white/5 bg-white/2 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-bold text-white">Homeowner Portal</h2>
+          <button
+            onClick={() => {
+              const url = `${window.location.origin}/portal/login`;
+              navigator.clipboard.writeText(url).then(() => showToast('Portal link copied'));
+            }}
+            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-1.5 transition-all"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            Copy Portal Link
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between py-2 border-b border-white/5">
+            <span className="text-xs text-slate-500">Login email</span>
+            <span className="text-xs text-white font-medium">
+              {project.client_email ?? <span className="text-slate-600 italic">No client linked</span>}
+            </span>
+          </div>
+          <div className="flex items-center justify-between py-2">
+            <span className="text-xs text-slate-500">Portal stage shown</span>
+            {project.homeowner_stage ? (
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                stageMeta(project.homeowner_stage)?.color ?? 'text-slate-400 bg-slate-500/20 border-slate-500/30'
+              }`}>
+                {stageMeta(project.homeowner_stage)?.label ?? project.homeowner_stage}
+              </span>
+            ) : (
+              <span className="text-xs text-slate-600 italic">Not set</span>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* ── Stage History ─────────────────────────────────────────────────── */}
       <div className="rounded-xl border border-white/5 bg-white/2 p-5">
         <div className="flex items-center gap-2 mb-4">
