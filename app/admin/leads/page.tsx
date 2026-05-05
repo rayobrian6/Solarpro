@@ -41,11 +41,58 @@ export default function AdminLeads() {
   const [status, setStatus]     = useState<typeof STATUSES[number]>('all');
   const [loading, setLoading]   = useState(true);
   const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
+
+  // Modal state
+  const [showModal, setShowModal]       = useState(false);
+  const [saving, setSaving]             = useState(false);
+  const [formName, setFormName]         = useState('');
+  const [formEmail, setFormEmail]       = useState('');
+  const [formPhone, setFormPhone]       = useState('');
+  const [formAddress, setFormAddress]   = useState('');
+  const [formNotes, setFormNotes]       = useState('');
   const LIMIT = 50;
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleCreate = async () => {
+    if (!formName.trim() || !formEmail.trim()) {
+      showToast('Name and email are required', false);
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch('/api/admin/leads', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          name:    formName.trim(),
+          email:   formEmail.trim(),
+          phone:   formPhone.trim() || null,
+          address: formAddress.trim() || null,
+          notes:   formNotes.trim() || null,
+        }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setShowModal(false);
+        setFormName('');
+        setFormEmail('');
+        setFormPhone('');
+        setFormAddress('');
+        setFormNotes('');
+        showToast('✓ Lead created');
+        load();
+      } else {
+        showToast(d.error || 'Failed to create lead', false);
+      }
+    } catch {
+      showToast('Connection error', false);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const load = useCallback(async () => {
@@ -77,12 +124,20 @@ export default function AdminLeads() {
           <h1 className="text-2xl font-black text-white">Leads</h1>
           <p className="text-sm text-slate-400 mt-1">{total.toLocaleString()} total leads</p>
         </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-2 text-xs text-slate-400 hover:text-white border border-white/10 rounded-lg px-3 py-2 transition-all"
-        >
-          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowModal(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/20 hover:bg-amber-500/20 hover:border-amber-500/30 rounded-lg px-3 py-2 transition-all"
+          >
+            <Plus size={12} /> Add Lead
+          </button>
+          <button
+            onClick={load}
+            className="flex items-center gap-2 text-xs text-slate-400 hover:text-white border border-white/10 rounded-lg px-3 py-2 transition-all"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       {/* Search + status filter */}
@@ -231,6 +286,130 @@ export default function AdminLeads() {
             >
               Next
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Create Lead Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          {/* Backdrop */}
+          <div
+            onClick={() => setShowModal(false)}
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+          />
+
+          {/* Modal */}
+          <div className="relative z-10 w-full max-w-md bg-[#0f1015] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <h2 className="text-base font-bold text-white">New Lead</h2>
+              <button
+                onClick={() => setShowModal(false)}
+                className="text-slate-500 hover:text-white transition-colors"
+              >
+                <XCircle size={16} />
+              </button>
+            </div>
+
+            {/* Form */}
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Name *
+                </label>
+                <div className="relative">
+                  <UserPlus size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={e => setFormName(e.target.value)}
+                    placeholder="Jane Doe"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Email *
+                </label>
+                <div className="relative">
+                  <Mail size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+                  <input
+                    type="email"
+                    value={formEmail}
+                    onChange={e => setFormEmail(e.target.value)}
+                    placeholder="jane@example.com"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Phone
+                </label>
+                <div className="relative">
+                  <Phone size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+                  <input
+                    type="tel"
+                    value={formPhone}
+                    onChange={e => setFormPhone(e.target.value)}
+                    placeholder="(555) 123-4567"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Address
+                </label>
+                <div className="relative">
+                  <MapPin size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
+                  <input
+                    type="text"
+                    value={formAddress}
+                    onChange={e => setFormAddress(e.target.value)}
+                    placeholder="123 Solar Street, San Francisco, CA"
+                    className="w-full bg-white/5 border border-white/10 rounded-lg pl-10 pr-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={formNotes}
+                  onChange={e => setFormNotes(e.target.value)}
+                  placeholder="Optional notes..."
+                  rows={3}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 bg-white/2">
+              <button
+                onClick={() => setShowModal(false)}
+                className="text-xs font-medium text-slate-400 hover:text-white transition-colors px-4 py-2"
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreate}
+                disabled={saving || !formName.trim() || !formEmail.trim()}
+                className="flex items-center gap-2 text-xs font-semibold text-black bg-amber-500 hover:bg-amber-400 rounded-lg px-4 py-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {saving ? <CheckCircle size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                {saving ? 'Creating...' : 'Create Lead'}
+              </button>
+            </div>
           </div>
         </div>
       )}
