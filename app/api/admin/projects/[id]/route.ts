@@ -37,7 +37,7 @@ export async function GET(
   try {
     const sql = await getDbReady();
 
-    const [rows, historyRows, fileRows, microRows] = await Promise.all([
+    const [rows, historyRows, fileRows] = await Promise.all([
       sql`
         SELECT
           p.id, p.name, p.address, p.system_size_kw, p.status,
@@ -79,15 +79,6 @@ export async function GET(
         ORDER BY created_at DESC
         LIMIT 50
       `,
-      sql`
-        SELECT
-          micro_stage,
-          created_at::text AS created_at,
-          created_by::text AS created_by
-        FROM project_micro_stages
-        WHERE project_id = ${id}
-        ORDER BY created_at ASC
-      `,
     ]);
 
     if (rows.length === 0) {
@@ -101,10 +92,27 @@ export async function GET(
       uploaded_at: String(r.uploaded_at),
     }));
 
-    const microStages = microRows.map((r: Record<string, unknown>) => ({
-      micro_stage: String(r.micro_stage),
-      created_at:  String(r.created_at),
-    }));
+    // ── Micro stages — failsafe: table may not exist yet on all envs ──────────
+    let microStages: { micro_stage: string; created_at: string }[] = [];
+    try {
+      const microRows = await sql`
+        SELECT
+          micro_stage,
+          created_at::text AS created_at,
+          created_by::text AS created_by
+        FROM project_micro_stages
+        WHERE project_id = ${id}
+        ORDER BY created_at ASC
+      `;
+      microStages = microRows.map((r: Record<string, unknown>) => ({
+        micro_stage: String(r.micro_stage),
+        created_at:  String(r.created_at),
+      }));
+    } catch (microErr: unknown) {
+      const msg = microErr instanceof Error ? microErr.message : String(microErr);
+      // Non-fatal: migration 027 may not have run yet — return empty array
+      console.warn(`[api/admin/projects/[id]] GET micro_stages failsafe: ${msg}`);
+    }
 
     return NextResponse.json({
       success: true,
