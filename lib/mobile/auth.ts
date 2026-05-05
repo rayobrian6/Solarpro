@@ -94,20 +94,35 @@ export function resolveMobileUser(
     return null;
   }
 
-  // STEP 4 — Ensure solarpro_user_id claim is present and a valid UUID
-  const uid = decoded.solarpro_user_id;
+  // STEP 4 — Debug: log full decoded payload (temp, aids mobile compat debugging)
+  console.log(`[MOBILE_AUTH_DEBUG] ${routeLabel} decoded claims:`, JSON.stringify(decoded));
+
+  // STEP 5 — Extract userId from any of the supported claim names.
+  //
+  // COMPATIBILITY LAYER (Phase 4.15.3):
+  //   Mobile tokens may use any of these claim names depending on which
+  //   version of the mobile app / token minter produced them.
+  //   Future phase will standardize all tokens to solarpro_user_id only.
+  //
+  //   Priority: solarpro_user_id → userId → sub
+  const d   = decoded as unknown as Record<string, unknown>;
+  const uid = (d.solarpro_user_id ?? d.userId ?? d.sub) as string | undefined;
+
   if (!uid) {
     console.error(
-      `[MOBILE_AUTH_FAIL] ${routeLabel} — JWT valid but missing solarpro_user_id claim. ` +
+      `[MOBILE_AUTH_FAIL] ${routeLabel} — JWT valid but no user identity claim found. ` +
+      `Checked: solarpro_user_id, userId, sub. ` +
       `Claims present: ${Object.keys(decoded).join(', ')}`
     );
     return null;
   }
+
+  // UUID format check — warn but DO NOT reject (compatibility layer)
   if (!isValidUUID(uid)) {
-    console.error(
-      `[MOBILE_AUTH_FAIL] ${routeLabel} — solarpro_user_id "${uid}" is not a valid UUID`
+    console.warn(
+      `[MOBILE_AUTH_WARN] ${routeLabel} — non-UUID userId received: "${uid}". ` +
+      `Allowing through (compatibility mode). Standardize token to use UUID in future.`
     );
-    return null;
   }
 
   console.log(`[MOBILE_AUTH] ${routeLabel} — authenticated userId=${uid} via bearer_jwt`);

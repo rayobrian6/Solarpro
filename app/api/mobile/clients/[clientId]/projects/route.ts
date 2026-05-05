@@ -64,6 +64,17 @@ export async function GET(
       return mobileAuthError(ROUTE, req);
     }
 
+    // Guard: DB queries require a valid UUID user_id.
+    // resolveMobileUser warns but allows non-UUID ids through (compat layer).
+    // If we can't cast to UUID, return a clear 401 instead of a DB cast error.
+    if (!isValidUUID(auth.userId)) {
+      console.error(`${ROUTE} — userId "${auth.userId}" is not a valid UUID; cannot query DB`);
+      return NextResponse.json(
+        { error: 'auth_failed', message: `User ID "${auth.userId}" is not a valid UUID. Token must include a UUID user identity claim.` },
+        { status: 401 },
+      );
+    }
+
     // ── DB queries ────────────────────────────────────────────────────────────
     const sql = await getDbReady();
 

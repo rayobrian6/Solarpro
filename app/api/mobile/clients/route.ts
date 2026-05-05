@@ -24,7 +24,7 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveMobileUser, mobileAuthError } from '@/lib/mobile/auth';
-import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import type { SurveyLookupClient } from '@/lib/survey/v2/types';
 
@@ -45,6 +45,17 @@ export async function GET(req: NextRequest) {
     const auth = resolveMobileUser(req, ROUTE);
     if (!auth) {
       return mobileAuthError(ROUTE, req);
+    }
+
+    // Guard: DB queries require a valid UUID user_id.
+    // resolveMobileUser warns but allows non-UUID ids through (compat layer).
+    // If we can't cast to UUID, return a clear 401 instead of a DB cast error.
+    if (!isValidUUID(auth.userId)) {
+      console.error(`${ROUTE} — userId "${auth.userId}" is not a valid UUID; cannot query DB`);
+      return NextResponse.json(
+        { error: 'auth_failed', message: `User ID "${auth.userId}" is not a valid UUID. Token must include a UUID user identity claim.` },
+        { status: 401 },
+      );
     }
 
     // ── DB query ──────────────────────────────────────────────────────────────
