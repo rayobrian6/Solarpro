@@ -35,11 +35,31 @@ export async function GET(req: NextRequest) {
               FROM projects p
               LEFT JOIN users u ON u.id = p.user_id
               LEFT JOIN clients c ON c.id = p.client_id
-             WHERE p.origin = ${originFilter}
-               AND (p.name ILIKE ${pattern}
+             WHERE p.deleted_at IS NULL
+               AND p.origin = ${originFilter}
+               AND (${search} = ''
+                    OR p.name ILIKE ${pattern}
                     OR p.address ILIKE ${pattern}
                     OR u.name ILIKE ${pattern}
                     OR u.email ILIKE ${pattern})
+             ORDER BY p.created_at DESC
+             LIMIT ${limit} OFFSET ${offset}
+          `
+        : search
+        ? sql`
+            SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at, p.updated_at,
+                   p.origin, p.deleted_at, p.status, p.homeowner_stage,
+                   u.name AS owner_name, u.email AS owner_email,
+                   c.name AS client_name, c.email AS client_email
+              FROM projects p
+              LEFT JOIN users u ON u.id = p.user_id
+              LEFT JOIN clients c ON c.id = p.client_id
+             WHERE p.deleted_at IS NULL
+               AND (p.name ILIKE ${pattern}
+                    OR p.address ILIKE ${pattern}
+                    OR u.name ILIKE ${pattern}
+                    OR u.email ILIKE ${pattern}
+                    OR c.name ILIKE ${pattern})
              ORDER BY p.created_at DESC
              LIMIT ${limit} OFFSET ${offset}
           `
@@ -51,10 +71,7 @@ export async function GET(req: NextRequest) {
               FROM projects p
               LEFT JOIN users u ON u.id = p.user_id
               LEFT JOIN clients c ON c.id = p.client_id
-             WHERE p.name ILIKE ${pattern}
-                OR p.address ILIKE ${pattern}
-                OR u.name ILIKE ${pattern}
-                OR u.email ILIKE ${pattern}
+             WHERE p.deleted_at IS NULL
              ORDER BY p.created_at DESC
              LIMIT ${limit} OFFSET ${offset}
           `,
@@ -62,19 +79,28 @@ export async function GET(req: NextRequest) {
         ? sql`
             SELECT COUNT(*) AS total FROM projects p
             LEFT JOIN users u ON u.id = p.user_id
-            WHERE p.origin = ${originFilter}
+            WHERE p.deleted_at IS NULL
+              AND p.origin = ${originFilter}
               AND (p.name ILIKE ${pattern}
                    OR p.address ILIKE ${pattern}
                    OR u.name ILIKE ${pattern}
                    OR u.email ILIKE ${pattern})
           `
-        : sql`
+        : search
+        ? sql`
             SELECT COUNT(*) AS total FROM projects p
             LEFT JOIN users u ON u.id = p.user_id
-            WHERE p.name ILIKE ${pattern}
-               OR p.address ILIKE ${pattern}
-               OR u.name ILIKE ${pattern}
-               OR u.email ILIKE ${pattern}
+            LEFT JOIN clients c ON c.id = p.client_id
+            WHERE p.deleted_at IS NULL
+              AND (p.name ILIKE ${pattern}
+                   OR p.address ILIKE ${pattern}
+                   OR u.name ILIKE ${pattern}
+                   OR u.email ILIKE ${pattern}
+                   OR c.name ILIKE ${pattern})
+          `
+        : sql`
+            SELECT COUNT(*) AS total FROM projects p
+            WHERE p.deleted_at IS NULL
           `,
     ]);
 

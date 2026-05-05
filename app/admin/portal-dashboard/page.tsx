@@ -368,13 +368,20 @@ export default function AdminPortalDashboardPage() {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/projects?limit=100');
-      const d   = await res.json();
+      if (!res.ok) {
+        console.error('[portal-dashboard] API error:', res.status, res.statusText);
+        return;
+      }
+      const d = await res.json();
+      console.log('[portal-dashboard] API response:', d.success, 'count:', d.projects?.length);
       if (d.success) {
         const list: Project[] = d.projects ?? [];
         setProjects(list);
         setFiltered(list);
-        if (list.length > 0 && !selected) setSelected(list[0]);
+        if (list.length > 0) setSelected(list[0]);
       }
+    } catch (err) {
+      console.error('[portal-dashboard] fetch error:', err);
     } finally {
       setLoading(false);
     }
