@@ -91,16 +91,18 @@ export async function GET(req: NextRequest) {
     }[] = [];
 
     if (projectIds.length > 0) {
-      // project_files (utility bills, documents)
+      // project_files (utility bills, portal uploads, survey documents)
+      // file_url = external URL (survey photo fetch); file_data = inline binary (portal uploads)
       const pfRows = await sql`
         SELECT
           project_id::text,
-          'project_file'    AS doc_type,
-          COALESCE(name, file_type, 'Document') AS label,
-          created_at::text  AS uploaded_at
+          'project_file'           AS doc_type,
+          file_type::text          AS file_type,
+          COALESCE(file_name, file_type, 'Document') AS label,
+          created_at::text         AS uploaded_at
         FROM project_files
         WHERE project_id = ANY(${projectIds})
-          AND url IS NOT NULL
+          AND (file_url IS NOT NULL OR file_data IS NOT NULL)
           AND status != 'failed'
         ORDER BY created_at DESC
       `;
@@ -122,6 +124,7 @@ export async function GET(req: NextRequest) {
         ...pfRows.map((r: Record<string, unknown>) => ({
           project_id:  String(r.project_id),
           doc_type:    String(r.doc_type),
+          file_type:   r.file_type ? String(r.file_type) : undefined,
           label:       normalizeDocumentLabel(String(r.label)),
           uploaded_at: String(r.uploaded_at),
         })),

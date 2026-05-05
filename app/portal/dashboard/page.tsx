@@ -307,7 +307,9 @@ export default function PortalDashboard() {
       setHistory(d.stageHistory ?? []);
       setDocuments(d.documents ?? []);
       // Mark bill as already uploaded if a utility_bill doc exists
-      const hasBill = (d.documents ?? []).some((doc: { doc_type: string }) => doc.doc_type === 'project_file');
+      const hasBill = (d.documents ?? []).some((doc: { label: string; file_type?: string }) =>
+        doc.label === 'Utility Bill' || doc.file_type === 'utility_bill'
+      );
       setBillUploaded(hasBill);
     } catch { setError('Connection error. Please refresh the page.'); }
     finally { setLoading(false); setTimeout(() => setMounted(true), 80); }
