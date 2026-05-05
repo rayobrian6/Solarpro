@@ -34,6 +34,11 @@ const PUBLIC_PATHS = [
   '/api/system/health',       // infrastructure health (no secrets)
   '/api/enterprise/contact',  // enterprise contact form
 
+  // -- Homeowner portal (own auth, own cookie) --
+  '/portal',
+  '/api/portal/login',
+  '/api/portal/logout',
+
   // ── External webhooks (validated internally via signature) ──
   '/api/stripe/webhook',
   '/api/webhooks/survey-complete',  // site-survey partner webhook (HMAC-signed)

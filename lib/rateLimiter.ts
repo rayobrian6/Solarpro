@@ -120,7 +120,10 @@ export type LimiterKey =
   | 'survey'
   | 'settings'
   | 'stripe'
-  | 'migrate';
+  | 'migrate'
+  // Homeowner portal
+  | 'portal_login'
+  | 'portal_read';
 
 const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   // Auth
@@ -161,6 +164,9 @@ const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   'settings':               _settingsLimiter,
   'stripe':                 _stripeLimiter,
   'migrate':                _migrateLimiter,
+  // Homeowner portal
+  'portal_login':           _loginLimiter,
+  'portal_read':            _standardLimiter,
 };
 
 // ── Public check function ─────────────────────────────────────────────────────
