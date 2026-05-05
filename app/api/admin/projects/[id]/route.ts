@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { writeMicroStage } from '@/lib/microStage';
 
 export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
@@ -166,6 +167,27 @@ export async function PATCH(
         VALUES
           (${id}, ${stage}, ${adminId}, ${safeNote})
       `;
+
+      // ── Write micro stage for admin-set homeowner_stage (non-fatal, fire-and-forget) ─
+      // Maps homeowner_stage → representative micro stage so the audit log
+      // reflects the manual override with consistent granularity.
+      const HOMEOWNER_TO_MICRO_OVERRIDE: Partial<Record<string, import('@/lib/microStage').MicroStage>> = {
+        lead_submitted:  'lead_created',
+        under_review:    'bill_uploaded',
+        site_survey:     'survey_submitted',
+        design:          'layout_completed',
+        proposal:        'proposal_sent',
+        installation:    'install_started',
+        completed:       'system_live',
+      };
+      const microOverride = HOMEOWNER_TO_MICRO_OVERRIDE[stage as string];
+      if (microOverride) {
+        void writeMicroStage(id, microOverride, adminId, {
+          source: 'admin_set_stage',
+          stage,
+          note: safeNote,
+        });
+      }
 
       return NextResponse.json({
         success: true,

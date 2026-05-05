@@ -27,6 +27,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { getPortalSession } from '@/lib/portalAuth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { writeMicroStage } from '@/lib/microStage';
 
 export async function POST(req: NextRequest) {
   // ── Rate limit ────────────────────────────────────────────────────────────
@@ -168,6 +169,19 @@ export async function POST(req: NextRequest) {
            'Uploaded via homeowner portal')
       `;
     }
+
+    // ── Write micro stages: bill_uploaded + bill_parsed ────────────────────
+    // Non-fatal: always fire-and-forget (writeMicroStage handles retries internally)
+    void writeMicroStage(projectId, 'bill_uploaded', session.clientId, {
+      uploadedVia: 'portal',
+      fileType: file.type,
+    });
+    void writeMicroStage(projectId, 'bill_parsed', session.clientId, {
+      utilityProvider: billData.utilityProvider ?? null,
+      monthlyKwh:      billData.monthlyKwh ?? null,
+      annualKwh:       billData.annualKwh ?? null,
+      confidence:      billData.confidence ?? null,
+    });
 
     // ── Advance stage: lead_submitted → under_review ──────────────────────
     let stageAdvanced = false;

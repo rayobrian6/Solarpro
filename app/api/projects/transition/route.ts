@@ -39,6 +39,7 @@ import { isValidStage } from '@/lib/operations/pipeline';
 import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { syncHomeownerStage } from '@/lib/homeownerStageSync';
+import { writeMicroStage, type MicroStage } from '@/lib/microStage';
 
 export async function POST(req: NextRequest) {
   try {
@@ -229,6 +230,32 @@ export async function POST(req: NextRequest) {
       await syncHomeownerStage(projectId, newStage, user.id ?? null);
     } catch {
       // Non-fatal — handled inside syncHomeownerStage
+    }
+
+    // ── Write micro stage (non-fatal, fire-and-forget) ────────────────────────
+    // Maps DEAL_TRANSITIONS newStage values to the corresponding micro stage.
+    // Only fires for forward-moving, meaningful pipeline events.
+    const PIPELINE_STAGE_TO_MICRO: Partial<Record<string, MicroStage>> = {
+      site_assessment:  'survey_scheduled',
+      design_complete:  'layout_completed',
+      proposal_sent:    'proposal_sent',
+      contract_signed:  'contract_signed',
+      engineering:      'engineering_started',
+      permit_submitted: 'permit_submitted',
+      permit_approved:  'permit_approved',
+      install_scheduled:'install_scheduled',
+      installation:     'install_started',
+      inspection:       'inspection_passed',
+      pto:              'pto_submitted',
+      complete:         'system_live',
+    };
+    const mappedMicro = PIPELINE_STAGE_TO_MICRO[newStage];
+    if (mappedMicro) {
+      void writeMicroStage(projectId, mappedMicro, user.id ?? null, {
+        action,
+        from_stage: prevStage,
+        to_stage: newStage,
+      });
     }
 
     // ── Re-generate commands for this project (non-fatal) ─────────────────

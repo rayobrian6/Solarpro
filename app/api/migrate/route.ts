@@ -1618,6 +1618,25 @@ export async function POST(req: NextRequest) {
       results.push(`\u26a0\ufe0f Migration 026 (control modes): ${(e as Error).message}`);
     }
 
+        // -- Migration 027: Micro-Stage Engine ---------------------------------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS project_micro_stages (
+          id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          project_id  UUID        NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          micro_stage TEXT        NOT NULL,
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_by  UUID,
+          metadata    JSONB
+        )
+      `;
+      await sql`CREATE INDEX IF NOT EXISTS idx_pms_project_created ON project_micro_stages(project_id, created_at DESC)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_pms_project_stage   ON project_micro_stages(project_id, micro_stage)`;
+      results.push('✅ Migration 027 complete: project_micro_stages table ready');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 027 (project_micro_stages): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
