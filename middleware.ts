@@ -118,7 +118,18 @@ export function middleware(req: NextRequest) {
   const isWebhook = pathname.startsWith('/api/stripe/webhook') ||
                     pathname.startsWith('/api/webhooks/survey-complete');
 
-  if (isStateChanging && pathname.startsWith('/api/') && !isWebhook) {
+  // ── Trusted external API origins ──────────────────────────────────────────
+  // These hosts are allowed to make cross-origin requests to /api/mobile/*
+  // They use Bearer JWT auth (not session cookies) so CSRF doesn't apply.
+  const TRUSTED_API_ORIGINS = [
+    'site-survey-api-bpyz.onrender.com',  // Mobile field app backend (Render)
+  ];
+
+  // /api/mobile/* routes are Bearer-JWT authenticated — CSRF does not apply.
+  // Allow trusted API origins through without CSRF check.
+  const isMobileApi = pathname.startsWith('/api/mobile/');
+
+  if (isStateChanging && pathname.startsWith('/api/') && !isWebhook && !isMobileApi) {
     const origin = req.headers.get('origin');
     const host = req.headers.get('host');
 
@@ -132,7 +143,8 @@ export function middleware(req: NextRequest) {
           // authenticated cross-origin requests against this app.
           const hostsMatch = originHost === host
           || originHost === 'localhost:3000'
-          || originHost === 'localhost:3008';
+          || originHost === 'localhost:3008'
+          || TRUSTED_API_ORIGINS.includes(originHost);
 
         if (!hostsMatch) {
           console.warn(`[CSRF_BLOCKED] origin=${origin} host=${host} path=${pathname}`);
@@ -152,6 +164,41 @@ export function middleware(req: NextRequest) {
     }
     // If no Origin header is present, the request likely came from the same origin
     // (browsers always send Origin on cross-origin POST requests)
+  }
+
+  // ── CORS headers for /api/mobile/* ────────────────────────────────────────
+  // Add Access-Control-Allow-Origin for trusted API origins on mobile routes.
+  // This allows the Render-hosted mobile backend to call our mobile API.
+  if (isMobileApi) {
+    const origin = req.headers.get('origin') ?? '';
+    let originHost = '';
+    try { originHost = new URL(origin).host; } catch { /* no origin header */ }
+
+    const isTrustedOrigin = TRUSTED_API_ORIGINS.includes(originHost)
+      || originHost === 'localhost:3000'
+      || originHost === 'localhost:3008';
+
+    // Handle OPTIONS preflight
+    if (req.method === 'OPTIONS') {
+      return new NextResponse(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '',
+          'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Requested-With',
+          'Access-Control-Max-Age':       '86400',
+        },
+      });
+    }
+
+    // Pass through with CORS headers attached
+    const res = NextResponse.next();
+    if (isTrustedOrigin) {
+      res.headers.set('Access-Control-Allow-Origin',  origin);
+      res.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      res.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Requested-With');
+    }
+    return res;
   }
   // ────────────────────────────────────────────────────────────────────────────
 
