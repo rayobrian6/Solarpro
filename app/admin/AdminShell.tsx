@@ -7,6 +7,7 @@ import {
   Cpu, Zap, Database, HardDrive, Activity,
   Shield, ChevronRight, LogOut, Sun, Wrench,
   ScrollText, Terminal, MessageSquare, Rocket, Layers, DollarSign, PenTool,
+  UserPlus,
 } from 'lucide-react';
 
 const NAV_SECTIONS = [
@@ -24,6 +25,7 @@ const NAV_SECTIONS = [
       { href: '/admin/users',     label: 'Users',         icon: Users },
       { href: '/admin/companies', label: 'Companies',     icon: Building2 },
       { href: '/admin/projects',  label: 'Projects',      icon: FolderOpen },
+      { href: '/admin/leads',     label: 'Leads',         icon: UserPlus },
     ],
   },
   {
