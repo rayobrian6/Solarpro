@@ -367,8 +367,8 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
     log(`STEP_G skipping vision pipeline — no files ingested`);
   }
 
-  // ── Write micro stage: survey_submitted (non-fatal, fire-and-forget) ────────
-  void writeMicroStage(projectId, 'survey_submitted', ownerId ?? null, {
+  // ── Write micro stage: survey_submitted (critical — awaited, retries once internally) ───
+  await writeMicroStage(projectId, 'survey_submitted', ownerId ?? null, {
     survey_id: event.survey_id,
     event_id: event.event_id,
     deliveryId,

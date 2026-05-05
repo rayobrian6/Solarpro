@@ -216,7 +216,22 @@ async function _doWriteMicroStage(
 ): Promise<void> {
   const sql = await getDbReady();
 
-  // 1. Insert micro stage
+  // 1. Idempotency check — never write the same micro_stage twice per project
+  const existing = await sql`
+    SELECT 1 FROM project_micro_stages
+    WHERE project_id = ${projectId}
+      AND micro_stage = ${stage}
+    LIMIT 1
+  `;
+  if (existing.length > 0) {
+    console.warn(
+      `[writeMicroStage] WARN: duplicate stage skipped ` +
+      `project=${projectId} stage=${stage}`,
+    );
+    return;
+  }
+
+  // 2. Insert micro stage
   const metaJson = metadata ? JSON.stringify(metadata) : null;
   await sql`
     INSERT INTO project_micro_stages
@@ -225,11 +240,11 @@ async function _doWriteMicroStage(
       (${projectId}, ${stage}, ${createdBy}, ${metaJson}::jsonb)
   `;
 
-  // 2. Resolve target homeowner_stage
+  // 3. Resolve target homeowner_stage
   const targetHomeownerStage = MICRO_TO_HOMEOWNER[stage];
   if (!targetHomeownerStage) return;
 
-  // 3. Read current homeowner_stage
+  // 4. Read current homeowner_stage
   const rows = await sql`
     SELECT homeowner_stage FROM projects WHERE id = ${projectId} LIMIT 1
   `;
@@ -239,14 +254,13 @@ async function _doWriteMicroStage(
   const currentIdx   = currentStage ? HOMEOWNER_STAGES.indexOf(currentStage) : -1;
   const targetIdx    = HOMEOWNER_STAGES.indexOf(targetHomeownerStage);
 
-  // 4. Forward-only update
+  // 5. Forward-only guard — homeowner_stage never moves backward
   if (targetIdx <= currentIdx) {
-    if (process.env.NODE_ENV === 'development') {
-      console.debug(
-        `[writeMicroStage] Skip homeowner sync: project=${projectId} ` +
-        `current=${currentStage} >= target=${targetHomeownerStage}`,
-      );
-    }
+    console.warn(
+      `[writeMicroStage] WARN: backward/same stage skipped ` +
+      `project=${projectId} micro=${stage} ` +
+      `current=${currentStage}(${currentIdx}) target=${targetHomeownerStage}(${targetIdx})`,
+    );
     return;
   }
 

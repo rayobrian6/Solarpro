@@ -251,7 +251,7 @@ export async function POST(req: NextRequest) {
     };
     const mappedMicro = PIPELINE_STAGE_TO_MICRO[newStage];
     if (mappedMicro) {
-      void writeMicroStage(projectId, mappedMicro, user.id ?? null, {
+      await writeMicroStage(projectId, mappedMicro, user.id ?? null, {
         action,
         from_stage: prevStage,
         to_stage: newStage,

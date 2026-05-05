@@ -1637,6 +1637,24 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 027 (project_micro_stages): ${(e as Error).message}`);
     }
 
+    // -- Migration 028: Unique constraint on project_micro_stages --------------
+    try {
+      await sql`
+        ALTER TABLE project_micro_stages
+          ADD CONSTRAINT uq_project_micro_stage
+          UNIQUE (project_id, micro_stage)
+      `;
+      results.push('✅ Migration 028 complete: uq_project_micro_stage constraint added');
+    } catch (e: unknown) {
+      const msg = (e as Error).message ?? '';
+      // Idempotent: constraint already exists is not a real error
+      if (msg.includes('already exists') || msg.includes('uq_project_micro_stage')) {
+        results.push('ℹ️ Migration 028 skipped: uq_project_micro_stage already exists');
+      } else {
+        results.push(`⚠️ Migration 028 (uq_project_micro_stage): ${msg}`);
+      }
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

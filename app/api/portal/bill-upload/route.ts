@@ -171,12 +171,12 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Write micro stages: bill_uploaded + bill_parsed ────────────────────
-    // Non-fatal: always fire-and-forget (writeMicroStage handles retries internally)
-    void writeMicroStage(projectId, 'bill_uploaded', session.clientId, {
+    // Critical events -- awaited so failures surface to the caller (writeMicroStage retries once internally)
+    await writeMicroStage(projectId, 'bill_uploaded', session.clientId, {
       uploadedVia: 'portal',
       fileType: file.type,
     });
-    void writeMicroStage(projectId, 'bill_parsed', session.clientId, {
+    await writeMicroStage(projectId, 'bill_parsed', session.clientId, {
       utilityProvider: billData.utilityProvider ?? null,
       monthlyKwh:      billData.monthlyKwh ?? null,
       annualKwh:       billData.annualKwh ?? null,
