@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
       originFilter !== 'all'
         ? sql`
             SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at,
-                   p.origin, p.deleted_at, p.status,
+                   p.origin, p.deleted_at, p.status, p.homeowner_stage,
                    u.name AS owner_name, u.email AS owner_email,
                    c.name AS client_name
               FROM projects p
@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
           `
         : sql`
             SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at,
-                   p.origin, p.deleted_at, p.status,
+                   p.origin, p.deleted_at, p.status, p.homeowner_stage,
                    u.name AS owner_name, u.email AS owner_email,
                    c.name AS client_name
               FROM projects p

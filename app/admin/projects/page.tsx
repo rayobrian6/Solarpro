@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { Search, RefreshCw, Trash2, RotateCcw, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Search, RefreshCw, Trash2, RotateCcw, CheckCircle, AlertCircle, ExternalLink, ChevronRight } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, string> = {
   lead:      'bg-blue-500/20 text-blue-400',
@@ -9,7 +10,28 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: 'bg-slate-500/20 text-slate-400',
 };
 
+const HOMEOWNER_STAGE_COLORS: Record<string, string> = {
+  lead_submitted: 'bg-slate-500/20  text-slate-400',
+  under_review:   'bg-blue-500/20   text-blue-400',
+  site_survey:    'bg-cyan-500/20   text-cyan-400',
+  design:         'bg-violet-500/20 text-violet-400',
+  proposal:       'bg-amber-500/20  text-amber-400',
+  installation:   'bg-orange-500/20 text-orange-400',
+  completed:      'bg-green-500/20  text-green-400',
+};
+
+const HOMEOWNER_STAGE_LABELS: Record<string, string> = {
+  lead_submitted: 'Lead Submitted',
+  under_review:   'Under Review',
+  site_survey:    'Site Survey',
+  design:         'Design',
+  proposal:       'Proposal',
+  installation:   'Installation',
+  completed:      'Completed',
+};
+
 export default function AdminProjects() {
+  const router = useRouter();
   const [projects, setProjects] = useState<any[]>([]);
   const [total, setTotal]       = useState(0);
   const [page, setPage]         = useState(1);
@@ -81,25 +103,29 @@ export default function AdminProjects() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-white/5 bg-white/2">
-                {['Project', 'Origin', 'Client', 'Owner', 'Address', 'System', 'Status', 'Created', 'Actions'].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs text-slate-500 font-medium">{h}</th>
+                {['Project', 'Origin', 'Client', 'Owner', 'Address', 'System', 'Internal Status', 'Portal Stage', 'Created', 'Actions'].map(h => (
+                  <th key={h} className="text-left px-4 py-3 text-xs text-slate-500 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={9} className="text-center py-12 text-slate-500"><RefreshCw size={16} className="animate-spin inline mr-2" />Loading...</td></tr>
+                <tr><td colSpan={10} className="text-center py-12 text-slate-500"><RefreshCw size={16} className="animate-spin inline mr-2" />Loading...</td></tr>
               ) : projects.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-12 text-slate-500">No projects found</td></tr>
+                <tr><td colSpan={10} className="text-center py-12 text-slate-500">No projects found</td></tr>
               ) : projects.map(p => (
-                <tr key={p.id} className={`border-b border-white/5 hover:bg-white/2 transition-colors ${p.deleted_at ? 'opacity-50' : ''}`}>
+                <tr
+                  key={p.id}
+                  className={`border-b border-white/5 hover:bg-white/2 transition-colors cursor-pointer ${p.deleted_at ? 'opacity-50' : ''}`}
+                  onClick={() => router.push(`/admin/projects/${p.id}`)}
+                >
                   <td className="px-4 py-3">
                     <div className="font-medium text-white text-xs">{p.name}</div>
                     <div className="text-slate-500 text-[10px] font-mono">{p.id.slice(0, 8)}…</div>
                   </td>
                   <td className="px-4 py-3">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                      p.origin === 'survey' ? 'bg-cyan-500/15 text-cyan-400' :
+                      p.origin === 'survey'      ? 'bg-cyan-500/15 text-cyan-400' :
                       p.origin === 'bill_upload' ? 'bg-blue-500/15 text-blue-400' :
                       'bg-slate-500/15 text-slate-400'
                     }`}>{p.origin || 'manual'}</span>
@@ -109,17 +135,41 @@ export default function AdminProjects() {
                     <div className="text-xs text-white">{p.owner_name}</div>
                     <div className="text-[10px] text-slate-500">{p.owner_email}</div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-400 max-w-[160px] truncate">{p.address || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-slate-400 max-w-[140px] truncate">{p.address || '—'}</td>
                   <td className="px-4 py-3 text-xs text-slate-400">{p.system_size_kw ? `${p.system_size_kw} kW` : '—'}</td>
+                  {/* Internal status — ops pipeline */}
                   <td className="px-4 py-3">
                     <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[p.status] || 'bg-slate-500/20 text-slate-400'}`}>
                       {p.deleted_at ? 'deleted' : p.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-400">{new Date(p.created_at).toLocaleDateString()}</td>
+                  {/* Homeowner stage — portal display */}
                   <td className="px-4 py-3">
+                    {p.homeowner_stage ? (
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${HOMEOWNER_STAGE_COLORS[p.homeowner_stage] || 'bg-slate-500/20 text-slate-400'}`}>
+                        {HOMEOWNER_STAGE_LABELS[p.homeowner_stage] || p.homeowner_stage}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-600 italic">not set</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">{new Date(p.created_at).toLocaleDateString()}</td>
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                     <div className="flex items-center gap-1">
-                      <a href={`/engineering?projectId=${p.id}`} target="_blank" title="Open in Engineering" className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-500/10 transition-colors">
+                      <button
+                        onClick={() => router.push(`/admin/projects/${p.id}`)}
+                        title="View / Edit Stage"
+                        className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors"
+                      >
+                        <ChevronRight size={13} />
+                      </button>
+                      <a
+                        href={`/engineering?projectId=${p.id}`}
+                        target="_blank"
+                        title="Open in Engineering"
+                        className="p-1.5 rounded-lg text-blue-400 hover:bg-blue-500/10 transition-colors"
+                        onClick={e => e.stopPropagation()}
+                      >
                         <ExternalLink size={13} />
                       </a>
                       {p.deleted_at ? (
@@ -127,14 +177,13 @@ export default function AdminProjects() {
                           <RotateCcw size={13} />
                         </button>
                       ) : (
-                        <>
-                          <button
-                            onClick={() => { if (confirm(`Hard-delete "${p.name}"? This cannot be undone.`)) act(p.id, 'delete'); }}
-                            title="Hard delete (permanent)"
-                            className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors">
-                            <Trash2 size={13} />
-                          </button>
-                        </>
+                        <button
+                          onClick={() => { if (confirm(`Hard-delete "${p.name}"? This cannot be undone.`)) act(p.id, 'delete'); }}
+                          title="Hard delete (permanent)"
+                          className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       )}
                     </div>
                   </td>
