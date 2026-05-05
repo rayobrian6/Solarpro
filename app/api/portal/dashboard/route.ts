@@ -81,6 +81,58 @@ export async function GET(req: NextRequest) {
       }));
     }
 
+    // Fetch documents for all client projects (project_files + site_survey_files)
+    let documents: {
+      project_id: string;
+      doc_type: string;
+      label: string;
+      uploaded_at: string;
+    }[] = [];
+
+    if (projectIds.length > 0) {
+      // project_files (utility bills, documents)
+      const pfRows = await sql`
+        SELECT
+          project_id::text,
+          'project_file'    AS doc_type,
+          COALESCE(name, file_type, 'Document') AS label,
+          created_at::text  AS uploaded_at
+        FROM project_files
+        WHERE project_id = ANY(${projectIds})
+          AND url IS NOT NULL
+          AND status != 'failed'
+        ORDER BY created_at DESC
+      `;
+
+      // site_survey_files (photos from field survey)
+      const ssfRows = await sql`
+        SELECT
+          ss.project_id::text,
+          'site_survey_file' AS doc_type,
+          COALESCE(ssf.label, ssf.filename, 'Site Survey Photo') AS label,
+          ssf.created_at::text AS uploaded_at
+        FROM site_survey_files ssf
+        JOIN site_surveys ss ON ss.id = ssf.survey_id
+        WHERE ss.project_id = ANY(${projectIds})
+        ORDER BY ssf.created_at DESC
+      `;
+
+      documents = [
+        ...pfRows.map((r: Record<string, unknown>) => ({
+          project_id:  String(r.project_id),
+          doc_type:    String(r.doc_type),
+          label:       String(r.label),
+          uploaded_at: String(r.uploaded_at),
+        })),
+        ...ssfRows.map((r: Record<string, unknown>) => ({
+          project_id:  String(r.project_id),
+          doc_type:    String(r.doc_type),
+          label:       String(r.label),
+          uploaded_at: String(r.uploaded_at),
+        })),
+      ].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
+    }
+
     return NextResponse.json({
       success: true,
       client: {
@@ -95,6 +147,7 @@ export async function GET(req: NextRequest) {
       },
       projects,
       stageHistory,
+      documents,
     });
   } catch (e: unknown) {
     return handleRouteDbError('[api/portal/dashboard]', e);

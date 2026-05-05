@@ -7,6 +7,7 @@ import {
   CheckCircle2, Circle, Clock,
   Phone, Mail, AlertCircle, Zap,
   TrendingUp, Home, BarChart3,
+  FileCheck,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -34,6 +35,13 @@ interface StageHistory {
   project_id: string;
   stage: HomeownerStage;
   created_at: string;
+}
+
+interface PortalDocument {
+  project_id: string;
+  doc_type: string;
+  label: string;
+  uploaded_at: string;
 }
 
 interface Client {
@@ -277,6 +285,7 @@ export default function PortalDashboard() {
   const [projects,      setProjects]      = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [history,       setHistory]       = useState<StageHistory[]>([]);
+  const [documents,     setDocuments]     = useState<PortalDocument[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState('');
   const [mounted,       setMounted]       = useState(false);
@@ -293,6 +302,7 @@ export default function PortalDashboard() {
       setProjects(list);
       if (list.length > 0) setActiveProject(list[0]);
       setHistory(d.stageHistory ?? []);
+      setDocuments(d.documents ?? []);
     } catch { setError('Connection error. Please refresh the page.'); }
     finally { setLoading(false); setTimeout(() => setMounted(true), 80); }
   };
@@ -498,6 +508,49 @@ export default function PortalDashboard() {
                 <p className="text-xs text-slate-600">{content?.roadmapLabel ?? '—'} · {content?.stepLabel ?? ''}</p>
               </div>
             </div>
+
+            {/* ── 4.5 YOUR DOCUMENTS ── */}
+            {(() => {
+              const projectDocs = documents.filter(
+                d => activeProject && d.project_id === activeProject.id
+              );
+              return (
+                <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="w-6 h-6 rounded-lg bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center">
+                      <FileCheck size={12} className="text-emerald-400" />
+                    </div>
+                    <h3 className="text-sm font-bold text-white">Your Documents</h3>
+                  </div>
+                  {projectDocs.length === 0 ? (
+                    <p className="text-xs text-slate-600 py-2">No documents uploaded yet.</p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {projectDocs.map((doc, i) => (
+                        <div key={i} className="flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/[0.04] px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-6 h-6 rounded-md bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                              <CheckCircle2 size={11} className="text-emerald-400" />
+                            </div>
+                            <div>
+                              <p className="text-xs font-semibold text-white">{doc.label}</p>
+                              <p className="text-[10px] text-slate-600 uppercase tracking-wide mt-0.5">
+                                {doc.doc_type === 'site_survey_file' ? 'Site Survey' : 'Document'} · Received
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[10px] text-slate-600">
+                              {new Date(doc.uploaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* ── 5. CONTACT ── */}
             <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">

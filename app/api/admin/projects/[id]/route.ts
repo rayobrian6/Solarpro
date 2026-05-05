@@ -120,6 +120,30 @@ export async function PATCH(
         );
       }
 
+      // Forward-only guard: prevent backward stage movement unless force=true
+      const force = body.force === true;
+      if (!force) {
+        const current = await sql`
+          SELECT homeowner_stage FROM projects WHERE id = ${id} LIMIT 1
+        `;
+        const currentStage = current[0]?.homeowner_stage as HomeownerStage | null;
+        if (currentStage) {
+          const currentIdx = HOMEOWNER_STAGES.indexOf(currentStage);
+          const newIdx = HOMEOWNER_STAGES.indexOf(stage as HomeownerStage);
+          if (newIdx < currentIdx) {
+            return NextResponse.json(
+              {
+                success: false,
+                error: `Cannot move stage backward from '${currentStage}' to '${stage}'. Pass force=true to override.`,
+                currentStage,
+                requestedStage: stage,
+              },
+              { status: 409 }
+            );
+          }
+        }
+      }
+
       // Update homeowner_stage on the project
       const updated = await sql`
         UPDATE projects

@@ -38,6 +38,7 @@ import {
 import { isValidStage } from '@/lib/operations/pipeline';
 import { generateTasksForStage } from '@/lib/operations/generateTasksForStage';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { syncHomeownerStage } from '@/lib/homeownerStageSync';
 
 export async function POST(req: NextRequest) {
   try {
@@ -221,6 +222,13 @@ export async function POST(req: NextRequest) {
       } catch (taskErr) {
         console.warn('[transition] task generation failed:', taskErr);
       }
+    }
+
+    // ── Auto-advance homeowner_stage (non-fatal) ──────────────────────
+    try {
+      await syncHomeownerStage(projectId, newStage, user.id ?? null);
+    } catch {
+      // Non-fatal — handled inside syncHomeownerStage
     }
 
     // ── Re-generate commands for this project (non-fatal) ─────────────────
