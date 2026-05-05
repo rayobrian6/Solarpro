@@ -1,42 +1,35 @@
-# Field Survey System — Master Directive Implementation
-# Branch: dev only
+# Master Directive — Align Site Survey Data
+## Status: EXECUTING
 
-## PHASE 1 — Database Migration
-- [x] Read existing migrations to understand current schema
-- [ ] Create migrations/016_site_surveys.sql — site_surveys + site_survey_files tables
+### Phase 1 — Field Map Audit
+- [x] Read lib/survey/v2/types.ts — all SurveyV2Payload fields extracted
+- [x] Read lib/survey/ingest/transformLayer.ts — field mapping verified
+- [x] Run Python audit script — zero gaps confirmed
+- [x] Document all 35 meaningful fields with storage + display status
 
-## PHASE 2 — DB Layer (lib/db-neon.ts additions)
-- [x] Add getSiteSurveysByProject, getSiteSurveysByClient, getSiteSurveyById
-- [x] Add createSiteSurvey, updateSiteSurvey, addSiteSurveyFile, getSiteSurveyFiles
+### Phase 2 — Storage Verification
+- [x] Read ingestPipeline.ts — rawPayload stored verbatim in survey_data
+- [x] Verify site_survey_files.label = photos[n].category (canonical key)
+- [x] Verify project_physical_data = derived/normalized only (no raw duplication)
+- [x] Read migrations 016/017 — schema confirmed
+- [x] Read db-neon.ts SiteSurvey/SiteSurveyFile functions — read path confirmed
 
-## PHASE 3 — API Routes
-- [x] POST/GET /api/projects/[id]/site-surveys
-- [x] GET /api/site-surveys/[surveyId]
-- [x] GET /api/clients/[id]/site-surveys
-- [x] PATCH /api/site-surveys/[surveyId]
+### Phase 3 — Single Read Source
+- [x] getProjectSurveyContext confirmed as single read source
+- [x] getSurveyDetailContext confirmed for detail page
+- [x] API routes confirmed — /api/site-surveys/[surveyId] + /api/projects/[id]/survey-context
 
-## PHASE 4 — Ingest Integration
-- [x] Update ingestPipeline.ts: create site_surveys row on submit
-- [x] Wire photos into site_survey_files on ingest
-- [x] Thread client_id through for both PM-initiated and standalone flows
+### Phase 4 — Clean Field Display
+- [x] Survey detail page mirrors survey app 5-step structure exactly
+- [x] All 8 human-readable label maps confirmed complete
+- [x] Empty field handling confirmed (FieldRow shows "Not captured")
+- [x] Photos grouped by canonical PhotoCategory order
 
-## PHASE 5 — FieldSurveyCard component
-- [x] Create components/project/FieldSurveyCard.tsx
-- [x] State 1: No survey — CTA card (Start Survey + QR Code)
-- [x] State 2: Survey exists — summary card + actions
+### Phase 5 — No Extra Logic
+- [x] Confirmed no new tables, pipelines, auth flows, or schemas added
+- [x] Complexity audit passed — all components are minimal read paths
+- [x] Over-engineering audit passed
 
-## PHASE 6 — Survey Detail Page
-- [x] Create app/projects/[id]/survey/[surveyId]/page.tsx
-- [x] Photos grid, key observations, full data expandable
-
-## PHASE 7 — Client Page Survey Tab
-- [x] Add Site Surveys section to app/clients/[id]/page.tsx
-
-## PHASE 8 — Project Page Integration
-- [x] Insert FieldSurveyCard above tab nav (always visible)
-- [x] QR code modal with copy link
-- [x] Keep existing survey tab / FieldSurveyPanel intact
-
-## PHASE 9 — TypeScript Check + Commit
-- [ ] npx tsc --noEmit
-- [ ] Fix errors, git commit to dev
+### Phase 6 — Validation Output
+- [x] Write MASTER_DIRECTIVE_VALIDATION.md with full field map, storage verification, mismatch list
+- [ ] Commit validation report to dev branch
