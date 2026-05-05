@@ -1,11 +1,10 @@
 // ============================================================================
 // GET /api/mobile/debug-auth
 //
-// PHASE 4.15.3 — Temporary diagnostic endpoint.
+// PHASE 4.15.3 / 4.15.5 — Temporary diagnostic endpoint.
 //
 // Returns environment variable status (NOT values) so you can confirm
-// whether SOLARPRO_HANDOFF_SECRET is set in the Vercel environment
-// without exposing any secrets.
+// whether required env vars are set in the Vercel environment.
 //
 // Also accepts an optional Bearer token and reports exactly why it
 // passes or fails verification — useful for diagnosing mobile auth issues.
@@ -20,17 +19,18 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyHandoffToken } from '@/lib/survey/handoff/tokenMinter';
+import { getDbReady } from '@/lib/db-neon';
 
 export async function GET(req: NextRequest) {
   const secret    = process.env.SOLARPRO_HANDOFF_SECRET ?? null;
   const secretOk  = !!secret && secret.length >= 32;
 
-  // ── Service key vars ──────────────────────────────────────────────────────
+  // -- Service key vars ------------------------------------------------------
   const serviceApiKey = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
   const serviceUserId = process.env.MOBILE_SERVICE_USER_ID?.trim() ?? null;
   const surveyUserId  = process.env.SURVEY_INGEST_DEFAULT_USER_ID?.trim() ?? null;
 
-  // ── Env summary (no secret values exposed) ───────────────────────────────
+  // -- Env summary (no secret values exposed) --------------------------------
   const env: Record<string, string> = {
     SOLARPRO_HANDOFF_SECRET: !secret
       ? 'NOT SET'
@@ -56,17 +56,50 @@ export async function GET(req: NextRequest) {
     VERCEL_ENV: process.env.VERCEL_ENV ?? '(unset)',
   };
 
-  // ── Optional token probe ──────────────────────────────────────────────────
-  const authHeader  = req.headers.get('authorization') ?? null;
-  const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
-  const token       = bearerMatch?.[1] ?? null;
+  // -- Request headers of interest -------------------------------------------
+  const authHeader        = req.headers.get('authorization') ?? null;
+  const forwardedEmail    = req.headers.get('x-mobile-user-email') ?? null;
+  const bearerMatch       = authHeader?.match(/^Bearer\s+(.+)$/i);
+  const token             = bearerMatch?.[1]?.trim() ?? null;
 
+  const requestHeaders: Record<string, string> = {
+    'x-mobile-user-email': forwardedEmail ?? '(not present)',
+    'authorization':       authHeader ? `Bearer ...(len=${token?.length ?? 0})` : '(not present)',
+  };
+
+  // -- Email lookup test (if X-Mobile-User-Email is present) ----------------
+  let emailLookup: Record<string, unknown> = { tested: false };
+  if (forwardedEmail) {
+    emailLookup = { tested: true, email: forwardedEmail };
+    try {
+      const sql = await getDbReady();
+      const rows = await sql`
+        SELECT id, email, name FROM users
+         WHERE LOWER(email) = ${forwardedEmail.toLowerCase()}
+         LIMIT 1
+      `;
+      if (rows.length > 0) {
+        emailLookup.found      = true;
+        emailLookup.userId     = rows[0].id;
+        emailLookup.userName   = rows[0].name;
+        emailLookup.result     = 'MATCH — this user would be authenticated';
+      } else {
+        emailLookup.found  = false;
+        emailLookup.result = 'NO MATCH — email not found in SolarPro users table';
+      }
+    } catch (err) {
+      emailLookup.error = err instanceof Error ? err.message : String(err);
+      emailLookup.result = 'ERROR — DB lookup failed';
+    }
+  }
+
+  // -- Optional token probe --------------------------------------------------
   let tokenProbe: Record<string, unknown> = { provided: false };
 
   if (token) {
     tokenProbe = { provided: true, len: token.length };
 
-    // ── Service API key check (Path B) ────────────────────────────────────
+    // Service API key check (Path B)
     if (serviceApiKey) {
       const keyMatch = token === serviceApiKey;
       tokenProbe.serviceKeyCheck = {
@@ -74,33 +107,34 @@ export async function GET(req: NextRequest) {
         serviceKeyLen:   serviceApiKey.length,
         tokenLen:        token.length,
         match:           keyMatch,
-        // partial values for debugging (safe - short prefix/suffix only)
         tokenFirst8:     token.slice(0, 8),
         tokenLast8:      token.slice(-8),
         keyFirst8:       serviceApiKey.slice(0, 8),
         keyLast8:        serviceApiKey.slice(-8),
       };
+      tokenProbe.serviceKeyResult = keyMatch
+        ? 'MATCH — would authenticate as service_api_key'
+        : 'NO MATCH — token does not equal MOBILE_SERVICE_API_KEY';
       if (keyMatch) {
-        tokenProbe.serviceKeyResult = 'MATCH — would authenticate as service_api_key';
-        tokenProbe.serviceUserId    = serviceUserId ?? surveyUserId ?? 'NOT SET';
-      } else {
-        tokenProbe.serviceKeyResult = 'NO MATCH — token does not equal MOBILE_SERVICE_API_KEY';
+        tokenProbe.serviceUserId = serviceUserId ?? surveyUserId ?? 'NOT SET (fallback)';
+        tokenProbe.note = forwardedEmail
+          ? 'X-Mobile-User-Email present — real userId would be resolved from email lookup above'
+          : 'X-Mobile-User-Email NOT present — would fall back to MOBILE_SERVICE_USER_ID';
       }
     } else {
-      tokenProbe.serviceKeyCheck = { serviceKeySet: false };
+      tokenProbe.serviceKeyCheck  = { serviceKeySet: false };
       tokenProbe.serviceKeyResult = 'SKIPPED — MOBILE_SERVICE_API_KEY not set';
     }
 
-    // ── JWT decode (no verification) to see algorithm ─────────────────────
+    // JWT decode (no verification)
     try {
       const headerB64 = token.split('.')[0];
       const header    = JSON.parse(Buffer.from(headerB64, 'base64').toString('utf8'));
       tokenProbe.header = header;
     } catch {
-      tokenProbe.headerParseError = 'Could not decode JWT header (token is not a JWT - expected for service key)';
+      tokenProbe.headerParseError = 'Could not decode JWT header (expected for service key tokens)';
     }
 
-    // ── JWT decode payload ────────────────────────────────────────────────
     try {
       const payloadB64 = token.split('.')[1];
       const payload    = JSON.parse(Buffer.from(payloadB64, 'base64').toString('utf8'));
@@ -112,7 +146,7 @@ export async function GET(req: NextRequest) {
           ? `userId = "${payload.userId}"`
           : payload.sub
           ? `sub = "${payload.sub}"`
-          : 'NO USER ID CLAIM FOUND (solarpro_user_id / userId / sub all missing)',
+          : 'NO USER ID CLAIM FOUND',
         _expired: payload.exp
           ? payload.exp < Math.floor(Date.now() / 1000)
             ? `EXPIRED at ${new Date(payload.exp * 1000).toISOString()}`
@@ -120,10 +154,10 @@ export async function GET(req: NextRequest) {
           : 'No exp claim',
       };
     } catch {
-      tokenProbe.payloadParseError = 'Could not decode JWT payload (not a JWT - expected for service key)';
+      tokenProbe.payloadParseError = 'Could not decode JWT payload (expected for service key tokens)';
     }
 
-    // ── JWT verification ──────────────────────────────────────────────────
+    // JWT verification
     if (!secretOk) {
       tokenProbe.jwtVerification = 'SKIPPED — SOLARPRO_HANDOFF_SECRET not set or too short';
     } else {
@@ -149,13 +183,22 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
-    ok:         secretOk,
-    timestamp:  new Date().toISOString(),
+    ok:             secretOk,
+    timestamp:      new Date().toISOString(),
     env,
+    requestHeaders,
+    emailLookup,
     tokenProbe,
-    instructions: secretOk
-      ? 'SOLARPRO_HANDOFF_SECRET is set. If tokens still fail, the mobile app secret does not match.'
-      : 'ACTION REQUIRED: Set SOLARPRO_HANDOFF_SECRET in Vercel -> Project Settings -> Environment Variables. ' +
-        'Use the same secret that is configured in the mobile app.',
+    howItWorks: [
+      '1. Mobile user logs in to site survey app with SolarPro credentials (email + password)',
+      '2. Render issues JWT with {userId, email} from its own auth system',
+      '3. Mobile app calls GET /api/mobile/clients with Bearer <render_jwt>',
+      '4. Render requireAuth() verifies the JWT, populates req.authUser.email',
+      '5. Render mobileClients.ts proxies to SolarPro with:',
+      '     Authorization: Bearer <SOLARPRO_API_KEY>  (service key)',
+      '     X-Mobile-User-Email: <user email>          (forwarded from req.authUser.email)',
+      '6. SolarPro matches service key, looks up email in users table -> scoped userId',
+      '7. SolarPro returns only clients/projects for that userId',
+    ],
   }, { status: 200 });
 }

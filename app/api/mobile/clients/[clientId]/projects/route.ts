@@ -5,8 +5,9 @@
 // authenticated user. Called by the mobile field app after the tech selects
 // a client, so they can optionally associate the survey with a specific project.
 //
-// Auth: Bearer token (SOLARPRO_HANDOFF_SECRET signed JWT) OR session cookie.
+// Auth: Bearer token (service key from Render) OR session cookie.
 //   - All auth validated by resolveMobileUser() in lib/mobile/auth.ts
+//   - Render forwards X-Mobile-User-Email so SolarPro resolves the correct user
 //   - Returns 401 with structured error if missing or invalid — NO exceptions
 //
 // Path param:
@@ -40,7 +41,7 @@ export async function GET(
   { params }: { params: { clientId: string } },
 ) {
   try {
-    // ── Rate limit ────────────────────────────────────────────────────────────
+    // -- Rate limit ----------------------------------------------------------
     const rl = await checkRateLimit('standard', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json(
@@ -49,7 +50,7 @@ export async function GET(
       );
     }
 
-    // ── Validate path param ───────────────────────────────────────────────────
+    // -- Validate path param -------------------------------------------------
     const { clientId } = params;
     if (!clientId || !isValidUUID(clientId)) {
       return NextResponse.json(
@@ -58,24 +59,22 @@ export async function GET(
       );
     }
 
-    // ── Auth (REQUIRED — no exceptions) ──────────────────────────────────────
-    const auth = resolveMobileUser(req, ROUTE);
+    // -- Auth (REQUIRED — no exceptions) ------------------------------------
+    const auth = await resolveMobileUser(req, ROUTE);
     if (!auth) {
       return mobileAuthError(ROUTE, req);
     }
 
     // Guard: DB queries require a valid UUID user_id.
-    // resolveMobileUser warns but allows non-UUID ids through (compat layer).
-    // If we can't cast to UUID, return a clear 401 instead of a DB cast error.
     if (!isValidUUID(auth.userId)) {
       console.error(`${ROUTE} — userId "${auth.userId}" is not a valid UUID; cannot query DB`);
       return NextResponse.json(
-        { error: 'auth_failed', message: `User ID "${auth.userId}" is not a valid UUID. Token must include a UUID user identity claim.` },
+        { error: 'auth_failed', message: `User ID "${auth.userId}" is not a valid UUID.` },
         { status: 401 },
       );
     }
 
-    // ── DB queries ────────────────────────────────────────────────────────────
+    // -- DB queries ----------------------------------------------------------
     const sql = await getDbReady();
 
     // Verify the client belongs to this user

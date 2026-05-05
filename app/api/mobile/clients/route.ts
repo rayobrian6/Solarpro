@@ -5,8 +5,9 @@
 // Called by the mobile field app BEFORE starting a survey so the
 // field tech can select which client this survey belongs to.
 //
-// Auth: Bearer token (SOLARPRO_HANDOFF_SECRET signed JWT) OR session cookie.
+// Auth: Bearer token (service key from Render) OR session cookie.
 //   - All auth validated by resolveMobileUser() in lib/mobile/auth.ts
+//   - Render forwards X-Mobile-User-Email so SolarPro resolves the correct user
 //   - Returns 401 with structured error if missing or invalid — NO exceptions
 //
 // Response 200:
@@ -42,35 +43,16 @@ export async function GET(req: NextRequest) {
     }
 
     // -- Auth (REQUIRED — no exceptions) ------------------------------------
-    // DIAGNOSTIC: log service key env state before calling resolveMobileUser
-    const _svcKeyTrimmed = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
-    const _svcKeySet     = !!_svcKeyTrimmed;
-    const _svcKeyLen     = _svcKeyTrimmed?.length ?? 0;
-    const _svcUserIdSet  = !!process.env.MOBILE_SERVICE_USER_ID;
-    const _authHdr       = req.headers.get('authorization') ?? '(none)';
-    const _bearerTok     = _authHdr.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
-    const _bearerLen     = _bearerTok?.length ?? 0;
-    const _keysMatch     = _svcKeyTrimmed && _bearerTok ? (_bearerTok === _svcKeyTrimmed) : false;
-    console.log(
-      `${ROUTE} [DIAG] svcKeySet=${_svcKeySet} svcKeyLen=${_svcKeyLen} ` +
-      `svcUserIdSet=${_svcUserIdSet} bearerLen=${_bearerLen} ` +
-      `bearerFirst8=${_bearerTok?.slice(0,8) ?? 'n/a'} ` +
-      `keyFirst8=${_svcKeyTrimmed?.slice(0,8) ?? 'n/a'} ` +
-      `directMatch=${_keysMatch}`
-    );
-
-    const auth = resolveMobileUser(req, ROUTE);
+    const auth = await resolveMobileUser(req, ROUTE);
     if (!auth) {
       return mobileAuthError(ROUTE, req);
     }
 
     // Guard: DB queries require a valid UUID user_id.
-    // resolveMobileUser warns but allows non-UUID ids through (compat layer).
-    // If we can't cast to UUID, return a clear 401 instead of a DB cast error.
     if (!isValidUUID(auth.userId)) {
       console.error(`${ROUTE} — userId "${auth.userId}" is not a valid UUID; cannot query DB`);
       return NextResponse.json(
-        { error: 'auth_failed', message: `User ID "${auth.userId}" is not a valid UUID. Token must include a UUID user identity claim.` },
+        { error: 'auth_failed', message: `User ID "${auth.userId}" is not a valid UUID.` },
         { status: 401 },
       );
     }

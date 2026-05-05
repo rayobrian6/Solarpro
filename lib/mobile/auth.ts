@@ -1,7 +1,7 @@
 // ============================================================================
 // lib/mobile/auth.ts
 //
-// PHASE 4.15.2 / 4.15.3 — Shared mobile Bearer JWT authentication helper.
+// PHASE 4.15.2 / 4.15.3 / 4.15.5 — Shared mobile Bearer JWT authentication helper.
 //
 // ALL /api/mobile/* routes MUST call resolveMobileUser() for auth.
 // No exceptions — unauthenticated access is never permitted.
@@ -9,14 +9,17 @@
 // Auth flow (tried in order):
 //   1. Session cookie      (SolarPro web user, same browser session)
 //   2. Service API key     (Render backend proxy, MOBILE_SERVICE_API_KEY)
+//      - When matched, reads X-Mobile-User-Email header forwarded by Render
+//      - Looks up that email in SolarPro users table to get real userId
+//      - Falls back to MOBILE_SERVICE_USER_ID only if email missing/unmatched
 //   3. Bearer JWT          (handoff JWT, SOLARPRO_HANDOFF_SECRET-signed HS256)
 //
-// Service-to-service flow (Render → SolarPro):
-//   The Render backend (site-survey-api-bpyz.onrender.com) proxies
-//   /api/mobile/clients to SolarPro using SOLARPRO_API_KEY as a Bearer token.
-//   On SolarPro, set MOBILE_SERVICE_API_KEY to the same value.
-//   When matched, returns a fixed service userId (MOBILE_SERVICE_USER_ID)
-//   OR uses SURVEY_INGEST_DEFAULT_USER_ID as fallback.
+// Service-to-service flow (Render -> SolarPro):
+//   Mobile App logs in with SolarPro credentials -> Render JWT has {userId, email}
+//   Render backend proxies /api/mobile/clients to SolarPro with:
+//     Authorization: Bearer <SOLARPRO_API_KEY>   (service key)
+//     X-Mobile-User-Email: <user email>          (forwarded from req.authUser.email)
+//   SolarPro looks up the email in users table -> scopes query to that user
 //
 // Returns:
 //   MobileAuthResult   on success (userId + source)
@@ -28,7 +31,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { verifyHandoffToken } from '@/lib/survey/handoff/tokenMinter';
-import { isValidUUID } from '@/lib/db-neon';
+import { getDbReady, isValidUUID } from '@/lib/db-neon';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,10 +48,10 @@ export interface MobileAuthResult {
 // Logs every failure path with structured [MOBILE_AUTH_FAIL] tags.
 // Never throws. Returns null if auth is missing or invalid.
 // ---------------------------------------------------------------------------
-export function resolveMobileUser(
+export async function resolveMobileUser(
   req: NextRequest,
   routeLabel: string,
-): MobileAuthResult | null {
+): Promise<MobileAuthResult | null> {
 
   // -- Path A: Session cookie ------------------------------------------------
   try {
@@ -63,17 +66,15 @@ export function resolveMobileUser(
 
   // -- Path B: Service-to-service API key (Render backend -> SolarPro) ------
   //
-  // The Render backend (site-survey-api-bpyz.onrender.com) proxies mobile
-  // requests to SolarPro using SOLARPRO_API_KEY as a Bearer token.
-  // On SolarPro (Vercel), set MOBILE_SERVICE_API_KEY to the same value.
-  // When matched, we use MOBILE_SERVICE_USER_ID (or SURVEY_INGEST_DEFAULT_USER_ID)
-  // as the scoped userId for DB queries.
+  // Render proxies mobile requests to SolarPro using SOLARPRO_API_KEY as Bearer.
+  // Render also forwards the logged-in user's email as X-Mobile-User-Email.
+  // We match the service key, then resolve userId from the forwarded email.
   const authHeader  = req.headers.get('authorization') ?? null;
   // IMPORTANT: trim() both sides to eliminate any whitespace/newline edge cases
   const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
   const serviceApiKey = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
 
-  // Diagnostic log for service key path (helps debug mismatch)
+  // Diagnostic log for service key path
   if (serviceApiKey) {
     console.log(
       `[MOBILE_AUTH] ${routeLabel} Path B check: ` +
@@ -86,7 +87,46 @@ export function resolveMobileUser(
   }
 
   if (serviceApiKey && bearerToken && bearerToken === serviceApiKey) {
-    // Resolve the user ID to scope DB queries
+
+    // -- Try to resolve real user from forwarded email ----------------------
+    const forwardedEmail = req.headers.get('x-mobile-user-email')?.trim().toLowerCase() ?? null;
+
+    if (forwardedEmail) {
+      console.log(`[MOBILE_AUTH] ${routeLabel} service key matched — resolving userId from email: ${forwardedEmail}`);
+      try {
+        const sql = await getDbReady();
+        const rows = await sql`
+          SELECT id FROM users
+           WHERE LOWER(email) = ${forwardedEmail}
+           LIMIT 1
+        `;
+
+        if (rows.length > 0) {
+          const userId = rows[0].id as string;
+          console.log(`[MOBILE_AUTH] ${routeLabel} — authenticated via service_api_key + email userId=${userId}`);
+          return { userId, source: 'service_api_key' };
+        }
+
+        console.warn(
+          `[MOBILE_AUTH_FAIL] ${routeLabel} — service key matched but email "${forwardedEmail}" ` +
+          `not found in SolarPro users table. Falling back to MOBILE_SERVICE_USER_ID.`
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[MOBILE_AUTH_FAIL] ${routeLabel} — service key matched but DB email lookup failed: ${msg}. ` +
+          `Falling back to MOBILE_SERVICE_USER_ID.`
+        );
+      }
+    } else {
+      console.warn(
+        `[MOBILE_AUTH] ${routeLabel} — service key matched but X-Mobile-User-Email header is missing. ` +
+        `Falling back to MOBILE_SERVICE_USER_ID. ` +
+        `Ensure Render backend forwards req.authUser.email as X-Mobile-User-Email.`
+      );
+    }
+
+    // -- Fallback: use configured service account user ID -------------------
     const serviceUserId =
       process.env.MOBILE_SERVICE_USER_ID?.trim() ||
       process.env.SURVEY_INGEST_DEFAULT_USER_ID?.trim() ||
@@ -95,13 +135,14 @@ export function resolveMobileUser(
     if (!serviceUserId || !isValidUUID(serviceUserId)) {
       console.error(
         `[MOBILE_AUTH_FAIL] ${routeLabel} — service API key matched but ` +
+        `X-Mobile-User-Email not resolved AND ` +
         `MOBILE_SERVICE_USER_ID / SURVEY_INGEST_DEFAULT_USER_ID is not set or not a valid UUID. ` +
-        `Set one of these env vars in Vercel to a valid SolarPro user UUID.`
+        `Set MOBILE_SERVICE_USER_ID in Vercel to a valid SolarPro user UUID.`
       );
       return null;
     }
 
-    console.log(`[MOBILE_AUTH] ${routeLabel} — authenticated via service_api_key userId=${serviceUserId}`);
+    console.log(`[MOBILE_AUTH] ${routeLabel} — authenticated via service_api_key (fallback) userId=${serviceUserId}`);
     return { userId: serviceUserId, source: 'service_api_key' };
   }
 
@@ -126,18 +167,13 @@ export function resolveMobileUser(
   console.log(`[MOBILE_AUTH] ${routeLabel} — Bearer token received (len=${token.length}), attempting JWT verify`);
 
   // STEP 3 — Verify the JWT signature + expiry
-  //
-  // Check SOLARPRO_HANDOFF_SECRET first so we can give a precise error.
-  // verifyHandoffToken silently returns null when the secret is missing —
-  // we surface that clearly here so it shows up in logs.
   const handoffSecretPresent = !!process.env.SOLARPRO_HANDOFF_SECRET;
   const handoffSecretLen     = process.env.SOLARPRO_HANDOFF_SECRET?.length ?? 0;
 
   if (!handoffSecretPresent) {
     console.error(
       `[MOBILE_AUTH_FAIL] ${routeLabel} — SOLARPRO_HANDOFF_SECRET is not set in environment. ` +
-      `Add this env var in Vercel -> Settings -> Environment Variables. ` +
-      `It must match the secret used to sign tokens in the mobile app.`
+      `Add this env var in Vercel -> Settings -> Environment Variables.`
     );
     return null;
   }
@@ -160,7 +196,6 @@ export function resolveMobileUser(
   }
 
   if (!decoded) {
-    // Secret is set but token still failed — decode header to get more info
     let tokenAlg = 'unknown';
     try {
       const headerB64 = token.split('.')[0];
@@ -171,24 +206,14 @@ export function resolveMobileUser(
     console.error(
       `[MOBILE_AUTH_FAIL] ${routeLabel} — verifyHandoffToken returned null. ` +
       `Secret IS set (len=${handoffSecretLen}). Token alg=${tokenAlg}. ` +
-      `Likely causes: (1) wrong secret value — secret used to sign token ` +
-      `does not match SOLARPRO_HANDOFF_SECRET in Vercel env, ` +
-      `(2) token expired, (3) token signed with different algorithm than HS256.`
+      `Likely causes: (1) wrong secret, (2) token expired, (3) non-HS256 algorithm.`
     );
     return null;
   }
 
-  // STEP 4 — Debug: log full decoded payload (temp, aids mobile compat debugging)
   console.log(`[MOBILE_AUTH_DEBUG] ${routeLabel} decoded claims:`, JSON.stringify(decoded));
 
-  // STEP 5 — Extract userId from any of the supported claim names.
-  //
-  // COMPATIBILITY LAYER (Phase 4.15.3):
-  //   Mobile tokens may use any of these claim names depending on which
-  //   version of the mobile app / token minter produced them.
-  //   Future phase will standardize all tokens to solarpro_user_id only.
-  //
-  //   Priority: solarpro_user_id -> userId -> sub
+  // STEP 4 — Extract userId from any supported claim name
   const d   = decoded as unknown as Record<string, unknown>;
   const uid = (d.solarpro_user_id ?? d.userId ?? d.sub) as string | undefined;
 
@@ -201,11 +226,10 @@ export function resolveMobileUser(
     return null;
   }
 
-  // UUID format check — warn but DO NOT reject (compatibility layer)
   if (!isValidUUID(uid)) {
     console.warn(
       `[MOBILE_AUTH_WARN] ${routeLabel} — non-UUID userId received: "${uid}". ` +
-      `Allowing through (compatibility mode). Standardize token to use UUID in future.`
+      `Allowing through (compatibility mode).`
     );
   }
 
@@ -215,9 +239,6 @@ export function resolveMobileUser(
 
 // ---------------------------------------------------------------------------
 // mobileAuthError
-//
-// Returns a structured 401 JSON response with a human-readable reason.
-// Always call this immediately when resolveMobileUser returns null.
 // ---------------------------------------------------------------------------
 export function mobileAuthError(routeLabel: string, req: NextRequest): NextResponse {
   const authHeader = req.headers.get('authorization') ?? null;
