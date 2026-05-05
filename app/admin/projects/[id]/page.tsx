@@ -155,17 +155,26 @@ export default function AdminProjectDetail() {
     <div className="space-y-6 max-w-4xl">
 
       {/* Back + header */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => router.push('/admin/projects')}
-          className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-        >
-          <ArrowLeft size={16} />
-        </button>
-        <div>
-          <h1 className="text-2xl font-black text-white">{project.name}</h1>
-          <p className="text-xs text-slate-500 font-mono mt-0.5">{project.id}</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => router.push('/admin/projects')}
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div>
+            <h1 className="text-2xl font-black text-white">{project.name}</h1>
+            <p className="text-xs text-slate-500 font-mono mt-0.5">{project.id}</p>
+          </div>
         </div>
+        <a
+          href={`/admin/projects/${project.id}/portal-preview`}
+          className="flex items-center gap-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/25 text-amber-400 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+          Portal Preview
+        </a>
       </div>
 
       {/* Info grid */}
