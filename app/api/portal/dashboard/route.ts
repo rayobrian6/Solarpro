@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 import { getPortalSession } from '@/lib/portalAuth';
+import { normalizeDocumentLabel } from '@/lib/normalizeDocumentLabel';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const maxDuration = 30;
@@ -121,13 +122,13 @@ export async function GET(req: NextRequest) {
         ...pfRows.map((r: Record<string, unknown>) => ({
           project_id:  String(r.project_id),
           doc_type:    String(r.doc_type),
-          label:       String(r.label),
+          label:       normalizeDocumentLabel(String(r.label)),
           uploaded_at: String(r.uploaded_at),
         })),
         ...ssfRows.map((r: Record<string, unknown>) => ({
           project_id:  String(r.project_id),
           doc_type:    String(r.doc_type),
-          label:       String(r.label),
+          label:       normalizeDocumentLabel(String(r.label)),
           uploaded_at: String(r.uploaded_at),
         })),
       ].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));

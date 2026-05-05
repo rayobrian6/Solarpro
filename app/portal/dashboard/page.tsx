@@ -286,6 +286,9 @@ export default function PortalDashboard() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [history,       setHistory]       = useState<StageHistory[]>([]);
   const [documents,     setDocuments]     = useState<PortalDocument[]>([]);
+  const [billUploaded,  setBillUploaded]  = useState(false);
+  const [billUploading, setBillUploading] = useState(false);
+  const [billUploadErr, setBillUploadErr] = useState('');
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState('');
   const [mounted,       setMounted]       = useState(false);
@@ -303,6 +306,9 @@ export default function PortalDashboard() {
       if (list.length > 0) setActiveProject(list[0]);
       setHistory(d.stageHistory ?? []);
       setDocuments(d.documents ?? []);
+      // Mark bill as already uploaded if a utility_bill doc exists
+      const hasBill = (d.documents ?? []).some((doc: { doc_type: string }) => doc.doc_type === 'project_file');
+      setBillUploaded(hasBill);
     } catch { setError('Connection error. Please refresh the page.'); }
     finally { setLoading(false); setTimeout(() => setMounted(true), 80); }
   };
@@ -474,6 +480,71 @@ export default function PortalDashboard() {
                     : <CheckCircle2 size={13} className="text-emerald-400 flex-shrink-0" />}
                   <span className="text-sm font-medium">{content.action}</span>
                 </div>
+
+                {/* Bill upload — only for lead_submitted or under_review */}
+                {(p.homeowner_stage === 'lead_submitted' || p.homeowner_stage === 'under_review') && (
+                  <div className="mt-6 border-t border-white/[0.05] pt-6">
+                    {billUploaded ? (
+                      <div className="flex items-center gap-3 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/[0.12] px-4 py-3">
+                        <CheckCircle2 size={15} className="text-emerald-400 flex-shrink-0" />
+                        <div>
+                          <p className="text-sm font-semibold text-emerald-300">Utility bill received ✓</p>
+                          <p className="text-xs text-slate-500 mt-0.5">We're analyzing your energy usage now.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-semibold text-white mb-1">Upload Your Utility Bill</p>
+                        <p className="text-xs text-slate-500 mb-4">Upload your electric bill so we can analyze your usage and design the right system.</p>
+                        {billUploadErr && (
+                          <p className="text-xs text-red-400 mb-3">{billUploadErr}</p>
+                        )}
+                        <label className={`inline-flex items-center gap-2.5 rounded-xl px-5 py-2.5 border cursor-pointer transition-all ${
+                          billUploading
+                            ? 'bg-white/[0.02] border-white/[0.06] text-slate-600 cursor-not-allowed'
+                            : 'bg-amber-500/[0.08] border-amber-500/[0.15] text-amber-300 hover:bg-amber-500/[0.12] hover:border-amber-500/[0.25]'
+                        }`}>
+                          <FileCheck size={13} className="flex-shrink-0" />
+                          <span className="text-sm font-semibold">
+                            {billUploading ? 'Uploading...' : 'Upload Bill'}
+                          </span>
+                          <input
+                            type="file"
+                            accept=".pdf,.jpg,.jpeg,.png,.webp"
+                            className="hidden"
+                            disabled={billUploading}
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file || !p.id) return;
+                              setBillUploading(true);
+                              setBillUploadErr('');
+                              try {
+                                const fd = new FormData();
+                                fd.append('file', file);
+                                fd.append('project_id', p.id);
+                                const res = await fetch('/api/portal/bill-upload', { method: 'POST', body: fd });
+                                const json = await res.json();
+                                if (json.success) {
+                                  setBillUploaded(true);
+                                  if (json.stageAdvanced) {
+                                    // Reload dashboard to reflect new stage
+                                    await load();
+                                  }
+                                } else {
+                                  setBillUploadErr(json.error || 'Upload failed. Please try again.');
+                                }
+                              } catch {
+                                setBillUploadErr('Connection error. Please try again.');
+                              } finally {
+                                setBillUploading(false);
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
