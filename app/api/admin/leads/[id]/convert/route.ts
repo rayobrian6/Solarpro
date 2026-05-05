@@ -54,6 +54,17 @@ export async function POST(req: NextRequest, { params }: Params) {
       }, { status: 409 });
     }
 
+    // Lead must have a user_id to convert — client and project both require an owner
+    if (!lead.user_id) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Lead has no assigned owner. Please assign a user before converting to project.',
+          code: 'LEAD_NO_OWNER',
+        },
+        { status: 400 }
+      );
+    }
     const userId = String(lead.user_id);
 
     // 2. Create or find client

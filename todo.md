@@ -2,12 +2,12 @@
 
 ## Tasks
 - [x] Read codebase conventions
-- [ ] Migration 018: leads table
-- [ ] API: GET/POST /api/admin/leads
-- [ ] API: GET/PATCH /api/admin/leads/[id]
-- [ ] API: POST /api/admin/leads/[id]/convert
-- [ ] Page: /admin/leads (list)
-- [ ] Page: /admin/leads/[id] (detail)
-- [ ] Add Leads to AdminShell nav
-- [ ] TypeScript check
-- [ ] Commit + push
+- [x] Migration 018: leads table
+- [x] API: GET/POST /api/admin/leads
+- [x] API: GET/PATCH /api/admin/leads/[id]
+- [x] API: POST /api/admin/leads/[id]/convert
+- [x] Page: /admin/leads (list)
+- [x] Page: /admin/leads/[id] (detail)
+- [x] Add Leads to AdminShell nav
+- [x] TypeScript check
+- [x] Commit + push
