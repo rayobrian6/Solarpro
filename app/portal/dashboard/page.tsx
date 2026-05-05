@@ -7,7 +7,7 @@ import {
   CheckCircle2, Circle, Clock,
   Phone, Mail, AlertCircle, Zap,
   TrendingUp, Home, BarChart3,
-  FileCheck,
+  FileCheck, Activity,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -44,6 +44,12 @@ interface PortalDocument {
   uploaded_at: string;
 }
 
+interface MicroStageEvent {
+  project_id: string;
+  micro_stage: string;
+  created_at: string;
+}
+
 interface Client {
   id: string;
   name: string;
@@ -63,6 +69,70 @@ type StageContent = {
   actionIsRequired: boolean;
   icon: string;
 };
+
+// ─── Micro stage display config ───────────────────────────────────────────────
+
+const MICRO_STAGE_META: Record<string, { label: string; icon: string }> = {
+  lead_created:             { label: 'Lead Created',           icon: '📋' },
+  project_created:          { label: 'Project Created',        icon: '🏗️' },
+  bill_uploaded:            { label: 'Utility Bill Uploaded',  icon: '📄' },
+  bill_parsed:              { label: 'Bill Analyzed',          icon: '🔬' },
+  usage_calculated:         { label: 'Usage Calculated',       icon: '📊' },
+  pre_design_complete:      { label: 'Pre-Design Complete',    icon: '✅' },
+  survey_scheduled:         { label: 'Survey Scheduled',       icon: '📅' },
+  survey_started:           { label: 'Survey Started',         icon: '🚗' },
+  survey_photos_uploaded:   { label: 'Photos Uploaded',        icon: '📸' },
+  survey_submitted:         { label: 'Survey Submitted',       icon: '📤' },
+  survey_reviewed:          { label: 'Survey Reviewed',        icon: '✅' },
+  layout_started:           { label: 'Layout Started',         icon: '📐' },
+  layout_completed:         { label: 'Layout Completed',       icon: '✅' },
+  engineering_started:      { label: 'Engineering Started',    icon: '⚙️' },
+  engineering_completed:    { label: 'Engineering Completed',  icon: '✅' },
+  sld_generated:            { label: 'SLD Generated',          icon: '🗂️' },
+  planset_generated:        { label: 'Plan Set Generated',     icon: '📑' },
+  final_proposal_generated: { label: 'Proposal Generated',    icon: '📄' },
+  proposal_sent:            { label: 'Proposal Sent',          icon: '📨' },
+  proposal_viewed:          { label: 'Proposal Viewed',        icon: '👁️' },
+  proposal_approved:        { label: 'Proposal Approved',      icon: '✅' },
+  contract_sent:            { label: 'Contract Sent',          icon: '📬' },
+  contract_viewed:          { label: 'Contract Viewed',        icon: '👁️' },
+  contract_signed:          { label: 'Contract Signed',        icon: '✍️' },
+  permit_submitted:         { label: 'Permit Submitted',       icon: '📋' },
+  permit_approved:          { label: 'Permit Approved',        icon: '✅' },
+  install_scheduled:        { label: 'Install Scheduled',      icon: '📅' },
+  install_started:          { label: 'Installation Started',   icon: '🔧' },
+  install_completed:        { label: 'Installation Completed', icon: '🏠' },
+  inspection_passed:        { label: 'Inspection Passed',      icon: '✅' },
+  pto_submitted:            { label: 'PTO Submitted',          icon: '📤' },
+  pto_approved:             { label: 'PTO Approved',           icon: '⚡' },
+  system_live:              { label: 'System Live',            icon: '🌟' },
+  monitoring_active:        { label: 'Monitoring Active',      icon: '📡' },
+};
+
+const STAGE_MICRO_MAP: Record<HomeownerStage, string[]> = {
+  lead_submitted: ['lead_created', 'project_created'],
+  under_review:   ['bill_uploaded', 'bill_parsed', 'usage_calculated', 'pre_design_complete'],
+  site_survey:    ['survey_scheduled', 'survey_started', 'survey_photos_uploaded', 'survey_submitted', 'survey_reviewed'],
+  design:         ['layout_started', 'layout_completed', 'engineering_started', 'engineering_completed', 'sld_generated', 'planset_generated'],
+  proposal:       ['final_proposal_generated', 'proposal_sent', 'proposal_viewed', 'proposal_approved', 'contract_sent', 'contract_viewed', 'contract_signed'],
+  installation:   ['permit_submitted', 'permit_approved', 'install_scheduled', 'install_started', 'install_completed', 'inspection_passed', 'pto_submitted', 'pto_approved'],
+  completed:      ['system_live', 'monitoring_active'],
+};
+
+const STAGE_EXPECTED_DOCS: Record<HomeownerStage, string[]> = {
+  lead_submitted: [],
+  under_review:   ['Utility Bill'],
+  site_survey:    ['Site Survey', 'Roof Photos'],
+  design:         ['Plan Set'],
+  proposal:       ['Proposal', 'Contract'],
+  installation:   ['Permit'],
+  completed:      [],
+};
+
+const ROADMAP_STEPS_ALL: HomeownerStage[] = [
+  'lead_submitted', 'under_review', 'site_survey', 'design',
+  'proposal', 'installation', 'completed',
+];
 
 const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
   lead_submitted: {
@@ -286,6 +356,7 @@ export default function PortalDashboard() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [history,       setHistory]       = useState<StageHistory[]>([]);
   const [documents,     setDocuments]     = useState<PortalDocument[]>([]);
+  const [microStages,   setMicroStages]   = useState<MicroStageEvent[]>([]);
   const [billUploaded,  setBillUploaded]  = useState(false);
   const [billUploading, setBillUploading] = useState(false);
   const [billUploadErr, setBillUploadErr] = useState('');
@@ -306,6 +377,7 @@ export default function PortalDashboard() {
       if (list.length > 0) setActiveProject(list[0]);
       setHistory(d.stageHistory ?? []);
       setDocuments(d.documents ?? []);
+      setMicroStages(d.microStages ?? []);
       // Mark bill as already uploaded if a utility_bill doc exists
       const hasBill = (d.documents ?? []).some((doc: { label: string; file_type?: string }) =>
         doc.label === 'Utility Bill' || doc.file_type === 'utility_bill'
@@ -582,45 +654,221 @@ export default function PortalDashboard() {
               </div>
             </div>
 
-            {/* ── 4.5 YOUR DOCUMENTS ── */}
+            {/* ── 4.5 STAGE PROGRESS + DOCUMENTS ── */}
             {(() => {
-              const projectDocs = documents.filter(
-                d => activeProject && d.project_id === activeProject.id
+              const projectDocs   = documents.filter(d => activeProject && d.project_id === activeProject.id);
+              const projectMicros = microStages.filter(m => activeProject && m.project_id === activeProject.id);
+              const completedSet  = new Set(projectMicros.map(m => m.micro_stage));
+              const microByStage  = (s: HomeownerStage) => STAGE_MICRO_MAP[s] ?? [];
+
+              // All stages up to and including current
+              const visibleStages = ROADMAP_STEPS_ALL.filter(
+                (_s, i) => i <= Math.max(stageIdx, 0)
               );
+
               return (
-                <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
-                  <div className="flex items-center gap-2 mb-4">
-                    <div className="w-6 h-6 rounded-lg bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center">
-                      <FileCheck size={12} className="text-emerald-400" />
+                <div className="space-y-4">
+
+                  {/* ── Section header ── */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-7 h-7 rounded-xl bg-amber-500/10 border border-amber-500/15 flex items-center justify-center flex-shrink-0">
+                      <Activity size={13} className="text-amber-400" />
                     </div>
-                    <h3 className="text-sm font-bold text-white">Your Documents</h3>
+                    <div>
+                      <h3 className="text-sm font-bold text-white">Project Progress</h3>
+                      <p className="text-[10px] text-slate-600">Milestones completed · Documents received</p>
+                    </div>
                   </div>
-                  {projectDocs.length === 0 ? (
-                    <p className="text-xs text-slate-600 py-2">No documents uploaded yet.</p>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {projectDocs.map((doc, i) => (
-                        <div key={i} className="flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/[0.04] px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-6 h-6 rounded-md bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                              <CheckCircle2 size={11} className="text-emerald-400" />
+
+                  {/* ── Per-stage cards ── */}
+                  {visibleStages.map((s) => {
+                    const si        = ROADMAP_STEPS_ALL.indexOf(s);
+                    const isCurrent = si === stageIdx;
+                    const isPast    = si < stageIdx;
+                    const stageMs   = microByStage(s);
+                    const doneMs    = stageMs.filter(m => completedSet.has(m));
+                    const reqDocs   = STAGE_EXPECTED_DOCS[s] ?? [];
+                    const recvDocs  = projectDocs.filter(doc =>
+                      reqDocs.some(req =>
+                        doc.label?.toLowerCase().includes(req.toLowerCase()) ||
+                        doc.doc_type?.toLowerCase().includes(req.toLowerCase().replace(/\s+/g, '_'))
+                      )
+                    );
+                    const sc = STAGE_CONTENT[s];
+
+                    return (
+                      <div key={s} className={`rounded-2xl border px-5 sm:px-7 py-5 transition-all ${
+                        isCurrent
+                          ? 'border-amber-500/[0.18] bg-amber-500/[0.03]'
+                          : isPast
+                          ? 'border-emerald-500/[0.12] bg-emerald-500/[0.02]'
+                          : 'border-white/[0.05] bg-white/[0.01]'
+                      }`}>
+
+                        {/* Stage header row */}
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className={`w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-sm ${
+                            isCurrent
+                              ? 'bg-amber-500/15 border border-amber-500/25'
+                              : isPast
+                              ? 'bg-emerald-500/12 border border-emerald-500/20'
+                              : 'bg-white/[0.04] border border-white/[0.08]'
+                          }`}>
+                            {isPast
+                              ? <CheckCircle2 size={13} className="text-emerald-400" />
+                              : <span>{sc.icon}</span>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={`text-sm font-bold leading-none ${
+                                isCurrent ? 'text-amber-300' : isPast ? 'text-emerald-300/70' : 'text-white/40'
+                              }`}>{sc.roadmapLabel}</span>
+                              {isCurrent && (
+                                <span className="text-[9px] font-black uppercase tracking-widest bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                  Active
+                                </span>
+                              )}
+                              {isPast && (
+                                <span className="text-[9px] font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-400/70 px-2 py-0.5 rounded-full border border-emerald-500/15">
+                                  Done
+                                </span>
+                              )}
                             </div>
-                            <div>
-                              <p className="text-xs font-semibold text-white">{doc.label}</p>
-                              <p className="text-[10px] text-slate-600 uppercase tracking-wide mt-0.5">
-                                {doc.doc_type === 'site_survey_file' ? 'Site Survey' : 'Document'} · Received
-                              </p>
+                            <p className="text-[10px] text-slate-600 mt-0.5">{sc.stepLabel}</p>
+                          </div>
+                          {stageMs.length > 0 && (
+                            <div className="text-right flex-shrink-0">
+                              <span className={`text-xs font-bold ${
+                                doneMs.length === stageMs.length ? 'text-emerald-400' : isCurrent ? 'text-amber-400' : 'text-slate-600'
+                              }`}>{doneMs.length}<span className="text-slate-600 font-normal">/{stageMs.length}</span></span>
+                              <p className="text-[9px] text-slate-700 uppercase tracking-wide">steps</p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Micro-stage milestone list */}
+                        {stageMs.length > 0 && (
+                          <div className="mb-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              {stageMs.map((ms) => {
+                                const done = completedSet.has(ms);
+                                const meta = MICRO_STAGE_META[ms];
+                                const evt  = projectMicros.find(e => e.micro_stage === ms);
+                                return (
+                                  <div key={ms} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 border transition-all ${
+                                    done
+                                      ? 'bg-emerald-500/[0.05] border-emerald-500/[0.10]'
+                                      : isCurrent
+                                      ? 'bg-white/[0.02] border-white/[0.04]'
+                                      : 'bg-transparent border-transparent'
+                                  }`}>
+                                    <span className={`text-sm flex-shrink-0 ${done ? '' : 'opacity-25'}`}>
+                                      {done ? '✅' : meta?.icon ?? '○'}
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className={`text-xs font-medium leading-none ${
+                                        done ? 'text-white' : 'text-white/25'
+                                      }`}>{meta?.label ?? ms}</p>
+                                      {done && evt && (
+                                        <p className="text-[9px] text-slate-700 mt-0.5">
+                                          {new Date(evt.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                        </p>
+                                      )}
+                                    </div>
+                                    {done
+                                      ? <CheckCircle2 size={10} className="text-emerald-400/60 flex-shrink-0" />
+                                      : isCurrent
+                                      ? <Clock size={10} className="text-white/15 flex-shrink-0" />
+                                      : null
+                                    }
+                                  </div>
+                                );
+                              })}
                             </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-[10px] text-slate-600">
+                        )}
+
+                        {/* Document checklist — only if this stage has required docs */}
+                        {reqDocs.length > 0 && (
+                          <div className="border-t border-white/[0.04] pt-4">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2.5 flex items-center gap-1.5">
+                              <FileCheck size={9} /> Documents
+                            </p>
+                            <div className="flex flex-col gap-1.5">
+                              {reqDocs.map((req) => {
+                                const received = recvDocs.find(doc =>
+                                  doc.label?.toLowerCase().includes(req.toLowerCase()) ||
+                                  doc.doc_type?.toLowerCase().includes(req.toLowerCase().replace(/\s+/g, '_'))
+                                );
+                                return (
+                                  <div key={req} className={`flex items-center justify-between rounded-xl px-3 py-2 border ${
+                                    received
+                                      ? 'bg-emerald-500/[0.05] border-emerald-500/[0.10]'
+                                      : isCurrent
+                                      ? 'bg-amber-500/[0.03] border-amber-500/[0.08]'
+                                      : 'bg-white/[0.02] border-white/[0.04]'
+                                  }`}>
+                                    <div className="flex items-center gap-2.5">
+                                      <div className={`w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 ${
+                                        received ? 'bg-emerald-500/15' : 'bg-white/[0.03]'
+                                      }`}>
+                                        {received
+                                          ? <CheckCircle2 size={10} className="text-emerald-400" />
+                                          : <Circle size={10} className={isCurrent ? 'text-amber-500/30' : 'text-white/10'} />}
+                                      </div>
+                                      <p className={`text-xs font-medium ${received ? 'text-white' : isCurrent ? 'text-amber-200/50' : 'text-white/20'}`}>
+                                        {req}
+                                      </p>
+                                    </div>
+                                    <span className={`text-[10px] font-semibold ${
+                                      received ? 'text-emerald-400' : isCurrent ? 'text-amber-500/40' : 'text-white/15'
+                                    }`}>
+                                      {received ? 'Received' : isCurrent ? 'Needed' : 'Pending'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                      </div>
+                    );
+                  })}
+
+                  {/* ── All received documents (catch-all) ── */}
+                  {projectDocs.length > 0 && (
+                    <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-5 sm:px-7 py-5">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="w-6 h-6 rounded-lg bg-blue-500/10 border border-blue-500/15 flex items-center justify-center">
+                          <FileCheck size={11} className="text-blue-400" />
+                        </div>
+                        <h4 className="text-xs font-bold text-white">All Received Documents</h4>
+                        <span className="ml-auto text-[10px] text-slate-600">{projectDocs.length} file{projectDocs.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {projectDocs.map((doc, i) => (
+                          <div key={i} className="flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/[0.04] px-3 py-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-5 h-5 rounded-md bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                                <CheckCircle2 size={10} className="text-emerald-400" />
+                              </div>
+                              <div>
+                                <p className="text-xs font-semibold text-white leading-none">{doc.label}</p>
+                                <p className="text-[9px] text-slate-600 mt-0.5 uppercase tracking-wide">
+                                  {doc.doc_type?.replace(/_/g, ' ') ?? 'Document'}
+                                </p>
+                              </div>
+                            </div>
+                            <p className="text-[10px] text-slate-600 flex-shrink-0 ml-3">
                               {new Date(doc.uploaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                             </p>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   )}
+
                 </div>
               );
             })()}

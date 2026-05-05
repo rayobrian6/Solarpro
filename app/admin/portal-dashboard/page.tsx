@@ -5,7 +5,7 @@ import {
   Sun, RefreshCw, Search, ChevronDown,
   MapPin, Clock, CheckCircle2, Circle,
   AlertCircle, Zap, TrendingUp, Home, Phone, Mail,
-  FileCheck,
+  FileCheck, Activity,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -38,7 +38,12 @@ interface ProjectDocument {
   uploaded_at: string;
 }
 
-// ─── Label normalizer (mirrors lib/normalizeDocumentLabel) ───────────────────
+interface MicroStageEvent {
+  micro_stage: string;
+  created_at: string;
+}
+
+// ─── Label normalizer ─────────────────────────────────────────────────────────
 
 const LABEL_MAP: Array<[RegExp, string]> = [
   [/\butility[_\s-]?bill[_\s-]?summary\b/i, 'Utility Bill'],
@@ -60,7 +65,75 @@ function normalizeLabel(raw: string): string {
   return raw.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-// ─── Stage Definitions ───────────────────────────────────────────────────────
+// ─── Micro stage display config ───────────────────────────────────────────────
+
+const MICRO_STAGE_META: Record<string, { label: string; icon: string; color: string }> = {
+  // lead_submitted
+  lead_created:           { label: 'Lead Created',            icon: '📋', color: 'text-slate-400' },
+  project_created:        { label: 'Project Created',         icon: '🏗️', color: 'text-slate-400' },
+  // under_review
+  bill_uploaded:          { label: 'Utility Bill Uploaded',   icon: '📄', color: 'text-blue-400' },
+  bill_parsed:            { label: 'Bill Analyzed',           icon: '🔬', color: 'text-blue-400' },
+  usage_calculated:       { label: 'Usage Calculated',        icon: '📊', color: 'text-blue-400' },
+  pre_design_complete:    { label: 'Pre-Design Complete',     icon: '✅', color: 'text-blue-400' },
+  // site_survey
+  survey_scheduled:       { label: 'Survey Scheduled',        icon: '📅', color: 'text-cyan-400' },
+  survey_started:         { label: 'Survey Started',          icon: '🚗', color: 'text-cyan-400' },
+  survey_photos_uploaded: { label: 'Photos Uploaded',         icon: '📸', color: 'text-cyan-400' },
+  survey_submitted:       { label: 'Survey Submitted',        icon: '📤', color: 'text-cyan-400' },
+  survey_reviewed:        { label: 'Survey Reviewed',         icon: '✅', color: 'text-cyan-400' },
+  // design
+  layout_started:         { label: 'Layout Started',          icon: '📐', color: 'text-violet-400' },
+  layout_completed:       { label: 'Layout Completed',        icon: '✅', color: 'text-violet-400' },
+  engineering_started:    { label: 'Engineering Started',     icon: '⚙️', color: 'text-violet-400' },
+  engineering_completed:  { label: 'Engineering Completed',   icon: '✅', color: 'text-violet-400' },
+  sld_generated:          { label: 'SLD Generated',           icon: '🗂️', color: 'text-violet-400' },
+  planset_generated:      { label: 'Plan Set Generated',      icon: '📑', color: 'text-violet-400' },
+  // proposal
+  final_proposal_generated: { label: 'Proposal Generated',   icon: '📄', color: 'text-amber-400' },
+  proposal_sent:          { label: 'Proposal Sent',           icon: '📨', color: 'text-amber-400' },
+  proposal_viewed:        { label: 'Proposal Viewed',         icon: '👁️', color: 'text-amber-400' },
+  proposal_approved:      { label: 'Proposal Approved',       icon: '✅', color: 'text-amber-400' },
+  contract_sent:          { label: 'Contract Sent',           icon: '📬', color: 'text-amber-400' },
+  contract_viewed:        { label: 'Contract Viewed',         icon: '👁️', color: 'text-amber-400' },
+  contract_signed:        { label: 'Contract Signed',         icon: '✍️', color: 'text-emerald-400' },
+  // installation
+  permit_submitted:       { label: 'Permit Submitted',        icon: '📋', color: 'text-orange-400' },
+  permit_approved:        { label: 'Permit Approved',         icon: '✅', color: 'text-orange-400' },
+  install_scheduled:      { label: 'Install Scheduled',       icon: '📅', color: 'text-orange-400' },
+  install_started:        { label: 'Installation Started',    icon: '🔧', color: 'text-orange-400' },
+  install_completed:      { label: 'Installation Completed',  icon: '🏠', color: 'text-orange-400' },
+  inspection_passed:      { label: 'Inspection Passed',       icon: '✅', color: 'text-orange-400' },
+  pto_submitted:          { label: 'PTO Submitted',           icon: '📤', color: 'text-orange-400' },
+  pto_approved:           { label: 'PTO Approved',            icon: '⚡', color: 'text-orange-400' },
+  // completed
+  system_live:            { label: 'System Live',             icon: '🌟', color: 'text-emerald-400' },
+  monitoring_active:      { label: 'Monitoring Active',       icon: '📡', color: 'text-emerald-400' },
+};
+
+// Which micro stages belong to each homeowner stage
+const STAGE_MICRO_MAP: Record<HomeownerStage, string[]> = {
+  lead_submitted: ['lead_created', 'project_created'],
+  under_review:   ['bill_uploaded', 'bill_parsed', 'usage_calculated', 'pre_design_complete'],
+  site_survey:    ['survey_scheduled', 'survey_started', 'survey_photos_uploaded', 'survey_submitted', 'survey_reviewed'],
+  design:         ['layout_started', 'layout_completed', 'engineering_started', 'engineering_completed', 'sld_generated', 'planset_generated'],
+  proposal:       ['final_proposal_generated', 'proposal_sent', 'proposal_viewed', 'proposal_approved', 'contract_sent', 'contract_viewed', 'contract_signed'],
+  installation:   ['permit_submitted', 'permit_approved', 'install_scheduled', 'install_started', 'install_completed', 'inspection_passed', 'pto_submitted', 'pto_approved'],
+  completed:      ['system_live', 'monitoring_active'],
+};
+
+// What documents are expected at each stage
+const STAGE_EXPECTED_DOCS: Record<HomeownerStage, string[]> = {
+  lead_submitted: [],
+  under_review:   ['Utility Bill'],
+  site_survey:    ['Site Survey', 'Roof Photos'],
+  design:         ['Plan Set'],
+  proposal:       ['Proposal', 'Contract'],
+  installation:   ['Permit'],
+  completed:      [],
+};
+
+// ─── Stage Definitions ────────────────────────────────────────────────────────
 
 type StageContent = {
   roadmapLabel: string;
@@ -137,6 +210,10 @@ function getStageIndex(stage: HomeownerStage | null): number {
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function formatShortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function getTimeOfDayGreeting(): string {
@@ -246,9 +323,193 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
   );
 }
 
+// ─── Stage Milestone Feed ─────────────────────────────────────────────────────
+
+function StageMilestoneFeed({
+  stage,
+  microStages,
+}: {
+  stage: HomeownerStage | null;
+  microStages: MicroStageEvent[];
+}) {
+  if (!stage) return null;
+
+  const completedSet = new Set(microStages.map(m => m.micro_stage));
+  const completedMap = Object.fromEntries(microStages.map(m => [m.micro_stage, m.created_at]));
+
+  // Show milestones for ALL stages up to and including current
+  const stageIdx = getStageIndex(stage);
+  const stagesToShow = ROADMAP_STEPS.slice(0, stageIdx + 1);
+
+  // Only show current + previous stages that have any micro events
+  const sections = stagesToShow.map(s => ({
+    stage: s,
+    content: STAGE_CONTENT[s],
+    micros: STAGE_MICRO_MAP[s],
+    isCurrent: s === stage,
+  })).filter(s => s.isCurrent || s.micros.some(m => completedSet.has(m)));
+
+  if (sections.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
+      <div className="flex items-center gap-2 mb-5">
+        <div className="w-6 h-6 rounded-lg bg-violet-500/10 border border-violet-500/15 flex items-center justify-center">
+          <Activity size={12} className="text-violet-400" />
+        </div>
+        <h3 className="text-sm font-bold text-white">Project Milestones</h3>
+        <span className="ml-auto text-[10px] text-slate-600">{completedSet.size} event{completedSet.size !== 1 ? 's' : ''} recorded</span>
+      </div>
+
+      <div className="space-y-6">
+        {sections.map(({ stage: s, content, micros, isCurrent }) => {
+          const completedMicros = micros.filter(m => completedSet.has(m));
+          const pendingMicros   = micros.filter(m => !completedSet.has(m));
+
+          return (
+            <div key={s}>
+              {/* Stage header */}
+              <div className="flex items-center gap-2 mb-3">
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isCurrent ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500/60'}`} />
+                <span className={`text-xs font-black uppercase tracking-widest ${isCurrent ? 'text-amber-400' : 'text-emerald-400/60'}`}>
+                  {content.roadmapLabel}
+                </span>
+                {!isCurrent && <span className="text-[9px] text-emerald-500/40 ml-1">✓ Complete</span>}
+                {isCurrent && <span className="text-[9px] bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider font-black ml-1">Active</span>}
+              </div>
+
+              {/* Micro stage checklist */}
+              <div className="flex flex-col gap-1.5 ml-4">
+                {completedMicros.map(m => {
+                  const meta = MICRO_STAGE_META[m];
+                  if (!meta) return null;
+                  return (
+                    <div key={m} className="flex items-center gap-3 rounded-lg bg-white/[0.02] border border-white/[0.04] px-3 py-2">
+                      <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0" />
+                      <span className="text-xs text-white font-medium flex-1">{meta.label}</span>
+                      <span className="text-[10px] text-slate-600">{formatShortDate(completedMap[m])}</span>
+                    </div>
+                  );
+                })}
+                {isCurrent && pendingMicros.map(m => {
+                  const meta = MICRO_STAGE_META[m];
+                  if (!meta) return null;
+                  return (
+                    <div key={m} className="flex items-center gap-3 rounded-lg bg-white/[0.015] border border-white/[0.03] px-3 py-2 opacity-40">
+                      <Circle size={12} className="text-slate-600 flex-shrink-0" />
+                      <span className="text-xs text-slate-500 flex-1">{meta.label}</span>
+                      <span className="text-[10px] text-slate-700">Pending</span>
+                    </div>
+                  );
+                })}
+                {completedMicros.length === 0 && !isCurrent && (
+                  <p className="text-xs text-slate-700 ml-1">No events recorded</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Document Checklist ───────────────────────────────────────────────────────
+
+function DocumentChecklist({
+  stage,
+  documents,
+}: {
+  stage: HomeownerStage | null;
+  documents: ProjectDocument[];
+}) {
+  if (!stage) return null;
+
+  const receivedLabels = new Set(
+    documents.map(d => normalizeLabel(d.label))
+  );
+  const stageIdx = getStageIndex(stage);
+
+  // Collect all expected docs for all stages up to current
+  const allExpected: { doc: string; stageLabel: string; stageIdx: number }[] = [];
+  ROADMAP_STEPS.slice(0, stageIdx + 1).forEach((s, i) => {
+    STAGE_EXPECTED_DOCS[s].forEach(doc => {
+      allExpected.push({ doc, stageLabel: STAGE_CONTENT[s].roadmapLabel, stageIdx: i });
+    });
+  });
+
+  return (
+    <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
+      <div className="flex items-center gap-2 mb-4">
+        <div className="w-6 h-6 rounded-lg bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center">
+          <FileCheck size={12} className="text-emerald-400" />
+        </div>
+        <h3 className="text-sm font-bold text-white">Documents</h3>
+        <span className="ml-auto text-[10px] text-slate-600">
+          {documents.length} received
+        </span>
+      </div>
+
+      {/* Expected docs checklist */}
+      {allExpected.length > 0 && (
+        <div className="flex flex-col gap-1.5 mb-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2">Required Documents</p>
+          {allExpected.map(({ doc, stageLabel }) => {
+            const received = receivedLabels.has(doc);
+            return (
+              <div key={doc} className={`flex items-center gap-3 rounded-lg px-3 py-2 border ${
+                received
+                  ? 'bg-emerald-500/[0.04] border-emerald-500/[0.12]'
+                  : 'bg-white/[0.015] border-white/[0.04]'
+              }`}>
+                {received
+                  ? <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0" />
+                  : <Circle size={12} className="text-slate-600 flex-shrink-0" />}
+                <span className={`text-xs font-medium flex-1 ${received ? 'text-white' : 'text-slate-500'}`}>{doc}</span>
+                <span className="text-[10px] text-slate-600">{stageLabel}</span>
+                {!received && (
+                  <span className="text-[9px] bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded-md ml-1">Needed</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* All received documents */}
+      {documents.length === 0 ? (
+        <p className="text-xs text-slate-600 py-1">No documents uploaded yet.</p>
+      ) : (
+        <>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600 mb-2">Received</p>
+          <div className="flex flex-col gap-1.5">
+            {documents.map((doc, i) => (
+              <div key={i} className="flex items-center justify-between rounded-lg bg-white/[0.02] border border-white/[0.04] px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 size={12} className="text-emerald-400 flex-shrink-0" />
+                  <span className="text-xs font-medium text-white">{normalizeLabel(doc.label)}</span>
+                </div>
+                <span className="text-[10px] text-slate-600">{formatShortDate(doc.uploaded_at)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Homeowner View ───────────────────────────────────────────────────────────
 
-function HomeownerView({ project, documents }: { project: Project; documents: ProjectDocument[] }) {
+function HomeownerView({
+  project,
+  documents,
+  microStages,
+}: {
+  project: Project;
+  documents: ProjectDocument[];
+  microStages: MicroStageEvent[];
+}) {
   const stage       = project.homeowner_stage;
   const content     = stage ? STAGE_CONTENT[stage] : null;
   const stageIdx    = getStageIndex(stage);
@@ -327,7 +588,13 @@ function HomeownerView({ project, documents }: { project: Project; documents: Pr
         </div>
       )}
 
-      {/* ── 4. PROJECT DETAILS ── */}
+      {/* ── 4. PROJECT MILESTONES (micro stage feed) ── */}
+      <StageMilestoneFeed stage={stage} microStages={microStages} />
+
+      {/* ── 5. DOCUMENTS ── */}
+      <DocumentChecklist stage={stage} documents={documents} />
+
+      {/* ── 6. PROJECT DETAILS ── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 mb-2">
@@ -357,43 +624,7 @@ function HomeownerView({ project, documents }: { project: Project; documents: Pr
         </div>
       </div>
 
-      {/* ── 5. YOUR DOCUMENTS ── */}
-      <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
-        <div className="flex items-center gap-2 mb-4">
-          <div className="w-6 h-6 rounded-lg bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center">
-            <FileCheck size={12} className="text-emerald-400" />
-          </div>
-          <h3 className="text-sm font-bold text-white">Your Documents</h3>
-        </div>
-        {documents.length === 0 ? (
-          <p className="text-xs text-slate-600 py-2">No documents uploaded yet.</p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {documents.map((doc, i) => (
-              <div key={i} className="flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/[0.04] px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-6 h-6 rounded-md bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                    <CheckCircle2 size={11} className="text-emerald-400" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-white">{normalizeLabel(doc.label)}</p>
-                    <p className="text-[10px] text-slate-600 uppercase tracking-wide mt-0.5">
-                      {doc.file_type === 'utility_bill' ? 'Utility Bill' : 'Document'} · Received
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] text-slate-600">
-                    {new Date(doc.uploaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── 6. CONTACT ── */}
+      {/* ── 7. CONTACT ── */}
       <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
         <h3 className="text-sm font-bold text-white mb-1">Have a question?</h3>
         <p className="text-xs text-slate-600 mb-5">Reach out to your project team anytime.</p>
@@ -434,16 +665,16 @@ function HomeownerView({ project, documents }: { project: Project; documents: Pr
 // ─── Admin Wrapper ────────────────────────────────────────────────────────────
 
 export default function AdminHomeownerDashboardPage() {
-  const [projects,   setProjects]   = useState<Project[]>([]);
-  const [selected,   setSelected]   = useState<Project | null>(null);
-  const [documents,  setDocuments]  = useState<ProjectDocument[]>([]);
-  const [filtered,   setFiltered]   = useState<Project[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [docLoading, setDocLoading] = useState(false);
-  const [search,     setSearch]     = useState('');
-  const [showPicker, setShowPicker] = useState(false);
+  const [projects,    setProjects]    = useState<Project[]>([]);
+  const [selected,    setSelected]    = useState<Project | null>(null);
+  const [documents,   setDocuments]   = useState<ProjectDocument[]>([]);
+  const [microStages, setMicroStages] = useState<MicroStageEvent[]>([]);
+  const [filtered,    setFiltered]    = useState<Project[]>([]);
+  const [loading,     setLoading]     = useState(true);
+  const [docLoading,  setDocLoading]  = useState(false);
+  const [search,      setSearch]      = useState('');
+  const [showPicker,  setShowPicker]  = useState(false);
 
-  // Load all projects (for picker)
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -459,17 +690,17 @@ export default function AdminHomeownerDashboardPage() {
     } finally { setLoading(false); }
   }, []);
 
-  // Load per-project detail (documents + stage history)
   const loadProjectDetail = useCallback(async (projectId: string) => {
     setDocLoading(true);
     setDocuments([]);
+    setMicroStages([]);
     try {
       const res = await fetch(`/api/admin/projects/${projectId}`);
       if (!res.ok) return;
       const d = await res.json();
       if (d.success) {
         setDocuments(d.documents ?? []);
-        // Also update the selected project with fresh homeowner_stage
+        setMicroStages(d.microStages ?? []);
         if (d.project) {
           setSelected(prev => prev?.id === projectId ? { ...prev, ...d.project } : prev);
         }
@@ -478,11 +709,7 @@ export default function AdminHomeownerDashboardPage() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  // When selected project changes, fetch its detail
-  useEffect(() => {
-    if (selected?.id) loadProjectDetail(selected.id);
-  }, [selected?.id, loadProjectDetail]);
+  useEffect(() => { if (selected?.id) loadProjectDetail(selected.id); }, [selected?.id, loadProjectDetail]);
 
   useEffect(() => {
     const q = search.toLowerCase();
@@ -496,8 +723,6 @@ export default function AdminHomeownerDashboardPage() {
 
   return (
     <div className="space-y-5">
-
-      {/* Admin bar */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-black text-white">Homeowner Dashboard</h1>
@@ -509,7 +734,6 @@ export default function AdminHomeownerDashboardPage() {
         </button>
       </div>
 
-      {/* Project picker */}
       <div className="relative">
         <div className="flex items-center gap-2">
           <div className="relative flex-1 max-w-sm">
@@ -554,7 +778,6 @@ export default function AdminHomeownerDashboardPage() {
         )}
       </div>
 
-      {/* Preview badge */}
       {selected && (
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 bg-blue-500/8 border border-blue-500/15 rounded-lg px-3 py-1.5">
@@ -574,13 +797,12 @@ export default function AdminHomeownerDashboardPage() {
           <RefreshCw size={16} className="animate-spin mr-2" /> Loading projects…
         </div>
       ) : selected ? (
-        <HomeownerView key={selected.id} project={selected} documents={documents} />
+        <HomeownerView key={selected.id} project={selected} documents={documents} microStages={microStages} />
       ) : (
         <div className="flex items-center justify-center h-64 rounded-2xl border border-white/8 bg-white/2">
           <p className="text-slate-600 text-sm">No projects found.</p>
         </div>
       )}
-
     </div>
   );
 }

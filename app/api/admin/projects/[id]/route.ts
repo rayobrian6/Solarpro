@@ -37,7 +37,7 @@ export async function GET(
   try {
     const sql = await getDbReady();
 
-    const [rows, historyRows, fileRows] = await Promise.all([
+    const [rows, historyRows, fileRows, microRows] = await Promise.all([
       sql`
         SELECT
           p.id, p.name, p.address, p.system_size_kw, p.status,
@@ -79,6 +79,15 @@ export async function GET(
         ORDER BY created_at DESC
         LIMIT 50
       `,
+      sql`
+        SELECT
+          micro_stage,
+          created_at::text AS created_at,
+          created_by::text AS created_by
+        FROM project_micro_stages
+        WHERE project_id = ${id}
+        ORDER BY created_at ASC
+      `,
     ]);
 
     if (rows.length === 0) {
@@ -92,11 +101,17 @@ export async function GET(
       uploaded_at: String(r.uploaded_at),
     }));
 
+    const microStages = microRows.map((r: Record<string, unknown>) => ({
+      micro_stage: String(r.micro_stage),
+      created_at:  String(r.created_at),
+    }));
+
     return NextResponse.json({
       success: true,
       project: rows[0],
       stageHistory: historyRows,
       documents,
+      microStages,
     });
   } catch (e: unknown) {
     return handleRouteDbError('[api/admin/projects/[id]] GET', e);

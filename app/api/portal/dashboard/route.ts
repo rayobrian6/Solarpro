@@ -137,6 +137,29 @@ export async function GET(req: NextRequest) {
       ].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
     }
 
+    // Fetch micro stages for all client projects (internal progress events)
+    let microStages: { project_id: string; micro_stage: string; created_at: string }[] = [];
+    if (projectIds.length > 0) {
+      try {
+        const microRows = await sql`
+          SELECT
+            project_id::text,
+            micro_stage::text,
+            created_at::text
+          FROM project_micro_stages
+          WHERE project_id = ANY(${projectIds})
+          ORDER BY created_at ASC
+        `;
+        microStages = microRows.map((r: Record<string, unknown>) => ({
+          project_id:  String(r.project_id),
+          micro_stage: String(r.micro_stage),
+          created_at:  String(r.created_at),
+        }));
+      } catch {
+        // project_micro_stages may not exist yet — non-fatal
+      }
+    }
+
     return NextResponse.json({
       success: true,
       client: {
@@ -151,6 +174,7 @@ export async function GET(req: NextRequest) {
       },
       projects,
       stageHistory,
+      microStages,
       documents,
     });
   } catch (e: unknown) {
