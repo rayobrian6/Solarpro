@@ -28,10 +28,10 @@ export async function GET(req: NextRequest) {
     const [rows, countRows] = await Promise.all([
       originFilter !== 'all'
         ? sql`
-            SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at,
+            SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at, p.updated_at,
                    p.origin, p.deleted_at, p.status, p.homeowner_stage,
                    u.name AS owner_name, u.email AS owner_email,
-                   c.name AS client_name
+                   c.name AS client_name, c.email AS client_email
               FROM projects p
               LEFT JOIN users u ON u.id = p.user_id
               LEFT JOIN clients c ON c.id = p.client_id
@@ -44,10 +44,10 @@ export async function GET(req: NextRequest) {
              LIMIT ${limit} OFFSET ${offset}
           `
         : sql`
-            SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at,
+            SELECT p.id, p.name, p.address, p.system_size_kw, p.created_at, p.updated_at,
                    p.origin, p.deleted_at, p.status, p.homeowner_stage,
                    u.name AS owner_name, u.email AS owner_email,
-                   c.name AS client_name
+                   c.name AS client_name, c.email AS client_email
               FROM projects p
               LEFT JOIN users u ON u.id = p.user_id
               LEFT JOIN clients c ON c.id = p.client_id
