@@ -245,7 +245,8 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
   try {
     // Resolve client_id — query the project we just upserted for its client_id.
     // This is the most reliable source: the project row always exists at this point.
-    const clientId = await _resolveClientIdForSurvey(sql, ownerId, linkResolution, context, projectId);
+    // Falls back to auto-creating a client from the survey data when none exists.
+    const clientId = await _resolveClientIdForSurvey(sql, ownerId, linkResolution, context, projectId, transformOutput);
 
     if (clientId) {
       // standalone: no project_id in JWT, or explicit picker selections present
@@ -712,6 +713,9 @@ async function _insertFiles(
 //   3. Look up client_id from the freshly upserted project row (most reliable —
 //      the project always exists at this point in the pipeline).
 //   4. Look up via linkResolution.projectId (fallback for attach action)
+//   5. Find any existing client for this user keyed on survey address
+//   6. Auto-create a client record from survey address/name so photos
+//      always land in site_survey_files and appear in the UI.
 //
 // projectId: the UUID returned by _upsertProject() — used as primary lookup.
 // ---------------------------------------------------------------------------
@@ -721,6 +725,7 @@ async function _resolveClientIdForSurvey(
   linkResolution: LinkResolution,
   context: IngestContext,
   projectId: string,
+  transformOutput: TransformOutput,
 ): Promise<string | null> {
   // Priority 1: explicit client selection from on-device picker
   if (context.selectedClientId && isValidUUID(context.selectedClientId)) {
@@ -762,6 +767,80 @@ async function _resolveClientIdForSurvey(
     } catch {
       // best-effort
     }
+  }
+
+  // Priority 5 & 6: Survey-origin projects frequently have no client_id because
+  // they were created from the field without a prior SolarPro client record.
+  // We still need a client_id to satisfy the site_surveys NOT NULL constraint
+  // so that photos land in site_survey_files and appear in the project UI.
+  //
+  // Strategy: upsert a client record keyed on (user_id, address) so that
+  // repeated ingest of the same site converges on the same client row.
+  try {
+    const surveyName    = transformOutput.projectName ?? 'Survey Client';
+    const surveyAddress = transformOutput.address ?? '';
+
+    // Priority 5: Look for an existing client with the same address under this user.
+    // Prevents duplicate clients on re-delivery / replay.
+    if (surveyAddress) {
+      const existing = await sql`
+        SELECT id FROM clients
+        WHERE user_id = ${ownerId}
+          AND LOWER(TRIM(address)) = LOWER(TRIM(${surveyAddress}))
+        LIMIT 1
+      `;
+      const existingId = (existing[0] as Record<string, unknown> | undefined)?.id as string | null;
+      if (existingId && isValidUUID(existingId)) {
+        console.log(
+          `[ingestPipeline] _resolveClientIdForSurvey: found existing client by address ` +
+          `clientId=${existingId} address="${surveyAddress}"`,
+        );
+        // Backfill the project client_id so future lookups hit Priority 3.
+        await sql`
+          UPDATE projects SET client_id = ${existingId}, updated_at = now()
+          WHERE id = ${projectId} AND user_id = ${ownerId} AND client_id IS NULL
+        `;
+        return existingId;
+      }
+    }
+
+    // Priority 6: No existing client found — create one from the survey data.
+    // Use a placeholder email derived from the survey external_id so it
+    // is unique; the user can update the client record later in the UI.
+    const placeholderEmail = `survey-${context.event.survey_id.slice(0, 8)}@survey.local`;
+
+    const inserted = await sql`
+      INSERT INTO clients (user_id, name, email, address, lat, lng)
+      VALUES (
+        ${ownerId},
+        ${surveyName},
+        ${placeholderEmail},
+        ${surveyAddress},
+        ${transformOutput.lat ?? null},
+        ${transformOutput.lng ?? null}
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING id
+    `;
+    const newClientId = (inserted[0] as Record<string, unknown> | undefined)?.id as string | null;
+
+    if (newClientId && isValidUUID(newClientId)) {
+      console.log(
+        `[ingestPipeline] _resolveClientIdForSurvey: auto-created client ` +
+        `clientId=${newClientId} name="${surveyName}" address="${surveyAddress}"`,
+      );
+      // Backfill the project client_id so the project page shows the client.
+      await sql`
+        UPDATE projects SET client_id = ${newClientId}, updated_at = now()
+        WHERE id = ${projectId} AND user_id = ${ownerId} AND client_id IS NULL
+      `;
+      return newClientId;
+    }
+  } catch (clientErr) {
+    const msg = clientErr instanceof Error ? clientErr.message : String(clientErr);
+    console.warn(
+      `[ingestPipeline] _resolveClientIdForSurvey: auto-client upsert failed (non-fatal): ${msg}`,
+    );
   }
 
   return null;

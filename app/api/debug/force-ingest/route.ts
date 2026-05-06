@@ -17,7 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
-import { getDbReady } from '@/lib/db-neon';
+import { getDbReady, createSiteSurvey, bulkAddSiteSurveyFiles, isValidUUID } from '@/lib/db-neon';
 import pg from 'pg';
 import { resolveIngestOwner } from '@/lib/survey/ingest/ownerResolver';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
@@ -471,6 +471,94 @@ export async function POST(req: NextRequest) {
           `;
           result.photosAdded++;
           photosProcessed++;
+        }
+
+        // ── Create site_surveys row + site_survey_files ────────────────────────
+        // site_surveys requires a client_id (NOT NULL). Resolve or auto-create
+        // a client so that photos appear in the project/client survey UI panels.
+        try {
+          let clientId: string | null = null;
+
+          // Step 1: find the project's client_id (may have been set on a prior run)
+          const projectRow = await sql`
+            SELECT client_id FROM projects WHERE id = ${projectId} AND user_id = ${surveyOwnerId} LIMIT 1
+          `;
+          clientId = (projectRow[0] as Record<string, unknown> | undefined)?.client_id as string | null;
+
+          // Step 2: if no client, look for an existing client by address
+          if (!clientId && survey.site_address) {
+            const byAddr = await sql`
+              SELECT id FROM clients
+              WHERE user_id = ${surveyOwnerId}
+                AND LOWER(TRIM(address)) = LOWER(TRIM(${survey.site_address}))
+              LIMIT 1
+            `;
+            const found = (byAddr[0] as Record<string, unknown> | undefined)?.id as string | null;
+            if (found && isValidUUID(found)) clientId = found;
+          }
+
+          // Step 3: auto-create a client from survey data if none found
+          if (!clientId) {
+            const placeholderEmail = `survey-${survey.id.slice(0, 8)}@survey.local`;
+            const inserted = await sql`
+              INSERT INTO clients (user_id, name, email, address, lat, lng)
+              VALUES (
+                ${surveyOwnerId},
+                ${projectName},
+                ${placeholderEmail},
+                ${survey.site_address ?? ''},
+                ${survey.latitude ?? null},
+                ${survey.longitude ?? null}
+              )
+              ON CONFLICT DO NOTHING
+              RETURNING id
+            `;
+            const newId = (inserted[0] as Record<string, unknown> | undefined)?.id as string | null;
+            if (newId && isValidUUID(newId)) {
+              clientId = newId;
+              console.log(`[FORCE INGEST] Auto-created client clientId=${clientId} for survey "${survey.site_name}"`);
+            }
+          }
+
+          // Step 4: backfill project.client_id if still missing
+          if (clientId && isValidUUID(clientId)) {
+            await sql`
+              UPDATE projects SET client_id = ${clientId}, updated_at = now()
+              WHERE id = ${projectId} AND user_id = ${surveyOwnerId} AND client_id IS NULL
+            `;
+
+            // Step 5: upsert site_surveys row (idempotent via external_survey_id)
+            const siteSurvey = await createSiteSurvey({
+              clientId,
+              projectId,
+              createdBy:        surveyOwnerId,
+              source:           'standalone',
+              status:           'completed',
+              addressSnapshot:  survey.site_address ?? null,
+              surveyData:       null,
+              inspectorName:    survey.inspector_name ?? null,
+              externalSurveyId: survey.id,
+              deliveryId:       null,
+            });
+
+            // Step 6: upsert site_survey_files for each photo
+            const surveyPhotosForFiles = photosBySurvey[survey.id] ?? [];
+            if (surveyPhotosForFiles.length > 0) {
+              const surveyFiles = surveyPhotosForFiles.map((photo) => ({
+                surveyId: siteSurvey.id,
+                fileUrl:  `${PARTNER_CDN_BASE}${photo.file_path}`,
+                fileType: 'photo' as const,
+                label:    photo.label ?? inferPhotoCategory(photo.label, photo.filename),
+                filename: photo.filename ?? null,
+                mimeType: photo.mime_type ?? 'image/jpeg',
+              }));
+              await bulkAddSiteSurveyFiles(surveyFiles);
+              console.log(`[FORCE INGEST] site_survey_files inserted count=${surveyFiles.length} surveyId=${siteSurvey.id}`);
+            }
+          }
+        } catch (siteSurveyErr) {
+          const msg = siteSurveyErr instanceof Error ? siteSurveyErr.message : String(siteSurveyErr);
+          console.warn(`[FORCE INGEST] site_surveys upsert failed (non-fatal): ${msg}`);
         }
 
         console.log(`[FORCE INGEST] "${survey.site_name}" — ${result.photosAdded} photos attached`);

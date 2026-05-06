@@ -85,6 +85,14 @@ export interface SurveyCompletedEvent {
   inspector_name?: string | null;
   /** Inspector email if sent by the partner app. Used for email-based owner resolution. */
   inspector_email?: string | null;
+  // -- Survey naming fields (from partner thin event) -------------------------
+  // The partner sends project_name and site_name in the thin event body.
+  // These are used as the project name when fetchFullPayload returns null
+  // (degraded mode) so we don't fall back to "Survey <uuid>".
+  /** Human-readable project name from the partner app (e.g. "Ray Test"). */
+  project_name?: string | null;
+  /** Human-readable site name from the partner app (e.g. "Ray Test"). */
+  site_name?: string | null;
   // -- v47.438: On-device picker selections (standalone surveys only) ---------
   // Set when the field worker used the client/project picker on Step 1.
   // Null/absent for project-specific surveys (project_id was in the JWT).
