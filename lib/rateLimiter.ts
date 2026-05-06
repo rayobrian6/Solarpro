@@ -41,6 +41,7 @@ function makeLimiter(requests: number, window: `${number} s` | `${number} m`): R
 // ── Route-specific limiters ───────────────────────────────────────────────────
 // Auth / identity — tight limits, brute-force sensitive
 const _loginLimiter          = makeLimiter(5,  '60 s');  // brute-force protection
+const _publicLeadLimiter     = makeLimiter(5,  '15 m');  // public lead form — 5 per 15 min per IP
 const _registerLimiter       = makeLimiter(3,  '60 s');  // prevent mass account creation
 const _passwordResetLimiter  = makeLimiter(3,  '60 s');  // prevent reset abuse
 const _deleteAccountLimiter  = makeLimiter(3,  '60 m');  // destructive — very tight
@@ -123,7 +124,9 @@ export type LimiterKey =
   | 'migrate'
   // Homeowner portal
   | 'portal_login'
-  | 'portal_read';
+  | 'portal_read'
+  // Public forms (no auth)
+  | 'public_lead';
 
 const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   // Auth
@@ -167,6 +170,8 @@ const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   // Homeowner portal
   'portal_login':           _loginLimiter,
   'portal_read':            _standardLimiter,
+  // Public forms
+  'public_lead':            _publicLeadLimiter,
 };
 
 // ── Public check function ─────────────────────────────────────────────────────

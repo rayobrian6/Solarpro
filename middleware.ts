@@ -40,6 +40,10 @@ const PUBLIC_PATHS = [
   '/api/portal/login',
   '/api/portal/logout',
 
+  // -- Public lead capture (no auth, rate-limited) --
+  '/get-a-quote',
+  '/api/leads/public',
+
   // ── Mobile app endpoints (validated internally via Bearer JWT) ──
   // Middleware only understands session cookies. The mobile field app sends
   // a Bearer token (SOLARPRO_HANDOFF_SECRET-signed JWT). Let requests through
