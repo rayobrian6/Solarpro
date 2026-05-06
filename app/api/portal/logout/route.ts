@@ -6,6 +6,6 @@ export const runtime = 'nodejs';
 
 export async function POST(_req: NextRequest) {
   const res = NextResponse.json({ success: true });
-  res.headers.set('Set-Cookie', clearPortalCookie());
+  res.headers.append('Set-Cookie', clearPortalCookie());
   return res;
 }

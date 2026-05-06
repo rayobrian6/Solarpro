@@ -61,8 +61,8 @@ export async function POST(req: NextRequest) {
       name:    client.name,
     });
 
-    // Set portal session cookie (Path=/portal, HttpOnly)
-    res.headers.set(
+    // Set portal session cookie (Path=/, HttpOnly — must cover /api/portal/* paths)
+    res.headers.append(
       'Set-Cookie',
       makePortalCookie(token)
     );

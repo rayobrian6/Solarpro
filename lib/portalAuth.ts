@@ -50,12 +50,12 @@ export function verifyPortalToken(token: string): PortalSession | null {
 export function makePortalCookie(token: string): string {
   const expires = new Date(Date.now() + PORTAL_COOKIE_MAX_AGE * 1000).toUTCString();
   const secure  = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  return `${PORTAL_COOKIE_NAME}=${token}; Path=/portal; HttpOnly; SameSite=Lax${secure}; Expires=${expires}`;
+  return `${PORTAL_COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax${secure}; Expires=${expires}`;
 }
 
 export function clearPortalCookie(): string {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  return `${PORTAL_COOKIE_NAME}=; Path=/portal; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
+  return `${PORTAL_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
 /** Read portal session from a Request object (works in API routes and middleware) */

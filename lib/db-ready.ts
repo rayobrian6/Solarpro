@@ -1,3 +1,5 @@
+import 'server-only'; // ← prevents this module from being bundled into client-side JS
+
 /**
  * lib/db-ready.ts
  *

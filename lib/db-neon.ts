@@ -1,3 +1,5 @@
+import 'server-only'; // ← prevents this module from being bundled into client-side JS
+
 /**
  * lib/db-neon.ts
  * Persistent database layer using Neon PostgreSQL.
