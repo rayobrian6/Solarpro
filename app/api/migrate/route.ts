@@ -213,29 +213,52 @@ export async function POST(req: NextRequest) {
 
     for (const u of freePassUsers) {
       try {
-        const bcrypt = await import('bcryptjs');
-        const { randomBytes } = await import('crypto');
-        // Generate a cryptographically random placeholder — never predictable, must be reset via password-reset flow
-        const placeholderPassword = randomBytes(32).toString('hex');
-        const placeholderHash = await bcrypt.hash(placeholderPassword, 10);
-        // Use full UPSERT — handles both existing and new users atomically
-        await sql`
-          INSERT INTO users (name, email, password_hash, company, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
-          VALUES (
-            ${u.name}, ${u.email}, ${placeholderHash}, ${u.company},
-            ${u.role}, 'contractor', 'free_pass', true, ${u.note},
-            '2099-12-31 23:59:59+00'
-          )
-          ON CONFLICT (email) DO UPDATE SET
-            plan                = 'contractor',
-            subscription_status = 'free_pass',
-            is_free_pass        = true,
-            free_pass_note      = ${u.note},
-            trial_ends_at       = '2099-12-31 23:59:59+00',
-            role                = EXCLUDED.role
-            -- password_hash intentionally omitted from UPDATE: never overwrite existing user passwords on re-migration
+        // ── ROOT CAUSE FIX (v60.6) ────────────────────────────────────────────
+        // Previous code inserted a random placeholder hash on every migration run.
+        // If the user row didn't exist yet, they got a permanently-locked account
+        // (can't register: 409 "already exists"; can't login: random hash).
+        // Fix: check if the user already exists FIRST.
+        //   • EXISTS  → only update free-pass metadata, NEVER touch password_hash
+        //   • NEW     → insert with a known-impossible sentinel hash so they MUST
+        //               use password-reset to gain access.
+        // ─────────────────────────────────────────────────────────────────────
+
+        const existing = await sql`
+          SELECT id FROM users WHERE email = ${u.email.toLowerCase().trim()} LIMIT 1
         `;
-        results.push(`✅ Free pass upserted: ${u.email}`);
+
+        if (existing.length > 0) {
+          // User already exists — update free-pass metadata only, never touch password_hash
+          await sql`
+            UPDATE users SET
+              name                = ${u.name},
+              company             = ${u.company},
+              role                = ${u.role},
+              plan                = 'contractor',
+              subscription_status = 'free_pass',
+              is_free_pass        = true,
+              free_pass_note      = ${u.note},
+              trial_ends_at       = '2099-12-31 23:59:59+00',
+              updated_at          = NOW()
+            WHERE email = ${u.email.toLowerCase().trim()}
+          `;
+          results.push(`✅ Free pass updated (existing user, password preserved): ${u.email}`);
+        } else {
+          // New user — insert with a sentinel hash that can never be guessed.
+          // User MUST go through password-reset flow to set a real password.
+          const bcrypt = await import('bcryptjs');
+          const sentinelHash = await bcrypt.hash('__SOLARPRO_MUST_RESET__', 4);
+          await sql`
+            INSERT INTO users (name, email, password_hash, company, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
+            VALUES (
+              ${u.name}, ${u.email.toLowerCase().trim()}, ${sentinelHash}, ${u.company},
+              ${u.role}, 'contractor', 'free_pass', true, ${u.note},
+              '2099-12-31 23:59:59+00'
+            )
+            ON CONFLICT (email) DO NOTHING
+          `;
+          results.push(`✅ Free pass created (new user, password reset required): ${u.email}`);
+        }
       } catch (e: unknown) {
         results.push(`⚠️ free pass ${u.email}: ${(e as Error).message}`);
       }

@@ -851,6 +851,64 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // ── Emergency: set password for any user by email ──────────────────────
+      // Super-admin only. Used when email delivery is unavailable and the owner
+      // is locked out due to a migration-inserted placeholder hash.
+      // Requires MIGRATE_SECRET header as a second factor to prevent abuse.
+      case 'set_user_password': {
+        const { email: targetEmail, new_password, migrate_secret } = params || {};
+
+        // Second factor: MIGRATE_SECRET header or param must match env var
+        const expectedSecret = process.env.MIGRATE_SECRET;
+        if (!expectedSecret || migrate_secret !== expectedSecret) {
+          return NextResponse.json(
+            { success: false, error: 'Invalid MIGRATE_SECRET — this tool requires a second-factor secret.' },
+            { status: 403 }
+          );
+        }
+
+        if (!targetEmail || typeof targetEmail !== 'string') {
+          return NextResponse.json({ success: false, error: 'email is required' }, { status: 400 });
+        }
+        if (!new_password || typeof new_password !== 'string' || new_password.length < 8) {
+          return NextResponse.json({ success: false, error: 'new_password must be at least 8 characters' }, { status: 400 });
+        }
+
+        const userRows = await sql`
+          SELECT id, email, name FROM users
+          WHERE email = ${targetEmail.toLowerCase().trim()}
+          LIMIT 1
+        `;
+        if (userRows.length === 0) {
+          return NextResponse.json({ success: false, error: `No user found with email: ${targetEmail}` }, { status: 404 });
+        }
+
+        const { hashPassword: hp } = await import('@/lib/auth');
+        const newHash = await hp(new_password);
+
+        await sql`
+          UPDATE users
+          SET password_hash = ${newHash},
+              updated_at    = NOW()
+          WHERE id = ${userRows[0].id}
+        `;
+
+        await logAdminAction({
+          adminId: admin.id,
+          action: 'set_user_password',
+          targetUserId: userRows[0].id,
+          metadata: {
+            targetEmail: targetEmail.toLowerCase().trim(),
+            note: 'Emergency password set via system-tools (super_admin + MIGRATE_SECRET)',
+          },
+        });
+
+        return NextResponse.json({
+          success: true,
+          message: `Password updated for ${userRows[0].email} (${userRows[0].name}). They can now log in with the new password.`,
+        });
+      }
+
       default:
         return NextResponse.json({ success: false, error: `Unknown tool: ${tool}` }, { status: 400 });
     }
