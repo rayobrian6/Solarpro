@@ -27,6 +27,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
+      // 'server-only' is a Next.js Server Component guard that throws in non-Next.js
+      // environments (including Vitest). Mock it as a no-op so tests can import
+      // server-side modules (db-ready, db-neon) directly without errors.
+      'server-only': path.resolve(__dirname, 'tests/__mocks__/server-only.ts'),
     },
   },
 });

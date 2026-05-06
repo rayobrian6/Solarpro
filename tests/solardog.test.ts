@@ -2756,8 +2756,8 @@ describe('Forbidden behaviors — v11 compliance', () => {
   it('system prompt says NEVER give generic answers', () => {
     const fs = require('fs');
     const src = fs.readFileSync('app/api/assistant/route.ts', 'utf8');
-    // Generic chatbot phrases are explicitly banned
-    expect(src).toContain('Never say');
+    // Generic chatbot phrases are explicitly banned (all-caps NEVER is used in system prompt)
+    expect(src).toContain('NEVER say');
   });
 
   it('system prompt says NEVER store random sentences as aliases', () => {
