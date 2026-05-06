@@ -1,5 +1,3 @@
-import 'server-only'; // ← prevents this module from being bundled into client-side JS
-
 /**
  * lib/db-ready.ts
  *
@@ -92,12 +90,15 @@ const BASE_DELAY_MS = 50;  // 50ms, 100ms, 200ms, 400ms, 800ms
 let _cachedSql: SqlExecutor | null = null;
 let _instanceWarm = false;  // true after first successful SELECT 1 on this instance
 
-// Log server instance start (appears once per cold start in Vercel logs)
-console.log('[SERVER_INSTANCE_STARTED] db-ready.ts module loaded on new function instance');
+// These logs only make sense on the server (Vercel cold start).
+// Guard with typeof window === 'undefined' so they don't fire in the
+// browser when this module is transitively bundled into client JS.
+if (typeof window === 'undefined') {
+  // Log server instance start (appears once per cold start in Vercel logs)
+  console.log('[SERVER_INSTANCE_STARTED] db-ready.ts module loaded on new function instance');
 
-// Log full env status at module load time so every cold start shows env health
-// in Vercel logs — search for [ENV_COLD_START] to find these entries.
-{
+  // Log full env status at module load time so every cold start shows env health
+  // in Vercel logs — search for [ENV_COLD_START] to find these entries.
   const _dbUrl  = process.env.DATABASE_URL;
   const _jwtSec = process.env.JWT_SECRET;
   const _dbOk   = !!(_dbUrl && _dbUrl !== 'YOUR_NEON_DATABASE_URL_HERE');
