@@ -212,7 +212,9 @@ export default function SolarDog() {
   }, [storeActiveId, pathname]);
 
   // ── Core UI state ──────────────────────────────────────────────────────────
-  const [isHidden,    setIsHidden]    = useState<boolean>(() => lsGet(HIDE_KEY) === '1');
+  // NOTE: always initialise to false (server-safe) — synced from localStorage after mount
+  // to avoid React hydration mismatch (#418/#423/#425) caused by server/client state difference.
+  const [isHidden,    setIsHidden]    = useState<boolean>(false);
   const [chatOpen,    setChatOpen]    = useState(false);
   const [messages,    setMessages]    = useState<ChatMessage[]>([]);
   const [input,       setInput]       = useState('');
@@ -226,12 +228,8 @@ export default function SolarDog() {
 
   // ── Voice state ────────────────────────────────────────────────────────────
   const [isMuted,         setIsMuted]         = useState(false);
-  const [volume,          setVolume]          = useState<number>(() => {
-    if (typeof window === 'undefined') return 0.8;
-    const saved = lsGet(VOLUME_KEY);
-    const v = saved ? parseFloat(saved) : 0.8;
-    return isNaN(v) ? 0.8 : Math.max(0, Math.min(1, v));
-  });
+  // NOTE: always initialise to 0.8 (server-safe) — synced from localStorage after mount
+  const [volume,          setVolume]          = useState<number>(0.8);
   const [voiceStatus,     setVoiceStatus]     = useState<VoiceStatus>('ready');
   const [showVoicePanel,  setShowVoicePanel]  = useState(false);
   const [serverVoiceEnabled, setServerVoiceEnabled] = useState<boolean | null>(null);
@@ -284,11 +282,25 @@ export default function SolarDog() {
       .catch(() => {/* silent */});
   }, []);
 
+  // Sync isHidden from localStorage after mount (avoids SSR hydration mismatch)
+  useEffect(() => {
+    if (lsGet(HIDE_KEY) === '1') setIsHidden(true);
+  }, []);
+
   // Persist hidden
   useEffect(() => {
     if (isHidden) lsSet(HIDE_KEY, '1');
     else          lsDel(HIDE_KEY);
   }, [isHidden]);
+
+  // Sync volume from localStorage after mount (avoids SSR hydration mismatch)
+  useEffect(() => {
+    const saved = lsGet(VOLUME_KEY);
+    if (saved) {
+      const v = parseFloat(saved);
+      if (!isNaN(v)) setVolume(Math.max(0, Math.min(1, v)));
+    }
+  }, []);
 
   // Persist volume
   useEffect(() => {
