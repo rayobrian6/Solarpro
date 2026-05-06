@@ -9,6 +9,7 @@ const COOKIE_NAME = 'solarpro_session';
 // Everything else requires a valid session cookie.
 const PUBLIC_PATHS = [
   // ── Marketing / Legal pages ──
+  '/',
   '/auth/login',
   '/auth/register',
   '/auth/subscribe',
