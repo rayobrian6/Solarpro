@@ -190,7 +190,14 @@ const VOICE_STATUS_HINT: Partial<Record<VoiceStatus, string>> = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function SolarDog() {
+interface SolarDogProps {
+  /** When true, automatically starts the onboarding tour once on first render */
+  autoStartTour?: boolean;
+  /** Called when the tour finishes or is skipped — parent can mark tour complete */
+  onTourComplete?: () => void;
+}
+
+export default function SolarDog({ autoStartTour = false, onTourComplete }: SolarDogProps = {}) {
   const pathname    = usePathname();
   const router      = useRouter();
   const pathnameRef = useRef(pathname);
@@ -212,8 +219,6 @@ export default function SolarDog() {
   }, [storeActiveId, pathname]);
 
   // ── Core UI state ──────────────────────────────────────────────────────────
-  // NOTE: always initialise to false (server-safe) — synced from localStorage after mount
-  // to avoid React hydration mismatch (#418/#423/#425) caused by server/client state difference.
   const [isHidden,    setIsHidden]    = useState<boolean>(false);
   const [chatOpen,    setChatOpen]    = useState(false);
   const [messages,    setMessages]    = useState<ChatMessage[]>([]);
@@ -228,7 +233,6 @@ export default function SolarDog() {
 
   // ── Voice state ────────────────────────────────────────────────────────────
   const [isMuted,         setIsMuted]         = useState(false);
-  // NOTE: always initialise to 0.8 (server-safe) — synced from localStorage after mount
   const [volume,          setVolume]          = useState<number>(0.8);
   const [voiceStatus,     setVoiceStatus]     = useState<VoiceStatus>('ready');
   const [showVoicePanel,  setShowVoicePanel]  = useState(false);
@@ -282,9 +286,15 @@ export default function SolarDog() {
       .catch(() => {/* silent */});
   }, []);
 
-  // Sync isHidden from localStorage after mount (avoids SSR hydration mismatch)
+  // Sync hidden + volume from localStorage after mount (SSR-safe)
   useEffect(() => {
     if (lsGet(HIDE_KEY) === '1') setIsHidden(true);
+    const saved = lsGet(VOLUME_KEY);
+    if (saved) {
+      const v = parseFloat(saved);
+      if (!isNaN(v)) setVolume(Math.max(0, Math.min(1, v)));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Persist hidden
@@ -292,15 +302,6 @@ export default function SolarDog() {
     if (isHidden) lsSet(HIDE_KEY, '1');
     else          lsDel(HIDE_KEY);
   }, [isHidden]);
-
-  // Sync volume from localStorage after mount (avoids SSR hydration mismatch)
-  useEffect(() => {
-    const saved = lsGet(VOLUME_KEY);
-    if (saved) {
-      const v = parseFloat(saved);
-      if (!isNaN(v)) setVolume(Math.max(0, Math.min(1, v)));
-    }
-  }, []);
 
   // Persist volume
   useEffect(() => {
@@ -333,6 +334,25 @@ export default function SolarDog() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // — Auto-start tour on first login (when autoStartTour prop is true) ——————————
+  // Small delay so the page finishes rendering before the tour begins.
+  useEffect(() => {
+    if (!autoStartTour) return;
+    const t = setTimeout(() => { runTour(); }, 1200);
+    return () => clearTimeout(t);
+  // runTour is stable (useCallback) — safe to include
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartTour]);
+
+  // — Window event trigger: 'solardog:start-tour' ———————————————————————————
+  // Allows any component to fire: window.dispatchEvent(new Event('solardog:start-tour'))
+  useEffect(() => {
+    const onStartTour = () => { runTour(); };
+    window.addEventListener('solardog:start-tour', onStartTour);
+    return () => window.removeEventListener('solardog:start-tour', onStartTour);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Subtitle helpers ───────────────────────────────────────────────────────
@@ -431,7 +451,9 @@ export default function SolarDog() {
     setDogPose('idle');
     setSubVisible(false);
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-  }, []);
+    // Notify parent (e.g. to mark tour complete in DB)
+    onTourComplete?.();
+  }, [onTourComplete]);
 
   // ── Hide / show ────────────────────────────────────────────────────────────
   const hideDog = useCallback(() => {
@@ -623,9 +645,14 @@ export default function SolarDog() {
       }
       await sleep(200);
     }
-    if (!abortTourRef.current) { isTourRef.current = false; setIsTour(false); }
+    if (!abortTourRef.current) {
+      isTourRef.current = false;
+      setIsTour(false);
+      // Notify parent that tour completed naturally
+      onTourComplete?.();
+    }
     abortTourRef.current = false;
-  }, [speak]);
+  }, [speak, onTourComplete]);
 
   // ── Send message ───────────────────────────────────────────────────────────
   const sendMessage = useCallback(async (overrideText?: string) => {

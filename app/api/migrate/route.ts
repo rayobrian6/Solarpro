@@ -1678,6 +1678,15 @@ export async function POST(req: NextRequest) {
       }
     }
 
+        // -- Migration 029: New-user tutorial tracking ----------------------------
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS has_seen_tour BOOLEAN NOT NULL DEFAULT false`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS tour_completed_at TIMESTAMPTZ`;
+      results.push('✅ Migration 029 complete: has_seen_tour + tour_completed_at added to users');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 029 (has_seen_tour): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

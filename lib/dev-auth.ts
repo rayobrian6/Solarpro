@@ -187,6 +187,10 @@ export function getDevMeResponse(): object {
       brandPrimaryColor:   '#f59e0b',
       brandSecondaryColor: '#0f172a',
       proposalFooterText:  null,
+
+      // Tutorial — dev bypass always has tour seen (don't auto-trigger in dev)
+      hasSeenTour:         true,
+      tourCompletedAt:     null,
     },
   };
 }

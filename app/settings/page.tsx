@@ -658,6 +658,22 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* —— SolarDog Tutorial —— visible to all users */}
+        <div className="card p-6">
+          <h2 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+            🐾 SolarDog Tutorial
+          </h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Replay the guided onboarding tour at any time. SolarDog will walk you through the key features.
+          </p>
+          <button
+            onClick={() => window.dispatchEvent(new Event('solardog:start-tour'))}
+            className="btn-primary flex items-center gap-2"
+          >
+            <span>▶ Restart Tutorial</span>
+          </button>
+        </div>
+
         {/* ── Admin Tools ── only visible to admin users */}
         {isAdmin && (
           <div className="card p-6 border border-amber-500/20">

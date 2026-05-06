@@ -28,6 +28,9 @@ export interface AppUser {
   companyLogoUrl?: string | null;
   brandPrimaryColor?: string;
   brandSecondaryColor?: string;
+  // Tutorial tracking
+  hasSeenTour: boolean;
+  tourCompletedAt?: string | null;
 }
 
 interface UserContextValue {
@@ -140,6 +143,9 @@ async function fetchUserFromDb(): Promise<FetchResult> {
       companyLogoUrl: u.companyLogoUrl || null,
       brandPrimaryColor: u.brandPrimaryColor || '#f59e0b',
       brandSecondaryColor: u.brandSecondaryColor || '#0f172a',
+      // Tutorial tracking — default false so new users see the tour
+      hasSeenTour: u.hasSeenTour === true,
+      tourCompletedAt: u.tourCompletedAt || null,
     };
     return { status: 'ok', user };
 

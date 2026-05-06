@@ -109,7 +109,8 @@ export async function GET(req: NextRequest) {
         company_logo_url, company_website,
         company_address, company_phone,
         brand_primary_color, brand_secondary_color,
-        proposal_footer_text
+        proposal_footer_text,
+        has_seen_tour, tour_completed_at
       FROM users WHERE id = ${userId} LIMIT 1
     `;
   } catch (fullErr: unknown) {
@@ -204,6 +205,10 @@ export async function GET(req: NextRequest) {
       brandPrimaryColor:   db.brand_primary_color   || '#f59e0b',
       brandSecondaryColor: db.brand_secondary_color || '#0f172a',
       proposalFooterText:  db.proposal_footer_text  || null,
+
+      // Tutorial
+      hasSeenTour:         db.has_seen_tour       === true,
+      tourCompletedAt:     db.tour_completed_at   || null,
     }
   }, {
     headers: {
