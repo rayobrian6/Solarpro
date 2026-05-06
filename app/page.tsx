@@ -1,17 +1,20 @@
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Sun, Zap, Map, FileText, BarChart3, ArrowRight,
   CheckCircle, Star, Cpu, Shield,
   TrendingUp, Users, Leaf, Sparkles,
-  DollarSign, Lock, Mail, Wrench,
+  Lock, Mail, Wrench,
   HardHat, Ruler, Package, AlertTriangle,
   Upload, Layout, GitBranch, ClipboardList, FileCheck,
-  ChevronRight, Database, Bolt
+  ChevronRight, Camera, Smartphone, Home,
+  MessageSquare, DollarSign, ClipboardCheck, Battery,
+  UserPlus, PieChart,
 } from 'lucide-react';
 
-// ─── DATA ────────────────────────────────────────────────────────────────────
+// ─── DATA ───────────────────────────────────────────────────────────────────
 
 const FEATURES = [
   {
@@ -25,18 +28,34 @@ const FEATURES = [
   {
     icon: <Zap size={22} />,
     title: 'Electrical Engineering',
-    desc: 'Full NEC-compliant single-line diagrams, conductor sizing, AC/DC disconnect specs, and interconnection rules for 19 utilities — auto-generated.',
+    desc: 'Full NEC-compliant single-line diagrams, conductor sizing, AC/DC disconnect specs, and interconnection rules for 19 utilities — auto-generated in seconds.',
     color: 'from-blue-500/20 to-cyan-500/10 border-blue-500/20',
     iconColor: 'text-blue-400 bg-blue-500/10',
     tag: 'NEC Compliant',
   },
   {
-    icon: <HardHat size={22} />,
-    title: 'Installer Workflow',
-    desc: 'Built around how installers actually work — from site survey to permit submission. BOM, structural calcs, and permit packages generated automatically.',
+    icon: <Smartphone size={22} />,
+    title: 'Site Survey Mobile App',
+    desc: 'Field teams conduct surveys, capture roof photos, and submit measurements from their phone. Results sync instantly to the project — no paper, no back-and-forth.',
+    color: 'from-cyan-500/20 to-teal-500/10 border-cyan-500/20',
+    iconColor: 'text-cyan-400 bg-cyan-500/10',
+    tag: 'Field Ready',
+  },
+  {
+    icon: <Home size={22} />,
+    title: 'Homeowner Portal',
+    desc: 'Every client gets a branded progress dashboard — from lead submission to system going live. They see exactly where their project stands without calling your office.',
     color: 'from-emerald-500/20 to-teal-500/10 border-emerald-500/20',
     iconColor: 'text-emerald-400 bg-emerald-500/10',
-    tag: 'Field Ready',
+    tag: 'Client Facing',
+  },
+  {
+    icon: <UserPlus size={22} />,
+    title: 'Lead & Pipeline Management',
+    desc: 'Capture leads, assign reps, track deals through every stage of your pipeline. Convert a lead to a full project in one click — no separate CRM needed.',
+    color: 'from-violet-500/20 to-purple-500/10 border-violet-500/20',
+    iconColor: 'text-violet-400 bg-violet-500/10',
+    tag: 'Built-in CRM',
   },
   {
     icon: <Ruler size={22} />,
@@ -62,6 +81,14 @@ const FEATURES = [
     iconColor: 'text-teal-400 bg-teal-500/10',
     tag: 'NREL Powered',
   },
+  {
+    icon: <Battery size={22} />,
+    title: 'Battery & Storage Design',
+    desc: 'Size battery systems alongside solar arrays. Backup load calculations, time-of-use optimization, and full BOM generation for storage-integrated projects.',
+    color: 'from-orange-500/20 to-amber-500/10 border-orange-500/20',
+    iconColor: 'text-orange-400 bg-orange-500/10',
+    tag: 'Storage Ready',
+  },
 ];
 
 const WORKFLOW_STEPS = [
@@ -83,6 +110,14 @@ const WORKFLOW_STEPS = [
   },
   {
     step: '03',
+    icon: <Camera size={20} />,
+    title: 'Site Survey',
+    desc: 'Field team completes mobile survey — roof photos, measurements, and notes sync to the project instantly.',
+    color: 'text-cyan-400',
+    bg: 'bg-cyan-500/10 border-cyan-500/30',
+  },
+  {
+    step: '04',
     icon: <Map size={20} />,
     title: 'Layout Design',
     desc: 'Place panels on satellite imagery. Google Solar API detects roof planes and optimizes placement.',
@@ -90,7 +125,7 @@ const WORKFLOW_STEPS = [
     bg: 'bg-blue-500/10 border-blue-500/30',
   },
   {
-    step: '04',
+    step: '05',
     icon: <GitBranch size={20} />,
     title: 'Single-Line Diagram',
     desc: 'NEC-compliant SLD auto-generated with conductor sizing, disconnects, and utility specs.',
@@ -98,7 +133,7 @@ const WORKFLOW_STEPS = [
     bg: 'bg-purple-500/10 border-purple-500/30',
   },
   {
-    step: '05',
+    step: '06',
     icon: <ClipboardList size={20} />,
     title: 'Bill of Materials',
     desc: 'Full BOM with part numbers, quantities, and pricing exported from your actual layout.',
@@ -106,7 +141,7 @@ const WORKFLOW_STEPS = [
     bg: 'bg-emerald-500/10 border-emerald-500/30',
   },
   {
-    step: '06',
+    step: '07',
     icon: <FileCheck size={20} />,
     title: 'Permit Package',
     desc: 'One-click AHJ-ready permit package: structural calcs, SLD, equipment specs, and proposal.',
@@ -126,6 +161,28 @@ const PRODUCT_SCREENS = [
     desc: 'Draw roof zones and ground arrays directly on Google Maps imagery. Auto-detect roof segments, place panels with drag-and-drop, and see production estimates update in real time.',
     bullets: ['Google Solar API roof detection', 'Drag-and-drop panel placement', 'Shade analysis overlay', 'Ground mount & Sol Fence support'],
     mockType: 'design',
+  },
+  {
+    id: 'portal',
+    label: 'Homeowner Portal',
+    tag: 'CLIENT FACING',
+    tagColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+    accent: 'emerald',
+    title: 'Your Clients Always Know Where Their Project Stands',
+    desc: 'Every homeowner gets a branded portal showing their project roadmap from lead to installation — stage by stage, with completed milestones, next steps, and document uploads. No more "where are we?" calls.',
+    bullets: ['Branded homeowner dashboard', 'Real-time stage progress', 'Completed milestones shown automatically', 'Document upload & receipt confirmation'],
+    mockType: 'portal',
+  },
+  {
+    id: 'survey',
+    label: 'Site Survey App',
+    tag: 'MOBILE FIELD TOOL',
+    tagColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+    accent: 'cyan',
+    title: 'Conduct Surveys From the Field — No Paperwork',
+    desc: 'Your field team opens the app, captures roof photos and measurements on-site, and submits the survey from their phone. Results sync directly to the project in SolarPro — no calls, no emails, no lost data.',
+    bullets: ['Mobile-first survey flow', 'Photo capture & annotation', 'Instant sync to project', 'Works on any iOS or Android device'],
+    mockType: 'survey',
   },
   {
     id: 'sld',
@@ -153,17 +210,15 @@ const PRODUCT_SCREENS = [
     id: 'bom',
     label: 'Bill of Materials',
     tag: 'AUTO-GENERATED',
-    tagColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
-    accent: 'emerald',
+    tagColor: 'text-teal-400 bg-teal-500/10 border-teal-500/20',
+    accent: 'teal',
     title: 'Complete BOM from Your Actual Layout',
     desc: 'No more manual counting. Every panel, string, conductor run, and combiner box from your design exports directly into a structured BOM with part numbers and quantities.',
-    bullets: ['Panels, inverters, racking counted', 'Part numbers & quantities', 'CSV / PDF export', 'Pricing integration ready'],
+    bullets: ['Panels, inverters, racking counted', 'Part numbers & quantities', 'CSV / PDF export', 'Distributor pricing integration'],
     mockType: 'bom',
   },
 ];
 
-// Plans pulled directly from lib/stripe.ts — getSubscriptionPlans()
-// DO NOT edit prices/features here without updating lib/stripe.ts first.
 const PRICING = [
   {
     id: 'starter',
@@ -189,6 +244,7 @@ const PRICING = [
       'BOM generation',
       'Proposal e-signing',
       'Sol Fence design',
+      'Homeowner portal',
     ],
     cta: 'Start 3-Day Trial',
     highlight: false,
@@ -211,6 +267,8 @@ const PRICING = [
       'Structural calculations',
       'BOM generation',
       'Proposal e-signing',
+      'Homeowner portal',
+      'Site survey mobile app',
       'White-label branding',
       'Battery system design',
       'Priority support',
@@ -234,6 +292,7 @@ const PRICING = [
       'Everything in Professional',
       'Unlimited team members',
       'Sol Fence design',
+      'Lead & pipeline management',
       'Bulk proposal generation',
       'Advanced automation tools',
       'Custom proposal templates',
@@ -277,36 +336,39 @@ const PRICING = [
 
 const TESTIMONIALS = [
   {
-    name: 'James D.',
-    role: 'Solar Contractor',
-    location: 'Phoenix, AZ',
-    quote: 'SolarPro is the first platform built by people who actually install solar. The permit packages come out right the first time — AHJ approved on first submission every time.',
+    name: 'Ryan B.',
+    role: 'Owner',
+    company: 'Under the Sun Solar',
+    location: 'Midwest',
+    quote: 'We built SolarPro because every tool we tried was designed for salespeople, not installers. Now our field team surveys from their phones, our office generates permits in minutes, and our clients can see their project progress without calling us.',
     rating: 5,
   },
   {
-    name: 'Maria S.',
+    name: 'James C.',
     role: 'Lead Installer',
-    location: 'San Diego, CA',
-    quote: "The Sol Fence designer is incredible. No other software even supports fence-mounted systems. We've added a whole new revenue stream thanks to SolarPro.",
+    company: 'Independent Contractor',
+    location: 'Arizona',
+    quote: "The site survey app alone saved us hours every week. Photos sync directly to the project, the SLD comes out NEC-compliant on the first try, and our AHJ approval rate went through the roof.",
     rating: 5,
   },
   {
-    name: 'Tom R.',
-    role: 'Solar Designer',
-    location: 'Austin, TX',
-    quote: 'The electrical engineering module alone is worth the price. NEC-compliant SLDs auto-generated in seconds. What used to take me 3 hours now takes 5 minutes.',
+    name: 'Sarah M.',
+    role: 'Project Manager',
+    company: 'Residential Solar Co.',
+    location: 'California',
+    quote: "Our homeowners used to call constantly asking for updates. Now they log into their portal and see exactly where their project stands. It's changed how we run the business.",
     rating: 5,
   },
 ];
 
 const STATS = [
-  { value: '500+', label: 'Contractors', sub: 'Active users' },
-  { value: '12k+', label: 'Projects', sub: 'Designed & permitted' },
-  { value: '3×', label: 'Faster', sub: 'Than legacy tools' },
+  { value: '7+', label: 'Modules', sub: 'Design to install' },
+  { value: '19', label: 'Utilities', sub: 'Interconnection rules' },
+  { value: '15 min', label: 'Avg Workflow', sub: 'Bill to permit package' },
   { value: '98%', label: 'Permit Approval', sub: 'First submission rate' },
 ];
 
-// ─── MOCK UI COMPONENTS ───────────────────────────────────────────────────────
+// ─── MOCK UI COMPONENTS ─────────────────────────────────────────────────────
 
 function DesignStudioMock() {
   return (
@@ -324,21 +386,12 @@ function DesignStudioMock() {
         <div className="absolute inset-0"
           style={{ background: 'linear-gradient(135deg, #1a2332 0%, #0f1923 40%, #1c2e1a 70%, #151f15 100%)' }}
         />
-        <div className="absolute" style={{ top: '60%', left: 0, right: 0, height: '3px', background: 'rgba(200,180,100,0.15)' }} />
-        <div className="absolute" style={{ left: '30%', top: 0, bottom: 0, width: '2px', background: 'rgba(200,180,100,0.1)' }} />
         <div className="absolute border-2 border-amber-400/50 rounded"
           style={{ top: '18%', left: '18%', width: '55%', height: '45%', background: 'rgba(80,60,20,0.3)' }}>
-          <div className="absolute inset-x-0 top-0 h-px bg-amber-400/40" style={{ top: '35%' }} />
           <div className="absolute grid gap-px"
-            style={{
-              top: '38%', left: '8%', right: '8%', bottom: '8%',
-              gridTemplateColumns: 'repeat(6, 1fr)',
-              gridTemplateRows: 'repeat(3, 1fr)',
-            }}>
+            style={{ top: '38%', left: '8%', right: '8%', bottom: '8%', gridTemplateColumns: 'repeat(6, 1fr)', gridTemplateRows: 'repeat(3, 1fr)' }}>
             {Array.from({ length: 18 }).map((_, i) => (
-              <div key={i}
-                className={`rounded-sm border ${i < 15 ? 'bg-blue-500/50 border-blue-400/40' : 'bg-slate-700/30 border-slate-600/20'}`}
-              />
+              <div key={i} className={`rounded-sm border ${i < 15 ? 'bg-blue-500/50 border-blue-400/40' : 'bg-slate-700/30 border-slate-600/20'}`} />
             ))}
           </div>
           <div className="absolute -top-5 right-0 text-xs font-bold text-amber-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-amber-500/30">
@@ -346,24 +399,122 @@ function DesignStudioMock() {
           </div>
         </div>
         <div className="absolute bottom-3 left-3 right-3 flex gap-2">
-          {[
-            { label: 'System Size', value: '8.4 kW' },
-            { label: 'Annual Prod.', value: '11,200 kWh' },
-            { label: 'Offset', value: '94%' },
-          ].map(s => (
+          {[{ label: 'System Size', value: '8.4 kW' }, { label: 'Annual Prod.', value: '11,200 kWh' }, { label: 'Offset', value: '94%' }].map(s => (
             <div key={s.label} className="flex-1 bg-slate-900/90 border border-slate-700/60 rounded-lg px-2 py-1.5 text-center">
               <div className="text-xs text-slate-500">{s.label}</div>
               <div className="text-sm font-bold text-amber-400">{s.value}</div>
             </div>
           ))}
         </div>
-        <div className="absolute top-3 right-3 flex flex-col gap-1.5">
-          {['◻', '+', '⊕', '⊘'].map((icon, i) => (
-            <div key={i} className="w-7 h-7 rounded-lg bg-slate-800/90 border border-slate-700/60 flex items-center justify-center text-xs text-slate-400">
-              {icon}
+      </div>
+    </div>
+  );
+}
+
+function HomeownerPortalMock() {
+  return (
+    <div className="relative w-full h-full bg-[#07070e] rounded-xl overflow-hidden border border-slate-700/60">
+      <div className="flex items-center justify-between px-3 py-2 bg-[#0a0a14]/80 border-b border-white/[0.06]">
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 rounded-md bg-amber-500/20 border border-amber-500/25 flex items-center justify-center">
+            <Sun size={10} className="text-amber-400" />
+          </div>
+          <span className="text-xs text-white font-semibold">Your Solar Project</span>
+        </div>
+        <div className="text-xs text-emerald-400 font-semibold flex items-center gap-1">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Active
+        </div>
+      </div>
+      <div className="p-4" style={{ height: 'calc(100% - 40px)', overflowY: 'auto' }}>
+        {/* Roadmap */}
+        <div className="flex items-center justify-between mb-3">
+          {['Request', 'Review', 'Survey', 'Design', 'Proposal', 'Install', 'Done'].map((step, i) => (
+            <div key={step} className="flex flex-col items-center flex-1">
+              {i > 0 && <div className={`absolute h-px w-full ${i <= 3 ? 'bg-emerald-500/40' : 'bg-white/[0.06]'}`} />}
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold z-10 ${
+                i < 3 ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-400'
+                : i === 3 ? 'bg-amber-500 text-slate-900'
+                : 'bg-white/[0.04] border border-white/[0.08] text-white/20'
+              }`}>
+                {i < 3 ? '✓' : i === 3 ? '◆' : '○'}
+              </div>
+              <span className={`text-[7px] mt-1 text-center leading-tight ${i <= 3 ? i === 3 ? 'text-amber-300' : 'text-emerald-400/60' : 'text-white/15'}`}>
+                {step}
+              </span>
             </div>
           ))}
         </div>
+        {/* Current stage */}
+        <div className="rounded-xl border border-amber-500/[0.12] bg-amber-500/[0.04] px-3 py-3 mb-3">
+          <div className="flex items-center gap-1.5 mb-2">
+            <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
+            <span className="text-[9px] font-black uppercase tracking-widest text-amber-500/60">Current Stage</span>
+          </div>
+          <p className="text-sm font-black text-white mb-1">We're designing your system.</p>
+          <p className="text-[10px] text-slate-400 mb-2">Our team is building a solar layout specifically for your home.</p>
+          {/* Completed so far */}
+          <div className="border-t border-white/[0.05] pt-2">
+            <p className="text-[8px] font-black uppercase tracking-widest text-slate-500 mb-1.5">Completed so far</p>
+            {['Survey appointment set', 'Site photos uploaded', 'Survey reviewed'].map(item => (
+              <div key={item} className="flex items-center gap-1.5 mb-1">
+                <span className="text-emerald-400 text-[10px]">✔</span>
+                <span className="text-[10px] text-slate-300">{item}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Project details */}
+        <div className="grid grid-cols-3 gap-1.5">
+          {[{ label: 'Property', value: '123 Main St' }, { label: 'System', value: '8.4 kW' }, { label: 'Progress', value: '57%' }].map(d => (
+            <div key={d.label} className="rounded-lg border border-white/[0.05] bg-white/[0.02] p-2">
+              <p className="text-[8px] text-slate-600 uppercase tracking-wider">{d.label}</p>
+              <p className="text-xs font-bold text-white">{d.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SiteSurveyMock() {
+  return (
+    <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700/60">
+      <div className="flex items-center justify-between px-3 py-2 bg-slate-800/80 border-b border-slate-700/50">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-red-500/70" />
+          <div className="w-2 h-2 rounded-full bg-amber-500/70" />
+          <div className="w-2 h-2 rounded-full bg-emerald-500/70" />
+        </div>
+        <div className="text-xs text-slate-400 font-mono">Site Survey App</div>
+        <div className="text-xs text-cyan-400 font-semibold">● Field</div>
+      </div>
+      <div className="p-4" style={{ height: 'calc(100% - 40px)' }}>
+        <div className="mb-3">
+          <p className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 font-mono">Project</p>
+          <p className="text-sm font-bold text-white">123 Main St — Johnson Residence</p>
+          <p className="text-xs text-slate-500">Assigned to: James C.</p>
+        </div>
+        <div className="space-y-2 mb-3">
+          {[
+            { label: 'Roof Photos', count: '8 captured', done: true },
+            { label: 'Measurements', count: '3 sections', done: true },
+            { label: 'Electrical Panel', count: '200A confirmed', done: true },
+            { label: 'Shading Notes', count: 'None observed', done: true },
+          ].map(item => (
+            <div key={item.label} className="flex items-center justify-between rounded-lg bg-slate-800/50 border border-slate-700/50 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle size={12} className="text-emerald-400" />
+                <span className="text-xs text-white">{item.label}</span>
+              </div>
+              <span className="text-[10px] text-slate-400">{item.count}</span>
+            </div>
+          ))}
+        </div>
+        <button className="w-full py-2 rounded-xl bg-cyan-500/20 border border-cyan-500/30 text-cyan-300 text-xs font-bold">
+          Submit Survey →
+        </button>
+        <p className="text-[9px] text-slate-600 text-center mt-2">Syncs instantly to SolarPro</p>
       </div>
     </div>
   );
@@ -394,26 +545,18 @@ function SLDMock() {
               </div>
             ))}
           </div>
-          <div className="border border-blue-400/40 rounded px-4 py-1 bg-slate-800/60 text-xs text-slate-300 font-mono mb-1">
-            DC Combiner / Disconnect
-          </div>
+          <div className="border border-blue-400/40 rounded px-4 py-1 bg-slate-800/60 text-xs text-slate-300 font-mono mb-1">DC Combiner / Disconnect</div>
           <div className="w-px h-3 bg-blue-400/30" />
           <div className="border-2 border-amber-400/60 rounded-lg px-6 py-2 bg-amber-500/10 text-center mb-1">
             <div className="text-xs font-black text-amber-400">INVERTER</div>
             <div className="text-[10px] text-slate-400 font-mono">8.0 kW · 240V AC</div>
           </div>
           <div className="w-px h-3 bg-amber-400/30" />
-          <div className="border border-emerald-400/40 rounded px-4 py-1 bg-slate-800/60 text-xs text-slate-300 font-mono mb-1">
-            AC Disconnect · 60A
-          </div>
+          <div className="border border-emerald-400/40 rounded px-4 py-1 bg-slate-800/60 text-xs text-slate-300 font-mono mb-1">AC Disconnect · 60A</div>
           <div className="w-px h-3 bg-emerald-400/30" />
-          <div className="border border-emerald-400/50 rounded px-4 py-1 bg-emerald-500/10 text-xs text-emerald-300 font-mono mb-1">
-            Main Service Panel · 200A
-          </div>
+          <div className="border border-emerald-400/50 rounded px-4 py-1 bg-emerald-500/10 text-xs text-emerald-300 font-mono mb-1">Main Service Panel · 200A</div>
           <div className="w-px h-3 bg-slate-500/40" />
-          <div className="border border-slate-500/50 rounded px-4 py-1 bg-slate-800/40 text-xs text-slate-400 font-mono">
-            Utility Meter / Grid
-          </div>
+          <div className="border border-slate-500/50 rounded px-4 py-1 bg-slate-800/40 text-xs text-slate-400 font-mono">Utility Meter / Grid</div>
           <div className="absolute top-2 right-2 flex flex-col gap-1">
             <div className="text-[10px] bg-blue-500/10 border border-blue-500/20 text-blue-300 px-2 py-0.5 rounded font-mono">✓ NEC 690</div>
             <div className="text-[10px] bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-mono">✓ UL Listed</div>
@@ -439,16 +582,12 @@ function SolFenceMock() {
       <div className="p-4" style={{ height: 'calc(100% - 40px)' }}>
         <div className="text-[10px] text-slate-500 mb-2 font-mono uppercase tracking-wider">Elevation View</div>
         <div className="relative bg-slate-800/40 rounded-lg border border-slate-700/40 p-3 mb-3 overflow-hidden">
-          <div className="absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-slate-700/30 to-transparent" />
-          <div className="absolute bottom-6 left-0 right-0 h-px bg-slate-600/60" />
           <div className="flex justify-around items-end pt-2" style={{ height: '80px' }}>
             {Array.from({ length: 7 }).map((_, i) => (
               <div key={i} className="flex flex-col items-center">
                 <div className="flex gap-px mb-1">
                   {[0, 1].map(p => (
-                    <div key={p} className="rounded-sm border border-purple-400/40 bg-purple-500/20"
-                      style={{ width: '10px', height: '40px' }}
-                    />
+                    <div key={p} className="rounded-sm border border-purple-400/40 bg-purple-500/20" style={{ width: '10px', height: '40px' }} />
                   ))}
                 </div>
                 <div className="w-1.5 h-6 bg-slate-500/60 rounded-sm" />
@@ -457,12 +596,7 @@ function SolFenceMock() {
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {[
-            { label: 'Fence Length', value: '120 ft' },
-            { label: 'Panel Count', value: '28 panels' },
-            { label: 'Orientation', value: 'Bifacial E/W' },
-            { label: 'Capacity', value: '11.2 kW' },
-          ].map(s => (
+          {[{ label: 'Fence Length', value: '120 ft' }, { label: 'Panel Count', value: '28 panels' }, { label: 'Orientation', value: 'Bifacial E/W' }, { label: 'Capacity', value: '11.2 kW' }].map(s => (
             <div key={s.label} className="bg-slate-800/40 border border-slate-700/40 rounded-lg px-2 py-1.5">
               <div className="text-[10px] text-slate-500">{s.label}</div>
               <div className="text-xs font-bold text-purple-300">{s.value}</div>
@@ -492,7 +626,7 @@ function BOMMock() {
           <div className="w-2 h-2 rounded-full bg-emerald-500/70" />
         </div>
         <div className="text-xs text-slate-400 font-mono">Bill of Materials</div>
-        <div className="text-xs text-emerald-400 font-semibold">Auto-Generated</div>
+        <div className="text-xs text-teal-400 font-semibold">Auto-Generated</div>
       </div>
       <div style={{ height: 'calc(100% - 40px)', overflowY: 'auto' }}>
         <div className="grid grid-cols-12 gap-1 px-3 py-1.5 border-b border-slate-700/50 text-[10px] text-slate-500 font-mono uppercase tracking-wider">
@@ -505,15 +639,13 @@ function BOMMock() {
           <div key={i} className={`grid grid-cols-12 gap-1 px-3 py-1.5 text-xs border-b border-slate-800/60 ${i % 2 === 0 ? 'bg-slate-800/20' : ''}`}>
             <div className="col-span-1 text-emerald-400 font-bold">{item.qty}</div>
             <div className="col-span-6 text-slate-200 font-mono text-[11px] truncate">{item.part}</div>
-            <div className="col-span-3">
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-400">{item.cat}</span>
-            </div>
-            <div className="col-span-2 text-right text-emerald-300 font-mono text-[11px]">{item.price}</div>
+            <div className="col-span-3"><span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-400">{item.cat}</span></div>
+            <div className="col-span-2 text-right text-teal-300 font-mono text-[11px]">{item.price}</div>
           </div>
         ))}
-        <div className="grid grid-cols-12 gap-1 px-3 py-2 border-t border-emerald-500/20 bg-emerald-500/5">
+        <div className="grid grid-cols-12 gap-1 px-3 py-2 border-t border-teal-500/20 bg-teal-500/5">
           <div className="col-span-10 text-xs font-bold text-white">Total Material Cost</div>
-          <div className="col-span-2 text-right text-emerald-400 font-black text-sm">$6,842</div>
+          <div className="col-span-2 text-right text-teal-400 font-black text-sm">$6,842</div>
         </div>
       </div>
     </div>
@@ -534,22 +666,28 @@ export default function LandingPage() {
   }, []);
 
   const accentMap: Record<string, string> = {
-    amber: 'border-amber-500/40 shadow-amber-500/10',
-    blue: 'border-blue-500/40 shadow-blue-500/10',
-    purple: 'border-purple-500/40 shadow-purple-500/10',
+    amber:   'border-amber-500/40 shadow-amber-500/10',
     emerald: 'border-emerald-500/40 shadow-emerald-500/10',
+    cyan:    'border-cyan-500/40 shadow-cyan-500/10',
+    blue:    'border-blue-500/40 shadow-blue-500/10',
+    purple:  'border-purple-500/40 shadow-purple-500/10',
+    teal:    'border-teal-500/40 shadow-teal-500/10',
   };
   const tabAccentMap: Record<string, string> = {
-    amber: 'border-amber-400 text-amber-400 bg-amber-500/10',
-    blue: 'border-blue-400 text-blue-400 bg-blue-500/10',
-    purple: 'border-purple-400 text-purple-400 bg-purple-500/10',
+    amber:   'border-amber-400 text-amber-400 bg-amber-500/10',
     emerald: 'border-emerald-400 text-emerald-400 bg-emerald-500/10',
+    cyan:    'border-cyan-400 text-cyan-400 bg-cyan-500/10',
+    blue:    'border-blue-400 text-blue-400 bg-blue-500/10',
+    purple:  'border-purple-400 text-purple-400 bg-purple-500/10',
+    teal:    'border-teal-400 text-teal-400 bg-teal-500/10',
   };
   const bulletAccentMap: Record<string, string> = {
-    amber: 'text-amber-400',
-    blue: 'text-blue-400',
-    purple: 'text-purple-400',
+    amber:   'text-amber-400',
     emerald: 'text-emerald-400',
+    cyan:    'text-cyan-400',
+    blue:    'text-blue-400',
+    purple:  'text-purple-400',
+    teal:    'text-teal-400',
   };
 
   const currentScreen = PRODUCT_SCREENS[activeScreen];
@@ -563,7 +701,7 @@ export default function LandingPage() {
       }`}>
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl solar-gradient flex items-center justify-center shadow-lg shadow-amber-500/30">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-lg shadow-amber-500/30">
               <Sun size={20} className="text-slate-900" />
             </div>
             <div>
@@ -581,7 +719,7 @@ export default function LandingPage() {
             <Link href="/auth/login" className="hidden md:block text-sm text-slate-400 hover:text-white transition-colors">
               Sign In
             </Link>
-            <Link href="/auth/register" className="btn-primary btn-sm">
+            <Link href="/auth/register" className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold text-sm px-4 py-2 rounded-xl hover:from-amber-300 hover:to-amber-500 transition-all inline-flex items-center gap-1.5 shadow-lg shadow-amber-500/20">
               Start Designing <ArrowRight size={14} />
             </Link>
           </div>
@@ -593,10 +731,7 @@ export default function LandingPage() {
         <div className="absolute inset-0">
           <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950" />
           <div className="absolute inset-0 opacity-[0.03]"
-            style={{
-              backgroundImage: 'linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)',
-              backgroundSize: '60px 60px',
-            }}
+            style={{ backgroundImage: 'linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)', backgroundSize: '60px 60px' }}
           />
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-amber-500/8 rounded-full blur-3xl" />
           <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-blue-500/8 rounded-full blur-3xl" />
@@ -605,23 +740,23 @@ export default function LandingPage() {
         <div className="relative z-10 max-w-6xl mx-auto px-6 text-center pt-24 pb-16">
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm font-medium mb-8">
             <HardHat size={14} />
-            Solar Design Software Built by Installers, for Installers
+            The Complete Solar Business Platform — Design to Installation
           </div>
 
           <h1 className="text-5xl md:text-7xl font-black text-white mb-6 leading-tight tracking-tight">
-            Design, Engineer, and
+            Design, Survey, Engineer,
             <br />
             <span className="bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 bg-clip-text text-transparent">
-              Quote Solar in Minutes
+              and Close Solar Faster
             </span>
           </h1>
 
           <p className="text-xl md:text-2xl text-slate-400 max-w-3xl mx-auto mb-10 leading-relaxed">
-            From utility bill upload to permit-ready package — SolarPro automates every step of the solar design and engineering process. No drafting. No spreadsheets. No juggling apps.
+            From utility bill to permitted install — SolarPro runs your entire solar operation. Design studio, field survey app, homeowner portal, lead pipeline, and permit outputs. One platform.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
-            <Link href="/auth/register" className="btn-primary px-8 py-4 rounded-xl text-base font-bold inline-flex items-center justify-center gap-2">
+            <Link href="/auth/register" className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold px-8 py-4 rounded-xl text-base hover:from-amber-300 hover:to-amber-500 transition-all inline-flex items-center justify-center gap-2 shadow-xl shadow-amber-500/20">
               Start Designing Free
               <ArrowRight size={18} />
             </Link>
@@ -648,8 +783,7 @@ export default function LandingPage() {
           {/* Hero Mock UI */}
           <div className="relative max-w-4xl mx-auto">
             <div className="absolute -inset-4 bg-gradient-to-r from-amber-500/10 via-transparent to-blue-500/10 rounded-3xl blur-2xl" />
-            <div className="relative rounded-2xl border border-slate-700/60 overflow-hidden shadow-2xl shadow-slate-950/80"
-              style={{ aspectRatio: '16/9' }}>
+            <div className="relative rounded-2xl border border-slate-700/60 overflow-hidden shadow-2xl shadow-slate-950/80" style={{ aspectRatio: '16/9' }}>
               <DesignStudioMock />
             </div>
             <div className="absolute -left-4 top-1/3 -translate-y-1/2 hidden lg:block">
@@ -698,10 +832,7 @@ export default function LandingPage() {
       {/* ── SECTION 2: Workflow Pipeline ── */}
       <section className="py-24 relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.02]"
-          style={{
-            backgroundImage: 'radial-gradient(circle, #f59e0b 1px, transparent 1px)',
-            backgroundSize: '32px 32px',
-          }}
+          style={{ backgroundImage: 'radial-gradient(circle, #f59e0b 1px, transparent 1px)', backgroundSize: '32px 32px' }}
         />
         <div className="max-w-6xl mx-auto px-6 relative z-10">
           <div className="text-center mb-16">
@@ -710,14 +841,14 @@ export default function LandingPage() {
             </div>
             <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
               From Bill Upload to
-              <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent"> Permit Package</span>
+              <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent"> Permitted Install</span>
             </h2>
             <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-              Every step of the solar design process in one platform. No switching apps. No manual data entry. No mistakes from copy-paste.
+              Every step of the solar business — design, survey, engineering, BOM, and permits — in one platform. No switching apps. No manual data entry.
             </p>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6 lg:gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
             {WORKFLOW_STEPS.map((step, idx) => (
               <div key={step.step} className="relative flex flex-col items-center text-center">
                 {idx < WORKFLOW_STEPS.length - 1 && (
@@ -746,7 +877,7 @@ export default function LandingPage() {
               </div>
             </div>
             <div className="flex-shrink-0 md:ml-auto">
-              <Link href="/auth/register" className="btn-primary px-5 py-2.5 rounded-xl text-sm whitespace-nowrap inline-flex items-center gap-2">
+              <Link href="/auth/register" className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold text-sm px-5 py-2.5 rounded-xl whitespace-nowrap inline-flex items-center gap-2 hover:from-amber-300 hover:to-amber-500 transition-all">
                 Try It Free <ArrowRight size={14} />
               </Link>
             </div>
@@ -757,10 +888,7 @@ export default function LandingPage() {
       {/* ── SECTION 3: Product Screenshots ── */}
       <section id="product" className="py-24 bg-slate-900/40 relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.015]"
-          style={{
-            backgroundImage: 'linear-gradient(#64748b 1px, transparent 1px), linear-gradient(90deg, #64748b 1px, transparent 1px)',
-            backgroundSize: '40px 40px',
-          }}
+          style={{ backgroundImage: 'linear-gradient(#64748b 1px, transparent 1px), linear-gradient(90deg, #64748b 1px, transparent 1px)', backgroundSize: '40px 40px' }}
         />
         <div className="max-w-7xl mx-auto px-6 relative z-10">
           <div className="text-center mb-12">
@@ -771,7 +899,7 @@ export default function LandingPage() {
               Every screen built for the field
             </h2>
             <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-              Not built for salespeople. Not built for software demos. Built for the engineers and installers who actually do the work.
+              Not built for salespeople. Not built for software demos. Built for the engineers, installers, and business owners who actually do the work.
             </p>
           </div>
 
@@ -794,10 +922,12 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
             <div className={`rounded-2xl border shadow-2xl overflow-hidden ${accentMap[currentScreen.accent]}`}
               style={{ aspectRatio: '4/3' }}>
-              {currentScreen.mockType === 'design' && <DesignStudioMock />}
-              {currentScreen.mockType === 'sld' && <SLDMock />}
-              {currentScreen.mockType === 'solfence' && <SolFenceMock />}
-              {currentScreen.mockType === 'bom' && <BOMMock />}
+              {currentScreen.mockType === 'design'  && <DesignStudioMock />}
+              {currentScreen.mockType === 'portal'  && <HomeownerPortalMock />}
+              {currentScreen.mockType === 'survey'  && <SiteSurveyMock />}
+              {currentScreen.mockType === 'sld'     && <SLDMock />}
+              {currentScreen.mockType === 'solfence'&& <SolFenceMock />}
+              {currentScreen.mockType === 'bom'     && <BOMMock />}
             </div>
 
             <div>
@@ -816,7 +946,7 @@ export default function LandingPage() {
                   </li>
                 ))}
               </ul>
-              <Link href="/auth/register" className="btn-primary px-6 py-3 rounded-xl inline-flex items-center gap-2">
+              <Link href="/auth/register" className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold px-6 py-3 rounded-xl inline-flex items-center gap-2 hover:from-amber-300 hover:to-amber-500 transition-all">
                 Try {currentScreen.label} Free <ArrowRight size={16} />
               </Link>
             </div>
@@ -824,9 +954,57 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── SECTION 4: Bill Parsing Feature ── */}
+      {/* ── SECTION 4: Homeowner Portal Spotlight ── */}
       <section className="py-24 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 via-slate-950 to-blue-500/5" />
+        <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 via-slate-950 to-blue-500/5" />
+        <div className="max-w-6xl mx-auto px-6 relative z-10">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium mb-6">
+                <Home size={12} /> Homeowner Portal
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black text-white mb-6 leading-tight">
+                Your clients always know
+                <br />
+                <span className="text-emerald-400">where their project stands.</span>
+              </h2>
+              <p className="text-slate-400 leading-relaxed mb-6">
+                Every homeowner gets a branded portal — no app download required. They log in and see a real-time roadmap of their project: what stage they're in, what's been completed, what's coming next, and what they need to do.
+              </p>
+              <p className="text-slate-400 leading-relaxed mb-8">
+                When your team advances a project stage, the portal updates automatically. No more "where are we?" calls. No more status emails. Your clients feel informed and confident — and your team can focus on the work.
+              </p>
+              <div className="space-y-3 mb-8">
+                {[
+                  'Branded with your company name and colors',
+                  'Project roadmap from lead to system live',
+                  '"Completed so far" milestones per stage',
+                  'Document upload — utility bills, contracts',
+                  'Auto-advances when admin moves the project forward',
+                ].map(pt => (
+                  <div key={pt} className="flex items-start gap-3 text-sm text-slate-300">
+                    <CheckCircle size={16} className="text-emerald-400 mt-0.5 flex-shrink-0" />
+                    {pt}
+                  </div>
+                ))}
+              </div>
+              <Link href="/auth/register" className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold px-6 py-3 rounded-xl inline-flex items-center gap-2 hover:from-amber-300 hover:to-amber-500 transition-all">
+                See the Portal in Action <ArrowRight size={16} />
+              </Link>
+            </div>
+
+            <div className="relative">
+              <div className="absolute -inset-4 bg-gradient-to-r from-emerald-500/8 to-transparent rounded-3xl blur-2xl" />
+              <div className="relative rounded-2xl border border-emerald-500/20 overflow-hidden shadow-2xl" style={{ aspectRatio: '4/3' }}>
+                <HomeownerPortalMock />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION 5: Bill Parsing Feature ── */}
+      <section className="py-24 relative overflow-hidden bg-slate-900/40">
         <div className="max-w-6xl mx-auto px-6 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
             <div>
@@ -857,7 +1035,7 @@ export default function LandingPage() {
                   </div>
                 ))}
               </div>
-              <Link href="/auth/register" className="btn-primary px-6 py-3 rounded-xl inline-flex items-center gap-2">
+              <Link href="/auth/register" className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold px-6 py-3 rounded-xl inline-flex items-center gap-2 hover:from-amber-300 hover:to-amber-500 transition-all">
                 Try Bill Upload Free <ArrowRight size={16} />
               </Link>
             </div>
@@ -884,9 +1062,9 @@ export default function LandingPage() {
                   <div className="space-y-2 mb-4">
                     {[
                       { label: 'Avg Monthly Usage', value: '1,240 kWh', color: 'text-amber-400' },
-                      { label: 'Annual Usage', value: '14,880 kWh', color: 'text-amber-400' },
-                      { label: 'Rate Schedule', value: 'TOU-D-Prime', color: 'text-blue-400' },
-                      { label: 'Avg Monthly Bill', value: '$248', color: 'text-emerald-400' },
+                      { label: 'Annual Usage',       value: '14,880 kWh', color: 'text-amber-400' },
+                      { label: 'Rate Schedule',      value: 'TOU-D-Prime', color: 'text-blue-400' },
+                      { label: 'Avg Monthly Bill',   value: '$248', color: 'text-emerald-400' },
                     ].map(row => (
                       <div key={row.label} className="flex items-center justify-between bg-slate-900/50 rounded-lg px-3 py-2">
                         <span className="text-slate-400 text-xs">{row.label}</span>
@@ -900,11 +1078,7 @@ export default function LandingPage() {
                       <span className="text-xs font-bold text-amber-400">AI Recommendation</span>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      {[
-                        { label: 'System Size', value: '10.5 kW' },
-                        { label: 'Offset', value: '95%' },
-                        { label: 'Payback', value: '6.2 yrs' },
-                      ].map(rec => (
+                      {[{ label: 'System Size', value: '10.5 kW' }, { label: 'Offset', value: '95%' }, { label: 'Payback', value: '6.2 yrs' }].map(rec => (
                         <div key={rec.label} className="text-center">
                           <div className="text-white font-black text-sm">{rec.value}</div>
                           <div className="text-slate-500 text-[10px]">{rec.label}</div>
@@ -919,13 +1093,58 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── SECTION 5: Trust / Built by Installers ── */}
+      {/* ── SECTION 6: Site Survey Mobile App Spotlight ── */}
+      <section className="py-24 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-slate-950 to-slate-950" />
+        <div className="max-w-6xl mx-auto px-6 relative z-10">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+            <div className="relative order-2 lg:order-1">
+              <div className="absolute -inset-4 bg-gradient-to-r from-cyan-500/8 to-transparent rounded-3xl blur-2xl" />
+              <div className="relative rounded-2xl border border-cyan-500/20 overflow-hidden shadow-2xl" style={{ aspectRatio: '4/3' }}>
+                <SiteSurveyMock />
+              </div>
+            </div>
+            <div className="order-1 lg:order-2">
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-medium mb-6">
+                <Smartphone size={12} /> Mobile Field App
+              </div>
+              <h2 className="text-3xl md:text-4xl font-black text-white mb-6 leading-tight">
+                Your field team surveys
+                <br />
+                <span className="text-cyan-400">from their phone.</span>
+              </h2>
+              <p className="text-slate-400 leading-relaxed mb-6">
+                No clipboards. No paperwork. No "I'll email you the photos later." Your field team opens the site survey app, captures roof photos and measurements on-site, and submits. Results sync instantly into SolarPro — ready for design.
+              </p>
+              <p className="text-slate-400 leading-relaxed mb-8">
+                Field teams log in with their SolarPro credentials. Each surveyor sees their assigned projects. Survey results feed directly into the design workflow — no re-entry, no lost data, no delays.
+              </p>
+              <div className="space-y-3 mb-8">
+                {[
+                  'Works on any iOS or Android device',
+                  'Photo capture with roof annotations',
+                  'Measurements and electrical panel details',
+                  'Instant sync to SolarPro project',
+                  'Triggers automatic project stage update',
+                ].map(pt => (
+                  <div key={pt} className="flex items-start gap-3 text-sm text-slate-300">
+                    <CheckCircle size={16} className="text-cyan-400 mt-0.5 flex-shrink-0" />
+                    {pt}
+                  </div>
+                ))}
+              </div>
+              <Link href="/auth/register" className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold px-6 py-3 rounded-xl inline-flex items-center gap-2 hover:from-amber-300 hover:to-amber-500 transition-all">
+                See the Survey App <ArrowRight size={16} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── SECTION 7: Trust / Built by Installers ── */}
       <section className="py-24 bg-slate-900/50 relative overflow-hidden">
         <div className="absolute inset-0 opacity-[0.02]"
-          style={{
-            backgroundImage: 'radial-gradient(circle, #f59e0b 1px, transparent 1px)',
-            backgroundSize: '40px 40px',
-          }}
+          style={{ backgroundImage: 'radial-gradient(circle, #f59e0b 1px, transparent 1px)', backgroundSize: '40px 40px' }}
         />
         <div className="max-w-6xl mx-auto px-6 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
@@ -975,9 +1194,9 @@ export default function LandingPage() {
                   color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
                 },
                 {
-                  icon: <Users size={20} />,
-                  title: '500+ Active Installers Trust Us',
-                  desc: 'Contractors from solo operators to 50-person crews use SolarPro daily to run their businesses.',
+                  icon: <MessageSquare size={20} />,
+                  title: 'Built on Real Installer Feedback',
+                  desc: 'Every feature in SolarPro came from a real problem we or our users hit in the field. No feature theater.',
                   color: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
                 },
               ].map(card => (
@@ -996,7 +1215,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── SECTION 6: Feature Grid ── */}
+      {/* ── SECTION 8: Feature Grid ── */}
       <section id="features" className="py-24 relative">
         <div className="max-w-7xl mx-auto px-6">
           <div className="text-center mb-14">
@@ -1004,10 +1223,10 @@ export default function LandingPage() {
               <Package size={12} /> Full Platform
             </div>
             <h2 className="text-4xl md:text-5xl font-black text-white mb-4">
-              Everything you need. Nothing you don't.
+              Everything your solar business needs.
             </h2>
             <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-              Six core modules covering every phase of the solar project lifecycle — all in one subscription.
+              Nine modules covering every phase of the solar project lifecycle — design, engineering, field ops, client communication, and business management. All in one subscription.
             </p>
           </div>
 
@@ -1043,11 +1262,12 @@ export default function LandingPage() {
               <div className="space-y-3">
                 {[
                   "Sales-focused tools that don't understand field installation",
-                  'Separate apps for design, engineering, and permitting',
+                  'Separate apps for design, engineering, surveying, and permitting',
                   'No support for Sol Fence or ground mount systems',
                   'Permit packages that get rejected by AHJs',
+                  'Homeowners calling your office for status updates',
+                  'Field team texting photos instead of syncing data',
                   'Manual BOM counting from layout screenshots',
-                  'Waiting days for an engineer stamp on your SLD',
                 ].map(pt => (
                   <div key={pt} className="flex items-start gap-3 text-sm text-slate-500">
                     <span className="text-rose-500 mt-0.5 flex-shrink-0">✕</span>
@@ -1064,11 +1284,12 @@ export default function LandingPage() {
               <div className="space-y-3">
                 {[
                   "Built by installers who've done every job type",
-                  'Design, engineering, BOM, and permits in one platform',
+                  'Design, survey, engineering, BOM, and permits in one platform',
                   'Native Sol Fence and ground mount support',
                   '98% first-submission AHJ approval rate',
+                  'Homeowners see live progress in their branded portal',
+                  'Field surveys sync directly from the mobile app',
                   'BOM auto-generated from your actual layout',
-                  'NEC-compliant SLDs generated in seconds — no stamp needed',
                 ].map(pt => (
                   <div key={pt} className="flex items-start gap-3 text-sm text-slate-300">
                     <CheckCircle size={15} className="text-emerald-400 mt-0.5 flex-shrink-0" />
@@ -1096,7 +1317,6 @@ export default function LandingPage() {
             </p>
           </div>
 
-          {/* 4-column grid for all plans */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5 max-w-7xl mx-auto">
             {PRICING.map(plan => (
               <div
@@ -1111,7 +1331,6 @@ export default function LandingPage() {
                     : 'border-slate-700/50'
                 }`}
               >
-                {/* Top badge bar */}
                 {plan.badge ? (
                   <div className={`text-xs font-black text-center py-1.5 ${
                     plan.highlight ? 'bg-amber-500 text-slate-900' : 'bg-slate-600 text-white'
@@ -1139,14 +1358,11 @@ export default function LandingPage() {
                     ? 'bg-gradient-to-br from-purple-500/8 to-slate-800/40'
                     : 'bg-slate-800/40'
                 }`}>
-
-                  {/* Plan name + desc */}
                   <div className="mb-4">
                     <h3 className="text-lg font-black text-white mb-0.5">{plan.name}</h3>
                     <p className="text-slate-500 text-xs leading-relaxed">{plan.desc}</p>
                   </div>
 
-                  {/* Price block */}
                   <div className="mb-4">
                     {plan.isTrial ? (
                       <div>
@@ -1173,7 +1389,6 @@ export default function LandingPage() {
                     )}
                   </div>
 
-                  {/* Trial note */}
                   {plan.isTrial && (
                     <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-lg px-3 py-2 mb-4">
                       <p className="text-xs text-emerald-400 leading-relaxed">
@@ -1182,47 +1397,35 @@ export default function LandingPage() {
                     </div>
                   )}
 
-                  {/* Features */}
                   <ul className="space-y-1.5 mb-4 flex-1">
                     {plan.features.map((f, i) => (
                       <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
-                        <CheckCircle size={13} className={`flex-shrink-0 mt-0.5 ${
-                          plan.isTrial ? 'text-slate-400' : 'text-emerald-400'
-                        }`} />
+                        <CheckCircle size={13} className={`flex-shrink-0 mt-0.5 ${plan.isTrial ? 'text-slate-400' : 'text-emerald-400'}`} />
                         {f}
                       </li>
                     ))}
                     {plan.notIncluded && plan.notIncluded.length > 0 && (
-                      <>
-                        {plan.notIncluded.map((f, i) => (
-                          <li key={`no-${i}`} className="flex items-start gap-2 text-xs text-slate-600">
-                            <span className="text-slate-700 flex-shrink-0 mt-0.5 text-[11px] leading-[13px]">✕</span>
-                            {f}
-                          </li>
-                        ))}
-                      </>
+                      plan.notIncluded.map((f, i) => (
+                        <li key={`no-${i}`} className="flex items-start gap-2 text-xs text-slate-600">
+                          <span className="text-slate-700 flex-shrink-0 mt-0.5 text-[11px] leading-[13px]">✕</span>
+                          {f}
+                        </li>
+                      ))
                     )}
                   </ul>
 
-                  {/* CTA button */}
                   {plan.id === 'enterprise' ? (
-                    <a
-                      href={plan.checkoutHref}
-                      className="w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 border border-purple-500/30"
-                    >
+                    <a href={plan.checkoutHref} className="w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 border border-purple-500/30">
                       {plan.cta} <ArrowRight size={13} />
                     </a>
                   ) : (
-                    <Link
-                      href={plan.checkoutHref}
-                      className={`w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
-                        plan.highlight
-                          ? 'bg-amber-500 hover:bg-amber-400 text-slate-900'
-                          : plan.isTrial
-                          ? 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/30'
-                          : 'bg-slate-700 hover:bg-slate-600 text-white border border-slate-600'
-                      }`}
-                    >
+                    <Link href={plan.checkoutHref} className={`w-full py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all ${
+                      plan.highlight
+                        ? 'bg-amber-500 hover:bg-amber-400 text-slate-900'
+                        : plan.isTrial
+                        ? 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-slate-700 hover:bg-slate-600 text-white border border-slate-600'
+                    }`}>
                       {plan.cta} <ArrowRight size={13} />
                     </Link>
                   )}
@@ -1231,7 +1434,6 @@ export default function LandingPage() {
             ))}
           </div>
 
-          {/* Disclaimer note */}
           <p className="text-center text-slate-600 text-xs mt-8">
             Starter trial provides temporary access. Active subscription required after trial period. All prices in USD, billed monthly.
           </p>
@@ -1262,7 +1464,8 @@ export default function LandingPage() {
                   </div>
                   <div>
                     <div className="text-white text-sm font-semibold">{t.name}</div>
-                    <div className="text-slate-500 text-xs">{t.role} · {t.location}</div>
+                    <div className="text-slate-500 text-xs">{t.role} · {t.company}</div>
+                    <div className="text-slate-600 text-xs">{t.location}</div>
                   </div>
                 </div>
               </div>
@@ -1271,28 +1474,25 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── SECTION 7: Final CTA ── */}
+      {/* ── SECTION 9: Final CTA ── */}
       <section className="py-28 relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 via-slate-900 to-blue-500/10" />
         <div className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage: 'linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)',
-            backgroundSize: '40px 40px',
-          }}
+          style={{ backgroundImage: 'linear-gradient(#f59e0b 1px, transparent 1px), linear-gradient(90deg, #f59e0b 1px, transparent 1px)', backgroundSize: '40px 40px' }}
         />
         <div className="relative z-10 max-w-4xl mx-auto px-6 text-center">
-          <div className="w-20 h-20 rounded-2xl solar-gradient flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-amber-500/30">
+          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center mx-auto mb-8 shadow-2xl shadow-amber-500/30">
             <Sun size={36} className="text-slate-900" />
           </div>
           <h2 className="text-4xl md:text-6xl font-black text-white mb-6 leading-tight">
-            Start Designing Solar
+            Run Your Entire Solar
             <br />
             <span className="bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
-              Systems Today
+              Business From One Platform
             </span>
           </h2>
           <p className="text-xl text-slate-400 mb-10 leading-relaxed max-w-2xl mx-auto">
-            Join 500+ solar contractors who design, engineer, and permit faster with SolarPro. 3-day free trial, no credit card required.
+            Design, survey, engineer, permit, and keep your clients informed — all in SolarPro. 3-day free trial, no credit card required.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 max-w-md mx-auto mb-6">
@@ -1308,9 +1508,9 @@ export default function LandingPage() {
             </div>
             <Link
               href={`/auth/register${email ? `?email=${encodeURIComponent(email)}` : ''}`}
-              className="btn-primary px-6 py-3 rounded-xl whitespace-nowrap inline-flex items-center gap-2 justify-center"
+              className="bg-gradient-to-r from-amber-400 to-amber-600 text-slate-900 font-bold px-6 py-3 rounded-xl whitespace-nowrap inline-flex items-center gap-2 justify-center hover:from-amber-300 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/20"
             >
-              Start Designing Free
+              Start Free Trial
             </Link>
           </div>
           <p className="text-slate-500 text-sm mb-10">3-day free trial · No credit card required · Cancel anytime</p>
@@ -1318,7 +1518,7 @@ export default function LandingPage() {
           <div className="flex flex-wrap justify-center gap-6 text-sm text-slate-400">
             {[
               { icon: <Shield size={14} />, text: '256-bit encryption' },
-              { icon: <CheckCircle size={14} />, text: 'SOC 2 compliant' },
+              { icon: <CheckCircle size={14} />, text: 'NEC 2023 compliant' },
               { icon: <Lock size={14} />, text: 'Your data stays yours' },
               { icon: <Star size={14} />, text: '5-star rated' },
             ].map(item => (
@@ -1337,7 +1537,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-10">
             <div className="col-span-2 md:col-span-1">
               <div className="flex items-center gap-3 mb-4">
-                <div className="w-9 h-9 rounded-xl solar-gradient flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center">
                   <Sun size={18} className="text-slate-900" />
                 </div>
                 <div>
@@ -1346,7 +1546,7 @@ export default function LandingPage() {
                 </div>
               </div>
               <p className="text-slate-500 text-xs leading-relaxed">
-                The complete solar design and engineering platform for installers.
+                The complete solar design and business platform for installers. Built by the industry, for the industry.
               </p>
             </div>
             <div>
@@ -1354,7 +1554,7 @@ export default function LandingPage() {
               <ul className="space-y-2 text-xs text-slate-500">
                 <li><a href="#features" className="hover:text-slate-300 transition-colors">Features</a></li>
                 <li><a href="#pricing" className="hover:text-slate-300 transition-colors">Pricing</a></li>
-                <li><Link href="/dashboard" className="hover:text-slate-300 transition-colors">Dashboard</Link></li>
+                <li><a href="#product" className="hover:text-slate-300 transition-colors">Product Tour</a></li>
               </ul>
             </div>
             <div>
