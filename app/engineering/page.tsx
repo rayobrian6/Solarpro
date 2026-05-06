@@ -679,6 +679,9 @@ function EngineeringPageInner() {
         if (p.client?.name) patches.clientName = p.client.name;
         if (p.clientId)     setCurrentClientId(p.clientId);
         if (p.systemType)   patches.systemType = p.systemType as SystemType;
+        // Patch lat/lng from project so PVWatts can use coordinates even without a full address
+        if (p.lat != null)  (patches as any).lat = p.lat;
+        if (p.lng != null)  (patches as any).lng = p.lng;
 
         // v47.395 — Parse address components for fallback city / zip / state.
         // Address format: "123 MAIN ST, CITY NAME, ST 12345" or "123 MAIN ST, CITY, ST"
@@ -4835,7 +4838,10 @@ function EngineeringPageInner() {
 
   // ── PVWatts production estimate ──────────────────────────────
   const fetchPVWatts = useCallback(async () => {
-    if (!config.address && !(config as any).lat) return;
+    if (!config.address && !(config as any).lat) {
+      setPvwattsData({ error: 'No location data — add a project address in System Config → Project Info to fetch a production estimate.', loading: false });
+      return;
+    }
     setPvwattsData(prev => ({ ...prev, loading: true, error: undefined }));
     try {
       const res = await fetch('/api/engineering/pvwatts', {
@@ -4846,7 +4852,7 @@ function EngineeringPageInner() {
           systemCapacityKw: parseFloat(totalKw) || 8.0,
           address: config.address || undefined,
           lat: (config as any).lat || undefined,
-          lon: (config as any).lon || undefined,
+          lon: (config as any).lon || (config as any).lng || undefined,
           moduleType: 1,   // Premium
           arrayType: 1,    // Fixed roof mount
           tilt: config.roofPitch ? Math.round(Math.atan(config.roofPitch / 12) * 180 / Math.PI) : 20,
@@ -4873,7 +4879,7 @@ function EngineeringPageInner() {
     } catch (_) {
       setPvwattsData({ error: 'PVWatts API unavailable', loading: false });
     }
-  }, [config.address, totalKw, config.roofPitch]);
+  }, [config.address, (config as any).lat, (config as any).lng, totalKw, config.roofPitch]);
 
   useEffect(() => {
     if (calcDebounceRef.current) clearTimeout(calcDebounceRef.current);

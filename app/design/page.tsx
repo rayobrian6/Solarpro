@@ -107,6 +107,12 @@ function DesignContent({ onQuickLaunch }: { onQuickLaunch?: (p: Project) => void
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId');
 
+  // Pre-warm Google Maps session token as early as possible so DesignStudio
+  // doesn't have to wait for it when it mounts (reduces initial tile render time).
+  useEffect(() => {
+    fetch('/api/maps-session').catch(() => {/* silently ignore — DesignStudio will retry */});
+  }, []);
+
   // ✅ Phase 5: Use global store — 3-tier fallback: store → server → localStorage
   const loadActiveProject = useAppStore(s => s.loadActiveProject);
   const loadProjects = useAppStore(s => s.loadProjects);

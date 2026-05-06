@@ -148,9 +148,9 @@ function NewProjectContent() {
       toast.update(toastId, {
         type: 'success',
         title: `Project "${project.name}" created!`,
-        message: 'Opening Design Studio — place panels on the satellite map to continue.',
+        message: 'Project created successfully. Opening client folder…',
       });
-      setTimeout(() => router.push(`/design?projectId=${project.id}`), 600);
+      setTimeout(() => router.push(`/clients/${selectedClient}`), 600);
     } catch (e: unknown) {
       console.error('[NewProject] handleSubmit error:', e);
       toast.update(toastId, {

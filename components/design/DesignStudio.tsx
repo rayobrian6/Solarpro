@@ -949,16 +949,20 @@ export default function DesignStudio({ project, onSave }: Props) {
   const googleSessionRef = React.useRef<{ token: string; key: string } | null>(null);
   const googleSessionFetchedRef = React.useRef(false);
 
-  // Fetch Google Maps session token once on mount
+  // Fetch Google Maps session token once on mount — pre-warm so tiles are ready immediately
   useEffect(() => {
     if (googleSessionFetchedRef.current) return;
     googleSessionFetchedRef.current = true;
     fetch('/api/maps-session')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.session && data?.key) {
-          googleSessionRef.current = { token: data.session, key: data.key };
+        if (data?.session) {
+          // Store session token; tiles are proxied through /api/maps-session (POST)
+          // so the API key stays server-side and never needs to be returned here.
+          googleSessionRef.current = { token: data.session, key: '' };
           setActiveTileSource('google');
+        } else {
+          setActiveTileSource('esri');
         }
       })
       .catch(() => { setActiveTileSource('esri'); });
@@ -1035,9 +1039,17 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     const esriUrl = (fz: number, ftx: number, fty: number) =>
       `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${fz}/${fty}/${ftx}`;
-    const googleUrl = (fz: number, ftx: number, fty: number) => {
-      const sess = googleSessionRef.current!;
-      return `https://tile.googleapis.com/v1/2dtiles/${fz}/${ftx}/${fty}?session=${sess.token}&key=${sess.key}`;
+    // Fetch Google tile via server-side proxy (POST /api/maps-session) so the API key stays server-side.
+    // Returns a Promise that resolves to an object URL for the tile image blob.
+    const fetchGoogleTile = async (fz: number, ftx: number, fty: number): Promise<string> => {
+      const res = await fetch('/api/maps-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ z: fz, x: ftx, y: fty }),
+      });
+      if (!res.ok) throw new Error(`Tile ${res.status}`);
+      const blob = await res.blob();
+      return URL.createObjectURL(blob);
     };
 
     needed.forEach(key => {
@@ -1068,9 +1080,14 @@ export default function DesignStudio({ project, onSave }: Props) {
           if (detectBlankTile(img)) {
             esriBlankZoomsRef.current.add(fz);
             if (hasGoogle && googleSessionRef.current) {
-              img.onload  = () => commitTile('google');
-              img.onerror = () => { TILE_INFLIGHT.delete(key); };
-              img.src = googleUrl(fz, ftx, fty);
+              // Fallback to Google proxy when ESRI tile is blank
+              fetchGoogleTile(fz, ftx, fty)
+                .then(objectUrl => {
+                  img.onload = () => { URL.revokeObjectURL(objectUrl); commitTile('google'); };
+                  img.onerror = () => { URL.revokeObjectURL(objectUrl); TILE_INFLIGHT.delete(key); };
+                  img.src = objectUrl;
+                })
+                .catch(() => commitTile('esri'));
               return;
             }
           }
@@ -1084,9 +1101,14 @@ export default function DesignStudio({ project, onSave }: Props) {
         img.onerror = () => { TILE_INFLIGHT.delete(key); };
         img.src = esriUrl(Math.min(fz, ARCGIS_MAX_ZOOM), ftx, fty);
       } else if (forceGoogle || hasGoogle) {
-        img.onload  = () => commitTile('google');
-        img.onerror = () => { img.onerror = null; tryEsri(); };
-        img.src = googleUrl(fz, ftx, fty);
+        // Load Google tile via server-side proxy (keeps API key server-side)
+        fetchGoogleTile(fz, ftx, fty)
+          .then(objectUrl => {
+            img.onload = () => { URL.revokeObjectURL(objectUrl); commitTile('google'); };
+            img.onerror = () => { URL.revokeObjectURL(objectUrl); img.onerror = null; tryEsri(); };
+            img.src = objectUrl;
+          })
+          .catch(() => tryEsri());
       } else {
         tryEsri();
       }
