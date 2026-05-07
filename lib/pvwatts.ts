@@ -347,3 +347,106 @@ export function calculateCost(
     roi,
   };
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// calculateProductionFromDefinition
+// ─────────────────────────────────────────────────────────────────────────────
+// Ephemeral production calculation — works from a SystemDefinition + LocationInput
+// with NO Client or DB dependency. Used by the production API when no project
+// is saved yet (projectId is absent).
+//
+// Mirrors calculateProduction() logic but accepts the new ephemeral types
+// directly instead of a Layout + Client pair.
+// ─────────────────────────────────────────────────────────────────────────────
+import type { SystemDefinition, LocationInput } from '@/types';
+
+export async function calculateProductionFromDefinition(
+  systemDef: SystemDefinition,
+  location: LocationInput,
+): Promise<Omit<ProductionResult, 'id' | 'calculatedAt'>> {
+  const { systemType, panels } = systemDef;
+
+  // ── Resolve system size ──────────────────────────────────────────────────
+  const panelWatts = panels.length > 0
+    ? (panels[0] as any)?.wattage ?? 400
+    : 400;
+  const systemSizeKw = systemDef.systemSizeKw && systemDef.systemSizeKw > 0
+    ? systemDef.systemSizeKw
+    : Math.max((panels.length * panelWatts) / 1000, 1.0);
+
+  // ── Resolve location ─────────────────────────────────────────────────────
+  const lat = location.lat ?? 33.4484;
+  const lng = location.lng ?? -112.074;
+  const annualKwh = location.annualKwh ?? 12000;
+
+  // ── Resolve tilt / azimuth from panels or explicit overrides ─────────────
+  let tilt    = systemDef.tilt    ?? systemDef.groundTilt    ?? 20;
+  let azimuth = systemDef.azimuth ?? systemDef.groundAzimuth ?? 180;
+  let bifacialFactor = 1.0;
+  let arrayType = 1; // fixed roof mount
+
+  if (panels.length > 0) {
+    const panelTilts    = panels.map((p: any) => p.tilt    ?? 0).filter((t: number) => t > 0 && t < 90);
+    const panelAzimuths = panels.map((p: any) => p.azimuth ?? 0).filter((a: number) => a > 0);
+    if (panelTilts.length    > 0) tilt    = panelTilts.reduce((a, b) => a + b, 0)    / panelTilts.length;
+    if (panelAzimuths.length > 0) azimuth = panelAzimuths.reduce((a, b) => a + b, 0) / panelAzimuths.length;
+    const bifacialPanels = panels.filter((p: any) => p.bifacialGain && p.bifacialGain > 1.0);
+    if (bifacialPanels.length > 0) {
+      bifacialFactor = bifacialPanels.reduce((a, p: any) => a + (p.bifacialGain ?? 1.0), 0) / bifacialPanels.length;
+    }
+  }
+
+  if (systemType === 'roof') {
+    arrayType = 1;
+    if (panels.length === 0 && systemDef.roofPlanes?.length) {
+      tilt    = systemDef.roofPlanes[0].pitch   ?? tilt;
+      azimuth = systemDef.roofPlanes[0].azimuth ?? azimuth;
+    }
+  } else if (systemType === 'ground') {
+    arrayType = 0;
+    if (panels.length === 0) {
+      tilt    = systemDef.groundTilt    ?? 25;
+      azimuth = systemDef.groundAzimuth ?? 180;
+    }
+  } else if (systemType === 'fence') {
+    tilt      = 90;
+    arrayType = 0;
+    if (panels.length === 0) azimuth = systemDef.fenceAzimuth ?? 180;
+    bifacialFactor = systemDef.bifacialOptimized
+      ? 1.20
+      : (bifacialFactor > 1.0 ? bifacialFactor : 1.10);
+  }
+
+  tilt    = Math.max(0, Math.min(90,  isNaN(tilt)    ? 20  : tilt));
+  azimuth = Math.max(0, Math.min(360, isNaN(azimuth) ? 180 : azimuth));
+
+  // ── PVWatts → local fallback ──────────────────────────────────────────────
+  let pvData = await fetchPVWatts({ lat, lng, systemSizeKw, tilt, azimuth, losses: 14, arrayType });
+  if (!pvData) {
+    pvData = calculateProductionLocal({ lat, lng, systemSizeKw, tilt, azimuth, losses: 14, bifacialFactor });
+  } else if (systemType === 'fence' && bifacialFactor > 1.0) {
+    const gain = bifacialGainFactor(90, bifacialFactor, azimuth);
+    pvData.ac_annual   = Math.round(pvData.ac_annual * gain);
+    pvData.ac_monthly  = pvData.ac_monthly.map(v => Math.round(v * gain));
+  }
+
+  const annualProductionKwh  = Math.round(pvData.ac_annual);
+  const monthlyProductionKwh = pvData.ac_monthly.map(Math.round);
+  const offsetPercentage     = Math.min(100, Math.round((annualProductionKwh / annualKwh) * 100));
+  const specificYield        = Math.round(annualProductionKwh / systemSizeKw);
+  const co2OffsetTons        = parseFloat((annualProductionKwh * 0.000386).toFixed(2));
+  const treesEquivalent      = Math.round(co2OffsetTons * 16.5);
+
+  return {
+    projectId:            undefined as any, // no project yet
+    layoutId:             undefined as any,
+    annualProductionKwh,
+    monthlyProductionKwh,
+    offsetPercentage,
+    specificYield,
+    performanceRatio:     0.80,
+    capacityFactor:       pvData.capacity_factor,
+    co2OffsetTons,
+    treesEquivalent,
+    pvWattsData:          pvData,
+  };
+}

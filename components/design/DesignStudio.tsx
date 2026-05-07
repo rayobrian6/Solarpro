@@ -2588,24 +2588,74 @@ export default function DesignStudio({ project, onSave }: Props) {
   }, [roofPlanes, groundArea, selectedPanel, setback, rowSpacing, tilt, azimuth, panelsPerRow, groundHeight, panels, orientation]);
 
   // ── Calculate production ───────────────────────────────────
+  const buildSystemDefinition = () => {
+    // Extract effective tilt/azimuth from placed panels
+    let effectiveTilt = tilt;
+    let effectiveAzimuth = azimuth;
+    if (panels.length > 0) {
+      const tilts = panels.map((p: any) => p.tilt ?? tilt).filter((t: number) => t > 0);
+      const azimuths = panels.map((p: any) => p.azimuth ?? azimuth).filter((a: number) => a > 0);
+      if (tilts.length > 0) effectiveTilt = tilts.reduce((a: number, b: number) => a + b, 0) / tilts.length;
+      if (azimuths.length > 0) effectiveAzimuth = azimuths.reduce((a: number, b: number) => a + b, 0) / azimuths.length;
+    }
+    const effectiveRoofPlanes = roofPlanes.length > 0 ? roofPlanes :
+      (panels.length > 0 && project.systemType === 'roof' ? [{
+        id: 'auto-plane-1',
+        vertices: [],
+        pitch: effectiveTilt,
+        azimuth: effectiveAzimuth,
+        area: panels.length * 1.134 * 1.722,
+        usableArea: panels.length * 1.134 * 1.722 * 0.85,
+      }] : undefined);
+    return {
+      panels,
+      systemType: project.systemType,
+      tilt: effectiveTilt,
+      azimuth: effectiveAzimuth,
+      groundTilt: effectiveTilt,
+      groundAzimuth: effectiveAzimuth,
+      fenceAzimuth: effectiveAzimuth,
+      fenceHeight,
+      bifacialOptimized,
+      totalPanels: panels.length,
+      systemSizeKw,
+      roofPlanes: effectiveRoofPlanes,
+    };
+  };
+
+  const buildLocationInput = () => {
+    return {
+      lat: mapCenter.lat,
+      lng: mapCenter.lng,
+      address: project.address,
+      annualKwh: project.client?.annualKwh ?? 12000,
+      utilityRate: project.client?.utilityRate ?? project.utilityRatePerKwh ?? 0.13,
+    };
+  };
+
   const calculateProduction = async () => {
     if (panels.length === 0) return;
     setCalculating(true);
     setCalcMessage('');
     const toastId = toast.loading('Running production simulation...', `PVWatts · ${panels.length} panels · ${systemSizeKw.toFixed(2)} kW`);
     try {
-      const layout = buildLayout();
+      // Always use ephemeral shape: systemDefinition + location
+      // The API will enrich with project data if projectId is also provided
+      const systemDefinition = buildSystemDefinition();
+      const location = buildLocationInput();
+      const body: Record<string, unknown> = { systemDefinition, location };
+      if (project.id) body.projectId = project.id;
       const res = await fetch('/api/production', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: project.id, layout }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (data.success) {
         setProduction(data.data.production);
         setCostEstimate(data.data.costEstimate);
         const annualKwh = data.data.production?.annualProductionKwh ?? 0;
-        const sizeKw = data.data.layout?.systemSizeKw ?? layout.systemSizeKw;
+        const sizeKw = data.data.layout?.systemSizeKw ?? systemSizeKw;
         setCalcMessage(`✅ ${annualKwh.toLocaleString()} kWh/yr · ${sizeKw.toFixed(2)} kW system`);
         toast.update(toastId, {
           type: 'success',
@@ -2633,44 +2683,17 @@ export default function DesignStudio({ project, onSave }: Props) {
   };
 
   const buildLayout = (): Omit<Layout, 'id' | 'createdAt' | 'updatedAt'> => {
-    // Extract tilt/azimuth from actual placed panels (3D placement data)
-    // This ensures production calculation uses real panel orientations
-    let effectiveTilt = tilt;
-    let effectiveAzimuth = azimuth;
-    
-    if (panels.length > 0) {
-      // Use the most common tilt/azimuth from placed panels
-      const tilts = panels.map((p: any) => p.tilt ?? tilt).filter((t: number) => t > 0);
-      const azimuths = panels.map((p: any) => p.azimuth ?? azimuth).filter((a: number) => a > 0);
-      
-      if (tilts.length > 0) {
-        effectiveTilt = tilts.reduce((a: number, b: number) => a + b, 0) / tilts.length;
-      }
-      if (azimuths.length > 0) {
-        effectiveAzimuth = azimuths.reduce((a: number, b: number) => a + b, 0) / azimuths.length;
-      }
-    }
-
-    // Build roof planes from placed panels if no manual roof planes drawn
-    const effectiveRoofPlanes = roofPlanes.length > 0 ? roofPlanes : 
-      (panels.length > 0 && project.systemType === 'roof' ? [{
-        id: 'auto-plane-1',
-        vertices: [],
-        pitch: effectiveTilt,
-        azimuth: effectiveAzimuth,
-        area: panels.length * 1.134 * 1.722,
-        usableArea: panels.length * 1.134 * 1.722 * 0.85,
-      }] : undefined);
-
+    // Reuse buildSystemDefinition for shared tilt/azimuth/roofPlane logic
+    const sysDef = buildSystemDefinition();
     return {
       projectId: project.id,
       systemType: project.systemType,
       panels,
-      roofPlanes: effectiveRoofPlanes,
-      groundTilt: effectiveTilt,
-      groundAzimuth: effectiveAzimuth,
+      roofPlanes: sysDef.roofPlanes,
+      groundTilt: sysDef.groundTilt,
+      groundAzimuth: sysDef.groundAzimuth,
       rowSpacing, groundHeight,
-      fenceAzimuth: effectiveAzimuth,
+      fenceAzimuth: sysDef.fenceAzimuth,
       fenceHeight,
       fenceLine: fenceLine.length > 0 ? fenceLine : undefined,
       bifacialOptimized,
@@ -2925,6 +2948,12 @@ export default function DesignStudio({ project, onSave }: Props) {
             lastSavedAt={lastSavedAt}
             className="ml-1"
           />
+          {/* Unsaved Design badge — shown when panels exist but design has never been saved this session */}
+          {panels.length > 0 && saveStatus !== 'saving' && saveStatus !== 'saved' && lastSavedAt === null && !layoutLoadedFromDB && (
+            <span className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1 flex-shrink-0">
+              <AlertCircle size={10} /> Unsaved Design
+            </span>
+          )}
           {/* Restore indicators — visible proof that layout was loaded from DB */}
           {layoutLoadedFromDB && (
             <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-full ml-1 flex items-center gap-1">

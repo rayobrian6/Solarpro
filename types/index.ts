@@ -729,6 +729,44 @@ export interface MapState {
   style: 'satellite' | 'streets' | 'hybrid';
 }
 
+
+// ─── Ephemeral System Definition ──────────────────────────────────────────────
+// Used by the production API when no saved project exists yet.
+// Carries all inputs needed for a full PVWatts calculation from in-memory UI state.
+export interface SystemDefinition {
+  // Panel layout (required for calculation)
+  panels: PlacedPanel[];
+  systemType: SystemType;
+
+  // Orientation (derived from panels or set explicitly)
+  tilt?: number;
+  azimuth?: number;
+
+  // Ground / fence specific
+  groundTilt?: number;
+  groundAzimuth?: number;
+  fenceAzimuth?: number;
+  fenceHeight?: number;
+  bifacialOptimized?: boolean;
+
+  // Computed totals
+  totalPanels?: number;
+  systemSizeKw?: number;
+
+  // Roof planes (optional — used for multi-face roof layouts)
+  roofPlanes?: RoofPlane[];
+}
+
+// Location input for ephemeral production calculation
+export interface LocationInput {
+  lat: number;
+  lng: number;
+  address?: string;
+  // Demand context — used for offset % and savings estimate
+  annualKwh?: number;    // kWh/year consumption (defaults to 12,000 if omitted)
+  utilityRate?: number;  // $/kWh (defaults to 0.13 if omitted)
+}
+
 // ─── Design Tool State ────────────────────────────────────────
 export type DrawingMode = 
   | 'select' 
