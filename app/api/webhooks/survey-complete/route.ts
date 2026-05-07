@@ -67,7 +67,21 @@ export async function POST(req: NextRequest) {
   const timestampHeader = req.headers.get('x-survey-timestamp');
   const eventIdHeader = req.headers.get('x-survey-event-id');
 
-  // ── HMAC verification ──────────────────────────────────────────────────
+  // ── SURVEY_WEBHOOK_RECEIVED ────────────────────────────────────────────────
+  // Emitted on every inbound call BEFORE signature check so we can prove
+  // the payload reached SolarPro regardless of what happens next.
+  // Search Vercel logs for: SURVEY_WEBHOOK_RECEIVED
+  console.info(
+    JSON.stringify({
+      tag:          'SURVEY_WEBHOOK_RECEIVED',
+      timestamp:    new Date().toISOString(),
+      eventId:      eventIdHeader ?? null,
+      hasSignature: Boolean(signatureHeader),
+      hasTimestamp: Boolean(timestampHeader),
+      bodyLength:   rawBody.length,
+    }),
+  );
+
   const sigResult = verifyWebhookSignature({
     rawBody,
     signatureHeader,
