@@ -130,9 +130,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     const webhookBodyStr = JSON.stringify(webhookBodyObj);
 
+    // Timestamp is included in the signed string so the verifier can enforce
+    // replay-protection (5-minute tolerance window). ISO-8601 format is accepted
+    // by parseTimestampHeaderToSeconds() in verifyWebhookSignature.ts.
+    const timestamp = new Date().toISOString();
+    const signedString = `${timestamp}.${webhookBodyStr}`;
+
     const { createHmac } = await import('crypto');
     const signature = createHmac('sha256', webhookSecret)
-      .update(webhookBodyStr)
+      .update(signedString)
       .digest('hex');
 
     // Construct internal webhook URL — always this app, never the partner app
@@ -142,8 +148,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const webhookRes = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type':       'application/json',
         'x-survey-signature': `sha256=${signature}`,
+        'x-survey-timestamp': timestamp,
+        'x-survey-event-id':  webhookBodyObj.event_id as string,
       },
       body: webhookBodyStr,
     });
