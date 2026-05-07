@@ -244,14 +244,22 @@ export async function POST(req: NextRequest) {
           `;
           results.push(`✅ Free pass updated (existing user, password preserved): ${u.email}`);
         } else {
-          // New user — insert with a sentinel hash that can never be guessed.
-          // User MUST go through password-reset flow to set a real password.
-          const bcrypt = await import('bcryptjs');
-          const sentinelHash = await bcrypt.hash('__SOLARPRO_MUST_RESET__', 4);
+          // New user — insert with the literal sentinel string that isLegacyHash()
+          // in lib/auth.ts recognises and maps to hashFormat='sentinel'.
+          // At login the user will receive LEGACY_HASH_RESET_REQUIRED with a
+          // clear "please use Forgot Password" message instead of the generic
+          // "Invalid email or password." they got before.
+          //
+          // IMPORTANT: do NOT bcrypt.hash('__SOLARPRO_MUST_RESET__') here.
+          // A real bcrypt hash of that string passes isLegacyHash() as valid
+          // bcrypt, the compare always returns false, and the user just sees
+          // a generic login failure with no reset hint. The literal string is
+          // the correct sentinel value.
+          const SENTINEL = '__SOLARPRO_MUST_RESET__';
           await sql`
             INSERT INTO users (name, email, password_hash, company, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
             VALUES (
-              ${u.name}, ${u.email.toLowerCase().trim()}, ${sentinelHash}, ${u.company},
+              ${u.name}, ${u.email.toLowerCase().trim()}, ${SENTINEL}, ${u.company},
               ${u.role}, 'contractor', 'free_pass', true, ${u.note},
               '2099-12-31 23:59:59+00'
             )
@@ -1685,6 +1693,49 @@ export async function POST(req: NextRequest) {
       results.push('✅ Migration 029 complete: has_seen_tour + tour_completed_at added to users');
     } catch (e: unknown) {
       results.push(`⚠️ Migration 029 (has_seen_tour): ${(e as Error).message}`);
+    }
+
+    // -- Migration 030: Repair bcrypt-of-sentinel password hashes ----------------
+    // Root cause: a previous version of this file stored bcrypt.hash('__SOLARPRO_MUST_RESET__', 4)
+    // as the placeholder for new free-pass users. That produces a real bcrypt hash
+    // ($2b$04$..., 60 chars) which passes isLegacyHash() as valid bcrypt, then
+    // bcrypt.compare() returns false, and the user sees a generic "Invalid email or
+    // password" with no reset prompt.
+    //
+    // Fix: find any user whose password_hash is bcrypt($2b$04$ cost=4) and NOT a
+    // user who has logged in successfully (i.e., hash is still the placeholder),
+    // and replace it with the literal sentinel '__SOLARPRO_MUST_RESET__' that
+    // isLegacyHash() correctly detects and maps to hashFormat='sentinel'.
+    //
+    // Detection heuristic: cost=4 is never used for real passwords (we use 10 or 12).
+    // A $2b$04$ hash is overwhelmingly likely to be our placeholder. We further
+    // restrict to users with is_free_pass=true to avoid touching any edge-case user.
+    try {
+      const suspectRows = await sql`
+        SELECT id, email
+        FROM users
+        WHERE is_free_pass = true
+          AND password_hash LIKE '$2b$04$%'
+          AND LENGTH(password_hash) = 60
+      `;
+      let repairCount = 0;
+      for (const row of suspectRows) {
+        await sql`
+          UPDATE users
+          SET password_hash = '__SOLARPRO_MUST_RESET__',
+              updated_at    = NOW()
+          WHERE id = ${row.id}
+        `;
+        repairCount++;
+        console.log(`[Migration 030] Repaired sentinel hash for userId=${row.id} (${row.email})`);
+      }
+      if (repairCount > 0) {
+        results.push(`✅ Migration 030 complete: repaired ${repairCount} bcrypt-of-sentinel hash(es) — users will now see password reset prompt instead of generic login failure`);
+      } else {
+        results.push(`✅ Migration 030 complete: no bcrypt-of-sentinel hashes found (already clean)`);
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 030 (sentinel hash repair): ${(e as Error).message}`);
     }
 
         return NextResponse.json({ success: true, results });
