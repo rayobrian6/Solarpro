@@ -254,6 +254,46 @@ export async function POST(req: NextRequest) {
     }
 
     const project = await getProjectById(projectId, user.id);
+
+    // ── Fallback: if project lookup failed but we have systemDefinition + location,
+    // run ephemeral calculation rather than returning an error.
+    // This handles: expired session, auth mismatch, deleted project, etc.
+    // Production calculation should ALWAYS succeed when data is present.
+    if (!project && hasSystemDef && body.location) {
+      const systemDef: SystemDefinition | undefined = body.systemDefinition;
+      const location:  LocationInput   | undefined  = body.location;
+      const validation = validateEphemeralInputs(systemDef, location);
+      if (validation.ok) {
+        console.log(`[PRODUCTION_FALLBACK_EPHEMERAL] projectId=${projectId} userId=${user.id} — project not found, falling back to ephemeral calc`);
+        const productionData = await calculateProductionFromDefinition(systemDef!, location!);
+        const production = {
+          ...productionData,
+          id:           `prod-ephemeral-${Date.now()}`,
+          projectId:    null,
+          calculatedAt: new Date().toISOString(),
+          ephemeral:    true,
+        };
+        const pricingCfg   = await loadPricingConfig();
+        const panels       = systemDef!.panels ?? [];
+        const systemSizeKw = systemDef!.systemSizeKw
+          ?? Math.max((panels.length * ((panels[0] as any)?.wattage ?? 400)) / 1000, 1.0);
+        const layoutType   = systemDef!.systemType ?? 'roof';
+        const utilityRate  = location!.utilityRate ?? 0.13;
+        const costEstimate = buildCostEstimate({
+          panels, systemSizeKw, layoutType,
+          annualProductionKwh: production.annualProductionKwh,
+          utilityRate, pricingCfg,
+          client: null,
+          salesOverride: body.salesOverride,
+        });
+        return NextResponse.json({
+          success: true,
+          data:    { production, costEstimate, layout: null, ephemeral: true },
+        });
+      }
+      // systemDef/location present but invalid — fall through to the original 404
+    }
+
     if (!project) {
       return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
     }

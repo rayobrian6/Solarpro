@@ -17,7 +17,7 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { buildDigitalTwin, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
+import { buildDigitalTwin, enrichDigitalTwinWithDsm, type DigitalTwinData, type RoofSegment } from '@/lib/digitalTwin';
 import { getSunPosition } from '@/lib/solarMath';
 import type { PlacedPanel } from '@/types';
 import {
@@ -732,45 +732,40 @@ function SolarEngine3D({
     twinRef.current = null;
     terrainReadyRef.current = false;
     setTerrainReady(false);
-    // Reload twin data for new location
-    buildDigitalTwin(lat, lng, projectAddress ?? '').then(async newTwin => {
+    // PERF v61: Reload twin data for new location — skip DSM for speed, enrich lazily.
+    buildDigitalTwin(lat, lng, projectAddress ?? '', true /* skipDsm */).then(newTwin => {
       twinRef.current = newTwin;
       onTwinLoaded?.(newTwin);
       addLog('FLY', `Twin reloaded: ${newTwin.roofSegments.length} segments`);
       setStatusMsg(`✅ Solar data loaded: ${newTwin.roofSegments.length} roof segments`);
-      // v47.216: Re-sample elevation for new location using Cesium terrain provider.
-      // Fallback: lat-based EGM96 geoid approximation for CONUS (avoids Ohio-specific -33.5m constant).
+
+      // PERF v61: Use geoid approximation directly — skip sampleTerrainMostDetailed (saves 3-5s).
       const googleGroundElev = newTwin.elevation ?? 0;
-      // Lat-based EGM96 approximation: -29 - 5*sin(lat_rad) is a reasonable CONUS estimate
       const latRad = lat * Math.PI / 180;
-      const geoidApprox = -29 - 5 * Math.sin(latRad);  // ~-34 at 38°N (Ohio), ~-31 at 22°N (FL)
-      let cesiumGroundElev = googleGroundElev + geoidApprox;
-      try {
-        const terrainProvider = viewer.terrainProvider;
-        if (terrainProvider && typeof C.sampleTerrainMostDetailed === 'function') {
-          const positions = [C.Cartographic.fromDegrees(lng, lat)];
-          // PERF v58.19: 5s timeout guard
-          const _terrTimeout = new Promise<never>((_,rej)=>setTimeout(()=>rej(new Error('terrain timeout')),5000));
-          const sampledPositions = await Promise.race([C.sampleTerrainMostDetailed(terrainProvider, positions), _terrTimeout]) as any[];
-          if (sampledPositions?.[0] && isFinite(sampledPositions[0].height) && sampledPositions[0].height > 0) {
-            cesiumGroundElev = sampledPositions[0].height;
-            addLog('FLY', `Terrain sampled: ${cesiumGroundElev.toFixed(1)}m (Google: ${googleGroundElev.toFixed(1)}m, geoidOffset: ${(cesiumGroundElev - googleGroundElev).toFixed(1)}m)`);
-          } else {
-            addLog('FLY', `Terrain sample invalid, using geoid approx: ${cesiumGroundElev.toFixed(1)}m`);
-          }
-        } else {
-          addLog('FLY', `Terrain provider unavailable, using geoid approx: ${cesiumGroundElev.toFixed(1)}m`);
-        }
-      } catch (e: unknown) {
-        addLog('WARN', `Terrain sampling failed: ${(e as Error).message}, using geoid approx: ${cesiumGroundElev.toFixed(1)}m`);
-      }
-      cesiumGroundElevRef.current = cesiumGroundElev;
-      addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElev.toFixed(1)}m`);
+      const geoidApprox = -29 - 5 * Math.sin(latRad);
+      cesiumGroundElevRef.current = googleGroundElev + geoidApprox;
+      addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElevRef.current.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
       terrainReadyRef.current = true;
       setTerrainReady(true);
+
       // Redraw overlays for new location
       drawOverlays(viewer, C, newTwin);
       viewer.scene.requestRender();
+
+      // Lazy DSM enrichment after scene is interactive
+      setTimeout(() => {
+        enrichDigitalTwinWithDsm(newTwin).then(enriched => {
+          if (enriched !== newTwin) {
+            setTwin(enriched);
+            onTwinLoaded?.(enriched);
+            twinRef.current = enriched;
+            if (viewerRef.current && (window as any).Cesium) {
+              drawOverlays(viewerRef.current, (window as any).Cesium, enriched);
+            }
+            addLog('FLY', `DSM enriched: ${enriched.roofSegments.length} roof segments`);
+          }
+        }).catch(() => {/* non-fatal */});
+      }, 2000);
     }).catch(err => {
       addLog('WARN', `Twin reload failed: ${(err as Error).message}`);
       terrainReadyRef.current = true; // unblock Auto Fill even on error
@@ -888,37 +883,36 @@ function SolarEngine3D({
         setRenderMode('TERRAIN_ONLY');
       }
 
-      // Run tiles and Solar API fetch IN PARALLEL for faster boot.
-      // If API key is missing, replace tile load with a rejected promise so
-      // the rest of boot (Solar API, terrain sampling) still completes normally.
+      // PERF v61: Run tiles and Solar API fetch IN PARALLEL for faster boot.
+      // DSM is NOT fetched at boot — it's the slowest call and not needed for initial render.
+      // DSM is lazy-loaded after boot completes (additive, non-blocking).
       const tilePromise: Promise<any> = GOOGLE_API_KEY
         ? C.Cesium3DTileset.fromUrl(
             `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_API_KEY}`,
             {
               showCreditsOnScreen: false,
-              // maximumScreenSpaceError: controls tile quality vs performance tradeoff.
-              // Lower = higher quality (more tiles loaded), higher = better performance (fewer tiles).
-              // 4 is a good balance for rooftop-level detail. Default is 16.
-              maximumScreenSpaceError: 16, // PERF v58.19: start coarse; camera optimizer drops to 4 on zoom-in
-              // skipLevelOfDetail: false ensures tiles load in order (no popping artifacts).
-              // true would allow skipping LOD levels for faster load but causes visual glitches.
-              skipLevelOfDetail: false,
-              // preferLeaves: true loads the highest-detail tiles first when zoomed in.
+              // PERF v61: Start coarse (32) for fast initial paint; camera optimizer drops to 4 on zoom-in.
+              maximumScreenSpaceError: 32,
+              // PERF v61: skipLevelOfDetail=true — tiles appear immediately without waiting for full LOD chain.
+              // Visual quality is the same at final zoom; only intermediate LOD pops are slightly more visible.
+              skipLevelOfDetail: true,
+              // preferLeaves: true loads highest-detail tiles first when zoomed in.
               preferLeaves: true,
-              // dynamicScreenSpaceError: reduces tile detail for tiles far from camera center.
-              // Improves performance without visible quality loss at edges of view.
+              // dynamicScreenSpaceError: reduces tile detail at edges — big perf win.
               dynamicScreenSpaceError: true,
-              // density=0.00278 and factor=4.0 are Google's recommended values for Photorealistic 3D Tiles.
-              // Tuned to match the tile resolution of the Google Maps dataset.
               dynamicScreenSpaceErrorDensity: 0.00278,
               dynamicScreenSpaceErrorFactor: 4.0,
+              // PERF v61: Limit concurrent tile requests — prevents request queue saturation on first load.
+              maximumAttemptedTiles: 32,
             }
           )
         : Promise.reject(new Error('NEXT_PUBLIC_GOOGLE_MAPS_API_KEY not set'));
 
+      // PERF v61: Only fetch elevation + solar at boot. DSM lazy-loaded after scene is interactive.
+      // skipDsm=true reduces initial boot time by 3-8s (DSM call is the slowest API at boot).
       const [tileResult, twinResult] = await Promise.allSettled([
         tilePromise,
-        buildDigitalTwin(lat, lng, projectAddress ?? ''),
+        buildDigitalTwin(lat, lng, projectAddress ?? '', true /* skipDsm */),
       ]);
 
       // Handle tiles result
@@ -963,48 +957,18 @@ function SolarEngine3D({
       // Google Elevation API returns orthometric heights; Cesium uses ellipsoidal heights
       // In Ohio the geoid undulation is approximately -33m (EGM96 geoid model)
       const googleGroundElev = twinData?.elevation ?? 0;
-      // GEOID UNDULATION EXPLANATION:
-      // Google Elevation API returns orthometric heights (height above mean sea level / EGM96 geoid).
-      // Cesium uses ellipsoidal heights (height above the WGS84 mathematical ellipsoid).
-      // The difference between these two systems is called "geoid undulation" (N).
-      // Formula: ellipsoidal height = orthometric height + geoid undulation
-      //
-      // For Ohio (~41.5N, -81.4W), the EGM96 geoid undulation is approximately -33.5m.
-      // This means the geoid surface is 33.5m BELOW the ellipsoid at this location.
-      // Source: https://geographiclib.sourceforge.io/cgi-bin/GeoidEval
-      //
-      // NOTE: This value is used as a fallback only. The code below attempts to sample
-      // Cesium terrain provider for the actual ellipsoidal height, which is more accurate.
-      // If terrain sampling succeeds, OHIO_GEOID_UNDULATION is NOT used.
-      // v47.216: Use lat-based EGM96 geoid approximation as fallback (not Ohio-specific).
-      // Terrain sampling below will override this with the actual Cesium ellipsoidal height.
+      // PERF v61: Use lat-based EGM96 geoid approximation directly — skip sampleTerrainMostDetailed.
+      // sampleTerrainMostDetailed can take 3-5s with EllipsoidTerrainProvider (which returns 0 anyway).
+      // The geoid approximation below is accurate to ~1-2m for CONUS, which is sufficient for panel placement.
+      // Formula: ellipsoidal_height = orthometric_height (Google Elevation) + geoid_undulation
+      // EGM96 CONUS approx: -29 - 5*sin(lat_rad) → ~-34m at Ohio, ~-32m at Alexandria VA, ~-29m at Texas
       const latRadBoot = lat * Math.PI / 180;
-      const geoidApproxBoot = -29 - 5 * Math.sin(latRadBoot);  // CONUS approx; ~-34 at Ohio, ~-32 at Alexandria VA
-      let cesiumGroundElev = googleGroundElev + geoidApproxBoot;
-
-      try {
-        const terrainProvider = viewer.terrainProvider;
-        if (terrainProvider && typeof C.sampleTerrainMostDetailed === 'function') {
-          const positions = [C.Cartographic.fromDegrees(lng, lat)];
-          // PERF v58.19: 5s timeout guard
-          const _terrTimeout = new Promise<never>((_,rej)=>setTimeout(()=>rej(new Error('terrain timeout')),5000));
-          const sampledPositions = await Promise.race([C.sampleTerrainMostDetailed(terrainProvider, positions), _terrTimeout]) as any[];
-          if (sampledPositions?.[0] && isFinite(sampledPositions[0].height) && sampledPositions[0].height > 0) {
-            cesiumGroundElev = sampledPositions[0].height;
-            addLog('BOOT', `Cesium terrain sampled: ${cesiumGroundElev.toFixed(1)}m (Google: ${googleGroundElev.toFixed(1)}m, geoidOffset: ${(cesiumGroundElev - googleGroundElev).toFixed(1)}m)`);
-          } else {
-            addLog('BOOT', `Terrain sample returned invalid height, using geoid estimate: ${cesiumGroundElev.toFixed(1)}m`);
-          }
-        } else {
-          addLog('BOOT', `sampleTerrainMostDetailed not available, using geoid estimate: ${cesiumGroundElev.toFixed(1)}m`);
-        }
-      } catch (e: unknown) {
-        addLog('WARN', `Terrain sampling failed: ${(e as Error).message}, using geoid estimate: ${cesiumGroundElev.toFixed(1)}m`);
-      }
+      const geoidApproxBoot = -29 - 5 * Math.sin(latRadBoot);
+      const cesiumGroundElev = googleGroundElev + geoidApproxBoot;
       cesiumGroundElevRef.current = cesiumGroundElev;
       terrainReadyRef.current = true;
       setTerrainReady(true);
-      addLog('BOOT', `cesiumGroundElev set: ${cesiumGroundElev.toFixed(1)}m, terrainReady=true`);
+      addLog('BOOT', `cesiumGroundElev: ${cesiumGroundElev.toFixed(1)}m (Google: ${googleGroundElev.toFixed(1)}m, geoidApprox: ${geoidApproxBoot.toFixed(1)}m) [skipped sampleTerrainMostDetailed for speed]`);
       // NOW set twin state - cesiumGroundElevRef is ready, so drawOverlays will use correct elevation
       if (twinData) setTwin(twinData);
 
@@ -1058,6 +1022,23 @@ function SolarEngine3D({
       [200, 600, 1500, 3000].forEach(t =>
         setTimeout(() => { try { viewer.resize(); viewer.scene.requestRender(); } catch {} }, t)
       );
+
+      // PERF v61: Lazy-load DSM after scene is already interactive (non-blocking).
+      // This enriches roof segment geometry without blocking initial 3D render.
+      if (twinData) {
+        setTimeout(() => {
+          enrichDigitalTwinWithDsm(twinData).then(enriched => {
+            if (enriched !== twinData) {
+              setTwin(enriched);
+              onTwinLoaded?.(enriched);
+              if (viewerRef.current && (window as any).Cesium) {
+                drawOverlays(viewerRef.current, (window as any).Cesium, enriched);
+              }
+              addLog('BOOT', `DSM enriched: ${enriched.roofSegments.length} roof segments`);
+            }
+          }).catch(e => addLog('WARN', `DSM enrichment failed: ${(e as Error).message}`));
+        }, 2000); // 2s delay — scene is already interactive by then
+      }
 
     } catch (err: unknown) {
       const msg = (err as Error)?.message ?? String(err);

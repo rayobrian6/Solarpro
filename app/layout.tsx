@@ -25,6 +25,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
           rel="stylesheet"
         />
+        {/* PERF v61: Preload CesiumJS so it's in browser cache before 3D view opens */}
+        <link rel="preconnect" href="https://cesium.com" />
+        <link
+          rel="preload"
+          href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"
+          as="script"
+          crossOrigin="anonymous"
+        />
+        <link
+          rel="preload"
+          href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css"
+          as="style"
+          crossOrigin="anonymous"
+        />
+        {/* PERF v61: Preconnect to Google tile API to reduce DNS/TLS handshake delay */}
+        <link rel="preconnect" href="https://tile.googleapis.com" />
       </head>
       <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
         <ToastProvider>

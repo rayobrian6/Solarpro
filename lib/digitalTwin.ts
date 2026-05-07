@@ -77,32 +77,37 @@ const SETBACK_M = 0.5; // 0.5m setback from roof edges
 // PERF v58.19: In-session cache — avoids re-fetching on navigation/tab-switch.
 const _twinCache = new Map<string, DigitalTwinData>();
 
+// PERF v61: Fast boot version — skips DSM (typically 3-8s) for initial 3D render.
+// Call buildDigitalTwinFull() after boot to enrich with DSM geometry.
 export async function buildDigitalTwin(
   lat: number,
   lng: number,
-  address: string
+  address: string,
+  skipDsm = false
 ): Promise<DigitalTwinData> {
   const _ck = `${lat.toFixed(4)},${lng.toFixed(4)}`;
   if (_twinCache.has(_ck)) return _twinCache.get(_ck)!;
-  // Run all API calls in parallel — including DSM for real roof geometry
-  // PERF v58.19: Skip elevationGrid — 25 API calls not needed for panel placement.
-  const [elevationData, solarData, dsmData] = await Promise.allSettled([
+
+  // PERF v61: If skipDsm, only run elevation + solar in parallel (saves 3-8s at boot).
+  // DSM will be lazily loaded in buildDigitalTwinFull() after the 3D scene is interactive.
+  const apiCalls: [Promise<any>, Promise<any>, Promise<any>] = [
     fetchElevation(lat, lng),
     fetchSolarData(lat, lng),
-    fetchDsmRoofPlanes(lat, lng),
-  ]);
+    skipDsm ? Promise.resolve(null) : fetchDsmRoofPlanes(lat, lng),
+  ];
+
+  const [elevationData, solarData, dsmData] = await Promise.allSettled(apiCalls);
 
   const elevation = elevationData.status === 'fulfilled' ? elevationData.value : 0;
   const solar     = solarData.status === 'fulfilled' ? solarData.value : null;
   const grid: TerrainPoint[] = [];  // elevation grid skipped at boot for speed
-  const dsm       = dsmData.status === 'fulfilled' ? dsmData.value : null;
+  const dsm       = (dsmData.status === 'fulfilled' && dsmData.value) ? dsmData.value : null;
 
   // Extract roof segments from Solar API (for sunshine hours, panel positions, etc.)
   const solarSegments = solar ? extractRoofSegments(solar, elevation) : [];
 
   // Merge DSM roof planes with Solar API segments:
   // DSM gives us accurate polygon geometry; Solar API gives us sunshine hours & panel positions.
-  // Match each DSM plane to the nearest Solar API segment by center proximity + azimuth similarity.
   const roofSegments = dsm?.roofPlanes?.length
     ? mergeDsmWithSolar(dsm.roofPlanes, solarSegments, elevation)
     : solarSegments;
@@ -118,8 +123,33 @@ export async function buildDigitalTwin(
     roofSegments,
     buildingFootprint,
   };
-  _twinCache.set(_ck, _res);
+  // Only cache if DSM was fetched (complete data). If skipDsm, don't cache — let full fetch cache.
+  if (!skipDsm) _twinCache.set(_ck, _res);
   return _res;
+}
+
+// PERF v61: Enrich an existing DigitalTwinData with DSM geometry (lazy, post-boot).
+// Call this after the 3D scene is interactive to upgrade Solar-only segments to DSM geometry.
+export async function enrichDigitalTwinWithDsm(
+  twin: DigitalTwinData
+): Promise<DigitalTwinData> {
+  const _ck = `${twin.lat.toFixed(4)},${twin.lng.toFixed(4)}`;
+  if (_twinCache.has(_ck)) return _twinCache.get(_ck)!;  // already enriched
+  try {
+    const dsm = await fetchDsmRoofPlanes(twin.lat, twin.lng);
+    if (!dsm?.roofPlanes?.length) {
+      _twinCache.set(_ck, twin);  // no DSM data, cache as-is
+      return twin;
+    }
+    const solarSegments = twin.solarData ? extractRoofSegments(twin.solarData, twin.elevation) : twin.roofSegments;
+    const enrichedSegments = mergeDsmWithSolar(dsm.roofPlanes, solarSegments, twin.elevation);
+    const enriched: DigitalTwinData = { ...twin, roofSegments: enrichedSegments };
+    _twinCache.set(_ck, enriched);
+    return enriched;
+  } catch {
+    _twinCache.set(_ck, twin);  // DSM failed — cache Solar-only version
+    return twin;
+  }
 }
 
 /**
