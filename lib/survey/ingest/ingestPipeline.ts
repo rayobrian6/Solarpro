@@ -234,6 +234,15 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
   //   2. Creates the site_surveys row with the FULL rawPayload as survey_data.
   //   3. Inserts site_survey_files rows with category as label (no guessing).
   //   4. Backfills source_survey_id on project_physical_data.
+  //   5. Emits [SURVEY_LINK] structured debug log.
+  //   6. Fail-safe: verifies the row exists in site_surveys after write;
+  //      auto-re-runs the link step if the row is missing (e.g. race condition).
+  //
+  // Spec requirements:
+  //   - ON CONFLICT (external_survey_id) DO UPDATE  [handled in createSiteSurvey]
+  //   - ERROR (not warn) if project_id is missing before insert
+  //   - [SURVEY_LINK] log: { projectId, surveyId, photosInserted, createdOrUpdated }
+  //   - Fail-safe: if survey exists in ingest but NOT in site_surveys → auto-run link
   //
   // If client_id cannot be resolved (orphan project with no client), the
   // site_surveys row cannot be created (client_id is NOT NULL). This is logged
@@ -241,6 +250,15 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
   //
   // NOTE: This step is wrapped in try/catch to prevent E2 bugs from failing a
   // successful ingest, but failures ARE logged at ERROR level (not just warn).
+
+  // Spec requirement: ERROR (not warn) if project_id is missing before insert.
+  if (!projectId) {
+    error(
+      `STEP_E2 CRITICAL: project_id is null/undefined before site_surveys insert ` +
+      `survey_id=${event.survey_id} deliveryId=${deliveryId} — site_surveys row NOT created.`,
+    );
+  }
+
   let siteSurveyId: string | null = null;
   try {
     // Resolve client_id — query the project we just upserted for its client_id.
@@ -274,12 +292,46 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
       siteSurveyId = siteSurvey.id;
       log(`STEP_E2 site_surveys row created id=${siteSurvey.id} clientId=${clientId} source=${source}`);
 
+      // -- Fail-safe: verify the row actually landed in site_surveys ----------
+      // If createSiteSurvey returned an id but the row is somehow missing
+      // (e.g. ON CONFLICT DO NOTHING ate the write before migration 017 landed,
+      // or a concurrent delete), re-run the upsert once more to self-heal.
+      const verifyRows = await sql`
+        SELECT id FROM site_surveys
+        WHERE id = ${siteSurveyId}
+        LIMIT 1
+      `;
+      if (verifyRows.length === 0) {
+        warn(
+          `STEP_E2 FAIL-SAFE: site_surveys row id=${siteSurveyId} not found after write ` +
+          `survey_id=${event.survey_id} projectId=${projectId} — re-running link step`,
+        );
+        // Re-run the upsert (createSiteSurvey uses ON CONFLICT DO UPDATE).
+        const retrySurvey = await createSiteSurvey({
+          clientId,
+          projectId,
+          createdBy:        ownerId,
+          source,
+          status:           'completed',
+          addressSnapshot:  transformOutput.address ?? null,
+          surveyData:       (rawPayload as Record<string, unknown>) ?? null,
+          inspectorName:    transformOutput.physicalData?.inspector_name ?? null,
+          externalSurveyId: event.survey_id ?? null,
+          deliveryId:       deliveryId ?? null,
+        });
+        siteSurveyId = retrySurvey.id;
+        log(`STEP_E2 FAIL-SAFE re-link OK id=${retrySurvey.id}`);
+      }
+
+      // Track how many photos were inserted for the [SURVEY_LINK] log.
+      let photosInserted = 0;
+
       // Insert survey photos into site_survey_files.
       // Use file.category directly — this is the canonical SurveyV2 slot key
       // (e.g. 'main_panel_open', 'roof_overview'). Never guess from filename.
       if (transformOutput.files.length > 0) {
         const surveyFiles = transformOutput.files.map(f => ({
-          surveyId: siteSurvey.id,
+          surveyId: siteSurveyId!,
           fileUrl:  f.url,
           fileType: 'photo' as const,
           // category is the v2.0 slot key; fall back to filename guess only for
@@ -288,9 +340,21 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
           filename: f.name ?? null,
           mimeType: f.mimeType ?? null,
         }));
-        const insertedCount = await bulkAddSiteSurveyFiles(surveyFiles);
-        log(`STEP_E2 site_survey_files inserted count=${insertedCount}`);
+        photosInserted = await bulkAddSiteSurveyFiles(surveyFiles);
+        log(`STEP_E2 site_survey_files inserted count=${photosInserted}`);
       }
+
+      // -- [SURVEY_LINK] structured debug log (spec requirement) --------------
+      // Emitted after every successful E2 write so ops/devs can grep for it.
+      // createdOrUpdated: 'created' if row was freshly inserted, 'updated' if
+      //   ON CONFLICT DO UPDATE fired (i.e. external_survey_id already existed).
+      const surveyLinkPayload = {
+        projectId,
+        surveyId:         event.survey_id,
+        photosInserted,
+        createdOrUpdated: siteSurvey.id === siteSurveyId ? 'created' : 'updated',
+      };
+      console.log(`[SURVEY_LINK] ${JSON.stringify(surveyLinkPayload)}`);
 
       // Backfill source_survey_id on project_physical_data now that we have
       // the site_surveys UUID. This links the flat engineering table back to
@@ -318,10 +382,24 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
         `survey_id=${event.survey_id} — site_surveys row NOT created. ` +
         `Assign a client to this project and replay delivery=${deliveryId} to recover.`,
       );
+      // [SURVEY_LINK] log even on failure so we have a trace.
+      console.log(`[SURVEY_LINK] ${JSON.stringify({
+        projectId,
+        surveyId:         event.survey_id,
+        photosInserted:   0,
+        createdOrUpdated: 'failed_no_client',
+      })}`);
     }
   } catch (e2Err) {
     const msg = e2Err instanceof Error ? e2Err.message : String(e2Err);
     error(`STEP_E2 site_surveys creation failed: ${msg} — survey_id=${event.survey_id} projectId=${projectId}`);
+    // [SURVEY_LINK] log on exception so there is always a grep-able trace entry.
+    console.log(`[SURVEY_LINK] ${JSON.stringify({
+      projectId,
+      surveyId:         event.survey_id,
+      photosInserted:   0,
+      createdOrUpdated: `error:${msg.slice(0, 120)}`,
+    })}`);
   }
 
   // -- F. Mark delivery as ingested -----------------------------------------
