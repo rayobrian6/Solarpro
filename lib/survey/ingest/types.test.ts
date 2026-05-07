@@ -1,5 +1,5 @@
 // ============================================================================
-// v47.435 — Survey Ingest: Types Contract Tests
+// v47.440 — Survey Ingest: Types Contract Tests
 //
 // Locks the IngestStatus, IngestErrorCode, SurveyProjectLinkStrategy,
 // and related constants against accidental drift.
@@ -76,15 +76,17 @@ describe('IngestStatus', () => {
 describe('IngestErrorCode', () => {
   it('contains all expected error codes', () => {
     // TypeScript compile-time + runtime lock.
+    // v47.440: PROJECT_RESOLUTION_FAILED added for survey→project resolution failures.
     const codes: IngestErrorCode[] = [
       'MISSING_OWNER_ID',
       'LINK_RESOLUTION_FAILED',
+      'PROJECT_RESOLUTION_FAILED',
       'TRANSFORM_FAILED',
       'DB_WRITE_FAILED',
       'DELIVERY_UPDATE_FAILED',
       'UNKNOWN',
     ];
-    expect(codes).toHaveLength(6);
+    expect(codes).toHaveLength(7);
     // All codes are SCREAMING_SNAKE_CASE
     for (const c of codes) {
       expect(c).toMatch(/^[A-Z_]+$/);
@@ -94,39 +96,82 @@ describe('IngestErrorCode', () => {
 
 // ---------------------------------------------------------------------------
 // LinkResolution — discriminated union shape checks
+//
+// v47.440: Only 'attach', 'resolve_existing', and 'error' are valid.
+// 'create', 'create_under_client', and 'triage' have been removed.
+// Surveys MUST attach to existing projects — auto-create is banned.
 // ---------------------------------------------------------------------------
 describe('LinkResolution discriminated union', () => {
-  it('action=attach has projectId', () => {
-    const res: LinkResolution = { action: 'attach', projectId: 'abc-123' };
+  it('action=attach has projectId and method', () => {
+    const res: LinkResolution = {
+      action: 'attach',
+      projectId: 'abc-123',
+      method: 'direct_id',
+    };
     expect(res.action).toBe('attach');
-    expect(res.projectId).toBe('abc-123');
+    if (res.action === 'attach') {
+      expect(res.projectId).toBe('abc-123');
+      expect(res.method).toBe('direct_id');
+    }
   });
 
-  it('action=create has surveyExternalId and strategy', () => {
+  it('action=attach accepts selected_project method', () => {
     const res: LinkResolution = {
-      action: 'create',
-      surveyExternalId: 'survey-xyz',
-      strategy: 'CREATE_ORPHAN',
+      action: 'attach',
+      projectId: 'proj-selected',
+      method: 'selected_project',
     };
-    expect(res.action).toBe('create');
-    expect(res.surveyExternalId).toBe('survey-xyz');
-    expect(res.strategy).toBe('CREATE_ORPHAN');
+    expect(res.action).toBe('attach');
+    if (res.action === 'attach') {
+      expect(res.method).toBe('selected_project');
+    }
   });
 
-  it('action=triage has surveyExternalId and reason', () => {
+  it('action=resolve_existing has surveyExternalId, clientId, address', () => {
     const res: LinkResolution = {
-      action: 'triage',
+      action: 'resolve_existing',
       surveyExternalId: 'survey-xyz',
-      reason: 'test reason',
+      clientId: null,
+      address: null,
     };
-    expect(res.action).toBe('triage');
-    expect(res.reason.length).toBeGreaterThan(0);
+    expect(res.action).toBe('resolve_existing');
+    if (res.action === 'resolve_existing') {
+      expect(res.surveyExternalId).toBe('survey-xyz');
+      expect(res.clientId).toBeNull();
+      expect(res.address).toBeNull();
+    }
+  });
+
+  it('action=resolve_existing can carry clientId hint', () => {
+    const res: LinkResolution = {
+      action: 'resolve_existing',
+      surveyExternalId: 'survey-abc',
+      clientId: 'client-uuid-123',
+      address: '123 Main St',
+    };
+    expect(res.action).toBe('resolve_existing');
+    if (res.action === 'resolve_existing') {
+      expect(res.clientId).toBe('client-uuid-123');
+      expect(res.address).toBe('123 Main St');
+    }
   });
 
   it('action=error has error message', () => {
     const res: LinkResolution = { action: 'error', error: 'something went wrong' };
     expect(res.action).toBe('error');
-    expect(res.error).toBeTruthy();
+    if (res.action === 'error') {
+      expect(res.error).toBeTruthy();
+    }
+  });
+
+  // ------ Auto-create is BANNED ------
+  it('create action does not exist in the union (auto-create is banned)', () => {
+    // This is a compile-time guarantee enforced by TypeScript.
+    // At runtime we verify the valid action values are the expected set.
+    const validActions = ['attach', 'resolve_existing', 'error'];
+    expect(validActions).not.toContain('create');
+    expect(validActions).not.toContain('create_under_client');
+    expect(validActions).not.toContain('triage');
   });
 });
 

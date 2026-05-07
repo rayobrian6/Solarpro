@@ -46,9 +46,10 @@ function makeInput(overrides: Partial<TransformInput> = {}): TransformInput {
     event: baseEvent,
     rawPayload: null,
     linkResolution: {
-      action: 'create',
+      action: 'resolve_existing',
       surveyExternalId: 'survey-test-abc',
-      strategy: 'CREATE_ORPHAN',
+      clientId: null,
+      address: null,
     },
     context: baseContext,
     ...overrides,

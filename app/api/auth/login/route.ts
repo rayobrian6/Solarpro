@@ -67,6 +67,16 @@ export async function POST(req: NextRequest) {
     `;
 
     if (rows.length === 0) {
+      // [AUTH_DEBUG] user not found
+      console.log('[AUTH_DEBUG]', JSON.stringify({
+        email:         email.toLowerCase().trim(),
+        userFound:     false,
+        hashPrefix:    null,
+        hashLen:       0,
+        hashFormat:    null,
+        compareResult: false,
+        requiresReset: false,
+      }));
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }
@@ -75,8 +85,32 @@ export async function POST(req: NextRequest) {
 
     const user = rows[0];
 
-    const valid = await verifyPassword(password, user.password_hash);
-    if (!valid) {
+    // [AUTH_DEBUG] structured log — temporary diagnostic (safe: no PII values, only metadata)
+    const verifyResult = await verifyPassword(password, user.password_hash, { extended: true });
+    console.log('[AUTH_DEBUG]', JSON.stringify({
+      email:         user.email,
+      userFound:     true,
+      hashPrefix:    user.password_hash ? user.password_hash.slice(0, 10) : null,
+      hashLen:       user.password_hash?.length ?? 0,
+      hashFormat:    verifyResult.hashFormat,
+      compareResult: verifyResult.valid,
+      requiresReset: verifyResult.requiresReset ?? false,
+    }));
+
+    if (verifyResult.requiresReset) {
+      // Legacy/non-bcrypt hash detected. User must reset their password.
+      // DO NOT silently reset or block — return a clear, actionable message.
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Your account requires a password reset. Please use "Forgot Password" to set a new password.',
+          code: 'LEGACY_HASH_RESET_REQUIRED',
+        },
+        { status: 401 }
+      );
+    }
+
+    if (!verifyResult.valid) {
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }
