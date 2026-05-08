@@ -106,7 +106,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       event_id:     payload.surveyId,
       survey_id:    payload.surveyId,
       completed_at: payload.submittedAt,
-      schemaVersion: payload.schemaVersion,
+      // schemaVersion is intentionally OMITTED from the webhook envelope.
+      // The envelope validator (envelopeValidator.ts) accepts absent schemaVersion
+      // and coerces it to CURRENT_SCHEMA_VERSION ('1.0'). The mobile payload's
+      // schemaVersion ('2.0') is an internal V2 schema and must not be forwarded.
       // F-06 ownership claims — forwarded from the verified handoff JWT.
       solarpro_user_id:    claims.solarpro_user_id    ?? null,
       solarpro_project_id: claims.solarpro_project_id ?? null,
