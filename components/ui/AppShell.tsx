@@ -512,6 +512,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const toast = useMiniToast();
 
+  // ── Responsive auto-collapse ─────────────────────────────────────────────
+  // On screens narrower than 1280px (xl breakpoint) the sidebar auto-collapses
+  // to icon-only mode so the content area has room to breathe.
+  // Once the user manually toggles the sidebar we stop auto-adjusting for the
+  // remainder of the session (userToggledRef guards the resize handler).
+  const userToggledRef = useRef(false);
+  useLayoutEffect(() => {
+    // Initial collapse on narrow screens (runs before first paint — no flicker)
+    if (typeof window !== 'undefined' && window.innerWidth < 1280) {
+      setCollapsed(true);
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      // Only auto-adjust when the user has NOT manually toggled
+      if (userToggledRef.current) return;
+      setCollapsed(window.innerWidth < 1280);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Carry projectId through design↔engineering navigation
   const navHref = (baseHref: string) => {
     if (baseHref === '/design' || baseHref === '/engineering') {
@@ -794,7 +818,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent />
         <button
           type="button"
-          onClick={() => { logClick('TOGGLE_SIDEBAR'); setCollapsed(!collapsed); }}
+          onClick={() => { logClick('TOGGLE_SIDEBAR'); userToggledRef.current = true; setCollapsed(!collapsed); }}
           className="absolute -right-3 top-20 w-6 h-6 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-all z-10 shadow-lg"
         >
           {collapsed ? <ChevronRight size={11} /> : <ChevronLeft size={11} />}
