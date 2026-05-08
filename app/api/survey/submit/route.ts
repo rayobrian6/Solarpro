@@ -131,6 +131,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       webhookBodyObj['solarpro_selected_client_id']  = payload.selectedClientId  ?? null;
     }
 
+    // v47.441: Inline the full SurveyV2Payload so the ingest pipeline (Step C)
+    // can use it directly as rawPayload without fetching from the partner API.
+    // This ensures photos (with category labels) and physicalData are extracted
+    // by the v2.0 transformer even though schemaVersion is absent from the envelope.
+    webhookBodyObj['inline_payload'] = payload as unknown as Record<string, unknown>;
+
     const webhookBodyStr = JSON.stringify(webhookBodyObj);
 
     // Timestamp is included in the signed string so the verifier can enforce

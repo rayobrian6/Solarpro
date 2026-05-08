@@ -116,6 +116,12 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
       survey_id: r.survey_id,
       completed_at: r.completed_at,
       survey_url: r.survey_url as string | undefined,
+      // v47.441: inline_payload - only set by /api/survey/submit (internal).
+      // External partner webhooks never include this field.
+      // Pass through as-is if present; null/undefined otherwise.
+      inline_payload: (r.inline_payload && typeof r.inline_payload === 'object' && !Array.isArray(r.inline_payload))
+        ? r.inline_payload as Record<string, unknown>
+        : null,
       // F-06: Ownership claims (null when not from a SolarPro handoff)
       solarpro_user_id,
       solarpro_project_id,

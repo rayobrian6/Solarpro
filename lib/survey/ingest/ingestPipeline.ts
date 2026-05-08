@@ -103,24 +103,38 @@ export async function runIngestPipeline(context: IngestContext): Promise<IngestR
   }
 
   // -- C. Fetch full survey payload ------------------------------------------
-  // GET ${PARTNER_BASE_URL}/api/surveys/{survey_id}
-  // Authorization: Bearer ${PARTNER_API_BEARER_TOKEN}
-  // Returns null on any error - pipeline continues in degraded mode.
-  log('STEP_C fetching full payload from partner API');
-  const rawPayload: SurveyRawPayload | null = await fetchFullPayload(
-    event.survey_id,
-    traceId,
-  );
-  if (rawPayload === null) {
-    log('STEP_C payload fetch returned null - continuing in degraded mode');
+  // Priority 1: Use inline_payload if provided by /api/survey/submit.
+  //   This is the full SurveyV2Payload already in memory - no network fetch needed.
+  //   External partner webhooks never set inline_payload.
+  // Priority 2: Fetch from GET ${PARTNER_BASE_URL}/api/surveys/{survey_id}
+  //   Used for survey-app webhook worker path where only a thin event arrives.
+  log('STEP_C fetching full payload');
+  let rawPayload: SurveyRawPayload | null = null;
+
+  if (event.inline_payload && typeof event.inline_payload === 'object') {
+    rawPayload = event.inline_payload as SurveyRawPayload;
+    log('STEP_C using inline_payload from submit route (no network fetch needed)');
   } else {
-    log('STEP_C payload fetch OK');
+    rawPayload = await fetchFullPayload(event.survey_id, traceId);
+    if (rawPayload === null) {
+      log('STEP_C payload fetch returned null - continuing in degraded mode');
+    } else {
+      log('STEP_C payload fetch OK');
+    }
   }
 
   // -- D. Transform ---------------------------------------------------------
+  // v47.441: When inline_payload is present (mobile direct submit via
+  // /api/survey/submit), use the v2.0 transformer so photos, physicalData,
+  // and siteOverview fields are correctly extracted.
+  // For external partner webhooks (schemaVersion always '1.0'), use the
+  // v1.0 transformer as before.
   log('STEP_D running transform');
+  const transformEvent = rawPayload === event.inline_payload && rawPayload !== null
+    ? { ...event, schemaVersion: '2.0' as const }
+    : event;
   const transformResult: TransformResult = transform({
-    event,
+    event: transformEvent,
     rawPayload,
     linkResolution,
     context,

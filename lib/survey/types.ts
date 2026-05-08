@@ -103,6 +103,13 @@ export interface SurveyCompletedEvent {
    *  (and solarpro_selected_project_id is absent), ingest creates a new project
    *  under this client and attaches the survey to it. */
   solarpro_selected_client_id?: string | null;
+  // -- v47.441: Inline payload for internal (same-process) submissions -------
+  // Set by /api/survey/submit when the full SurveyV2Payload is already in
+  // memory. When present, Step C of ingestPipeline skips the partner API fetch
+  // and uses this directly as rawPayload. External partner webhooks never set
+  // this field (they don't have the full payload at send time).
+  /** Full SurveyV2Payload inlined by /api/survey/submit. Never set by external partners. */
+  inline_payload?: Record<string, unknown> | null;
 }
 
 // ---------------------------------------------------------------------------
