@@ -224,6 +224,40 @@ export async function resolveMobileUser(
   const d   = decoded as unknown as Record<string, unknown>;
   const uid = (d.solarpro_user_id ?? d.userId ?? d.sub) as string | undefined;
 
+  // STEP 4b — If no UUID userId claim, try email→userId lookup.
+  // Render's mobile proxy mints a JWT with {email} signed by SOLARPRO_HANDOFF_SECRET.
+  // This lets Render forward the mobile user's identity without needing a shared
+  // service key — only the handoff secret (already synced on both sides) is required.
+  const emailClaim = (d.solarpro_email ?? d.email) as string | undefined;
+  if ((!uid || !isValidUUID(uid as string)) && emailClaim) {
+    const normalizedEmail = emailClaim.trim().toLowerCase();
+    console.log(
+      `[MOBILE_AUTH] ${routeLabel} — no UUID userId in JWT, trying email lookup: ${normalizedEmail}`
+    );
+    try {
+      const sql = await getDbReady();
+      const rows = await sql`
+        SELECT id FROM users
+         WHERE LOWER(email) = ${normalizedEmail}
+         LIMIT 1
+      `;
+      if (rows.length > 0) {
+        const resolvedId = rows[0].id as string;
+        console.log(
+          `[MOBILE_AUTH] ${routeLabel} — authenticated via bearer_jwt + email lookup userId=${resolvedId}`
+        );
+        return { userId: resolvedId, source: 'bearer_jwt' };
+      }
+      console.warn(
+        `[MOBILE_AUTH_FAIL] ${routeLabel} — JWT email "${normalizedEmail}" not found in users table`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[MOBILE_AUTH_FAIL] ${routeLabel} — email lookup DB error: ${msg}`);
+    }
+    return null;
+  }
+
   if (!uid) {
     console.error(
       `[MOBILE_AUTH_FAIL] ${routeLabel} — JWT valid but no user identity claim found. ` +
