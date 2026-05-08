@@ -112,7 +112,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       // schemaVersion ('2.0') is an internal V2 schema and must not be forwarded.
       // F-06 ownership claims — forwarded from the verified handoff JWT.
       solarpro_user_id:    claims.solarpro_user_id    ?? null,
-      solarpro_project_id: claims.solarpro_project_id ?? null,
+      // v47.442: Use claims.solarpro_project_id when present (explicit handoff JWT claim).
+      // Fall back to payload.projectId when solarpro_project_id is absent from the JWT
+      // (e.g. the JWT was minted without it) but the payload carries a real project UUID.
+      // This ensures Strategy 3 (project-based owner resolution in ownerResolver.ts) can
+      // fire even when the JWT predates the solarpro_project_id claim addition.
+      // NEVER forward __standalone__ as a project ID -- that is a sentinel, not a UUID.
+      solarpro_project_id: claims.solarpro_project_id
+        ?? (payload.projectId && payload.projectId !== STANDALONE_PROJECT_ID
+            ? payload.projectId
+            : null),
       solarpro_email:      claims.solarpro_email       ?? null,
       // Survey payload fields
       projectId:         payload.projectId,
