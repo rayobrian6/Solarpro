@@ -586,6 +586,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     const access = hasPlatformAccess(user);
     if (!access) {
+      // Diagnostic log — helps identify why a user is being redirected.
+      // Fields: userId, role, isFreePass, subscriptionStatus, trialEndsAt, hasAccess
+      console.warn('[AppShell] Access denied → redirecting to /subscribe?expired=1', {
+        userId:             user.id,
+        role:               user.role,
+        isFreePass:         user.isFreePass,
+        subscriptionStatus: user.subscriptionStatus,
+        trialEndsAt:        user.trialEndsAt,
+        hasAccess:          access,
+        pathname,
+      });
       router.push('/subscribe?expired=1');
     }
   }, [user, pathname, router]);

@@ -65,6 +65,18 @@ export function getDb(): SqlExecutor {
 // ---------------------------------------------------------------------------
 export function isLegacyHash(hash: string | null | undefined): boolean {
   if (!hash) return false;
+
+  // ---------------------------------------------------------------------------
+  // SAFETY NET: bcrypt cost=4 hashes are NEVER produced by real password flows.
+  // We hash real passwords at cost 10 or 12.  A $2b$04$ hash is overwhelmingly
+  // our old placeholder (bcrypt.hash('__SOLARPRO_MUST_RESET__', 4)) written by
+  // an earlier version of the migration script.  Detecting this here means the
+  // login route returns LEGACY_HASH_RESET_REQUIRED (with a clear "use Forgot
+  // Password" message) even if Migration 030 / free-pass repair hasn't run yet.
+  // This is the permanent safety net — independent of any migration.
+  // ---------------------------------------------------------------------------
+  if (/^\$2[aby]\$04\$/.test(hash) && hash.length === 60) return true;
+
   // Valid bcrypt: starts with $2a$, $2b$, $2y$ and is exactly 60 chars
   if (/^\$2[aby]\$\d{2}\$/.test(hash) && hash.length === 60) return false;
   // Valid argon2: starts with $argon2
@@ -106,6 +118,8 @@ export async function verifyPassword(
   if (isLegacyHash(hash)) {
     const hashFormat = hash === '__SOLARPRO_MUST_RESET__'
       ? 'sentinel'
+      : /^\$2[aby]\$04\$/.test(hash) && hash.length === 60
+      ? 'cost4_bcrypt_sentinel'   // bcrypt-of-sentinel from old migration script
       : /^[0-9a-f]{32}:[0-9a-f]{128}$/i.test(hash)
       ? 'legacy_salt_sha512'
       : 'unknown_legacy';

@@ -228,21 +228,73 @@ export async function POST(req: NextRequest) {
         `;
 
         if (existing.length > 0) {
-          // User already exists — update free-pass metadata only, never touch password_hash
-          await sql`
-            UPDATE users SET
-              name                = ${u.name},
-              company             = ${u.company},
-              role                = ${u.role},
-              plan                = 'contractor',
-              subscription_status = 'free_pass',
-              is_free_pass        = true,
-              free_pass_note      = ${u.note},
-              trial_ends_at       = '2099-12-31 23:59:59+00',
-              updated_at          = NOW()
-            WHERE email = ${u.email.toLowerCase().trim()}
+          // ── ROOT CAUSE FIX (self-healing) ─────────────────────────────────
+          // Update free-pass metadata AND repair any broken/placeholder
+          // password_hash.  A "broken" hash is one that would cause the login
+          // route to return a generic "Invalid email or password" with no reset
+          // hint.  Broken patterns:
+          //   • '$2b$04$…' (60 chars) — bcrypt of sentinel at cost=4, old migration bug
+          //   • '__SOLARPRO_MUST_RESET__'    — already the correct sentinel, keep
+          //   • 'salt_hex:hash_hex' pattern  — legacy SHA-512, needs sentinel
+          //
+          // If the hash looks like a REAL bcrypt hash (cost ≥ 10, 60 chars) we
+          // leave it alone — the user has already set a real password.
+          //
+          // This update runs on every /api/migrate invocation, so it is
+          // idempotent and self-healing without any manual DB surgery.
+          // ──────────────────────────────────────────────────────────────────
+          const existingHash = await sql`
+            SELECT password_hash FROM users
+            WHERE email = ${u.email.toLowerCase().trim()} LIMIT 1
           `;
-          results.push(`✅ Free pass updated (existing user, password preserved): ${u.email}`);
+          const currentHash: string = existingHash[0]?.password_hash ?? '';
+
+          // Detect broken hashes that need repair:
+          //   cost=4 bcrypt  → was bcrypt.hash('__SOLARPRO_MUST_RESET__', 4)
+          //   sentinel       → already correct, leave as-is (no repair needed)
+          //   legacy SHA-512 → salt:hash format, needs sentinel
+          //   null/empty     → needs sentinel
+          const isCost4Bcrypt = /^\$2[aby]\$04\$/.test(currentHash) && currentHash.length === 60;
+          const isLegacySha   = /^[0-9a-f]{32}:[0-9a-f]{128}$/i.test(currentHash);
+          const isEmpty       = !currentHash;
+          const needsRepair   = isCost4Bcrypt || isLegacySha || isEmpty;
+
+          if (needsRepair) {
+            // Replace broken hash with the correct sentinel so isLegacyHash()
+            // catches it and the login route shows the "use Forgot Password" prompt.
+            await sql`
+              UPDATE users SET
+                name                = ${u.name},
+                company             = ${u.company},
+                role                = ${u.role},
+                plan                = 'contractor',
+                subscription_status = 'free_pass',
+                is_free_pass        = true,
+                free_pass_note      = ${u.note},
+                trial_ends_at       = '2099-12-31 23:59:59+00',
+                password_hash       = '__SOLARPRO_MUST_RESET__',
+                updated_at          = NOW()
+              WHERE email = ${u.email.toLowerCase().trim()}
+            `;
+            console.log(`[FreePass repair] Repaired broken hash (${isCost4Bcrypt ? 'cost4_bcrypt' : isLegacySha ? 'legacy_sha' : 'empty'}) for ${u.email}`);
+            results.push(`✅ Free pass updated + hash repaired (${isCost4Bcrypt ? 'cost4_bcrypt→sentinel' : 'empty/legacy→sentinel'}): ${u.email}`);
+          } else {
+            // Real bcrypt hash (cost≥10) — user has set a real password, preserve it
+            await sql`
+              UPDATE users SET
+                name                = ${u.name},
+                company             = ${u.company},
+                role                = ${u.role},
+                plan                = 'contractor',
+                subscription_status = 'free_pass',
+                is_free_pass        = true,
+                free_pass_note      = ${u.note},
+                trial_ends_at       = '2099-12-31 23:59:59+00',
+                updated_at          = NOW()
+              WHERE email = ${u.email.toLowerCase().trim()}
+            `;
+            results.push(`✅ Free pass updated (existing user, real password preserved): ${u.email}`);
+          }
         } else {
           // New user — insert with the literal sentinel string that isLegacyHash()
           // in lib/auth.ts recognises and maps to hashFormat='sentinel'.
