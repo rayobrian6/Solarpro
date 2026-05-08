@@ -96,7 +96,7 @@ export default function DesignSidebar({
   const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
   return (
-    <div className="w-72 bg-slate-900 border-l border-slate-700/50 flex flex-col overflow-hidden flex-shrink-0">
+    <div className="w-60 xl:w-72 bg-slate-900 border-l border-slate-700/50 flex flex-col overflow-hidden flex-shrink-0">
       <div className="flex-1 overflow-y-auto">
 
         {/* Panel Selection */}

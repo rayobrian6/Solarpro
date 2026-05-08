@@ -3377,7 +3377,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         </div>
 
         {/* ── Right Sidebar ── */}
-        <div className="w-80 bg-slate-900 border-l border-slate-700/50 flex flex-col flex-shrink-0 min-h-0">
+        <div className="w-64 xl:w-80 bg-slate-900 border-l border-slate-700/50 flex flex-col flex-shrink-0 min-h-0">
           {/* Tab bar */}
           <div className="flex border-b border-slate-700/50 flex-shrink-0">
             {[
