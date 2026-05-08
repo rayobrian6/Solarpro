@@ -121,10 +121,13 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
   const [systemKw, setSystemKw] = useState<number>(0);
   const [offsetPercent, setOffsetPercent] = useState(100);
   const [manualKwh, setManualKwh] = useState('');
+  const [manualRate, setManualRate] = useState('');
   const [manualAddress, setManualAddress] = useState('');
   const [selectedFile, setSelectedFile] = useState<{ name: string; size: number; type: string } | null>(null);
   const [lastFile, setLastFile] = useState<File | null>(null); // for retry
+  const [parseFailedMode, setParseFailedMode] = useState(false); // true = AI parse failed → manual entry is primary
   const [provisioning, setProvisioning] = useState(false);
+  const manualKwhRef = useRef<HTMLInputElement>(null);
   const [provisionedProjectId, setProvisionedProjectId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -280,14 +283,17 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         if (res.status === 415) msg = 'Unsupported file type. Please upload a PDF, JPG, or PNG.';
         if (res.status === 422) {
           if (data.parseEmpty) {
-            msg = 'Bill text could not be extracted. Please re-upload a clearer image or enter manually.';
+            msg = 'AI couldn\'t extract readable data from this bill. Enter your usage manually below — it only takes a moment.';
           } else {
-            msg = data.error || 'Could not extract data from this bill. Try a clearer image or enter manually.';
+            msg = data.error || 'Could not extract data from this bill. Enter manually below.';
           }
         }
         setError(msg);
+        setParseFailedMode(true); // elevate manual entry as primary CTA
         setUploading(false);
         setProcessingStage('uploading');
+        // Auto-focus the manual kWh field after a short delay (state flush)
+        setTimeout(() => manualKwhRef.current?.focus(), 150);
         return;
       }
 
@@ -297,7 +303,9 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       cancelSimulation();
       const msg = err instanceof Error ? (err as Error).message : 'Upload failed. Please check your connection and try again.';
       setError(msg);
+      setParseFailedMode(true);
       setProcessingStage('uploading');
+      setTimeout(() => manualKwhRef.current?.focus(), 150);
     } finally {
       setUploading(false);
     }
@@ -306,6 +314,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
   // ── Retry handler ─────────────────────────────────────────────────────────
   const handleRetry = useCallback(() => {
     setError(null);
+    setParseFailedMode(false);
     if (lastFile) {
       handleFile(lastFile);
     } else {
@@ -320,12 +329,14 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
       return;
     }
     setError(null);
+    setParseFailedMode(false);
     setUploading(true);
     setProcessingStage('parsing');
 
     try {
+      const rateStr = manualRate ? `\nElectricity Rate: $${manualRate}/kWh` : '';
       const formData = new FormData();
-      formData.append('text', `Service Address: ${manualAddress}\nMonthly Usage: ${manualKwh} kWh\nAnnual Usage: ${parseFloat(manualKwh) * 12} kWh`);
+      formData.append('text', `Service Address: ${manualAddress}\nMonthly Usage: ${manualKwh} kWh\nAnnual Usage: ${parseFloat(manualKwh) * 12} kWh${rateStr}`);
 
       const res = await fetch('/api/bill-upload', { method: 'POST', body: formData });
       let data: any;
@@ -340,11 +351,13 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
           data.billData.monthlyKwh = parseFloat(manualKwh);
           data.billData.estimatedAnnualKwh = parseFloat(manualKwh) * 12;
           data.billData.serviceAddress = manualAddress;
+          if (manualRate) data.billData.electricityRate = parseFloat(manualRate);
         }
         await runSystemSizing(data.billData || {
           monthlyKwh: parseFloat(manualKwh),
           estimatedAnnualKwh: parseFloat(manualKwh) * 12,
           serviceAddress: manualAddress,
+          electricityRate: manualRate ? parseFloat(manualRate) : undefined,
         }, data);
       } else {
         setError(data.error || 'Could not process address');
@@ -354,7 +367,7 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
     } finally {
       setUploading(false);
     }
-  }, [manualKwh, manualAddress, runSystemSizing]);
+  }, [manualKwh, manualRate, manualAddress, runSystemSizing]);
 
   // ── Drag & drop ────────────────────────────────────────────────────────────
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -484,133 +497,239 @@ export default function BillUploadFlow({ onComplete, onClose, className = '' }: 
         {/* ── STEP 1: Upload ── */}
         {step === 'upload' && (
           <div className="space-y-4">
-            {/* Drop zone */}
-            <div
-              onDragOver={e => { e.preventDefault(); setDragging(true); }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-              onClick={() => !uploading && fileInputRef.current?.click()}
-              className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
-                uploading
-                  ? 'border-amber-500/40 bg-amber-500/5 cursor-default'
-                  : dragging
-                    ? 'border-amber-400 bg-amber-500/5 cursor-copy'
-                    : 'border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 cursor-pointer'
-              }`}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                className="hidden"
-                onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
-              />
 
-              {uploading ? (
-                <ProcessingIndicator />
-              ) : selectedFile && !error ? (
-                /* File preview after selection (while not uploading) */
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                    <FileText size={22} className="text-amber-400" />
+            {/* ── PARSE FAILED MODE: manual entry is primary ── */}
+            {parseFailedMode && (
+              <>
+                {/* Amber banner */}
+                <div className="flex items-start gap-3 rounded-xl bg-amber-500/10 border border-amber-500/30 p-4">
+                  <AlertCircle size={16} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-amber-300 text-sm font-semibold">AI couldn't read this bill</p>
+                    <p className="text-amber-200/70 text-xs mt-0.5">{error || 'Enter your usage below — it only takes a few seconds.'}</p>
+                  </div>
+                </div>
+
+                {/* Manual entry — primary CTA when parse failed */}
+                <div className="rounded-xl border border-amber-500/20 bg-slate-800/60 p-4 space-y-3">
+                  <p className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Enter Bill Data Manually</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1.5 block font-medium">Monthly kWh <span className="text-red-400">*</span></label>
+                      <input
+                        ref={manualKwhRef}
+                        type="number"
+                        value={manualKwh}
+                        onChange={e => setManualKwh(e.target.value)}
+                        placeholder="e.g. 1200"
+                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/30"
+                      />
+                      <p className="text-slate-500 text-[10px] mt-1">From your bill's kWh used</p>
+                    </div>
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1.5 block font-medium">Service Address <span className="text-red-400">*</span></label>
+                      <input
+                        type="text"
+                        value={manualAddress}
+                        onChange={e => setManualAddress(e.target.value)}
+                        placeholder="123 Main St, City, ST"
+                        className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/30"
+                      />
+                    </div>
                   </div>
                   <div>
-                    <p className="text-white font-semibold text-sm truncate max-w-xs">{selectedFile.name}</p>
-                    <p className="text-slate-400 text-xs mt-0.5">{formatFileSize(selectedFile.size)}</p>
+                    <label className="text-slate-400 text-xs mb-1.5 block font-medium">Utility Rate ($/kWh) <span className="text-slate-600">optional</span></label>
+                    <input
+                      type="number"
+                      value={manualRate}
+                      onChange={e => setManualRate(e.target.value)}
+                      placeholder="e.g. 0.14"
+                      step="0.001"
+                      min="0.01"
+                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-white text-sm focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/30"
+                    />
+                    <p className="text-slate-500 text-[10px] mt-1">Leave blank to use utility database average</p>
                   </div>
-                  <p className="text-slate-500 text-xs">Click to choose a different file</p>
+                  <button
+                    onClick={handleManualEntry}
+                    disabled={uploading || !manualKwh || !manualAddress}
+                    className="w-full btn-primary py-2.5 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {uploading
+                      ? <><Loader2 size={14} className="animate-spin inline mr-2" />Processing…</>
+                      : <><ArrowRight size={14} className="inline mr-1.5" />Continue with Manual Entry</>
+                    }
+                  </button>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
-                    <Upload size={24} className="text-slate-400" />
-                  </div>
-                  <div>
-                    <p className="text-white font-semibold">Drop your electric bill here</p>
-                    <p className="text-slate-400 text-sm mt-1">PDF, JPG, or PNG — we'll extract everything automatically</p>
-                  </div>
-                  <div className="flex items-center gap-4 text-xs text-slate-500">
-                    <span className="flex items-center gap-1"><FileText size={12} /> PDF</span>
-                    <span className="flex items-center gap-1"><FileText size={12} /> JPG</span>
-                    <span className="flex items-center gap-1"><FileText size={12} /> PNG</span>
-                    <span className="flex items-center gap-1 text-slate-600">max {MAX_FILE_SIZE_MB} MB</span>
-                  </div>
-                </div>
-              )}
-            </div>
 
-            {/* What we extract */}
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { icon: <Zap size={14} className="text-amber-400" />, label: 'kWh Usage', desc: 'Monthly & annual' },
-                { icon: <Building2 size={14} className="text-blue-400" />, label: 'Utility Provider', desc: 'Auto-detected' },
-                { icon: <MapPin size={14} className="text-emerald-400" />, label: 'Service Address', desc: 'Location data' },
-              ].map(item => (
-                <div key={item.label} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
-                  <div className="flex items-center gap-2 mb-1">{item.icon}<span className="text-white text-xs font-medium">{item.label}</span></div>
-                  <p className="text-slate-400 text-xs">{item.desc}</p>
+                {/* Secondary: try uploading again */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-slate-700/60" />
+                  <span className="text-slate-600 text-xs">or</span>
+                  <div className="flex-1 h-px bg-slate-700/60" />
                 </div>
-              ))}
-            </div>
-
-            {/* Error with retry */}
-            {error && (
-              <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-                <AlertCircle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-red-300 text-sm">{error}</p>
-                  {lastFile && (
-                    <button
-                      onClick={e => { e.stopPropagation(); handleRetry(); }}
-                      className="mt-2 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
-                    >
-                      <RefreshCw size={11} /> Try again
-                    </button>
-                  )}
-                </div>
-              </div>
+                <button
+                  onClick={() => { setError(null); setParseFailedMode(false); fileInputRef.current?.click(); }}
+                  disabled={uploading}
+                  className="w-full btn-secondary py-2 text-sm flex items-center justify-center gap-2"
+                >
+                  <Upload size={13} /> Try uploading a different file
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="hidden"
+                  onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
+                />
+              </>
             )}
 
-            {/* Divider */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-slate-700" />
-              <span className="text-slate-500 text-xs">or enter manually</span>
-              <div className="flex-1 h-px bg-slate-700" />
-            </div>
+            {/* ── NORMAL MODE: upload drop zone + manual entry below ── */}
+            {!parseFailedMode && (
+              <>
+                {/* Drop zone */}
+                <div
+                  onDragOver={e => { e.preventDefault(); setDragging(true); }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => !uploading && fileInputRef.current?.click()}
+                  className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
+                    uploading
+                      ? 'border-amber-500/40 bg-amber-500/5 cursor-default'
+                      : dragging
+                        ? 'border-amber-400 bg-amber-500/5 cursor-copy'
+                        : 'border-slate-600 hover:border-slate-500 hover:bg-slate-800/50 cursor-pointer'
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    className="hidden"
+                    onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])}
+                  />
 
-            {/* Manual entry */}
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 text-xs mb-1 block">Monthly kWh Usage</label>
-                  <input
-                    type="number"
-                    value={manualKwh}
-                    onChange={e => setManualKwh(e.target.value)}
-                    placeholder="e.g. 1200"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500/50"
-                  />
+                  {uploading ? (
+                    <ProcessingIndicator />
+                  ) : selectedFile && !error ? (
+                    /* File preview after selection (while not uploading) */
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                        <FileText size={22} className="text-amber-400" />
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold text-sm truncate max-w-xs">{selectedFile.name}</p>
+                        <p className="text-slate-400 text-xs mt-0.5">{formatFileSize(selectedFile.size)}</p>
+                      </div>
+                      <p className="text-slate-500 text-xs">Click to choose a different file</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+                        <Upload size={24} className="text-slate-400" />
+                      </div>
+                      <div>
+                        <p className="text-white font-semibold">Drop your electric bill here</p>
+                        <p className="text-slate-400 text-sm mt-1">PDF, JPG, or PNG — we'll extract everything automatically</p>
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-slate-500">
+                        <span className="flex items-center gap-1"><FileText size={12} /> PDF</span>
+                        <span className="flex items-center gap-1"><FileText size={12} /> JPG</span>
+                        <span className="flex items-center gap-1"><FileText size={12} /> PNG</span>
+                        <span className="flex items-center gap-1 text-slate-600">max {MAX_FILE_SIZE_MB} MB</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <label className="text-slate-400 text-xs mb-1 block">Service Address</label>
-                  <input
-                    type="text"
-                    value={manualAddress}
-                    onChange={e => setManualAddress(e.target.value)}
-                    placeholder="123 Main St, City, ST 12345"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500/50"
-                  />
+
+                {/* What we extract */}
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { icon: <Zap size={14} className="text-amber-400" />, label: 'kWh Usage', desc: 'Monthly & annual' },
+                    { icon: <Building2 size={14} className="text-blue-400" />, label: 'Utility Provider', desc: 'Auto-detected' },
+                    { icon: <MapPin size={14} className="text-emerald-400" />, label: 'Service Address', desc: 'Location data' },
+                  ].map(item => (
+                    <div key={item.label} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                      <div className="flex items-center gap-2 mb-1">{item.icon}<span className="text-white text-xs font-medium">{item.label}</span></div>
+                      <p className="text-slate-400 text-xs">{item.desc}</p>
+                    </div>
+                  ))}
                 </div>
-              </div>
-              <button
-                onClick={handleManualEntry}
-                disabled={uploading || !manualKwh || !manualAddress}
-                className="w-full btn-secondary py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {uploading ? <Loader2 size={14} className="animate-spin inline mr-2" /> : null}
-                Continue with Manual Entry
-              </button>
-            </div>
+
+                {/* Error with retry */}
+                {error && !parseFailedMode && (
+                  <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                    <AlertCircle size={15} className="text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-red-300 text-sm">{error}</p>
+                      {lastFile && (
+                        <button
+                          onClick={e => { e.stopPropagation(); handleRetry(); }}
+                          className="mt-2 flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 transition-colors"
+                        >
+                          <RefreshCw size={11} /> Try again
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Divider */}
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 h-px bg-slate-700" />
+                  <span className="text-slate-500 text-xs">or enter manually</span>
+                  <div className="flex-1 h-px bg-slate-700" />
+                </div>
+
+                {/* Manual entry */}
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1 block">Monthly kWh Usage</label>
+                      <input
+                        ref={manualKwhRef}
+                        type="number"
+                        value={manualKwh}
+                        onChange={e => setManualKwh(e.target.value)}
+                        placeholder="e.g. 1200"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1 block">Service Address</label>
+                      <input
+                        type="text"
+                        value={manualAddress}
+                        onChange={e => setManualAddress(e.target.value)}
+                        placeholder="123 Main St, City, ST 12345"
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500/50"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-slate-400 text-xs mb-1 block">Utility Rate ($/kWh) <span className="text-slate-600">optional</span></label>
+                    <input
+                      type="number"
+                      value={manualRate}
+                      onChange={e => setManualRate(e.target.value)}
+                      placeholder="e.g. 0.14"
+                      step="0.001"
+                      min="0.01"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500/50"
+                    />
+                  </div>
+                  <button
+                    onClick={handleManualEntry}
+                    disabled={uploading || !manualKwh || !manualAddress}
+                    className="w-full btn-secondary py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {uploading ? <Loader2 size={14} className="animate-spin inline mr-2" /> : null}
+                    Continue with Manual Entry
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
 
