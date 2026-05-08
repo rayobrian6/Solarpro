@@ -2,14 +2,15 @@
 // Survey Detail Page -- /projects/[id]/survey/[surveyId]
 //
 // Data source: GET /api/site-surveys/[surveyId]  (returns SiteSurvey + SiteSurveyFile[])
-// The surveyData JSONB is typed as SurveyV2Payload (schemaVersion: '2.0').
+// The surveyData JSONB is typed as SurveyV2Payload (schemaVersion: '2.0') for v2
+// surveys, or a flat partner payload (v1.0) for Render / mobile-app surveys.
 //
 // Sections (in order):
 //   1. Photos     -- grouped by PhotoCategory key from site_survey_files.label
-//   2. Electrical -- typed from SurveyElectricalService
-//   3. Roof       -- typed from SurveyRoofConditions
-//   4. Obstructions -- typed from SurveyObstructions
-//   5. Site Overview -- typed from SurveySiteOverview
+//   2. Electrical -- typed from SurveyElectricalService (v2) or metadata (v1)
+//   3. Roof       -- typed from SurveyRoofConditions (v2) or metadata (v1)
+//   4. Obstructions -- typed from SurveyObstructions (v2 only; v1 shows checklist)
+//   5. Site Overview -- typed from SurveySiteOverview (v2) or top-level fields (v1)
 //   6. Notes      -- accessNotes, mountingNotes, electricalNotes, setbackNotes
 //   7. Raw Data   -- collapsible JSON for engineering debug
 //
@@ -18,6 +19,8 @@
 //   - No ingest changes
 //   - Data read from getProjectSurveyContext only (via /api/site-surveys/[surveyId])
 //   - Photo labels come from site_survey_files.label (category key from Phase 1)
+//   - v1.0 partner payloads (schemaVersion missing) are displayed using
+//     V1PartnerPayload extraction — no "legacy schema" fallback shown.
 // ============================================================================
 
 'use client';
@@ -30,7 +33,7 @@ import {
   ArrowLeft, Camera, Home, Zap, ChevronDown, ChevronUp,
   AlertTriangle, RefreshCw, CheckCircle, Clock,
   MapPin, User, Calendar, ImageIcon, Shield,
-  TriangleRight, Sun, Layers, FileText,
+  Sun, Layers, FileText, Wrench,
 } from 'lucide-react';
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db-neon';
 import type {
@@ -42,6 +45,143 @@ import type {
   Obstruction,
   PhotoCategory,
 } from '@/lib/survey/v2/types';
+
+// ---------------------------------------------------------------------------
+// V1 partner payload type (Render / site-survey-api)
+// Shape confirmed from transformLayer.ts extractPhysicalDataLegacy + extractFilesLegacy
+// ---------------------------------------------------------------------------
+interface V1PartnerMetadata {
+  type?: string;
+  azimuth?: number | string;
+  rafter_size?: string;
+  rafter_spacing?: string | number;
+  roof_age_years?: number | string;
+  roof_material?: string;
+  [key: string]: unknown;
+}
+
+interface V1PartnerPhoto {
+  id?: string;
+  label?: string;
+  file_path?: string;
+  url?: string;
+  mime_type?: string;
+  captured_at?: string;
+  [key: string]: unknown;
+}
+
+interface V1PartnerChecklist {
+  label?: string;
+  status?: string;
+  notes?: string;
+  [key: string]: unknown;
+}
+
+interface V1PartnerPayload {
+  schemaVersion?: undefined; // v1.0 never has this set to '2.0'
+  id?: string;
+  site_name?: string;
+  site_address?: string;
+  latitude?: number | string;
+  longitude?: number | string;
+  inspector_name?: string;
+  survey_date?: string;
+  category_name?: string;
+  metadata?: V1PartnerMetadata;
+  photos?: V1PartnerPhoto[];
+  checklist?: V1PartnerChecklist[];
+  [key: string]: unknown;
+}
+
+// Normalized display shape extracted from a V1PartnerPayload
+interface V1DisplayData {
+  siteName: string | null;
+  siteAddress: string | null;
+  inspectorName: string | null;
+  surveyDate: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  categoryName: string | null;
+  // Roof / mounting
+  roofMaterial: string | null;
+  roofAgeYears: number | null;
+  rafterSpacing: string | null;
+  rafterSize: string | null;
+  azimuth: number | null;
+  surveyType: string | null;
+  // Checklist items
+  checklist: Array<{ label: string; status: string; notes: string | null }>;
+}
+
+// ---------------------------------------------------------------------------
+// extractV1Display — maps flat partner payload → normalized V1DisplayData.
+// Defensive: never throws, always returns null values on missing fields.
+// ---------------------------------------------------------------------------
+function extractV1Display(raw: Record<string, unknown>): V1DisplayData {
+  const p = raw as V1PartnerPayload;
+  const meta: V1PartnerMetadata =
+    (typeof p.metadata === 'object' && p.metadata !== null)
+      ? (p.metadata as V1PartnerMetadata)
+      : {};
+
+  const parseLat = (v: unknown): number | null => {
+    if (typeof v === 'number' && isFinite(v)) return v;
+    if (typeof v === 'string') { const n = parseFloat(v); if (isFinite(n)) return n; }
+    return null;
+  };
+
+  const parseRafterSpacing = (v: unknown): string | null => {
+    if (!v && v !== 0) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    // Normalize "24in" / "24" / 24 → '24"'
+    const num = parseFloat(s.replace(/[^0-9.]/g, ''));
+    if (isFinite(num)) return `${num}"`;
+    return s;
+  };
+
+  const checklist: V1DisplayData['checklist'] = [];
+  if (Array.isArray(p.checklist)) {
+    for (const item of p.checklist) {
+      if (typeof item === 'object' && item !== null) {
+        const ci = item as V1PartnerChecklist;
+        checklist.push({
+          label:  typeof ci.label  === 'string' ? ci.label  : 'Item',
+          status: typeof ci.status === 'string' ? ci.status : 'unknown',
+          notes:  typeof ci.notes  === 'string' && ci.notes.trim() ? ci.notes.trim() : null,
+        });
+      }
+    }
+  }
+
+  const azimuth = typeof meta.azimuth === 'number'
+    ? meta.azimuth
+    : typeof meta.azimuth === 'string' ? parseFloat(meta.azimuth) || null : null;
+
+  const roofAgeYears = (() => {
+    const v = meta.roof_age_years;
+    if (typeof v === 'number' && isFinite(v)) return Math.round(v);
+    if (typeof v === 'string') { const n = parseInt(v, 10); return isFinite(n) ? n : null; }
+    return null;
+  })();
+
+  return {
+    siteName:      typeof p.site_name    === 'string' && p.site_name.trim()    ? p.site_name.trim()    : null,
+    siteAddress:   typeof p.site_address === 'string' && p.site_address.trim() ? p.site_address.trim() : null,
+    inspectorName: typeof p.inspector_name === 'string' && p.inspector_name.trim() ? p.inspector_name.trim() : null,
+    surveyDate:    typeof p.survey_date  === 'string' && p.survey_date.trim()  ? p.survey_date.trim()  : null,
+    latitude:      parseLat(p.latitude),
+    longitude:     parseLat(p.longitude),
+    categoryName:  typeof p.category_name === 'string' && p.category_name.trim() ? p.category_name.trim() : null,
+    roofMaterial:  typeof meta.roof_material === 'string' && meta.roof_material.trim() ? meta.roof_material.trim() : null,
+    roofAgeYears,
+    rafterSpacing: parseRafterSpacing(meta.rafter_spacing),
+    rafterSize:    typeof meta.rafter_size === 'string' && meta.rafter_size.trim() ? meta.rafter_size.trim() : null,
+    azimuth:       typeof azimuth === 'number' && isFinite(azimuth) ? azimuth : null,
+    surveyType:    typeof meta.type === 'string' && meta.type.trim() ? meta.type.trim() : null,
+    checklist,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Photo category display config
@@ -472,6 +612,91 @@ function RawDataSection({ data }: { data: Record<string, unknown> | null }) {
 }
 
 // ---------------------------------------------------------------------------
+// V1 SECTIONS — rendered when surveyData is a v1.0 partner payload
+// ---------------------------------------------------------------------------
+
+/** V1 Site Info section */
+function V1SiteSection({ d }: { d: V1DisplayData }) {
+  return (
+    <SectionCard icon={<Sun size={14} />} title="Site Overview" iconColor="text-cyan-400">
+      <div className="grid grid-cols-1 md:grid-cols-2">
+        <FieldRow label="Site Name"       value={d.siteName} />
+        <FieldRow label="Site Address"    value={d.siteAddress} />
+        <FieldRow label="Inspector"       value={d.inspectorName} />
+        <FieldRow label="Survey Date"     value={d.surveyDate} />
+        <FieldRow label="Survey Type"     value={d.surveyType} />
+        <FieldRow label="Category"        value={d.categoryName} />
+        {d.latitude != null && d.longitude != null && (
+          <FieldRow
+            label="Coordinates"
+            value={`${d.latitude.toFixed(5)}, ${d.longitude.toFixed(5)}`}
+          />
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+/** V1 Roof & Mounting section */
+function V1RoofSection({ d }: { d: V1DisplayData }) {
+  // Only render if at least one field has data
+  const hasData = d.roofMaterial || d.roofAgeYears != null || d.rafterSpacing || d.rafterSize || d.azimuth != null;
+  if (!hasData) return null;
+
+  return (
+    <SectionCard icon={<Home size={14} />} title="Roof & Mounting" iconColor="text-amber-400">
+      <div className="grid grid-cols-1 md:grid-cols-2">
+        <FieldRow label="Roof Material"  value={d.roofMaterial ? (ROOF_MATERIAL_LABELS[d.roofMaterial] ?? d.roofMaterial) : null} />
+        <FieldRow label="Roof Age"       value={d.roofAgeYears != null ? `${d.roofAgeYears} years` : null} />
+        <FieldRow label="Rafter Spacing" value={d.rafterSpacing} />
+        <FieldRow label="Rafter Size"    value={d.rafterSize} />
+        <FieldRow label="Azimuth"        value={d.azimuth != null ? `${d.azimuth}°` : null} />
+      </div>
+    </SectionCard>
+  );
+}
+
+/** V1 Checklist section — rendered if partner sent checklist items */
+function V1ChecklistSection({ items }: { items: V1DisplayData['checklist'] }) {
+  if (items.length === 0) return null;
+
+  const STATUS_COLORS: Record<string, string> = {
+    pass:    'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+    fail:    'text-red-400 bg-red-500/10 border-red-500/20',
+    n_a:     'text-slate-500 bg-slate-700/30 border-slate-600/20',
+    na:      'text-slate-500 bg-slate-700/30 border-slate-600/20',
+    pending: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  };
+
+  return (
+    <SectionCard icon={<Wrench size={14} />} title="Field Checklist" iconColor="text-teal-400">
+      <div className="space-y-2">
+        {items.map((item, i) => {
+          const statusKey = item.status.toLowerCase().replace(/[^a-z]/g, '_');
+          const statusCls = STATUS_COLORS[statusKey] ?? STATUS_COLORS['pending'];
+          return (
+            <div
+              key={i}
+              className="flex items-start gap-3 p-2.5 rounded-lg bg-slate-800/40 border border-slate-700/30"
+            >
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border flex-shrink-0 mt-0.5 capitalize ${statusCls}`}>
+                {item.status}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-slate-200 font-medium">{item.label}</p>
+                {item.notes && (
+                  <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">{item.notes}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SectionCard>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Status badge
 // ---------------------------------------------------------------------------
 function StatusBadge({ status }: { status: SiteSurvey['status'] }) {
@@ -560,13 +785,25 @@ export default function SurveyDetailPage() {
 
   const { survey, files } = detail;
 
-  // Extract typed SurveyV2Payload if available
+  // ---------------------------------------------------------------------------
+  // Determine payload version:
+  //   payload  = SurveyV2Payload | null  (schemaVersion === '2.0')
+  //   v1Data   = V1DisplayData | null    (partner payload — all other surveys)
+  // Exactly one of these will be non-null for any survey that has surveyData.
+  // ---------------------------------------------------------------------------
   const payload: SurveyV2Payload | null = (() => {
     const d = survey.surveyData;
     if (!d || typeof d !== 'object') return null;
     const rec = d as Record<string, unknown>;
     if (rec.schemaVersion !== '2.0') return null;
     return rec as unknown as SurveyV2Payload;
+  })();
+
+  const v1Data: V1DisplayData | null = (() => {
+    if (payload) return null; // v2 — don't extract v1
+    const d = survey.surveyData;
+    if (!d || typeof d !== 'object') return null;
+    return extractV1Display(d as Record<string, unknown>);
   })();
 
   return (
@@ -589,6 +826,11 @@ export default function SurveyDetailPage() {
               {payload && (
                 <span className="text-[10px] text-emerald-400 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20">
                   v2.0
+                </span>
+              )}
+              {v1Data && (
+                <span className="text-[10px] text-slate-400 px-2 py-0.5 rounded-full bg-slate-700/40 border border-slate-600/30">
+                  Field Survey
                 </span>
               )}
             </div>
@@ -617,7 +859,9 @@ export default function SurveyDetailPage() {
         {/* 1. Photos — always shown (from site_survey_files) */}
         <PhotosSection files={files} />
 
-        {/* Typed V2 sections */}
+        {/* ------------------------------------------------------------------ */}
+        {/* Typed V2 sections                                                   */}
+        {/* ------------------------------------------------------------------ */}
         {payload ? (
           <>
             {/* 2. Electrical */}
@@ -635,21 +879,25 @@ export default function SurveyDetailPage() {
             {/* 6. Notes */}
             <NotesSection payload={payload} />
           </>
+        ) : v1Data ? (
+          /* ------------------------------------------------------------------ */
+          /* V1 partner payload sections (Render / mobile-app surveys)          */
+          /* ------------------------------------------------------------------ */
+          <>
+            {/* Site info */}
+            <V1SiteSection d={v1Data} />
+
+            {/* Roof & mounting (only shown if metadata fields are present) */}
+            <V1RoofSection d={v1Data} />
+
+            {/* Field checklist (if partner sent one) */}
+            <V1ChecklistSection items={v1Data.checklist} />
+          </>
         ) : (
-          /* Fallback for v1.0 / partner payloads: show raw key-value summary */
-          survey.surveyData && (
-            <div className="card p-5 space-y-2">
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Survey Data</p>
-              <p className="text-xs text-slate-500 italic">
-                This survey was submitted with a legacy schema. Structured sections are not available.
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-2 border-t border-slate-800 pt-2">
-                {Object.entries(survey.surveyData).slice(0, 20).map(([k, v]) => (
-                  <FieldRow key={k} label={k} value={typeof v === 'object' ? JSON.stringify(v) : String(v ?? '')} />
-                ))}
-              </div>
-            </div>
-          )
+          /* No surveyData at all — show empty state */
+          <div className="card p-5 text-center">
+            <p className="text-xs text-slate-500 italic">No survey data available for this record.</p>
+          </div>
         )}
 
         {/* 7. Raw data (always available, collapsed by default) */}
