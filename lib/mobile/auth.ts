@@ -72,18 +72,25 @@ export async function resolveMobileUser(
   const authHeader  = req.headers.get('authorization') ?? null;
   // IMPORTANT: trim() both sides to eliminate any whitespace/newline edge cases
   const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
-  const serviceApiKey = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
+  // Accept either MOBILE_SERVICE_API_KEY (canonical) or SOLARPRO_API_KEY (Render alias).
+  // Both sides must hold the same secret — Render sends SOLARPRO_API_KEY as the Bearer,
+  // SolarPro validates it against whichever of these env vars is set.
+  const serviceApiKey =
+    (process.env.MOBILE_SERVICE_API_KEY?.trim() || process.env.SOLARPRO_API_KEY?.trim()) ?? null;
 
   // Diagnostic log for service key path
   if (serviceApiKey) {
+    const keySource = process.env.MOBILE_SERVICE_API_KEY?.trim()
+      ? 'MOBILE_SERVICE_API_KEY'
+      : 'SOLARPRO_API_KEY';
     console.log(
-      `[MOBILE_AUTH] ${routeLabel} Path B check: ` +
+      `[MOBILE_AUTH] ${routeLabel} Path B check (source=${keySource}): ` +
       `serviceKey(len=${serviceApiKey.length} first8=${serviceApiKey.slice(0,8)}) ` +
       `bearer(len=${bearerToken?.length ?? 0} first8=${bearerToken?.slice(0,8) ?? 'n/a'}) ` +
       `match=${bearerToken === serviceApiKey}`
     );
   } else {
-    console.warn(`[MOBILE_AUTH] ${routeLabel} Path B: MOBILE_SERVICE_API_KEY not set in env`);
+    console.warn(`[MOBILE_AUTH] ${routeLabel} Path B: neither MOBILE_SERVICE_API_KEY nor SOLARPRO_API_KEY set in env`);
   }
 
   if (serviceApiKey && bearerToken && bearerToken === serviceApiKey) {
