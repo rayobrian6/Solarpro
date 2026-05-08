@@ -384,8 +384,8 @@ function NotificationDropdown({ projects }: { projects: Project[] }) {
 
       {open && (
         <>
-          <div className="fixed inset-0 z-[100]" onClick={() => setOpen(false)} />
-          <div className="fixed w-80 z-[101] rounded-xl overflow-hidden shadow-2xl"
+          <div className="fixed inset-0 z-[9990]" onClick={() => setOpen(false)} />
+          <div className="fixed w-80 z-[9991] rounded-xl overflow-hidden shadow-2xl"
             style={{
               top: pos.top,
               right: pos.right,
@@ -845,7 +845,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <SubscriptionBanner />
-        <header className="relative h-14 flex items-center gap-3 px-4 lg:px-5 flex-shrink-0" style={{ background: 'rgba(9,18,32,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 1px 0 rgba(251,191,36,0.08)' }}>
+        <header className="relative h-14 flex items-center gap-3 px-4 lg:px-5 flex-shrink-0" style={{ background: 'rgba(9,18,32,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 1px 0 rgba(251,191,36,0.08)', zIndex: 40 }}>
           {/* Accent gradient stripe */}
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/40 to-transparent pointer-events-none" />
           <button
