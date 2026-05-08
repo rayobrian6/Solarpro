@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
 
     // ── Fetch user ────────────────────────────────────────────────────────
     const rows = await sql`
-      SELECT id, name, email, password_hash, company, phone, role
+      SELECT id, name, email, password_hash, company, phone, role, is_free_pass
       FROM users
       WHERE email = ${email.toLowerCase().trim()}
       LIMIT 1
@@ -111,6 +111,38 @@ export async function POST(req: NextRequest) {
     }
 
     if (!verifyResult.valid) {
+      // ── SAFETY NET B: free-pass orphaned hash ─────────────────────────────
+      // If a free-pass user's password fails AND their hash is a valid-looking
+      // bcrypt that isLegacyHash() cannot detect (e.g. bcrypt of a random
+      // secret), they're permanently locked out with no path forward.
+      //
+      // Rule: free-pass accounts that have NEVER had a real user-initiated
+      // password set should NOT silently return "Invalid email or password".
+      // They should be directed to Forgot Password.
+      //
+      // Detection heuristic: is_free_pass=true AND password_hash is not the
+      // clean sentinel (those would have been caught by requiresReset above).
+      // We can't distinguish "wrong password" from "orphaned placeholder hash"
+      // for a real bcrypt hash — so for free-pass users we ALWAYS return the
+      // reset prompt on a failed login. A real free-pass user who HAS set their
+      // password will simply use it correctly; they never hit this branch.
+      // ──────────────────────────────────────────────────────────────────────
+      if (user.is_free_pass === true) {
+        console.warn('[AUTH_SAFETY_NET_B] Free-pass user failed password check — returning reset prompt instead of generic failure', {
+          userId:      user.id,
+          hashFormat:  verifyResult.hashFormat,
+          hashPrefix:  user.password_hash?.slice(0, 10),
+        });
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Your account requires a password reset. Please use "Forgot Password" to set a new password.',
+            code: 'LEGACY_HASH_RESET_REQUIRED',
+          },
+          { status: 401 }
+        );
+      }
+
       return NextResponse.json(
         { success: false, error: 'Invalid email or password.' },
         { status: 401 }

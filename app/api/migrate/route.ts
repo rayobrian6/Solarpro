@@ -1790,6 +1790,58 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 030 (sentinel hash repair): ${(e as Error).message}`);
     }
 
+    // -- Migration 031: Repair cost=10 orphaned placeholder hashes on free-pass users ---
+    // Root cause: app/api/admin/free-pass/route.ts previously used
+    //   bcrypt.hash(randomBytes(32).toString('hex'), 10)
+    // as the placeholder for new free-pass accounts created via the admin UI.
+    // That produces a valid bcrypt hash (cost=10, 60 chars) which:
+    //   • isLegacyHash() returns false (looks like real bcrypt)
+    //   • bcrypt.compare() always returns false (random secret, unknowable)
+    //   • User sees generic "Invalid email or password" with no way out
+    //
+    // Detection: is_free_pass=true AND hash starts with $2b$10$ or $2a$10$/$2y$10$.
+    // Cost=10 was ONLY used by the broken admin/free-pass route.
+    // Real user-set passwords use cost=12 (via hashPassword() in lib/auth.ts).
+    // Real temp passwords from admin/users reset_password action use cost=10
+    //   BUT those are sent to the admin who shares them — if the user hasn't
+    //   changed it yet, they still have that temp password to log in with.
+    //   However: admin/users reset_password is only for EXISTING users, not
+    //   free-pass placeholder accounts — so is_free_pass=true + cost=10 is
+    //   exclusively the broken admin/free-pass placeholder case.
+    //
+    // Fix: replace with sentinel so the login route shows the reset prompt.
+    try {
+      const cost10Rows = await sql`
+        SELECT id, email
+        FROM users
+        WHERE is_free_pass = true
+          AND (
+            password_hash LIKE '$2b$10$%'
+            OR password_hash LIKE '$2a$10$%'
+            OR password_hash LIKE '$2y$10$%'
+          )
+          AND LENGTH(password_hash) = 60
+      `;
+      let repairCount031 = 0;
+      for (const row of cost10Rows) {
+        await sql`
+          UPDATE users
+          SET password_hash = '__SOLARPRO_MUST_RESET__',
+              updated_at    = NOW()
+          WHERE id = ${row.id}
+        `;
+        repairCount031++;
+        console.log(`[Migration 031] Repaired cost=10 orphaned placeholder hash for userId=${row.id} (${row.email})`);
+      }
+      if (repairCount031 > 0) {
+        results.push(`✅ Migration 031 complete: repaired ${repairCount031} cost=10 orphaned placeholder hash(es) on free-pass users`);
+      } else {
+        results.push(`✅ Migration 031 complete: no cost=10 orphaned placeholder hashes found (already clean)`);
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 031 (cost=10 placeholder repair): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
