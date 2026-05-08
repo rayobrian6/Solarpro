@@ -6886,7 +6886,7 @@ function EngineeringPageInner() {
 
       {/* ── v61: Pending Suggestion Card ── */}
       {pendingSuggestion && (
-        <div className="px-6 pt-3 flex-shrink-0">
+        <div className="px-3 md:px-6 pt-3 flex-shrink-0">
           <SuggestionCard suggestion={pendingSuggestion} />
         </div>
       )}
@@ -7003,7 +7003,7 @@ function EngineeringPageInner() {
         <div className="flex flex-1 overflow-hidden">
 
         {/* Main Tab Content */}
-        <div className="flex-1 overflow-y-auto p-6" ref={printRef}>
+        <div className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6" ref={printRef}>
 
           {/* ── CONFIG TAB ── */}
           {activeTab === 'config' && (() => {
