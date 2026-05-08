@@ -76,15 +76,23 @@ export async function POST(req: NextRequest) {
           message: `✅ Free pass granted to existing user: ${email}`,
         });
       } else {
-        // Create placeholder account — user must reset password via forgot-password flow
-        const bcrypt = await import('bcryptjs');
-        const { randomBytes } = await import('crypto');
-        const placeholderHash = await bcrypt.hash(randomBytes(32).toString('hex'), 10);
+        // Create placeholder account — user must reset password via forgot-password flow.
+        //
+        // ⚠️  CRITICAL: Do NOT use bcrypt.hash(randomBytes(...), 10) here.
+        // That produces a valid-looking bcrypt hash that isLegacyHash() cannot detect,
+        // so bcrypt.compare() silently returns false and the user sees a generic
+        // "Invalid email or password" with no way out — they can't register (email taken)
+        // and can't login (hash unknowable).
+        //
+        // The ONLY safe placeholder is the literal sentinel string '__SOLARPRO_MUST_RESET__'.
+        // isLegacyHash() detects it → verifyPassword() returns requiresReset=true →
+        // login route shows "Please use Forgot Password to set a new password."
+        const SENTINEL = '__SOLARPRO_MUST_RESET__';
         const name = email.split('@')[0];
         await sql`
           INSERT INTO users (name, email, password_hash, role, plan, subscription_status, is_free_pass, free_pass_note, trial_ends_at)
           VALUES (
-            ${name}, ${email.toLowerCase()}, ${placeholderHash},
+            ${name}, ${email.toLowerCase()}, ${SENTINEL},
             'user', ${safePlan}, 'free_pass', true, ${note},
             '2099-12-31 23:59:59+00'
           )
