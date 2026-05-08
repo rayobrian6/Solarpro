@@ -989,7 +989,7 @@ export default function CommandCenter() {
                     </span>
                   )}
                 </div>
-                <h1 className="text-2xl font-black text-white tracking-tight">
+                <h1 className="text-xl lg:text-2xl font-black text-white tracking-tight">
                   {greeting()}{currentUser?.name ? `, ${currentUser.name.split(' ')[0]}` : ''}.
                 </h1>
                 <p className="text-sm text-slate-400 mt-0.5">
@@ -1014,7 +1014,7 @@ export default function CommandCenter() {
 
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
           {!dashLoading && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div className="relative overflow-hidden rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-3">
                 <div className="absolute -top-4 -right-4 w-16 h-16 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
                 <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
@@ -1220,7 +1220,7 @@ export default function CommandCenter() {
             </div>
             <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All Projects <ChevronRight size={12} /></Link>
           </div>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
             {statusPipeline.map(({ status, count }) => {
               const cfg = STAGE_CFG[status];
               const isActive = pipelineFilter === status;
@@ -1229,7 +1229,7 @@ export default function CommandCenter() {
                 <button key={status} onClick={() => setPipelineFilter(isActive ? 'all' : status)}
                   className="relative rounded-xl p-3 text-center transition-all duration-150 hover:-translate-y-0.5 group"
                   style={{ background: isActive ? `${cfg.bar}22` : 'var(--bg-muted)', border: isActive ? `1px solid ${cfg.bar}55` : '1px solid var(--border-color)' }}>
-                  <div className={`text-2xl font-black transition-colors ${isActive ? cfg.color : 'text-white'}`}>{count}</div>
+                  <div className={`text-xl lg:text-2xl font-black transition-colors ${isActive ? cfg.color : 'text-white'}`}>{count}</div>
                   <div className={`text-xs font-semibold mt-0.5 capitalize ${cfg.color}`}>{status}</div>
                   <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ background: 'var(--bg-subtle)' }}>
                     <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: cfg.bar }} />
