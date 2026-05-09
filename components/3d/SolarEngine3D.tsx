@@ -2192,7 +2192,18 @@ function SolarEngine3D({
       if (pickedObject) {
         const pp = viewer.scene.pickPosition(screenPos);
         if (pp && isFinite(pp.x) && isFinite(pp.y) && isFinite(pp.z) && C.Cartesian3.magnitude(pp) > 1000) {
-          cartesian = pp; pickMethod = '3dtiles';
+          // Google Photorealistic 3D Tiles meshes are shells — pickPosition can land on
+          // the inner (back) face of a roof/wall, placing the point INSIDE the geometry.
+          // Fix: nudge the hit point 0.15 m outward along the ellipsoid surface normal
+          // (i.e. radially away from Earth's centre) so markers/panels always sit on top.
+          const surfaceNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(pp);
+          if (surfaceNormal) {
+            const nudge = C.Cartesian3.multiplyByScalar(surfaceNormal, 0.15, new C.Cartesian3());
+            cartesian = C.Cartesian3.add(pp, nudge, new C.Cartesian3());
+          } else {
+            cartesian = pp;
+          }
+          pickMethod = '3dtiles';
         }
       }
     } catch (e) { handleCesiumError('3D tiles pick', e, true); }
