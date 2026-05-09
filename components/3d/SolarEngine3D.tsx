@@ -826,6 +826,42 @@ function SolarEngine3D({
       viewer.resize();
       viewerRef.current = viewer;
 
+      // ── FREE CAMERA: ensure all mouse/touch inputs are fully enabled ──────────
+      // Explicitly configure ScreenSpaceCameraController so no input is locked.
+      // - Left-drag   → orbit/rotate around the scene
+      // - Middle-drag → tilt (look up/down)
+      // - Right-drag  → tilt (same as middle — matches user expectation)
+      // - Scroll      → zoom in/out
+      // - Two-finger  → pinch zoom + tilt on touch devices
+      try {
+        const ctrl = viewer.scene.screenSpaceCameraController;
+        ctrl.enableInputs   = true;
+        ctrl.enableRotate   = true;
+        ctrl.enableTilt     = true;
+        ctrl.enableZoom     = true;
+        ctrl.enableLook     = true;
+        ctrl.enableTranslate = true;
+
+        // Map BOTH middle-drag AND right-drag to tilt so users can use either
+        ctrl.tiltEventTypes = [
+          C.CameraEventType.MIDDLE_DRAG,
+          C.CameraEventType.RIGHT_DRAG,
+          { eventType: C.CameraEventType.LEFT_DRAG, modifier: C.KeyboardEventModifier.CTRL },
+        ];
+        // Left-drag = free orbit/rotate
+        ctrl.rotateEventTypes = [C.CameraEventType.LEFT_DRAG];
+        // Scroll wheel + pinch = zoom
+        ctrl.zoomEventTypes = [
+          C.CameraEventType.WHEEL,
+          C.CameraEventType.PINCH,
+          { eventType: C.CameraEventType.LEFT_DRAG, modifier: C.KeyboardEventModifier.SHIFT },
+        ];
+        // Remove pitch limits so users can look straight up or straight down freely
+        ctrl.minimumZoomDistance = 5;   // allow close-up inspection
+        ctrl.maximumZoomDistance = 50000; // allow wide overview
+      } catch (e) { addLog('WARN', `Camera controller config: ${(e as Error).message}`); }
+      // ─────────────────────────────────────────────────────────────────────────
+
       // Global render error handler - prevents freeze
       viewer.scene.renderError.addEventListener((_scene: any, error: any) => {
         addLog('ERROR', `Cesium render error: ${error?.message ?? error}`);
