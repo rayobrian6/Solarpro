@@ -37,7 +37,12 @@ export const stripe = new Proxy({} as Stripe, {
 // PLAN DEFINITIONS
 // ============================================================
 
-export type PlanId = 'starter' | 'professional' | 'contractor' | 'enterprise' | 'free_pass';
+// Re-export PlanId from pricing.config so the rest of the codebase
+// can import from either place — stripe.ts remains the canonical
+// server-side import for billing logic.
+export type { PlanId } from '@/lib/pricing.config';
+import type { PlanId } from '@/lib/pricing.config';
+import { PRICING_PLANS, PLAN_FEATURES } from '@/lib/pricing.config';
 
 export interface SubscriptionPlan {
   id: PlanId;
@@ -48,6 +53,8 @@ export interface SubscriptionPlan {
   interval: 'month' | null;
   badge?: string;
   trialDays: number;          // 0 = no trial
+  usersIncluded: number | null;
+  extraSeatPrice: number | null;
   features: string[];
   notIncluded?: string[];
   cta: string;
@@ -60,31 +67,15 @@ export function getSubscriptionPlans(): SubscriptionPlan[] {
     {
       id: 'starter',
       name: 'Starter',
-      price: 79,
-      priceLabel: '$79/month',
+      price: PRICING_PLANS.starter.price,
+      priceLabel: `$${PRICING_PLANS.starter.price}/month`,
       priceId: process.env.STRIPE_PRICE_STARTER || null,
       interval: 'month',
       trialDays: 3,
-      features: [
-        'Basic 3D Solar Design Studio',
-        'Up to 2 active projects',
-        'Up to 5 clients',
-        'Preview proposals only',
-        'Production analysis (NREL PVWatts)',
-        'Google Solar API integration',
-        'Utility rate calculators',
-        'Email support',
-      ],
-      notIncluded: [
-        'Engineering calculations (SLD)',
-        'Permit packet generation',
-        'Structural calculations',
-        'BOM generation',
-        'Proposal e-signing',
-        'White-label branding',
-        'Sol Fence design',
-        'API access',
-      ],
+      usersIncluded: PRICING_PLANS.starter.usersIncluded,
+      extraSeatPrice: PRICING_PLANS.starter.extraSeatPrice,
+      features: PLAN_FEATURES.starter.included,
+      notIncluded: PLAN_FEATURES.starter.notIncluded,
       cta: 'Start Free Trial',
       ctaStyle: 'outline',
       checkoutType: 'trial',
@@ -92,72 +83,47 @@ export function getSubscriptionPlans(): SubscriptionPlan[] {
     {
       id: 'professional',
       name: 'Professional',
-      price: 149,
-      priceLabel: '$149/month',
+      price: PRICING_PLANS.professional.price,
+      priceLabel: `$${PRICING_PLANS.professional.price}/month`,
       priceId: process.env.STRIPE_PRICE_PROFESSIONAL || null,
       interval: 'month',
-      badge: 'Most Popular',
       trialDays: 0,
-      features: [
-        'Everything in Starter',
-        'Unlimited projects & clients',
-        'Full engineering calculations (SLD)',
-        'Permit packet generation',
-        'Structural calculations',
-        'BOM generation',
-        'Proposal e-signing',
-        'White-label branding',
-        'Battery system design',
-        'Priority support',
-      ],
-      cta: 'Subscribe',
+      usersIncluded: PRICING_PLANS.professional.usersIncluded,
+      extraSeatPrice: PRICING_PLANS.professional.extraSeatPrice,
+      features: PLAN_FEATURES.professional.included,
+      notIncluded: PLAN_FEATURES.professional.notIncluded,
+      cta: 'Get Started',
       ctaStyle: 'primary',
       checkoutType: 'stripe',
     },
     {
       id: 'contractor',
       name: 'Contractor',
-      price: 250,
-      priceLabel: '$250/month',
+      price: PRICING_PLANS.contractor.price,
+      priceLabel: `$${PRICING_PLANS.contractor.price}/month`,
       priceId: process.env.STRIPE_PRICE_CONTRACTOR || null,
       interval: 'month',
-      badge: 'Best Value',
       trialDays: 0,
-      features: [
-        'Everything in Professional',
-        'Unlimited team members',
-        'Bulk proposal generation',
-        'Advanced automation tools',
-        'Custom proposal templates',
-        'Sol Fence design',
-        'API access',
-        'Dedicated onboarding',
-        'SLA support',
-      ],
-      cta: 'Subscribe',
+      usersIncluded: PRICING_PLANS.contractor.usersIncluded,
+      extraSeatPrice: PRICING_PLANS.contractor.extraSeatPrice,
+      features: PLAN_FEATURES.contractor.included,
+      notIncluded: PLAN_FEATURES.contractor.notIncluded,
+      cta: 'Get Started',
       ctaStyle: 'secondary',
       checkoutType: 'stripe',
     },
     {
       id: 'enterprise',
       name: 'Enterprise',
-      price: null,
+      price: PRICING_PLANS.enterprise.price,
       priceLabel: 'Custom pricing',
       priceId: null,
       interval: null,
       trialDays: 0,
-      features: [
-        'Everything in Contractor',
-        'Multi-company accounts',
-        'Custom integrations',
-        'Private API access',
-        'Enterprise security controls',
-        'Dedicated account manager',
-        'Custom SLA',
-        'On-premise deployment option',
-        'Volume discounts',
-        'White-glove onboarding',
-      ],
+      usersIncluded: PRICING_PLANS.enterprise.usersIncluded,
+      extraSeatPrice: PRICING_PLANS.enterprise.extraSeatPrice,
+      features: PLAN_FEATURES.enterprise.included,
+      notIncluded: PLAN_FEATURES.enterprise.notIncluded,
       cta: 'Contact Sales',
       ctaStyle: 'enterprise',
       checkoutType: 'contact',
@@ -220,7 +186,7 @@ export function getPlanPermissions(plan: PlanId): PlanPermissions {
         proposalEsigning: true,
         proposalPreviewOnly: false,
         batteryDesign: true,
-        teamMembers: 3,
+        teamMembers: 2,         // 2 included; additional seats at +$29/mo
         bulkProposals: false,
         apiAccess: false,
         multiCompany: false,
@@ -238,7 +204,7 @@ export function getPlanPermissions(plan: PlanId): PlanPermissions {
         proposalEsigning: true,
         proposalPreviewOnly: false,
         batteryDesign: true,
-        teamMembers: null,
+        teamMembers: 2,         // 2 included; additional seats at +$29/mo
         bulkProposals: true,
         apiAccess: true,
         multiCompany: false,

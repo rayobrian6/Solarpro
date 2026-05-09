@@ -8,8 +8,9 @@ import Link from 'next/link';
 import type { Client, SystemType } from '@/types';
 import { useToast } from '@/components/ui/Toast';
 import { useAppStore } from '@/store/appStore';
-import { MapPin, Upload, Zap, Building2, Loader2, CheckCircle } from 'lucide-react';
+import { Upload, Zap, Building2, Loader2, CheckCircle, MapPin } from 'lucide-react';
 import BillUploadFlow from '@/components/onboarding/BillUploadFlow';
+import AddressAutocomplete, { type AddressSuggestion } from '@/components/ui/AddressAutocomplete';
 
 const SYSTEM_TYPES = [
   {
@@ -80,20 +81,19 @@ function NewProjectContent() {
     }
   }, [selectedClient, selectedType, clients]);
 
-  // Auto-geocode address and detect utility
-  const handleAddressBlur = async () => {
-    if (!address.trim() || geocoding) return;
+  // Resolve full location + utility data from an address string
+  const resolveAddress = async (addressStr: string) => {
+    if (!addressStr.trim() || geocoding) return;
     setGeocoding(true);
     try {
       const res = await fetch('/api/geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address }),
+        body: JSON.stringify({ address: addressStr }),
       });
       const geo = await res.json();
       if (geo.success && geo.location) {
         setLocationData(geo.location);
-        // Auto-detect utility
         const uRes = await fetch('/api/utility-detect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -105,12 +105,22 @@ function NewProjectContent() {
           }),
         });
         const uData = await uRes.json();
-        if (uData.success && uData.utility) {
-          setUtilityData(uData.utility);
-        }
+        if (uData.success && uData.utility) setUtilityData(uData.utility);
       }
     } catch {}
     setGeocoding(false);
+  };
+
+  // Called when user picks a suggestion from the autocomplete dropdown
+  const handleAddressSelect = (suggestion: AddressSuggestion) => {
+    const picked = suggestion.short_name || suggestion.display_name;
+    setAddress(picked);
+    resolveAddress(picked);
+  };
+
+  // Fallback: user typed manually and blurred without picking a suggestion
+  const handleAddressBlur = () => {
+    if (address.trim() && !locationData) resolveAddress(address);
   };
 
   const handleBillUploadComplete = (result: any) => {
@@ -295,22 +305,14 @@ function NewProjectContent() {
                   <label className="input-label flex items-center gap-1">
                     <MapPin size={12} className="text-slate-400" /> Project Address
                   </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={address}
-                      onChange={e => setAddress(e.target.value)}
-                      onBlur={handleAddressBlur}
-                      placeholder="123 Main St, City, ST 12345"
-                      className="input pr-8"
-                    />
-                    {geocoding && (
-                      <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-amber-400 animate-spin" />
-                    )}
-                    {locationData && !geocoding && (
-                      <CheckCircle size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-400" />
-                    )}
-                  </div>
+                  <AddressAutocomplete
+                    value={address}
+                    onChange={v => { setAddress(v); if (!v) { setLocationData(null); setUtilityData(null); } }}
+                    onSelect={handleAddressSelect}
+                    onSubmit={handleAddressBlur}
+                    placeholder="123 Main St, City, ST 12345"
+                    loading={geocoding}
+                  />
                   {locationData && (
                     <div className="mt-2 flex flex-wrap gap-2">
                       <span className="inline-flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2 py-0.5 text-xs text-emerald-300">

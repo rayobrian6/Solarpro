@@ -5,169 +5,82 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   Check, X, Star, Zap, Building2, ArrowRight,
-  Shield, Clock, ChevronDown, ChevronUp
+  Shield, Clock, Users, ChevronDown, ChevronUp,
+  AlertCircle, Minus,
 } from 'lucide-react';
+import {
+  PRICING_PLANS,
+  PLAN_DISPLAY,
+  PLAN_FEATURES,
+  COMPARISON_TABLE,
+  formatSeatLimit,
+  formatExtraSeatMsg,
+  type PlanId,
+} from '@/lib/pricing.config';
 
-const PLANS = [
-  {
-    id: 'starter',
-    name: 'Starter',
-    price: 79,
-    priceLabel: '$79',
-    period: '/month',
-    badge: null,
-    badgeColor: '',
-    trialLabel: '3-day free trial',
-    description: 'Perfect for solo solar installers getting started.',
-    checkoutType: 'trial',
-    ctaLabel: 'Start Free Trial',
-    ctaNote: 'No credit card required',
-    borderColor: 'border-slate-600',
-    ctaClass: 'bg-slate-700 hover:bg-slate-600 text-white',
-    features: [
-      'Basic 3D Solar Design Studio',
-      'Up to 2 active projects',
-      'Up to 5 clients',
-      'Preview proposals only',
-      'Production analysis (NREL PVWatts)',
-      'Google Solar API integration',
-      'Utility rate calculators',
-      'Email support',
-    ],
-    notIncluded: [
-      'Engineering calculations (SLD)',
-      'Permit packet generation',
-      'Structural calculations',
-      'BOM generation',
-      'Proposal e-signing',
-      'White-label branding',
-      'Sol Fence design',
-      'API access',
-    ],
-  },
-  {
-    id: 'professional',
-    name: 'Professional',
-    price: 149,
-    priceLabel: '$149',
-    period: '/month',
-    badge: 'Most Popular',
-    badgeColor: 'bg-amber-500 text-black',
-    trialLabel: null,
-    description: 'For growing solar install teams that need full engineering.',
-    checkoutType: 'stripe',
-    ctaLabel: 'Subscribe',
-    ctaNote: null,
-    borderColor: 'border-amber-500',
-    ctaClass: 'bg-amber-500 hover:bg-amber-400 text-black font-bold',
-    features: [
-      'Everything in Starter',
-      'Unlimited projects & clients',
-      'Full engineering calculations (SLD)',
-      'Permit packet generation',
-      'Structural calculations',
-      'BOM generation',
-      'Proposal e-signing',
-      'White-label branding',
-      'Battery system design',
-      'Priority support',
-    ],
-    notIncluded: [],
-  },
-  {
-    id: 'contractor',
-    name: 'Contractor',
-    price: 250,
-    priceLabel: '$250',
-    period: '/month',
-    badge: 'Best Value',
-    badgeColor: 'bg-blue-500 text-white',
-    trialLabel: null,
-    description: 'For large contracting firms with teams and high volume.',
-    checkoutType: 'stripe',
-    ctaLabel: 'Subscribe',
-    ctaNote: null,
-    borderColor: 'border-blue-500',
-    ctaClass: 'bg-blue-500 hover:bg-blue-400 text-white font-bold',
-    features: [
-      'Everything in Professional',
-      'Unlimited team members',
-      'Bulk proposal generation',
-      'Advanced automation tools',
-      'Custom proposal templates',
-      'Sol Fence design',
-      'API access',
-      'Dedicated onboarding',
-      'SLA support',
-    ],
-    notIncluded: [],
-  },
-  {
-    id: 'enterprise',
-    name: 'Enterprise',
-    price: null,
-    priceLabel: 'Custom',
-    period: ' pricing',
-    badge: 'Custom',
-    badgeColor: 'bg-purple-600 text-white',
-    trialLabel: null,
-    description: 'For multi-company operations needing custom solutions.',
-    checkoutType: 'contact',
-    ctaLabel: 'Contact Sales',
-    ctaNote: null,
-    borderColor: 'border-purple-600',
-    ctaClass: 'bg-purple-600 hover:bg-purple-500 text-white font-bold',
-    features: [
-      'Everything in Contractor',
-      'Multi-company accounts',
-      'Custom integrations',
-      'Private API access',
-      'Enterprise security controls',
-      'Dedicated account manager',
-      'Custom SLA',
-      'On-premise deployment option',
-      'Volume discounts',
-      'White-glove onboarding',
-    ],
-    notIncluded: [],
-  },
-];
+// ─── Derived plan list for rendering ────────────────────────────────────────
 
-const COMPARISON_FEATURES = [
-  { label: 'Active Projects',         starter: '2',    pro: 'Unlimited', contractor: 'Unlimited', enterprise: 'Unlimited' },
-  { label: 'Clients',                 starter: '5',    pro: 'Unlimited', contractor: 'Unlimited', enterprise: 'Unlimited' },
-  { label: '3D Solar Design',         starter: true,   pro: true,        contractor: true,         enterprise: true },
-  { label: 'Proposals',               starter: 'Preview only', pro: true, contractor: true,        enterprise: true },
-  { label: 'Engineering (SLD)',        starter: false,  pro: true,        contractor: true,         enterprise: true },
-  { label: 'Permit Packets',          starter: false,  pro: true,        contractor: true,         enterprise: true },
-  { label: 'Structural Calculations', starter: false,  pro: true,        contractor: true,         enterprise: true },
-  { label: 'BOM Generation',          starter: false,  pro: true,        contractor: true,         enterprise: true },
-  { label: 'Proposal E-Signing',      starter: false,  pro: true,        contractor: true,         enterprise: true },
-  { label: 'White-Label Branding',    starter: false,  pro: true,        contractor: true,         enterprise: true },
-  { label: 'Battery System Design',   starter: false,  pro: true,        contractor: true,         enterprise: true },
-  { label: 'Sol Fence Design',        starter: false,  pro: false,       contractor: true,         enterprise: true },
-  { label: 'Bulk Proposals',          starter: false,  pro: false,       contractor: true,         enterprise: true },
-  { label: 'API Access',              starter: false,  pro: false,       contractor: true,         enterprise: true },
-  { label: 'Team Members',            starter: '1',    pro: 'Up to 3',   contractor: 'Unlimited',  enterprise: 'Unlimited' },
-  { label: 'Multi-Company',           starter: false,  pro: false,       contractor: false,        enterprise: true },
-  { label: 'Dedicated Onboarding',    starter: false,  pro: false,       contractor: true,         enterprise: true },
-  { label: 'SLA Support',             starter: false,  pro: false,       contractor: true,         enterprise: true },
-  { label: 'Support',                 starter: 'Email', pro: 'Priority', contractor: 'Dedicated',  enterprise: 'White-glove' },
-];
+const PLANS = PLAN_DISPLAY.map((meta) => {
+  const cfg = PRICING_PLANS[meta.id as keyof typeof PRICING_PLANS];
+  const features = PLAN_FEATURES[meta.id as keyof typeof PLAN_FEATURES];
+  return {
+    ...meta,
+    price: cfg.price,
+    priceLabel: cfg.price ? `$${cfg.price}` : 'Custom',
+    period: cfg.price ? '/month' : ' pricing',
+    usersIncluded: cfg.usersIncluded,
+    extraSeatPrice: cfg.extraSeatPrice,
+    seatLabel: formatSeatLimit(meta.id as keyof typeof PRICING_PLANS),
+    extraSeatMsg: formatExtraSeatMsg(meta.id as keyof typeof PRICING_PLANS),
+    features: features.included,
+    notIncluded: features.notIncluded,
+  };
+});
 
-function FeatureCell({ value }: { value: boolean | string }) {
-  if (value === true) return <Check className="w-5 h-5 text-green-400 mx-auto" />;
-  if (value === false) return <X className="w-4 h-4 text-slate-600 mx-auto" />;
-  return <span className="text-sm text-slate-300">{value}</span>;
+// ─── Card border / accent styles ────────────────────────────────────────────
+
+const CARD_STYLES: Record<string, { border: string; cta: string; badge: string }> = {
+  starter: {
+    border: 'border-slate-600/60',
+    cta: 'bg-slate-700 hover:bg-slate-600 text-white',
+    badge: '',
+  },
+  professional: {
+    border: 'border-slate-500/60',
+    cta: 'bg-slate-700 hover:bg-slate-600 text-white',
+    badge: '',
+  },
+  contractor: {
+    border: 'border-amber-500',
+    cta: 'bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold shadow-lg shadow-amber-500/25',
+    badge: 'bg-amber-500 text-slate-900',
+  },
+  enterprise: {
+    border: 'border-purple-600/60',
+    cta: 'bg-purple-700 hover:bg-purple-600 text-white',
+    badge: 'bg-purple-700 text-white',
+  },
+};
+
+// ─── Feature comparison cell ─────────────────────────────────────────────────
+
+function CompCell({ value }: { value: string }) {
+  if (value === 'yes')     return <Check className="w-5 h-5 text-green-400 mx-auto" />;
+  if (value === 'no')      return <X className="w-4 h-4 text-slate-600 mx-auto" />;
+  if (value === 'partial') return <AlertCircle className="w-4 h-4 text-amber-400 mx-auto" />;
+  return <span className="text-sm text-slate-300 text-center block">{value}</span>;
 }
+
+// ─── Main inner component ────────────────────────────────────────────────────
 
 function SubscribePageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const canceled = searchParams.get('canceled');
-  const expired = searchParams.get('expired');
-  const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const expired  = searchParams.get('expired');
+
+  const [loading, setLoading]             = useState<string | null>(null);
+  const [error, setError]                 = useState<string | null>(null);
   const [showComparison, setShowComparison] = useState(false);
 
   const handlePlanClick = async (plan: typeof PLANS[0]) => {
@@ -179,7 +92,6 @@ function SubscribePageInner() {
     }
 
     if (plan.checkoutType === 'trial') {
-      // Check if logged in
       try {
         const res = await fetch('/api/auth/me');
         if (!res.ok) {
@@ -201,7 +113,6 @@ function SubscribePageInner() {
           router.push(`/auth/register?plan=${plan.id}`);
           return;
         }
-
         const res = await fetch('/api/stripe/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -223,7 +134,8 @@ function SubscribePageInner() {
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] text-white">
-      {/* Header */}
+
+      {/* ── Nav bar ──────────────────────────────────────────────────────── */}
       <div className="border-b border-slate-800 px-6 py-4 flex items-center justify-between">
         <Link href="/dashboard" className="flex items-center gap-2">
           <div className="w-8 h-8 bg-amber-500 rounded-lg flex items-center justify-center">
@@ -237,22 +149,19 @@ function SubscribePageInner() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-16">
-        {/* Trial expired banner */}
+
+        {/* ── Status banners ───────────────────────────────────────────────── */}
         {expired && (
           <div className="mb-8 bg-red-900/30 border border-red-500/50 rounded-xl p-5 text-center">
             <p className="text-red-300 font-semibold text-lg mb-1">⏰ Your free trial has expired</p>
-            <p className="text-red-400/80 text-sm">Choose a plan below to continue using SolarPro and keep all your projects and data.</p>
+            <p className="text-red-400/80 text-sm">Choose a plan below to keep all your projects and data.</p>
           </div>
         )}
-
-        {/* Canceled banner */}
         {canceled && (
           <div className="mb-8 bg-slate-800 border border-slate-600 rounded-xl p-4 text-center text-slate-300">
             Checkout was canceled. No charges were made. Choose a plan below to continue.
           </div>
         )}
-
-        {/* Error banner */}
         {error && (
           <div className="mb-8 bg-red-900/40 border border-red-500 rounded-xl p-4 text-center text-red-300 flex items-center justify-center gap-2">
             <span>⚠️ {error}</span>
@@ -260,7 +169,7 @@ function SubscribePageInner() {
           </div>
         )}
 
-        {/* Hero */}
+        {/* ── Hero ─────────────────────────────────────────────────────────── */}
         <div className="text-center mb-14">
           <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-full px-4 py-1.5 text-amber-400 text-sm mb-6">
             <Star className="w-4 h-4" />
@@ -270,81 +179,116 @@ function SubscribePageInner() {
           <p className="text-slate-400 text-xl max-w-2xl mx-auto">
             From solo installers to large contracting firms — SolarPro scales with your business.
           </p>
+          <p className="text-slate-500 text-sm mt-3">
+            Additional users can be added as your team grows
+          </p>
         </div>
 
-        {/* Plan Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-16">
-          {PLANS.map((plan) => (
-            <div
-              key={plan.id}
-              className={`relative rounded-2xl border-2 ${plan.borderColor} bg-slate-900/60 backdrop-blur p-6 flex flex-col`}
-            >
-              {/* Badge */}
-              {plan.badge && (
-                <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold ${plan.badgeColor}`}>
-                  ✦ {plan.badge}
-                </div>
-              )}
-
-              {/* Plan name & description */}
-              <div className="mb-4">
-                <h2 className="text-xl font-bold mb-1">{plan.name}</h2>
-                <p className="text-slate-400 text-sm">{plan.description}</p>
-              </div>
-
-              {/* Price */}
-              <div className="mb-4">
-                <div className="flex items-baseline gap-1">
-                  <span className="text-4xl font-bold">{plan.priceLabel}</span>
-                  <span className="text-slate-400 text-sm">{plan.period}</span>
-                </div>
-                {plan.trialLabel && (
-                  <div className="mt-2 inline-flex items-center gap-1 bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded-full">
-                    <Clock className="w-3 h-3" />
-                    {plan.trialLabel}
-                  </div>
-                )}
-              </div>
-
-              {/* CTA Button */}
-              <button
-                onClick={() => handlePlanClick(plan)}
-                disabled={loading === plan.id}
-                className={`w-full py-3 px-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 mb-6 ${plan.ctaClass} disabled:opacity-60`}
+        {/* ── Plan Cards ───────────────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-6">
+          {PLANS.map((plan) => {
+            const styles = CARD_STYLES[plan.id] ?? CARD_STYLES.starter;
+            return (
+              <div
+                key={plan.id}
+                className={`relative rounded-2xl border-2 ${styles.border} ${
+                  plan.highlight
+                    ? 'bg-slate-900/90 shadow-xl shadow-amber-500/10'
+                    : 'bg-slate-900/60'
+                } backdrop-blur p-6 flex flex-col`}
               >
-                {loading === plan.id ? (
-                  <span className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
-                ) : (
-                  <>
-                    {plan.ctaLabel}
-                    <ArrowRight className="w-4 h-4" />
-                  </>
+                {/* Badge */}
+                {plan.badge && (
+                  <div className={`absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${styles.badge}`}>
+                    ✦ {plan.badge}
+                  </div>
                 )}
-              </button>
-              {plan.ctaNote && (
-                <p className="text-center text-slate-500 text-xs -mt-4 mb-4">{plan.ctaNote}</p>
-              )}
+                {plan.id === 'starter' && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/30 whitespace-nowrap">
+                    3-Day Free Trial
+                  </div>
+                )}
 
-              {/* Features */}
-              <div className="flex-1 space-y-2">
-                {plan.features.map((f) => (
-                  <div key={f} className="flex items-start gap-2 text-sm">
-                    <Check className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
-                    <span className="text-slate-300">{f}</span>
+                {/* Plan name & description */}
+                <div className="mb-4 mt-2">
+                  <h2 className="text-xl font-bold mb-1">{plan.name}</h2>
+                  <p className="text-slate-400 text-sm leading-snug">{plan.tagline}</p>
+                </div>
+
+                {/* Price */}
+                <div className="mb-3">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl font-bold">{plan.priceLabel}</span>
+                    <span className="text-slate-400 text-sm">{plan.period}</span>
                   </div>
-                ))}
-                {plan.notIncluded && plan.notIncluded.map((f) => (
-                  <div key={f} className="flex items-start gap-2 text-sm">
-                    <X className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
-                    <span className="text-slate-600">{f}</span>
+                </div>
+
+                {/* Seat info */}
+                <div className="mb-4 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5 text-sm">
+                    <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="text-slate-300">{plan.seatLabel}</span>
                   </div>
-                ))}
+                  {plan.extraSeatMsg && (
+                    <div className="text-xs text-slate-500 pl-5">{plan.extraSeatMsg}</div>
+                  )}
+                  {plan.id === 'enterprise' && (
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="text-slate-300">Unlimited users</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* CTA */}
+                <button
+                  onClick={() => handlePlanClick(plan)}
+                  disabled={loading === plan.id}
+                  className={`w-full py-3 px-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-2 mb-5 ${styles.cta} disabled:opacity-60`}
+                >
+                  {loading === plan.id ? (
+                    <span className="animate-spin w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                  ) : (
+                    <>
+                      {plan.ctaLabel}
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
+                </button>
+
+                {/* Contractor replacement message */}
+                {plan.id === 'contractor' && (
+                  <p className="text-xs text-amber-400/80 text-center -mt-2 mb-4 leading-snug">
+                    Replace $300–$1,000/month in solar software tools with one platform
+                  </p>
+                )}
+
+                {/* Features */}
+                <div className="flex-1 space-y-2 border-t border-slate-700/50 pt-4">
+                  {plan.features.map((f) => (
+                    <div key={f} className="flex items-start gap-2 text-sm">
+                      <Check className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+                      <span className="text-slate-300">{f}</span>
+                    </div>
+                  ))}
+                  {plan.notIncluded && plan.notIncluded.map((f) => (
+                    <div key={f} className="flex items-start gap-2 text-sm">
+                      <X className="w-4 h-4 text-slate-600 mt-0.5 shrink-0" />
+                      <span className="text-slate-600">{f}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
-        {/* Feature Comparison Toggle */}
+        {/* ── Seat scaling note ────────────────────────────────────────────── */}
+        <p className="text-center text-slate-500 text-sm mb-16">
+          Additional users can be added to any paid plan as your team grows
+        </p>
+
+        {/* ── Feature Comparison Toggle ────────────────────────────────────── */}
         <div className="text-center mb-6">
           <button
             onClick={() => setShowComparison(!showComparison)}
@@ -355,52 +299,65 @@ function SubscribePageInner() {
           </button>
         </div>
 
-        {/* Feature Comparison Table */}
+        {/* ── Feature Comparison Table ─────────────────────────────────────── */}
         {showComparison && (
           <div className="bg-slate-900/60 border border-slate-700 rounded-2xl overflow-hidden mb-16">
             <div className="p-6 border-b border-slate-700">
-              <h2 className="text-2xl font-bold text-center">Full Feature Comparison</h2>
+              <h2 className="text-2xl font-bold text-center">Feature Comparison</h2>
+              <p className="text-slate-400 text-sm text-center mt-1">
+                ✅ Full access &nbsp;&nbsp; ⚠️ Partial access &nbsp;&nbsp; ✗ Not included
+              </p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-slate-700">
-                    <th className="text-left p-4 text-slate-400 font-medium w-1/3">Feature</th>
+                    <th className="text-left p-4 text-slate-400 font-medium w-2/5">Feature</th>
                     <th className="text-center p-4 text-slate-300 font-medium">
                       <div>Starter</div>
-                      <div className="text-amber-400 text-sm font-bold">$79/mo</div>
+                      <div className="text-slate-400 text-sm font-normal">$79/mo · 1 user</div>
+                    </th>
+                    <th className="text-center p-4 text-slate-300 font-medium">
+                      <div>Professional</div>
+                      <div className="text-slate-400 text-sm font-normal">$149/mo · 2 users</div>
                     </th>
                     <th className="text-center p-4 text-amber-400 font-medium">
-                      <div>Professional</div>
-                      <div className="text-amber-400 text-sm font-bold">$149/mo</div>
-                    </th>
-                    <th className="text-center p-4 text-blue-400 font-medium">
                       <div>Contractor</div>
-                      <div className="text-blue-400 text-sm font-bold">$250/mo</div>
-                    </th>
-                    <th className="text-center p-4 text-purple-400 font-medium">
-                      <div>Enterprise</div>
-                      <div className="text-purple-400 text-sm font-bold">Custom</div>
+                      <div className="text-amber-400/70 text-sm font-normal">$249/mo · 2 users</div>
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {COMPARISON_FEATURES.map((row, i) => (
+                  {COMPARISON_TABLE.map((row, i) => (
                     <tr key={row.label} className={`border-b border-slate-800 ${i % 2 === 0 ? 'bg-slate-900/30' : ''}`}>
                       <td className="p-4 text-slate-300 text-sm">{row.label}</td>
-                      <td className="p-4 text-center"><FeatureCell value={row.starter} /></td>
-                      <td className="p-4 text-center"><FeatureCell value={row.pro} /></td>
-                      <td className="p-4 text-center"><FeatureCell value={row.contractor} /></td>
-                      <td className="p-4 text-center"><FeatureCell value={row.enterprise} /></td>
+                      <td className="p-4 text-center"><CompCell value={row.starter} /></td>
+                      <td className="p-4 text-center"><CompCell value={row.professional} /></td>
+                      <td className="p-4 text-center"><CompCell value={row.contractor} /></td>
                     </tr>
                   ))}
+                  {/* Seat row */}
+                  <tr className="border-b border-slate-800 bg-slate-900/30">
+                    <td className="p-4 text-slate-300 text-sm font-medium">Team Members</td>
+                    <td className="p-4 text-center text-sm text-slate-300">1 user</td>
+                    <td className="p-4 text-center text-sm text-slate-300">Up to 2<br /><span className="text-xs text-slate-500">+$29/mo each</span></td>
+                    <td className="p-4 text-center text-sm text-amber-300">2 included<br /><span className="text-xs text-slate-400">+$29/mo each</span></td>
+                  </tr>
+                  {/* Enterprise row */}
+                  <tr className="bg-purple-900/10">
+                    <td className="p-4 text-slate-300 text-sm font-semibold">Enterprise</td>
+                    <td colSpan={3} className="p-4 text-center text-slate-400 text-sm">
+                      Unlimited users · Multi-company · Custom integrations · API access ·{' '}
+                      <Link href="/enterprise" className="text-purple-400 hover:underline">Contact Sales →</Link>
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </div>
           </div>
         )}
 
-        {/* Trust badges */}
+        {/* ── Trust badges ─────────────────────────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
           <div className="bg-slate-900/40 border border-slate-700 rounded-xl p-6">
             <Shield className="w-8 h-8 text-green-400 mx-auto mb-3" />

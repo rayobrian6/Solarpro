@@ -42,13 +42,14 @@ class BillErrorBoundary extends Component<
   }
 }
 import AppShell from '@/components/ui/AppShell';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import type { Project } from '@/types';
 import { useAppStore } from '@/store/appStore';
 import {
   ArrowLeft, Upload, Map, FileText, Zap, DollarSign,
   User, Calendar, AlertTriangle, CheckCircle, ChevronRight,
-  Settings, BarChart2, Shield, Sun, Wrench, Send, Package, Camera
+  Settings, BarChart2, Shield, Sun, Wrench, Send, Package, Camera,
+  Pencil, X
 } from 'lucide-react';
 import Link from 'next/link';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
@@ -222,6 +223,7 @@ interface QuickAction {
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
 
   const loadActiveProject = useAppStore(s => s.loadActiveProject);
   const projects = useAppStore(s => s.projects);
@@ -234,6 +236,15 @@ export default function ProjectDetailPage() {
   const [showAllWarnings, setShowAllWarnings] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
   const [savingBill, setSavingBill] = useState(false);
+  const [showChangeTypeModal, setShowChangeTypeModal] = useState(false);
+  const [changingType, setChangingType] = useState(false);
+
+  // Auto-open change-type modal when navigated here with ?changeType=1
+  useEffect(() => {
+    if (searchParams.get('changeType') === '1') {
+      setShowChangeTypeModal(true);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const existing = projects.find(p => p.id === id);
@@ -271,6 +282,36 @@ export default function ProjectDetailPage() {
     // All complete — show proposal
     setActiveTab('proposal');
   };
+
+  const handleChangeSystemType = useCallback(async (newType: 'roof' | 'ground' | 'fence') => {
+    if (!project || newType === project.systemType) {
+      setShowChangeTypeModal(false);
+      return;
+    }
+    setChangingType(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/repair-system-type`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ systemType: newType }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed to change system type');
+      // Reload from server so all state is fresh
+      const updated = await loadActiveProject(project.id);
+      if (updated) {
+        setProject(updated);
+        syncProjectToStore(updated);
+      }
+      setShowChangeTypeModal(false);
+    } catch (e: unknown) {
+      console.error('[ChangeSystemType]', e);
+      alert((e as Error)?.message || 'Failed to change system type. Please try again.');
+    } finally {
+      setChangingType(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project]);
 
   const handleUploadBill = useCallback(() => {
     setShowBillModal(true);
@@ -570,6 +611,78 @@ export default function ProjectDetailPage() {
     <AppShell>
       <div className="p-4 md:p-6 space-y-4 animate-fade-in">
 
+        {/* ── Change System Type Modal ─────────────────────────────────────── */}
+        {showChangeTypeModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl animate-fade-in">
+              <div className="flex items-center justify-between p-5 border-b border-slate-700">
+                <div>
+                  <h2 className="text-white font-bold text-base">Change System Type</h2>
+                  <p className="text-slate-400 text-xs mt-0.5">
+                    Currently: <span className="text-white font-medium">{typeLabel}</span>
+                    {project.layout && (
+                      <span className="ml-2 text-amber-400">⚠ Existing design will be cleared</span>
+                    )}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowChangeTypeModal(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+                  disabled={changingType}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {project.layout && (
+                <div className="mx-5 mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2">
+                  <AlertTriangle size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-300">
+                    This project has an existing design with <strong>{project.layout.totalPanels} panels</strong>.
+                    Changing the system type will clear the current panel layout so you can start fresh with the correct mount type.
+                    Bill data, system size, and engineering settings are kept.
+                  </p>
+                </div>
+              )}
+              <div className="p-5 grid grid-cols-1 gap-3">
+                {([
+                  { type: 'roof' as const, label: 'Roof Mount', icon: '🏠', desc: 'Standard rooftop installation with auto roof detection, pitch & azimuth optimization.' },
+                  { type: 'ground' as const, label: 'Ground Mount', icon: '🌱', desc: 'Fixed or adjustable tilt ground array. Adjustable tilt 0–45°, row spacing optimization.' },
+                  { type: 'fence' as const, label: 'Sol Fence (Vertical)', icon: '🔲', desc: 'Vertical bifacial fence-integrated system. 90° mounting, bifacial E-W optimization.' },
+                ] as const).map(({ type, label, icon, desc }) => {
+                  const isCurrent = type === project.systemType;
+                  return (
+                    <button
+                      key={type}
+                      onClick={() => !isCurrent && handleChangeSystemType(type)}
+                      disabled={isCurrent || changingType}
+                      className={`flex items-start gap-3 p-4 rounded-xl border text-left transition-all ${
+                        isCurrent
+                          ? 'border-slate-600 bg-slate-800/60 opacity-60 cursor-default'
+                          : 'border-slate-700 bg-slate-800/40 hover:border-slate-500 hover:bg-slate-700/60 cursor-pointer'
+                      }`}
+                    >
+                      <span className="text-2xl mt-0.5 flex-shrink-0">{icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-white text-sm">{label}</span>
+                          {isCurrent && <span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-700 text-slate-300">Current</span>}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{desc}</p>
+                      </div>
+                      {changingType && !isCurrent && <span className="spinner w-4 h-4 flex-shrink-0 mt-0.5" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="px-5 pb-5">
+                <button onClick={() => setShowChangeTypeModal(false)} disabled={changingType} className="btn-secondary w-full text-sm">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-start gap-3 flex-wrap">
           <Link href="/projects" className="btn-ghost p-2 rounded-lg mt-0.5">
@@ -579,9 +692,15 @@ export default function ProjectDetailPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-black text-white">{project.name}</h1>
               <span className={`badge ${statusColors[project.status]}`}>{project.status}</span>
-              <span className={`badge ${project.systemType === 'roof' ? 'badge-roof' : project.systemType === 'ground' ? 'badge-ground' : 'badge-fence'}`}>
+              {/* System type badge — click pencil to change type */}
+              <button
+                onClick={() => setShowChangeTypeModal(true)}
+                title="Change system type"
+                className={`badge ${project.systemType === 'roof' ? 'badge-roof' : project.systemType === 'ground' ? 'badge-ground' : 'badge-fence'} inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity`}
+              >
                 {typeLabel}
-              </span>
+                <Pencil size={10} className="opacity-60" />
+              </button>
             </div>
             <div className="flex items-center gap-3 mt-1 text-xs text-slate-400 flex-wrap">
               {project.client?.name && (

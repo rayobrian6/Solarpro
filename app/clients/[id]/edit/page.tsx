@@ -6,6 +6,7 @@ import { ArrowLeft, Save } from 'lucide-react';
 import Link from 'next/link';
 import type { Client } from '@/types';
 import { useAppStore } from '@/store/appStore';
+import AddressAutocomplete, { type AddressSuggestion } from '@/components/ui/AddressAutocomplete';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -42,6 +43,30 @@ export default function EditClientPage() {
   }, [id, clients]);
 
   const set = (k: string, v: any) => setForm((prev: any) => ({ ...prev, [k]: v }));
+
+  // When user picks an address suggestion, resolve full location and populate fields
+  const handleAddressSelect = async (suggestion: AddressSuggestion) => {
+    const picked = suggestion.short_name || suggestion.display_name;
+    set('address', picked);
+    try {
+      const res = await fetch('/api/geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: picked }),
+      });
+      const geo = await res.json();
+      if (geo.success && geo.location) {
+        const loc = geo.location;
+        setForm((prev: any) => ({
+          ...prev,
+          address: picked,
+          city: loc.city || prev.city,
+          state: loc.stateCode || prev.state,
+          zip: loc.zip || prev.zip,
+        }));
+      }
+    } catch {}
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -84,7 +109,7 @@ export default function EditClientPage() {
             <div className="col-span-2"><label className="input-label">Full Name</label><input className="input" value={form.name || ''} onChange={e => set('name', e.target.value)} /></div>
             <div><label className="input-label">Email</label><input className="input" type="email" value={form.email || ''} onChange={e => set('email', e.target.value)} /></div>
             <div><label className="input-label">Phone</label><input className="input" value={form.phone || ''} onChange={e => set('phone', e.target.value)} /></div>
-            <div className="col-span-2"><label className="input-label">Address</label><input className="input" value={form.address || ''} onChange={e => set('address', e.target.value)} /></div>
+            <div className="col-span-2"><label className="input-label">Address</label><AddressAutocomplete value={form.address || ''} onChange={v => set('address', v)} onSelect={handleAddressSelect} placeholder="Start typing an address..." inputClassName="text-sm" /></div>
             <div><label className="input-label">City</label><input className="input" value={form.city || ''} onChange={e => set('city', e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-2">
               <div><label className="input-label">State</label><input className="input" value={form.state || ''} onChange={e => set('state', e.target.value.toUpperCase())} maxLength={2} /></div>
