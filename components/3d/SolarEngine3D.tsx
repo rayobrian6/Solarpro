@@ -5870,570 +5870,529 @@ function SolarEngine3D({
         </div>
       )}
 
-      {/* Top toolbar */}
-      {stage === 'done' && (
-        <div style={{
-          position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
-          display: 'flex', gap: 4, alignItems: 'center',
-          background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '6px 10px', zIndex: 50,
-          maxWidth: 'calc(100vw - 120px)', overflowX: 'auto', flexWrap: 'nowrap',
-          /* hide scrollbar visually but keep it functional */
-          scrollbarWidth: 'none',
-        }}>
-          {([
-            { mode: 'select'        as PlacementMode, icon: '↖',             label: 'Select',     tooltip: 'Select a placed panel. Click to select, SHIFT+click to multi-select. Press Delete to remove.' },
-            { mode: 'roof'          as PlacementMode, icon: '🏠',         label: 'Roof',       tooltip: 'Place a single roof panel. Click on a roof surface to snap a panel to the nearest grid position.' },
-            { mode: 'ground'        as PlacementMode, icon: '🌱',         label: 'Ground',     tooltip: 'Ground Mount: click start point, then end point to place a row. PLP = 2 portrait rows auto. XR = 4 landscape rows. Press Enter to confirm.' },
-            { mode: 'fence'         as PlacementMode, icon: '⚡',             label: 'Fence',      tooltip: 'SOL Fence: click to add fence segment points. Right-click to finalize the fence layout.' },
-            { mode: 'plane3d'       as PlacementMode, icon: '📐',         label: '3D Plane',   tooltip: '3D Plane: click 3+ points on a roof surface to define a custom panel grid plane. Right-click to confirm.' },
-            { mode: 'row'           as PlacementMode, icon: '➡',             label: 'Row',        tooltip: 'Row Tool: click two points to place a straight row of panels between them.' },
-            { mode: 'measure'       as PlacementMode, icon: '📏',         label: 'Measure',    tooltip: 'Measure Tool: click two points to measure the distance between them on the terrain.' },
-            { mode: 'auto_roof'     as PlacementMode, icon: '✨',             label: 'Auto',       tooltip: 'Auto Fill: automatically fills all detected roof segments with panels in the current orientation.' },
-            { mode: 'pick_house'    as PlacementMode, icon: '🏡',         label: 'Pick House', tooltip: 'Pick House: click a building on the map to load its address and solar data.' },
-            { mode: 'surface_select' as PlacementMode, icon: '🎯',        label: 'Surface',    tooltip: 'Surface Select: click a roof plane to fill it with a panel grid. Use Extend Row / Add Row to expand.' },
-            { mode: 'extend_row'    as PlacementMode, icon: '→+',            label: 'Ext Row',    tooltip: 'Extend Row: click a roof plane to add one more panel column to the right of each existing row.' },
-            { mode: 'add_row'       as PlacementMode, icon: '↑+',            label: 'Add Row',    tooltip: 'Add Row: click a roof plane to add a new panel row above the highest existing row.' },
-            { mode: 'obstruction'   as PlacementMode, icon: '⚠',             label: 'Obs',        tooltip: 'Obstruction: mark a rectangular area as obstructed (e.g. HVAC unit). Panels will not be placed inside.' },
-            { mode: 'set_direction' as PlacementMode, icon: '🧭',         label: 'Set Dir',    tooltip: 'Set Direction: click two points to define a custom panel row direction for the next Surface Select.' },
-            { mode: 'set_origin'    as PlacementMode, icon: '📍',         label: 'Set Origin', tooltip: 'Set Origin: click to set a custom grid origin point for the next Surface Select fill.' },
-          ] as { mode: PlacementMode; icon: string; label: string; tooltip: string }[]).map(({ mode, icon, label, tooltip }) => (
-            <button
-              key={mode}
-              title={tooltip}
-              onMouseEnter={(e) => {
-                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                setTooltipInfo({ text: tooltip, x: rect.left + rect.width / 2, y: rect.bottom + 8 });
-              }}
-              onMouseLeave={() => setTooltipInfo(null)}
-              onClick={() => {
-                onPlacementModeChange(mode);
-                // auto_roof: fires once via placementMode useEffect — NOT directly here.
-                // Calling handleAutoRoof here AND in the useEffect caused double-execution.
-                // Cancel any in-progress ground array when switching modes
-                // v49.1: 'ground' is now the unified ground array mode — cancel on switching away
-                if (mode !== 'ground' && mode !== 'ground_array' && groundArrayRowsRef.current.length > 0) {
-                  cancelGroundArray();
-                }
-                // Track system type context for row tool (row inherits from last non-row mode)
-                if (mode === 'roof' || mode === 'ground' || mode === 'ground_array' || mode === 'fence') {
-                  rowSystemTypeRef.current = (mode === 'ground' || mode === 'ground_array') ? 'ground' : mode as SystemType;
-                }
-                if (mode !== 'fence') { fencePtsRef.current = []; setFencePtCount(0); }
-                if (mode !== 'plane') { planePtsRef.current = []; setPlanePtCount(0); }
-                if (mode !== 'plane3d') {
-                  // Cancel any in-progress 3D plane drawing when switching away
-                  const v = viewerRef.current;
-                  if (v) clearPlane3DPreview(v);
-                }
-                if (mode === 'set_direction') {
-                  dirClickPtsRef.current = [];
-                }
-                if (mode !== 'row')   { rowPtsRef.current = [];   setRowPtCount(0); rowStartScreenPosRef.current = null; }
-                if (mode !== 'measure') { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }
-                if (mode !== 'select')  { clearPanelSelection(); }
-              }}
-              style={{
-                padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', border: 'none', flexShrink: 0, whiteSpace: 'nowrap',
-                background: placementMode === mode ? 'linear-gradient(135deg, #ff8c00, #ffd700)' : 'rgba(255,255,255,0.08)',
-                color: placementMode === mode ? '#000' : '#ccc', transition: 'all 0.15s',
-              }}
-            >
-              {icon} {label}
-            </button>
-          ))}
+      {/* ── Toolbar: left vertical icon strip ── */}
+      {stage === 'done' && (() => {
+        const btnBase: React.CSSProperties = {
+          width: 36, height: 36, borderRadius: 8, fontSize: 16,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', border: 'none', transition: 'all 0.15s', flexShrink: 0,
+        };
+        const toolGroups: { mode: PlacementMode; icon: string; label: string; tooltip: string }[][] = [
+          [
+            { mode: 'select' as PlacementMode, icon: '\u2196', label: 'Select', tooltip: 'Select a placed panel. SHIFT+click for multi-select. Delete to remove.' },
+          ],
+          [
+            { mode: 'roof' as PlacementMode, icon: '\u{1F3E0}', label: 'Roof', tooltip: 'Place a single roof panel. Click on a roof surface to snap to the grid.' },
+            { mode: 'ground' as PlacementMode, icon: '\u{1F331}', label: 'Ground', tooltip: 'Ground Mount: click start \u2192 end point to place a row.' },
+            { mode: 'fence' as PlacementMode, icon: '\u26A1', label: 'Fence', tooltip: 'SOL Fence: click to add fence segment points. Right-click to finalize.' },
+            { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: '3D Plane', tooltip: '3D Plane: click 3+ points on a roof surface to define a custom panel grid plane.' },
+            { mode: 'row' as PlacementMode, icon: '\u27A1', label: 'Row', tooltip: 'Row Tool: click two points to place a straight row of panels.' },
+          ],
+          [
+            { mode: 'auto_roof' as PlacementMode, icon: '\u2728', label: 'Auto', tooltip: 'Auto Fill: fills all detected roof segments with panels.' },
+            { mode: 'pick_house' as PlacementMode, icon: '\u{1F3E1}', label: 'Pick', tooltip: 'Pick House: click a building to load its address and solar data.' },
+            { mode: 'surface_select' as PlacementMode, icon: '\u{1F3AF}', label: 'Surface', tooltip: 'Surface Select: click a roof plane to fill it with a panel grid.' },
+            { mode: 'extend_row' as PlacementMode, icon: '\u2192+', label: 'Ext', tooltip: 'Extend Row: add one more panel column to the right of each row.' },
+            { mode: 'add_row' as PlacementMode, icon: '\u2191+', label: '+Row', tooltip: 'Add Row: add a new panel row above the highest existing row.' },
+          ],
+          [
+            { mode: 'measure' as PlacementMode, icon: '\u{1F4CF}', label: 'Measure', tooltip: 'Measure Tool: click two points to measure distance on terrain.' },
+            { mode: 'obstruction' as PlacementMode, icon: '\u26A0', label: 'Obs', tooltip: 'Obstruction: mark a rectangular area as obstructed (HVAC etc).' },
+            { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Dir', tooltip: 'Set Direction: click two points to define a custom panel row direction.' },
+            { mode: 'set_origin' as PlacementMode, icon: '\u{1F4CD}', label: 'Origin', tooltip: 'Set Origin: click to set a custom grid origin for Surface Select.' },
+          ],
+        ];
+        return (
+          <>
+            {/* ── LEFT: vertical tool strip ── */}
+            <div style={{
+              position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
+              display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center',
+              background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
+              padding: '8px 5px', zIndex: 50,
+            }}>
+              {toolGroups.map((group, gi) => (
+                <React.Fragment key={gi}>
+                  {group.map(({ mode, icon, label, tooltip }) => (
+                    <button
+                      key={mode}
+                      title={tooltip}
+                      onMouseEnter={(e) => {
+                        const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                        setTooltipInfo({ text: `${label}: ${tooltip}`, x: rect.right + 8, y: rect.top + rect.height / 2 });
+                      }}
+                      onMouseLeave={() => setTooltipInfo(null)}
+                      onClick={() => {
+                        onPlacementModeChange(mode);
+                        if (mode !== 'ground' && mode !== 'ground_array' && groundArrayRowsRef.current.length > 0) {
+                          cancelGroundArray();
+                        }
+                        if (mode === 'roof' || mode === 'ground' || mode === 'ground_array' || mode === 'fence') {
+                          rowSystemTypeRef.current = (mode === 'ground' || mode === 'ground_array') ? 'ground' : mode as SystemType;
+                        }
+                        if (mode !== 'fence') { fencePtsRef.current = []; setFencePtCount(0); }
+                        if (mode !== 'plane') { planePtsRef.current = []; setPlanePtCount(0); }
+                        if (mode !== 'plane3d') { const v = viewerRef.current; if (v) clearPlane3DPreview(v); }
+                        if (mode === 'set_direction') { dirClickPtsRef.current = []; }
+                        if (mode !== 'row')   { rowPtsRef.current = [];   setRowPtCount(0); rowStartScreenPosRef.current = null; }
+                        if (mode !== 'measure') { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }
+                        if (mode !== 'select')  { clearPanelSelection(); }
+                      }}
+                      style={{
+                        ...btnBase,
+                        background: placementMode === mode
+                          ? 'linear-gradient(135deg, #ff8c00, #ffd700)'
+                          : 'rgba(255,255,255,0.07)',
+                        color: placementMode === mode ? '#000' : '#ccc',
+                        boxShadow: placementMode === mode ? '0 0 8px rgba(255,180,0,0.35)' : 'none',
+                      }}
+                    >
+                      {icon}
+                    </button>
+                  ))}
+                  {gi < toolGroups.length - 1 && (
+                    <div style={{ width: 22, height: 1, background: 'rgba(255,255,255,0.12)', margin: '3px 0' }} />
+                  )}
+                </React.Fragment>
+              ))}
 
-          <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
+              {/* divider */}
+              <div style={{ width: 22, height: 1, background: 'rgba(255,255,255,0.12)', margin: '3px 0' }} />
 
-          {/* v47.215: Fit View button — zooms camera to all placed panels */}
-          <button
-            onClick={() => {
-              const viewer = viewerRef.current;
-              const C = (window as any).Cesium;
-              if (viewer && C) fitCameraToRoofPlanes(viewer, C);
-            }}
-            title="Fit View: zoom camera to all placed panels"
-            style={{
-              padding: '5px 10px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-              cursor: 'pointer', border: '1px solid rgba(100,200,255,0.35)',
-              background: 'rgba(0,150,255,0.15)', color: '#60c8ff', transition: 'all 0.15s',
-              flexShrink: 0, whiteSpace: 'nowrap',
-            }}
-          >
-            ⛶ Fit View
-          </button>
-
-          <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
-
-          {/* v31.1: Active tool indicator */}
-          <div style={{
-            fontSize: 10, color: '#888', padding: '2px 6px',
-            background: 'rgba(255,255,255,0.05)', borderRadius: 5,
-            border: '1px solid rgba(255,255,255,0.08)',
-            whiteSpace: 'nowrap',
-          }}>
-            <span style={{ color: '#555' }}>Tool: </span>
-            <span style={{ color: placementMode === 'select' ? '#10b981' : '#ff8c00', fontWeight: 700 }}>
-              {placementMode === 'select' ? '↖ Select' :
-               placementMode === 'roof' ? '🏠 Place Roof' :
-               placementMode === 'ground' ? '🌱 Ground Array' :
-               placementMode === 'ground_array' ? '🌱 G-Array' :
-               placementMode === 'fence' ? '⚡ Fence' :
-               placementMode === 'plane' ? '📐 Plane' :
-               placementMode === 'row' ? '➡ Row' :
-               placementMode === 'measure' ? '📏 Measure' :
-               placementMode === 'auto_roof' ? '✨ Auto Fill' :
-               placementMode === 'pick_house' ? '🏡 Pick House' :
-               placementMode === 'surface_select' ? '🎯 Surface Select' :
-               placementMode === 'extend_row' ? '→+ Extend Row' :
-               placementMode === 'add_row' ? '↑+ Add Row' :
-               placementMode === 'obstruction' ? '⚠ Place Obstruction' :
-               placementMode === 'plane3d'     ? `✏ 3D Plane (${pts3DCount} pts)` :
-               placementMode === 'set_direction' ? (layoutDirSet ? '🧭 Dir ✓ Set' : '🧭 Click 2 pts for direction') :
-               placementMode === 'set_origin'    ? (layoutOriginSet ? '📍 Origin ✓ Set' : '📍 Click layout start point') :
-               placementMode}
-            </span>
-          </div>
-
-          <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
-
-          {/* Ground tilt selector — shown for both Ground and Ground Array modes */}
-          {(placementMode === 'ground' || placementMode === 'ground_array') && (
-            <select value={gTilt} onChange={e => setGTilt(Number(e.target.value))}
-              style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
-              <option value={0}>0° Flat</option>
-              <option value={10}>10°</option>
-              <option value={20}>20°</option>
-              <option value={25}>25°</option>
-              <option value={30}>30°</option>
-              <option value={35}>35°</option>
-              <option value={40}>40°</option>
-              <option value={90}>90° Vertical</option>
-            </select>
-          )}
-
-          {/* Ground Array status + confirm/cancel buttons */}
-          {(placementMode === 'ground' || placementMode === 'ground_array') && groundArrayRowCount > 0 && (
-            <>
-              <div style={{ color: '#14b8a6', fontSize: 12, padding: '4px 8px', fontWeight: 600 }}>
-                {groundArrayRowCount} row{groundArrayRowCount !== 1 ? 's' : ''} · {groundArrayPanelCount} panels
-              </div>
+              {/* Fit View */}
               <button
-                onClick={finalizeGroundArray}
-                style={{ padding: '4px 12px', borderRadius: 7, fontSize: 12, fontWeight: 700,
-                  cursor: 'pointer', border: 'none',
-                  background: 'linear-gradient(135deg, #14b8a6, #0d9488)', color: '#fff' }}>
-                ✓ Confirm
+                onClick={() => { const viewer = viewerRef.current; const C = (window as any).Cesium; if (viewer && C) fitCameraToRoofPlanes(viewer, C); }}
+                title="Fit View: zoom camera to all placed panels"
+                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Fit View', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                onMouseLeave={() => setTooltipInfo(null)}
+                style={{ ...btnBase, background: 'rgba(0,150,255,0.15)', color: '#60c8ff', border: '1px solid rgba(100,200,255,0.2)' }}
+              >
+                {'\u26F6'}
               </button>
+
+              {/* Fly Home */}
               <button
-                onClick={cancelGroundArray}
-                style={{ padding: '4px 10px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                  cursor: 'pointer', border: '1px solid rgba(239,68,68,0.4)',
-                  background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
-                ✗ Cancel
+                onClick={flyToProperty}
+                title="Fly to property"
+                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Fly to property', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                onMouseLeave={() => setTooltipInfo(null)}
+                style={{ ...btnBase, background: 'rgba(255,255,255,0.07)', color: '#ccc' }}
+              >
+                {'\u{1F3E0}'}
               </button>
-            </>
-          )}
 
-          {/* Ground Array hint when no rows yet */}
-          {(placementMode === 'ground' || placementMode === 'ground_array') && groundArrayRowCount === 0 && (
-            <div style={{ color: '#14b8a6', fontSize: 11, padding: '4px 8px', opacity: 0.8 }}>
-              Click start → end point → PLP auto-places 2 rows → Enter to confirm
-            </div>
-          )}
-
-          {/* Plane info + finish button */}
-          {placementMode === 'plane' && (
-            <>
-              <div style={{ color: '#00ccff', fontSize: 12, padding: '4px 8px' }}>
-                {planePtCount === 0 ? 'Click roof corners' : `${planePtCount} pts`}
-              </div>
-              {planePtCount >= 3 && (
-                <button
-                  onClick={() => {
-                    const viewer = viewerRef.current;
-                    const C = (window as any).Cesium;
-                    if (viewer && C) finalizePlane(viewer, C);
-                  }}
-                  style={{ padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700,
-                    background: 'rgba(0,180,255,0.2)', color: '#00ccff',
-                    border: '1px solid rgba(0,180,255,0.4)', cursor: 'pointer' }}
-                >
-                  ✅ Fill Plane
-                </button>
-              )}
-            </>
-          )}
-
-          {/* v47.121: 3D Plane tool status + Finish button */}
-          {placementMode === 'plane3d' && (
-            <>
-              <div style={{ color: '#00ff88', fontSize: 12, padding: '4px 8px' }}>
-                {pts3DCount === 0
-                  ? 'Click roof corners in 3D'
-                  : pts3DCount < 3
-                  ? `${pts3DCount} pt${pts3DCount > 1 ? 's' : ''} — need ${3 - pts3DCount} more`
-                  : `${pts3DCount} pts — right-click or Finish`}
-              </div>
-              {pts3DCount >= 3 && (
-                <button
-                  onClick={() => {
-                    const viewer = viewerRef.current;
-                    const C = (window as any).Cesium;
-                    if (viewer && C) finalizePlane3D(viewer, C);
-                  }}
-                  style={{ padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700,
-                    background: 'rgba(0,255,136,0.15)', color: '#00ff88',
-                    border: '1px solid rgba(0,255,136,0.4)', cursor: 'pointer' }}
-                >
-                  ✅ Create Roof Plane
-                </button>
-              )}
-              {pts3DCount > 0 && (
-                <button
-                  onClick={() => {
-                    const viewer = viewerRef.current;
-                    if (viewer) clearPlane3DPreview(viewer);
-                    setStatusMsg('3D Plane cleared — click roof corners to start again');
-                  }}
-                  style={{ padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                    background: 'rgba(255,60,60,0.12)', color: '#ff6666',
-                    border: '1px solid rgba(255,60,60,0.3)', cursor: 'pointer' }}
-                >
-                  ✕ Clear
-                </button>
-              )}
-            </>
-          )}
-
-          {/* v47.126: Set Layout Direction UI */}
-          {placementMode === 'set_direction' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ color: '#ffd700', fontSize: 12, padding: '4px 8px' }}>
-                {!layoutDirSet
-                  ? 'Click first point, then second point along roof edge'
-                  : '✓ Direction locked — switch to 3D Plane or Auto'}
-              </div>
-              {layoutDirSet && (
-                <button onClick={() => {
-                  customLayoutDirRef.current = null;
-                  setLayoutDirSet(false);
-                  dirClickPtsRef.current = [];
-                  setStatusMsg('Layout direction reset — longest edge will be used');
-                }} style={{ padding: '4px 10px', borderRadius: 7, fontSize: 11,
-                  background: 'rgba(255,200,0,0.12)', color: '#ffd700',
-                  border: '1px solid rgba(255,200,0,0.3)', cursor: 'pointer' }}>
-                  ✕ Reset Dir
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* v47.126: Set Origin UI */}
-          {placementMode === 'set_origin' && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ color: '#00ff88', fontSize: 12, padding: '4px 8px' }}>
-                {!layoutOriginSet
-                  ? 'Click where first panel should begin'
-                  : '✓ Origin locked — panels start here'}
-              </div>
-              {layoutOriginSet && (
-                <button onClick={() => {
-                  customLayoutOriginRef.current = null;
-                  setLayoutOriginSet(false);
-                  setStatusMsg('Layout origin reset — corner-snap will be used');
-                }} style={{ padding: '4px 10px', borderRadius: 7, fontSize: 11,
-                  background: 'rgba(0,255,136,0.12)', color: '#00ff88',
-                  border: '1px solid rgba(0,255,136,0.3)', cursor: 'pointer' }}>
-                  ✕ Reset Origin
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Fence info + finish button */}
-          {placementMode === 'fence' && fencePtCount > 0 && (
-            <>
-              <div style={{ color: '#ff8800', fontSize: 12, padding: '4px 8px' }}>
-                {fencePtCount} pts
-              </div>
-              {fencePtCount >= 2 && (
-                <button
-                  onClick={() => {
-                    const viewer = viewerRef.current;
-                    const C = (window as any).Cesium;
-                    if (viewer && C) finalizeFence(viewer, C);
-                  }}
-                  style={{ padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700,
-                    background: 'rgba(0,200,100,0.2)', color: '#00cc66',
-                    border: '1px solid rgba(0,200,100,0.4)', cursor: 'pointer' }}
-                >
-                  ✅ Finish Fence
-                </button>
-              )}
-            </>
-          )}
-
-          {/* Row mode status */}
-          {placementMode === 'row' && (
-            <div style={{ color: '#00ffcc', fontSize: 12, padding: '4px 8px' }}>
-              {rowPtCount === 0 ? 'Click row start' : 'Click row end'}
-            </div>
-          )}
-
-          {/* Measure mode status + clear */}
-          {placementMode === 'measure' && (
-            <>
-              <div style={{ color: '#00ffff', fontSize: 12, padding: '4px 8px' }}>
-                {measurePtCount === 0 ? 'Click point 1' : measurePtCount === 1 ? 'Click point 2' : `${measurePtCount} pts`}
-              </div>
-              {measurePtCount > 0 && (
-                <button
-                  onClick={() => { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }}
-                  style={{ padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700,
-                    background: 'rgba(0,200,255,0.15)', color: '#00ffff',
-                    border: '1px solid rgba(0,200,255,0.3)', cursor: 'pointer' }}
-                >
-                  🗑 Clear
-                </button>
-              )}
-            </>
-          )}
-
-          {/* Select mode — delete selected panel(s) */}
-          {placementMode === 'select' && selectedPanelIds.size > 0 && (
-            <>
-              <div style={{ color: selectedPanelIds.size > 1 ? '#ffaa00' : '#ff6666', fontSize: 12, padding: '4px 8px' }}>
-                {selectedPanelIds.size === 1 ? '1 selected' : `${selectedPanelIds.size} selected`}
-              </div>
-              <button onClick={deleteSelectedPanels}
-                style={{ padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700,
-                  background: 'rgba(255,50,50,0.2)', color: '#ff6666',
-                  border: '1px solid rgba(255,50,50,0.4)', cursor: 'pointer' }}>
-                🗑️ Delete{selectedPanelIds.size > 1 ? ` (${selectedPanelIds.size})` : ''}
+              {/* Orient North */}
+              <button
+                onClick={() => {
+                  const viewer = viewerRef.current; if (!viewer) return;
+                  const C = (window as any).Cesium; if (!C) return;
+                  const elev = cesiumGroundElevRef.current;
+                  viewer.camera.flyTo({
+                    destination: C.Cartesian3.fromDegrees(lng, lat, elev + 200),
+                    orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-45), roll: 0 },
+                    duration: 1.5,
+                  });
+                  setStatusMsg('\u{1F9ED} Oriented: North up');
+                }}
+                title="Orient view: North up"
+                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Orient North up', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                onMouseLeave={() => setTooltipInfo(null)}
+                style={{ ...btnBase, background: 'rgba(255,140,0,0.12)', color: '#ffaa44', border: '1px solid rgba(255,140,0,0.18)' }}
+              >
+                {'\u{1F9ED}'}
               </button>
-              <button onClick={clearPanelSelection}
-                style={{ padding: '5px 10px', borderRadius: 7, fontSize: 11,
-                  background: 'rgba(255,255,255,0.08)', color: '#aaa',
-                  border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
-                ✕
+
+              {/* Clear All Panels */}
+              <button
+                onClick={clearPanels}
+                title="Clear all panels"
+                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Clear all panels', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                onMouseLeave={() => setTooltipInfo(null)}
+                style={{ ...btnBase, background: 'rgba(255,60,60,0.15)', color: '#ff6666', border: '1px solid rgba(255,60,60,0.22)' }}
+              >
+                {'\u{1F5D1}'}
               </button>
-              {selectedPanelIds.size === 1 && (
-                <div style={{ color: '#888', fontSize: 10, padding: '2px 6px' }}>
-                  SHIFT+click to add
+            </div>
+
+            {/* ── TOP-RIGHT: stats + orientation + active tool + context controls ── */}
+            <div style={{
+              position: 'absolute', top: 12, right: 12,
+              display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
+              zIndex: 50,
+            }}>
+              {/* Stats + orientation row */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '5px 12px',
+              }}>
+                <span style={{ color: '#ffd700', fontSize: 13, fontWeight: 700 }}>{panelCount} panels</span>
+                <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.15)' }} />
+                <span style={{ color: '#4caf50', fontSize: 13, fontWeight: 700 }}>{totalKw} kW</span>
+                <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.15)' }} />
+                <button
+                  onClick={() => {
+                    const next: PanelOrientation = panelOrientation === 'portrait' ? 'landscape' : 'portrait';
+                    setPanelOrientation(next);
+                    panelOrientationRef.current = next;
+                    surfaceOrientationRef.current = next;
+                  }}
+                  title="Toggle panel orientation"
+                  style={{
+                    padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    background: panelOrientation === 'landscape' ? 'rgba(255,140,0,0.25)' : 'rgba(255,255,255,0.08)',
+                    color: panelOrientation === 'landscape' ? '#ffd700' : '#aaa',
+                    border: panelOrientation === 'landscape' ? '1px solid rgba(255,200,0,0.4)' : '1px solid rgba(255,255,255,0.1)',
+                  }}
+                >
+                  {panelOrientation === 'portrait' ? '\u25AF Port' : '\u25AD Land'}
+                </button>
+              </div>
+
+              {/* Active tool badge */}
+              <div style={{
+                background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,140,0,0.25)', borderRadius: 8,
+                padding: '4px 10px', fontSize: 11, color: '#ff8c00', fontWeight: 600,
+              }}>
+                {placementMode === 'select' ? '\u2196 Select' :
+                 placementMode === 'roof' ? '\u{1F3E0} Place Roof' :
+                 placementMode === 'ground' || placementMode === 'ground_array' ? '\u{1F331} Ground Array' :
+                 placementMode === 'fence' ? '\u26A1 Fence' :
+                 placementMode === 'plane3d' ? '\u{1F4D0} 3D Plane' :
+                 placementMode === 'row' ? '\u27A1 Row' :
+                 placementMode === 'auto_roof' ? '\u2728 Auto Fill' :
+                 placementMode === 'pick_house' ? '\u{1F3E1} Pick House' :
+                 placementMode === 'surface_select' ? '\u{1F3AF} Surface' :
+                 placementMode === 'extend_row' ? '\u2192+ Ext Row' :
+                 placementMode === 'add_row' ? '\u2191+ Add Row' :
+                 placementMode === 'obstruction' ? '\u26A0 Obstruction' :
+                 placementMode === 'measure' ? '\u{1F4CF} Measure' :
+                 placementMode === 'set_direction' ? '\u{1F9ED} Set Direction' :
+                 placementMode === 'set_origin' ? '\u{1F4CD} Set Origin' :
+                 placementMode}
+              </div>
+
+              {/* ── Ground mode context controls ── */}
+              {(placementMode === 'ground' || placementMode === 'ground_array') && (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end',
+                  background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(8px)',
+                  border: '1px solid rgba(20,184,166,0.3)', borderRadius: 10, padding: '8px 10px',
+                }}>
+                  <select value={gTilt} onChange={e => setGTilt(Number(e.target.value))}
+                    style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
+                    <option value={0}>0\u00b0 Flat</option>
+                    <option value={10}>10\u00b0</option>
+                    <option value={20}>20\u00b0</option>
+                    <option value={25}>25\u00b0</option>
+                    <option value={30}>30\u00b0</option>
+                    <option value={35}>35\u00b0</option>
+                    <option value={40}>40\u00b0</option>
+                    <option value={90}>90\u00b0 Vertical</option>
+                  </select>
+                  <button
+                    title={showRacking ? 'Hide pylon posts & rails' : 'Show pylon posts & rails'}
+                    onClick={() => { const next = !showRacking; setShowRacking(next); showRackingRef.current = next; }}
+                    style={{
+                      padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                      background: showRacking ? 'rgba(20,184,166,0.2)' : 'rgba(255,255,255,0.07)',
+                      color: showRacking ? '#2dd4bf' : '#888', border: '1px solid rgba(20,184,166,0.25)',
+                    }}
+                  >
+                    {showRacking ? '\u{1F3D7} Racking On' : '\u{1F3D7} Racking Off'}
+                  </button>
+                  {showRacking && (
+                    <button
+                      title={groundMountStyle === 'pipe' ? 'Switch to IronRidge XR' : 'Switch to PLP Power Rail'}
+                      onClick={() => {
+                        const next: 'pipe' | 'ironridge' = groundMountStyle === 'pipe' ? 'ironridge' : 'pipe';
+                        setGroundMountStyle(next); groundMountStyleRef.current = next;
+                        const viewer = viewerRef.current; const C = (window as any).Cesium;
+                        if (viewer && C) {
+                          const toRemove: string[] = [];
+                          panelMapRef.current.forEach((ent, key) => { if (key.includes('__gnd__')) { try { viewer.entities.remove(ent); } catch {} toRemove.push(key); } });
+                          toRemove.forEach(k => panelMapRef.current.delete(k));
+                          try { viewer.scene.requestRender(); } catch {}
+                        }
+                      }}
+                      style={{
+                        padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        background: groundMountStyle === 'ironridge' ? 'rgba(100,160,255,0.18)' : 'rgba(255,200,80,0.13)',
+                        color: groundMountStyle === 'ironridge' ? '#7ab8ff' : '#ffc850',
+                        border: groundMountStyle === 'ironridge' ? '1px solid rgba(100,160,255,0.35)' : '1px solid rgba(255,200,80,0.3)',
+                      }}
+                    >
+                      {groundMountStyle === 'pipe' ? '\u{1F529} PLP Rail' : '\u2B1B IronRidge XR'}
+                    </button>
+                  )}
+                  {groundArrayRowCount > 0 ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ color: '#14b8a6', fontSize: 12, fontWeight: 600 }}>
+                        {groundArrayRowCount} row{groundArrayRowCount !== 1 ? 's' : ''} &middot; {groundArrayPanelCount} panels
+                      </span>
+                      <button onClick={finalizeGroundArray}
+                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none',
+                          background: 'linear-gradient(135deg, #14b8a6, #0d9488)', color: '#fff' }}>
+                        \u2713 Confirm
+                      </button>
+                      <button onClick={cancelGroundArray}
+                        style={{ padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                          border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
+                        \u2717
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ color: '#14b8a6', fontSize: 10, opacity: 0.8 }}>Click start \u2192 end \u2192 Enter</div>
+                  )}
                 </div>
               )}
-              {/* Fence section conversion — show when ANY selected panel belongs to a fence section.
-                  Does NOT depend on systemType prop — works regardless of active zone type. */}
-              {selectedPanelIds.size >= 1 && (() => {
-                const selId = [...selectedPanelIds][0];
-                const sectionsCount = fenceSectionsRef.current.length;
-                // If sections are empty but we have panels, try rebuilding on demand
-                if (sectionsCount === 0 && panelsRef.current.length > 0) {
-                  const fencePanels = panelsRef.current.filter(p =>
-                    (p as any).systemType === 'fence'
-                  );
-                  if (fencePanels.length > 0) {
-                    const byLayout = new Map<string, typeof fencePanels>();
-                    fencePanels.forEach(p => {
-                      const lid = p.layoutId ?? 'default';
-                      if (!byLayout.has(lid)) byLayout.set(lid, []);
-                      byLayout.get(lid)!.push(p);
-                    });
-                    const rebuilt: FenceSectionState[] = [];
-                    let segIdx = 0;
-                    byLayout.forEach((segPanels) => {
-                      segPanels.sort((a, b) => (a.col ?? 0) - (b.col ?? 0));
-                      for (let i = 0; i < segPanels.length; i += 2) {
-                        const secPanels = segPanels.slice(i, i + 2);
-                        rebuilt.push({
-                          id: `sec-${segIdx}-${Math.floor(i / 2)}`,
-                          segIdx, secIdx: Math.floor(i / 2),
-                          type: 'solar',
-                          panelIds: secPanels.map(p => p.id),
-                          entityKey: '',
-                        });
-                      }
-                      segIdx++;
-                    });
-                    fenceSectionsRef.current = rebuilt;
-                  }
-                }
-                const sec = fenceSectionsRef.current.find(s => s.panelIds.includes(selId));
-                if (!sec) return null;
-                return (
-                  <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 4 }}>
-                    <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.15)' }} />
-                    <span style={{ color: '#888', fontSize: 10 }}>Section:</span>
-                    {sec.type !== 'solar' && (
-                      <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'solar'); }}
-                        style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
-                          background: 'rgba(34,197,94,0.15)', color: '#4ade80',
-                          border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }}>
-                        ☀️ Solar
-                      </button>
-                    )}
-                    {sec.type !== 'gate' && (
-                      <>
-                        <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'gate', '4ft', selId); }}
-                          style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
-                            background: 'rgba(168,85,247,0.15)', color: '#c084fc',
-                            border: '1px solid rgba(168,85,247,0.3)', cursor: 'pointer' }}>
-                          🚪 4ft Gate
-                        </button>
-                        <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'gate', '8ft', selId); }}
-                          style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
-                            background: 'rgba(139,92,246,0.2)', color: '#a78bfa',
-                            border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer' }}>
-                          🚪 8ft Gate
-                        </button>
-                      </>
-                    )}
-                    {sec.type !== 'vinyl' && (
-                      <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'vinyl'); }}
-                        style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
-                          background: 'rgba(245,158,11,0.15)', color: '#fbbf24',
-                          border: '1px solid rgba(245,158,11,0.3)', cursor: 'pointer' }}>
-                        🪟 Vinyl
-                      </button>
-                    )}
-                    <span style={{ color: '#666', fontSize: 9 }}>({sec.type})</span>
+
+              {/* ── 3D Plane context controls ── */}
+              {placementMode === 'plane3d' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,136,0.25)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#00ff88', fontSize: 12 }}>
+                    {pts3DCount === 0 ? 'Click roof corners in 3D' :
+                     pts3DCount < 3 ? `${pts3DCount} pt${pts3DCount > 1 ? 's' : ''} \u2014 need ${3 - pts3DCount} more` :
+                     `${pts3DCount} pts \u2014 right-click or Finish`}
+                  </span>
+                  {pts3DCount >= 3 && (
+                    <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) finalizePlane3D(v, C); }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(0,255,136,0.15)', color: '#00ff88',
+                        border: '1px solid rgba(0,255,136,0.4)', cursor: 'pointer' }}>
+                      \u2705 Create Roof Plane
+                    </button>
+                  )}
+                  {pts3DCount > 0 && (
+                    <button onClick={() => { const v = viewerRef.current; if (v) clearPlane3DPreview(v); setStatusMsg('3D Plane cleared'); }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
+                        background: 'rgba(255,60,60,0.12)', color: '#ff6666',
+                        border: '1px solid rgba(255,60,60,0.3)', cursor: 'pointer' }}>
+                      \u2715 Clear
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* ── Fence context controls ── */}
+              {placementMode === 'fence' && fencePtCount > 0 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(255,136,0,0.25)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#ff8800', fontSize: 12 }}>{fencePtCount} pts</span>
+                  {fencePtCount >= 2 && (
+                    <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) finalizeFence(v, C); }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(0,200,100,0.2)', color: '#00cc66',
+                        border: '1px solid rgba(0,200,100,0.4)', cursor: 'pointer' }}>
+                      \u2705 Finish Fence
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* ── Select context controls ── */}
+              {placementMode === 'select' && selectedPanelIds.size > 0 && (
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(255,100,100,0.25)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: selectedPanelIds.size > 1 ? '#ffaa00' : '#ff6666', fontSize: 12 }}>
+                      {selectedPanelIds.size === 1 ? '1 selected' : `${selectedPanelIds.size} selected`}
+                    </span>
+                    <button onClick={deleteSelectedPanels}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(255,50,50,0.2)', color: '#ff6666',
+                        border: '1px solid rgba(255,50,50,0.4)', cursor: 'pointer' }}>
+                      Delete{selectedPanelIds.size > 1 ? ` (${selectedPanelIds.size})` : ''}
+                    </button>
+                    <button onClick={clearPanelSelection}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
+                        background: 'rgba(255,255,255,0.08)', color: '#aaa',
+                        border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>
+                      \u2715
+                    </button>
                   </div>
-                );
-              })()}
-            </>
-          )}
-
-          <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
-
-          {/* v48.12: Ground racking toggle */}
-          {placementMode === 'ground' || placementMode === 'ground_array' ? (
-            <button
-              title={showRacking ? 'Hide pylon posts & rails' : 'Show pylon posts & rails'}
-              onClick={() => {
-                const next = !showRacking;
-                setShowRacking(next);
-                showRackingRef.current = next;
-                // Hide/show existing racking entities
-                // v6.2.2: handle both legacy __gracking__ and new __gnd__ prefixed keys
-                panelMapRef.current.forEach((ent, key) => {
-                  if (key.startsWith('__gracking__') || key.includes('__gnd__')) {
-                    try { ent.show = next; } catch {}
-                  }
-                });
-                const viewer = viewerRef.current;
-                try { if (viewer) viewer.scene.requestRender(); } catch {}
-              }}
-              style={{
-                padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                background: showRacking ? 'rgba(100,200,100,0.18)' : 'rgba(255,255,255,0.06)',
-                color: showRacking ? '#7dff7d' : '#888',
-                border: showRacking ? '1px solid rgba(100,220,100,0.35)' : '1px solid rgba(255,255,255,0.1)',
-                cursor: 'pointer',
-              }}
-            >
-              🏗 Racking
-            </button>
-          ) : null}
-
-          {/* v48.14: Ground mount style toggle — pipe vs ironridge */}
-          {(placementMode === 'ground' || placementMode === 'ground_array') && showRacking ? (
-            <button
-              title={groundMountStyle === 'pipe'
-                ? 'PLP Power Rail: post pairs every ~20ft (6.1m). Click to switch to IronRidge XR'
-                : 'IronRidge XR1000: post pairs every ~12ft (3.66m). Click to switch to PLP Power Rail'}
-              onClick={() => {
-                const next: 'pipe' | 'ironridge' = groundMountStyle === 'pipe' ? 'ironridge' : 'pipe';
-                setGroundMountStyle(next);
-                groundMountStyleRef.current = next;
-                // REG-2/REG-3 fix: style toggle only affects future placements.
-                // Remove any existing __gnd__ racking so the scene is clean.
-                const viewer = viewerRef.current;
-                const C = (window as any).Cesium;
-                if (viewer && C) {
-                  // REG-2: was '__gracking__' (wrong prefix) — now '__gnd__' (correct)
-                  // v6.2.2: keys now have array prefix, so check includes('__gnd__')
-                  const toRemove: string[] = [];
-                  panelMapRef.current.forEach((ent, key) => {
-                    if (key.includes('__gnd__')) {
-                      try { viewer.entities.remove(ent); } catch {}
-                      toRemove.push(key);
+                  {selectedPanelIds.size === 1 && (
+                    <span style={{ color: '#666', fontSize: 10 }}>SHIFT+click to add</span>
+                  )}
+                  {/* Fence section conversion */}
+                  {selectedPanelIds.size >= 1 && (() => {
+                    const selId = [...selectedPanelIds][0];
+                    const sectionsCount = fenceSectionsRef.current.length;
+                    if (sectionsCount === 0 && panelsRef.current.length > 0) {
+                      const fencePanels = panelsRef.current.filter(p => (p as any).systemType === 'fence');
+                      if (fencePanels.length > 0) {
+                        const byLayout = new Map<string, typeof fencePanels>();
+                        fencePanels.forEach(p => { const lid = p.layoutId ?? 'default'; if (!byLayout.has(lid)) byLayout.set(lid, []); byLayout.get(lid)!.push(p); });
+                        const rebuilt: FenceSectionState[] = [];
+                        let segIdx = 0;
+                        byLayout.forEach((segPanels) => {
+                          segPanels.sort((a, b) => (a.col ?? 0) - (b.col ?? 0));
+                          for (let i = 0; i < segPanels.length; i += 2) {
+                            const secPanels = segPanels.slice(i, i + 2);
+                            rebuilt.push({ id: `sec-${segIdx}-${Math.floor(i / 2)}`, segIdx, secIdx: Math.floor(i / 2), type: 'solar', panelIds: secPanels.map(p => p.id), entityKey: '' });
+                          }
+                          segIdx++;
+                        });
+                        fenceSectionsRef.current = rebuilt;
+                      }
                     }
-                  });
-                  toRemove.forEach(k => panelMapRef.current.delete(k));
-                  // REG-3: removed broken addGroundRacking call — committed panels have
-                  // lost arrayRow stamps after finalize. Style switch affects new placements only.
-                  try { viewer.scene.requestRender(); } catch {}
-                }
-              }}
-              style={{
-                padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                background: groundMountStyle === 'ironridge' ? 'rgba(100,160,255,0.18)' : 'rgba(255,200,80,0.13)',
-                color: groundMountStyle === 'ironridge' ? '#7ab8ff' : '#ffc850',
-                border: groundMountStyle === 'ironridge' ? '1px solid rgba(100,160,255,0.35)' : '1px solid rgba(255,200,80,0.3)',
-                cursor: 'pointer',
-              }}
-            >
-              {groundMountStyle === 'pipe' ? '🔩 PLP Rail' : '⬛ IronRidge XR'}
-            </button>
-          ) : null}
+                    const sec = fenceSectionsRef.current.find(s => s.panelIds.includes(selId));
+                    if (!sec) return null;
+                    return (
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.15)' }} />
+                        <span style={{ color: '#888', fontSize: 10 }}>Section:</span>
+                        {sec.type !== 'solar' && (
+                          <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'solar'); }}
+                            style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                              background: 'rgba(34,197,94,0.15)', color: '#4ade80',
+                              border: '1px solid rgba(34,197,94,0.3)', cursor: 'pointer' }}>
+                            Solar
+                          </button>
+                        )}
+                        {sec.type !== 'gate' && (
+                          <>
+                            <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'gate', '4ft', selId); }}
+                              style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                                background: 'rgba(168,85,247,0.15)', color: '#c084fc',
+                                border: '1px solid rgba(168,85,247,0.3)', cursor: 'pointer' }}>
+                              4ft Gate
+                            </button>
+                            <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'gate', '8ft', selId); }}
+                              style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                                background: 'rgba(139,92,246,0.2)', color: '#a78bfa',
+                                border: '1px solid rgba(139,92,246,0.4)', cursor: 'pointer' }}>
+                              8ft Gate
+                            </button>
+                          </>
+                        )}
+                        {sec.type !== 'vinyl' && (
+                          <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) convertFenceSection(v, C, sec.id, 'vinyl'); }}
+                            style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                              background: 'rgba(245,158,11,0.15)', color: '#fbbf24',
+                              border: '1px solid rgba(245,158,11,0.3)', cursor: 'pointer' }}>
+                            Vinyl
+                          </button>
+                        )}
+                        <span style={{ color: '#666', fontSize: 9 }}>({sec.type})</span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
 
-          {/* Portrait / Landscape toggle */}
-          <button
-            onClick={() => {
-              const next: PanelOrientation = panelOrientation === 'portrait' ? 'landscape' : 'portrait';
-              setPanelOrientation(next);
-              panelOrientationRef.current = next;
-              surfaceOrientationRef.current = next;  // v47.155: keep surface placement in sync
-            }}
-            title="Toggle panel orientation"
-            style={{
-              padding: '5px 10px', borderRadius: 7, fontSize: 11, fontWeight: 700,
-              cursor: 'pointer',
-              background: panelOrientation === 'landscape' ? 'rgba(255,140,0,0.25)' : 'rgba(255,255,255,0.08)',
-              color: panelOrientation === 'landscape' ? '#ffd700' : '#aaa',
-              border: panelOrientation === 'landscape' ? '1px solid rgba(255,200,0,0.4)' : '1px solid rgba(255,255,255,0.1)',
-            }}
-          >
-            {panelOrientation === 'portrait' ? '▯ Portrait' : '▭ Landscape'}
-          </button>
+              {/* ── Measure context ── */}
+              {placementMode === 'measure' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,255,0.2)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#00ffff', fontSize: 12 }}>
+                    {measurePtCount === 0 ? 'Click point 1' : measurePtCount === 1 ? 'Click point 2' : `${measurePtCount} pts`}
+                  </span>
+                  {measurePtCount > 0 && (
+                    <button onClick={() => { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(0,200,255,0.15)', color: '#00ffff',
+                        border: '1px solid rgba(0,200,255,0.3)', cursor: 'pointer' }}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+              )}
 
-          <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
+              {/* ── Row context ── */}
+              {placementMode === 'row' && (
+                <div style={{
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,204,0.2)',
+                  borderRadius: 10, padding: '6px 10px', color: '#00ffcc', fontSize: 12,
+                }}>
+                  {rowPtCount === 0 ? 'Click row start' : 'Click row end'}
+                </div>
+              )}
 
-          <div style={{ color: '#ffd700', fontSize: 13, fontWeight: 700, padding: '0 4px' }}>{panelCount} panels</div>
-          <div style={{ color: '#4caf50', fontSize: 13, fontWeight: 700 }}>{totalKw} kW</div>
+              {/* ── Set Direction context ── */}
+              {placementMode === 'set_direction' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(255,215,0,0.2)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#ffd700', fontSize: 12 }}>
+                    {!layoutDirSet ? 'Click first point, then second along roof edge' : '\u2713 Direction locked'}
+                  </span>
+                  {layoutDirSet && (
+                    <button onClick={() => { customLayoutDirRef.current = null; setLayoutDirSet(false); setStatusMsg('Layout direction reset'); }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
+                        background: 'rgba(255,215,0,0.12)', color: '#ffd700',
+                        border: '1px solid rgba(255,215,0,0.3)', cursor: 'pointer' }}>
+                      \u2715 Reset
+                    </button>
+                  )}
+                </div>
+              )}
 
-          <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.15)', margin: '0 4px' }} />
+              {/* ── Set Origin context ── */}
+              {placementMode === 'set_origin' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,255,136,0.2)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#00ff88', fontSize: 12 }}>
+                    {!layoutOriginSet ? 'Click to set grid origin' : '\u2713 Origin set'}
+                  </span>
+                  {layoutOriginSet && (
+                    <button onClick={() => { customLayoutOriginRef.current = null; setLayoutOriginSet(false); setStatusMsg('Layout origin reset'); }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11,
+                        background: 'rgba(0,255,136,0.12)', color: '#00ff88',
+                        border: '1px solid rgba(0,255,136,0.3)', cursor: 'pointer' }}>
+                      \u2715 Reset
+                    </button>
+                  )}
+                </div>
+              )}
 
-          <button onClick={flyToProperty} title="Fly to property"
-            style={{ padding: '5px 10px', borderRadius: 7, fontSize: 12, background: 'rgba(255,255,255,0.08)', color: '#ccc', border: 'none', cursor: 'pointer' }}>
-            🏠
-          </button>
-          <button
-            onClick={() => {
-              const viewer = viewerRef.current;
-              if (!viewer) return;
-              const C = (window as any).Cesium;
-              if (!C) return;
-              const elev = cesiumGroundElevRef.current;
-              viewer.camera.flyTo({
-                destination: C.Cartesian3.fromDegrees(lng, lat, elev + 200),
-                orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-45), roll: 0 },
-                duration: 1.5,
-              });
-              setStatusMsg('🧭 Oriented: North up — South is at bottom of view');
-            }}
-            title="Orient view: North up (South at bottom)"
-            style={{ padding: '5px 10px', borderRadius: 7, fontSize: 12, background: 'rgba(255,140,0,0.12)', color: '#ffaa44', border: '1px solid rgba(255,140,0,0.25)', cursor: 'pointer' }}>
-            🧭 S↓
-          </button>
-          <button onClick={clearPanels} title="Clear all panels"
-            style={{ padding: '5px 10px', borderRadius: 7, fontSize: 12, background: 'rgba(255,60,60,0.15)', color: '#ff6666', border: '1px solid rgba(255,60,60,0.3)', cursor: 'pointer' }}>
-            🗑
-          </button>
-        </div>
-      )}
+              {/* ── Plane (legacy) context ── */}
+              {placementMode === 'plane' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  background: 'rgba(15,15,30,0.92)', border: '1px solid rgba(0,180,255,0.2)',
+                  borderRadius: 10, padding: '6px 10px',
+                }}>
+                  <span style={{ color: '#00ccff', fontSize: 12 }}>
+                    {planePtCount === 0 ? 'Click roof corners' : `${planePtCount} pts`}
+                  </span>
+                  {planePtCount >= 3 && (
+                    <button onClick={() => { const v = viewerRef.current; const C = (window as any).Cesium; if (v && C) finalizePlane(v, C); }}
+                      style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: 'rgba(0,180,255,0.2)', color: '#00ccff',
+                        border: '1px solid rgba(0,180,255,0.4)', cursor: 'pointer' }}>
+                      \u2705 Fill Plane
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </>
+        );
+      })()}
+
+
+
 
       {/* Overlay toggles (left side) */}
       {stage === 'done' && (
