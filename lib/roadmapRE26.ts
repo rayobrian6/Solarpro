@@ -1260,6 +1260,98 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     updatedAt: '2026-04-29',
   },
 
+  // \u2500\u2500\u2500 v63.1 \u2014 AUTH & ACCOUNT STABILITY \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  {
+    id: 'v63.1-auth-infinite-reset-loop-fix',
+    title: 'Fix: auth infinite password-reset loop for free-pass accounts',
+    summary: 'Users with is_free_pass=true and a bcrypt-12 real hash were being re-routed to force-reset on every login due to Safety Net B over-matching. Fixed the Safety Net B predicate to trigger only on cost-10 placeholder hashes. Also replaced router.push() with window.location.href on login redirect so UserContext re-mounts cleanly after sign-in \u2014 eliminating stale-state loops where the nav bar would not reflect the logged-in user.',
+    track: 'ui-ux',
+    priority: 'p0',
+    status: 'done',
+    effort: 's',
+    commits: ['2a6cde5', '92b7aa6', '67bd9d2'],
+    files: [
+      'app/api/auth/login/route.ts',
+      'app/auth/login/page.tsx',
+    ],
+    shippedIn: 'v63.1',
+    notes: 'Safety Net B condition narrowed from any bcrypt hash to cost-10 placeholder only (regex /^\\$2[aby]\\$10\\$/).  Login page redirect changed from router.push() to window.location.href to force full React tree remount and prevent stale UserContext.  Verified against raymond.obrian@yahoo.com test account.',
+    createdAt: '2026-05-09',
+    updatedAt: '2026-05-09',
+  },
+  {
+    id: 'v63.1-free-pass-account-db-repair',
+    title: 'DB repair: clear stale is_free_pass flag for 5 real-password accounts',
+    summary: 'Five accounts (jeff@solfence.solar, googleplay.reviewer@solarpro.solutions, austinhancock47@gmail.com, michaelorrmusic@gmail.com, rayobrian6@gmail.com) had is_free_pass=true combined with bcrypt-12 hashes \u2014 meaning they had already set a real password but were still being treated as free-pass grants. Cleared is_free_pass=false for all five directly in Neon DB. Complements the Safety Net B code fix.',
+    track: 'admin-ops',
+    priority: 'p0',
+    status: 'done',
+    effort: 's',
+    commits: [],
+    files: [],
+    shippedIn: 'v63.1',
+    notes: 'DB surgery via psycopg2. Accounts audited: Group B (bcrypt-12 + is_free_pass=true) \u2014 4 users; Group C (legacy hash + is_free_pass=true) \u2014 1 user (rayobrian6@gmail.com). Group A (cost-10 placeholder, never set real password \u2014 5 users) left unchanged; Safety Net B on dev correctly routes them to Forgot Password flow.',
+    createdAt: '2026-05-09',
+    updatedAt: '2026-05-09',
+  },
+
+  // \u2500\u2500\u2500 v63.2 \u2014 CHANGE SYSTEM TYPE UI \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  {
+    id: 'v63.2-change-system-type-ui',
+    title: 'Allow users to change system type (Roof / Ground / Fence) after project creation',
+    summary: 'Previously users who accidentally selected the wrong panel-placement method (Roof Mount, Ground Mount, or Fence Mount) during project creation had no way to correct it without creating a whole new project. Added a clickable pencil-badge on the system-type pill in the project detail header and a \"Change\" link inside DesignTab\'s System Configuration panel. Both open a modal that lets the user pick a new type; the change atomically updates both the projects and layouts tables via the existing /api/projects/[id]/repair-system-type endpoint. Current type is grayed-out with a checkmark; a warning is shown if existing layout rows would be cleared.',
+    track: 'ui-ux',
+    priority: 'p1',
+    status: 'done',
+    effort: 'm',
+    commits: ['fac8d73'],
+    files: [
+      'app/projects/[id]/page.tsx',
+      'components/project/DesignTab.tsx',
+    ],
+    shippedIn: 'v63.2',
+    notes: 'Used existing /api/projects/[id]/repair-system-type POST endpoint \u2014 no new API needed. Modal auto-opens when ?changeType=1 query param is present, enabling deep-link from DesignTab. Pencil icon from lucide-react.',
+    createdAt: '2026-05-09',
+    updatedAt: '2026-05-09',
+  },
+
+  // \u2500\u2500\u2500 v63.3 \u2014 ADDRESS AUTOCOMPLETE SITE-WIDE \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  {
+    id: 'v63.3-address-autocomplete-site-wide',
+    title: 'Address autocomplete (type-ahead) on New Project and Edit Client pages',
+    summary: 'Users had to type addresses manually in the New Project and Edit Client forms with no suggestions. Replaced the plain <input> fields on both pages with the existing AddressAutocomplete component (backed by /api/geocode?mode=autocomplete, 300 ms debounce, keyboard-navigable). On New Project, selecting a suggestion immediately triggers resolveAddress() to populate lat/lng, utility zone, and irradiance data \u2014 no extra blur step needed. On Edit Client, selecting a suggestion auto-fills city, state, and zip fields via POST /api/geocode. Site-wide parity: every address input now has live type-ahead suggestions.',
+    track: 'ui-ux',
+    priority: 'p1',
+    status: 'done',
+    effort: 's',
+    commits: ['aba8e75'],
+    files: [
+      'app/projects/new/page.tsx',
+      'app/clients/[id]/edit/page.tsx',
+    ],
+    shippedIn: 'v63.3',
+    notes: 'AddressAutocomplete component was already used on app/design/page.tsx and components/design/DesignStudio.tsx. This commit extends coverage to the two remaining user-facing address fields. Clearing the field also clears locationData/utilityData state on New Project.',
+    createdAt: '2026-05-09',
+    updatedAt: '2026-05-09',
+  },
+
+  // \u2500\u2500\u2500 v63.4 \u2014 CSS INPUT ICON OVERLAY FIX \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  {
+    id: 'v63.4-css-input-icon-overlay-fix',
+    title: 'Fix: leading icon overlaying first character in .input fields',
+    summary: 'Across many pages (address autocomplete, client search, project search, city/state inputs) the leading icon was visually overlapping the first character of typed text \u2014 e.g. a MapPin icon covering the \"1\" of \"123 Main St\". Root cause: the global .input CSS class used @apply px-3 as plain-CSS, which Tailwind resolved at component build time and beat the pl-8/pl-9 padding-left utilities applied inline for icon offset. Fix: wrapped .input inside @layer components in globals.css so Tailwind\'s utility layer always overrides the component base \u2014 no changes to any component files required.',
+    track: 'infrastructure',
+    priority: 'p1',
+    status: 'done',
+    effort: 's',
+    commits: ['e251b2b'],
+    files: ['app/globals.css'],
+    shippedIn: 'v63.4',
+    notes: 'Fix: @layer components { .input { @apply ... px-3 ... } }. Utilities (pl-8, pl-9, pr-8) now always win per Tailwind cascade rules (base \u2192 components \u2192 utilities). Fixes AddressAutocomplete (pl-8/pr-8), clients/new (pl-9), clients/page search (pl-9), projects/page search (pl-9), and all future .input + pl-* combos.',
+    createdAt: '2026-05-09',
+    updatedAt: '2026-05-09',
+  },
+
   // ─── IDEAS (parking lot) ─────────────────────────────────────────────
   {
     id: 'idea-ev-charger-ecosystem',
