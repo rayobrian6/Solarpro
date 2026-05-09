@@ -120,14 +120,15 @@ export async function POST(req: NextRequest) {
       // password set should NOT silently return "Invalid email or password".
       // They should be directed to Forgot Password.
       //
-      // Detection heuristic: is_free_pass=true AND password_hash is not the
-      // clean sentinel (those would have been caught by requiresReset above).
-      // We can't distinguish "wrong password" from "orphaned placeholder hash"
-      // for a real bcrypt hash — so for free-pass users we ALWAYS return the
-      // reset prompt on a failed login. A real free-pass user who HAS set their
-      // password will simply use it correctly; they never hit this branch.
+      //
+      // Safety Net B: only redirect to password reset if the hash is still
+      // Detection heuristic: is_free_pass=true AND password_hash is still a
+      // cost-10 placeholder (set by migration scripts). If the user has already
+      // set a real bcrypt-12 password, a wrong password attempt returns the
+      // standard "Invalid email or password" — not a forced reset.
       // ──────────────────────────────────────────────────────────────────────
-      if (user.is_free_pass === true) {
+      if (user.is_free_pass === true &&
+          /^\$2[aby]\$10\$/.test(user.password_hash || '')) {
         console.warn('[AUTH_SAFETY_NET_B] Free-pass user failed password check — returning reset prompt instead of generic failure', {
           userId:      user.id,
           hashFormat:  verifyResult.hashFormat,
