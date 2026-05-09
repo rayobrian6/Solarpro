@@ -1107,8 +1107,13 @@ function SolarEngine3D({
     let lastOptHeight = -1;
     viewer.camera.changed.addEventListener(() => {
       try {
+        // CRITICAL: With requestRenderMode=true, Cesium won't repaint during camera
+        // moves unless we explicitly request a render here. Without this, middle-mouse
+        // drag / tilt appears frozen even though the camera IS moving internally.
+        viewer.scene.requestRender();
+
         const h = viewer.camera.positionCartographic?.height ?? 500;
-        // Only update when height changes by more than 50m (avoid thrashing)
+        // Only update quality settings when height changes by more than 50m (avoid thrashing)
         if (Math.abs(h - lastOptHeight) < 50) return;
         lastOptHeight = h;
 
@@ -1138,6 +1143,46 @@ function SolarEngine3D({
         }
       } catch {}
     });
+
+    // ADDITIONAL FIX: Pump requestRender during any mouse drag on the canvas.
+    // camera.changed fires at the END of a movement step, but smooth dragging
+    // needs continuous repaints. We listen to mousemove/pointermove while any
+    // button is held and request a render each frame.
+    const canvas = viewer.scene.canvas as HTMLCanvasElement;
+    let dragActive = false;
+    let rafId = 0;
+
+    const onDragStart = () => { dragActive = true; };
+    const onDragEnd   = () => {
+      dragActive = false;
+      cancelAnimationFrame(rafId);
+      // One final render after drag ends to settle the view
+      try { viewer.scene.requestRender(); } catch {}
+    };
+    const pumpRender = () => {
+      if (!dragActive) return;
+      try { viewer.scene.requestRender(); } catch {}
+      rafId = requestAnimationFrame(pumpRender);
+    };
+    const onDragMove = () => {
+      if (!dragActive) return;
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(pumpRender);
+    };
+
+    canvas.addEventListener('mousedown',   onDragStart, { passive: true });
+    canvas.addEventListener('pointerdown', onDragStart, { passive: true });
+    canvas.addEventListener('mouseup',     onDragEnd,   { passive: true });
+    canvas.addEventListener('pointerup',   onDragEnd,   { passive: true });
+    canvas.addEventListener('mouseleave',  onDragEnd,   { passive: true });
+    canvas.addEventListener('mousemove',   onDragMove,  { passive: true });
+    canvas.addEventListener('pointermove', onDragMove,  { passive: true });
+    // Scroll wheel zoom also needs continuous renders
+    canvas.addEventListener('wheel', () => {
+      try { viewer.scene.requestRender(); } catch {}
+      setTimeout(() => { try { viewer.scene.requestRender(); } catch {}; }, 100);
+      setTimeout(() => { try { viewer.scene.requestRender(); } catch {}; }, 300);
+    }, { passive: true });
   }
 
   // ── v47.215: Fit camera to all placed panels (bounding box zoom) ─────────────────
@@ -6007,6 +6052,49 @@ function SolarEngine3D({
                 style={{ ...btnBase, background: 'rgba(255,140,0,0.12)', color: '#ffaa44', border: '1px solid rgba(255,140,0,0.18)' }}
               >
                 {'\u{1F9ED}'}
+              </button>
+
+              {/* Tilt to 3D perspective view */}
+              <button
+                onClick={() => {
+                  const viewer = viewerRef.current; if (!viewer) return;
+                  const C = (window as any).Cesium; if (!C) return;
+                  const elev = cesiumGroundElevRef.current;
+                  // Fly to a 45° angled perspective from the south-west — gives a great 3D view
+                  viewer.camera.flyTo({
+                    destination: C.Cartesian3.fromDegrees(lng - 0.002, lat - 0.003, elev + 280),
+                    orientation: { heading: C.Math.toRadians(330), pitch: C.Math.toRadians(-30), roll: 0 },
+                    duration: 1.5,
+                  });
+                  setStatusMsg('📐 3D perspective view');
+                }}
+                title="Tilt to 3D perspective view (pitch -30°)"
+                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Tilt: 3D perspective', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                onMouseLeave={() => setTooltipInfo(null)}
+                style={{ ...btnBase, background: 'rgba(100,220,255,0.13)', color: '#66ddff', border: '1px solid rgba(100,220,255,0.22)' }}
+              >
+                {'📐'}
+              </button>
+
+              {/* Top-down (bird's eye) view */}
+              <button
+                onClick={() => {
+                  const viewer = viewerRef.current; if (!viewer) return;
+                  const C = (window as any).Cesium; if (!C) return;
+                  const elev = cesiumGroundElevRef.current;
+                  viewer.camera.flyTo({
+                    destination: C.Cartesian3.fromDegrees(lng, lat, elev + 150),
+                    orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-89), roll: 0 },
+                    duration: 1.5,
+                  });
+                  setStatusMsg('🔭 Top-down view');
+                }}
+                title="Top-down bird's eye view"
+                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Top-down view', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                onMouseLeave={() => setTooltipInfo(null)}
+                style={{ ...btnBase, background: 'rgba(100,255,180,0.12)', color: '#55ffaa', border: '1px solid rgba(100,255,180,0.2)' }}
+              >
+                {'🔭'}
               </button>
 
               {/* Clear All Panels */}
