@@ -1632,296 +1632,145 @@ function SolarEngine3D({
       0.92,
     );
 
-    // Rail bottom face sits at: stackHeight - railHeight above roof deck.
-    // Rail centre is half a rail height above that.
-    const stackH          = getRoofPanelOffset(mountId);
-    const railCentreAbove = stackH - railH / 2; // above roof deck to rail centre
+    // Rail centre sits inwardM below the panel centroid along the roof normal.
+    // panel.height = roofDeckAlt + stackH (vertical addition).
+    // Rail centre = roofDeckAlt + railH/2  =>  inwardM = stackH - railH/2.
+    const stackH  = getRoofPanelOffset(mountId);
+    const inwardM = stackH - railH / 2;
 
-    // ── Spatial cluster helper ─────────────────────────────────────────────
-    // Splits a row's panels into contiguous runs along the ridge axis.
-    // Any gap > 1.5× panelW between adjacent panels = new cluster = new rail.
-    // This fixes the case where one planeId has two spatially-separated arrays
-    // that share the same gridRow indices (e.g. left + right faces of hip roof).
-    function splitIntoRailClusters(panels: PlacedPanel[], panelW: number): PlacedPanel[][] {
-      if (panels.length === 0) return [];
-      if (panels.length === 1) return [panels];
-      const ref    = panels[0];
-      const azRad  = (ref.azimuth ?? 180) * Math.PI / 180;
-      const cosLat = Math.cos(ref.lat * Math.PI / 180);
-      const MPD0   = 111320;
-      // Ridge direction = perpendicular to down-slope (rotate down-slope 90° CCW).
-      // Down-slope: lat=-cos(az), lng=sin(az).  Ridge: lat=sin(az), lng=cos(az).
-      const rLatU =  Math.sin(azRad); // ridge unit lat component
-      const rLngU =  Math.cos(azRad); // ridge unit lng component
-      const withProj = panels.map(p => {
-        const dLat = (p.lat - ref.lat) * MPD0;
-        const dLng = (p.lng - ref.lng) * MPD0 * cosLat;
-        return { p, proj: dLat * rLatU + dLng * rLngU };
-      });
-      withProj.sort((a, b) => a.proj - b.proj);
-      // Gap threshold for splitting a row into separate rail runs.
-      // Hip-roof separation gaps are many panel-widths wide (genuine separate arrays).
-      // Polygon-clipping can remove an isolated middle or end panel, leaving a gap of
-      // exactly ~2 × panelW (one missing column). Using 2.5× ensures a single missing
-      // panel never splits the cluster while still catching genuine array separations.
-      const GAP = panelW * 2.5;
-      const clusters: PlacedPanel[][] = [];
-      let cur: PlacedPanel[] = [withProj[0].p];
-      for (let i = 1; i < withProj.length; i++) {
-        if (withProj[i].proj - withProj[i - 1].proj > GAP) {
-          clusters.push(cur);
-          cur = [];
-        }
-        cur.push(withProj[i].p);
-      }
-      clusters.push(cur);
-      return clusters;
-    }
+    // Max gap between adjacent panel edges that still belongs to the same rail run.
+    // Panels from buildSurfaceGrid have 0mm spacing so any gap > 0.20m is a real
+    // missing-panel hole or a genuine array separation. Never bridge this gap.
+    const MAX_PANEL_GAP = 0.20; // metres
 
     byPlane.forEach((planePanels, planeId) => {
-      // ── Determine correct row-grouping axis ─────────────────────────────────
-      // buildSurfaceGrid stores gridRow along the plane V-axis and gridCol along U.
-      // V = cross(n, u) where u = longest-polygon-edge direction.
-      //   Wide roof  (ridge is longest edge): u=along-ridge -> gridCol=ridge, gridRow=slope ✓
-      //   Tall roof  (slope is longest edge): u=up-slope    -> gridCol=slope, gridRow=ridge ✗
-      //
-      // Strategy: build both gridRow-groups and gridCol-groups, then score each by
-      // computing avg ridge-spread / avg slope-spread across groups. The grouping
-      // whose groups are spread MORE along the ridge (less along slope) wins.
-      const refPanel  = planePanels[0];
-      const refAzRad  = (refPanel.azimuth ?? 180) * Math.PI / 180;
-      const refCosLat = Math.cos(refPanel.lat  * Math.PI / 180);
-      const MPD_AX    = 111320;
-      const sLatU = -Math.cos(refAzRad); // down-slope lat component
-      const sLngU =  Math.sin(refAzRad); // down-slope lng component
-      const rLatU =  Math.sin(refAzRad); // along-ridge lat component
-      const rLngU =  Math.cos(refAzRad); // along-ridge lng component
+      // -- Plane ECEF frame --------------------------------------------------
+      // All panels on a planeId share identical ecefNx/Ny/Nz and ecefUx/Uy/Uz.
+      //   u = along-ridge direction  (rail runs along u)
+      //   n = roof plane normal
+      //   v = cross(n, u)  = down-slope axis  (rows are separated along v)
+      const rep0 = planePanels[0];
+      const nx = rep0.ecefNx!;  const ny = rep0.ecefNy!;  const nz = rep0.ecefNz!;
+      const ux = rep0.ecefUx!;  const uy = rep0.ecefUy!;  const uz = rep0.ecefUz!;
 
-      function spSlope(p: PlacedPanel): number {
-        const dLat = (p.lat - refPanel.lat) * MPD_AX;
-        const dLng = (p.lng - refPanel.lng) * MPD_AX * refCosLat;
-        return dLat * sLatU + dLng * sLngU;
-      }
-      function spRidge(p: PlacedPanel): number {
-        const dLat = (p.lat - refPanel.lat) * MPD_AX;
-        const dLng = (p.lng - refPanel.lng) * MPD_AX * refCosLat;
-        return dLat * rLatU + dLng * rLngU;
+      // v = cross(n, u)
+      const vx = ny * uz - nz * uy;
+      const vy = nz * ux - nx * uz;
+      const vz = nx * uy - ny * ux;
+
+      // Reference ECEF point for plane-local coordinates (first panel in plane)
+      const refEcef = engLatLngToECEF(rep0.lat, rep0.lng, rep0.height ?? 0);
+
+      // For each panel compute plane-local (u, v) coordinates and panel half-widths.
+      // uC/vC are metres along the ridge/slope axes relative to refEcef.
+      // uMin/uMax are the panel's left/right edges in the u (ridge) direction.
+      type PanelUV = {
+        p: PlacedPanel;
+        uC: number; vC: number;
+        pw: number; ph: number;
+        uMin: number; uMax: number;
+      };
+
+      const panelUVs: PanelUV[] = planePanels.map(p => {
+        const ecef = engLatLngToECEF(p.lat, p.lng, p.height ?? 0);
+        const dx = ecef.x - refEcef.x;
+        const dy = ecef.y - refEcef.y;
+        const dz = ecef.z - refEcef.z;
+        const uC = dx * ux + dy * uy + dz * uz;
+        const vC = dx * vx + dy * vy + dz * vz;
+        const orient = (p.orientation ?? 'portrait') as PanelOrientation;
+        const { pw, ph } = panelDims(orient);
+        return { p, uC, vC, pw, ph, uMin: uC - pw / 2, uMax: uC + pw / 2 };
+      });
+
+      // -- Group panels into rows by v-coordinate ----------------------------
+      // Panels in the same row share nearly the same vC value.
+      // Tolerance = 25% of panel height -- enough to absorb any floating-point
+      // noise while clearly separating distinct rows (which differ by ~panelH).
+      panelUVs.sort((a, b) => a.vC - b.vC);
+
+      const rows: PanelUV[][] = [];
+      for (const puv of panelUVs) {
+        const tol = puv.ph * 0.25;
+        let placed = false;
+        for (const row of rows) {
+          const rowV = row.reduce((s, r) => s + r.vC, 0) / row.length;
+          if (Math.abs(puv.vC - rowV) <= tol) {
+            row.push(puv);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) rows.push([puv]);
       }
 
-      const byGridRow = new Map<number, PlacedPanel[]>();
-      for (const p of planePanels) {
-        const k = p.gridRow ?? 0;
-        if (!byGridRow.has(k)) byGridRow.set(k, []);
-        byGridRow.get(k)!.push(p);
-      }
-      const byGridCol = new Map<number, PlacedPanel[]>();
-      for (const p of planePanels) {
-        const k = p.gridCol ?? 0;
-        if (!byGridCol.has(k)) byGridCol.set(k, []);
-        byGridCol.get(k)!.push(p);
-      }
-
-      // Score: avg(ridge_spread) / avg(slope_spread) per group. Higher = groups run along ridge.
-      function groupScore(groups: Map<number, PlacedPanel[]>): number {
-        let sumR = 0, sumS = 0, n = 0;
-        groups.forEach(ps => {
-          if (ps.length < 2) return;
-          const rs = ps.map(spRidge), ss = ps.map(spSlope);
-          sumR += Math.max(...rs) - Math.min(...rs);
-          sumS += Math.max(...ss) - Math.min(...ss);
-          n++;
-        });
-        if (n === 0) return 1;
-        return (sumS > 0.01) ? (sumR / n) / (sumS / n) : 999;
-      }
-
-      // Use whichever grouping produces groups more spread along the ridge
-      const rowGroups = groupScore(byGridRow) >= groupScore(byGridCol)
-        ? byGridRow
-        : byGridCol;
-
+      // -- Split each row into contiguous rail segments ----------------------
+      // Sort panels by uMin (left to right along ridge).
+      // A new segment starts whenever the gap between panel edges exceeds MAX_PANEL_GAP.
+      // Span is derived ONLY from actual placed panel corners -- never grid bounds.
       const planeEntities: any[] = [];
 
-      rowGroups.forEach((rowPanels) => {
-        if (rowPanels.length === 0) return;
+      rows.forEach((row, rowIdx) => {
+        row.sort((a, b) => a.uMin - b.uMin);
 
-        // Split into spatially-contiguous clusters along the ridge.
-        // One planeId can have two separated arrays sharing the same row index
-        // (e.g. left + right faces of a hip roof). Each cluster gets its own
-        // independent rail run so rails never bridge the gap between arrays.
-        const repOrientForGap = (rowPanels[0].orientation ?? 'portrait') as PanelOrientation;
-        const { pw: gapPanelW } = panelDims(repOrientForGap);
-        const clusters = splitIntoRailClusters(rowPanels, gapPanelW);
+        const segments: PanelUV[][] = [];
+        let seg: PanelUV[] = [row[0]];
+        for (let i = 1; i < row.length; i++) {
+          const gap = row[i].uMin - row[i - 1].uMax;
+          if (gap > MAX_PANEL_GAP) {
+            segments.push(seg);
+            seg = [];
+          }
+          seg.push(row[i]);
+        }
+        segments.push(seg);
 
-        for (const clusterPanels of clusters) {
-          // ── Per-cluster rail geometry ─────────────────────────────────────────
-          // Each cluster is a spatially-contiguous run of panels in this row.
-          // Rails are scoped to the cluster — never bridging a gap to another array.
+        segments.forEach((segment, segIdx) => {
+          // Rail span = actual outer edges of the first and last panel in segment.
+          // This is the ONLY source. No roof bounds, no grid slots, no run lengths.
+          const segUMin    = Math.min(...segment.map(s => s.uMin));
+          const segUMax    = Math.max(...segment.map(s => s.uMax));
+          const railLength = segUMax - segUMin;
+          if (railLength <= 0) return;
 
-          const rep     = clusterPanels[0];
+          // Row v-centre for this segment
+          const vCentre = segment.reduce((s, r) => s + r.vC, 0) / segment.length;
+          // Rail box u-centre = midpoint of the span
+          const uMid = (segUMin + segUMax) / 2;
+
+          const rep     = segment[0].p;
           const azDeg   = rep.azimuth ?? 180;
           const tiltDeg = rep.tilt    ?? 0;
-          const orient  = (rep.orientation ?? 'portrait') as PanelOrientation;
-          const { pw: panelW, ph: panelH } = panelDims(orient);
+          const { ph: panelH } = panelDims((rep.orientation ?? 'portrait') as PanelOrientation);
 
-          const headingRad = (azDeg - 90) * Math.PI / 180; // along-ridge heading
-          const pitchRad   = -(tiltDeg   * Math.PI / 180); // tilt with roof
+          const tiltRad    = tiltDeg * Math.PI / 180;
+          const headingRad = (azDeg - 90) * Math.PI / 180;
+          const pitchRad   = -tiltRad;
 
-          const nCols = clusterPanels.length;
+          console.log(
+            `[RAIL_SPAN_SOURCE] planeId=${planeId} row=${rowIdx} seg=${segIdx}` +
+            ` panelCount=${segment.length} segStart=${segUMin.toFixed(3)}` +
+            ` segEnd=${segUMax.toFixed(3)} segLength=${railLength.toFixed(3)}m` +
+            ` source=actual-panel-corners`
+          );
 
-          // ── ECEF surface normal + u-axis from stored panel vectors ────────────
-          // Every roof panel stores:
-          //   ecefNx/Ny/Nz  = unit normal of the roof plane in ECEF
-          //   ecefUx/Uy/Uz  = u-axis (along-ridge direction) in ECEF
-          // All panels on the same planeId share these vectors — read from rep.
-          const nx = rep.ecefNx ?? 0;
-          const ny = rep.ecefNy ?? 0;
-          const nz = rep.ecefNz ?? 1;
-          const ux = rep.ecefUx ?? 0;
-          const uy = rep.ecefUy ?? 0;
-          const uz = rep.ecefUz ?? 0;
-          const hasEcefNormal = isFinite(nx) && isFinite(ny) && isFinite(nz) &&
-                                (Math.abs(nx) + Math.abs(ny) + Math.abs(nz)) > 0.1;
-          const hasEcefU      = isFinite(ux) && isFinite(uy) && isFinite(uz) &&
-                                (Math.abs(ux) + Math.abs(uy) + Math.abs(uz)) > 0.1;
-
-          // ── Projection-based rail span (STEP 2–3 per spec) ───────────────────
-          // Project each panel centre onto the ECEF u-axis (along-ridge unit vector).
-          // Extend by ±panelW/2 to reach the panel edge. This gives an exact
-          // edge-to-edge span that works regardless of spacing, gaps, irregular
-          // placements, or how many panels are in the cluster.
-          //
-          // This is the ONLY correct approach: it is:
-          //   - Parented to roof plane coordinate frame (uses ecefUx/Uy/Uz)
-          //   - Independent of world axes
-          //   - Correct for missing panels, L-shapes, staggered rows, split clusters
-          //   - Free of azimuth-trig error on non-axis-aligned roofs
-          let railLength: number;
-          let centLat: number;
-          let centLng: number;
-          let centH: number;
-
-          if (hasEcefU) {
-            // Convert each panel centre to ECEF and project onto u-axis
-            const panelECEFs = clusterPanels.map(p =>
-              engLatLngToECEF(p.lat, p.lng, p.height ?? 0)
-            );
-            const uProjs = panelECEFs.map(e =>
-              e.x * ux + e.y * uy + e.z * uz
-            );
-
-            // Span = from leading edge of first panel to trailing edge of last panel
-            const minCentre = Math.min(...uProjs);
-            const maxCentre = Math.max(...uProjs);
-            const minEdge   = minCentre - panelW / 2;
-            const maxEdge   = maxCentre + panelW / 2;
-            railLength      = maxEdge - minEdge;
-
-            // Rail box must be centred at the midpoint of the span.
-            // Compute in ECEF: start from average-ECEF then shift along u to midpoint.
-            const avgEcef = {
-              x: panelECEFs.reduce((s, e) => s + e.x, 0) / nCols,
-              y: panelECEFs.reduce((s, e) => s + e.y, 0) / nCols,
-              z: panelECEFs.reduce((s, e) => s + e.z, 0) / nCols,
-            };
-            const avgU  = uProjs.reduce((s, v) => s + v, 0) / nCols;
-            const midU  = (minEdge + maxEdge) / 2;
-            const delta = midU - avgU; // shift from avg to midpoint along u
-            const midEcef = {
-              x: avgEcef.x + delta * ux,
-              y: avgEcef.y + delta * uy,
-              z: avgEcef.z + delta * uz,
-            };
-
-            // Back-project ECEF midpoint to lat/lng/h for the slope-shift math below.
-            // Use a first-order approximation: average lat/lng + small ECEF delta.
-            const avgLat = clusterPanels.reduce((s, p) => s + p.lat, 0) / nCols;
-            const avgLng = clusterPanels.reduce((s, p) => s + p.lng, 0) / nCols;
-            const avgH   = clusterPanels.reduce((s, p) => s + (p.height ?? 0), 0) / nCols;
-            const cosLatM = Math.cos(avgLat * Math.PI / 180);
-            const MPD_B   = 111320;
-            centLat = avgLat + (midEcef.z - avgEcef.z) / MPD_B * (180 / Math.PI);
-            centLng = avgLng + (midEcef.y - avgEcef.y) / (MPD_B * cosLatM) * (180 / Math.PI);
-            centH   = avgH   + (
-              Math.sqrt(midEcef.x*midEcef.x + midEcef.y*midEcef.y + midEcef.z*midEcef.z)
-              - Math.sqrt(avgEcef.x*avgEcef.x + avgEcef.y*avgEcef.y + avgEcef.z*avgEcef.z)
-            );
-          } else {
-            // Fallback (no ecefU stored): use panel-count × width, centred at avg pos
-            railLength = nCols * panelW;
-            centLat = clusterPanels.reduce((s, p) => s + p.lat,            0) / nCols;
-            centLng = clusterPanels.reduce((s, p) => s + p.lng,            0) / nCols;
-            centH   = clusterPanels.reduce((s, p) => s + (p.height ?? 0), 0) / nCols;
-          }
-
-          // ── Down-slope shift (for 25%/75% rail positions) ─────────────────────
-          // shiftM is measured along the slope surface from the row centroid.
-          // To move shiftM along the slope we need:
-          //   - horizontal (lat/lng) component = shiftM * cos(tilt)   [map plane]
-          //   - vertical (height) component    = -shiftM * sin(tilt)  [downhill = lower alt]
-          // For the along-normal displacement to reach the rail height:
-          //   panel.height = roofDeckAlt + stackH (stackH added vertically, not along normal)
-          //   rail centre must be (PANEL_THICKNESS/2 + railH/2) below panel centroid
-          //   along the roof normal direction.
-          // Offset from panel centroid to rail centre along the inward roof normal.
-          //
-          // panel.height = roofDeckAlt + stackH  (stored as a VERTICAL addition).
-          // In addPanelEntity, pos = safeCartesian3(lng, lat, panel.height) — so the
-          // Cesium box centroid IS at panel.height (= roofDeckAlt + stackH).
-          //
-          // Rail centre is at roofDeckAlt + railH/2 (rail rests on roof deck via standoffs).
-          // → displacement from panel centroid to rail centre along -normal:
-          //     inwardM = stackH - railH/2
-          //             = 0.140 - 0.021  (XR100: 140mm stack, 42mm rail → centre at 21mm)
-          //             = 0.119m  (119mm)
-          //
-          // Old (wrong) formula was PANEL_THICKNESS/2 + railH/2 = 41mm — that only
-          // accounted for panel half-thickness, ignoring the full standoff height.
-          const inwardM = stackH - railH / 2;
-
-          const cosLat   = Math.cos(centLat * Math.PI / 180);
-          const MPD      = 111320;
-          const azRad    = azDeg * Math.PI / 180;
-          const tiltRad  = tiltDeg * Math.PI / 180;
-          const sinTilt  = Math.sin(tiltRad);
-          const cosTilt  = Math.cos(tiltRad);
-
-          // Down-slope unit vector (lat/lng components)
-          const slopeLat = -Math.cos(azRad);
-          const slopeLng =  Math.sin(azRad);
-
-          // Two rails per cluster-row: 25% from eave, 25% from ridge
-          const railOffsets: Array<{ shiftM: number; label: string }> = [
-            { shiftM:  panelH * 0.25, label: 'lower' }, // 25% from eave
-            { shiftM: -panelH * 0.25, label: 'upper' }, // 25% from ridge
+          // Two rails per row: lower (25% from eave) and upper (25% from ridge).
+          // shiftV moves along v (down-slope) from the row centre.
+          //   positive v => toward eave  => lower rail
+          //   negative v => toward ridge => upper rail
+          const railOffsets: Array<{ shiftV: number; label: string }> = [
+            { shiftV:  panelH * 0.25, label: 'lower' },
+            { shiftV: -panelH * 0.25, label: 'upper' },
           ];
 
-          for (const { shiftM, label } of railOffsets) {
-            // ── Step 1: shift along slope to 25%/75% position ─────────────────
-            // Horizontal component of slope movement
-            const horizShiftM = shiftM * cosTilt;
-            const shiftedLat  = centLat + (slopeLat * horizShiftM) / MPD;
-            const shiftedLng  = centLng + (slopeLng * horizShiftM) / (MPD * cosLat);
-            const shiftedH    = centH   - shiftM * sinTilt; // downhill = lower alt
+          for (const { shiftV, label } of railOffsets) {
+            const vRail = vCentre + shiftV;
 
-            if (!isFinite(shiftedLat) || !isFinite(shiftedLng) || !isFinite(shiftedH)) continue;
-
-            // ── Step 2: displace inward along roof normal to rail centre ───────
-            // Rail centre = shifted panel centroid - inwardM * roof_normal (ECEF)
-            let railX: number, railY: number, railZ: number;
-
-            if (hasEcefNormal) {
-              // Exact ECEF displacement along the stored roof normal
-              const shiftedEcef = engLatLngToECEF(shiftedLat, shiftedLng, shiftedH);
-              railX = shiftedEcef.x - inwardM * nx;
-              railY = shiftedEcef.y - inwardM * ny;
-              railZ = shiftedEcef.z - inwardM * nz;
-            } else {
-              // Fallback: approximate using vertical component of normal = cos(tilt)
-              const railHeight = shiftedH - inwardM * cosTilt;
-              const fe = engLatLngToECEF(shiftedLat, shiftedLng, railHeight);
-              railX = fe.x; railY = fe.y; railZ = fe.z;
-            }
+            // ECEF position of rail centre:
+            //   P = refEcef  +  uMid * u  +  vRail * v  -  inwardM * n
+            const railX = refEcef.x + uMid * ux + vRail * vx - inwardM * nx;
+            const railY = refEcef.y + uMid * uy + vRail * vy - inwardM * ny;
+            const railZ = refEcef.z + uMid * uz + vRail * vz - inwardM * nz;
 
             if (!isFinite(railX) || !isFinite(railY) || !isFinite(railZ)) continue;
 
@@ -1933,14 +1782,13 @@ function SolarEngine3D({
               );
               if (!ori) continue;
 
-              const clusterIdx = clusters.indexOf(clusterPanels);
               const railEntity = viewer.entities.add({
-                name:        `roof-rail-plane${planeId}-row${rep.gridRow ?? 0}-cl${clusterIdx}-${label}`,
+                name:        `roof-rail-plane${planeId}-row${rowIdx}-seg${segIdx}-${label}`,
                 position:    pos,
                 orientation: ori,
                 box: {
-                  // Visual scale 3× on cross-section (width + height) so 42mm rail reads
-                  // clearly at Cesium viewing distances. Length is never scaled.
+                  // Cross-section 3x visual scale for readability at Cesium zoom levels.
+                  // Length (y / along-ridge) is EXACT panel-edge to panel-edge -- never scaled.
                   dimensions: new C.Cartesian3(railW * 3, railLength, railH * 3),
                   material:   new C.ColorMaterialProperty(railColor),
                   outline:    false,
@@ -1952,8 +1800,8 @@ function SolarEngine3D({
               handleCesiumError('renderRoofRails row entity', e, true);
             }
           }
-        } // end cluster loop
-      }); // end rowGroups.forEach
+        }); // end segment loop
+      }); // end row loop
 
       if (planeEntities.length > 0) {
         roofRailMapRef.current.set(planeId, planeEntities);
