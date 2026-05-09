@@ -1659,7 +1659,12 @@ function SolarEngine3D({
         return { p, proj: dLat * rLatU + dLng * rLngU };
       });
       withProj.sort((a, b) => a.proj - b.proj);
-      const GAP = panelW * 1.5;
+      // Gap threshold for splitting a row into separate rail runs.
+      // Hip-roof separation gaps are many panel-widths wide (genuine separate arrays).
+      // Polygon-clipping can remove an isolated middle or end panel, leaving a gap of
+      // exactly ~2 × panelW (one missing column). Using 2.5× ensures a single missing
+      // panel never splits the cluster while still catching genuine array separations.
+      const GAP = panelW * 2.5;
       const clusters: PlacedPanel[][] = [];
       let cur: PlacedPanel[] = [withProj[0].p];
       for (let i = 1; i < withProj.length; i++) {
