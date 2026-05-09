@@ -842,6 +842,16 @@ function SolarEngine3D({
         ctrl.enableLook     = true;
         ctrl.enableTranslate = true;
 
+        // KEY FIX: Disable collision detection — this is what causes Cesium to
+        // snap the camera BACK to top-down when the user tilts past ~45°.
+        // Cesium's default enableCollisionDetection=true prevents the camera from
+        // "going below terrain", which it interprets as any tilt beyond ~45° when
+        // close to the ground. Disabling it gives truly free tilt from 0° to 90°+.
+        ctrl.enableCollisionDetection = false;
+
+        // Also clear maximumTiltAngle so there's no hard angle cap at all
+        ctrl.maximumTiltAngle = undefined;
+
         // Map BOTH middle-drag AND right-drag to tilt so users can use either
         ctrl.tiltEventTypes = [
           C.CameraEventType.MIDDLE_DRAG,
@@ -856,9 +866,9 @@ function SolarEngine3D({
           C.CameraEventType.PINCH,
           { eventType: C.CameraEventType.LEFT_DRAG, modifier: C.KeyboardEventModifier.SHIFT },
         ];
-        // Remove pitch limits so users can look straight up or straight down freely
-        ctrl.minimumZoomDistance = 5;   // allow close-up inspection
-        ctrl.maximumZoomDistance = 50000; // allow wide overview
+        // Allow close-up zoom without collision snapping
+        ctrl.minimumZoomDistance = 1;
+        ctrl.maximumZoomDistance = 50000;
       } catch (e) { addLog('WARN', `Camera controller config: ${(e as Error).message}`); }
       // ─────────────────────────────────────────────────────────────────────────
 
