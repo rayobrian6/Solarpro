@@ -6301,9 +6301,10 @@ function EngineeringPageInner() {
   // Per-tab feature gating
   const { can, loading: subLoading } = useSubscription();
   // While loading, grant access to avoid flash-of-locked-content for paid/free-pass users
-  const canSLD    = subLoading ? true : can('engineering');
-  const canPermit = subLoading ? true : can('permitPackets');
-  const canBOM    = subLoading ? true : can('bom');
+  const canSLD      = subLoading ? true : can('engineering');
+  const canPermit   = subLoading ? true : can('permitPackets');
+  const canBOM      = subLoading ? true : can('bom');
+  const canSolFence = subLoading ? true : can('solFence');
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'config',     label: 'System Config',      icon: <Settings size={14} /> },
@@ -8697,10 +8698,19 @@ function EngineeringPageInner() {
                       <div className="grid grid-cols-2 gap-2.5">
                         <div>
                           <label className="eng-label">System Type</label>
-                          <select value={config.systemType} onChange={e => updateConfig({ systemType: e.target.value as any })} className="eng-select">
+                          <select
+                            value={config.systemType}
+                            onChange={e => {
+                              if (e.target.value === 'fence' && !canSolFence) return; // silently block; UI shows disabled
+                              updateConfig({ systemType: e.target.value as any });
+                            }}
+                            className="eng-select"
+                          >
                             <option value="roof">Roof Mount</option>
                             <option value="ground">Ground Mount</option>
-                            <option value="fence">Solar Fence</option>
+                            <option value="fence" disabled={!canSolFence}>
+                              Solar Fence{!canSolFence ? ' 🔒 Contractor' : ''}
+                            </option>
                           </select>
                         </div>
                         <div>

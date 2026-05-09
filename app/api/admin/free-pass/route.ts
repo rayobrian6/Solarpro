@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Plan allowlist — only accept known plan values
-    const VALID_PLANS = new Set(['starter', 'contractor', 'pro', 'enterprise', 'admin']);
+    const VALID_PLANS = new Set(['starter', 'professional', 'contractor', 'enterprise', 'admin']);
     const safePlan = typeof plan === 'string' && VALID_PLANS.has(plan) ? plan : 'contractor';
 
     const sql = await getDbReady();
