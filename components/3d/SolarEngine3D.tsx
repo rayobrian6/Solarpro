@@ -2635,10 +2635,14 @@ function SolarEngine3D({
       if (!carto) return null;
       const pLat = C.Math.toDegrees(carto.latitude);
       const pLng = C.Math.toDegrees(carto.longitude);
-      const hitH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
-      const height = hitH ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0);
+      // v48.35: Only trust carto.height from real surface picks (terrain/3dtiles).
+      // Ellipsoid intersection gives height=0 by definition — always wrong for elevated terrain.
+      // For ellipsoid fallback, use cesiumGroundElevRef (sampled at boot from terrain provider).
+      const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
+      const trustedH = (pickMethod !== 'ellipsoid') ? rawH : null;
+      const height = trustedH ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (rawH ?? 0));
       if (!isValidCoord(pLat, pLng)) return null;
-      addLog('GROUND', `[GROUND-PICK v48.32] method=${pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} h=${height.toFixed(2)}m`);
+      addLog('GROUND', `[GROUND-PICK v48.35] method=${pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} rawH=${rawH?.toFixed(2)} h=${height.toFixed(2)}m`);
       return { lat: pLat, lng: pLng, height, pickMethod };
     } catch { return null; }
   }
@@ -2698,8 +2702,10 @@ function SolarEngine3D({
       // v48.11: Use actual terrain hit height so single-click ground panels appear at
       // the cursor. Fall back to boot-sampled cesiumGroundElevRef when hit height is
       // unavailable (e.g. ellipsoid-only pick returns height ~0).
-      const hitHeightGnd = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
-      const baseZ       = hitHeightGnd ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (carto.height ?? 0));
+      // v48.35: Ellipsoid pick gives height=0 by definition — not terrain elevation.
+      const rawHeightGnd = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
+      const hitHeightGnd = (hit.pickMethod !== 'ellipsoid') ? rawHeightGnd : null;
+      const baseZ       = hitHeightGnd ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (rawHeightGnd ?? 0));
       const mountPlaneZ = baseZ + MOUNT_HEIGHT_M;
       if (!isValidCoord(pLat, pLng, mountPlaneZ)) return;
 

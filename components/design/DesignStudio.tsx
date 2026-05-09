@@ -2431,6 +2431,15 @@ export default function DesignStudio({ project, onSave }: Props) {
       toast.error('No zones defined', 'Draw a roof, ground, or fence zone first, then click Auto Layout.');
       return;
     }
+
+    // v48.35: In 3D mode, the 2D layout engines produce panels without terrain heights,
+    // which render underground. Route through SolarEngine3D's auto_roof engine instead,
+    // which samples terrain and places panels at the correct elevation.
+    if (show3D) {
+      setPlacementMode3D('auto_roof');
+      return;
+    }
+
     setAutoLayoutRunning(true);
 
     // v47.93: Preserve MANUAL panels — only replace AUTO-generated panels
@@ -2481,7 +2490,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       `${allNew.length} panels placed · ${(calculateSystemSize(allNew)).toFixed(2)} kW`
     );
   }, [panels, roofPlanes, groundArea, fenceLine, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation]);
+      tilt, azimuth, panelsPerRow, groundHeight, fenceHeight, bifacialOptimized, orientation, show3D, setPlacementMode3D]);
 
   // ── Fill Roof: maximize panels with minimal setback (0.3 m) ─────────────────
   const fillRoof = useCallback(() => {
@@ -3097,6 +3106,8 @@ export default function DesignStudio({ project, onSave }: Props) {
               onPlacementModeChange={setPlacementMode3D}
               showShade={showShade3D}
               fireSetbacks={fireSetbacks}
+              orientation={orientation}
+              onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
                 if (twin.roofSegments) setRoofSegments(twin.roofSegments);
