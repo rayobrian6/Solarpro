@@ -1781,15 +1781,25 @@ function SolarEngine3D({
           if (nCols === 1) {
             railLength = panelW;
           } else {
-            // splitIntoRailClusters already sorts by ridge projection — first/last are extremes.
-            const pFirst = clusterPanels[0];
-            const pLast  = clusterPanels[nCols - 1];
-            const cosLatApprox = Math.cos(pFirst.lat * Math.PI / 180);
-            const MPD_R  = 111320;
-            const dLat   = (pLast.lat - pFirst.lat) * MPD_R;
-            const dLng   = (pLast.lng - pFirst.lng) * MPD_R * cosLatApprox;
-            const centreTocentre = Math.sqrt(dLat * dLat + dLng * dLng);
-            railLength = centreTocentre + panelW; // span from first left-edge to last right-edge
+            // Compute rail length from the RIDGE-PROJECTED span of the cluster.
+            // Using raw geodetic distance (sqrt(dLat²+dLng²)) contaminates the
+            // length with any slope-direction spread between pFirst and pLast.
+            // Instead, project each panel onto the ridge unit vector and measure
+            // only the ridge-axis extent — then add one panelW for the end overhangs.
+            const refC    = clusterPanels[0];
+            const azC     = (refC.azimuth ?? 180) * Math.PI / 180;
+            const cosLatC = Math.cos(refC.lat * Math.PI / 180);
+            const MPD_R   = 111320;
+            // Ridge unit vector (perpendicular to down-slope):
+            const rxLat =  Math.sin(azC); // lat component of ridge direction
+            const rxLng =  Math.cos(azC); // lng component
+            const ridgeProjs = clusterPanels.map(p => {
+              const dLat = (p.lat - refC.lat) * MPD_R;
+              const dLng = (p.lng - refC.lng) * MPD_R * cosLatC;
+              return dLat * rxLat + dLng * rxLng;
+            });
+            const ridgeSpan = Math.max(...ridgeProjs) - Math.min(...ridgeProjs);
+            railLength = ridgeSpan + panelW; // add one panelW for half-panel overhang on each end
           }
 
           // Cluster centroid (average panel position)
