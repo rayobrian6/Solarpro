@@ -2770,7 +2770,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   return (
     <div className="flex flex-col h-full bg-slate-950">
       {/* ── Studio Header ── */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-900 border-b border-slate-700/50 flex-shrink-0">
+      <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-900 border-b border-slate-700/50 flex-shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         <div className={`px-2.5 py-1 rounded-lg border text-xs font-semibold ${systemTypeBg} ${systemTypeColor}`}>
           {systemTypeLabel}
         </div>
@@ -2840,7 +2840,7 @@ export default function DesignStudio({ project, onSave }: Props) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 ml-auto">
+        <div className="flex items-center gap-2 ml-auto flex-shrink-0">
           {/* Automation buttons */}
           {(roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0) && (
             <div className="flex items-center gap-1 bg-slate-800/60 rounded-lg px-2 py-1">
