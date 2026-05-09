@@ -2155,39 +2155,19 @@ function SolarEngine3D({
           ? new C.Color(0.15, 0.20, 0.30, 0.55)  // subtle blue-grey on near-black
           : new C.Color(0.10, 0.15, 0.25, 0.45); // subtle dark blue on navy
 
-        // v6.2.2: Compute ECEF pwDir/phDir axes for this panel grid.
+        // v48.31: Compute ECEF pwDir/phDir axes for this panel grid.
         // pwDir = along panel width (pw), phDir = along panel height (ph), N = face normal.
-        // These MUST match the panel box's HPR orientation exactly.
+        // ALWAYS derive from orientation quaternion — this is the single source of truth
+        // (same quaternion drives the box entity, so grid lines MUST use it too).
+        // The old storedUx branch used frame.u which for ground panels doesn't always
+        // match the box Y-axis, causing the cell grid to render as a "ghost" behind panels.
         const pN = { x: ecefNx, y: ecefNy, z: ecefNz };
 
         let pwDir: { x: number; y: number; z: number };
         let phDir: { x: number; y: number; z: number };
 
-        // Prefer stored ecefUx (set by surfaceGeometry3D + planeEngine v47.159).
-        // storedU = frame.u = along-ridge direction = pw axis.
-        const storedUx = (panel as any).ecefUx;
-        const storedUy = (panel as any).ecefUy;
-        const storedUz = (panel as any).ecefUz;
-        if (isFinite(storedUx) && isFinite(storedUy) && isFinite(storedUz) &&
-            Math.abs(storedUx) + Math.abs(storedUy) + Math.abs(storedUz) > 1e-6) {
-          // storedU = pw direction. Derive ph = cross(pw, N).
-          // Note: cross(pw, N) = boxX (right-handed: cross(Y, Z) = X).
-          // NOT cross(N, pw) which gives -boxX.
-          pwDir = { x: storedUx, y: storedUy, z: storedUz };
-          const phRaw = {
-            x: pwDir.y * pN.z - pwDir.z * pN.y,
-            y: pwDir.z * pN.x - pwDir.x * pN.z,
-            z: pwDir.x * pN.y - pwDir.y * pN.x,
-          };
-          const phMag = Math.sqrt(phRaw.x**2 + phRaw.y**2 + phRaw.z**2);
-          phDir = phMag > 1e-6
-            ? { x: phRaw.x/phMag, y: phRaw.y/phMag, z: phRaw.z/phMag }
-            : { x: 0, y: 0, z: 1 };
-        } else {
-          // v6.2.2-fix: Derive grid axes directly from orientation quaternion.
-          // This is the single source of truth — the same quaternion used for the
-          // panel box entity. No heading/east/north reconstruction needed.
-          // Cesium box local axes: X = phDir (height), Y = pwDir (width), Z = normal.
+        {
+          // Cesium box local axes: X = phDir (height dim), Y = pwDir (width dim), Z = normal.
           const rotM3 = C.Matrix3.fromQuaternion(orientation);
           const col0 = C.Matrix3.getColumn(rotM3, 0, new C.Cartesian3()); // X = phDir
           const col1 = C.Matrix3.getColumn(rotM3, 1, new C.Cartesian3()); // Y = pwDir
@@ -2580,28 +2560,37 @@ function SolarEngine3D({
     return { cartesian, pickMethod };
   }
 
-  // ── getGroundPlanePosition: angle-independent ground click (v48.30) ──────────
+  // ── getGroundPlanePosition: angle-independent ground click (v48.31) ──────────
   /**
-   * Picks a ground-level world position. Two-step approach (v48.30):
-   *   Step 1 — scene.pickPosition for Z:  depth buffer height is reliable on flat
-   *             ground even at oblique angles. Only lat/lng drift at oblique — Z stays
-   *             close to true surface elevation. We use this Z only.
-   *   Step 2 — ray-plane intersection at surfaceZ for lat/lng: fires a pick ray and
-   *             intersects a tangent plane at the depth-buffer Z. Gives correct lat/lng
-   *             at any camera angle, with the actual surface elevation as the plane height.
+   * Picks a ground-level world position. Two-step approach (v48.31):
+   *   Step 1 — scene.pickPosition:  depth buffer gives the closest approximation
+   *             of the actual surface point. Z (height) is reliable even at oblique
+   *             angles. lat/lng from pickPosition can drift at oblique angles BUT
+   *             we capture the ECEF point for use as the tangent plane anchor.
+   *   Step 2 — ray-plane at the pickPosition point: build a tangent plane at the
+   *             depth-hit ECEF point (not the property center). The geodetic surface
+   *             normal at THAT point is used. Then intersect the pick ray with this
+   *             plane — gives correct lat/lng at ANY camera angle because the plane
+   *             is anchored at the actual clicked location, not the property center.
    *
-   * This replaces the v48.29 approach which used cesiumGroundElevRef (property-center
-   * elevation) as the plane height — causing floating panels when the click was on terrain
-   * at a different elevation from the property centroid (e.g. a parking lot 3m lower).
+   * v48.30 bug: plane was anchored at property center (lng, lat) — at oblique angles
+   * with click far from center, the tangent plane orientation diverges, causing
+   * lat/lng drift of several meters (the "click offset" bug).
+   *
+   * v48.31 fix: anchor the tangent plane at the scene.pickPosition ECEF point.
+   * The surface normal at that point is used for the plane, so the ray-plane
+   * intersection returns the exact lat/lng under the cursor at any camera angle.
    */
   function getGroundPlanePosition(
     viewer: any,
     C: any,
     screenPos: any,
   ): { lat: number; lng: number; height: number; pickMethod: string } | null {
-    // ── Step 1: Get actual surface Z via scene.pickPosition ───────────────────
-    let surfaceZ = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+    // ── Step 1: scene.pickPosition — get ECEF point + Z ──────────────────────
+    let surfaceZ    = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+    let planePt: any = null;   // ECEF anchor for the tangent plane
     let heightSource = 'cesiumGroundElevRef';
+
     try {
       const depthHit = viewer.scene.pickPosition(screenPos);
       if (depthHit && isFinite(depthHit.x) && isFinite(depthHit.y) && isFinite(depthHit.z)
@@ -2609,24 +2598,29 @@ function SolarEngine3D({
         const depthCarto = C.Cartographic.fromCartesian(depthHit);
         if (depthCarto && isFinite(depthCarto.height)) {
           const depthZ = depthCarto.height;
-          // Sanity check: within ±100m of cesiumGroundElevRef (guards sky/void picks)
-          const refZ = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+          const refZ   = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
           if (Math.abs(depthZ - refZ) < 100) {
-            surfaceZ = depthZ;
+            surfaceZ     = depthZ;
+            planePt      = depthHit;   // anchor the plane HERE — at the actual surface hit
             heightSource = 'pickPosition';
           }
         }
       }
-    } catch { /* pickPosition can fail on sky/void — use cesiumGroundElevRef */ }
+    } catch { /* pickPosition can fail on sky/void — fallback below */ }
 
-    // ── Step 2: Ray-plane at surfaceZ → accurate lat/lng ─────────────────────
+    // ── Step 2: Ray-plane anchored at pickPosition point → accurate lat/lng ───
+    // Build the tangent plane at the actual surface hit (planePt), not at the
+    // property center. This eliminates the lat/lng drift at oblique camera angles.
     try {
       const ray = viewer.camera.getPickRay(screenPos);
       if (!ray) return null;
-      const planePt     = C.Cartesian3.fromDegrees(lng, lat, surfaceZ);
-      const planeNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(planePt, new C.Cartesian3());
-      const plane       = C.Plane.fromPointNormal(planePt, planeNormal);
+
+      // Use pickPosition hit as plane anchor when available; fallback to property center
+      const anchor = planePt ?? C.Cartesian3.fromDegrees(lng, lat, surfaceZ);
+      const planeNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(anchor, new C.Cartesian3());
+      const plane       = C.Plane.fromPointNormal(anchor, planeNormal);
       const hit         = C.IntersectionTests.rayPlane(ray, plane, new C.Cartesian3());
+
       if (hit && isFinite(hit.x) && isFinite(hit.y) && isFinite(hit.z)
           && C.Cartesian3.magnitude(hit) > 1_000_000) {
         const carto = C.Cartographic.fromCartesian(hit);
@@ -2634,7 +2628,7 @@ function SolarEngine3D({
         const pLat = C.Math.toDegrees(carto.latitude);
         const pLng = C.Math.toDegrees(carto.longitude);
         if (!isValidCoord(pLat, pLng)) return null;
-        addLog('GROUND', `[GROUND-PLANE-PICK v48.30] lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} Z=${surfaceZ.toFixed(2)}m (src=${heightSource})`);
+        addLog('GROUND', `[GROUND-PLANE-PICK v48.31] lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} Z=${surfaceZ.toFixed(2)}m src=${heightSource} anchor=${planePt ? 'depthHit' : 'center'}`);
         return { lat: pLat, lng: pLng, height: surfaceZ, pickMethod: `ray-plane+${heightSource}` };
       }
     } catch (e) { handleCesiumError('getGroundPlanePosition', e, true); }
@@ -6623,9 +6617,25 @@ function SolarEngine3D({
                   onClick={() => {
                     const next: PanelOrientation = panelOrientation === 'portrait' ? 'landscape' : 'portrait';
                     setPanelOrientation(next);
-                    panelOrientationRef.current = next;
+                    panelOrientationRef.current  = next;
                     surfaceOrientationRef.current = next;
-                    // v48.25: notify DesignStudio so 2D orientation state + layout stay in sync
+                    // v48.31: Re-render ALL existing panels with the new orientation.
+                    // Previously only the ref was updated — existing panels kept their
+                    // stored orientation: 'portrait' so nothing changed visually.
+                    // Now: clone every panel with the new orientation, rebuild entities,
+                    // and sync DesignStudio state so the change persists.
+                    const viewer = viewerRef.current;
+                    const Cs = (window as any).Cesium;
+                    if (viewer && Cs && panelsRef.current.length > 0) {
+                      const updated = panelsRef.current.map(p => ({ ...p, orientation: next }));
+                      panelsRef.current = updated;
+                      lastRenderedPanelsRef.current = []; // force full rebuild
+                      if (renderAllPanelsRef.current) {
+                        renderAllPanelsRef.current(viewer, Cs, updated);
+                      }
+                      onPanelsChange(updated);
+                    }
+                    // Notify DesignStudio so 2D orientation state stays in sync
                     onOrientationChange?.(next);
                   }}
                   title="Toggle panel orientation"
