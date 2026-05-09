@@ -2380,11 +2380,20 @@ export default function DesignStudio({ project, onSave }: Props) {
   // v47.103: Re-layout all AUTO panels immediately when orientation toggle changes.
   // Called with the NEW orientation value directly (before React state update settles).
   const relayoutWithOrientation = useCallback((newOrientation: 'portrait' | 'landscape') => {
-    if (show3D) return; // 3D mode: SolarEngine3D handles orientation internally — don't generate 2D panels (no height)
     const hasZones = roofPlanes.length > 0 || groundArea.length > 0;
     if (!hasZones) return; // no zones yet, nothing to re-layout
     const hasAutoPanels = panels.some(p => p.layoutSource === 'AUTO');
     if (!hasAutoPanels) return; // no auto panels to refresh
+
+    // v48.37: In 3D mode with 3D-placed panels (height > 0), re-trigger the 3D
+    // engine's handleAutoRoof instead of the 2D layout engine.
+    // The 2D engine outputs panels with height=undefined → renders underground.
+    // The orientation prop flowing to SolarEngine3D ensures panelOrientationRef
+    // is updated BEFORE handleAutoRoof fires, so it uses the correct new orientation.
+    if (show3D && panels.some(p => (p.height ?? 0) > 0)) {
+      setPlacementMode3D('auto_roof');
+      return;
+    }
 
     clearGridCache();
     const manualPanels = panels.filter(p => p.layoutSource === 'MANUAL');
@@ -2423,7 +2432,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       `${allNew.length} panels re-laid out`
     );
   }, [panels, roofPlanes, groundArea, selectedPanel, setback, panelSpacing, rowSpacing,
-      tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks]);
+      tilt, azimuth, panelsPerRow, groundHeight, fireSetbacks, alignToEdge, show3D, setPlacementMode3D]);
 
   const autoLayoutAll = useCallback(() => {
     const hasZones = roofPlanes.length > 0 || groundArea.length > 0 || fenceLine.length > 0;
@@ -3106,6 +3115,8 @@ export default function DesignStudio({ project, onSave }: Props) {
               onPlacementModeChange={setPlacementMode3D}
               showShade={showShade3D}
               fireSetbacks={fireSetbacks}
+              orientation={orientation}
+              onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
                 if (twin.roofSegments) setRoofSegments(twin.roofSegments);
