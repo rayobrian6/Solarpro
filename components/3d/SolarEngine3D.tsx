@@ -2560,89 +2560,36 @@ function SolarEngine3D({
     return { cartesian, pickMethod };
   }
 
-  // ── getGroundPlanePosition: angle-independent ground click (v48.31) ──────────
+  // ── getGroundPlanePosition: angle-independent ground click (v48.32) ──────────
   /**
-   * Picks a ground-level world position. Two-step approach (v48.31):
-   *   Step 1 — scene.pickPosition:  depth buffer gives the closest approximation
-   *             of the actual surface point. Z (height) is reliable even at oblique
-   *             angles. lat/lng from pickPosition can drift at oblique angles BUT
-   *             we capture the ECEF point for use as the tangent plane anchor.
-   *   Step 2 — ray-plane at the pickPosition point: build a tangent plane at the
-   *             depth-hit ECEF point (not the property center). The geodetic surface
-   *             normal at THAT point is used. Then intersect the pick ray with this
-   *             plane — gives correct lat/lng at ANY camera angle because the plane
-   *             is anchored at the actual clicked location, not the property center.
+   * Picks a ground-level world position using the same approach as fence/plane tools.
    *
-   * v48.30 bug: plane was anchored at property center (lng, lat) — at oblique angles
-   * with click far from center, the tangent plane orientation diverges, causing
-   * lat/lng drift of several meters (the "click offset" bug).
+   * Uses getWorldPosition (scene.pick → pickPosition on 3D tile mesh) for lat/lng —
+   * this is accurate at any camera angle because it hits the actual tile geometry.
+   * For Z we use the locked flat-plane height (rows 2+) or the hit height (row 1).
    *
-   * v48.31 fix: anchor the tangent plane at the scene.pickPosition ECEF point.
-   * The surface normal at that point is used for the plane, so the ray-plane
-   * intersection returns the exact lat/lng under the cursor at any camera angle.
+   * The previous ray-plane approach was over-engineered — getWorldPosition already
+   * works correctly at oblique angles (same as fence click, plane3d tool).
    */
   function getGroundPlanePosition(
     viewer: any,
     C: any,
     screenPos: any,
   ): { lat: number; lng: number; height: number; pickMethod: string } | null {
-    // ── Step 1: scene.pickPosition — get ECEF point + Z ──────────────────────
-    let surfaceZ    = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-    let planePt: any = null;   // ECEF anchor for the tangent plane
-    let heightSource = 'cesiumGroundElevRef';
-
+    const hit = getWorldPosition(viewer, C, screenPos);
+    if (!hit) return null;
     try {
-      const depthHit = viewer.scene.pickPosition(screenPos);
-      if (depthHit && isFinite(depthHit.x) && isFinite(depthHit.y) && isFinite(depthHit.z)
-          && C.Cartesian3.magnitude(depthHit) > 1_000_000) {
-        const depthCarto = C.Cartographic.fromCartesian(depthHit);
-        if (depthCarto && isFinite(depthCarto.height)) {
-          const depthZ = depthCarto.height;
-          const refZ   = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-          if (Math.abs(depthZ - refZ) < 100) {
-            surfaceZ     = depthZ;
-            planePt      = depthHit;   // anchor the plane HERE — at the actual surface hit
-            heightSource = 'pickPosition';
-          }
-        }
-      }
-    } catch { /* pickPosition can fail on sky/void — fallback below */ }
-
-    // ── Step 2: Ray-plane anchored at pickPosition point → accurate lat/lng ───
-    // Build the tangent plane at the actual surface hit (planePt), not at the
-    // property center. This eliminates the lat/lng drift at oblique camera angles.
-    try {
-      const ray = viewer.camera.getPickRay(screenPos);
-      if (!ray) return null;
-
-      // Use pickPosition hit as plane anchor when available; fallback to property center
-      const anchor = planePt ?? C.Cartesian3.fromDegrees(lng, lat, surfaceZ);
-      const planeNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(anchor, new C.Cartesian3());
-      const plane       = C.Plane.fromPointNormal(anchor, planeNormal);
-      const hit         = C.IntersectionTests.rayPlane(ray, plane, new C.Cartesian3());
-
-      if (hit && isFinite(hit.x) && isFinite(hit.y) && isFinite(hit.z)
-          && C.Cartesian3.magnitude(hit) > 1_000_000) {
-        const carto = C.Cartographic.fromCartesian(hit);
-        if (!carto) return null;
-        const pLat = C.Math.toDegrees(carto.latitude);
-        const pLng = C.Math.toDegrees(carto.longitude);
-        if (!isValidCoord(pLat, pLng)) return null;
-        addLog('GROUND', `[GROUND-PLANE-PICK v48.31] lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} Z=${surfaceZ.toFixed(2)}m src=${heightSource} anchor=${planePt ? 'depthHit' : 'center'}`);
-        return { lat: pLat, lng: pLng, height: surfaceZ, pickMethod: `ray-plane+${heightSource}` };
-      }
-    } catch (e) { handleCesiumError('getGroundPlanePosition', e, true); }
-
-    // ── Fallback: getWorldPosition lat/lng + surfaceZ override ────────────────
-    const fallback = getWorldPosition(viewer, C, screenPos);
-    if (!fallback) return null;
-    try {
-      const carto = C.Cartographic.fromCartesian(fallback.cartesian);
+      const carto = C.Cartographic.fromCartesian(hit.cartesian);
       if (!carto) return null;
       const pLat = C.Math.toDegrees(carto.latitude);
       const pLng = C.Math.toDegrees(carto.longitude);
+      // Height: use tile hit height when reliable (> 10m above ellipsoid = real tile hit)
+      // Fall back to cesiumGroundElevRef for sky/void picks (ellipsoid fallback)
+      const hitH = isFinite(carto.height) && carto.height > 10 ? carto.height : null;
+      const height = hitH ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0);
       if (!isValidCoord(pLat, pLng)) return null;
-      return { lat: pLat, lng: pLng, height: surfaceZ, pickMethod: `fallback-${fallback.pickMethod}` };
+      addLog('GROUND', `[GROUND-PICK v48.32] method=${hit.pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} h=${height.toFixed(2)}m`);
+      return { lat: pLat, lng: pLng, height, pickMethod: hit.pickMethod };
     } catch { return null; }
   }
 
@@ -6619,21 +6566,28 @@ function SolarEngine3D({
                     setPanelOrientation(next);
                     panelOrientationRef.current  = next;
                     surfaceOrientationRef.current = next;
-                    // v48.31: Re-render ALL existing panels with the new orientation.
-                    // Previously only the ref was updated — existing panels kept their
-                    // stored orientation: 'portrait' so nothing changed visually.
-                    // Now: clone every panel with the new orientation, rebuild entities,
-                    // and sync DesignStudio state so the change persists.
+                    // v48.32: Re-render existing panels with new orientation.
+                    // IMPORTANT: do NOT call onPanelsChange here — that would push
+                    // orientation-cloned panels back to DesignStudio, which can cause
+                    // the panels useEffect to fire a second render pass and multiply panels.
+                    // Instead: directly rebuild entities in the Cesium viewer only,
+                    // and update panelsRef/lastRenderedPanelsRef so the next incremental
+                    // diff sees the correct baseline.
                     const viewer = viewerRef.current;
                     const Cs = (window as any).Cesium;
                     if (viewer && Cs && panelsRef.current.length > 0) {
+                      // 1. Clone panels with new orientation (keep same IDs so refs stay valid)
                       const updated = panelsRef.current.map(p => ({ ...p, orientation: next }));
+                      // 2. Remove all existing panel entities from the viewer
+                      panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+                      panelMapRef.current.clear();
+                      // 3. Re-add with new orientation dims
+                      const skipGrid = updated.length > 12;
+                      updated.forEach(p => addPanelEntity(viewer, Cs, p, skipGrid));
+                      // 4. Update local refs so incremental diff stays clean
                       panelsRef.current = updated;
-                      lastRenderedPanelsRef.current = []; // force full rebuild
-                      if (renderAllPanelsRef.current) {
-                        renderAllPanelsRef.current(viewer, Cs, updated);
-                      }
-                      onPanelsChange(updated);
+                      lastRenderedPanelsRef.current = updated;
+                      try { viewer.scene.requestRender(); } catch {}
                     }
                     // Notify DesignStudio so 2D orientation state stays in sync
                     onOrientationChange?.(next);
