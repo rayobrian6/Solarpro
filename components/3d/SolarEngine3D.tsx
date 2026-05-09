@@ -1709,9 +1709,30 @@ function SolarEngine3D({
           const headingRad = (azDeg - 90) * Math.PI / 180; // along-ridge heading
           const pitchRad   = -(tiltDeg   * Math.PI / 180); // tilt with roof
 
-          // Rail length = exact cluster span — no cantilever.
+          // Rail length = actual geodetic span of the cluster + one panel width.
+          // We measure the real centre-to-centre distance along the ridge axis between
+          // the first and last panels in the sorted cluster, then add panelW so the
+          // rail covers the half-panel overhanging each end.
+          //
+          // This is placement-path-agnostic: works whether the engine used 0mm, 6mm,
+          // or 50mm column spacing (fillRoofSegmentWithPanels uses PW_O + 0.05).
+          // Using a hardcoded gap constant (e.g. 0.006) breaks for paths that use
+          // different spacing, causing the rail to fall short of the last panel.
           const nCols      = clusterPanels.length;
-          const railLength = (nCols - 1) * (panelW + 0.006) + panelW; // ~6mm inter-panel gap
+          let railLength: number;
+          if (nCols === 1) {
+            railLength = panelW;
+          } else {
+            // splitIntoRailClusters already sorts by ridge projection — first/last are extremes.
+            const pFirst = clusterPanels[0];
+            const pLast  = clusterPanels[nCols - 1];
+            const cosLatApprox = Math.cos(pFirst.lat * Math.PI / 180);
+            const MPD_R  = 111320;
+            const dLat   = (pLast.lat - pFirst.lat) * MPD_R;
+            const dLng   = (pLast.lng - pFirst.lng) * MPD_R * cosLatApprox;
+            const centreTocentre = Math.sqrt(dLat * dLat + dLng * dLng);
+            railLength = centreTocentre + panelW; // span from first left-edge to last right-edge
+          }
 
           // Cluster centroid (average panel position)
           const centLat = clusterPanels.reduce((s, p) => s + p.lat,            0) / nCols;
