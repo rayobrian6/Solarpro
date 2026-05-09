@@ -57,6 +57,13 @@ const PUBLIC_PATHS = [
   // ── DB migrations (validated internally via MIGRATE_SECRET) ──
   '/api/migrate',
 
+  // ── Lockout-safe account diagnostic (validated internally via ADMIN_SECRET) ──
+  // Allows diagnosing a locked-out account without needing to be logged in.
+  '/api/admin/debug/account-state',
+
+  // ── Emergency account repair (validated internally via ADMIN_SECRET) ──
+  '/api/admin/repair-account',
+
   // ── REMOVED from public (now require auth): ──────────────────
   // '/api/auth/debug-password-reset',  — debug route, guarded in prod
   // '/api/auth/debug-login',           — debug route, guarded in prod

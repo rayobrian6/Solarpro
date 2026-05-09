@@ -109,9 +109,13 @@ export async function PATCH(req: NextRequest) {
       // Math.random() is not cryptographically secure — crypto.randomBytes gives 48 bits of entropy
       const { randomBytes } = await import('crypto');
       const tempPassword = 'TempPass' + randomBytes(6).toString('hex').toUpperCase() + '!';
-      const bcrypt = await import('bcryptjs');
-      const hash = await bcrypt.hash(tempPassword, 10);
-      await sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${id}`;
+      // FIX: Use hashPassword() (cost 12, same as user-set passwords) instead of
+      // bcrypt.hash(tempPassword, 10). Cost-10 hashes trigger Safety Net B on login
+      // for free-pass users and look like orphaned placeholders.
+      // Also clear is_free_pass so Safety Net B can never fire after admin reset.
+      const { hashPassword: hp } = await import('@/lib/auth');
+      const hash = await hp(tempPassword);
+      await sql`UPDATE users SET password_hash = ${hash}, is_free_pass = false, updated_at = NOW() WHERE id = ${id}`;
       await logAdminAction({ adminId: admin.id, action: 'reset_password', targetUserId: id, targetCompany: targetUser?.company, metadata: { targetEmail: targetUser?.email } });
       // Return the temp password so admin can share it
       return NextResponse.json({ success: true, tempPassword, message: `Password reset. Temporary password: ${tempPassword}` });
