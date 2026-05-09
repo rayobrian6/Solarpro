@@ -1767,40 +1767,17 @@ function SolarEngine3D({
           const headingRad = (azDeg - 90) * Math.PI / 180; // along-ridge heading
           const pitchRad   = -(tiltDeg   * Math.PI / 180); // tilt with roof
 
-          // Rail length = actual geodetic span of the cluster + one panel width.
-          // We measure the real centre-to-centre distance along the ridge axis between
-          // the first and last panels in the sorted cluster, then add panelW so the
-          // rail covers the half-panel overhanging each end.
+          // Rail length = number of panels × panel width.
           //
-          // This is placement-path-agnostic: works whether the engine used 0mm, 6mm,
-          // or 50mm column spacing (fillRoofSegmentWithPanels uses PW_O + 0.05).
-          // Using a hardcoded gap constant (e.g. 0.006) breaks for paths that use
-          // different spacing, causing the rail to fall short of the last panel.
-          const nCols      = clusterPanels.length;
-          let railLength: number;
-          if (nCols === 1) {
-            railLength = panelW;
-          } else {
-            // Compute rail length from the RIDGE-PROJECTED span of the cluster.
-            // Using raw geodetic distance (sqrt(dLat²+dLng²)) contaminates the
-            // length with any slope-direction spread between pFirst and pLast.
-            // Instead, project each panel onto the ridge unit vector and measure
-            // only the ridge-axis extent — then add one panelW for the end overhangs.
-            const refC    = clusterPanels[0];
-            const azC     = (refC.azimuth ?? 180) * Math.PI / 180;
-            const cosLatC = Math.cos(refC.lat * Math.PI / 180);
-            const MPD_R   = 111320;
-            // Ridge unit vector (perpendicular to down-slope):
-            const rxLat =  Math.sin(azC); // lat component of ridge direction
-            const rxLng =  Math.cos(azC); // lng component
-            const ridgeProjs = clusterPanels.map(p => {
-              const dLat = (p.lat - refC.lat) * MPD_R;
-              const dLng = (p.lng - refC.lng) * MPD_R * cosLatC;
-              return dLat * rxLat + dLng * rxLng;
-            });
-            const ridgeSpan = Math.max(...ridgeProjs) - Math.min(...ridgeProjs);
-            railLength = ridgeSpan + panelW; // add one panelW for half-panel overhang on each end
-          }
+          // All roof panels reaching renderRoofRails come exclusively from
+          // buildSurfaceGrid (panelSpacingM=0), so the centre-to-centre step
+          // between adjacent panels in a row is exactly panelW — no inter-panel
+          // gap. Therefore the total span from left edge to right edge is simply
+          // nCols × panelW. No geodetic distance math needed or wanted here:
+          // any projected-span formula accumulates rounding error and can break
+          // when rowGroups collapses multiple rows into one cluster.
+          const nCols     = clusterPanels.length;
+          const railLength = nCols * panelW;
 
           // Cluster centroid (average panel position)
           const centLat = clusterPanels.reduce((s, p) => s + p.lat,            0) / nCols;
