@@ -3405,8 +3405,153 @@ export default function DesignStudio({ project, onSave }: Props) {
             {/* ── DESIGN TAB ── */}
             {activeTab === 'design' && (
               <>
+                {/* System Summary */}
+                {panels.length > 0 && (
+                  <Section title="System Summary" icon={<Zap size={12} />}>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        { label: 'Panels', value: panels.length.toString(), color: 'text-white' },
+                        { label: 'System Size', value: `${systemSizeKw.toFixed(2)} kW`, color: 'text-amber-400' },
+                        { label: 'Panel Wattage', value: `${selectedPanel.wattage}W`, color: 'text-white' },
+                        { label: 'Array Area', value: `${(panels.length * selectedPanel.width * selectedPanel.height * FEET_PER_METER * FEET_PER_METER).toFixed(0)} ft²`, color: 'text-white' },
+                      ].map(item => (
+                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
+                          <div className="text-slate-400">{item.label}</div>
+                          <div className={`font-semibold ${item.color}`}>{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Quick production estimate preview */}
+                    {quickEstimate && !production && (
+                      <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <Sun size={11} className="text-amber-400" />
+                          <span className="text-xs text-slate-400 font-medium">Quick Estimate</span>
+                          <span className="text-xs text-slate-600 ml-auto">(pre-calculation)</span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5 text-xs">
+                          <div className="text-center">
+                            <div className="text-amber-400 font-bold">{quickEstimate.annualKwh.toLocaleString()}</div>
+                            <div className="text-slate-500">kWh/yr</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-emerald-400 font-bold">${quickEstimate.annualSavings.toLocaleString()}</div>
+                            <div className="text-slate-500">est. savings</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-blue-400 font-bold">{quickEstimate.peakSunHours}</div>
+                            <div className="text-slate-500">sun hrs/day</div>
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
+                      </div>
+                    )}
+                    <button
+                      onClick={calculateProduction}
+                      disabled={calculating}
+                      className="btn-primary w-full mt-1"
+                    >
+                      {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
+                    </button>
+                    {calcMessage && (
+                      <div className={`text-xs mt-1 px-2 py-1.5 rounded-lg ${
+                        calcMessage.startsWith('✅')
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                      }`}>
+                        {calcMessage}
+                      </div>
+                    )}
+                  </Section>
+                )}
+
+                {/* Production Results */}
+                {production && (
+                  <Section title="Production Results" icon={<BarChart2 size={12} />}>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      {[
+                        { label: 'Annual Production', value: `${production.annualProductionKwh.toLocaleString()} kWh`, color: 'text-amber-400' },
+                        { label: 'Offset', value: `${production.offsetPercentage}%`, color: production.offsetPercentage >= 100 ? 'text-emerald-400' : 'text-blue-400' },
+                        { label: 'Specific Yield', value: `${production.specificYield} kWh/kWp`, color: 'text-white' },
+                        { label: 'CO₂ Offset', value: `${production.co2OffsetTons} tons/yr`, color: 'text-emerald-400' },
+                      ].map(item => (
+                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
+                          <div className="text-slate-400 text-xs">{item.label}</div>
+                          <div className={`font-semibold text-xs ${item.color}`}>{item.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div>
+                      <div className="text-xs text-slate-500 mb-1.5">Monthly Production (kWh)</div>
+                      <div className="flex items-end gap-0.5 h-12">
+                        {production.monthlyProductionKwh.map((kwh: number, i: number) => {
+                          const max = Math.max(...production.monthlyProductionKwh);
+                          return (
+                            <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
+                              <div
+                                className="w-full bg-amber-500/70 rounded-sm hover:bg-amber-400 transition-colors"
+                                style={{ height: `${(kwh / max) * 40}px` }}
+                                title={`${MONTHS[i]}: ${kwh.toLocaleString()} kWh`}
+                              />
+                              <span className="text-slate-600" style={{ fontSize: '7px' }}>{MONTHS[i]}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-400">Energy Offset</span>
+                        <span className="font-semibold text-white">{production.offsetPercentage}%</span>
+                      </div>
+                      <div className="progress-bar">
+                        <div className="progress-fill bg-gradient-to-r from-amber-500 to-emerald-500" style={{ width: `${Math.min(100, production.offsetPercentage)}%` }} />
+                      </div>
+                    </div>
+                  </Section>
+                )}
+
+                {/* Cost Estimate */}
+                {costEstimate && (
+                  <Section title="Cost Estimate" icon={<DollarSign size={12} />}>
+                    <div className="space-y-2 text-xs">
+                      {[
+                        { label: 'Gross System Cost', value: `$${costEstimate.grossCost.toLocaleString()}` },
+                        { label: 'Est. Incentives / ITC*', value: costEstimate.taxCredit > 0 ? `-$${costEstimate.taxCredit.toLocaleString()}` : 'See proposal', color: 'text-emerald-400' },
+                      ].map(item => (
+                        <div key={item.label} className="flex justify-between">
+                          <span className="text-slate-400">{item.label}</span>
+                          <span className={`font-semibold ${(item as any).color || 'text-white'}`}>{item.value}</span>
+                        </div>
+                      ))}
+                      <div className="border-t border-slate-700 pt-2 flex justify-between">
+                        <span className="text-slate-300 font-semibold">Net Cost</span>
+                        <span className="font-bold text-amber-400">${costEstimate.netCost.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Annual Savings</span>
+                        <span className="font-semibold text-emerald-400">${costEstimate.annualSavings.toLocaleString()}/yr</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Payback Period</span>
+                        <span className="font-semibold text-white">{costEstimate.paybackYears} years</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">25-Year Savings</span>
+                        <span className="font-semibold text-emerald-400">${costEstimate.lifetimeSavings.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">ROI</span>
+                        <span className="font-semibold text-emerald-400">{costEstimate.roi}%</span>
+                      </div>
+                    </div>
+                    <Link href={`/proposals?projectId=${project.id}`} className="btn-primary w-full mt-2 text-xs">
+                      Generate Proposal <ArrowRight size={12} />
+                    </Link>
+                  </Section>
+                )}
                 {/* System Configuration */}
-                <Section title="Configuration" icon={<Settings size={12} />}>
+                <Section title="Configuration" icon={<Settings size={12} />} defaultOpen={false}>
                   {/* Active Zone Type Switcher */}
                   <div className="mb-3">
                     <div className="text-xs text-slate-500 mb-1.5">Active Drawing Zone</div>
@@ -3597,51 +3742,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                   )}
                 </Section>
 
-                {/* 3D Auto-Place Panels */}
-                {show3D && (
-                  <Section title="3D Panel Placement" icon={<Layers size={12} />} defaultOpen={true}>
-                    <div className="space-y-2">
-                      <div className="text-xs text-slate-400 leading-relaxed">
-                        Use the toolbar in the 3D view to place panels. Click <strong className="text-amber-400">✨ Auto</strong> to automatically fill all roof segments with optimal panel placement.
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5 text-xs">
-                        {[
-                          { mode: 'select' as PlacementMode, icon: '↖', label: 'Select', desc: 'Select / pan' },
-                          { mode: 'roof' as PlacementMode, icon: '🏠', label: 'Place Roof', desc: 'Click to place panel' },
-                          { mode: 'ground' as PlacementMode, icon: '🌍', label: 'Place Ground', desc: 'Click to place panel' },
-                          { mode: 'auto_roof' as PlacementMode, icon: '✨', label: 'Auto Fill', desc: 'Fill all roofs' },
-                        ].map(({ mode, icon, label, desc }) => (
-                          <button
-                            key={mode}
-                            onClick={() => setPlacementMode3D(mode)}
-                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border text-left transition-all ${
-                              placementMode3D === mode
-                                ? 'border-amber-500/50 bg-amber-500/10 text-amber-400'
-                                : 'border-slate-700 text-slate-400 hover:text-slate-300 hover:border-slate-600'
-                            }`}
-                          >
-                            <span>{icon}</span>
-                            <div>
-                              <div className="font-medium">{label}</div>
-                              <div className="text-slate-500 text-xs">{desc}</div>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                      {roofSegments.length > 0 && (
-                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 text-xs text-emerald-300">
-                          <div className="font-semibold mb-0.5">✅ Solar API Ready</div>
-                          <div>{roofSegments.length} roof segments detected</div>
-                          <div>Max capacity: {((solarApiData?.solarPotential?.maxArrayPanelsCount ?? 0) * 400 / 1000).toFixed(1)} kW</div>
-                        </div>
-                      )}
-                    </div>
-                  </Section>
-                )}
+
 
                 {/* Roof Analysis - Google Solar API */}
                 {roofSegments.length > 0 && (
-                  <Section title="Roof Analysis" icon={<Sun size={12} />} badge={`${roofSegments.length} segments`}>
+                  <Section title="Roof Analysis" icon={<Sun size={12} />} badge={`${roofSegments.length} segments`} defaultOpen={false}>
                     <div className="space-y-1.5">
                       {roofSegments.map((segment, idx) => {
                         const area = segment.areaM2 ?? segment.stats?.areaMeters2 ?? 0;
@@ -3707,7 +3812,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                     title="Roof Planes"
                     icon={<Home size={12} />}
                     badge={roofPlanes.length > 0 ? `${roofPlanes.length} planes` : undefined}
-                    defaultOpen={true}
+                    defaultOpen={false}
                   >
                     <div className="space-y-2">
 
@@ -3917,151 +4022,6 @@ export default function DesignStudio({ project, onSave }: Props) {
                     </div>
                   </Section>
 
-                {/* System Summary */}
-                {panels.length > 0 && (
-                  <Section title="System Summary" icon={<Zap size={12} />}>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      {[
-                        { label: 'Panels', value: panels.length.toString(), color: 'text-white' },
-                        { label: 'System Size', value: `${systemSizeKw.toFixed(2)} kW`, color: 'text-amber-400' },
-                        { label: 'Panel Wattage', value: `${selectedPanel.wattage}W`, color: 'text-white' },
-                        { label: 'Array Area', value: `${(panels.length * selectedPanel.width * selectedPanel.height * FEET_PER_METER * FEET_PER_METER).toFixed(0)} ft²`, color: 'text-white' },
-                      ].map(item => (
-                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
-                          <div className="text-slate-400">{item.label}</div>
-                          <div className={`font-semibold ${item.color}`}>{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {/* Quick production estimate preview */}
-                    {quickEstimate && !production && (
-                      <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
-                        <div className="flex items-center gap-1.5 mb-2">
-                          <Sun size={11} className="text-amber-400" />
-                          <span className="text-xs text-slate-400 font-medium">Quick Estimate</span>
-                          <span className="text-xs text-slate-600 ml-auto">(pre-calculation)</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-1.5 text-xs">
-                          <div className="text-center">
-                            <div className="text-amber-400 font-bold">{quickEstimate.annualKwh.toLocaleString()}</div>
-                            <div className="text-slate-500">kWh/yr</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-emerald-400 font-bold">${quickEstimate.annualSavings.toLocaleString()}</div>
-                            <div className="text-slate-500">est. savings</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-blue-400 font-bold">{quickEstimate.peakSunHours}</div>
-                            <div className="text-slate-500">sun hrs/day</div>
-                          </div>
-                        </div>
-                        <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
-                      </div>
-                    )}
-                    <button
-                      onClick={calculateProduction}
-                      disabled={calculating}
-                      className="btn-primary w-full mt-1"
-                    >
-                      {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
-                    </button>
-                    {calcMessage && (
-                      <div className={`text-xs mt-1 px-2 py-1.5 rounded-lg ${
-                        calcMessage.startsWith('✅')
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                      }`}>
-                        {calcMessage}
-                      </div>
-                    )}
-                  </Section>
-                )}
-
-                {/* Production Results */}
-                {production && (
-                  <Section title="Production Results" icon={<BarChart2 size={12} />}>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                      {[
-                        { label: 'Annual Production', value: `${production.annualProductionKwh.toLocaleString()} kWh`, color: 'text-amber-400' },
-                        { label: 'Offset', value: `${production.offsetPercentage}%`, color: production.offsetPercentage >= 100 ? 'text-emerald-400' : 'text-blue-400' },
-                        { label: 'Specific Yield', value: `${production.specificYield} kWh/kWp`, color: 'text-white' },
-                        { label: 'CO₂ Offset', value: `${production.co2OffsetTons} tons/yr`, color: 'text-emerald-400' },
-                      ].map(item => (
-                        <div key={item.label} className="bg-slate-800/60 rounded-lg p-2">
-                          <div className="text-slate-400 text-xs">{item.label}</div>
-                          <div className={`font-semibold text-xs ${item.color}`}>{item.value}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500 mb-1.5">Monthly Production (kWh)</div>
-                      <div className="flex items-end gap-0.5 h-12">
-                        {production.monthlyProductionKwh.map((kwh: number, i: number) => {
-                          const max = Math.max(...production.monthlyProductionKwh);
-                          return (
-                            <div key={i} className="flex-1 flex flex-col items-center gap-0.5">
-                              <div
-                                className="w-full bg-amber-500/70 rounded-sm hover:bg-amber-400 transition-colors"
-                                style={{ height: `${(kwh / max) * 40}px` }}
-                                title={`${MONTHS[i]}: ${kwh.toLocaleString()} kWh`}
-                              />
-                              <span className="text-slate-600" style={{ fontSize: '7px' }}>{MONTHS[i]}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-xs mb-1">
-                        <span className="text-slate-400">Energy Offset</span>
-                        <span className="font-semibold text-white">{production.offsetPercentage}%</span>
-                      </div>
-                      <div className="progress-bar">
-                        <div className="progress-fill bg-gradient-to-r from-amber-500 to-emerald-500" style={{ width: `${Math.min(100, production.offsetPercentage)}%` }} />
-                      </div>
-                    </div>
-                  </Section>
-                )}
-
-                {/* Cost Estimate */}
-                {costEstimate && (
-                  <Section title="Cost Estimate" icon={<DollarSign size={12} />}>
-                    <div className="space-y-2 text-xs">
-                      {[
-                        { label: 'Gross System Cost', value: `$${costEstimate.grossCost.toLocaleString()}` },
-                        { label: 'Est. Incentives / ITC*', value: costEstimate.taxCredit > 0 ? `-$${costEstimate.taxCredit.toLocaleString()}` : 'See proposal', color: 'text-emerald-400' },
-                      ].map(item => (
-                        <div key={item.label} className="flex justify-between">
-                          <span className="text-slate-400">{item.label}</span>
-                          <span className={`font-semibold ${(item as any).color || 'text-white'}`}>{item.value}</span>
-                        </div>
-                      ))}
-                      <div className="border-t border-slate-700 pt-2 flex justify-between">
-                        <span className="text-slate-300 font-semibold">Net Cost</span>
-                        <span className="font-bold text-amber-400">${costEstimate.netCost.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Annual Savings</span>
-                        <span className="font-semibold text-emerald-400">${costEstimate.annualSavings.toLocaleString()}/yr</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">Payback Period</span>
-                        <span className="font-semibold text-white">{costEstimate.paybackYears} years</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">25-Year Savings</span>
-                        <span className="font-semibold text-emerald-400">${costEstimate.lifetimeSavings.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-400">ROI</span>
-                        <span className="font-semibold text-emerald-400">{costEstimate.roi}%</span>
-                      </div>
-                    </div>
-                    <Link href={`/proposals?projectId=${project.id}`} className="btn-primary w-full mt-2 text-xs">
-                      Generate Proposal <ArrowRight size={12} />
-                    </Link>
-                  </Section>
-                )}
               </>
             )}
 
