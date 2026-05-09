@@ -2638,11 +2638,19 @@ function SolarEngine3D({
       // v48.35: Only trust carto.height from real surface picks (terrain/3dtiles).
       // Ellipsoid intersection gives height=0 by definition — always wrong for elevated terrain.
       // For ellipsoid fallback, use cesiumGroundElevRef (sampled at boot from terrain provider).
+      // v50.1: ALSO distrust globe.pick height when it returns near-zero (WGS84 ellipsoid surface)
+      // AND the site cesiumGroundElevRef indicates significant elevation.
+      // Root cause: EllipsoidTerrainProvider makes globe.pick return height≈0 (ellipsoid surface),
+      // identical to a raw ellipsoid pick but labeled 'terrain'. Must fall back to cesiumGroundElevRef.
       const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
-      const trustedH = (pickMethod !== 'ellipsoid') ? rawH : null;
+      const ELEV_TRUST_M = 5; // below 5m above WGS84 we suspect ellipsoid-surface hit
+      const isNearSeaLevel = rawH !== null && Math.abs(rawH) < ELEV_TRUST_M;
+      const siteIsElevated = cesiumGroundElevRef.current > ELEV_TRUST_M;
+      // Distrust: explicit ellipsoid pick, OR terrain/3dtiles returning near-zero at elevated site
+      const trustedH = (pickMethod !== 'ellipsoid' && !(isNearSeaLevel && siteIsElevated)) ? rawH : null;
       const height = trustedH ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (rawH ?? 0));
       if (!isValidCoord(pLat, pLng)) return null;
-      addLog('GROUND', `[GROUND-PICK v48.35] method=${pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} rawH=${rawH?.toFixed(2)} h=${height.toFixed(2)}m`);
+      addLog('GROUND', `[GROUND-PICK v50.1] method=${pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} rawH=${rawH?.toFixed(2)} nearSea=${isNearSeaLevel} siteElev=${siteIsElevated} h=${height.toFixed(2)}m`);
       return { lat: pLat, lng: pLng, height, pickMethod };
     } catch { return null; }
   }
@@ -2703,8 +2711,12 @@ function SolarEngine3D({
       // the cursor. Fall back to boot-sampled cesiumGroundElevRef when hit height is
       // unavailable (e.g. ellipsoid-only pick returns height ~0).
       // v48.35: Ellipsoid pick gives height=0 by definition — not terrain elevation.
+      // v50.1: ALSO distrust terrain/3dtiles picks that return near-zero height at elevated sites.
+      // EllipsoidTerrainProvider makes globe.pick return the WGS84 ellipsoid surface (h≈0).
       const rawHeightGnd = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
-      const hitHeightGnd = (hit.pickMethod !== 'ellipsoid') ? rawHeightGnd : null;
+      const isNearSeaLevelGnd = rawHeightGnd !== null && Math.abs(rawHeightGnd) < 5;
+      const siteIsElevatedGnd = cesiumGroundElevRef.current > 5;
+      const hitHeightGnd = (hit.pickMethod !== 'ellipsoid' && !(isNearSeaLevelGnd && siteIsElevatedGnd)) ? rawHeightGnd : null;
       const baseZ       = hitHeightGnd ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (rawHeightGnd ?? 0));
       const mountPlaneZ = baseZ + MOUNT_HEIGHT_M;
       if (!isValidCoord(pLat, pLng, mountPlaneZ)) return;
