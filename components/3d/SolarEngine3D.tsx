@@ -6033,18 +6033,6 @@ function SolarEngine3D({
 
         return (
           <>
-            {/* Tooltip portal */}
-            {tooltipInfo && (
-              <div style={{
-                position: 'fixed', left: tooltipInfo.x, top: tooltipInfo.y,
-                transform: 'translateY(-50%)',
-                background: 'rgba(0,0,0,0.88)', color: '#fff', fontSize: 11,
-                padding: '4px 8px', borderRadius: 6, pointerEvents: 'none',
-                zIndex: 9999, maxWidth: 240, whiteSpace: 'pre-wrap',
-                border: '1px solid rgba(255,255,255,0.15)',
-              }}>{tooltipInfo.text}</div>
-            )}
-
             {/* ── LEFT: spine + flyout ── */}
             <div style={{
               position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
@@ -6062,7 +6050,7 @@ function SolarEngine3D({
 
                 {/* SELECT — standalone, always visible */}
                 <button
-                  onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Select: click panels. SHIFT+click = multi-select.', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                  onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Select: click panels. SHIFT+click = multi-select.', x: r.left + r.width / 2, y: r.top - 8 }); }}
                   onMouseLeave={() => setTooltipInfo(null)}
                   onClick={() => activateTool('select')}
                   style={{
@@ -6084,7 +6072,7 @@ function SolarEngine3D({
                   return (
                     <div key={grp.id} style={{ position: 'relative' }}>
                       <button
-                        onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: grp.label + ' \u2014 click to expand', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                        onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: grp.label + ' \u2014 click to expand', x: r.left + r.width / 2, y: r.top - 8 }); }}
                         onMouseLeave={() => setTooltipInfo(null)}
                         onClick={() => setOpenGroup(isOpen ? null : grp.id)}
                         style={{
@@ -6124,7 +6112,7 @@ function SolarEngine3D({
                   { icon: '\u{1F5D1}',     tip: 'Clear All: remove all panels',     action: clearPanels, danger: true },
                 ] as { icon: string; tip: string; action: () => void; danger?: boolean }[]).map(({ icon, tip, action, danger }) => (
                   <button key={tip}
-                    onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:tip,x:r.right+8,y:r.top+r.height/2}); }}
+                    onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:tip,x:r.left+r.width/2,y:r.top-8}); }}
                     onMouseLeave={() => setTooltipInfo(null)}
                     onClick={action}
                     style={{ ...btnBase, background: danger ? 'rgba(255,60,60,0.15)' : 'rgba(255,255,255,0.07)', color: danger ? '#ff6666' : '#aaa' }}
@@ -6153,7 +6141,7 @@ function SolarEngine3D({
                     {/* Tool rows */}
                     {grp.tools.map(({ mode, icon, label, tip }) => (
                       <button key={mode}
-                        onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:label+': '+tip,x:r.right+8,y:r.top+r.height/2}); }}
+                        onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:label+': '+tip,x:r.left+r.width/2,y:r.top-8}); }}
                         onMouseLeave={() => setTooltipInfo(null)}
                         onClick={() => activateTool(mode)}
                         style={{
@@ -6769,15 +6757,16 @@ function SolarEngine3D({
           position: 'fixed',
           left: tooltipInfo.x,
           top: tooltipInfo.y,
-          transform: 'translateX(-50%)',
+          transform: 'translateX(-50%) translateY(-100%)',
+          marginTop: -6,
           background: 'rgba(10,10,25,0.97)',
           border: '1px solid rgba(255,255,255,0.18)',
           borderRadius: 6,
           color: '#e8e8e8',
           fontSize: 11,
           padding: '6px 10px',
-          maxWidth: 280,
-          zIndex: 9999,
+          maxWidth: 260,
+          zIndex: 99999,
           pointerEvents: 'none',
           lineHeight: 1.45,
           boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
