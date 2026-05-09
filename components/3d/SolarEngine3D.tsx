@@ -1679,22 +1679,63 @@ function SolarEngine3D({
     }
 
     byPlane.forEach((planePanels, planeId) => {
-      // Group by gridRow
-      const byRow = new Map<number, PlacedPanel[]>();
-      for (const p of planePanels) {
-        const row = p.gridRow ?? 0;
-        if (!byRow.has(row)) byRow.set(row, []);
-        byRow.get(row)!.push(p);
+      // Group panels into slope-rows by projecting each panel onto the down-slope axis.
+      //
+      // WHY NOT gridRow:
+      //   buildSurfaceGrid assigns gridRow along the V-axis of the plane's local frame.
+      //   When localFrame3D.u is derived from the LONGEST POLYGON EDGE, u may point
+      //   up-slope (for tall/narrow roofs) and v may point along-ridge — swapping rows
+      //   and columns. Grouping by gridRow then bins panels by along-ridge position,
+      //   causing rails to run up the slope instead of along the ridge.
+      //
+      // FIX: project every panel onto the actual down-slope axis (from panel.azimuth),
+      // sort by that projection, and bin panels whose projections are within
+      // panelH * 0.55 of each other. This is azimuth-aware and frame-agnostic.
+      const refPanel = planePanels[0];
+      const refAzRad = (refPanel.azimuth ?? 180) * Math.PI / 180;
+      const refCosLat = Math.cos(refPanel.lat * Math.PI / 180);
+      const MPD_SLOPE = 111320;
+      // Down-slope unit vector in (lat, lng) space (scaled by MPD):
+      //   azimuth 180° (south) → lat decreases (south) = -cos(180°)=+1 lat, sin(180°)=0 lng
+      //   azimuth  90° (east)  → lat unchanged,           sin(90°)=+1 lng
+      const sLatU = -Math.cos(refAzRad); // lat component of down-slope unit vector
+      const sLngU =  Math.sin(refAzRad); // lng component
+
+      // Compute slope projection for every panel (metres along down-slope from refPanel)
+      const withSlope = planePanels.map(p => {
+        const dLat = (p.lat - refPanel.lat) * MPD_SLOPE;
+        const dLng = (p.lng - refPanel.lng) * MPD_SLOPE * refCosLat;
+        const slopeProj = dLat * sLatU + dLng * sLngU;
+        return { p, slopeProj };
+      });
+      withSlope.sort((a, b) => a.slopeProj - b.slopeProj);
+
+      // Bin panels whose slope projections are within panelH*0.55 of each other.
+      // Each bin = one along-ridge row that gets its own pair of rails.
+      const refOrient = (refPanel.orientation ?? 'portrait') as PanelOrientation;
+      const { ph: refPanelH } = panelDims(refOrient);
+      const BIN_TOL = refPanelH * 0.55; // tighter than half panel height → clean row separation
+      const slopeBins: PlacedPanel[][] = [];
+      let curBin: PlacedPanel[] = [];
+      let binRef = withSlope[0].slopeProj;
+      for (const { p, slopeProj } of withSlope) {
+        if (slopeProj - binRef > BIN_TOL) {
+          slopeBins.push(curBin);
+          curBin = [];
+          binRef = slopeProj;
+        }
+        curBin.push(p);
       }
+      slopeBins.push(curBin);
 
       const planeEntities: any[] = [];
 
-      byRow.forEach((rowPanels) => {
+      slopeBins.forEach((rowPanels) => {
         if (rowPanels.length === 0) return;
 
         // Split into spatially-contiguous clusters along the ridge.
-        // One planeId can have two separated arrays sharing the same gridRow
-        // indices (e.g. left + right of a hip roof). Each cluster gets its own
+        // One planeId can have two separated arrays sharing the same slope row
+        // (e.g. left + right faces of a hip roof). Each cluster gets its own
         // independent rail run so rails never bridge the gap between arrays.
         const repOrientForGap = (rowPanels[0].orientation ?? 'portrait') as PanelOrientation;
         const { pw: gapPanelW } = panelDims(repOrientForGap);
@@ -1853,7 +1894,7 @@ function SolarEngine3D({
             }
           }
         } // end cluster loop
-      }); // end byRow.forEach
+      }); // end slopeBins.forEach
 
       if (planeEntities.length > 0) {
         roofRailMapRef.current.set(planeId, planeEntities);
