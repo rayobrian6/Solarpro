@@ -472,6 +472,8 @@ function SolarEngine3D({
   const selectedPanelIdsRef = useRef<Set<string>>(new Set());
   // v48.12: Toolbar tooltip state
   const [tooltipInfo, setTooltipInfo] = useState<{ text: string; x: number; y: number } | null>(null);
+  // Which toolbar group is currently expanded (null = all collapsed)
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
   // v48.12: Ground mount racking visibility toggle
   const [showRacking, setShowRacking] = useState<boolean>(true);
   const showRackingRef = useRef<boolean>(true);
@@ -5967,193 +5969,217 @@ function SolarEngine3D({
         </div>
       )}
 
-      {/* ── Toolbar: left vertical icon strip ── */}
+      {/* ── Collapsible grouped toolbar ── */}
       {stage === 'done' && (() => {
         const btnBase: React.CSSProperties = {
           width: 36, height: 36, borderRadius: 8, fontSize: 16,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           cursor: 'pointer', border: 'none', transition: 'all 0.15s', flexShrink: 0,
         };
-        const toolGroups: { mode: PlacementMode; icon: string; label: string; tooltip: string }[][] = [
-          [
-            { mode: 'select' as PlacementMode, icon: '\u2196', label: 'Select', tooltip: 'Select a placed panel. SHIFT+click for multi-select. Delete to remove.' },
-          ],
-          [
-            { mode: 'roof' as PlacementMode, icon: '\u{1F3E0}', label: 'Roof', tooltip: 'Place a single roof panel. Click on a roof surface to snap to the grid.' },
-            { mode: 'ground' as PlacementMode, icon: '\u{1F331}', label: 'Ground', tooltip: 'Ground Mount: click start \u2192 end point to place a row.' },
-            { mode: 'fence' as PlacementMode, icon: '\u26A1', label: 'Fence', tooltip: 'SOL Fence: click to add fence segment points. Right-click to finalize.' },
-            { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: '3D Plane', tooltip: '3D Plane: click 3+ points on a roof surface to define a custom panel grid plane.' },
-            { mode: 'row' as PlacementMode, icon: '\u27A1', label: 'Row', tooltip: 'Row Tool: click two points to place a straight row of panels.' },
-          ],
-          [
-            { mode: 'auto_roof' as PlacementMode, icon: '\u2728', label: 'Auto', tooltip: 'Auto Fill: fills all detected roof segments with panels.' },
-            { mode: 'pick_house' as PlacementMode, icon: '\u{1F3E1}', label: 'Pick', tooltip: 'Pick House: click a building to load its address and solar data.' },
-            { mode: 'surface_select' as PlacementMode, icon: '\u{1F3AF}', label: 'Surface', tooltip: 'Surface Select: click a roof plane to fill it with a panel grid.' },
-            { mode: 'extend_row' as PlacementMode, icon: '\u2192+', label: 'Ext', tooltip: 'Extend Row: add one more panel column to the right of each row.' },
-            { mode: 'add_row' as PlacementMode, icon: '\u2191+', label: '+Row', tooltip: 'Add Row: add a new panel row above the highest existing row.' },
-          ],
-          [
-            { mode: 'measure' as PlacementMode, icon: '\u{1F4CF}', label: 'Measure', tooltip: 'Measure Tool: click two points to measure distance on terrain.' },
-            { mode: 'obstruction' as PlacementMode, icon: '\u26A0', label: 'Obs', tooltip: 'Obstruction: mark a rectangular area as obstructed (HVAC etc).' },
-            { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Dir', tooltip: 'Set Direction: click two points to define a custom panel row direction.' },
-            { mode: 'set_origin' as PlacementMode, icon: '\u{1F4CD}', label: 'Origin', tooltip: 'Set Origin: click to set a custom grid origin for Surface Select.' },
-          ],
+
+        // Activate a tool and collapse the flyout
+        const activateTool = (mode: PlacementMode) => {
+          onPlacementModeChange(mode);
+          if (mode !== 'ground' && mode !== 'ground_array' && groundArrayRowsRef.current.length > 0) cancelGroundArray();
+          if (mode === 'roof' || mode === 'ground' || mode === 'ground_array' || mode === 'fence') {
+            rowSystemTypeRef.current = (mode === 'ground' || mode === 'ground_array') ? 'ground' : mode as SystemType;
+          }
+          if (mode !== 'fence')   { fencePtsRef.current = []; setFencePtCount(0); }
+          if (mode !== 'plane')   { planePtsRef.current = []; setPlanePtCount(0); }
+          if (mode !== 'plane3d') { const v = viewerRef.current; if (v) clearPlane3DPreview(v); }
+          if (mode === 'set_direction') { dirClickPtsRef.current = []; }
+          if (mode !== 'row')     { rowPtsRef.current = []; setRowPtCount(0); rowStartScreenPosRef.current = null; }
+          if (mode !== 'measure') { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }
+          if (mode !== 'select')  { clearPanelSelection(); }
+          setOpenGroup(null); // close flyout after selection
+        };
+
+        type ToolDef  = { mode: PlacementMode; icon: string; label: string; tip: string };
+        type GroupDef = { id: string; icon: string; label: string; tools: ToolDef[] };
+
+        const groups: GroupDef[] = [
+          {
+            id: 'place', icon: '\u{1F3E0}', label: 'Place',
+            tools: [
+              { mode: 'roof'    as PlacementMode, icon: '\u{1F3E0}', label: 'Roof',     tip: 'Place panels on a roof surface' },
+              { mode: 'ground'  as PlacementMode, icon: '\u{1F331}', label: 'Ground',   tip: 'Ground mount: click start \u2192 end to place a row' },
+              { mode: 'fence'   as PlacementMode, icon: '\u26A1',    label: 'Fence',    tip: 'SOL Fence: click points, right-click to finish' },
+              { mode: 'plane3d' as PlacementMode, icon: '\u{1F4D0}', label: '3D Plane', tip: '3D Plane: click 3+ roof points to define a custom grid' },
+              { mode: 'row'     as PlacementMode, icon: '\u27A1',    label: 'Row',      tip: 'Row Tool: click two points to place a panel row' },
+            ],
+          },
+          {
+            id: 'auto', icon: '\u2728', label: 'Auto',
+            tools: [
+              { mode: 'auto_roof'      as PlacementMode, icon: '\u2728',       label: 'Auto Fill',  tip: 'Fill all detected roof segments with panels' },
+              { mode: 'pick_house'     as PlacementMode, icon: '\u{1F3E1}',    label: 'Pick House', tip: 'Click a building to load its address + solar data' },
+              { mode: 'surface_select' as PlacementMode, icon: '\u{1F3AF}',    label: 'Surface',    tip: 'Click a roof plane to fill it with a panel grid' },
+              { mode: 'extend_row'     as PlacementMode, icon: '\u2192+',      label: 'Ext Row',    tip: 'Add one more panel column to the right of each row' },
+              { mode: 'add_row'        as PlacementMode, icon: '\u2191+',      label: 'Add Row',    tip: 'Add a new panel row above the highest existing row' },
+            ],
+          },
+          {
+            id: 'tools', icon: '\u{1F4CF}', label: 'Tools',
+            tools: [
+              { mode: 'measure'       as PlacementMode, icon: '\u{1F4CF}', label: 'Measure',   tip: 'Click two points to measure distance on terrain' },
+              { mode: 'obstruction'   as PlacementMode, icon: '\u26A0',    label: 'Obstruct',  tip: 'Mark a rectangular area as obstructed (HVAC etc.)' },
+              { mode: 'set_direction' as PlacementMode, icon: '\u{1F9ED}', label: 'Direction', tip: 'Click two points to set a custom panel row direction' },
+              { mode: 'set_origin'    as PlacementMode, icon: '\u{1F4CD}', label: 'Origin',    tip: 'Set a custom grid origin for Surface Select' },
+            ],
+          },
         ];
+
+        const activeGroupId = groups.find(g => g.tools.some(t => t.mode === placementMode))?.id ?? null;
+
         return (
           <>
-            {/* ── LEFT: vertical tool strip ── */}
+            {/* Tooltip portal */}
+            {tooltipInfo && (
+              <div style={{
+                position: 'fixed', left: tooltipInfo.x, top: tooltipInfo.y,
+                transform: 'translateY(-50%)',
+                background: 'rgba(0,0,0,0.88)', color: '#fff', fontSize: 11,
+                padding: '4px 8px', borderRadius: 6, pointerEvents: 'none',
+                zIndex: 9999, maxWidth: 240, whiteSpace: 'pre-wrap',
+                border: '1px solid rgba(255,255,255,0.15)',
+              }}>{tooltipInfo.text}</div>
+            )}
+
+            {/* ── LEFT: spine + flyout ── */}
             <div style={{
-              position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-              display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center',
-              background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(8px)',
-              border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
-              padding: '8px 5px', zIndex: 50,
+              position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+              display: 'flex', flexDirection: 'row', alignItems: 'flex-start',
+              gap: 0, zIndex: 50, pointerEvents: 'none',
             }}>
-              {toolGroups.map((group, gi) => (
-                <React.Fragment key={gi}>
-                  {group.map(({ mode, icon, label, tooltip }) => (
-                    <button
-                      key={mode}
-                      title={tooltip}
-                      onMouseEnter={(e) => {
-                        const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                        setTooltipInfo({ text: `${label}: ${tooltip}`, x: rect.right + 8, y: rect.top + rect.height / 2 });
-                      }}
-                      onMouseLeave={() => setTooltipInfo(null)}
-                      onClick={() => {
-                        onPlacementModeChange(mode);
-                        if (mode !== 'ground' && mode !== 'ground_array' && groundArrayRowsRef.current.length > 0) {
-                          cancelGroundArray();
-                        }
-                        if (mode === 'roof' || mode === 'ground' || mode === 'ground_array' || mode === 'fence') {
-                          rowSystemTypeRef.current = (mode === 'ground' || mode === 'ground_array') ? 'ground' : mode as SystemType;
-                        }
-                        if (mode !== 'fence') { fencePtsRef.current = []; setFencePtCount(0); }
-                        if (mode !== 'plane') { planePtsRef.current = []; setPlanePtCount(0); }
-                        if (mode !== 'plane3d') { const v = viewerRef.current; if (v) clearPlane3DPreview(v); }
-                        if (mode === 'set_direction') { dirClickPtsRef.current = []; }
-                        if (mode !== 'row')   { rowPtsRef.current = [];   setRowPtCount(0); rowStartScreenPosRef.current = null; }
-                        if (mode !== 'measure') { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }
-                        if (mode !== 'select')  { clearPanelSelection(); }
-                      }}
-                      style={{
-                        ...btnBase,
-                        background: placementMode === mode
-                          ? 'linear-gradient(135deg, #ff8c00, #ffd700)'
-                          : 'rgba(255,255,255,0.07)',
-                        color: placementMode === mode ? '#000' : '#ccc',
-                        boxShadow: placementMode === mode ? '0 0 8px rgba(255,180,0,0.35)' : 'none',
-                      }}
-                    >
-                      {icon}
-                    </button>
-                  ))}
-                  {gi < toolGroups.length - 1 && (
-                    <div style={{ width: 22, height: 1, background: 'rgba(255,255,255,0.12)', margin: '3px 0' }} />
-                  )}
-                </React.Fragment>
-              ))}
 
-              {/* divider */}
-              <div style={{ width: 22, height: 1, background: 'rgba(255,255,255,0.12)', margin: '3px 0' }} />
+              {/* ── Spine: always-visible icon column ── */}
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'center',
+                background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12,
+                padding: '6px 4px', pointerEvents: 'all',
+              }}>
 
-              {/* Fit View */}
-              <button
-                onClick={() => { const viewer = viewerRef.current; const C = (window as any).Cesium; if (viewer && C) fitCameraToRoofPlanes(viewer, C); }}
-                title="Fit View: zoom camera to all placed panels"
-                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Fit View', x: r.right + 8, y: r.top + r.height / 2 }); }}
-                onMouseLeave={() => setTooltipInfo(null)}
-                style={{ ...btnBase, background: 'rgba(0,150,255,0.15)', color: '#60c8ff', border: '1px solid rgba(100,200,255,0.2)' }}
-              >
-                {'\u26F6'}
-              </button>
+                {/* SELECT — standalone, always visible */}
+                <button
+                  onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Select: click panels. SHIFT+click = multi-select.', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                  onMouseLeave={() => setTooltipInfo(null)}
+                  onClick={() => activateTool('select')}
+                  style={{
+                    ...btnBase,
+                    background: placementMode === 'select' ? 'linear-gradient(135deg,#ff8c00,#ffd700)' : 'rgba(255,255,255,0.07)',
+                    color: placementMode === 'select' ? '#000' : '#ccc',
+                    boxShadow: placementMode === 'select' ? '0 0 8px rgba(255,180,0,0.4)' : 'none',
+                  }}
+                >{'\u2196'}</button>
 
-              {/* Fly Home */}
-              <button
-                onClick={flyToProperty}
-                title="Fly to property"
-                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Fly to property', x: r.right + 8, y: r.top + r.height / 2 }); }}
-                onMouseLeave={() => setTooltipInfo(null)}
-                style={{ ...btnBase, background: 'rgba(255,255,255,0.07)', color: '#ccc' }}
-              >
-                {'\u{1F3E0}'}
-              </button>
+                <div style={{ width: 22, height: 1, background: 'rgba(255,255,255,0.12)', margin: '1px 0' }} />
 
-              {/* Orient North */}
-              <button
-                onClick={() => {
-                  const viewer = viewerRef.current; if (!viewer) return;
-                  const C = (window as any).Cesium; if (!C) return;
-                  const elev = cesiumGroundElevRef.current;
-                  viewer.camera.flyTo({
-                    destination: C.Cartesian3.fromDegrees(lng, lat, elev + 200),
-                    orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-45), roll: 0 },
-                    duration: 1.5,
-                  });
-                  setStatusMsg('\u{1F9ED} Oriented: North up');
-                }}
-                title="Orient view: North up"
-                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Orient North up', x: r.right + 8, y: r.top + r.height / 2 }); }}
-                onMouseLeave={() => setTooltipInfo(null)}
-                style={{ ...btnBase, background: 'rgba(255,140,0,0.12)', color: '#ffaa44', border: '1px solid rgba(255,140,0,0.18)' }}
-              >
-                {'\u{1F9ED}'}
-              </button>
+                {/* GROUP HEADER BUTTONS */}
+                {groups.map((grp) => {
+                  const isOpen    = openGroup === grp.id;
+                  const hasActive = grp.id === activeGroupId;
+                  const activeTool = grp.tools.find(t => t.mode === placementMode);
+                  const headerIcon = activeTool ? activeTool.icon : grp.icon;
+                  return (
+                    <div key={grp.id} style={{ position: 'relative' }}>
+                      <button
+                        onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: grp.label + ' \u2014 click to expand', x: r.right + 8, y: r.top + r.height / 2 }); }}
+                        onMouseLeave={() => setTooltipInfo(null)}
+                        onClick={() => setOpenGroup(isOpen ? null : grp.id)}
+                        style={{
+                          ...btnBase,
+                          background: hasActive
+                            ? 'linear-gradient(135deg,#ff8c00,#ffd700)'
+                            : isOpen ? 'rgba(255,140,0,0.22)' : 'rgba(255,255,255,0.07)',
+                          color: hasActive ? '#000' : isOpen ? '#ffd700' : '#ccc',
+                          boxShadow: hasActive ? '0 0 8px rgba(255,180,0,0.4)' : 'none',
+                          outline: isOpen ? '1px solid rgba(255,180,0,0.5)' : 'none',
+                          position: 'relative',
+                        }}
+                      >
+                        {headerIcon}
+                        {/* Mini chevron — rotates when open */}
+                        <span style={{
+                          position: 'absolute', bottom: 1, right: 2, fontSize: 6,
+                          color: hasActive ? '#000' : '#666',
+                          display: 'inline-block',
+                          transform: isOpen ? 'rotate(90deg)' : 'none',
+                          transition: 'transform 0.15s',
+                        }}>&#9654;</span>
+                      </button>
+                    </div>
+                  );
+                })}
 
-              {/* Tilt to 3D perspective view */}
-              <button
-                onClick={() => {
-                  const viewer = viewerRef.current; if (!viewer) return;
-                  const C = (window as any).Cesium; if (!C) return;
-                  const elev = cesiumGroundElevRef.current;
-                  // Fly to a 45° angled perspective from the south-west — gives a great 3D view
-                  viewer.camera.flyTo({
-                    destination: C.Cartesian3.fromDegrees(lng - 0.002, lat - 0.003, elev + 280),
-                    orientation: { heading: C.Math.toRadians(330), pitch: C.Math.toRadians(-30), roll: 0 },
-                    duration: 1.5,
-                  });
-                  setStatusMsg('📐 3D perspective view');
-                }}
-                title="Tilt to 3D perspective view (pitch -30°)"
-                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Tilt: 3D perspective', x: r.right + 8, y: r.top + r.height / 2 }); }}
-                onMouseLeave={() => setTooltipInfo(null)}
-                style={{ ...btnBase, background: 'rgba(100,220,255,0.13)', color: '#66ddff', border: '1px solid rgba(100,220,255,0.22)' }}
-              >
-                {'📐'}
-              </button>
+                <div style={{ width: 22, height: 1, background: 'rgba(255,255,255,0.12)', margin: '1px 0' }} />
 
-              {/* Top-down (bird's eye) view */}
-              <button
-                onClick={() => {
-                  const viewer = viewerRef.current; if (!viewer) return;
-                  const C = (window as any).Cesium; if (!C) return;
-                  const elev = cesiumGroundElevRef.current;
-                  viewer.camera.flyTo({
-                    destination: C.Cartesian3.fromDegrees(lng, lat, elev + 150),
-                    orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-89), roll: 0 },
-                    duration: 1.5,
-                  });
-                  setStatusMsg('🔭 Top-down view');
-                }}
-                title="Top-down bird's eye view"
-                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Top-down view', x: r.right + 8, y: r.top + r.height / 2 }); }}
-                onMouseLeave={() => setTooltipInfo(null)}
-                style={{ ...btnBase, background: 'rgba(100,255,180,0.12)', color: '#55ffaa', border: '1px solid rgba(100,255,180,0.2)' }}
-              >
-                {'🔭'}
-              </button>
+                {/* VIEW UTILITY BUTTONS */}
+                {([
+                  { icon: '\u26F6',        tip: 'Fit View: zoom to placed panels',   action: () => { const v = viewerRef.current; const C = (window as any).Cesium; if (v&&C) fitCameraToRoofPlanes(v,C); } },
+                  { icon: '\u{1F3E0}',     tip: 'Fly Home: return to property',      action: flyToProperty },
+                  { icon: '\u{1F9ED}',     tip: 'Orient North: reset heading',       action: () => { const v=viewerRef.current; const C=(window as any).Cesium; if(!v||!C)return; const el=cesiumGroundElevRef.current; v.camera.flyTo({destination:C.Cartesian3.fromDegrees(lng,lat,el+200),orientation:{heading:C.Math.toRadians(0),pitch:C.Math.toRadians(-45),roll:0},duration:1.5}); setStatusMsg('\u{1F9ED} North up'); } },
+                  { icon: '\u{1F4D0}',     tip: 'Tilt: 3D angled perspective view', action: () => { const v=viewerRef.current; const C=(window as any).Cesium; if(!v||!C)return; const el=cesiumGroundElevRef.current; v.camera.flyTo({destination:C.Cartesian3.fromDegrees(lng-0.002,lat-0.003,el+280),orientation:{heading:C.Math.toRadians(330),pitch:C.Math.toRadians(-30),roll:0},duration:1.5}); setStatusMsg('\u{1F4D0} Perspective'); } },
+                  { icon: '\u{1F52D}',     tip: "Top-Down: bird's eye view",        action: () => { const v=viewerRef.current; const C=(window as any).Cesium; if(!v||!C)return; const el=cesiumGroundElevRef.current; v.camera.flyTo({destination:C.Cartesian3.fromDegrees(lng,lat,el+150),orientation:{heading:C.Math.toRadians(0),pitch:C.Math.toRadians(-89),roll:0},duration:1.5}); setStatusMsg('\u{1F52D} Top-down'); } },
+                  { icon: '\u{1F5D1}',     tip: 'Clear All: remove all panels',     action: clearPanels, danger: true },
+                ] as { icon: string; tip: string; action: () => void; danger?: boolean }[]).map(({ icon, tip, action, danger }) => (
+                  <button key={tip}
+                    onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:tip,x:r.right+8,y:r.top+r.height/2}); }}
+                    onMouseLeave={() => setTooltipInfo(null)}
+                    onClick={action}
+                    style={{ ...btnBase, background: danger ? 'rgba(255,60,60,0.15)' : 'rgba(255,255,255,0.07)', color: danger ? '#ff6666' : '#aaa' }}
+                  >{icon}</button>
+                ))}
 
-              {/* Clear All Panels */}
-              <button
-                onClick={clearPanels}
-                title="Clear all panels"
-                onMouseEnter={(e) => { const r = (e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({ text: 'Clear all panels', x: r.right + 8, y: r.top + r.height / 2 }); }}
-                onMouseLeave={() => setTooltipInfo(null)}
-                style={{ ...btnBase, background: 'rgba(255,60,60,0.15)', color: '#ff6666', border: '1px solid rgba(255,60,60,0.22)' }}
-              >
-                {'\u{1F5D1}'}
-              </button>
-            </div>
+              </div>{/* end spine */}
+
+              {/* ── Flyout panel (slides out to the right when a group is open) ── */}
+              {openGroup && (() => {
+                const grp = groups.find(g => g.id === openGroup)!;
+                return (
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', gap: 3,
+                    background: 'rgba(15,15,30,0.95)', backdropFilter: 'blur(10px)',
+                    border: '1px solid rgba(255,180,0,0.35)', borderRadius: 12,
+                    padding: '6px 5px', marginLeft: 6, pointerEvents: 'all',
+                    boxShadow: '0 4px 24px rgba(0,0,0,0.55)',
+                    animation: 'toolFlyout 0.13s ease',
+                  }}>
+                    {/* Group label header */}
+                    <div style={{
+                      fontSize: 9, color: '#ffa040', textAlign: 'center',
+                      fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', paddingBottom: 2,
+                    }}>{grp.label}</div>
+                    {/* Tool rows */}
+                    {grp.tools.map(({ mode, icon, label, tip }) => (
+                      <button key={mode}
+                        onMouseEnter={(e) => { const r=(e.currentTarget as HTMLButtonElement).getBoundingClientRect(); setTooltipInfo({text:label+': '+tip,x:r.right+8,y:r.top+r.height/2}); }}
+                        onMouseLeave={() => setTooltipInfo(null)}
+                        onClick={() => activateTool(mode)}
+                        style={{
+                          width: 86, height: 34, borderRadius: 8, fontSize: 12,
+                          display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px',
+                          cursor: 'pointer', border: 'none', transition: 'all 0.12s',
+                          background: placementMode === mode
+                            ? 'linear-gradient(135deg,#ff8c00,#ffd700)'
+                            : 'rgba(255,255,255,0.08)',
+                          color: placementMode === mode ? '#000' : '#ccc',
+                          boxShadow: placementMode === mode ? '0 0 8px rgba(255,180,0,0.35)' : 'none',
+                          fontWeight: placementMode === mode ? 700 : 400,
+                        }}
+                      >
+                        <span style={{ fontSize: 15, flexShrink: 0 }}>{icon}</span>
+                        <span style={{ fontSize: 10, whiteSpace: 'nowrap' }}>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+
+            </div>{/* end toolbar row */}
+
+            {/* Flyout slide-in animation */}
+            <style>{'@keyframes toolFlyout { from { opacity:0; transform:translateX(-8px); } to { opacity:1; transform:translateX(0); } }'}</style>
 
             {/* ── TOP-RIGHT: stats + orientation + active tool + context controls ── */}
             <div style={{
@@ -6161,6 +6187,7 @@ function SolarEngine3D({
               display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5,
               zIndex: 50,
             }}>
+              {/* Stats + orientation row */}
               {/* Stats + orientation row */}
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 8,
