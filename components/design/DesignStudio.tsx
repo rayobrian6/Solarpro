@@ -3405,9 +3405,9 @@ export default function DesignStudio({ project, onSave }: Props) {
             {/* ── DESIGN TAB ── */}
             {activeTab === 'design' && (
               <>
-                {/* System Summary */}
-                {panels.length > 0 && (
-                  <Section title="System Summary" icon={<Zap size={12} />}>
+                {/* System Summary — always visible so Calculate Production is always accessible */}
+                <Section title="System Summary" icon={<Zap size={12} />}>
+                  {panels.length > 0 ? (
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       {[
                         { label: 'Panels', value: panels.length.toString(), color: 'text-white' },
@@ -3421,49 +3421,64 @@ export default function DesignStudio({ project, onSave }: Props) {
                         </div>
                       ))}
                     </div>
-                    {/* Quick production estimate preview */}
-                    {quickEstimate && !production && (
-                      <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
-                        <div className="flex items-center gap-1.5 mb-2">
-                          <Sun size={11} className="text-amber-400" />
-                          <span className="text-xs text-slate-400 font-medium">Quick Estimate</span>
-                          <span className="text-xs text-slate-600 ml-auto">(pre-calculation)</span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-1.5 text-xs">
-                          <div className="text-center">
-                            <div className="text-amber-400 font-bold">{quickEstimate.annualKwh.toLocaleString()}</div>
-                            <div className="text-slate-500">kWh/yr</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-emerald-400 font-bold">${quickEstimate.annualSavings.toLocaleString()}</div>
-                            <div className="text-slate-500">est. savings</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="text-blue-400 font-bold">{quickEstimate.peakSunHours}</div>
-                            <div className="text-slate-500">sun hrs/day</div>
-                          </div>
-                        </div>
-                        <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
+                  ) : (
+                    <div className="text-xs text-slate-500 bg-slate-800/40 rounded-lg p-2.5 border border-slate-700/40 text-center">
+                      Place panels on the roof to see system summary
+                    </div>
+                  )}
+                  {/* Quick production estimate preview */}
+                  {quickEstimate && !production && (
+                    <div className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/50">
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <Sun size={11} className="text-amber-400" />
+                        <span className="text-xs text-slate-400 font-medium">Quick Estimate</span>
+                        <span className="text-xs text-slate-600 ml-auto">(pre-calculation)</span>
                       </div>
-                    )}
-                    <button
-                      onClick={calculateProduction}
-                      disabled={calculating}
-                      className="btn-primary w-full mt-1"
-                    >
-                      {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
-                    </button>
-                    {calcMessage && (
-                      <div className={`text-xs mt-1 px-2 py-1.5 rounded-lg ${
-                        calcMessage.startsWith('✅')
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                      }`}>
-                        {calcMessage}
+                      <div className="grid grid-cols-3 gap-1.5 text-xs">
+                        <div className="text-center">
+                          <div className="text-amber-400 font-bold">{quickEstimate.annualKwh.toLocaleString()}</div>
+                          <div className="text-slate-500">kWh/yr</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-emerald-400 font-bold">${quickEstimate.annualSavings.toLocaleString()}</div>
+                          <div className="text-slate-500">est. savings</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-blue-400 font-bold">{quickEstimate.peakSunHours}</div>
+                          <div className="text-slate-500">sun hrs/day</div>
+                        </div>
                       </div>
-                    )}
-                  </Section>
-                )}
+                      <div className="text-xs text-slate-600 mt-1.5 text-center">Run PVWatts for precise results</div>
+                    </div>
+                  )}
+                  <button
+                    onClick={calculateProduction}
+                    disabled={calculating || panels.length === 0}
+                    className="btn-primary w-full mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
+                  </button>
+                  {calcMessage && (
+                    <div className={`text-xs mt-1 px-2 py-1.5 rounded-lg ${
+                      calcMessage.startsWith('✅')
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                        : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                    }`}>
+                      {calcMessage}
+                    </div>
+                  )}
+                  {/* Generate Proposal — always visible, disabled until production is calculated */}
+                  <Link
+                    href={production ? `/proposals?projectId=${project.id}` : '#'}
+                    onClick={e => { if (!production) e.preventDefault(); }}
+                    className={`btn-primary w-full mt-1 text-xs text-center ${!production ? 'opacity-40 cursor-not-allowed pointer-events-none' : ''}`}
+                  >
+                    Generate Proposal <ArrowRight size={12} />
+                  </Link>
+                  {!production && (
+                    <div className="text-xs text-slate-600 text-center -mt-1">Calculate production first</div>
+                  )}
+                </Section>
 
                 {/* Production Results */}
                 {production && (
