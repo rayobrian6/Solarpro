@@ -3625,7 +3625,8 @@ export default function DesignStudio({ project, onSave }: Props) {
                   )}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
 
-                  {/* v30.9: Panel Orientation Toggle */}
+                  {/* v30.9: Panel Orientation Toggle — hidden in 3D mode (3D view has its own toggle) */}
+                  {!show3D && (
                   <div className="flex items-center justify-between py-1">
                     <label className="text-xs text-slate-400">Panel Orientation</label>
                     <div className="flex rounded-lg overflow-hidden border border-slate-600">
@@ -3643,6 +3644,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </button>
                     </div>
                   </div>
+                  )}
 
                   {/* v30.9: Fire Setback Controls (roof only) */}
                   {activeZoneType === 'roof' && (

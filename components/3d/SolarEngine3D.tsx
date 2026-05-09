@@ -2560,36 +2560,86 @@ function SolarEngine3D({
     return { cartesian, pickMethod };
   }
 
-  // ── getGroundPlanePosition: angle-independent ground click (v48.32) ──────────
+  // ── getGroundPlanePosition: ground-level click picker (v48.32) ──────────────
   /**
-   * Picks a ground-level world position using the same approach as fence/plane tools.
+   * Picks a ground-level world position for ground array placement.
    *
-   * Uses getWorldPosition (scene.pick → pickPosition on 3D tile mesh) for lat/lng —
-   * this is accurate at any camera angle because it hits the actual tile geometry.
-   * For Z we use the locked flat-plane height (rows 2+) or the hit height (row 1).
+   * Key requirement: must hit the GROUND SURFACE (where piles go into the ground),
+   * NOT elevated panel geometry or racking structure entities.
    *
-   * The previous ray-plane approach was over-engineered — getWorldPosition already
-   * works correctly at oblique angles (same as fence click, plane3d tool).
+   * Strategy: try globe.pick (terrain only — ignores all Cesium entities) first.
+   * This guarantees we always get the ground surface point regardless of what
+   * panel/racking geometry is above it.
+   * Fall back to 3D tiles pick (scene.pick) if terrain pick fails.
+   * Final fallback: cesiumGroundElevRef height with ray-ellipsoid.
    */
   function getGroundPlanePosition(
     viewer: any,
     C: any,
     screenPos: any,
   ): { lat: number; lng: number; height: number; pickMethod: string } | null {
-    const hit = getWorldPosition(viewer, C, screenPos);
-    if (!hit) return null;
+    const ray = viewer.camera.getPickRay(screenPos);
+    if (!ray) return null;
+
+    let cartesian: any = null;
+    let pickMethod = 'none';
+
+    // ── Priority 1: globe.pick — terrain-only, ignores ALL Cesium entities ──
+    // This is what we want for ground array: the actual ground surface under
+    // the cursor, even if a panel or racking post is sitting above it.
     try {
-      const carto = C.Cartographic.fromCartesian(hit.cartesian);
+      const gp = viewer.scene.globe.pick(ray, viewer.scene);
+      if (gp && isFinite(gp.x) && C.Cartesian3.magnitude(gp) > 1_000_000) {
+        cartesian  = gp;
+        pickMethod = 'terrain';
+      }
+    } catch { /* terrain pick unavailable */ }
+
+    // ── Priority 2: 3D tiles pick — but ONLY if it hits a tile, not a panel ─
+    if (!cartesian) {
+      try {
+        const pickedObject = viewer.scene.pick(screenPos);
+        // Skip if the pick hit one of our own entities (panel / racking / overlay)
+        const entityName: string = pickedObject?.id?.name ?? pickedObject?.primitive?.id?.name ?? '';
+        const isOurEntity = entityName.startsWith('[PANEL') || entityName.startsWith('[GRAC') ||
+                            entityName.startsWith('[GND_') || entityName.includes('__gracking__') ||
+                            entityName.includes('__gnd__');
+        if (pickedObject && !isOurEntity) {
+          const pp = viewer.scene.pickPosition(screenPos);
+          if (pp && isFinite(pp.x) && C.Cartesian3.magnitude(pp) > 1_000_000) {
+            const surfaceNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(pp);
+            cartesian = surfaceNormal
+              ? C.Cartesian3.add(pp, C.Cartesian3.multiplyByScalar(surfaceNormal, 0.15, new C.Cartesian3()), new C.Cartesian3())
+              : pp;
+            pickMethod = '3dtiles';
+          }
+        }
+      } catch { /* tiles pick failed */ }
+    }
+
+    // ── Priority 3: ellipsoid fallback ───────────────────────────────────────
+    if (!cartesian) {
+      try {
+        const ep = viewer.scene.globe.ellipsoid.intersectWithRay(ray);
+        if (ep && isFinite(ep.x) && C.Cartesian3.magnitude(ep) > 1_000_000) {
+          cartesian  = ep;
+          pickMethod = 'ellipsoid';
+        }
+      } catch { /* ellipsoid failed */ }
+    }
+
+    if (!cartesian) return null;
+
+    try {
+      const carto = C.Cartographic.fromCartesian(cartesian);
       if (!carto) return null;
       const pLat = C.Math.toDegrees(carto.latitude);
       const pLng = C.Math.toDegrees(carto.longitude);
-      // Height: use tile hit height when reliable (> 10m above ellipsoid = real tile hit)
-      // Fall back to cesiumGroundElevRef for sky/void picks (ellipsoid fallback)
       const hitH = isFinite(carto.height) && carto.height > 10 ? carto.height : null;
       const height = hitH ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0);
       if (!isValidCoord(pLat, pLng)) return null;
-      addLog('GROUND', `[GROUND-PICK v48.32] method=${hit.pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} h=${height.toFixed(2)}m`);
-      return { lat: pLat, lng: pLng, height, pickMethod: hit.pickMethod };
+      addLog('GROUND', `[GROUND-PICK v48.32] method=${pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} h=${height.toFixed(2)}m`);
+      return { lat: pLat, lng: pLng, height, pickMethod };
     } catch { return null; }
   }
 
