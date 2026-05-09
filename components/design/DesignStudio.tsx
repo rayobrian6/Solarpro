@@ -2380,6 +2380,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   // v47.103: Re-layout all AUTO panels immediately when orientation toggle changes.
   // Called with the NEW orientation value directly (before React state update settles).
   const relayoutWithOrientation = useCallback((newOrientation: 'portrait' | 'landscape') => {
+    if (show3D) return; // 3D mode: SolarEngine3D handles orientation internally — don't generate 2D panels (no height)
     const hasZones = roofPlanes.length > 0 || groundArea.length > 0;
     if (!hasZones) return; // no zones yet, nothing to re-layout
     const hasAutoPanels = panels.some(p => p.layoutSource === 'AUTO');
@@ -3625,8 +3626,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   )}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
 
-                  {/* v30.9: Panel Orientation Toggle — hidden in 3D mode (3D view has its own toggle) */}
-                  {!show3D && (
+                  {/* v30.9: Panel Orientation Toggle — always visible; relayoutWithOrientation is a no-op in 3D mode (see guard) */}
                   <div className="flex items-center justify-between py-1">
                     <label className="text-xs text-slate-400">Panel Orientation</label>
                     <div className="flex rounded-lg overflow-hidden border border-slate-600">
@@ -3644,7 +3644,6 @@ export default function DesignStudio({ project, onSave }: Props) {
                       </button>
                     </div>
                   </div>
-                  )}
 
                   {/* v30.9: Fire Setback Controls (roof only) */}
                   {activeZoneType === 'roof' && (

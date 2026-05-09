@@ -2635,7 +2635,7 @@ function SolarEngine3D({
       if (!carto) return null;
       const pLat = C.Math.toDegrees(carto.latitude);
       const pLng = C.Math.toDegrees(carto.longitude);
-      const hitH = isFinite(carto.height) && carto.height > 10 ? carto.height : null;
+      const hitH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
       const height = hitH ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0);
       if (!isValidCoord(pLat, pLng)) return null;
       addLog('GROUND', `[GROUND-PICK v48.32] method=${pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} h=${height.toFixed(2)}m`);
@@ -2698,7 +2698,7 @@ function SolarEngine3D({
       // v48.11: Use actual terrain hit height so single-click ground panels appear at
       // the cursor. Fall back to boot-sampled cesiumGroundElevRef when hit height is
       // unavailable (e.g. ellipsoid-only pick returns height ~0).
-      const hitHeightGnd = isFinite(carto.height) && carto.height > 10 ? carto.height : null;
+      const hitHeightGnd = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
       const baseZ       = hitHeightGnd ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (carto.height ?? 0));
       const mountPlaneZ = baseZ + MOUNT_HEIGHT_M;
       if (!isValidCoord(pLat, pLng, mountPlaneZ)) return;
