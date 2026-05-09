@@ -1616,7 +1616,10 @@ function SolarEngine3D({
       if (showShadeRef.current && twinRef.current) {
         const d = new Date();
         d.setUTCFullYear(d.getUTCFullYear(), 5, 21);
-        d.setUTCHours(Math.floor(simHourRef.current), Math.round((simHourRef.current % 1) * 60), 0, 0);
+        // simHourRef is LOCAL solar time — convert to UTC
+        const _localH = simHourRef.current;
+        const _utcH = ((_localH - lng / 15) % 24 + 24) % 24;
+        d.setUTCHours(Math.floor(_utcH), Math.round((_utcH % 1) * 60), 0, 0);
         const sunPos = getSunPosition(lat, lng, d);
         const shade  = computeShade(panel, sunPos);
         cellMaterial    = new C.ColorMaterialProperty(shadeToColor(C, shade));
@@ -1892,7 +1895,9 @@ function SolarEngine3D({
 
     // Build simulation date: June 21 at simulated hour (UTC)
     // IMPORTANT: Use UTC hours so Cesium's sun position (which uses UTC) matches our calculation
-    const hour = simHourRef.current;
+    // simHourRef is LOCAL solar time; convert to UTC for sun position
+    const localHour = simHourRef.current;
+    const hour = ((localHour - lng / 15) % 24 + 24) % 24;
     const d = new Date();
     // Set to June 21 of current year, at the simulated hour in UTC
     d.setUTCFullYear(d.getUTCFullYear(), 5, 21); // June 21
@@ -5687,7 +5692,7 @@ function SolarEngine3D({
     if (animating) {
       const interval = setInterval(() => {
         setSimHour(h => {
-          const next = h >= 20 ? 5 : h + 0.25;
+          const next = h >= 22 ? 5 : h + 0.25;
           simHourRef.current = next;
           updateShadeColors();
           return next;
@@ -5735,19 +5740,20 @@ function SolarEngine3D({
   }
 
   // Sun position for display — use UTC hours to match fixed getSunPosition
+  // simHour is now LOCAL solar time (5–22). Convert to UTC for getSunPosition.
+  const localSolarHourClamped = ((simHour % 24) + 24) % 24;
+  const simHourUTC = ((simHour - lng / 15) % 24 + 24) % 24;
   const sunPos = getSunPosition(lat, lng, (() => {
     const d = new Date();
     d.setUTCFullYear(d.getUTCFullYear(), 5, 21);
-    d.setUTCHours(Math.floor(simHour), Math.round((simHour % 1) * 60), 0, 0);
+    d.setUTCHours(Math.floor(simHourUTC), Math.round((simHourUTC % 1) * 60), 0, 0);
     return d;
   })());
-  // Local solar time = UTC + longitude/15 (4 min per degree)
-  const solarNoonUTC = 12 - lng / 15;
-  const localSolarHourRaw = simHour + lng / 15;
-  const localSolarHourClamped = ((localSolarHourRaw % 24) + 24) % 24;
+  // localSolarHourClamped IS simHour (slider value = local solar time directly)
   const lsh = Math.floor(localSolarHourClamped);
   const lsm = Math.round((localSolarHourClamped % 1) * 60);
   const localSolarTimeStr = `${lsh.toString().padStart(2,'0')}:${lsm.toString().padStart(2,'0')}`;
+  const solarNoonUTC = 12 - lng / 15; // still needed for potential noon marker
   const azToDir = (az: number) => {
     const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
     return dirs[Math.round(az / 22.5) % 16];
@@ -6394,13 +6400,13 @@ function SolarEngine3D({
 
 
 
-      {/* Overlay toggles (left side) */}
+      {/* Overlay toggles (bottom-left, above status bar — clear of tool sidebar) */}
       {stage === 'done' && (
         <div style={{
-          position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
-          display: 'flex', flexDirection: 'column', gap: 6,
+          position: 'absolute', left: 60, bottom: 16,
+          display: 'flex', flexDirection: 'row', gap: 6,
           background: 'rgba(15,15,30,0.88)', backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '10px 8px', zIndex: 50,
+          border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '6px 10px', zIndex: 50,
         }}>
           {[
             { key: 'parcel', label: '📐 Parcel', value: showParcel, color: '#00ff88' },
@@ -6451,7 +6457,7 @@ function SolarEngine3D({
                 <div style={{ color: '#ffd700', fontSize: 14, fontWeight: 800, lineHeight: 1.1 }}>
                   {localSolarTimeStr} Solar
                 </div>
-                <div style={{ color: '#888', fontSize: 10 }}>UTC: {formatHour(simHour)}</div>
+                <div style={{ color: '#888', fontSize: 10 }}>Local solar time</div>
               </div>
             </div>
             <div style={{ textAlign: 'center' }}>
@@ -6476,10 +6482,10 @@ function SolarEngine3D({
             </button>
           </div>
 
-          {/* Row 2: slider with hour ticks + solar noon marker */}
+          {/* Row 2: slider in LOCAL solar time (5am–10pm) */}
           <div style={{ width: '100%', position: 'relative' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-              {Array.from({length: 16}, (_, i) => i + 5).map(h => (
+              {Array.from({length: 18}, (_, i) => i + 5).map(h => (
                 <div key={h} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
                   <div style={{ width: 1, height: h % 3 === 0 ? 7 : 3,
                     background: h % 3 === 0 ? 'rgba(255,200,0,0.5)' : 'rgba(255,255,255,0.15)' }} />
@@ -6487,12 +6493,19 @@ function SolarEngine3D({
                 </div>
               ))}
             </div>
-            <input type="range" min={5} max={20} step={0.25} value={simHour}
-              onChange={e => { const v = Number(e.target.value); simHourRef.current = v; setSimHour(v); updateShadeColors(); }}
+            <input type="range" min={5} max={22} step={0.25} value={localSolarHourClamped}
+              onChange={e => {
+                // simHour is LOCAL solar time — set directly
+                const localH = Number(e.target.value);
+                simHourRef.current = localH;
+                setSimHour(localH);
+                updateShadeColors();
+              }}
               style={{ width: '100%', accentColor: '#ff8c00', cursor: 'pointer' }} />
+            {/* Solar noon marker */}
             <div style={{
               position: 'absolute', top: 0, bottom: 0,
-              left: `${Math.max(0, Math.min(100, (solarNoonUTC - 5) / 15 * 100))}%`,
+              left: `${Math.max(0, Math.min(100, (12 - 5) / 17 * 100))}%`,
               width: 2, background: 'rgba(255,220,0,0.4)', pointerEvents: 'none',
             }} />
           </div>
