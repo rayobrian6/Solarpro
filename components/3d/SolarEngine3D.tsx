@@ -211,6 +211,13 @@ interface Props {
   selectedRoofPlaneId?: string;
   /** v47.122: Called when user clicks a roof plane in the 3D view */
   onRoofPlaneSelect?: (planeId: string) => void;
+  /** v48.26: Orientation driven from DesignStudio (2D panel orientation buttons).
+   *  Keeps the 3D panelOrientationRef in sync so handleAutoRoof uses the correct
+   *  orientation when triggered by relayoutWithOrientation via placementMode='auto_roof'. */
+  orientation?: PanelOrientation;
+  /** v48.25: Called when the user toggles panel orientation inside the 3D viewer.
+   *  DesignStudio uses this to keep its own `orientation` state + 2D layout in sync. */
+  onOrientationChange?: (orientation: PanelOrientation) => void;
   /** CAD-derived roof planes from DesignStudio -- used by Auto Fill instead of Solar API segments */
   roofPlanes?: Array<{
     id: string;
@@ -357,6 +364,8 @@ function SolarEngine3D({
   onRoofPlaneCreated,
   selectedRoofPlaneId,
   onRoofPlaneSelect,
+  onOrientationChange,
+  orientation: orientationProp,
 }: Props) {
   const cesiumRef   = useRef<HTMLDivElement>(null);
   const viewerRef   = useRef<any>(null);
@@ -546,6 +555,15 @@ function SolarEngine3D({
 
   // Sync orientation ref
   useEffect(() => { panelOrientationRef.current = panelOrientation; }, [panelOrientation]);
+  // v48.26: sync panelOrientation state when DesignStudio drives it via the 2D buttons
+  useEffect(() => {
+    if (orientationProp && orientationProp !== panelOrientationRef.current) {
+      setPanelOrientation(orientationProp);
+      panelOrientationRef.current = orientationProp;
+      surfaceOrientationRef.current = orientationProp;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orientationProp]);
   useEffect(() => { groundMountStyleRef.current = groundMountStyle; }, [groundMountStyle]);
 
   // Sync refs with props
@@ -979,8 +997,9 @@ function SolarEngine3D({
             `https://tile.googleapis.com/v1/3dtiles/root.json?key=${GOOGLE_API_KEY}`,
             {
               showCreditsOnScreen: false,
-              // PERF v61: Start coarse (32) for fast initial paint; camera optimizer drops to 4 on zoom-in.
-              maximumScreenSpaceError: 32,
+              // PERF v48.29: Raised initial SSE from 32→64 for faster first paint.
+              // Dynamic optimizer (camera.changed) adjusts down to 16/8 on zoom-in.
+              maximumScreenSpaceError: 64,
               // PERF v61: skipLevelOfDetail=true — tiles appear immediately without waiting for full LOD chain.
               // Visual quality is the same at final zoom; only intermediate LOD pops are slightly more visible.
               skipLevelOfDetail: true,
@@ -1220,13 +1239,15 @@ function SolarEngine3D({
         }
 
         // Dynamic tile screen space error: more detail close-up, less at overview
+        // v48.29: Raised thresholds (64/32/16) to reduce tile-reload storms at oblique 45° angles.
+        // At 45° tilt many more tile faces are visible, causing SSE=4 to flood requests → slow render.
         if (tilesetRef.current) {
           if (h > 1000) {
-            tilesetRef.current.maximumScreenSpaceError = 32; // fast overview
+            tilesetRef.current.maximumScreenSpaceError = 64; // fast overview
           } else if (h > 400) {
-            tilesetRef.current.maximumScreenSpaceError = 16; // balanced
+            tilesetRef.current.maximumScreenSpaceError = 32; // balanced
           } else {
-            tilesetRef.current.maximumScreenSpaceError = 4;  // full quality close-up
+            tilesetRef.current.maximumScreenSpaceError = 16; // full quality close-up (was 4 — caused 10-15s loads at 45°)
           }
         }
       } catch {}
@@ -2559,6 +2580,77 @@ function SolarEngine3D({
     return { cartesian, pickMethod };
   }
 
+  // ── getGroundPlanePosition: angle-independent ground click (v48.30) ──────────
+  /**
+   * Picks a ground-level world position. Two-step approach (v48.30):
+   *   Step 1 — scene.pickPosition for Z:  depth buffer height is reliable on flat
+   *             ground even at oblique angles. Only lat/lng drift at oblique — Z stays
+   *             close to true surface elevation. We use this Z only.
+   *   Step 2 — ray-plane intersection at surfaceZ for lat/lng: fires a pick ray and
+   *             intersects a tangent plane at the depth-buffer Z. Gives correct lat/lng
+   *             at any camera angle, with the actual surface elevation as the plane height.
+   *
+   * This replaces the v48.29 approach which used cesiumGroundElevRef (property-center
+   * elevation) as the plane height — causing floating panels when the click was on terrain
+   * at a different elevation from the property centroid (e.g. a parking lot 3m lower).
+   */
+  function getGroundPlanePosition(
+    viewer: any,
+    C: any,
+    screenPos: any,
+  ): { lat: number; lng: number; height: number; pickMethod: string } | null {
+    // ── Step 1: Get actual surface Z via scene.pickPosition ───────────────────
+    let surfaceZ = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+    let heightSource = 'cesiumGroundElevRef';
+    try {
+      const depthHit = viewer.scene.pickPosition(screenPos);
+      if (depthHit && isFinite(depthHit.x) && isFinite(depthHit.y) && isFinite(depthHit.z)
+          && C.Cartesian3.magnitude(depthHit) > 1_000_000) {
+        const depthCarto = C.Cartographic.fromCartesian(depthHit);
+        if (depthCarto && isFinite(depthCarto.height)) {
+          const depthZ = depthCarto.height;
+          // Sanity check: within ±100m of cesiumGroundElevRef (guards sky/void picks)
+          const refZ = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+          if (Math.abs(depthZ - refZ) < 100) {
+            surfaceZ = depthZ;
+            heightSource = 'pickPosition';
+          }
+        }
+      }
+    } catch { /* pickPosition can fail on sky/void — use cesiumGroundElevRef */ }
+
+    // ── Step 2: Ray-plane at surfaceZ → accurate lat/lng ─────────────────────
+    try {
+      const ray = viewer.camera.getPickRay(screenPos);
+      if (!ray) return null;
+      const planePt     = C.Cartesian3.fromDegrees(lng, lat, surfaceZ);
+      const planeNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(planePt, new C.Cartesian3());
+      const plane       = C.Plane.fromPointNormal(planePt, planeNormal);
+      const hit         = C.IntersectionTests.rayPlane(ray, plane, new C.Cartesian3());
+      if (hit && isFinite(hit.x) && isFinite(hit.y) && isFinite(hit.z)
+          && C.Cartesian3.magnitude(hit) > 1_000_000) {
+        const carto = C.Cartographic.fromCartesian(hit);
+        if (!carto) return null;
+        const pLat = C.Math.toDegrees(carto.latitude);
+        const pLng = C.Math.toDegrees(carto.longitude);
+        if (!isValidCoord(pLat, pLng)) return null;
+        addLog('GROUND', `[GROUND-PLANE-PICK v48.30] lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} Z=${surfaceZ.toFixed(2)}m (src=${heightSource})`);
+        return { lat: pLat, lng: pLng, height: surfaceZ, pickMethod: `ray-plane+${heightSource}` };
+      }
+    } catch (e) { handleCesiumError('getGroundPlanePosition', e, true); }
+
+    // ── Fallback: getWorldPosition lat/lng + surfaceZ override ────────────────
+    const fallback = getWorldPosition(viewer, C, screenPos);
+    if (!fallback) return null;
+    try {
+      const carto = C.Cartographic.fromCartesian(fallback.cartesian);
+      if (!carto) return null;
+      const pLat = C.Math.toDegrees(carto.latitude);
+      const pLng = C.Math.toDegrees(carto.longitude);
+      if (!isValidCoord(pLat, pLng)) return null;
+      return { lat: pLat, lng: pLng, height: surfaceZ, pickMethod: `fallback-${fallback.pickMethod}` };
+    } catch { return null; }
+  }
 
   // ── Roof placement ─────────────────────────────────────────────────────────
   function handleRoofClick(viewer: any, C: any, screenPos: any) {
@@ -2654,38 +2746,28 @@ function SolarEngine3D({
   // Press Enter or right-click to finalize the array.
   function handleGroundArrayClick(viewer: any, C: any, screenPos: any) {
     try {
-      // v49.1: GROUND ENGINE PROOF LOG — if you see this, the new engine is active
-      console.log('[GROUND ENGINE] handleGroundArrayClick fired — groundMountRealityEngine active', {
-        mode: modeRef.current,
-        style: groundMountStyleRef.current,
-        rowsPlaced: groundArrayRowsRef.current.length,
-      });
-      addLog('GROUND', `[v49.1] [GROUND ENGINE] groundMountRealityEngine active mode=${modeRef.current} style=${groundMountStyleRef.current}`);
+      // v49.1 / v48.29: Ground engine active
+      addLog('GROUND', `[v49.1] groundMountRealityEngine active mode=${modeRef.current} style=${groundMountStyleRef.current} rows=${groundArrayRowsRef.current.length}`);
 
-      const hit = getWorldPosition(viewer, C, screenPos);
-      if (!hit) { setStatusMsg('\u274c No ground detected \u2014 click on open ground'); return; }
-      const carto = C.Cartographic.fromCartesian(hit.cartesian);
-      if (!carto) return;
-      // v48.11: Use actual raycast terrain height as baseZ for row-1 clicks so panels
-      // appear at the cursor position. For rows 2+ the first-row height is preserved
-      // (flat mount plane within a single array). Boot-sampled cesiumGroundElevRef is
-      // the fallback when the terrain hit height is unavailable (ellipsoid pick).
-      // v48.17 FINAL CORRECTION — Level construction plane:
-      // ALL rows in an array share the same flat mountPlaneZ established at first click.
-      // Terrain height is ONLY used at the first click to derive baseZ (post exposure).
-      // Subsequent row clicks MUST reuse first-row baseZ so panels stay on a flat plane.
-      const hitHeight = isFinite(carto.height) && carto.height > 10 ? carto.height : null;
-      const pendingStartCheck = groundArrayFirstRowRef.current;
+      // v48.29: Use ray-plane ground pick instead of scene.pickPosition.
+      // scene.pickPosition is unreliable at oblique camera angles (depth buffer
+      // inaccuracy on Google 3D Tiles gives wrong world coordinates at non-top-down views).
+      // getGroundPlanePosition fires a pick ray and intersects with a local tangent
+      // plane at the known terrain elevation — works correctly at ANY camera angle.
+      const gpp = getGroundPlanePosition(viewer, C, screenPos);
+      if (!gpp) { setStatusMsg('\u274c No ground detected \u2014 click on open ground'); return; }
+
       // Rows 2+: locked flat plane from row-1 start elevation.
-      // Row 1 (first click): use actual terrain hit height.
+      // Row 1 (first click): use terrain elevation from ground plane pick.
+      const pendingStartCheck = groundArrayFirstRowRef.current;
       const baseZ_arr = (pendingStartCheck && pendingStartCheck.rowSpacingM > 0)
         ? pendingStartCheck.start.height - MOUNT_HEIGHT_M   // LOCKED flat plane
-        : (hitHeight ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (carto.height ?? 0)));
+        : gpp.height;
       const mountPlaneZ_arr = baseZ_arr + MOUNT_HEIGHT_M;
-      addLog('GROUND', `[GROUND_CLICK_DEBUG] arrayClick method=${hit.pickMethod} hitH=${hitHeight?.toFixed(2) ?? 'null'} baseZ=${baseZ_arr.toFixed(2)} mountZ=${mountPlaneZ_arr.toFixed(2)} lockedPlane=${!!(pendingStartCheck && pendingStartCheck.rowSpacingM > 0)}`);
+      addLog('GROUND', `[GROUND_CLICK_DEBUG v48.29] method=${gpp.pickMethod} lat=${gpp.lat.toFixed(7)} lng=${gpp.lng.toFixed(7)} baseZ=${baseZ_arr.toFixed(2)} mountZ=${mountPlaneZ_arr.toFixed(2)} locked=${!!(pendingStartCheck && pendingStartCheck.rowSpacingM > 0)}`);
       const pt = {
-        lat:    C.Math.toDegrees(carto.latitude),
-        lng:    C.Math.toDegrees(carto.longitude),
+        lat:    gpp.lat,
+        lng:    gpp.lng,
         height: mountPlaneZ_arr,
       };
       if (!isValidCoord(pt.lat, pt.lng)) return;
@@ -6340,6 +6422,9 @@ function SolarEngine3D({
           if (mode !== 'measure') { measurePtsRef.current = []; setMeasurePtCount(0); clearMeasureOverlay(); }
           if (mode !== 'select')  { clearPanelSelection(); }
           setOpenGroup(null); // close flyout after selection
+
+          // Camera angle is NOT forced when entering ground mode.
+          // getWorldPosition() works at any angle (same as 3D plane tool).
         };
 
         type ToolDef  = { mode: PlacementMode; icon: string; label: string; tip: string };
@@ -6540,6 +6625,8 @@ function SolarEngine3D({
                     setPanelOrientation(next);
                     panelOrientationRef.current = next;
                     surfaceOrientationRef.current = next;
+                    // v48.25: notify DesignStudio so 2D orientation state + layout stay in sync
+                    onOrientationChange?.(next);
                   }}
                   title="Toggle panel orientation"
                   style={{
@@ -6577,77 +6664,106 @@ function SolarEngine3D({
                  placementMode}
               </div>
 
-              {/* ── Ground mode context controls ── */}
+              {/* ── Ground mode context controls (v48.28) ── */}
               {(placementMode === 'ground' || placementMode === 'ground_array') && (
                 <div style={{
-                  display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end',
-                  background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(8px)',
-                  border: '1px solid rgba(20,184,166,0.3)', borderRadius: 10, padding: '8px 10px',
+                  display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'stretch',
+                  background: 'rgba(15,15,30,0.93)', backdropFilter: 'blur(8px)',
+                  border: '1px solid rgba(20,184,166,0.35)', borderRadius: 10, padding: '8px 10px',
+                  minWidth: 160,
                 }}>
-                  <select value={gTilt} onChange={e => setGTilt(Number(e.target.value))}
-                    style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: '4px 8px', fontSize: 12, cursor: 'pointer' }}>
-                    <option value={0}>0\u00b0 Flat</option>
-                    <option value={10}>10\u00b0</option>
-                    <option value={20}>20\u00b0</option>
-                    <option value={25}>25\u00b0</option>
-                    <option value={30}>30\u00b0</option>
-                    <option value={35}>35\u00b0</option>
-                    <option value={40}>40\u00b0</option>
-                    <option value={90}>90\u00b0 Vertical</option>
-                  </select>
-                  <button
-                    title={showRacking ? 'Hide pylon posts & rails' : 'Show pylon posts & rails'}
-                    onClick={() => { const next = !showRacking; setShowRacking(next); showRackingRef.current = next; }}
-                    style={{
-                      padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                      background: showRacking ? 'rgba(20,184,166,0.2)' : 'rgba(255,255,255,0.07)',
-                      color: showRacking ? '#2dd4bf' : '#888', border: '1px solid rgba(20,184,166,0.25)',
-                    }}
-                  >
-                    {showRacking ? '\u{1F3D7} Racking On' : '\u{1F3D7} Racking Off'}
-                  </button>
-                  {showRacking && (
+                  {/* Header */}
+                  <div style={{ color: '#14b8a6', fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase', textAlign: 'center', borderBottom: '1px solid rgba(20,184,166,0.2)', paddingBottom: 4, marginBottom: 2 }}>
+                    🌱 Ground Mount
+                  </div>
+
+                  {/* Tilt row */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <span style={{ color: '#aaa', fontSize: 10 }}>Panel Tilt</span>
+                    <select value={gTilt} onChange={e => setGTilt(Number(e.target.value))}
+                      style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 5, padding: '3px 6px', fontSize: 11, cursor: 'pointer' }}>
+                      <option value={0}>0° (Flat)</option>
+                      <option value={10}>10°</option>
+                      <option value={20}>20°</option>
+                      <option value={25}>25°</option>
+                      <option value={30}>30°</option>
+                      <option value={35}>35°</option>
+                      <option value={40}>40°</option>
+                      <option value={90}>90° (Vertical)</option>
+                    </select>
+                  </div>
+
+                  {/* Racking toggle row */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <span style={{ color: '#aaa', fontSize: 10 }}>Racking</span>
                     <button
-                      title={groundMountStyle === 'pipe' ? 'Switch to IronRidge XR' : 'Switch to PLP Power Rail'}
-                      onClick={() => {
-                        const next: 'pipe' | 'ironridge' = groundMountStyle === 'pipe' ? 'ironridge' : 'pipe';
-                        setGroundMountStyle(next); groundMountStyleRef.current = next;
-                        const viewer = viewerRef.current; const C = (window as any).Cesium;
-                        if (viewer && C) {
-                          const toRemove: string[] = [];
-                          panelMapRef.current.forEach((ent, key) => { if (key.includes('__gnd__')) { try { viewer.entities.remove(ent); } catch {} toRemove.push(key); } });
-                          toRemove.forEach(k => panelMapRef.current.delete(k));
-                          try { viewer.scene.requestRender(); } catch {}
-                        }
-                      }}
+                      title={showRacking ? 'Hide post & rail structure' : 'Show post & rail structure'}
+                      onClick={() => { const next = !showRacking; setShowRacking(next); showRackingRef.current = next; }}
                       style={{
-                        padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                        background: groundMountStyle === 'ironridge' ? 'rgba(100,160,255,0.18)' : 'rgba(255,200,80,0.13)',
-                        color: groundMountStyle === 'ironridge' ? '#7ab8ff' : '#ffc850',
-                        border: groundMountStyle === 'ironridge' ? '1px solid rgba(100,160,255,0.35)' : '1px solid rgba(255,200,80,0.3)',
+                        padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                        background: showRacking ? 'rgba(20,184,166,0.25)' : 'rgba(255,255,255,0.07)',
+                        color: showRacking ? '#2dd4bf' : '#666', border: `1px solid ${showRacking ? 'rgba(20,184,166,0.35)' : 'rgba(255,255,255,0.1)'}`,
                       }}
                     >
-                      {groundMountStyle === 'pipe' ? '\u{1F529} PLP Rail' : '\u2B1B IronRidge XR'}
+                      {showRacking ? 'Visible' : 'Hidden'}
                     </button>
+                  </div>
+
+                  {/* Racking style row (only when racking is visible) */}
+                  {showRacking && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                      <span style={{ color: '#aaa', fontSize: 10 }}>Style</span>
+                      {/* v48.30: IronRidge XR is a 4-row landscape system — not yet built.
+                          Power Rail is the only active style. IronRidge button is disabled
+                          with a "coming soon" tooltip so clicking it doesn't wipe the array. */}
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          title="Power Rail ground mount (active)"
+                          onClick={() => { setGroundMountStyle('pipe'); groundMountStyleRef.current = 'pipe'; }}
+                          style={{
+                            padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                            background: 'rgba(255,200,80,0.18)', color: '#ffc850',
+                            border: '1px solid rgba(255,200,80,0.35)',
+                          }}
+                        >Power Rail</button>
+                        <button
+                          title="IronRidge XR — 4-row landscape system (coming soon)"
+                          onClick={() => setStatusMsg('🔧 IronRidge XR (4-row landscape) coming soon')}
+                          style={{
+                            padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                            cursor: 'not-allowed', opacity: 0.38,
+                            background: 'rgba(255,255,255,0.04)', color: '#555',
+                            border: '1px solid rgba(255,255,255,0.08)',
+                          }}
+                        >IronRidge XR</button>
+                      </div>
+                    </div>
                   )}
+
+                  {/* Status / confirm section */}
                   {groundArrayRowCount > 0 ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                      <span style={{ color: '#14b8a6', fontSize: 12, fontWeight: 600 }}>
-                        {groundArrayRowCount} row{groundArrayRowCount !== 1 ? 's' : ''} &middot; {groundArrayPanelCount} panels
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 4, borderTop: '1px solid rgba(20,184,166,0.15)' }}>
+                      <span style={{ color: '#14b8a6', fontSize: 11, fontWeight: 600, textAlign: 'center' }}>
+                        {groundArrayRowCount} row{groundArrayRowCount !== 1 ? 's' : ''} · {groundArrayPanelCount} panels
                       </span>
-                      <button onClick={finalizeGroundArray}
-                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none',
-                          background: 'linear-gradient(135deg, #14b8a6, #0d9488)', color: '#fff' }}>
-                        \u2713 Confirm
-                      </button>
-                      <button onClick={cancelGroundArray}
-                        style={{ padding: '4px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
-                          border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
-                        \u2717
-                      </button>
+                      <div style={{ display: 'flex', gap: 5 }}>
+                        <button onClick={finalizeGroundArray}
+                          style={{ flex: 1, padding: '5px 0', borderRadius: 6, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: 'none',
+                            background: 'linear-gradient(135deg, #14b8a6, #0d9488)', color: '#fff' }}>
+                          ✓ Place Array
+                        </button>
+                        <button onClick={cancelGroundArray}
+                          title="Discard this array and start over"
+                          style={{ padding: '5px 8px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                            border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#f87171' }}>
+                          ✗
+                        </button>
+                      </div>
                     </div>
                   ) : (
-                    <div style={{ color: '#14b8a6', fontSize: 10, opacity: 0.8 }}>Click start \u2192 end \u2192 Enter</div>
+                    <div style={{ color: '#888', fontSize: 10, textAlign: 'center', paddingTop: 3 }}>
+                      Click start → end to place a row
+                    </div>
                   )}
                 </div>
               )}
