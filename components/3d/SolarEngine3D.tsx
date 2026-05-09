@@ -1767,32 +1767,92 @@ function SolarEngine3D({
           const headingRad = (azDeg - 90) * Math.PI / 180; // along-ridge heading
           const pitchRad   = -(tiltDeg   * Math.PI / 180); // tilt with roof
 
-          // Rail length = number of panels × panel width.
-          //
-          // All roof panels reaching renderRoofRails come exclusively from
-          // buildSurfaceGrid (panelSpacingM=0), so the centre-to-centre step
-          // between adjacent panels in a row is exactly panelW — no inter-panel
-          // gap. Therefore the total span from left edge to right edge is simply
-          // nCols × panelW. No geodetic distance math needed or wanted here:
-          // any projected-span formula accumulates rounding error and can break
-          // when rowGroups collapses multiple rows into one cluster.
-          const nCols     = clusterPanels.length;
-          const railLength = nCols * panelW;
+          const nCols = clusterPanels.length;
 
-          // Cluster centroid (average panel position)
-          const centLat = clusterPanels.reduce((s, p) => s + p.lat,            0) / nCols;
-          const centLng = clusterPanels.reduce((s, p) => s + p.lng,            0) / nCols;
-          const centH   = clusterPanels.reduce((s, p) => s + (p.height ?? 0), 0) / nCols;
-
-          // ── ECEF surface normal from stored panel vectors ─────────────────────
-          // Every roof panel stores ecefNx/Ny/Nz = unit normal of the roof plane in ECEF.
-          // We use the cluster representative's normal (all panels on one plane share it).
-          // If not available, fall back to computing from tilt/azimuth.
+          // ── ECEF surface normal + u-axis from stored panel vectors ────────────
+          // Every roof panel stores:
+          //   ecefNx/Ny/Nz  = unit normal of the roof plane in ECEF
+          //   ecefUx/Uy/Uz  = u-axis (along-ridge direction) in ECEF
+          // All panels on the same planeId share these vectors — read from rep.
           const nx = rep.ecefNx ?? 0;
           const ny = rep.ecefNy ?? 0;
           const nz = rep.ecefNz ?? 1;
+          const ux = rep.ecefUx ?? 0;
+          const uy = rep.ecefUy ?? 0;
+          const uz = rep.ecefUz ?? 0;
           const hasEcefNormal = isFinite(nx) && isFinite(ny) && isFinite(nz) &&
                                 (Math.abs(nx) + Math.abs(ny) + Math.abs(nz)) > 0.1;
+          const hasEcefU      = isFinite(ux) && isFinite(uy) && isFinite(uz) &&
+                                (Math.abs(ux) + Math.abs(uy) + Math.abs(uz)) > 0.1;
+
+          // ── Projection-based rail span (STEP 2–3 per spec) ───────────────────
+          // Project each panel centre onto the ECEF u-axis (along-ridge unit vector).
+          // Extend by ±panelW/2 to reach the panel edge. This gives an exact
+          // edge-to-edge span that works regardless of spacing, gaps, irregular
+          // placements, or how many panels are in the cluster.
+          //
+          // This is the ONLY correct approach: it is:
+          //   - Parented to roof plane coordinate frame (uses ecefUx/Uy/Uz)
+          //   - Independent of world axes
+          //   - Correct for missing panels, L-shapes, staggered rows, split clusters
+          //   - Free of azimuth-trig error on non-axis-aligned roofs
+          let railLength: number;
+          let centLat: number;
+          let centLng: number;
+          let centH: number;
+
+          if (hasEcefU) {
+            // Convert each panel centre to ECEF and project onto u-axis
+            const panelECEFs = clusterPanels.map(p =>
+              engLatLngToECEF(p.lat, p.lng, p.height ?? 0)
+            );
+            const uProjs = panelECEFs.map(e =>
+              e.x * ux + e.y * uy + e.z * uz
+            );
+
+            // Span = from leading edge of first panel to trailing edge of last panel
+            const minCentre = Math.min(...uProjs);
+            const maxCentre = Math.max(...uProjs);
+            const minEdge   = minCentre - panelW / 2;
+            const maxEdge   = maxCentre + panelW / 2;
+            railLength      = maxEdge - minEdge;
+
+            // Rail box must be centred at the midpoint of the span.
+            // Compute in ECEF: start from average-ECEF then shift along u to midpoint.
+            const avgEcef = {
+              x: panelECEFs.reduce((s, e) => s + e.x, 0) / nCols,
+              y: panelECEFs.reduce((s, e) => s + e.y, 0) / nCols,
+              z: panelECEFs.reduce((s, e) => s + e.z, 0) / nCols,
+            };
+            const avgU  = uProjs.reduce((s, v) => s + v, 0) / nCols;
+            const midU  = (minEdge + maxEdge) / 2;
+            const delta = midU - avgU; // shift from avg to midpoint along u
+            const midEcef = {
+              x: avgEcef.x + delta * ux,
+              y: avgEcef.y + delta * uy,
+              z: avgEcef.z + delta * uz,
+            };
+
+            // Back-project ECEF midpoint to lat/lng/h for the slope-shift math below.
+            // Use a first-order approximation: average lat/lng + small ECEF delta.
+            const avgLat = clusterPanels.reduce((s, p) => s + p.lat, 0) / nCols;
+            const avgLng = clusterPanels.reduce((s, p) => s + p.lng, 0) / nCols;
+            const avgH   = clusterPanels.reduce((s, p) => s + (p.height ?? 0), 0) / nCols;
+            const cosLatM = Math.cos(avgLat * Math.PI / 180);
+            const MPD_B   = 111320;
+            centLat = avgLat + (midEcef.z - avgEcef.z) / MPD_B * (180 / Math.PI);
+            centLng = avgLng + (midEcef.y - avgEcef.y) / (MPD_B * cosLatM) * (180 / Math.PI);
+            centH   = avgH   + (
+              Math.sqrt(midEcef.x*midEcef.x + midEcef.y*midEcef.y + midEcef.z*midEcef.z)
+              - Math.sqrt(avgEcef.x*avgEcef.x + avgEcef.y*avgEcef.y + avgEcef.z*avgEcef.z)
+            );
+          } else {
+            // Fallback (no ecefU stored): use panel-count × width, centred at avg pos
+            railLength = nCols * panelW;
+            centLat = clusterPanels.reduce((s, p) => s + p.lat,            0) / nCols;
+            centLng = clusterPanels.reduce((s, p) => s + p.lng,            0) / nCols;
+            centH   = clusterPanels.reduce((s, p) => s + (p.height ?? 0), 0) / nCols;
+          }
 
           // ── Down-slope shift (for 25%/75% rail positions) ─────────────────────
           // shiftM is measured along the slope surface from the row centroid.
