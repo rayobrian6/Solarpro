@@ -1737,12 +1737,21 @@ function SolarEngine3D({
           //   panel.height = roofDeckAlt + stackH (stackH added vertically, not along normal)
           //   rail centre must be (PANEL_THICKNESS/2 + railH/2) below panel centroid
           //   along the roof normal direction.
-          const PANEL_THICKNESS = 0.040; // 40mm panel depth
-          // Offset from panel centroid to rail centre along the inward roof normal:
-          //   panel centre → panel bottom face: PANEL_THICKNESS/2 along -normal
-          //   panel bottom face → rail centre:   railH/2 along -normal
-          // Total inward displacement = (PANEL_THICKNESS/2 + railH/2)
-          const inwardM = PANEL_THICKNESS / 2 + railH / 2;
+          // Offset from panel centroid to rail centre along the inward roof normal.
+          //
+          // panel.height = roofDeckAlt + stackH  (stored as a VERTICAL addition).
+          // In addPanelEntity, pos = safeCartesian3(lng, lat, panel.height) — so the
+          // Cesium box centroid IS at panel.height (= roofDeckAlt + stackH).
+          //
+          // Rail centre is at roofDeckAlt + railH/2 (rail rests on roof deck via standoffs).
+          // → displacement from panel centroid to rail centre along -normal:
+          //     inwardM = stackH - railH/2
+          //             = 0.140 - 0.021  (XR100: 140mm stack, 42mm rail → centre at 21mm)
+          //             = 0.119m  (119mm)
+          //
+          // Old (wrong) formula was PANEL_THICKNESS/2 + railH/2 = 41mm — that only
+          // accounted for panel half-thickness, ignoring the full standoff height.
+          const inwardM = stackH - railH / 2;
 
           const cosLat   = Math.cos(centLat * Math.PI / 180);
           const MPD      = 111320;
