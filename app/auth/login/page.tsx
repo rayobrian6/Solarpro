@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Sun, Eye, EyeOff, ArrowRight, Mail, Lock, CheckCircle, RefreshCw } from 'lucide-react';
 
 // ── How many times the UI will auto-retry a DB_STARTING 503 ──────────────────
@@ -9,7 +9,6 @@ const MAX_AUTO_RETRIES    = 5;
 const RETRY_BASE_DELAY_MS = 3000; // 3s, 4.5s, 6s, 7.5s, 9s
 
 function LoginForm() {
-  const router       = useRouter();
   const searchParams = useSearchParams();
 
   const [showPassword, setShowPassword] = useState(false);
@@ -150,15 +149,18 @@ function LoginForm() {
     if (result === 'success') {
       setStarting(false);
       setLoading(false);
-      // FIX: Do NOT call router.refresh() here. router.refresh() triggers
-      // a new /api/auth/me fetch immediately — before the browser has
-      // finished processing the Set-Cookie header from the login response.
-      // The cookie isn't in the jar yet, so /api/auth/me returns 401 and
-      // UserContext logs the user out. router.push() is sufficient: the
-      // full page navigation to /dashboard will trigger a fresh /api/auth/me
-      // call via UserContext.useEffect on mount, by which time the cookie
-      // is guaranteed to be set.
-      router.push(redirect);
+      // Use window.location.href (full browser navigation) instead of router.push().
+      // router.push() is a client-side navigation — UserContext lives in app/layout.tsx
+      // and persists across client navigations without remounting. Its initial
+      // refreshUser() useEffect does NOT re-fire on router.push(), so the user state
+      // stays null even after a successful login.
+      //
+      // window.location.href triggers a full page load which:
+      //   1. Guarantees the Set-Cookie header is fully processed (cookie in jar)
+      //   2. Forces a complete React tree remount
+      //   3. Triggers UserContext.useEffect on mount -> refreshUser() -> /api/auth/me
+      //      which now sees the valid session cookie and returns the user.
+      window.location.href = redirect;
       return;
     }
 
