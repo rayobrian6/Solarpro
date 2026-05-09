@@ -97,10 +97,40 @@ const PH_PORTRAIT  = 1.722;
 const PW_LANDSCAPE = 1.722;
 const PH_LANDSCAPE = 1.134;
 const PT = 0.040;  // thickness meters
-// PANEL_OFFSET: vertical gap between the roof/ground surface and the bottom of the panel box.
-// 0.08m (8cm) prevents z-fighting (flickering) where the panel geometry intersects the tile mesh.
-// Too small = z-fighting artifacts. Too large = panels appear to float above the roof.
-const PANEL_OFFSET = 0.08; // meters above surface
+// PANEL_OFFSET: vertical gap for ground / fence / fallback contexts.
+// Ground mount and fence panels use this directly (their height math is separate).
+const PANEL_OFFSET = 0.08; // meters above surface (ground / fence / fallback)
+
+// ── Mounting-system-aware roof panel offset ─────────────────────────────────
+// Physical stack height from roof deck to panel bottom face:
+//   rooftech-mini + xr100 : RT-MINI standoff (~4" = 0.102m) + XR100 rail (1.66" = 0.042m) ≈ 0.14m
+//   rooftech-mini + xr1000: RT-MINI standoff (~4" = 0.102m) + XR1000 rail (2.0"  = 0.051m) ≈ 0.16m
+//   ironridge l-foot only : L-foot body (~2.5" = 0.064m)  + XR100 rail (1.66" = 0.042m)   ≈ 0.11m
+//   rail-less (rt-mini-s) : standoff only                                                   ≈ 0.10m
+//   flat-roof ballasted   : tilt leg — conservative low profile                             ≈ 0.10m
+//   default / unknown     : 0.12m — conservative clearance, safe for any pitch
+//
+// RENDERING ONLY — does NOT affect structural calc, placement math, ECEF coords, or BOM.
+function getRoofPanelOffset(mountingSystemId: string): number {
+  switch (mountingSystemId) {
+    case 'rooftech-mini':
+    case 'rt-mini':
+    case 'ironridge-xr100':     // RT-MINI pads are the standard standoff for XR100
+      return 0.14;              // 102mm standoff + 42mm rail = ~144mm
+    case 'ironridge-xr1000':
+      return 0.16;              // 102mm standoff + 51mm rail + margin
+    case 'rooftech-mini-s':
+    case 'rooftech-mini-t':
+    case 'rooftech-hook':
+      return 0.10;              // rail-less: standoff height only
+    case 'rooftech-mini-m':
+      return 0.12;
+    case 'ironridge-flat-roof':
+      return 0.10;              // ballasted tray — low profile
+    default:
+      return 0.12;              // safe conservative default
+  }
+}
 
 // v47.257: Ground mount racking height above grade.
 // All ground-mounted panels share a single flat mountPlaneZ = baseZ + MOUNT_HEIGHT_M.
@@ -163,6 +193,9 @@ interface Props {
   fenceHeight: number;
   showShade: boolean;
   selectedPanel?: any;
+  /** Mounting system ID from mounting-hardware-db — drives visual panel offset.
+   *  Defaults to 'ironridge-xr100' when not provided. VISUAL ONLY — no structural impact. */
+  mountingSystemId?: string;
   fireSetbacks?: {
     edgeSetbackM: number;
     ridgeSetbackM: number;
@@ -319,6 +352,7 @@ function SolarEngine3D({
   systemType, tilt, azimuth, fenceHeight,
   showShade, selectedPanel,
   fireSetbacks,
+  mountingSystemId = 'ironridge-xr100',
   onTwinLoaded, onError, onLocationPick,
   onRoofPlaneCreated,
   selectedRoofPlaneId,
@@ -343,6 +377,11 @@ function SolarEngine3D({
   const roofPlanesRef = useRef<Props['roofPlanes']>(roofPlanes ?? []);
   // selectedPanelRef: always current copy of the selectedPanel prop
   const selectedPanelRef = useRef<Props['selectedPanel']>(selectedPanel);
+  // mountingSystemIdRef: always current mounting system ID — read inside closures without stale prop
+  const mountingSystemIdRef = useRef<string>(mountingSystemId);
+  // roofRailMapRef: Cesium entities keyed by planeId for roof rail visualization (Phase 2).
+  // Cleared and rebuilt whenever renderAllPanels rebuilds the panel set.
+  const roofRailMapRef = useRef<Map<string, any[]>>(new Map());
   // terrainReadyRef: mirrors terrainReady state as a ref so it can be read inside
   // setInterval callbacks without stale closure issues.
   const terrainReadyRef = useRef(false);
@@ -616,6 +655,7 @@ function SolarEngine3D({
   }, [panels]);
 
   useEffect(() => { roofPlanesRef.current = roofPlanes ?? []; }, [roofPlanes]);
+  useEffect(() => { mountingSystemIdRef.current = mountingSystemId; }, [mountingSystemId]);
 
   // v47.122: Re-render all tracked planes when selection changes
   // Selected plane → bright highlight; all others → dimmed
@@ -1492,6 +1532,300 @@ function SolarEngine3D({
    * @param panelList - Full list of panels to render (replaces current display entirely)
    * @param forceFullRebuild - If true, clears all entities and rebuilds (used for shade toggle)
    */
+  // ── Phase 2: Roof rail visualization ────────────────────────────────────────
+  //
+  // Renders IronRidge XR100 rails beneath roof panel arrays.
+  //
+  // Design rules (per spec):
+  //   - Rails ONLY — no pads, L-feet, bolts, or flashing (Phase 3+)
+  //   - Rails run parallel to eaves (along the panel u-axis / ridge direction)
+  //   - One rail run per panel row (gridRow), spanning the full row width
+  //   - Rail positioned at panel bottom edge (eave side of panel row)
+  //   - Rail height offset = stack height MINUS rail height (sits under panel)
+  //   - Minimal entity count: one box entity per rail run, NOT per panel
+  //   - Only rendered for rail-based mounting systems
+  //   - Entities stored in roofRailMapRef keyed by planeId for O(plane) cleanup
+  //
+  // RENDERING ONLY — zero impact on structural calc, panel coords, or BOM.
+
+  /** Returns XR rail dimensions for the active mounting system, or null for rail-less. */
+  function getRailSpec(mountingId: string): { heightM: number; widthM: number; color: string } | null {
+    switch (mountingId) {
+      case 'ironridge-xr100':
+      case 'rooftech-mini':
+      case 'rt-mini':
+        return { heightM: 0.042, widthM: 0.025, color: '#6b7280' }; // XR100: 1.66"H × ~1"W, silver-grey
+      case 'ironridge-xr1000':
+        return { heightM: 0.051, widthM: 0.030, color: '#4b5563' }; // XR1000: 2"H, darker grey
+      // Rail-less and non-roof systems return null → no rails rendered
+      case 'rooftech-mini-s':
+      case 'rooftech-mini-t':
+      case 'rooftech-hook':
+      case 'ironridge-flat-roof':
+        return null;
+      default:
+        return null; // unknown system → don't render rails
+    }
+  }
+
+  /**
+   * Clears all roof rail entities for a specific planeId (or all planes if planeId omitted).
+   * Safe to call before every renderRoofRails rebuild.
+   */
+  function clearRoofRails(viewer: any, planeId?: string) {
+    if (planeId) {
+      const entities = roofRailMapRef.current.get(planeId) ?? [];
+      entities.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+      roofRailMapRef.current.delete(planeId);
+    } else {
+      roofRailMapRef.current.forEach(entities => {
+        entities.forEach(e => { try { viewer.entities.remove(e); } catch {} });
+      });
+      roofRailMapRef.current.clear();
+    }
+  }
+
+  /**
+   * Renders XR100 rails for all roof planes visible in panelList.
+   *
+   * Algorithm:
+   *   1. Filter to roof panels that have ECEF frame vectors (ecefNx/ecefUx)
+   *   2. Group by planeId
+   *   3. For each plane: group panels by gridRow
+   *   4. For each row: find min/max along u-axis, compute rail center + length
+   *   5. Position rail at panel bottom edge, offset below panel bottom face
+   *   6. Build one Cesium box entity per rail run
+   */
+  function renderRoofRails(viewer: any, C: any, panelList: PlacedPanel[]) {
+    const mountId = mountingSystemIdRef.current;
+    const railSpec = getRailSpec(mountId);
+
+    // Clear ALL existing rail entities first
+    clearRoofRails(viewer);
+
+    // No rails for this mounting system
+    if (!railSpec) return;
+
+    // Only process roof panels that have ECEF frame vectors AND a planeId.
+    // Panels placed without a plane (single roof click) have no planeId — skip them.
+    // Both auto-fill and surface-select paths store ecefNx/ecefUx on every panel.
+    const roofPanels = panelList.filter(p =>
+      p.systemType === 'roof' &&
+      p.planeId !== undefined &&
+      isFinite(p.ecefNx ?? NaN) && isFinite(p.ecefUx ?? NaN)
+    );
+    if (roofPanels.length === 0) return;
+
+    // Group by planeId
+    const byPlane = new Map<string, PlacedPanel[]>();
+    for (const panel of roofPanels) {
+      const pid = panel.planeId!;
+      if (!byPlane.has(pid)) byPlane.set(pid, []);
+      byPlane.get(pid)!.push(panel);
+    }
+
+    const { heightM: railH, widthM: railW } = railSpec;
+    const railColor = new C.Color(
+      parseInt(railSpec.color.slice(1, 3), 16) / 255,
+      parseInt(railSpec.color.slice(3, 5), 16) / 255,
+      parseInt(railSpec.color.slice(5, 7), 16) / 255,
+      0.92,
+    );
+
+    // Rail bottom face sits at: stackHeight - railHeight above roof deck.
+    // Rail centre is half a rail height above that.
+    const stackH          = getRoofPanelOffset(mountId);
+    const railCentreAbove = stackH - railH / 2; // above roof deck to rail centre
+
+    // ── Spatial cluster helper ─────────────────────────────────────────────
+    // Splits a row's panels into contiguous runs along the ridge axis.
+    // Any gap > 1.5× panelW between adjacent panels = new cluster = new rail.
+    // This fixes the case where one planeId has two spatially-separated arrays
+    // that share the same gridRow indices (e.g. left + right faces of hip roof).
+    function splitIntoRailClusters(panels: PlacedPanel[], panelW: number): PlacedPanel[][] {
+      if (panels.length === 0) return [];
+      if (panels.length === 1) return [panels];
+      const ref    = panels[0];
+      const azRad  = (ref.azimuth ?? 180) * Math.PI / 180;
+      const cosLat = Math.cos(ref.lat * Math.PI / 180);
+      const MPD0   = 111320;
+      // Ridge direction = perpendicular to down-slope (rotate down-slope 90° CCW).
+      // Down-slope: lat=-cos(az), lng=sin(az).  Ridge: lat=sin(az), lng=cos(az).
+      const rLatU =  Math.sin(azRad); // ridge unit lat component
+      const rLngU =  Math.cos(azRad); // ridge unit lng component
+      const withProj = panels.map(p => {
+        const dLat = (p.lat - ref.lat) * MPD0;
+        const dLng = (p.lng - ref.lng) * MPD0 * cosLat;
+        return { p, proj: dLat * rLatU + dLng * rLngU };
+      });
+      withProj.sort((a, b) => a.proj - b.proj);
+      const GAP = panelW * 1.5;
+      const clusters: PlacedPanel[][] = [];
+      let cur: PlacedPanel[] = [withProj[0].p];
+      for (let i = 1; i < withProj.length; i++) {
+        if (withProj[i].proj - withProj[i - 1].proj > GAP) {
+          clusters.push(cur);
+          cur = [];
+        }
+        cur.push(withProj[i].p);
+      }
+      clusters.push(cur);
+      return clusters;
+    }
+
+    byPlane.forEach((planePanels, planeId) => {
+      // Group by gridRow
+      const byRow = new Map<number, PlacedPanel[]>();
+      for (const p of planePanels) {
+        const row = p.gridRow ?? 0;
+        if (!byRow.has(row)) byRow.set(row, []);
+        byRow.get(row)!.push(p);
+      }
+
+      const planeEntities: any[] = [];
+
+      byRow.forEach((rowPanels) => {
+        if (rowPanels.length === 0) return;
+
+        // Split into spatially-contiguous clusters along the ridge.
+        // One planeId can have two separated arrays sharing the same gridRow
+        // indices (e.g. left + right of a hip roof). Each cluster gets its own
+        // independent rail run so rails never bridge the gap between arrays.
+        const repOrientForGap = (rowPanels[0].orientation ?? 'portrait') as PanelOrientation;
+        const { pw: gapPanelW } = panelDims(repOrientForGap);
+        const clusters = splitIntoRailClusters(rowPanels, gapPanelW);
+
+        for (const clusterPanels of clusters) {
+          // ── Per-cluster rail geometry ─────────────────────────────────────────
+          // Each cluster is a spatially-contiguous run of panels in this row.
+          // Rails are scoped to the cluster — never bridging a gap to another array.
+
+          const rep     = clusterPanels[0];
+          const azDeg   = rep.azimuth ?? 180;
+          const tiltDeg = rep.tilt    ?? 0;
+          const orient  = (rep.orientation ?? 'portrait') as PanelOrientation;
+          const { pw: panelW, ph: panelH } = panelDims(orient);
+
+          const headingRad = (azDeg - 90) * Math.PI / 180; // along-ridge heading
+          const pitchRad   = -(tiltDeg   * Math.PI / 180); // tilt with roof
+
+          // Rail length = exact cluster span — no cantilever.
+          const nCols      = clusterPanels.length;
+          const railLength = (nCols - 1) * (panelW + 0.006) + panelW; // ~6mm inter-panel gap
+
+          // Cluster centroid (average panel position)
+          const centLat = clusterPanels.reduce((s, p) => s + p.lat,            0) / nCols;
+          const centLng = clusterPanels.reduce((s, p) => s + p.lng,            0) / nCols;
+          const centH   = clusterPanels.reduce((s, p) => s + (p.height ?? 0), 0) / nCols;
+
+          // ── ECEF surface normal from stored panel vectors ─────────────────────
+          // Every roof panel stores ecefNx/Ny/Nz = unit normal of the roof plane in ECEF.
+          // We use the cluster representative's normal (all panels on one plane share it).
+          // If not available, fall back to computing from tilt/azimuth.
+          const nx = rep.ecefNx ?? 0;
+          const ny = rep.ecefNy ?? 0;
+          const nz = rep.ecefNz ?? 1;
+          const hasEcefNormal = isFinite(nx) && isFinite(ny) && isFinite(nz) &&
+                                (Math.abs(nx) + Math.abs(ny) + Math.abs(nz)) > 0.1;
+
+          // ── Down-slope shift (for 25%/75% rail positions) ─────────────────────
+          // shiftM is measured along the slope surface from the row centroid.
+          // To move shiftM along the slope we need:
+          //   - horizontal (lat/lng) component = shiftM * cos(tilt)   [map plane]
+          //   - vertical (height) component    = -shiftM * sin(tilt)  [downhill = lower alt]
+          // For the along-normal displacement to reach the rail height:
+          //   panel.height = roofDeckAlt + stackH (stackH added vertically, not along normal)
+          //   rail centre must be (PANEL_THICKNESS/2 + railH/2) below panel centroid
+          //   along the roof normal direction.
+          const PANEL_THICKNESS = 0.040; // 40mm panel depth
+          // Offset from panel centroid to rail centre along the inward roof normal:
+          //   panel centre → panel bottom face: PANEL_THICKNESS/2 along -normal
+          //   panel bottom face → rail centre:   railH/2 along -normal
+          // Total inward displacement = (PANEL_THICKNESS/2 + railH/2)
+          const inwardM = PANEL_THICKNESS / 2 + railH / 2;
+
+          const cosLat   = Math.cos(centLat * Math.PI / 180);
+          const MPD      = 111320;
+          const azRad    = azDeg * Math.PI / 180;
+          const tiltRad  = tiltDeg * Math.PI / 180;
+          const sinTilt  = Math.sin(tiltRad);
+          const cosTilt  = Math.cos(tiltRad);
+
+          // Down-slope unit vector (lat/lng components)
+          const slopeLat = -Math.cos(azRad);
+          const slopeLng =  Math.sin(azRad);
+
+          // Two rails per cluster-row: 25% from eave, 25% from ridge
+          const railOffsets: Array<{ shiftM: number; label: string }> = [
+            { shiftM:  panelH * 0.25, label: 'lower' }, // 25% from eave
+            { shiftM: -panelH * 0.25, label: 'upper' }, // 25% from ridge
+          ];
+
+          for (const { shiftM, label } of railOffsets) {
+            // ── Step 1: shift along slope to 25%/75% position ─────────────────
+            // Horizontal component of slope movement
+            const horizShiftM = shiftM * cosTilt;
+            const shiftedLat  = centLat + (slopeLat * horizShiftM) / MPD;
+            const shiftedLng  = centLng + (slopeLng * horizShiftM) / (MPD * cosLat);
+            const shiftedH    = centH   - shiftM * sinTilt; // downhill = lower alt
+
+            if (!isFinite(shiftedLat) || !isFinite(shiftedLng) || !isFinite(shiftedH)) continue;
+
+            // ── Step 2: displace inward along roof normal to rail centre ───────
+            // Rail centre = shifted panel centroid - inwardM * roof_normal (ECEF)
+            let railX: number, railY: number, railZ: number;
+
+            if (hasEcefNormal) {
+              // Exact ECEF displacement along the stored roof normal
+              const shiftedEcef = engLatLngToECEF(shiftedLat, shiftedLng, shiftedH);
+              railX = shiftedEcef.x - inwardM * nx;
+              railY = shiftedEcef.y - inwardM * ny;
+              railZ = shiftedEcef.z - inwardM * nz;
+            } else {
+              // Fallback: approximate using vertical component of normal = cos(tilt)
+              const railHeight = shiftedH - inwardM * cosTilt;
+              const fe = engLatLngToECEF(shiftedLat, shiftedLng, railHeight);
+              railX = fe.x; railY = fe.y; railZ = fe.z;
+            }
+
+            if (!isFinite(railX) || !isFinite(railY) || !isFinite(railZ)) continue;
+
+            try {
+              const pos = new C.Cartesian3(railX, railY, railZ);
+              const ori = C.Transforms.headingPitchRollQuaternion(
+                pos,
+                new C.HeadingPitchRoll(headingRad, pitchRad, 0),
+              );
+              if (!ori) continue;
+
+              const clusterIdx = clusters.indexOf(clusterPanels);
+              const railEntity = viewer.entities.add({
+                name:        `roof-rail-plane${planeId}-row${rep.gridRow ?? 0}-cl${clusterIdx}-${label}`,
+                position:    pos,
+                orientation: ori,
+                box: {
+                  // Visual scale 3× on cross-section (width + height) so 42mm rail reads
+                  // clearly at Cesium viewing distances. Length is never scaled.
+                  dimensions: new C.Cartesian3(railW * 3, railLength, railH * 3),
+                  material:   new C.ColorMaterialProperty(railColor),
+                  outline:    false,
+                  shadows:    C.ShadowMode.DISABLED,
+                },
+              });
+              planeEntities.push(railEntity);
+            } catch (e) {
+              handleCesiumError('renderRoofRails row entity', e, true);
+            }
+          }
+        } // end cluster loop
+      }); // end byRow.forEach
+
+      if (planeEntities.length > 0) {
+        roofRailMapRef.current.set(planeId, planeEntities);
+      }
+    });
+  }
+
   function renderAllPanels(viewer: any, C: any, panelList: PlacedPanel[], forceFullRebuild = false) {
     const prev = lastRenderedPanelsRef.current;
 
@@ -1503,6 +1837,8 @@ function SolarEngine3D({
       const skipGridBatch = panelList.length > 12;
       panelList.forEach(p => addPanelEntity(viewer, C, p, skipGridBatch));
       lastRenderedPanelsRef.current = panelList;
+      // Phase 2: rebuild roof rails after full panel rebuild
+      try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails full', e, true); }
       try { viewer.scene.requestRender(); } catch {}
       return;
     }
@@ -1557,6 +1893,8 @@ function SolarEngine3D({
 
     lastRenderedPanelsRef.current = panelList;
     if (changed) {
+      // Phase 2: rebuild roof rails whenever panel set changes
+      try { renderRoofRails(viewer, C, panelList); } catch (e) { handleCesiumError('renderRoofRails incr', e, true); }
       try { viewer.scene.requestRender(); } catch {}
     }
   }
@@ -2259,7 +2597,7 @@ function SolarEngine3D({
 
       const { tiltDeg, azimuthDeg } = computeSurfaceNormal(viewer, C, screenPos, cartesian, pickMethod);
       const panel = createPanel({
-        lat: pLat, lng: pLng, height: pHeight + PANEL_OFFSET,
+        lat: pLat, lng: pLng, height: pHeight + getRoofPanelOffset(mountingSystemIdRef.current),
         tilt: tiltDeg, azimuth: azimuthDeg, systemType: 'roof',
         heading: headingFromAzimuth(azimuthDeg), pitch: -(tiltDeg * Math.PI / 180), roll: 0,
       });
@@ -2270,6 +2608,8 @@ function SolarEngine3D({
       lastRenderedPanelsRef.current = newPanels; // prevent double-render orphan
       onPanelsChange(newPanels);
       setPanelCount(newPanels.length);
+      // Phase 2: rebuild rails after single-click roof placement
+      try { renderRoofRails(viewer, C, newPanels); } catch {}
       setStatusMsg(`✅ Roof panel placed (${tiltDeg.toFixed(0)}° pitch, ${azimuthDeg.toFixed(0)}° az) — click to continue, right-click to stop`);
       showGhostPanel(viewer, C, pLat, pLng, pHeight, tiltDeg, azimuthDeg);
       try { viewer.scene.requestRender(); } catch {}
@@ -3960,7 +4300,7 @@ function SolarEngine3D({
     const stepM = pw + 0.05;
     const nextLat = lastLat + (ridgeN * stepM) / mLat;
     const nextLng = lastLng + (ridgeE * stepM) / mLng;
-    const pos = safeCartesian3(C, nextLng, nextLat, lastH + PANEL_OFFSET);
+    const pos = safeCartesian3(C, nextLng, nextLat, lastH + getRoofPanelOffset(mountingSystemIdRef.current));
     if (!pos) return;
     const pitchRad = -tiltDeg * Math.PI / 180;
     const hpr = new C.HeadingPitchRoll(heading, pitchRad, 0);
@@ -4336,6 +4676,8 @@ function SolarEngine3D({
         panelsRef.current = merged;
         onPanelsChange(merged);
         setPanelCount(merged.length);
+        // Phase 2: render roof rails after plane3d fill
+        try { renderRoofRails(viewer, C, merged); } catch (e) { handleCesiumError('renderRoofRails plane3d', e, true); }
 
         // v47.126: Show bounding box overlay + panel count feedback
         try {
@@ -4512,6 +4854,8 @@ function SolarEngine3D({
       panelsRef.current = mergedPanels;
       onPanelsChange(mergedPanels);
       setPanelCount(mergedPanels.length);
+      // Phase 2: render roof rails after surface-select fill
+      try { renderRoofRails(viewer, C, mergedPanels); } catch (e) { handleCesiumError('renderRoofRails surface', e, true); }
 
       setStatusMsg(`Surface grid: ${filtered.length} panels on plane ${plane.id.slice(0,8)}… | Extend Row / Add Row to expand`);
 
@@ -4574,6 +4918,8 @@ function SolarEngine3D({
       panelsRef.current = updated;
       onPanelsChange(updated);
       setPanelCount(updated.length);
+      // Phase 2: rebuild rails after extend row
+      try { renderRoofRails(viewer, C, updated); } catch {}
       setStatusMsg(`Row extended — ${updated.length} total panels`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
@@ -4648,6 +4994,8 @@ function SolarEngine3D({
       panelsRef.current = updated;
       onPanelsChange(updated);
       setPanelCount(updated.length);
+      // Phase 2: rebuild rails after add row
+      try { renderRoofRails(viewer, C, updated); } catch {}
       setStatusMsg(`Row added (${newPanels.length} panels) — ${updated.length} total`);
       try { viewer.scene.requestRender(); } catch {}
     } catch (err: unknown) {
@@ -5198,6 +5546,8 @@ function SolarEngine3D({
     panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     panelMapRef.current.clear();
     lastRenderedPanelsRef.current = [];
+    // Phase 2: clear roof rails on auto-fill rebuild
+    try { clearRoofRails(viewer); } catch {}
 
     const orient      = panelOrientationRef.current ?? 'portrait';
     const groundElev  = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
@@ -5273,6 +5623,8 @@ function SolarEngine3D({
     panelsRef.current = newPanels;
     onPanelsChange(newPanels);
     setPanelCount(newPanels.length);
+    // Phase 2: render roof rails after auto-fill completes
+    try { renderRoofRails(viewer, C, newPanels); } catch (e) { handleCesiumError('renderRoofRails auto', e, true); }
     setStatusMsg(`Auto-roof: ${newPanels.length} panels on ${eligiblePlanes.length} roof planes (frame-locked)`);
 
     // v47.126: Show bounding box for all auto-filled panels
@@ -5458,7 +5810,7 @@ function SolarEngine3D({
         const dE = (gp.lng - seg.center.lng) * mLng;
         const slopeProj = dE * slopeE + dN * slopeN;
         const ridgeProj = dE * ridgeE + dN * ridgeN;
-        const height = segElev + tanPitch * slopeProj + PANEL_OFFSET;
+        const height = segElev + tanPitch * slopeProj + getRoofPanelOffset(mountingSystemIdRef.current);
         if (!isValidCoord(gp.lat, gp.lng, height)) continue;
         validGp.push({ lat: gp.lat, lng: gp.lng, orientation: gp.orientation, slopeProj, ridgeProj, height });
       }
@@ -5602,7 +5954,7 @@ function SolarEngine3D({
         if (!panelCarto) continue;
         const pLat    = C.Math.toDegrees(panelCarto.latitude);
         const pLng    = C.Math.toDegrees(panelCarto.longitude);
-        const pHeight = panelCarto.height + PANEL_OFFSET;
+        const pHeight = panelCarto.height + getRoofPanelOffset(mountingSystemIdRef.current);
 
         if (!isValidCoord(pLat, pLng, pHeight)) continue;
 
@@ -5764,6 +6116,8 @@ function SolarEngine3D({
     // ── Step 2: Remove all panel entities from the 3D scene ──
     panelMapRef.current.forEach(e => { try { viewer.entities.remove(e); } catch {} });
     panelMapRef.current.clear();
+    // Phase 2: clear roof rail entities alongside panels
+    try { clearRoofRails(viewer); } catch {}
 
     // ── Step 3: Reset all panel data state ──
     lastRenderedPanelsRef.current = []; // reset incremental diff state
