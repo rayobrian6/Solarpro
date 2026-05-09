@@ -219,93 +219,68 @@ const PRODUCT_SCREENS = [
   },
 ];
 
+// ─── Landing page pricing — sourced from lib/pricing.config.ts ─────────────
+// All prices and features are imported from the single source of truth.
+// Do NOT hardcode prices here.
+import { PRICING_PLANS as _PP, PLAN_FEATURES as _PF, formatSeatLimit as _fsl, formatExtraSeatMsg as _fem } from '@/lib/pricing.config';
+
 const PRICING = [
   {
     id: 'starter',
-    name: 'Starter Trial',
+    name: 'Starter',
     trialBadge: '3-Day Free Trial',
-    price: '$79',
+    price: `$${_PP.starter.price}`,
     period: '/mo after trial',
-    desc: 'Explore SolarPro with limited access.',
+    desc: 'For solo installers getting started.',
     trialNote: 'Free for 3 days — no credit card required.',
-    features: [
-      'Basic 3D Solar Design Studio',
-      'Up to 2 active projects',
-      'Up to 5 clients',
-      'Preview proposals only',
-      'Production analysis (NREL PVWatts)',
-      'Google Solar API integration',
-      'Utility rate calculators',
-      'Email support',
-    ],
-    notIncluded: [
-      'Engineering calculations (SLD)',
-      'Permit packet generation',
-      'BOM generation',
-      'Proposal e-signing',
-      'Sol Fence design',
-      'Homeowner portal',
-    ],
+    seatLabel: _fsl('starter'),
+    extraSeatMsg: _fem('starter'),
+    features: _PF.starter.included,
+    notIncluded: _PF.starter.notIncluded,
     cta: 'Start 3-Day Trial',
     highlight: false,
+    badge: null as string | null,
     isTrial: true,
     checkoutHref: '/auth/register',
+    replacementMsg: null as string | null,
   },
   {
     id: 'professional',
     name: 'Professional',
     trialBadge: null,
-    price: '$149',
+    price: `$${_PP.professional.price}`,
     period: '/mo',
-    desc: 'Full engineering suite for growing install teams.',
+    desc: 'For growing installers running real volume.',
     trialNote: null,
-    features: [
-      'Everything in Starter',
-      'Unlimited projects & clients',
-      'Full engineering calculations (SLD)',
-      'Permit packet generation',
-      'Structural calculations',
-      'BOM generation',
-      'Proposal e-signing',
-      'Homeowner portal',
-      'Site survey mobile app',
-      'White-label branding',
-      'Battery system design',
-      'Priority support',
-    ],
-    notIncluded: [],
-    cta: 'Subscribe',
-    highlight: true,
-    badge: 'Most Popular',
+    seatLabel: _fsl('professional'),
+    extraSeatMsg: _fem('professional'),
+    features: _PF.professional.included,
+    notIncluded: _PF.professional.notIncluded,
+    cta: 'Get Started',
+    highlight: false,
+    badge: null as string | null,
     isTrial: false,
     checkoutHref: '/auth/subscribe?plan=professional',
+    replacementMsg: null as string | null,
   },
   {
     id: 'contractor',
     name: 'Contractor',
     trialBadge: null,
-    price: '$250',
+    price: `$${_PP.contractor.price}`,
     period: '/mo',
-    desc: 'Everything, for large contracting firms.',
+    desc: 'Full platform for serious solar companies.',
     trialNote: null,
-    features: [
-      'Everything in Professional',
-      'Unlimited team members',
-      'Sol Fence design',
-      'Lead & pipeline management',
-      'Bulk proposal generation',
-      'Advanced automation tools',
-      'Custom proposal templates',
-      'API access',
-      'Dedicated onboarding',
-      'SLA support',
-    ],
-    notIncluded: [],
-    cta: 'Subscribe',
-    highlight: false,
-    badge: 'Best Value',
+    seatLabel: _fsl('contractor'),
+    extraSeatMsg: _fem('contractor'),
+    features: _PF.contractor.included,
+    notIncluded: _PF.contractor.notIncluded,
+    cta: 'Get Started',
+    highlight: true,
+    badge: 'Most Popular' as string | null,
     isTrial: false,
     checkoutHref: '/auth/subscribe?plan=contractor',
+    replacementMsg: 'Replace $300–$1,000/month in solar software tools with one platform' as string | null,
   },
   {
     id: 'enterprise',
@@ -313,24 +288,18 @@ const PRICING = [
     trialBadge: null,
     price: 'Custom',
     period: ' pricing',
-    desc: 'Multi-company accounts with dedicated support.',
+    desc: 'For large teams and multi-location companies.',
     trialNote: null,
-    features: [
-      'Everything in Contractor',
-      'Multi-company accounts',
-      'Custom integrations',
-      'Private API access',
-      'Enterprise security controls',
-      'Dedicated account manager',
-      'Custom SLA',
-      'Volume discounts',
-      'White-glove onboarding',
-    ],
-    notIncluded: [],
+    seatLabel: 'Unlimited users',
+    extraSeatMsg: null as string | null,
+    features: _PF.enterprise.included,
+    notIncluded: _PF.enterprise.notIncluded,
     cta: 'Contact Sales',
     highlight: false,
+    badge: null as string | null,
     isTrial: false,
     checkoutHref: 'mailto:sales@underthesun.solutions',
+    replacementMsg: null as string | null,
   },
 ];
 
@@ -1389,6 +1358,18 @@ export default function LandingPage() {
                     )}
                   </div>
 
+                  {/* Seat info */}
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-slate-500 shrink-0"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span className="text-slate-500 text-xs">{plan.seatLabel}</span>
+                  </div>
+                  {plan.extraSeatMsg && (
+                    <p className="text-xs text-slate-600 pl-3.5 mb-1">{plan.extraSeatMsg}</p>
+                  )}
+                  {plan.replacementMsg && (
+                    <p className="text-xs text-amber-400/70 mb-2 leading-snug">{plan.replacementMsg}</p>
+                  )}
+
                   {plan.isTrial && (
                     <div className="bg-emerald-500/8 border border-emerald-500/20 rounded-lg px-3 py-2 mb-4">
                       <p className="text-xs text-emerald-400 leading-relaxed">
@@ -1435,7 +1416,8 @@ export default function LandingPage() {
           </div>
 
           <p className="text-center text-slate-600 text-xs mt-8">
-            Starter trial provides temporary access. Active subscription required after trial period. All prices in USD, billed monthly.
+            Starter trial provides temporary access. Active subscription required after trial period. All prices in USD, billed monthly.<br />
+            <span className="text-slate-700">Additional users can be added to any paid plan as your team grows.</span>
           </p>
         </div>
       </section>
