@@ -5877,6 +5877,9 @@ function SolarEngine3D({
           display: 'flex', gap: 4, alignItems: 'center',
           background: 'rgba(15,15,30,0.92)', backdropFilter: 'blur(8px)',
           border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10, padding: '6px 10px', zIndex: 50,
+          maxWidth: 'calc(100vw - 120px)', overflowX: 'auto', flexWrap: 'nowrap',
+          /* hide scrollbar visually but keep it functional */
+          scrollbarWidth: 'none',
         }}>
           {([
             { mode: 'select'        as PlacementMode, icon: '↖',             label: 'Select',     tooltip: 'Select a placed panel. Click to select, SHIFT+click to multi-select. Press Delete to remove.' },
@@ -5932,7 +5935,7 @@ function SolarEngine3D({
               }}
               style={{
                 padding: '5px 12px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', border: 'none',
+                cursor: 'pointer', border: 'none', flexShrink: 0, whiteSpace: 'nowrap',
                 background: placementMode === mode ? 'linear-gradient(135deg, #ff8c00, #ffd700)' : 'rgba(255,255,255,0.08)',
                 color: placementMode === mode ? '#000' : '#ccc', transition: 'all 0.15s',
               }}
@@ -5955,6 +5958,7 @@ function SolarEngine3D({
               padding: '5px 10px', borderRadius: 7, fontSize: 12, fontWeight: 600,
               cursor: 'pointer', border: '1px solid rgba(100,200,255,0.35)',
               background: 'rgba(0,150,255,0.15)', color: '#60c8ff', transition: 'all 0.15s',
+              flexShrink: 0, whiteSpace: 'nowrap',
             }}
           >
             ⛶ Fit View
