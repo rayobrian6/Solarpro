@@ -49,19 +49,24 @@ export async function GET(req: NextRequest) {
     const client = clients[0];
 
     // Fetch projects for this client — ONLY homeowner_stage, NOT project_status
+    // Also pull owner contact info (company_phone, email) for the portal contact section
     const projects = await sql`
       SELECT
-        id,
-        name,
-        address,
-        system_size_kw,
-        homeowner_stage,
-        updated_at,
-        created_at
-      FROM projects
-      WHERE client_id = ${session.clientId}
-        AND deleted_at IS NULL
-      ORDER BY created_at DESC
+        p.id,
+        p.name,
+        p.address,
+        p.system_size_kw,
+        p.homeowner_stage,
+        p.updated_at,
+        p.created_at,
+        u.company_phone  AS owner_phone,
+        u.email          AS owner_email,
+        u.company        AS owner_company
+      FROM projects p
+      LEFT JOIN users u ON u.id = p.user_id
+      WHERE p.client_id = ${session.clientId}
+        AND p.deleted_at IS NULL
+      ORDER BY p.created_at DESC
     `;
 
     // Fetch stage history for all client projects (homeowner-safe: stage + date only)
@@ -160,6 +165,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // Derive owner contact info from the first project's owner (most recent project)
+    const firstProject = projects[0] as Record<string, unknown> | undefined;
+    const ownerPhone   = firstProject?.owner_phone   ? String(firstProject.owner_phone)   : null;
+    const ownerEmail   = firstProject?.owner_email   ? String(firstProject.owner_email)   : null;
+    const ownerCompany = firstProject?.owner_company ? String(firstProject.owner_company) : null;
+
     return NextResponse.json({
       success: true,
       client: {
@@ -171,6 +182,11 @@ export async function GET(req: NextRequest) {
         city:    client.city || null,
         state:   client.state || null,
         zip:     client.zip || null,
+      },
+      owner: {
+        phone:   ownerPhone,
+        email:   ownerEmail,
+        company: ownerCompany,
       },
       projects,
       stageHistory,

@@ -84,6 +84,17 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
     typeof r.inspector_email === 'string' && r.inspector_email.trim()
       ? r.inspector_email.trim().toLowerCase() : null;
 
+  // Survey naming fields — sent by partner in the thin event body.
+  // These are used as fallback project name in degraded mode (when
+  // fetchFullPayload returns null and we would otherwise fall back to
+  // "Survey <uuid>"). Silently ignored if absent.
+  const project_name =
+    typeof r.project_name === 'string' && r.project_name.trim()
+      ? r.project_name.trim() : null;
+  const site_name =
+    typeof r.site_name === 'string' && r.site_name.trim()
+      ? r.site_name.trim() : null;
+
   // v47.438: On-device picker selections — forwarded by /api/survey/submit from
   // the SurveyV2Payload. These determine which project/client the survey lands on.
   // MUST be passed through here or they are silently dropped before reaching
@@ -105,6 +116,12 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
       survey_id: r.survey_id,
       completed_at: r.completed_at,
       survey_url: r.survey_url as string | undefined,
+      // v47.441: inline_payload - only set by /api/survey/submit (internal).
+      // External partner webhooks never include this field.
+      // Pass through as-is if present; null/undefined otherwise.
+      inline_payload: (r.inline_payload && typeof r.inline_payload === 'object' && !Array.isArray(r.inline_payload))
+        ? r.inline_payload as Record<string, unknown>
+        : null,
       // F-06: Ownership claims (null when not from a SolarPro handoff)
       solarpro_user_id,
       solarpro_project_id,
@@ -115,6 +132,9 @@ export function validateEnvelope(raw: unknown): EnvelopeResult {
       // v47.438: On-device picker selections (null for PM-initiated surveys)
       solarpro_selected_project_id,
       solarpro_selected_client_id,
+      // Survey naming fallback (used in degraded mode when full payload fetch fails)
+      project_name,
+      site_name,
     },
   };
 }

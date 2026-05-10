@@ -1,9 +1,16 @@
 // ============================================================================
-// v47.435 — Survey Ingest: Pipeline Orchestrator Tests
+// v47.440 — Survey Ingest: Pipeline Orchestrator Tests
 //
 // Tests for runIngestPipeline(). Uses vi.mock to isolate DB calls.
-// Verifies the pipeline's idempotency path, status transitions,
+// Verifies the pipeline's resolution path, status transitions,
 // error capture, and context validation — without a live DB.
+//
+// v47.440 changes from v47.435:
+//   - Pipeline no longer creates projects. _upsertProject() is gone.
+//   - Step E now calls _resolveExistingProjectId() (Priority A/B/C lookup)
+//     then _attachSurveyToProject() (UPDATE ... RETURNING id).
+//   - created flag is always false (we never create).
+//   - PROJECT_RESOLUTION_FAILED replaces DB_WRITE_FAILED for resolution errors.
 // ============================================================================
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -14,6 +21,11 @@ import type { IngestContext } from './types';
 // ---------------------------------------------------------------------------
 vi.mock('@/lib/db-neon', () => ({
   getDbReady: vi.fn(),
+  // isValidUUID is used by projectLinkResolver (imported at module load)
+  isValidUUID: (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id),
+  // createSiteSurvey and bulkAddSiteSurveyFiles are called in Step E2 (non-fatal if they fail)
+  createSiteSurvey: vi.fn().mockResolvedValue({ id: 'site-survey-mock-001' }),
+  bulkAddSiteSurveyFiles: vi.fn().mockResolvedValue(0),
 }));
 
 import { runIngestPipeline } from './ingestPipeline';
@@ -43,23 +55,28 @@ function makeContext(overrides: Partial<IngestContext> = {}): IngestContext {
   };
 }
 
-/** Build a mock sql tagged-template function that returns different results
- *  for UPDATE (delivery) vs INSERT (project upsert). */
+/**
+ * Build a mock sql tagged-template function for the v47.440 pipeline.
+ *
+ * New pipeline call sequence (for resolve_existing action):
+ *   Call 1: _resolveExistingProjectId Priority B SELECT — returns [{ id }] to simulate "found"
+ *   Call 2: _attachSurveyToProject   UPDATE...RETURNING — returns [{ id }] to simulate "updated"
+ *   Call 3+: delivery UPDATE, physical_data, etc.     — returns []
+ *
+ * @param projectId  The project UUID the mock will "find" and "attach"
+ */
 function makeSql({
-  upsertRows = [{ id: 'proj-new-001', inserted: true }],
-  deliveryUpdateRows = [],
-  insertFileRows = [],
-}: {
-  upsertRows?: unknown[];
-  deliveryUpdateRows?: unknown[];
-  insertFileRows?: unknown[];
+  projectId = 'proj-new-001',
+  deliveryUpdateRows = [] as unknown[],
 } = {}) {
   let callCount = 0;
   const sql = vi.fn((..._args: unknown[]) => {
     callCount++;
-    // First call: project upsert INSERT → return upsertRows
-    // Subsequent UPDATE calls: return []
-    if (callCount === 1) return Promise.resolve(upsertRows);
+    // Call 1: _resolveExistingProjectId Priority B SELECT → found project
+    if (callCount === 1) return Promise.resolve([{ id: projectId }]);
+    // Call 2: _attachSurveyToProject UPDATE...RETURNING → success
+    if (callCount === 2) return Promise.resolve([{ id: projectId }]);
+    // All subsequent calls: delivery UPDATE, physical_data, etc.
     return Promise.resolve(deliveryUpdateRows);
   });
   // Make sql also callable as a tagged template (postgres.js style)
@@ -107,14 +124,16 @@ describe('runIngestPipeline — validation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Happy path: CREATE_ORPHAN, rawPayload=null (v47.435 stub)
+// Happy path: resolve_existing, rawPayload=null (v47.440)
+//
+// With no selectedProjectId/partnerProjectId, the resolver returns
+// action='resolve_existing'. The pipeline looks up the project via
+// Priority B (survey_external_id) using the mock, finds it, and attaches.
 // ---------------------------------------------------------------------------
-describe('runIngestPipeline — happy path (CREATE_ORPHAN, stub)', () => {
+describe('runIngestPipeline — happy path (resolve_existing, stub)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    const sql = makeSql({
-      upsertRows: [{ id: 'proj-created-001', inserted: true }],
-    });
+    const sql = makeSql({ projectId: 'proj-resolved-001' });
     vi.mocked(getDbReady).mockResolvedValue(sql as any);
   });
 
@@ -124,19 +143,19 @@ describe('runIngestPipeline — happy path (CREATE_ORPHAN, stub)', () => {
     expect(result.status).toBe('ingested');
   });
 
-  it('returns the projectId from the upsert', async () => {
+  it('returns the resolved projectId', async () => {
     const ctx = makeContext();
     const result = await runIngestPipeline(ctx);
     if (result.status === 'ingested') {
-      expect(result.projectId).toBe('proj-created-001');
+      expect(result.projectId).toBe('proj-resolved-001');
     }
   });
 
-  it('created=true when DB returns inserted=true', async () => {
+  it('created=false (v47.440: we never create; always attach to existing)', async () => {
     const ctx = makeContext();
     const result = await runIngestPipeline(ctx);
     if (result.status === 'ingested') {
-      expect(result.created).toBe(true);
+      expect(result.created).toBe(false);
     }
   });
 
@@ -169,15 +188,80 @@ describe('runIngestPipeline — happy path (CREATE_ORPHAN, stub)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Happy path: attach action (selectedProjectId provided)
+//
+// When selectedProjectId is a valid UUID, resolver returns action='attach'.
+// Pipeline runs Priority A: SELECT to verify the project exists.
+// ---------------------------------------------------------------------------
+describe('runIngestPipeline — happy path (attach via selectedProjectId)', () => {
+  const PROJ_ID = 'aaaabbbb-cccc-dddd-eeee-000011112222';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Call 1: Priority A SELECT verify project exists → found
+    // Call 2: _attachSurveyToProject UPDATE...RETURNING → success
+    // Call 3+: everything else → []
+    let callCount = 0;
+    const sql = vi.fn((..._args: unknown[]) => {
+      callCount++;
+      if (callCount <= 2) return Promise.resolve([{ id: PROJ_ID }]);
+      return Promise.resolve([]);
+    });
+    const taggedSql = (strings: TemplateStringsArray, ...values: unknown[]) => sql(strings, ...values);
+    Object.assign(taggedSql, { mock: sql.mock });
+    vi.mocked(getDbReady).mockResolvedValue(taggedSql as any);
+  });
+
+  it('returns status=ingested', async () => {
+    const ctx = makeContext({ selectedProjectId: PROJ_ID });
+    const result = await runIngestPipeline(ctx);
+    expect(result.status).toBe('ingested');
+  });
+
+  it('returns the correct projectId', async () => {
+    const ctx = makeContext({ selectedProjectId: PROJ_ID });
+    const result = await runIngestPipeline(ctx);
+    if (result.status === 'ingested') {
+      expect(result.projectId).toBe(PROJ_ID);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DB write failure
 // ---------------------------------------------------------------------------
 describe('runIngestPipeline — DB write failure', () => {
-  it('returns failed with DB_WRITE_FAILED when project upsert throws', async () => {
+  it('returns failed with PROJECT_RESOLUTION_FAILED when project lookup throws', async () => {
+    // With resolve_existing action, Priority B SELECT throws → PROJECT_RESOLUTION_FAILED
     vi.clearAllMocks();
     const failingSql = vi.fn().mockRejectedValue(new Error('relation "projects" does not exist'));
     vi.mocked(getDbReady)
-      .mockResolvedValueOnce(failingSql as any)  // first call: project upsert fails
-      .mockResolvedValueOnce(failingSql as any); // second call: _markDeliveryFailed also fails (non-fatal)
+      .mockResolvedValueOnce(failingSql as any)   // first call: project resolution SQL fails
+      .mockResolvedValueOnce(failingSql as any);  // second call: _markDeliveryFailed also fails (non-fatal)
+
+    const ctx = makeContext();
+    const result = await runIngestPipeline(ctx);
+    expect(result.status).toBe('failed');
+    if (result.status === 'failed') {
+      expect(result.code).toBe('PROJECT_RESOLUTION_FAILED');
+    }
+  });
+
+  it('returns failed with DB_WRITE_FAILED when _attachSurveyToProject throws', async () => {
+    // Priority B SELECT succeeds (finds project), but UPDATE RETURNING fails
+    vi.clearAllMocks();
+    let callCount = 0;
+    const mixedSql = vi.fn((..._args: unknown[]) => {
+      callCount++;
+      // Call 1: Priority B SELECT → found project
+      if (callCount === 1) return Promise.resolve([{ id: 'proj-found-001' }]);
+      // Call 2: _attachSurveyToProject UPDATE RETURNING → throws
+      return Promise.reject(new Error('relation "projects" does not exist'));
+    });
+    const taggedSql = (strings: TemplateStringsArray, ...values: unknown[]) =>
+      mixedSql(strings, ...values);
+    Object.assign(taggedSql, { mock: mixedSql.mock });
+    vi.mocked(getDbReady).mockResolvedValue(taggedSql as any);
 
     const ctx = makeContext();
     const result = await runIngestPipeline(ctx);
@@ -210,28 +294,14 @@ describe('runIngestPipeline — DB write failure', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Status transitions: created=true vs created=false
+// Status transitions: created flag
+//
+// v47.440: created is always false — surveys attach to EXISTING projects.
 // ---------------------------------------------------------------------------
-describe('runIngestPipeline — created flag from DB xmax', () => {
-  it('created=false when DB returns inserted=false (update path)', async () => {
+describe('runIngestPipeline — created flag (v47.440)', () => {
+  it('created=false (pipeline never creates projects)', async () => {
     vi.clearAllMocks();
-    const sql = makeSql({
-      upsertRows: [{ id: 'proj-existing-001', inserted: false }],
-    });
-    vi.mocked(getDbReady).mockResolvedValue(sql as any);
-
-    const ctx = makeContext();
-    const result = await runIngestPipeline(ctx);
-    if (result.status === 'ingested') {
-      expect(result.created).toBe(false);
-    }
-  });
-
-  it('created=false when DB returns inserted="false" (string from postgres.js)', async () => {
-    vi.clearAllMocks();
-    const sql = makeSql({
-      upsertRows: [{ id: 'proj-existing-002', inserted: 'false' }],
-    });
+    const sql = makeSql({ projectId: 'proj-attach-001' });
     vi.mocked(getDbReady).mockResolvedValue(sql as any);
 
     const ctx = makeContext();
@@ -248,9 +318,7 @@ describe('runIngestPipeline — created flag from DB xmax', () => {
 describe('runIngestPipeline — result shape contract', () => {
   it('ingested result always has: status, projectId, created, transformSummary, durationMs', async () => {
     vi.clearAllMocks();
-    const sql = makeSql({
-      upsertRows: [{ id: 'proj-shape-001', inserted: true }],
-    });
+    const sql = makeSql({ projectId: 'proj-shape-001' });
     vi.mocked(getDbReady).mockResolvedValue(sql as any);
 
     const ctx = makeContext();

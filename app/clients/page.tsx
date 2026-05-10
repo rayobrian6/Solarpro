@@ -112,7 +112,7 @@ export default function ClientsPage() {
 
             {/* KPI strip */}
             {!loading && clients.length > 0 && (
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="bg-slate-900/60 rounded-xl border border-slate-700/40 p-3 text-center">
                   <div className="w-7 h-7 rounded-lg bg-teal-500/15 border border-teal-500/20 flex items-center justify-center mx-auto mb-2">
                     <Users size={12} className="text-teal-400" />

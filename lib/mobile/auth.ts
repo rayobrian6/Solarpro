@@ -72,18 +72,25 @@ export async function resolveMobileUser(
   const authHeader  = req.headers.get('authorization') ?? null;
   // IMPORTANT: trim() both sides to eliminate any whitespace/newline edge cases
   const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
-  const serviceApiKey = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
+  // Accept either MOBILE_SERVICE_API_KEY (canonical) or SOLARPRO_API_KEY (Render alias).
+  // Both sides must hold the same secret — Render sends SOLARPRO_API_KEY as the Bearer,
+  // SolarPro validates it against whichever of these env vars is set.
+  const serviceApiKey =
+    (process.env.MOBILE_SERVICE_API_KEY?.trim() || process.env.SOLARPRO_API_KEY?.trim()) ?? null;
 
   // Diagnostic log for service key path
   if (serviceApiKey) {
+    const keySource = process.env.MOBILE_SERVICE_API_KEY?.trim()
+      ? 'MOBILE_SERVICE_API_KEY'
+      : 'SOLARPRO_API_KEY';
     console.log(
-      `[MOBILE_AUTH] ${routeLabel} Path B check: ` +
+      `[MOBILE_AUTH] ${routeLabel} Path B check (source=${keySource}): ` +
       `serviceKey(len=${serviceApiKey.length} first8=${serviceApiKey.slice(0,8)}) ` +
       `bearer(len=${bearerToken?.length ?? 0} first8=${bearerToken?.slice(0,8) ?? 'n/a'}) ` +
       `match=${bearerToken === serviceApiKey}`
     );
   } else {
-    console.warn(`[MOBILE_AUTH] ${routeLabel} Path B: MOBILE_SERVICE_API_KEY not set in env`);
+    console.warn(`[MOBILE_AUTH] ${routeLabel} Path B: neither MOBILE_SERVICE_API_KEY nor SOLARPRO_API_KEY set in env`);
   }
 
   if (serviceApiKey && bearerToken && bearerToken === serviceApiKey) {
@@ -216,6 +223,40 @@ export async function resolveMobileUser(
   // STEP 4 — Extract userId from any supported claim name
   const d   = decoded as unknown as Record<string, unknown>;
   const uid = (d.solarpro_user_id ?? d.userId ?? d.sub) as string | undefined;
+
+  // STEP 4b — If no UUID userId claim, try email→userId lookup.
+  // Render's mobile proxy mints a JWT with {email} signed by SOLARPRO_HANDOFF_SECRET.
+  // This lets Render forward the mobile user's identity without needing a shared
+  // service key — only the handoff secret (already synced on both sides) is required.
+  const emailClaim = (d.solarpro_email ?? d.email) as string | undefined;
+  if ((!uid || !isValidUUID(uid as string)) && emailClaim) {
+    const normalizedEmail = emailClaim.trim().toLowerCase();
+    console.log(
+      `[MOBILE_AUTH] ${routeLabel} — no UUID userId in JWT, trying email lookup: ${normalizedEmail}`
+    );
+    try {
+      const sql = await getDbReady();
+      const rows = await sql`
+        SELECT id FROM users
+         WHERE LOWER(email) = ${normalizedEmail}
+         LIMIT 1
+      `;
+      if (rows.length > 0) {
+        const resolvedId = rows[0].id as string;
+        console.log(
+          `[MOBILE_AUTH] ${routeLabel} — authenticated via bearer_jwt + email lookup userId=${resolvedId}`
+        );
+        return { userId: resolvedId, source: 'bearer_jwt' };
+      }
+      console.warn(
+        `[MOBILE_AUTH_FAIL] ${routeLabel} — JWT email "${normalizedEmail}" not found in users table`
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[MOBILE_AUTH_FAIL] ${routeLabel} — email lookup DB error: ${msg}`);
+    }
+    return null;
+  }
 
   if (!uid) {
     console.error(

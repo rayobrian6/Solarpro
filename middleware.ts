@@ -40,6 +40,10 @@ const PUBLIC_PATHS = [
   '/api/portal/login',
   '/api/portal/logout',
 
+  // -- Public lead capture (no auth, rate-limited) --
+  '/get-a-quote',
+  '/api/leads/public',
+
   // ── Mobile app endpoints (validated internally via Bearer JWT) ──
   // Middleware only understands session cookies. The mobile field app sends
   // a Bearer token (SOLARPRO_HANDOFF_SECRET-signed JWT). Let requests through
@@ -52,6 +56,13 @@ const PUBLIC_PATHS = [
 
   // ── DB migrations (validated internally via MIGRATE_SECRET) ──
   '/api/migrate',
+
+  // ── Lockout-safe account diagnostic (validated internally via ADMIN_SECRET) ──
+  // Allows diagnosing a locked-out account without needing to be logged in.
+  '/api/admin/debug/account-state',
+
+  // ── Emergency account repair (validated internally via ADMIN_SECRET) ──
+  '/api/admin/repair-account',
 
   // ── REMOVED from public (now require auth): ──────────────────
   // '/api/auth/debug-password-reset',  — debug route, guarded in prod

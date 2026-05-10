@@ -56,6 +56,12 @@ interface Client {
   phone: string | null;
 }
 
+interface Owner {
+  phone:   string | null;
+  email:   string | null;
+  company: string | null;
+}
+
 // ─── Stage Definitions ───────────────────────────────────────────────────────
 
 type StageContent = {
@@ -384,6 +390,7 @@ function CompletedSoFar({
 export default function PortalDashboard() {
   const router = useRouter();
   const [client,        setClient]        = useState<Client | null>(null);
+  const [owner,         setOwner]         = useState<Owner | null>(null);
   const [projects,      setProjects]      = useState<Project[]>([]);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [history,       setHistory]       = useState<StageHistory[]>([]);
@@ -407,6 +414,7 @@ export default function PortalDashboard() {
       if (d.code === 'PORTAL_AUTH_REQUIRED' || res.status === 401) { router.replace('/portal/login'); return; }
       if (!d.success) { setError(d.error || 'Failed to load your project.'); return; }
       setClient(d.client);
+      setOwner(d.owner ?? null);
       const list: Project[] = d.projects ?? [];
       setProjects(list);
       if (list.length > 0) setActiveProject(list[0]);
@@ -488,7 +496,9 @@ export default function PortalDashboard() {
               <Sun size={14} className="text-amber-400" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white leading-none">Under the Sun Solar</div>
+              <div className="text-sm font-bold text-white leading-none">
+                {owner?.company ?? 'Solar Portal'}
+              </div>
               <div className="text-[10px] text-slate-600 mt-0.5">Homeowner Portal</div>
             </div>
           </div>
@@ -734,30 +744,38 @@ export default function PortalDashboard() {
             )}
 
             {/* ── 6. CONTACT ── */}
-            <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
-              <h3 className="text-sm font-bold text-white mb-1">Have a question?</h3>
-              <p className="text-xs text-slate-600 mb-5">Reach out to your project team anytime.</p>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <a href="tel:+1-800-000-0000" className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
-                    <Phone size={12} className="text-amber-400" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-slate-600 uppercase tracking-wide">Phone</p>
-                    <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors">(800) 000-0000</p>
-                  </div>
-                </a>
-                <a href="mailto:hello@underthesun.solar" className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
-                    <Mail size={12} className="text-amber-400" />
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-slate-600 uppercase tracking-wide">Email</p>
-                    <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors">hello@underthesun.solar</p>
-                  </div>
-                </a>
+            {(owner?.phone || owner?.email) && (
+              <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
+                <h3 className="text-sm font-bold text-white mb-1">Have a question?</h3>
+                <p className="text-xs text-slate-600 mb-5">Reach out to your project team anytime.</p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  {owner.phone && (
+                    <a href={`tel:${owner.phone}`}
+                      className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group">
+                      <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
+                        <Phone size={12} className="text-amber-400" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-slate-600 uppercase tracking-wide">Phone</p>
+                        <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors">{owner.phone}</p>
+                      </div>
+                    </a>
+                  )}
+                  {owner.email && (
+                    <a href={`mailto:${owner.email}`}
+                      className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group">
+                      <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
+                        <Mail size={12} className="text-amber-400" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-slate-600 uppercase tracking-wide">Email</p>
+                        <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors">{owner.email}</p>
+                      </div>
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
           </>
         ) : (
@@ -773,7 +791,7 @@ export default function PortalDashboard() {
         <div className="flex items-center justify-center gap-3 pt-2 pb-6">
           <div className="h-px flex-1 bg-white/[0.03]" />
           <span className="text-[10px] text-white/10 flex items-center gap-1.5">
-            <Sun size={9} className="text-amber-500/20" /> Under the Sun Solar
+            <Sun size={9} className="text-amber-500/20" /> {owner?.company ?? 'Solar Portal'}
           </span>
           <div className="h-px flex-1 bg-white/[0.03]" />
         </div>

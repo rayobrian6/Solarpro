@@ -26,7 +26,14 @@ export async function GET(req: NextRequest) {
   const secretOk  = !!secret && secret.length >= 32;
 
   // -- Service key vars ------------------------------------------------------
-  const serviceApiKey = process.env.MOBILE_SERVICE_API_KEY?.trim() ?? null;
+  // Accept either MOBILE_SERVICE_API_KEY (canonical) or SOLARPRO_API_KEY (Render alias).
+  const serviceApiKeyRaw  = process.env.MOBILE_SERVICE_API_KEY?.trim() || process.env.SOLARPRO_API_KEY?.trim() || null;
+  const serviceApiKeySource = process.env.MOBILE_SERVICE_API_KEY?.trim()
+    ? 'MOBILE_SERVICE_API_KEY'
+    : process.env.SOLARPRO_API_KEY?.trim()
+    ? 'SOLARPRO_API_KEY'
+    : null;
+  const serviceApiKey = serviceApiKeyRaw;
   const serviceUserId = process.env.MOBILE_SERVICE_USER_ID?.trim() ?? null;
   const surveyUserId  = process.env.SURVEY_INGEST_DEFAULT_USER_ID?.trim() ?? null;
 
@@ -43,9 +50,15 @@ export async function GET(req: NextRequest) {
     DATABASE_URL: process.env.DATABASE_URL
       ? 'SET'
       : 'NOT SET',
-    MOBILE_SERVICE_API_KEY: !serviceApiKey
+    MOBILE_SERVICE_API_KEY: !process.env.MOBILE_SERVICE_API_KEY?.trim()
       ? 'NOT SET'
-      : `SET (len=${serviceApiKey.length}, first4=${serviceApiKey.slice(0,4)}, last4=${serviceApiKey.slice(-4)})`,
+      : `SET (len=${process.env.MOBILE_SERVICE_API_KEY.trim().length}, first4=${process.env.MOBILE_SERVICE_API_KEY.trim().slice(0,4)})`,
+    SOLARPRO_API_KEY: !process.env.SOLARPRO_API_KEY?.trim()
+      ? 'NOT SET'
+      : `SET (len=${process.env.SOLARPRO_API_KEY.trim().length}, first4=${process.env.SOLARPRO_API_KEY.trim().slice(0,4)})`,
+    'SERVICE_API_KEY_RESOLVED(either)': !serviceApiKey
+      ? `NOT SET (checked MOBILE_SERVICE_API_KEY + SOLARPRO_API_KEY)`
+      : `SET via ${serviceApiKeySource} (len=${serviceApiKey.length})`,
     MOBILE_SERVICE_USER_ID: !serviceUserId
       ? 'NOT SET'
       : `SET (val=${serviceUserId})`,
@@ -123,7 +136,7 @@ export async function GET(req: NextRequest) {
       }
     } else {
       tokenProbe.serviceKeyCheck  = { serviceKeySet: false };
-      tokenProbe.serviceKeyResult = 'SKIPPED — MOBILE_SERVICE_API_KEY not set';
+      tokenProbe.serviceKeyResult = 'SKIPPED — neither MOBILE_SERVICE_API_KEY nor SOLARPRO_API_KEY set';
     }
 
     // JWT decode (no verification)

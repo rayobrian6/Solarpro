@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
 
   try {
-        const rl = await checkRateLimit('maps-session', getClientIp(req));
+    // Use the 'tile' rate limiter (60/60s) for tile proxy requests — higher volume OK
+    const rl = await checkRateLimit('tile', getClientIp(req));
     if (!rl.allowed) {
       return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
     }

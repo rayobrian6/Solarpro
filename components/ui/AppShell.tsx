@@ -384,8 +384,8 @@ function NotificationDropdown({ projects }: { projects: Project[] }) {
 
       {open && (
         <>
-          <div className="fixed inset-0 z-[100]" onClick={() => setOpen(false)} />
-          <div className="fixed w-80 z-[101] rounded-xl overflow-hidden shadow-2xl"
+          <div className="fixed inset-0 z-[9990]" onClick={() => setOpen(false)} />
+          <div className="fixed w-80 z-[9991] rounded-xl overflow-hidden shadow-2xl"
             style={{
               top: pos.top,
               right: pos.right,
@@ -512,6 +512,30 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const toast = useMiniToast();
 
+  // ── Responsive auto-collapse ─────────────────────────────────────────────
+  // On screens narrower than 1280px (xl breakpoint) the sidebar auto-collapses
+  // to icon-only mode so the content area has room to breathe.
+  // Once the user manually toggles the sidebar we stop auto-adjusting for the
+  // remainder of the session (userToggledRef guards the resize handler).
+  const userToggledRef = useRef(false);
+  useLayoutEffect(() => {
+    // Initial collapse on narrow screens (runs before first paint — no flicker)
+    if (typeof window !== 'undefined' && window.innerWidth < 1280) {
+      setCollapsed(true);
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      // Only auto-adjust when the user has NOT manually toggled
+      if (userToggledRef.current) return;
+      setCollapsed(window.innerWidth < 1280);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Carry projectId through design↔engineering navigation
   const navHref = (baseHref: string) => {
     if (baseHref === '/design' || baseHref === '/engineering') {
@@ -562,6 +586,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
     const access = hasPlatformAccess(user);
     if (!access) {
+      // Diagnostic log — helps identify why a user is being redirected.
+      // Fields: userId, role, isFreePass, subscriptionStatus, trialEndsAt, hasAccess
+      console.warn('[AppShell] Access denied → redirecting to /subscribe?expired=1', {
+        userId:             user.id,
+        role:               user.role,
+        isFreePass:         user.isFreePass,
+        subscriptionStatus: user.subscriptionStatus,
+        trialEndsAt:        user.trialEndsAt,
+        hasAccess:          access,
+        pathname,
+      });
       router.push('/subscribe?expired=1');
     }
   }, [user, pathname, router]);
@@ -794,7 +829,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <SidebarContent />
         <button
           type="button"
-          onClick={() => { logClick('TOGGLE_SIDEBAR'); setCollapsed(!collapsed); }}
+          onClick={() => { logClick('TOGGLE_SIDEBAR'); userToggledRef.current = true; setCollapsed(!collapsed); }}
           className="absolute -right-3 top-20 w-6 h-6 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-full flex items-center justify-center text-slate-400 hover:text-white transition-all z-10 shadow-lg"
         >
           {collapsed ? <ChevronRight size={11} /> : <ChevronLeft size={11} />}
@@ -821,7 +856,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <SubscriptionBanner />
-        <header className="relative h-14 flex items-center gap-3 px-4 lg:px-5 flex-shrink-0" style={{ background: 'rgba(9,18,32,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 1px 0 rgba(251,191,36,0.08)' }}>
+        <header className="relative h-14 flex items-center gap-3 px-4 lg:px-5 flex-shrink-0" style={{ background: 'rgba(9,18,32,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', borderBottom: '1px solid rgba(255,255,255,0.06)', boxShadow: '0 1px 0 rgba(251,191,36,0.08)', zIndex: 40 }}>
           {/* Accent gradient stripe */}
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-500/40 to-transparent pointer-events-none" />
           <button

@@ -734,6 +734,10 @@ export function placeGroundRow(opts: {
 
   const frame = buildPlaneFromTwoPoints(p1ECEF, p2ECEF, tiltDeg);
 
+  // v48.30: Reverted vMin back to 0, vMax = heightM.
+  // v48.28 tried vMin=-halfH to center panels on the click line, but negative-v
+  // is the downhill/backward direction in the tilted frame — it rendered a ghost
+  // grid behind and below the real panels. vMin=0 is correct: panels grow uphill.
   return placePanelGrid({
     frame,
     boundaryUV:        [],
@@ -750,6 +754,6 @@ export function placeGroundRow(opts: {
     uMax:              segLen,
     vMin:              0,
     vMax:              dims.heightM,
-    skipBoundaryCheck: true,     // explicit bounds are the only constraint
+    skipBoundaryCheck: true,
   });
 }

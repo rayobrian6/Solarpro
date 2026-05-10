@@ -376,9 +376,13 @@ const v1SurveyCompletedTransformer: SurveyTransformer = {
 
     try {
       // --- projectName ---
+      // Priority: full payload (site_name/project_name) > thin event fields > UUID fallback
+      // The partner sends project_name and site_name in the thin webhook event.
+      // These are used when fetchFullPayload returns null (degraded mode) so we
+      // never fall back to the raw UUID which is unreadable in the UI.
       const projectName = rawPayload !== null
         ? extractProjectNameLegacy(rawPayload, event.survey_id)
-        : `Survey ${event.survey_id}`;
+        : (event.site_name?.trim() || event.project_name?.trim() || `Survey ${event.survey_id}`);
 
       // --- address ---
       const address = rawPayload !== null ? extractAddressLegacy(rawPayload) : null;

@@ -679,6 +679,9 @@ function EngineeringPageInner() {
         if (p.client?.name) patches.clientName = p.client.name;
         if (p.clientId)     setCurrentClientId(p.clientId);
         if (p.systemType)   patches.systemType = p.systemType as SystemType;
+        // Patch lat/lng from project so PVWatts can use coordinates even without a full address
+        if (p.lat != null)  (patches as any).lat = p.lat;
+        if (p.lng != null)  (patches as any).lng = p.lng;
 
         // v47.395 — Parse address components for fallback city / zip / state.
         // Address format: "123 MAIN ST, CITY NAME, ST 12345" or "123 MAIN ST, CITY, ST"
@@ -4835,7 +4838,10 @@ function EngineeringPageInner() {
 
   // ── PVWatts production estimate ──────────────────────────────
   const fetchPVWatts = useCallback(async () => {
-    if (!config.address && !(config as any).lat) return;
+    if (!config.address && !(config as any).lat) {
+      setPvwattsData({ error: 'No location data — add a project address in System Config → Project Info to fetch a production estimate.', loading: false });
+      return;
+    }
     setPvwattsData(prev => ({ ...prev, loading: true, error: undefined }));
     try {
       const res = await fetch('/api/engineering/pvwatts', {
@@ -4846,7 +4852,7 @@ function EngineeringPageInner() {
           systemCapacityKw: parseFloat(totalKw) || 8.0,
           address: config.address || undefined,
           lat: (config as any).lat || undefined,
-          lon: (config as any).lon || undefined,
+          lon: (config as any).lon || (config as any).lng || undefined,
           moduleType: 1,   // Premium
           arrayType: 1,    // Fixed roof mount
           tilt: config.roofPitch ? Math.round(Math.atan(config.roofPitch / 12) * 180 / Math.PI) : 20,
@@ -4873,7 +4879,7 @@ function EngineeringPageInner() {
     } catch (_) {
       setPvwattsData({ error: 'PVWatts API unavailable', loading: false });
     }
-  }, [config.address, totalKw, config.roofPitch]);
+  }, [config.address, (config as any).lat, (config as any).lng, totalKw, config.roofPitch]);
 
   useEffect(() => {
     if (calcDebounceRef.current) clearTimeout(calcDebounceRef.current);
@@ -6295,9 +6301,10 @@ function EngineeringPageInner() {
   // Per-tab feature gating
   const { can, loading: subLoading } = useSubscription();
   // While loading, grant access to avoid flash-of-locked-content for paid/free-pass users
-  const canSLD    = subLoading ? true : can('engineering');
-  const canPermit = subLoading ? true : can('permitPackets');
-  const canBOM    = subLoading ? true : can('bom');
+  const canSLD      = subLoading ? true : can('engineering');
+  const canPermit   = subLoading ? true : can('permitPackets');
+  const canBOM      = subLoading ? true : can('bom');
+  const canSolFence = subLoading ? true : can('solFence');
 
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
     { id: 'config',     label: 'System Config',      icon: <Settings size={14} /> },
@@ -6880,7 +6887,7 @@ function EngineeringPageInner() {
 
       {/* ── v61: Pending Suggestion Card ── */}
       {pendingSuggestion && (
-        <div className="px-6 pt-3 flex-shrink-0">
+        <div className="px-3 md:px-6 pt-3 flex-shrink-0">
           <SuggestionCard suggestion={pendingSuggestion} />
         </div>
       )}
@@ -6997,7 +7004,7 @@ function EngineeringPageInner() {
         <div className="flex flex-1 overflow-hidden">
 
         {/* Main Tab Content */}
-        <div className="flex-1 overflow-y-auto p-6" ref={printRef}>
+        <div className="flex-1 overflow-y-auto p-3 md:p-4 lg:p-6" ref={printRef}>
 
           {/* ── CONFIG TAB ── */}
           {activeTab === 'config' && (() => {
@@ -8691,10 +8698,19 @@ function EngineeringPageInner() {
                       <div className="grid grid-cols-2 gap-2.5">
                         <div>
                           <label className="eng-label">System Type</label>
-                          <select value={config.systemType} onChange={e => updateConfig({ systemType: e.target.value as any })} className="eng-select">
+                          <select
+                            value={config.systemType}
+                            onChange={e => {
+                              if (e.target.value === 'fence' && !canSolFence) return; // silently block; UI shows disabled
+                              updateConfig({ systemType: e.target.value as any });
+                            }}
+                            className="eng-select"
+                          >
                             <option value="roof">Roof Mount</option>
                             <option value="ground">Ground Mount</option>
-                            <option value="fence">Solar Fence</option>
+                            <option value="fence" disabled={!canSolFence}>
+                              Solar Fence{!canSolFence ? ' 🔒 Contractor' : ''}
+                            </option>
                           </select>
                         </div>
                         <div>

@@ -117,12 +117,13 @@ export interface IngestResultFailure {
 // can filter the admin log by error category.
 // ---------------------------------------------------------------------------
 export type IngestErrorCode =
-  | 'MISSING_OWNER_ID'        // SURVEY_INGEST_DEFAULT_USER_ID env var not set
-  | 'LINK_RESOLUTION_FAILED'  // projectLinkResolver could not determine a project target
-  | 'TRANSFORM_FAILED'        // transformLayer.transform() threw
-  | 'DB_WRITE_FAILED'         // project upsert or file insert failed
-  | 'DELIVERY_UPDATE_FAILED'  // could not mark delivery as ingested/failed in DB
-  | 'UNKNOWN';                // catch-all for unexpected errors
+  | 'MISSING_OWNER_ID'           // SURVEY_INGEST_DEFAULT_USER_ID env var not set
+  | 'LINK_RESOLUTION_FAILED'     // projectLinkResolver could not determine a project target
+  | 'PROJECT_RESOLUTION_FAILED'  // could not resolve an EXISTING project for this survey
+  | 'TRANSFORM_FAILED'           // transformLayer.transform() threw
+  | 'DB_WRITE_FAILED'            // project upsert or file insert failed
+  | 'DELIVERY_UPDATE_FAILED'     // could not mark delivery as ingested/failed in DB
+  | 'UNKNOWN';                   // catch-all for unexpected errors
 
 // ---------------------------------------------------------------------------
 // SurveyProjectLinkStrategy — Q8 abstraction.
@@ -152,43 +153,39 @@ export const DEFAULT_SURVEY_PROJECT_LINK_STRATEGY: SurveyProjectLinkStrategy = '
 
 // ---------------------------------------------------------------------------
 // LinkResolution — output of projectLinkResolver.resolveProjectLink().
+//
+// v47.440: Only two outcomes are valid:
+//   'attach'           — a direct project UUID is known (from JWT or on-device
+//                        picker). Pipeline verifies it exists in DB.
+//   'resolve_existing' — no direct UUID; pipeline must look up an existing
+//                        project by survey_external_id or client+address.
+//                        NEVER creates a new project.
+//   'error'            — resolver could not even produce a lookup strategy.
+//
+// The old 'create', 'create_under_client', and 'triage' variants have been
+// removed. Surveys MUST attach to existing projects.
 // ---------------------------------------------------------------------------
 export type LinkResolution =
   | LinkResolutionAttach
-  | LinkResolutionCreate
-  | LinkResolutionCreateUnderClient
-  | LinkResolutionTriage
+  | LinkResolutionResolveExisting
   | LinkResolutionError;
 
 export interface LinkResolutionAttach {
   action: 'attach';
-  /** Existing SolarPro project ID to attach this survey to. */
+  /** Existing SolarPro project UUID to attach this survey to.
+   *  Pipeline validates this UUID exists in DB before proceeding. */
   projectId: string;
+  /** Which mechanism produced this UUID (for [SURVEY_PROJECT_RESOLUTION] log). */
+  method: 'direct_id' | 'selected_project';
 }
 
-export interface LinkResolutionCreate {
-  action: 'create';
-  /** survey_external_id to use as the idempotency key on INSERT. */
+export interface LinkResolutionResolveExisting {
+  action: 'resolve_existing';
+  /** The survey_external_id (= event.survey_id) used for Priority B lookup. */
   surveyExternalId: string;
-  /** The strategy that decided to create (for logging). */
-  strategy: 'CREATE_ORPHAN';
-}
-
-// v47.438: Create a new project under a specific client (on-device picker selected a client).
-export interface LinkResolutionCreateUnderClient {
-  action: 'create_under_client';
-  /** SolarPro client UUID to attach the new project to. */
-  clientId: string;
-  /** survey_external_id to use as the idempotency key on INSERT. */
-  surveyExternalId: string;
-}
-
-export interface LinkResolutionTriage {
-  action: 'triage';
-  /** survey_external_id to store on a triage record. */
-  surveyExternalId: string;
-  /** Reason ops needs to resolve this manually. */
-  reason: string;
+  /** Hint fields forwarded to the pipeline DB resolver. */
+  clientId: string | null;
+  address: string | null;
 }
 
 export interface LinkResolutionError {

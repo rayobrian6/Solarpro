@@ -1,11 +1,18 @@
 // ============================================================================
-// v47.434 Stage 9.1 — Admin Webhook Replay (STUB)
+// v47.437 — Admin Webhook Replay
 //
 // POST /api/admin/survey-webhook-log/:id/replay
 //
-// v47.434 SCOPE: returns 501 NOT IMPLEMENTED. The endpoint shape is locked so
-// the admin UI can wire to it; the actual replay semantics (re-fetch + re-transform
-// + mark status='replayed') land in v47.437.
+// Re-runs the ingest pipeline for a previously received webhook delivery.
+// Useful for recovering from pipeline failures or re-fetching payload data
+// after fixing env vars (e.g. PARTNER_BASE_URL was empty).
+//
+// Steps:
+//   1. Load delivery row from webhook_deliveries
+//   2. Parse the raw_body back into a SurveyCompletedEvent envelope
+//   3. Re-resolve owner (same logic as the original webhook handler)
+//   4. Run runIngestPipeline() with the delivery's original data
+//   5. Update webhook_deliveries.status = 'replayed'
 // ============================================================================
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -14,7 +21,11 @@ export const revalidate = 0;
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
-import { isValidUUID } from '@/lib/db-neon';
+import { getDbReady, isValidUUID } from '@/lib/db-neon';
+import { validateEnvelope } from '@/lib/survey/envelopeValidator';
+import { runIngestPipeline } from '@/lib/survey/ingest/ingestPipeline';
+import { resolveIngestOwner } from '@/lib/survey/ingest/ownerResolver';
+import type { IngestContext } from '@/lib/survey/ingest/types';
 
 export async function POST(
   req: NextRequest,
@@ -36,14 +47,96 @@ export async function POST(
     return NextResponse.json({ success: false, error: 'Invalid delivery id format.' }, { status: 400 });
   }
 
-  return NextResponse.json(
-    {
-      success: false,
-      error: 'Replay not implemented',
-      reason: 'REPLAY_NOT_IMPLEMENTED',
-      note: 'Ships in v47.437 alongside the full ingest pipeline.',
-      deliveryId: id,
-    },
-    { status: 501 },
+  const sql = await getDbReady();
+
+  // ── Load delivery row ──────────────────────────────────────────────────────
+  const rows = await sql`
+    SELECT id, raw_body, status, event_id, signature_valid
+      FROM webhook_deliveries
+     WHERE id = ${id}
+     LIMIT 1
+  `;
+
+  if (!rows.length) {
+    return NextResponse.json({ success: false, error: 'Delivery not found.' }, { status: 404 });
+  }
+
+  const delivery = rows[0] as {
+    id: string;
+    raw_body: string;
+    status: string;
+    event_id: string;
+    signature_valid: boolean;
+  };
+
+  // ── Parse envelope from raw_body ───────────────────────────────────────────
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(delivery.raw_body);
+  } catch {
+    return NextResponse.json(
+      { success: false, error: 'raw_body is not valid JSON — cannot replay.' },
+      { status: 422 },
+    );
+  }
+
+  const v = validateEnvelope(parsed);
+  if (!v.ok) {
+    return NextResponse.json(
+      { success: false, error: `Envelope validation failed: ${v.error}` },
+      { status: 422 },
+    );
+  }
+
+  const envelope = v.event;
+
+  // ── Resolve owner ──────────────────────────────────────────────────────────
+  const ownerResolution = await resolveIngestOwner(
+    envelope.solarpro_user_id    ?? null,
+    delivery.id,
+    envelope.solarpro_email      ?? null,
+    envelope.solarpro_project_id ?? null,
+    envelope.inspector_email     ?? null,
+    envelope.inspector_name      ?? null,
   );
+
+  if (!ownerResolution) {
+    return NextResponse.json(
+      { success: false, error: 'Owner resolution failed — SURVEY_INGEST_DEFAULT_USER_ID not configured.' },
+      { status: 500 },
+    );
+  }
+
+  // ── Build ingest context ───────────────────────────────────────────────────
+  const ingestContext: IngestContext = {
+    event: envelope,
+    deliveryId: delivery.id,
+    ownerId: ownerResolution.ownerId,
+    ownerSource: ownerResolution.ownerSource,
+    partnerProjectId: envelope.solarpro_project_id ?? null,
+    selectedProjectId: envelope.solarpro_selected_project_id ?? null,
+    selectedClientId:  envelope.solarpro_selected_client_id  ?? null,
+    receivedAt: new Date().toISOString(),
+    traceId: `replay-${delivery.id}`,
+  };
+
+  // ── Run ingest pipeline ────────────────────────────────────────────────────
+  const ingestResult = await runIngestPipeline(ingestContext);
+
+  // ── Mark delivery as replayed ──────────────────────────────────────────────
+  try {
+    await sql`
+      UPDATE webhook_deliveries
+         SET status = 'replayed', processed_at = now()
+       WHERE id = ${id}
+    `;
+  } catch {
+    // non-fatal
+  }
+
+  return NextResponse.json({
+    success: ingestResult.status === 'ingested',
+    deliveryId: id,
+    ingestResult,
+  });
 }

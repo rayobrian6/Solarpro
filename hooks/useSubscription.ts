@@ -8,11 +8,13 @@
  * and ensures all components see the same user state simultaneously.
  *
  * All access decisions flow through hasPlatformAccess() from lib/permissions.ts.
+ * All price display values come from lib/pricing.config.ts.
  */
 
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess, canAccess, checkAccess, FeatureKey } from '@/lib/permissions';
-import type { PlanId } from '@/lib/stripe';
+import type { PlanId } from '@/lib/pricing.config';
+import { PRICING_PLANS } from '@/lib/pricing.config';
 
 export interface SubscriptionState {
   loading: boolean;
@@ -41,10 +43,11 @@ const PLAN_LABELS: Record<string, string> = {
   free_pass:    'Free Pass',
 };
 
+// Prices come from PRICING_PLANS (single source of truth)
 const PLAN_PRICES: Record<string, string> = {
-  starter:      '$79/mo',
-  professional: '$149/mo',
-  contractor:   '$250/mo',
+  starter:      `$${PRICING_PLANS.starter.price}/mo`,
+  professional: `$${PRICING_PLANS.professional.price}/mo`,
+  contractor:   `$${PRICING_PLANS.contractor.price}/mo`,
   enterprise:   'Custom',
   free_pass:    'Free',
 };
@@ -52,7 +55,7 @@ const PLAN_PRICES: Record<string, string> = {
 const PLAN_COLORS: Record<string, string> = {
   starter:      'text-slate-300',
   professional: 'text-amber-400',
-  contractor:   'text-blue-400',
+  contractor:   'text-amber-400',
   enterprise:   'text-purple-400',
   free_pass:    'text-green-400',
 };
@@ -102,7 +105,7 @@ export function useSubscription(): SubscriptionState {
     isPastDue,
     isCanceled,
     planLabel: PLAN_LABELS[plan] || 'Starter',
-    planPrice: PLAN_PRICES[plan] || '$79/mo',
+    planPrice: PLAN_PRICES[plan] || `$${PRICING_PLANS.starter.price}/mo`,
     planColor: PLAN_COLORS[plan] || 'text-slate-300',
     can: (feature: FeatureKey) => {
       // hasPlatformAccess covers admin + free_pass + active subscription

@@ -25,7 +25,7 @@ interface Props {
   costEstimate: any;
   calculating: boolean;
   onCalculate: () => void;
-  project: Project;
+  project?: Project;  // optional — supports ephemeral (unsaved) design mode
 }
 
 function SliderRow({ label, value, min, max, step, unit, onChange }: {
@@ -96,7 +96,7 @@ export default function DesignSidebar({
   const MONTHS = ['J','F','M','A','M','J','J','A','S','O','N','D'];
 
   return (
-    <div className="w-72 bg-slate-900 border-l border-slate-700/50 flex flex-col overflow-hidden flex-shrink-0">
+    <div className="w-60 xl:w-72 bg-slate-900 border-l border-slate-700/50 flex flex-col overflow-hidden flex-shrink-0">
       <div className="flex-1 overflow-y-auto">
 
         {/* Panel Selection */}
@@ -216,7 +216,7 @@ export default function DesignSidebar({
 
             <button
               onClick={onCalculate}
-              disabled={calculating || panels.length === 0}
+              disabled={calculating}
               className="btn-primary w-full mt-1"
             >
               {calculating ? <><Loader size={14} className="animate-spin" /> Calculating...</> : <><Play size={14} /> Calculate Production</>}
@@ -312,12 +312,18 @@ export default function DesignSidebar({
               </div>
             </div>
 
-            <Link
-              href={`/proposals?projectId=${project.id}`}
-              className="btn-primary w-full mt-2 text-xs"
-            >
-              Generate Proposal <ArrowRight size={12} />
-            </Link>
+            {project?.id ? (
+              <Link
+                href={`/proposals?projectId=${project.id}`}
+                className="btn-primary w-full mt-2 text-xs"
+              >
+                Generate Proposal <ArrowRight size={12} />
+              </Link>
+            ) : (
+              <div className="text-xs text-slate-500 text-center mt-2 px-2 py-1.5 bg-slate-800/60 rounded-lg">
+                Save your design to generate a proposal
+              </div>
+            )}
           </Section>
         )}
       </div>

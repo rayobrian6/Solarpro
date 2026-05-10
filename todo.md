@@ -1,13 +1,18 @@
-# PHASE 1 — ADMIN LEAD SYSTEM
+# DECOUPLE PRODUCTION CALCULATION FROM PROJECT DEPENDENCY
 
-## Tasks
-- [x] Read codebase conventions
-- [x] Migration 018: leads table
-- [x] API: GET/POST /api/admin/leads
-- [x] API: GET/PATCH /api/admin/leads/[id]
-- [x] API: POST /api/admin/leads/[id]/convert
-- [x] Page: /admin/leads (list)
-- [x] Page: /admin/leads/[id] (detail)
-- [x] Add Leads to AdminShell nav
-- [x] TypeScript check
-- [x] Commit + push
+## Completed
+- [x] Add `SystemDefinition` and `LocationInput` types to `types/index.ts`
+- [x] Add `calculateProductionFromDefinition()` to `lib/pvwatts.ts`
+- [x] Rewrite `app/api/production/route.ts` with two-shape API (ephemeral + project-backed)
+- [x] Modify `components/design/DesignStudio.tsx`
+  - [x] Add `buildSystemDefinition()` — builds SystemDefinition from current UI state
+  - [x] Add `buildLocationInput()` — builds LocationInput from mapCenter + project context
+  - [x] Update `calculateProduction()` to send ephemeral shape (`systemDefinition + location`)
+  - [x] Refactor `buildLayout()` to reuse `buildSystemDefinition()` (no duplication)
+  - [x] Add "Unsaved Design" amber badge in toolbar
+- [x] Modify `components/design/DesignSidebar.tsx`
+  - [x] Make `project` prop optional
+  - [x] Remove `panels.length === 0` from Calculate button disabled condition
+  - [x] Conditionally render Generate Proposal link only when `project?.id` exists
+- [x] TypeScript check — 0 errors
+- [x] Commit + push to master

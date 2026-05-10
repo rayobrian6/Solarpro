@@ -113,10 +113,15 @@ export async function POST(req: NextRequest) {
     // 4. Hash the new password with bcrypt (cost 12)
     const passwordHash = await hashPassword(password);
 
-    // 5. Update the user's password
+    // 5. Update the user's password AND clear is_free_pass.
+    // Clearing is_free_pass is critical: if the account was flagged as a
+    // free-pass orphan, the login route's Safety Net B would otherwise keep
+    // forcing a reset on every failed login attempt even after a valid
+    // bcrypt hash has been stored — creating an infinite reset loop.
     await sql`
       UPDATE users
       SET password_hash = ${passwordHash},
+          is_free_pass  = false,
           updated_at    = NOW()
       WHERE id = ${tokenRecord.user_id}
     `;

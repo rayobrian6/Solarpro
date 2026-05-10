@@ -2427,17 +2427,39 @@ export async function createSiteSurvey(data: {
       ${data.externalSurveyId ?? null},
       ${data.deliveryId ?? null}
     )
-    ON CONFLICT DO NOTHING
+    ON CONFLICT (external_survey_id)
+    DO UPDATE SET
+      -- Idempotent re-delivery: update mutable fields but keep id/created_at stable.
+      -- This ensures force-ingest + backfill can safely re-run without duplicates.
+      -- project_id and client_id are updated so replays can fix surveys that
+      -- initially landed under the wrong project (e.g. first delivery had no
+      -- solarpro_project_id claim; a replay after the column was populated will
+      -- now correctly re-link the survey to the right project).
+      status           = EXCLUDED.status,
+      project_id       = COALESCE(EXCLUDED.project_id, site_surveys.project_id),
+      client_id        = COALESCE(EXCLUDED.client_id, site_surveys.client_id),
+      address_snapshot = COALESCE(EXCLUDED.address_snapshot, site_surveys.address_snapshot),
+      survey_data      = COALESCE(EXCLUDED.survey_data, site_surveys.survey_data),
+      inspector_name   = COALESCE(EXCLUDED.inspector_name, site_surveys.inspector_name),
+      delivery_id      = COALESCE(EXCLUDED.delivery_id, site_surveys.delivery_id),
+      updated_at       = NOW()
     RETURNING *
   `;
   if (!rows.length) {
-    // Row already exists (rare race) — fetch it
+    // Fallback: fetch by external_survey_id (should not happen after ON CONFLICT DO UPDATE)
     const existing = await sql`
       SELECT * FROM site_surveys
       WHERE external_survey_id = ${data.externalSurveyId ?? ''}
       LIMIT 1
     `;
-    return rowToSiteSurvey(existing[0] as Record<string, unknown>);
+    if (existing.length) return rowToSiteSurvey(existing[0] as Record<string, unknown>);
+    // Last resort: fetch by project_id
+    const byProject = await sql`
+      SELECT * FROM site_surveys
+      WHERE project_id = ${data.projectId ?? ''}
+      LIMIT 1
+    `;
+    return rowToSiteSurvey(byProject[0] as Record<string, unknown>);
   }
   return rowToSiteSurvey(rows[0] as Record<string, unknown>);
 }

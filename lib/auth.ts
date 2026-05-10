@@ -50,12 +50,92 @@ export function getDb(): SqlExecutor {
 }
 
 // ── Password helpers ─────────────────────────────────────────────────────────
+
+// ---------------------------------------------------------------------------
+// isLegacyHash — detect non-bcrypt password_hash values stored in DB.
+//
+// Known legacy formats:
+//   1. "salt_hex:hash_hex" — custom SHA-512 scheme from pre-v47 data import.
+//      Format: <32-hex-salt>:<128-hex-hash>  total length = 161 chars.
+//   2. "__SOLARPRO_MUST_RESET__" — sentinel set by migrate/route.ts for
+//      pre-seeded users who have never set a real password.
+//   3. Any other non-bcrypt string (no $2a$/$2b$ prefix or wrong length).
+//
+// bcrypt hashes always start with "$2a$", "$2b$", or "$2y$" and are 60 chars.
+// ---------------------------------------------------------------------------
+export function isLegacyHash(hash: string | null | undefined): boolean {
+  if (!hash) return false;
+
+  // ---------------------------------------------------------------------------
+  // SAFETY NET: bcrypt cost=4 hashes are NEVER produced by real password flows.
+  // We hash real passwords at cost 10 or 12.  A $2b$04$ hash is overwhelmingly
+  // our old placeholder (bcrypt.hash('__SOLARPRO_MUST_RESET__', 4)) written by
+  // an earlier version of the migration script.  Detecting this here means the
+  // login route returns LEGACY_HASH_RESET_REQUIRED (with a clear "use Forgot
+  // Password" message) even if Migration 030 / free-pass repair hasn't run yet.
+  // This is the permanent safety net — independent of any migration.
+  // ---------------------------------------------------------------------------
+  if (/^\$2[aby]\$04\$/.test(hash) && hash.length === 60) return true;
+
+  // Valid bcrypt: starts with $2a$, $2b$, $2y$ and is exactly 60 chars
+  if (/^\$2[aby]\$\d{2}\$/.test(hash) && hash.length === 60) return false;
+  // Valid argon2: starts with $argon2
+  if (hash.startsWith('$argon2')) return false;
+  // Everything else is legacy / invalid
+  return true;
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 12);
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash);
+// ---------------------------------------------------------------------------
+// verifyPassword — bcrypt.compare with legacy hash detection.
+//
+// Overload 1 (default):  returns boolean (backward-compatible)
+// Overload 2 (extended): returns { valid, requiresReset?, hashFormat }
+//
+// If the stored hash is a legacy/non-bcrypt format:
+//   - Returns valid=false, requiresReset=true
+//   - NEVER silently resets the password
+//   - Login route uses requiresReset to show a friendly "please reset" message
+// ---------------------------------------------------------------------------
+export async function verifyPassword(
+  password: string,
+  hash: string,
+): Promise<boolean>;
+export async function verifyPassword(
+  password: string,
+  hash: string,
+  opts: { extended: true },
+): Promise<{ valid: boolean; requiresReset?: boolean; hashFormat: string }>;
+export async function verifyPassword(
+  password: string,
+  hash: string,
+  opts?: { extended?: boolean },
+): Promise<boolean | { valid: boolean; requiresReset?: boolean; hashFormat: string }> {
+  // Detect legacy hash BEFORE calling bcrypt (bcrypt throws on invalid hash strings)
+  if (isLegacyHash(hash)) {
+    const hashFormat = hash === '__SOLARPRO_MUST_RESET__'
+      ? 'sentinel'
+      : /^\$2[aby]\$04\$/.test(hash) && hash.length === 60
+      ? 'cost4_bcrypt_sentinel'   // bcrypt-of-sentinel from old migration script
+      : /^[0-9a-f]{32}:[0-9a-f]{128}$/i.test(hash)
+      ? 'legacy_salt_sha512'
+      : 'unknown_legacy';
+
+    if (opts?.extended) {
+      return { valid: false, requiresReset: true, hashFormat };
+    }
+    return false;
+  }
+
+  const valid = await bcrypt.compare(password, hash);
+
+  if (opts?.extended) {
+    return { valid, hashFormat: 'bcrypt' };
+  }
+  return valid;
 }
 
 // ── JWT / Session ─────────────────────────────────────────────────────────────

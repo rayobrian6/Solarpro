@@ -120,7 +120,7 @@ export async function PATCH(req: NextRequest) {
 
       case 'change_plan': {
         const plan = body.plan;
-        if (!['starter', 'contractor', 'pro', 'enterprise'].includes(plan))
+        if (!['starter', 'professional', 'contractor', 'enterprise'].includes(plan))
           return NextResponse.json({ success: false, error: 'Invalid plan' }, { status: 400 });
         await sql`UPDATE users SET plan = ${plan}, updated_at = NOW() WHERE company = ${company}`;
         await logAdminAction({ adminId: admin.id, action: 'company_change_plan', targetCompany: company, metadata: { newPlan: plan } });

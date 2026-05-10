@@ -106,10 +106,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       event_id:     payload.surveyId,
       survey_id:    payload.surveyId,
       completed_at: payload.submittedAt,
-      schemaVersion: payload.schemaVersion,
+      // schemaVersion is intentionally OMITTED from the webhook envelope.
+      // The envelope validator (envelopeValidator.ts) accepts absent schemaVersion
+      // and coerces it to CURRENT_SCHEMA_VERSION ('1.0'). The mobile payload's
+      // schemaVersion ('2.0') is an internal V2 schema and must not be forwarded.
       // F-06 ownership claims — forwarded from the verified handoff JWT.
       solarpro_user_id:    claims.solarpro_user_id    ?? null,
-      solarpro_project_id: claims.solarpro_project_id ?? null,
+      // v47.442: Use claims.solarpro_project_id when present (explicit handoff JWT claim).
+      // Fall back to payload.projectId when solarpro_project_id is absent from the JWT
+      // (e.g. the JWT was minted without it) but the payload carries a real project UUID.
+      // This ensures Strategy 3 (project-based owner resolution in ownerResolver.ts) can
+      // fire even when the JWT predates the solarpro_project_id claim addition.
+      // NEVER forward __standalone__ as a project ID -- that is a sentinel, not a UUID.
+      solarpro_project_id: claims.solarpro_project_id
+        ?? (payload.projectId && payload.projectId !== STANDALONE_PROJECT_ID
+            ? payload.projectId
+            : null),
       solarpro_email:      claims.solarpro_email       ?? null,
       // Survey payload fields
       projectId:         payload.projectId,
@@ -128,11 +140,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       webhookBodyObj['solarpro_selected_client_id']  = payload.selectedClientId  ?? null;
     }
 
+    // v47.441: Inline the full SurveyV2Payload so the ingest pipeline (Step C)
+    // can use it directly as rawPayload without fetching from the partner API.
+    // This ensures photos (with category labels) and physicalData are extracted
+    // by the v2.0 transformer even though schemaVersion is absent from the envelope.
+    webhookBodyObj['inline_payload'] = payload as unknown as Record<string, unknown>;
+
     const webhookBodyStr = JSON.stringify(webhookBodyObj);
+
+    // Timestamp is included in the signed string so the verifier can enforce
+    // replay-protection (5-minute tolerance window). ISO-8601 format is accepted
+    // by parseTimestampHeaderToSeconds() in verifyWebhookSignature.ts.
+    const timestamp = new Date().toISOString();
+    const signedString = `${timestamp}.${webhookBodyStr}`;
 
     const { createHmac } = await import('crypto');
     const signature = createHmac('sha256', webhookSecret)
-      .update(webhookBodyStr)
+      .update(signedString)
       .digest('hex');
 
     // Construct internal webhook URL — always this app, never the partner app
@@ -142,8 +166,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const webhookRes = await fetch(webhookUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type':       'application/json',
         'x-survey-signature': `sha256=${signature}`,
+        'x-survey-timestamp': timestamp,
+        'x-survey-event-id':  webhookBodyObj.event_id as string,
       },
       body: webhookBodyStr,
     });

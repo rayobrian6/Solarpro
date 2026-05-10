@@ -25,12 +25,31 @@ export interface EnvValidationResult {
  * Required env vars — app CANNOT function without these.
  * Missing any of these should block deployment / fail fast.
  *
- *   DATABASE_URL    — Neon PostgreSQL connection string
- *   JWT_SECRET      — JWT session signing secret (32+ chars)
+ *   DATABASE_URL             — Neon PostgreSQL connection string
+ *   JWT_SECRET               — JWT session signing secret (32+ chars)
+ *
+ * ── Pipeline-critical (survey → SolarPro ingest) ──────────────────────────
+ *   SURVEY_WEBHOOK_SECRET    — HMAC-SHA256 secret for inbound webhook verification.
+ *                              MUST match SURVEY_WEBHOOK_SECRET on Render.
+ *                              Changing this causes all webhooks to be rejected
+ *                              with 401 SIGNATURE_MISMATCH and surveys will not land.
+ *
+ *   SOLARPRO_HANDOFF_SECRET  — HS256 secret for mobile proxy JWT verification.
+ *                              MUST match SOLARPRO_HANDOFF_SECRET on Render.
+ *                              Changing this breaks the mobile client dropdown
+ *                              (upstream_auth_failed) immediately.
+ *
+ *   SURVEY_INGEST_DEFAULT_USER_ID — UUID of the SolarPro user who owns
+ *                              ingest-created projects. Must be a real user in the DB.
+ *                              Changing this orphans all new ingest surveys.
  */
 const REQUIRED_VARS = [
   'DATABASE_URL',
   'JWT_SECRET',
+  // ── Pipeline-critical — DO NOT CHANGE without updating Render to match ──
+  'SURVEY_WEBHOOK_SECRET',
+  'SOLARPRO_HANDOFF_SECRET',
+  'SURVEY_INGEST_DEFAULT_USER_ID',
 ] as const;
 
 /**
@@ -165,13 +184,18 @@ export function getMissingVars(): { required: string[]; recommended: string[] } 
 
 function getVarDescription(varName: string): string {
   const descriptions: Record<string, string> = {
-    DATABASE_URL:           'Neon PostgreSQL connection string (postgresql://...)',
-    JWT_SECRET:             'Secret key for JWT session signing (random 32+ char string)',
-    ANTHROPIC_API_KEY:      'Anthropic API key for Claude 3.5 Sonnet bill extraction (sk-ant-...)',
-    OPENAI_API_KEY:         'OpenAI API key for GPT-4o-mini bill extraction fallback (sk-...)',
-    GOOGLE_MAPS_API_KEY:    'Google Maps API key for geocoding + utility rate detection',
-    RESEND_API_KEY:         'Resend API key for transactional email (re_...)',
-    NEXT_PUBLIC_BASE_URL:   'Production base URL, e.g. https://solarpro-v31.vercel.app',
+    DATABASE_URL:                    'Neon PostgreSQL connection string (postgresql://...)',
+    JWT_SECRET:                      'Secret key for JWT session signing (random 32+ char string)',
+    // ── Pipeline-critical ───────────────────────────────────────────────────
+    SURVEY_WEBHOOK_SECRET:           'HMAC secret for inbound webhook verification — MUST match Render SURVEY_WEBHOOK_SECRET',
+    SOLARPRO_HANDOFF_SECRET:         'HS256 secret for mobile proxy JWT auth — MUST match Render SOLARPRO_HANDOFF_SECRET',
+    SURVEY_INGEST_DEFAULT_USER_ID:   'UUID of SolarPro user who owns ingest-created projects (must be a real user UUID)',
+    // ── Optional ────────────────────────────────────────────────────────────
+    ANTHROPIC_API_KEY:               'Anthropic API key for Claude 3.5 Sonnet bill extraction (sk-ant-...)',
+    OPENAI_API_KEY:                  'OpenAI API key for GPT-4o-mini bill extraction fallback (sk-...)',
+    GOOGLE_MAPS_API_KEY:             'Google Maps API key for geocoding + utility rate detection',
+    RESEND_API_KEY:                  'Resend API key for transactional email (re_...)',
+    NEXT_PUBLIC_BASE_URL:            'Production base URL, e.g. https://solarpro-v31.vercel.app',
   };
   return descriptions[varName] ?? 'Required for app functionality';
 }

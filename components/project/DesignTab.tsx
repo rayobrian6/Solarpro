@@ -147,10 +147,22 @@ export default function DesignTab({ project, onEquipmentUpdate }: DesignTabProps
             <span className="text-xl">{typeIcon}</span> System Configuration
           </h4>
           <div className="space-y-2 text-sm">
+            {/* System Type row with change link */}
+            <div className="flex justify-between items-center border-b border-slate-700/50 pb-2">
+              <span className="text-slate-400">System Type</span>
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-white">{typeLabel}</span>
+                <Link
+                  href={`/projects/${project.id}?changeType=1`}
+                  className="text-xs text-amber-400 hover:text-amber-300 transition-colors underline underline-offset-2"
+                >
+                  Change
+                </Link>
+              </div>
+            </div>
             {[
               { label: 'System Size', value: `${layout.systemSizeKw.toFixed(2)} kW` },
               { label: 'Panel Count', value: `${layout.totalPanels} panels` },
-              { label: 'System Type', value: typeLabel },
               ...(project.systemType === 'fence' ? [
                 { label: 'Tilt', value: '90° (Vertical)' },
                 { label: 'Bifacial', value: layout.bifacialOptimized ? 'Yes (+20%)' : 'Yes (+10%)' },

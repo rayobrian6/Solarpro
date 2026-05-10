@@ -2,9 +2,10 @@
 import React, { useEffect, useState, Suspense } from 'react';
 import AppShell from '@/components/ui/AppShell';
 import DesignStudio from '@/components/design/DesignStudio';
+import AddressAutocomplete, { type AddressSuggestion } from '@/components/ui/AddressAutocomplete';
 import { useSearchParams } from 'next/navigation';
 import type { Project } from '@/types';
-import { Map, ArrowLeft, Plus, AlertCircle, RefreshCw, Zap, MapPin, Loader2 } from 'lucide-react';
+import { Map, ArrowLeft, Plus, AlertCircle, RefreshCw, Zap, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useAppStore } from '@/store/appStore';
 
@@ -33,31 +34,45 @@ function makeDemoProject(address: string, lat: number, lng: number): Project {
   } as Project;
 }
 
-// ── Quick Launch Panel ───────────────────────────────────────────────────────
+// ── Quick Launch Panel ──────────────────────────────────────────────────────
 function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
   const [address, setAddress] = useState('');
   const [geocoding, setGeocoding] = useState(false);
   const [error, setError] = useState('');
+  // When user picks a suggestion we already have lat/lng — skip re-geocoding
+  const [picked, setPicked] = useState<{ lat: number; lng: number } | null>(null);
 
-  const handleLaunch = async () => {
-    if (!address.trim()) { setError('Please enter an address'); return; }
-    setGeocoding(true);
+  const handleSelect = (s: AddressSuggestion) => {
+    setAddress(s.short_name || s.display_name);
+    setPicked({ lat: s.lat, lng: s.lng });
     setError('');
+  };
+
+  const handleLaunch = async (addr?: string) => {
+    const target = addr ?? address;
+    if (!target.trim()) { setError('Please enter an address'); return; }
+    setError('');
+
+    // Fast path — user already selected a suggestion with coords
+    if (picked) {
+      onLaunch(makeDemoProject(target, picked.lat, picked.lng));
+      return;
+    }
+
+    // Slow path — geocode free-form text
+    setGeocoding(true);
     try {
-      const res = await fetch(`/api/geocode?q=${encodeURIComponent(address)}&mode=search`);
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(target)}&mode=autocomplete`);
       const data = await res.json();
-      if (data.success && data.results?.[0]) {
-        const r = data.results[0];
-        onLaunch(makeDemoProject(address, r.lat, r.lng));
-      } else if (data.lat && data.lng) {
-        onLaunch(makeDemoProject(address, data.lat, data.lng));
+      const first = data.success && data.data?.[0];
+      if (first) {
+        onLaunch(makeDemoProject(first.short_name || target, first.lat, first.lng));
       } else {
-        // Launch with a default center — design studio will let user search
-        onLaunch(makeDemoProject(address, 39.8283, -98.5795));
+        // Design studio has its own address bar — launch with US center as fallback
+        onLaunch(makeDemoProject(target, 39.8283, -98.5795));
       }
     } catch {
-      // Still launch — design studio has its own address search
-      onLaunch(makeDemoProject(address, 39.8283, -98.5795));
+      onLaunch(makeDemoProject(target, 39.8283, -98.5795));
     } finally {
       setGeocoding(false);
     }
@@ -71,33 +86,32 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
         </div>
         <div>
           <h3 className="font-semibold text-white text-sm">Quick Launch — No Project Needed</h3>
-          <p className="text-slate-400 text-xs">Jump straight into 3D design with just an address</p>
+          <p className="text-slate-400 text-xs">Type an address — suggestions appear as you type</p>
         </div>
       </div>
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <MapPin size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={address}
-            onChange={e => setAddress(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleLaunch()}
-            placeholder="Enter any address to open 3D design..."
-            className="input pl-8 text-sm w-full"
-          />
-        </div>
+      <div className="flex gap-2 items-start">
+        <AddressAutocomplete
+          value={address}
+          onChange={v => { setAddress(v); setPicked(null); }}
+          onSelect={handleSelect}
+          onSubmit={handleLaunch}
+          placeholder="Enter any address to open 3D design…"
+          className="flex-1"
+          loading={geocoding}
+          autoFocus
+        />
         <button
-          onClick={handleLaunch}
-          disabled={geocoding}
-          className="btn-primary px-4 flex items-center gap-2 whitespace-nowrap"
+          onClick={() => handleLaunch()}
+          disabled={geocoding || !address.trim()}
+          className="btn-primary px-4 flex items-center gap-2 whitespace-nowrap h-[38px]"
         >
           {geocoding ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-          {geocoding ? 'Loading...' : 'Open 3D Design'}
+          {geocoding ? 'Loading…' : 'Open 3D Design'}
         </button>
       </div>
       {error && <p className="text-red-400 text-xs mt-2">{error}</p>}
       <p className="text-slate-500 text-xs mt-2">
-        💡 You can also search for any address inside the design studio after it opens.
+        💡 Pick a suggestion to fly straight to the correct rooftop — no extra searching needed.
       </p>
     </div>
   );
@@ -106,6 +120,12 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
 function DesignContent({ onQuickLaunch }: { onQuickLaunch?: (p: Project) => void }) {
   const searchParams = useSearchParams();
   const projectId = searchParams.get('projectId');
+
+  // Pre-warm Google Maps session token as early as possible so DesignStudio
+  // doesn't have to wait for it when it mounts (reduces initial tile render time).
+  useEffect(() => {
+    fetch('/api/maps-session').catch(() => {/* silently ignore — DesignStudio will retry */});
+  }, []);
 
   // ✅ Phase 5: Use global store — 3-tier fallback: store → server → localStorage
   const loadActiveProject = useAppStore(s => s.loadActiveProject);

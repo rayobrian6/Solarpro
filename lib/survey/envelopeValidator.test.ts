@@ -96,13 +96,15 @@ describe('validateEnvelope — v47.434a', () => {
       expect(result.event.event_id).toBe(partnerPayload.event_id);
       expect(result.event.survey_id).toBe(partnerPayload.survey_id);
       expect(result.event.completed_at).toBe(partnerPayload.completed_at);
-      // Extra partner fields: project_id, project_name, site_name are silently dropped
-      // (not on SurveyCompletedEvent). inspector_name IS a first-class field
-      // since commit 47b6784 (F-06b ownership resolution).
+      // project_id is still silently dropped (not on SurveyCompletedEvent).
+      // project_name and site_name are now first-class fields (promoted so
+      // SolarPro can show the human-readable name in degraded mode instead
+      // of falling back to "Survey uuid").
+      // inspector_name IS a first-class field since commit 47b6784 (F-06b).
       expect('project_id' in result.event).toBe(false);
-      expect('project_name' in result.event).toBe(false);
-      expect('inspector_name' in result.event).toBe(true);   // promoted in F-06b
-      expect('site_name' in result.event).toBe(false);
+      expect('project_name' in result.event).toBe(true);    // promoted -- survey name fix
+      expect('site_name' in result.event).toBe(true);       // promoted -- survey name fix
+      expect('inspector_name' in result.event).toBe(true);  // promoted in F-06b
     }
   });
 
