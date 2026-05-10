@@ -235,6 +235,8 @@ interface Props {
     polygon3D?: Array<{ x: number; y: number; z: number }>;
     localFrame3D?: { u: { x: number; y: number; z: number }; v: { x: number; y: number; z: number }; n: { x: number; y: number; z: number } };
   }>;
+  /** v50.11: Show irradiance heatmap overlay on the 3D roof */
+  showIrradiance?: boolean;
 }
 
 function log(tag: string, msg: string, data?: any) {
@@ -366,6 +368,7 @@ function SolarEngine3D({
   onRoofPlaneSelect,
   onOrientationChange,
   orientation: orientationProp,
+  showIrradiance = false,
 }: Props) {
   const cesiumRef   = useRef<HTMLDivElement>(null);
   const viewerRef   = useRef<any>(null);
@@ -506,6 +509,8 @@ function SolarEngine3D({
   const [animating, setAnimating] = useState(false);
   const [showParcel, setShowParcel]     = useState(true);
   const [showRoofSegs, setShowRoofSegs] = useState(true);
+  // v50.11: local irradiance toggle — initialised from prop, also togglable from internal button
+  const [showIrradianceLocal, setShowIrradianceLocal] = useState(showIrradiance);
   const [panelCount, setPanelCount]     = useState(panels.length);
   const [fencePtCount, setFencePtCount] = useState(0);
   const [gTilt, setGTilt]               = useState(25);
@@ -538,6 +543,13 @@ function SolarEngine3D({
   const [lastLog, setLastLog]           = useState('');
   const [showShadeLocal, setShowShadeLocal] = useState(showShade);
   const [tileStatus, setTileStatus] = useState<'loading' | 'loaded' | 'failed'>('loading');
+
+  // v50.11: Irradiance heatmap state
+  const irradianceOverlayRef = useRef<any>(null);   // Cesium GroundPrimitive
+  const [irradianceLoading, setIrradianceLoading] = useState(false);
+  const [irradianceBounds, setIrradianceBounds] = useState<{
+    west: number; south: number; east: number; north: number;
+  } | null>(null);
 
   // Phase 0: Debug panel state
   const [renderMode, setRenderMode]           = useState<'TILES' | 'TERRAIN_ONLY'>('TERRAIN_ONLY');
@@ -708,6 +720,78 @@ function SolarEngine3D({
   useEffect(() => { selectedPanelRef.current = selectedPanel; }, [selectedPanel]);
   useEffect(() => { simHourRef.current = simHour; }, [simHour]);
   useEffect(() => { showShadeRef.current = showShade; setShowShadeLocal(showShade); }, [showShade]);
+  // v50.11: sync prop → local state (parent can also drive the toggle)
+  useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
+
+  // v50.11: Irradiance heatmap — load/unload when showIrradianceLocal changes
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    const C = (window as any).Cesium;
+    if (!viewer || !C) return;
+
+    // ── Remove existing overlay ────────────────────────────────────────────
+    if (irradianceOverlayRef.current) {
+      try { viewer.entities.remove(irradianceOverlayRef.current); } catch {}
+      irradianceOverlayRef.current = null;
+    }
+
+    if (!showIrradianceLocal) {
+      try { viewer.scene.requestRender(); } catch {}
+      return;
+    }
+
+    // ── Load + render ──────────────────────────────────────────────────────
+    setIrradianceLoading(true);
+    (async () => {
+      try {
+        const { loadIrradianceLayer } = await import('@/lib/geotiffDecoder');
+        const { renderIrradianceCanvas } = await import('@/lib/irradianceColormap');
+
+        const layer = await loadIrradianceLayer(lat, lng);
+        if (!layer) {
+          addLog('IRRADIANCE', 'No irradiance data available for this location');
+          setIrradianceLoading(false);
+          return;
+        }
+
+        // Render to canvas (RGBA image)
+        const canvas = renderIrradianceCanvas(layer);
+        setIrradianceBounds(layer.bounds);
+
+        // Build Cesium rectangle entity draped over the roof
+        const rect = C.Rectangle.fromDegrees(
+          layer.bounds.west, layer.bounds.south,
+          layer.bounds.east, layer.bounds.north,
+        );
+
+        const entity = viewer.entities.add({
+          name: '__irradiance_heatmap__',
+          rectangle: {
+            coordinates: rect,
+            material: canvas,
+            classificationType: C.ClassificationType?.CESIUM_3D_TILE ?? 0,
+            heightReference: C.HeightReference?.CLAMP_TO_GROUND ?? 0,
+          },
+        });
+
+        irradianceOverlayRef.current = entity;
+        addLog('IRRADIANCE', `Heatmap loaded: ${layer.width}×${layer.height}px minVal=${layer.minVal.toFixed(0)} maxVal=${layer.maxVal.toFixed(0)}`);
+        try { viewer.scene.requestRender(); } catch {}
+      } catch (err: unknown) {
+        addLog('IRRADIANCE', `Failed: ${(err as Error).message}`);
+      } finally {
+        setIrradianceLoading(false);
+      }
+    })();
+
+    return () => {
+      if (irradianceOverlayRef.current && viewerRef.current) {
+        try { viewerRef.current.entities.remove(irradianceOverlayRef.current); } catch {}
+        irradianceOverlayRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showIrradianceLocal, lat, lng]);
 
   const addLog = useCallback((tag: string, msg: string) => {
     const line = log(tag, msg);
@@ -7013,6 +7097,7 @@ function SolarEngine3D({
             { key: 'parcel', label: '📐 Parcel', value: showParcel, color: '#00ff88' },
             { key: 'roof', label: '🏠 Roof Segs', value: showRoofSegs, color: '#ffd700' },
             { key: 'shade', label: '🌡 Shade', value: showShadeLocal, color: '#ff6644' },
+            { key: 'irradiance', label: irradianceLoading ? '⏳ Heatmap' : '☀ Heatmap', value: showIrradianceLocal, color: '#f97316' },
           ].map(({ key, label, value, color }) => (
             <button
               key={key}
@@ -7025,6 +7110,7 @@ function SolarEngine3D({
                   setShowShadeLocal(next);
                   updateShadeColors();
                 }
+                else if (key === 'irradiance') setShowIrradianceLocal(v => !v);
               }}
               style={{
                 padding: '6px 10px', borderRadius: 7, fontSize: 11, fontWeight: 600,

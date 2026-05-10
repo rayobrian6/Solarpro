@@ -8,6 +8,8 @@ import { generateFenceLayout, calculateSystemSize, polygonAreaM2 } from '@/lib/p
 import { generateRoofLayoutOptimized, generateGroundLayoutOptimized, clearGridCache } from '@/lib/panelLayoutOptimized';
 import { enrichRoofPlaneWithLECS, longestEdgeBearing } from '@/lib/roofGeometry';
 import { enrichRoofPlaneWith3DFrame } from '@/lib/surfaceGeometry3D';
+// v50.11: POA calculation + segment labels
+import { ghiToPoa, poaQualityLabel, segmentLabel } from '@/lib/poaCalc';
 import {
   FEET_PER_METER, METERS_PER_FOOT,
   STANDARD_PANEL_WIDTH_FEET, STANDARD_PANEL_HEIGHT_FEET,
@@ -433,6 +435,8 @@ export default function DesignStudio({ project, onSave }: Props) {
   // 3D placement mode
   const [placementMode3D, setPlacementMode3D] = useState<PlacementMode>('select');
   const [showShade3D, setShowShade3D] = useState(false);
+  // v50.11: irradiance heatmap toggle
+  const [showIrradiance, setShowIrradiance] = useState(false);
 
   // Equipment state
   const [availablePanels, setAvailablePanels] = useState<SolarPanel[]>([]);
@@ -3092,6 +3096,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               placementMode={placementMode3D}
               onPlacementModeChange={setPlacementMode3D}
               showShade={showShade3D}
+              showIrradiance={showIrradiance}
               fireSetbacks={fireSetbacks}
               orientation={orientation}
               onOrientationChange={(o) => setOrientation(o)}
@@ -3825,10 +3830,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                           </div>
                         </div>
 
-                        {/* Section table — compact rows */}
+                        {/* Section table — compact rows (v50.11: labels + POA) */}
                         <div className="rounded-lg overflow-hidden border border-slate-700/40">
-                          <div className="grid grid-cols-4 gap-0 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wide">
-                            <div>#</div><div className="text-right">Area</div><div className="text-right">Faces</div><div className="text-right">Sun</div>
+                          {/* 5 columns: Label | Area | Faces | POA | Sun */}
+                          <div className="grid grid-cols-5 gap-0 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wide">
+                            <div>Plane</div><div className="text-right">Area</div><div className="text-right">Faces</div><div className="text-right">POA</div><div className="text-right">Sun</div>
                           </div>
                           {roofSegments.map((segment: any, idx: number) => {
                             const area = (segment.areaM2 ?? segment.stats?.areaMeters2 ?? 0) * 10.7639;
@@ -3838,25 +3844,67 @@ export default function DesignStudio({ project, onSave }: Props) {
                             const azLabel = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round(az / 45) % 8];
                             const sunPct = maxSunshine > 0 ? sun / maxSunshine : 0;
                             const isBest = segment === bestSeg;
-                            // Sun quality colour
                             const sunColor = sunPct > 0.85 ? 'text-amber-400' : sunPct > 0.65 ? 'text-yellow-400' : 'text-slate-400';
+                            // v50.11: POA estimate + plane label
+                            const poa = ghiToPoa(sun, pitch, az, mapCenter.lat);
+                            const { color: poaColor } = poaQualityLabel(poa);
+                            const label = segmentLabel(idx);
                             return (
-                              <div key={idx} className={`grid grid-cols-4 gap-0 px-2 py-1.5 text-xs border-t border-slate-700/30 items-center ${isBest ? 'bg-amber-500/5' : idx % 2 === 0 ? 'bg-slate-800/30' : ''}`}>
+                              <div key={idx} className={`grid grid-cols-5 gap-0 px-2 py-1.5 text-xs border-t border-slate-700/30 items-center ${isBest ? 'bg-amber-500/5' : idx % 2 === 0 ? 'bg-slate-800/30' : ''}`}>
+                                {/* Plane label badge */}
                                 <div className="flex items-center gap-1">
-                                  <span className="font-bold text-white">{idx + 1}</span>
-                                  {isBest && <span className="text-[8px] bg-amber-500 text-slate-900 font-bold px-1 rounded">BEST</span>}
+                                  <span className={`inline-flex items-center justify-center w-5 h-5 rounded font-bold text-[10px] ${isBest ? 'bg-amber-500 text-slate-900' : 'bg-slate-700 text-slate-300'}`}>
+                                    {label}
+                                  </span>
                                 </div>
                                 <div className="text-right text-slate-300">{area.toFixed(0)} ft²</div>
                                 <div className="text-right">
                                   <span className="text-blue-400 font-semibold">{azLabel}</span>
                                   <span className="text-slate-600 ml-0.5 text-[10px]">{pitch.toFixed(0)}°</span>
                                 </div>
+                                <div className={`text-right font-semibold ${poaColor}`}>
+                                  {poa > 0 ? poa.toLocaleString() : '—'}
+                                </div>
                                 <div className={`text-right font-semibold ${sunColor}`}>{sun > 0 ? sun.toFixed(0) : '—'}</div>
                               </div>
                             );
                           })}
                         </div>
-                        <div className="text-[10px] text-slate-600 text-right">Sun hrs/yr · Google Solar API</div>
+
+                        {/* Legend row */}
+                        <div className="flex items-center justify-between text-[10px] text-slate-600">
+                          <span>POA = kWh/m²/yr (est.)</span>
+                          <span>Sun hrs/yr · Google Solar API</span>
+                        </div>
+
+                        {/* v50.11: Heatmap toggle button */}
+                        {show3D && (
+                          <button
+                            onClick={() => setShowIrradiance(v => !v)}
+                            className={`w-full py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 ${
+                              showIrradiance
+                                ? 'bg-orange-500/20 border border-orange-500/40 text-orange-400'
+                                : 'bg-slate-800/60 border border-slate-700/40 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60'
+                            }`}
+                          >
+                            <span>☀</span>
+                            <span>{showIrradiance ? 'Heatmap On — Click to Hide' : 'Show Irradiance Heatmap'}</span>
+                          </button>
+                        )}
+
+                        {/* v50.11: Irradiance colormap legend */}
+                        {showIrradiance && (
+                          <div className="space-y-1">
+                            <div className="h-3 rounded w-full" style={{
+                              background: 'linear-gradient(to right, #3b82f6, #8b5cf6, #facc15, #f97316, #ef4444)',
+                            }} />
+                            <div className="flex justify-between text-[10px] text-slate-500">
+                              <span>Low</span>
+                              <span className="text-slate-400 font-medium">Annual Solar Flux (kWh/m²/yr)</span>
+                              <span>High</span>
+                            </div>
+                          </div>
+                        )}
 
                       </div>
                     </Section>
@@ -3872,7 +3920,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   >
                     <div className="space-y-2">
 
-                      {/* Idle state */}
+                      {/* Idle state */}                      {/* Idle state */}
                       {solarApiStatus === 'idle' && roofPlanes.length === 0 && (
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
                           <div className="font-semibold text-slate-300 mb-1">No Planes Detected</div>
