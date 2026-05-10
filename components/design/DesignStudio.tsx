@@ -409,6 +409,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Layout state
   const [panels, setPanels] = useState<PlacedPanel[]>([]);
   const [roofPlanes, setRoofPlanes] = useState<RoofPlane[]>([]);
+  const [expandedPlaneId, setExpandedPlaneId] = useState<string | null>(null);
   const [groundArea, setGroundArea] = useState<{ lat: number; lng: number }[]>([]);
   
   // Google Solar API data
@@ -3781,69 +3782,82 @@ export default function DesignStudio({ project, onSave }: Props) {
 
 
                 {/* Roof Analysis - Google Solar API */}
-                {roofSegments.length > 0 && (
-                  <Section title="Roof Analysis" icon={<Sun size={12} />} badge={`${roofSegments.length} segments`} defaultOpen={false}>
-                    <div className="space-y-1.5">
-                      {roofSegments.map((segment, idx) => {
-                        const area = segment.areaM2 ?? segment.stats?.areaMeters2 ?? 0;
-                        const pitch = segment.pitchDegrees ?? 0;
-                        const az = segment.azimuthDegrees ?? 180;
-                        const sunshine = segment.sunshineHours ?? segment.stats?.sunshineQuantiles?.[5] ?? 0;
-                        const maxSunshine = Math.max(...roofSegments.map((s: any) => s.sunshineHours ?? s.stats?.sunshineQuantiles?.[5] ?? 0));
-                        const sunPct = maxSunshine > 0 ? (sunshine / maxSunshine) * 100 : 0;
-                        const azLabel = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round(az / 45) % 8];
-                        return (
-                          <div key={idx} className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40 hover:border-amber-500/30 transition-colors">
-                            <div className="flex justify-between items-center mb-1.5">
-                              <span className="text-xs font-bold text-white">Section {idx + 1}</span>
-                              <span className="text-xs text-slate-400 font-mono">{(area * 10.7639).toFixed(0)} ft²</span>
-                            </div>
-                            <div className="grid grid-cols-3 gap-1 text-xs mb-1.5">
-                              <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Slope</div>
-                                <div className="text-amber-400 font-bold">{pitch.toFixed(0)}°</div>
-                              </div>
-                              <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Faces</div>
-                                <div className="text-blue-400 font-bold">{azLabel}</div>
-                              </div>
-                              <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Sun hrs/yr</div>
-                                <div className="text-yellow-400 font-bold">{sunshine > 0 ? sunshine.toFixed(0) : '—'}</div>
-                              </div>
-                            </div>
-                            {sunshine > 0 && (
-                              <div className="mt-1">
-                                <div className="h-1 bg-slate-700 rounded-full overflow-hidden">
-                                  <div
-                                    className="h-full rounded-full transition-all"
-                                    style={{
-                                      width: `${sunPct}%`,
-                                      background: `linear-gradient(90deg, #f59e0b, #fbbf24)`,
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {solarApiData?.solarPotential && (
-                      <div className="mt-2 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 text-xs">
-                        <div className="text-amber-400 font-semibold mb-1">☀️ Solar Potential</div>
-                        <div className="grid grid-cols-2 gap-1 text-slate-300">
-                          <div>Max panels: <span className="text-white font-bold">{solarApiData.solarPotential.maxArrayPanelsCount}</span></div>
-                          <div>Peak power: <span className="text-white font-bold">{((solarApiData.solarPotential.maxArrayPanelsCount * 400) / 1000).toFixed(1)} kW</span></div>
-                          <div>Best sun: <span className="text-white font-bold">{solarApiData.solarPotential.maxSunshineHoursPerYear?.toFixed(0)} hrs/yr</span></div>
-                          <div>Roof area: <span className="text-white font-bold">{((solarApiData.solarPotential.wholeRoofStats?.areaMeters2 ?? 0) * 10.7639).toFixed(0)} ft²</span></div>
-                        </div>
-                      </div>
-                    )}
-                  </Section>
-                )}
+                {roofSegments.length > 0 && (() => {
+                  // Pre-compute summary stats
+                  const totalAreaFt2 = roofSegments.reduce((s: number, seg: any) => s + (seg.areaM2 ?? seg.stats?.areaMeters2 ?? 0) * 10.7639, 0);
+                  const bestSeg = roofSegments.reduce((best: any, seg: any) => {
+                    const sun = seg.sunshineHours ?? seg.stats?.sunshineQuantiles?.[5] ?? 0;
+                    const bestSun = best.sunshineHours ?? best.stats?.sunshineQuantiles?.[5] ?? 0;
+                    return sun > bestSun ? seg : best;
+                  }, roofSegments[0]);
+                  const bestAz = bestSeg.azimuthDegrees ?? 180;
+                  const bestAzLabel = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round(bestAz / 45) % 8];
+                  const bestSun = Math.round(bestSeg.sunshineHours ?? bestSeg.stats?.sunshineQuantiles?.[5] ?? 0);
+                  const maxPanels = solarApiData?.solarPotential?.maxArrayPanelsCount ?? 0;
+                  const peakKw = ((maxPanels * 400) / 1000).toFixed(1);
+                  const maxSunshine = Math.max(...roofSegments.map((s: any) => s.sunshineHours ?? s.stats?.sunshineQuantiles?.[5] ?? 0));
+                  return (
+                    <Section title="Roof Analysis" icon={<Sun size={12} />} badge={`${roofSegments.length} sections`} defaultOpen={false}>
+                      <div className="space-y-2">
 
-                {/* ── Roof Planes Section ─────────────────────────────── */}
+                        {/* Hero summary row */}
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <div className="bg-slate-900/80 rounded-lg p-2 text-center border border-slate-700/50">
+                            <div className="text-[10px] text-slate-500 mb-0.5">Total Roof</div>
+                            <div className="text-sm font-bold text-white">{totalAreaFt2.toFixed(0)}</div>
+                            <div className="text-[10px] text-slate-500">ft²</div>
+                          </div>
+                          <div className="bg-amber-500/10 rounded-lg p-2 text-center border border-amber-500/30">
+                            <div className="text-[10px] text-amber-400 mb-0.5">Best Face</div>
+                            <div className="text-sm font-bold text-white">{bestAzLabel}</div>
+                            <div className="text-[10px] text-amber-400">{bestSun} hrs/yr</div>
+                          </div>
+                          <div className="bg-slate-900/80 rounded-lg p-2 text-center border border-slate-700/50">
+                            <div className="text-[10px] text-slate-500 mb-0.5">Peak Power</div>
+                            <div className="text-sm font-bold text-white">{peakKw}</div>
+                            <div className="text-[10px] text-slate-500">kW max</div>
+                          </div>
+                        </div>
+
+                        {/* Section table — compact rows */}
+                        <div className="rounded-lg overflow-hidden border border-slate-700/40">
+                          <div className="grid grid-cols-4 gap-0 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wide">
+                            <div>#</div><div className="text-right">Area</div><div className="text-right">Faces</div><div className="text-right">Sun</div>
+                          </div>
+                          {roofSegments.map((segment: any, idx: number) => {
+                            const area = (segment.areaM2 ?? segment.stats?.areaMeters2 ?? 0) * 10.7639;
+                            const pitch = segment.pitchDegrees ?? 0;
+                            const az = segment.azimuthDegrees ?? 180;
+                            const sun = segment.sunshineHours ?? segment.stats?.sunshineQuantiles?.[5] ?? 0;
+                            const azLabel = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round(az / 45) % 8];
+                            const sunPct = maxSunshine > 0 ? sun / maxSunshine : 0;
+                            const isBest = segment === bestSeg;
+                            // Sun quality colour
+                            const sunColor = sunPct > 0.85 ? 'text-amber-400' : sunPct > 0.65 ? 'text-yellow-400' : 'text-slate-400';
+                            return (
+                              <div key={idx} className={`grid grid-cols-4 gap-0 px-2 py-1.5 text-xs border-t border-slate-700/30 items-center ${isBest ? 'bg-amber-500/5' : idx % 2 === 0 ? 'bg-slate-800/30' : ''}`}>
+                                <div className="flex items-center gap-1">
+                                  <span className="font-bold text-white">{idx + 1}</span>
+                                  {isBest && <span className="text-[8px] bg-amber-500 text-slate-900 font-bold px-1 rounded">BEST</span>}
+                                </div>
+                                <div className="text-right text-slate-300">{area.toFixed(0)} ft²</div>
+                                <div className="text-right">
+                                  <span className="text-blue-400 font-semibold">{azLabel}</span>
+                                  <span className="text-slate-600 ml-0.5 text-[10px]">{pitch.toFixed(0)}°</span>
+                                </div>
+                                <div className={`text-right font-semibold ${sunColor}`}>{sun > 0 ? sun.toFixed(0) : '—'}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="text-[10px] text-slate-600 text-right">Sun hrs/yr · Google Solar API</div>
+
+                      </div>
+                    </Section>
+                  );
+                })()}
+
+                {/* ── Roof Planes Section ─────────────────────────────────────────── */}
                 <Section
                     title="Roof Planes"
                     icon={<Home size={12} />}
@@ -3852,34 +3866,34 @@ export default function DesignStudio({ project, onSave }: Props) {
                   >
                     <div className="space-y-2">
 
-                      {/* Idle state - no planes yet, no detection run */}
+                      {/* Idle state */}
                       {solarApiStatus === 'idle' && roofPlanes.length === 0 && (
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
-                          <div className="font-semibold text-slate-300 mb-1">No Roof Planes</div>
-                          <div className="leading-relaxed">Use the <span className="text-amber-400 font-medium">Draw Roof Zone</span> tool (R) to trace each roof plane, or navigate to a new address to trigger auto-detection.</div>
+                          <div className="font-semibold text-slate-300 mb-1">No Planes Detected</div>
+                          <div className="leading-relaxed">Navigate to an address to auto-detect, or use <span className="text-amber-400 font-medium">Draw Roof Zone</span> to trace manually.</div>
                         </div>
                       )}
 
-                      {/* Loading state */}
+                      {/* Loading */}
                       {solarApiStatus === 'loading' && (
                         <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/10 rounded-lg p-2.5 border border-amber-500/20">
                           <div className="w-3 h-3 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                          <span>Auto-detecting roof planes via Solar API…</span>
+                          <span>Detecting roof planes…</span>
                         </div>
                       )}
 
-                      {/* Unavailable state */}
+                      {/* Unavailable */}
                       {solarApiStatus === 'unavailable' && roofPlanes.length === 0 && (
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
-                          <div className="font-semibold text-slate-300 mb-1">⚠ Solar API Unavailable</div>
-                          <div>Use the <span className="text-amber-400 font-medium">Draw Roof Zone</span> tool (R) to manually trace each roof plane on the map.</div>
+                          <div className="font-semibold text-slate-300 mb-1">⚠ Auto-detect Unavailable</div>
+                          <div>Use <span className="text-amber-400 font-medium">Draw Roof Zone</span> to trace planes manually.</div>
                         </div>
                       )}
 
-                      {/* Unconfirmed planes banner */}
+                      {/* Unconfirmed banner */}
                       {roofPlanes.some(p => p.confirmed === false) && (
                         <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs">
-                          <div className="text-amber-300 font-semibold mb-1.5">🛰️ We found your roof sections</div>
+                          <div className="text-amber-300 font-semibold mb-1">🛰️ We found your roof sections</div>
                           <div className="text-slate-300 mb-2 leading-relaxed">
                             We automatically mapped your roof from satellite imagery. Take a quick look and confirm — or adjust anything that looks off.
                           </div>
@@ -3890,7 +3904,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                             }}
                             className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-slate-900 font-bold rounded-lg text-xs transition-colors"
                           >
-                            ✅ Confirm All Roof Planes
+                            ✅ Confirm All Planes
                           </button>
                           <button
                             onClick={() => {
@@ -3910,133 +3924,116 @@ export default function DesignStudio({ project, onSave }: Props) {
                       {roofPlanes.length > 0 && roofPlanes.every(p => p.confirmed !== false) && (
                         <div className="flex items-center gap-2 text-xs text-emerald-300 bg-emerald-500/10 rounded-lg p-2 border border-emerald-500/20">
                           <span>✅</span>
-                          <span className="font-semibold">{roofPlanes.length} roof planes confirmed</span>
+                          <span className="font-semibold">{roofPlanes.length} planes confirmed</span>
                           <span className="text-slate-500 ml-auto">Ready for permit</span>
                         </div>
                       )}
 
-                      {/* Individual plane list */}
-                      {roofPlanes.map((plane, idx) => {
-                        const azDir = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round((plane.azimuth ?? 180) / 45) % 8];
-                        const isUnconfirmed = plane.confirmed === false;
-                        const edgeTypeCounts: Record<string, number> = {};
-                        plane.edgeTypes?.forEach(et => { edgeTypeCounts[et] = (edgeTypeCounts[et] ?? 0) + 1; });
-                        return (
-                          <div
-                            key={plane.id}
-                            className={`rounded-lg p-2.5 border text-xs transition-colors ${
-                              isUnconfirmed
-                                ? 'bg-amber-500/5 border-amber-500/30 hover:border-amber-500/50'
-                                : 'bg-slate-800/60 border-slate-700/40 hover:border-emerald-500/30'
-                            }`}
-                          >
-                            <div className="flex justify-between items-center mb-1.5">
-                              <span className="font-bold text-white">
-                                {isUnconfirmed ? '⚠ ' : '✅ '}Plane {idx + 1}
-                                {plane.source === 'solar_api' && (
-                                  <span className="ml-1 text-[10px] text-slate-500 font-normal">auto-detected</span>
-                                )}
-                              </span>
-                              <div className="flex gap-1">
-                                {isUnconfirmed && (
-                                  <button
-                                    onClick={() => setRoofPlanes(prev => prev.map(p => p.id === plane.id ? { ...p, confirmed: true } : p))}
-                                    className="px-1.5 py-0.5 bg-emerald-600/80 hover:bg-emerald-500 text-white rounded text-[10px] font-medium transition-colors"
-                                    title="Confirm this plane"
-                                  >
-                                    ✓
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => setRoofPlanes(prev => prev.filter(p => p.id !== plane.id))}
-                                  className="px-1.5 py-0.5 bg-red-600/60 hover:bg-red-500 text-white rounded text-[10px] transition-colors"
-                                  title="Delete this plane"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-3 gap-1 mb-1.5">
-                              <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Slope</div>
-                                <div className="text-amber-400 font-bold">{(plane.pitch ?? 0).toFixed(0)}°</div>
-                              </div>
-                              <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Faces</div>
-                                <div className="text-blue-400 font-bold">{azDir}</div>
-                              </div>
-                              <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Area</div>
-                                <div className="text-slate-300 font-bold">{((plane.area ?? 0) * 10.764).toFixed(0)} ft²</div>
-                              </div>
-                            </div>
-                            {/* Edge type legend hidden — technical jargon not useful to homeowners */}
-                            {/* Pitch editor */}
-                            <div className="mt-1.5 flex items-center gap-2">
-                              <span className="text-slate-500 text-[10px] flex-shrink-0">Adjust slope:</span>
-                              <input
-                                type="range"
-                                min={0}
-                                max={45}
-                                step={1}
-                                value={plane.pitch ?? 0}
-                                onChange={e => setRoofPlanes(prev => prev.map(p =>
-                                  p.id === plane.id ? { ...p, pitch: Number(e.target.value) } : p
-                                ))}
-                                className="flex-1 h-1 accent-amber-400"
-                              />
-                              <span className="text-amber-400 font-mono text-[10px] w-6">{(plane.pitch ?? 0).toFixed(0)}°</span>
-                            </div>
-                            {/* Azimuth direction selector */}
-                            <div className="mt-1.5">
-                              <span className="text-slate-500 text-[10px]">Which way does this roof face?</span>
-                              <div className="grid grid-cols-8 gap-0.5 mt-1">
-                                {[
-                                  {label:'N', az:0}, {label:'NE', az:45}, {label:'E', az:90}, {label:'SE', az:135},
-                                  {label:'S', az:180}, {label:'SW', az:225}, {label:'W', az:270}, {label:'NW', az:315},
-                                ].map(({label, az}) => {
-                                  const isSel = Math.abs((plane.azimuth ?? 180) - az) < 23;
-                                  return (
-                                    <button
-                                      key={label}
-                                      onClick={() => setRoofPlanes(prev => prev.map(p =>
-                                        p.id === plane.id ? { ...p, azimuth: az } : p
-                                      ))}
-                                      className={`py-0.5 rounded text-[9px] font-bold transition-all ${
-                                        isSel
-                                          ? 'bg-amber-500 text-slate-900'
-                                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-white'
-                                      }`}
-                                    >
-                                      {label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                            {/* Re-layout button */}
-                            <button
-                              onClick={() => relayoutPlane(plane)}
-                              className="w-full mt-2 py-1.5 bg-blue-600/80 hover:bg-blue-500 text-white rounded-lg text-[10px] font-semibold transition-colors flex items-center justify-center gap-1"
-                              title="Remove existing panels and re-place with updated azimuth & pitch"
-                            >
-                              ↺ Update Panel Layout
-                            </button>
+                      {/* Plane table — contractor-grade compact rows */}
+                      {roofPlanes.length > 0 && (
+                        <div className="rounded-lg overflow-hidden border border-slate-700/40">
+                          {/* Header */}
+                          <div className="grid grid-cols-[1.2rem_1fr_2rem_2.5rem_2rem] gap-1.5 bg-slate-900/80 px-2 py-1 text-[10px] text-slate-500 font-semibold uppercase tracking-wide items-center">
+                            <div></div>
+                            <div>Plane</div>
+                            <div className="text-right">Slope</div>
+                            <div className="text-right">Faces</div>
+                            <div></div>
                           </div>
-                        );
-                      })}
 
-                      {/* Add new plane button */}
+                          {roofPlanes.map((plane, idx) => {
+                            const azDir = ['N','NE','E','SE','S','SW','W','NW','N'][Math.round((plane.azimuth ?? 180) / 45) % 8];
+                            const isUnconfirmed = plane.confirmed === false;
+                            const areaFt2 = ((plane.area ?? 0) * 10.764).toFixed(0);
+                            const isExpanded = expandedPlaneId === plane.id;
+                            return (
+                              <div key={plane.id} className={`border-t border-slate-700/30 ${isUnconfirmed ? 'bg-amber-500/5' : idx % 2 === 0 ? 'bg-slate-800/20' : ''}`}>
+                                {/* Main row */}
+                                <div
+                                  className="grid grid-cols-[1.2rem_1fr_2rem_2.5rem_2rem] gap-1.5 px-2 py-1.5 items-center cursor-pointer hover:bg-slate-700/20 transition-colors"
+                                  onClick={() => setExpandedPlaneId(isExpanded ? null : plane.id)}
+                                >
+                                  <div className={`w-3 h-3 rounded-full flex-shrink-0 ${isUnconfirmed ? 'bg-amber-500/60' : 'bg-emerald-500/80'}`} />
+                                  <div className="min-w-0">
+                                    <span className="text-xs font-semibold text-white">Plane {idx + 1}</span>
+                                    <span className="text-[10px] text-slate-500 ml-1">{areaFt2} ft²</span>
+                                  </div>
+                                  <div className="text-right text-[11px] text-amber-400 font-mono">{(plane.pitch ?? 0).toFixed(0)}°</div>
+                                  <div className="text-right text-[11px] text-blue-400 font-semibold">{azDir}</div>
+                                  <div className="flex items-center justify-end gap-0.5">
+                                    <button
+                                      onClick={e => { e.stopPropagation(); setRoofPlanes(prev => prev.filter(p => p.id !== plane.id)); }}
+                                      className="w-4 h-4 flex items-center justify-center text-slate-600 hover:text-red-400 transition-colors text-[10px]"
+                                      title="Delete"
+                                    >✕</button>
+                                  </div>
+                                </div>
+
+                                {/* Expanded editor */}
+                                {isExpanded && (
+                                  <div className="px-3 pb-2.5 pt-0.5 border-t border-slate-700/20 bg-slate-900/30 space-y-2">
+                                    {/* Confirm / unconfirm */}
+                                    {isUnconfirmed && (
+                                      <button
+                                        onClick={() => setRoofPlanes(prev => prev.map(p => p.id === plane.id ? { ...p, confirmed: true } : p))}
+                                        className="w-full py-1 bg-emerald-600/80 hover:bg-emerald-500 text-white rounded text-[10px] font-semibold transition-colors"
+                                      >
+                                        ✓ Confirm This Plane
+                                      </button>
+                                    )}
+                                    {/* Slope slider */}
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] text-slate-500 w-10 flex-shrink-0">Slope</span>
+                                      <input
+                                        type="range" min={0} max={45} step={1}
+                                        value={plane.pitch ?? 0}
+                                        onChange={e => setRoofPlanes(prev => prev.map(p => p.id === plane.id ? { ...p, pitch: Number(e.target.value) } : p))}
+                                        className="flex-1 h-1 accent-amber-400"
+                                      />
+                                      <span className="text-amber-400 font-mono text-[10px] w-5 text-right">{(plane.pitch ?? 0).toFixed(0)}°</span>
+                                    </div>
+                                    {/* Direction */}
+                                    <div>
+                                      <div className="text-[10px] text-slate-500 mb-1">Direction this face points</div>
+                                      <div className="grid grid-cols-8 gap-0.5">
+                                        {[{l:'N',a:0},{l:'NE',a:45},{l:'E',a:90},{l:'SE',a:135},{l:'S',a:180},{l:'SW',a:225},{l:'W',a:270},{l:'NW',a:315}].map(({l,a}) => {
+                                          const isSel = Math.abs((plane.azimuth ?? 180) - a) < 23;
+                                          return (
+                                            <button key={l}
+                                              onClick={() => setRoofPlanes(prev => prev.map(p => p.id === plane.id ? { ...p, azimuth: a } : p))}
+                                              className={`py-0.5 rounded text-[9px] font-bold transition-all ${isSel ? 'bg-amber-500 text-slate-900' : 'bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-white'}`}
+                                            >{l}</button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                    {/* Re-layout */}
+                                    <button
+                                      onClick={() => relayoutPlane(plane)}
+                                      className="w-full py-1.5 bg-blue-600/80 hover:bg-blue-500 text-white rounded-lg text-[10px] font-semibold transition-colors flex items-center justify-center gap-1"
+                                    >
+                                      ↺ Update Panel Layout
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Add plane button */}
                       <button
                         onClick={() => { setDrawingMode('draw_roof'); setActiveZoneType('roof'); }}
                         className="w-full py-2 border border-dashed border-slate-600 hover:border-amber-500/50 hover:text-amber-400 text-slate-500 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5"
                       >
                         <Home size={11} />
-                        Add Another Roof Section
+                        Add Roof Plane
                       </button>
 
                     </div>
                   </Section>
+
 
               </>
             )}
