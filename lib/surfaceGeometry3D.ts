@@ -922,40 +922,54 @@ function buildSurfaceGridECEF(opts: {
     }
   }
 
-  // ── v50.28: Phase-agnostic gutter-flush shift ────────────────────────────────
-  // When eaveSetbackM === 0 (panels to gutter line), shift the entire bestFill DOWN
-  // so the bottom of the lowest panel sits at GRID_EPSILON (0.1 mm) above boundVLo.
+  // ── v50.29: Phase-agnostic gutter-flush shift (correct direction) ────────────
+  // When eaveSetbackM === 0 (panels to gutter line), shift the entire bestFill
+  // TOWARD THE EAVE so the top edge of the panel nearest the eave sits at
+  // GRID_EPSILON (0.1 mm) inside boundVHi (the eave boundary).
   //
-  // WHY THIS APPROACH (vs v50.26c post-shift and v50.27 GRID_EPSILON baseV):
+  // UV COORDINATE ORIENTATION (critical — governs shift direction):
+  //   v = cross(n, u) points DOWN-SLOPE (toward eave) for ALL azimuth directions.
+  //   After origin-snap to minUV corner:
+  //     minV = 0        → RIDGE end   (up-slope, top of roof)
+  //     maxV = roofRun  → EAVE end    (down-slope, gutter line)
+  //   Therefore:
+  //     boundVLo = minV + eaveSetbackM   → physically at RIDGE end
+  //     boundVHi = maxV - ridgeSetbackM  → physically near EAVE (gutter) end
+  //   To push panels toward the gutter we must ADD to vC (toward higher v = eave).
+  //
+  // WHY v50.28 WAS WRONG:
+  //   v50.28 used minVc (lowest v = ridge end) and subtracted shift, pushing panels
+  //   toward minV = the RIDGE, causing all panels to cluster at the top of the roof.
+  //
+  // WHY THIS APPROACH (vs v50.26c / v50.27):
   //   The phase competition (4 candidates: pv=0, stepV/2, pu=0, stepU/2) picks the
   //   phase that maximises panel count.  On tapered/hip faces pv=stepV/2 often wins
   //   because it avoids narrow-polygon PIP failures near the eave.  With that phase,
-  //   the centered grid origin is at boundVLo + remainingV/2 + stepV/2, placing the
-  //   bottom of row 0 at remainingV/2 + stepV/2 above the gutter — up to ~34 inches.
-  //   v50.27’s GRID_EPSILON baseV only fixed the pv=0 case; the pv=stepV/2 winner
-  //   still floated panels.
-  //
-  //   The correct approach: let the phase competition run with centered origins
-  //   (maximises count on all polygon shapes), then compute the actual floating gap
-  //   from the bestFill data itself, and shift the entire fill down by that gap.
+  //   the centered grid floats up to stepV/2 (∼34 inches) away from the gutter.
+  //   The correct approach: let phase competition run with centered origins (maximises
+  //   count), then compute the actual gap from bestFill data and shift toward eave.
   //
   // UNIFORM SHIFT — no mixing:
-  //   Every panel in bestFill shifts by the SAME amount (uniform, not per-panel).
-  //   Panels that fail panelFits at the shifted position are REMOVED entirely
-  //   (not kept at their original position).  This prevents mixed-vC rows which
-  //   caused the 25%-overlap rail artefact seen in v50.26c.
+  //   Every panel in bestFill shifts by the SAME amount.  Panels that fail panelFits
+  //   at the shifted position are REMOVED (not kept at original).  This prevents
+  //   mixed-vC rows which caused the 25%-overlap rail artefact seen in v50.26c.
   //
   // COUNT REGRESSION:
   //   Rectangular face: polygon = bounding box → all shifted panels pass → zero loss.
-  //   Tapered/hip face: row 0 corners may land outside the narrowing polygon → dropped.
-  //   This is correct behaviour — those corner slots are physically unreachable.
+  //   Tapered/hip face: eave-corner panels may land outside narrowing polygon → dropped.
+  //   This is correct — those corner slots are physically unreachable at the eave end.
+  //
+  // V-HI SNAP SAFETY:
+  //   boundVHi = maxV - ridgeSetbackM = maxV - 0.457m → 0.457m inside polygon boundary.
+  //   Snapping top of panel to boundVHi - hh is safe; no PIP boundary ambiguity.
   if (eaveSetbackM === 0 && bestFill.length > 0) {
-    const minVc      = Math.min(...bestFill.map(p => p.vC));
-    const actualBot  = minVc - dims.heightM / 2;         // bottom of lowest panel
-    const shift      = actualBot - GRID_EPSILON;          // gap to close (minus 0.1 mm)
-    if (shift > GRID_EPSILON) {                           // skip if already near gutter
+    const maxVc      = Math.max(...bestFill.map(p => p.vC));
+    const actualTop  = maxVc + dims.heightM / 2;          // top edge of panel nearest eave
+    const gapAtEave  = boundVHi - actualTop;              // gap between top panel and eave boundary
+    const shift      = gapAtEave - GRID_EPSILON;          // push toward eave, leave 0.1mm clearance
+    if (shift > GRID_EPSILON) {                           // skip if already flush
       bestFill = bestFill
-        .map(p  => ({ ...p, vC: p.vC - shift }))          // uniform shift — no mixing
+        .map(p  => ({ ...p, vC: p.vC + shift }))          // ADD — toward higher v = eave side
         .filter(p => panelFits(p.uC, p.vC));              // drop if outside polygon at new pos
     }
   }
