@@ -418,6 +418,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   const [roofSegments, setRoofSegments] = useState<any[]>([]);
   const [solarApiData, setSolarApiData] = useState<any>(null);
   const [solarDataAddress, setSolarDataAddress] = useState<string | null>(null); // address Solar data is actually for
+  const [solarDataCityOnly, setSolarDataCityOnly] = useState(false); // v50.13: true when data came from city-level coords (no street number)
   const [solarDataLoading, setSolarDataLoading] = useState(false);
   const [solarDataError, setSolarDataError] = useState<string | null>(null);
   // Solar API roof plane auto-detection status
@@ -714,7 +715,11 @@ export default function DesignStudio({ project, onSave }: Props) {
         setZoom(19);
         TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map()); // clear tiles to force reload at new location
         setLocationStatus('found');
-        fetchSolarData(newLat, newLng);
+        // v50.13: Pass address and city-only flag so Roof Analysis can show a warning
+        // when data came from city-level coordinates (no specific building)
+        const resolvedShortName = data.data.short_name || address;
+        const isCityOnly = !isStreetLevelAddress(resolvedShortName);
+        fetchSolarData(newLat, newLng, resolvedShortName, isCityOnly);
         toast.update(toastId, {
           type: 'success',
           title: 'Location found!',
@@ -792,16 +797,26 @@ export default function DesignStudio({ project, onSave }: Props) {
     setMapCenter({ lat: s.lat, lng: s.lng });
     setZoom(19);
     TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map());
-    fetchSolarData(s.lat, s.lng, s.short_name ?? addressSearch);
+    // v50.13: detect city-only autocomplete selections (no house number)
+    const suggAddr = s.short_name ?? addressSearch;
+    fetchSolarData(s.lat, s.lng, suggAddr, !isStreetLevelAddress(suggAddr));
     setLocationStatus('found');
     toast.info('Loading site model...', `${s.short_name} · Resetting 3D scene`);
   }, [toast]);
 
+  // v50.13: Returns true when address string has a leading house number (e.g. "123 Main St")
+  // City-only addresses like "Edwardsville, IL" have no house number — Solar API returns random building data.
+  const isStreetLevelAddress = (addr: string | null | undefined): boolean => {
+    if (!addr) return false;
+    return /^\d+\s/.test(addr.trim());
+  };
+
   // Fetch Google Solar API data — only call this when a specific building has been picked
-  const fetchSolarData = useCallback(async (lat: number, lng: number, address?: string) => {
+  const fetchSolarData = useCallback(async (lat: number, lng: number, address?: string, cityOnly = false) => {
     setSolarDataLoading(true);
     setSolarDataError(null);
     setSolarDataAddress(address ?? null);
+    setSolarDataCityOnly(cityOnly);
     try {
       const response = await fetch(
         `/api/solar?endpoint=buildingInsights&lat=${lat}&lng=${lng}&quality=HIGH`
@@ -836,6 +851,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     setSolarApiData(null);
     setRoofSegments([]);
     setSolarDataAddress(null);
+    setSolarDataCityOnly(false);
 
     // Update map center and address bar
     setMapCenter({ lat: pickedLat, lng: pickedLng });
@@ -846,7 +862,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     toast.info('🏡 House selected', `Loading solar data for ${pickedAddress}`);
 
     // Fetch Solar API data for the explicitly picked building
-    setSolarDataAddress(null); // clear while loading
+    setSolarDataAddress(null); setSolarDataCityOnly(false); // clear while loading
     fetchSolarData(pickedLat, pickedLng, pickedAddress);
 
     // Save resolved coords back to project (non-fatal)
@@ -873,7 +889,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setLocationStatus('found');
       // Do NOT auto-fetch Solar data on project load — data must be tied to a specific
       // building the user explicitly picks. Project coords may be a city center or wrong address.
-      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null);
+      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null); setSolarDataCityOnly(false);
       if (project.address) setAddressSearch(project.address);
       return;
     }
@@ -883,7 +899,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       setMapCenter({ lat: project.client!.lat!, lng: project.client!.lng! });
       setLocationStatus('found');
       // Do NOT auto-fetch Solar data — must be tied to explicit building pick
-      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null);
+      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null); setSolarDataCityOnly(false);
       if (project.client?.address) {
         setAddressSearch([project.client.address, project.client.city, project.client.state].filter(Boolean).join(', '));
       }
@@ -3107,7 +3123,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                   // v50.10: tag segments with the address they belong to.
                   // Only set if not already anchored to an explicit Pick House / address-search pick —
                   // we never want to overwrite a user-chosen address with project boot coords.
-                  setSolarDataAddress(prev => prev ?? (twin.address || null));
+                  const twinAddr = twin.address || null;
+                  setSolarDataAddress(prev => prev ?? twinAddr);
+                  // v50.13: flag city-only if twin address has no street number and not already anchored to explicit pick
+                  setSolarDataCityOnly(current => current ? current : !isStreetLevelAddress(twinAddr));
                 }
               }}
               onError={(error) => {
@@ -3808,6 +3827,19 @@ export default function DesignStudio({ project, onSave }: Props) {
                           <div className="flex items-center gap-1.5 text-[10px] text-slate-500 bg-slate-900/60 rounded px-2 py-1 border border-slate-700/30">
                             <span>📍</span>
                             <span className="truncate">{solarDataAddress}</span>
+                          </div>
+                        )}
+
+                        {/* v50.13: City-only address warning — data may not match building on screen */}
+                        {solarDataCityOnly && (
+                          <div className="flex items-start gap-2 text-[10px] text-amber-300 bg-amber-500/10 rounded-lg px-2.5 py-2 border border-amber-500/30">
+                            <span className="text-sm leading-none mt-0.5">⚠</span>
+                            <div>
+                              <div className="font-semibold mb-0.5">No street address — data may not match this building</div>
+                              <div className="text-amber-200/70 leading-relaxed">
+                                Solar data was loaded from city-level coordinates. For accurate results, enter a full street address (e.g. <span className="font-medium text-amber-300">123 Main St, Edwardsville IL</span>) or use <span className="font-medium text-amber-300">Pick House</span> to click the exact building.
+                              </div>
+                            </div>
                           </div>
                         )}
 
