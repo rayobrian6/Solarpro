@@ -2573,16 +2573,15 @@ function SolarEngine3D({
    * Fall back to 3D tiles pick (scene.pick) if terrain pick fails.
    * Final fallback: cesiumGroundElevRef height with ray-ellipsoid.
    */
-  // ── getGroundPlanePosition v50.4: pickEllipsoid (lat/lng) + pickPosition (height only) ──────
+  // ── getGroundPlanePosition v50.5: delegate to getWorldPosition (same as fence/plane) ──────────
   //
-  // THE EASY FIX:
-  //   camera.pickEllipsoid(screenPos) — projects the pick ray directly onto the WGS84
-  //   ellipsoid using pure ray-ellipsoid math. Zero depth-buffer involvement. Returns
-  //   pixel-perfect lat/lng at ANY camera angle. This is the canonical Cesium API for
-  //   accurate 2D cursor position and is unaffected by logarithmicDepthBuffer or oblique angle.
+  // getWorldPosition is already pixel-perfect for fence and plane modes — it uses
+  // scene.pick + scene.pickPosition on 3D tiles (primary) with globe.pick and ellipsoid
+  // as fallbacks. We use the SAME function here for lat/lng accuracy.
   //
-  //   Height: use scene.pickPosition height scalar only (discard its lat/lng which drifts
-  //   with depth buffer at oblique angles). Fall back to cesiumGroundElevRef if tiles unavailable.
+  // Height trust: only 3dtiles pick gives real mesh height; terrain/ellipsoid return h≈0
+  // with EllipsoidTerrainProvider. When h≈0 and site is elevated, fall back to
+  // cesiumGroundElevRef (boot-sampled from Google Elevation API + EGM96 geoid).
   //
   function getGroundPlanePosition(
     viewer: any,
@@ -2590,48 +2589,23 @@ function SolarEngine3D({
     screenPos: any,
   ): { lat: number; lng: number; height: number; pickMethod: string } | null {
 
-    // ── POSITION: camera.pickEllipsoid → exact lat/lng under cursor, no depth buffer ──────────
-    let pLat: number | null = null;
-    let pLng: number | null = null;
-    try {
-      const ellipsoidPos = viewer.camera.pickEllipsoid(screenPos, C.Ellipsoid.WGS84);
-      if (ellipsoidPos && isFinite(ellipsoidPos.x) && C.Cartesian3.magnitude(ellipsoidPos) > 1_000_000) {
-        const carto = C.Cartographic.fromCartesian(ellipsoidPos);
-        if (carto) {
-          pLat = C.Math.toDegrees(carto.latitude);
-          pLng = C.Math.toDegrees(carto.longitude);
-        }
-      }
-    } catch { /* pickEllipsoid failed */ }
+    const hit = getWorldPosition(viewer, C, screenPos);
+    if (!hit) return null;
 
-    if (pLat === null || pLng === null || !isValidCoord(pLat, pLng)) return null;
+    const carto = C.Cartographic.fromCartesian(hit.cartesian);
+    if (!carto) return null;
+    const pLat = C.Math.toDegrees(carto.latitude);
+    const pLng = C.Math.toDegrees(carto.longitude);
+    if (!isValidCoord(pLat, pLng)) return null;
 
-    // ── HEIGHT: scene.pickPosition scalar only — discard its lat/lng (depth buffer drift) ──────
-    let groundElevM: number | null = null;
-    try {
-      const pickedObject = viewer.scene.pick(screenPos);
-      const entityName: string = pickedObject?.id?.name ?? pickedObject?.primitive?.id?.name ?? '';
-      const isOurEntity = entityName.startsWith('[PANEL') || entityName.startsWith('[GRAC') ||
-                          entityName.startsWith('[GND_') || entityName.includes('__gracking__') ||
-                          entityName.includes('__gnd__');
-      if (pickedObject && !isOurEntity) {
-        const pp = viewer.scene.pickPosition(screenPos);
-        if (pp && isFinite(pp.x) && C.Cartesian3.magnitude(pp) > 1_000_000) {
-          const carto3d = C.Cartographic.fromCartesian(pp);
-          if (carto3d && isFinite(carto3d.height) && carto3d.height > -500) {
-            groundElevM = carto3d.height;
-          }
-        }
-      }
-    } catch { /* tiles unavailable */ }
+    // Height trust: 3dtiles gives real mesh height; terrain+ellipsoid return h≈0.
+    const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
+    const trustedH = (hit.pickMethod === '3dtiles' && rawH !== null) ? rawH : null;
+    const fallbackH = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+    const groundElevM = trustedH ?? fallbackH;
 
-    // Fallback height: boot-sampled from Google Elevation API + EGM96 geoid correction.
-    if (groundElevM === null) {
-      groundElevM = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-    }
-
-    addLog('GROUND', `[GROUND-PICK v50.4] pickEllipsoid lat=${pLat.toFixed(6)} lng=${pLng.toFixed(6)} groundElevM=${groundElevM.toFixed(2)}`);
-    return { lat: pLat, lng: pLng, height: groundElevM, pickMethod: 'pickEllipsoid' };
+    addLog('GROUND', `[GROUND-PICK v50.5] method=${hit.pickMethod} lat=${pLat.toFixed(6)} lng=${pLng.toFixed(6)} rawH=${rawH?.toFixed(2) ?? 'null'} groundElevM=${groundElevM.toFixed(2)}`);
+    return { lat: pLat, lng: pLng, height: groundElevM, pickMethod: hit.pickMethod };
   }
 
   // ── Roof placement ─────────────────────────────────────────────────────────
