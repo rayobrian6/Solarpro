@@ -212,7 +212,11 @@ function buildRoofPlanes(segments: SolarApiSegment[]): RoofPlane[] {
   });
 }
 
-// ─── GET /api/solar — original proxy (unchanged) ─────────────────────────────
+// ─── GET /api/solar — proxy + building-level segment filter ──────────────────
+// For buildingInsights: proxies Solar API and filters roofSegmentStats to the
+// selected building only (within MAX_SEGMENT_RADIUS_M of solarJson.center).
+// This is the path used by fetchSolarData in DesignStudio — must filter here.
+// For dataLayers: straight proxy (no filtering needed).
 export async function GET(req: NextRequest) {
   // SECURITY: Require authenticated user
   const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
@@ -259,7 +263,47 @@ export async function GET(req: NextRequest) {
         { status: response.status }
       );
     }
-    return NextResponse.json(await response.json());
+
+    const json = await response.json();
+
+    // ── Filter roofSegmentStats for buildingInsights ──────────────────────
+    // Google's findClosest API returns segments from the entire response area,
+    // which may include adjacent buildings. Filter to only those within
+    // MAX_SEGMENT_RADIUS_M of the building center to prevent neighbor bleed.
+    if (endpoint === 'buildingInsights' && json.solarPotential?.roofSegmentStats) {
+      const buildingCenter = json.center as { latitude: number; longitude: number } | undefined;
+      const MAX_SEGMENT_RADIUS_M = 30;
+
+      if (buildingCenter) {
+        const rawSegs  = json.solarPotential.roofSegmentStats as any[];
+        const filtered = rawSegs.filter((s: any) => {
+          const sLat = s.center?.latitude;
+          const sLng = s.center?.longitude;
+          if (sLat == null || sLng == null) return true;
+          return distanceM(
+            { lat: buildingCenter.latitude, lng: buildingCenter.longitude },
+            { lat: sLat, lng: sLng },
+          ) <= MAX_SEGMENT_RADIUS_M;
+        });
+
+        const segsToUse = filtered.length > 0 ? filtered : rawSegs;
+        console.log(
+          `[solar/GET] buildingInsights segments: ${rawSegs.length} total → ${segsToUse.length} after building filter` +
+          ` (center: ${buildingCenter.latitude.toFixed(5)}, ${buildingCenter.longitude.toFixed(5)})`
+        );
+
+        // Return filtered copy — all other Solar API fields (center, imageryDate, etc.) preserved
+        return NextResponse.json({
+          ...json,
+          solarPotential: {
+            ...json.solarPotential,
+            roofSegmentStats: segsToUse,
+          },
+        });
+      }
+    }
+
+    return NextResponse.json(json);
   } catch (error: unknown) {
     return handleRouteDbError('[solar/GET]', error);
   }
