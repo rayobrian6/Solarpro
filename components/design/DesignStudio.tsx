@@ -3795,20 +3795,20 @@ export default function DesignStudio({ project, onSave }: Props) {
                         return (
                           <div key={idx} className="bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40 hover:border-amber-500/30 transition-colors">
                             <div className="flex justify-between items-center mb-1.5">
-                              <span className="text-xs font-bold text-white">Segment {idx + 1}</span>
+                              <span className="text-xs font-bold text-white">Section {idx + 1}</span>
                               <span className="text-xs text-slate-400 font-mono">{(area * 10.7639).toFixed(0)} ft²</span>
                             </div>
                             <div className="grid grid-cols-3 gap-1 text-xs mb-1.5">
                               <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Pitch</div>
+                                <div className="text-slate-500 text-[10px]">Slope</div>
                                 <div className="text-amber-400 font-bold">{pitch.toFixed(0)}°</div>
                               </div>
                               <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Azimuth</div>
+                                <div className="text-slate-500 text-[10px]">Faces</div>
                                 <div className="text-blue-400 font-bold">{azLabel}</div>
                               </div>
                               <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Sun hrs</div>
+                                <div className="text-slate-500 text-[10px]">Sun hrs/yr</div>
                                 <div className="text-yellow-400 font-bold">{sunshine > 0 ? sunshine.toFixed(0) : '—'}</div>
                               </div>
                             </div>
@@ -3834,8 +3834,8 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div className="text-amber-400 font-semibold mb-1">☀️ Solar Potential</div>
                         <div className="grid grid-cols-2 gap-1 text-slate-300">
                           <div>Max panels: <span className="text-white font-bold">{solarApiData.solarPotential.maxArrayPanelsCount}</span></div>
-                          <div>Max kW: <span className="text-white font-bold">{((solarApiData.solarPotential.maxArrayPanelsCount * 400) / 1000).toFixed(1)}</span></div>
-                          <div>Sunshine: <span className="text-white font-bold">{solarApiData.solarPotential.maxSunshineHoursPerYear?.toFixed(0)} hrs/yr</span></div>
+                          <div>Peak power: <span className="text-white font-bold">{((solarApiData.solarPotential.maxArrayPanelsCount * 400) / 1000).toFixed(1)} kW</span></div>
+                          <div>Best sun: <span className="text-white font-bold">{solarApiData.solarPotential.maxSunshineHoursPerYear?.toFixed(0)} hrs/yr</span></div>
                           <div>Roof area: <span className="text-white font-bold">{((solarApiData.solarPotential.wholeRoofStats?.areaMeters2 ?? 0) * 10.7639).toFixed(0)} ft²</span></div>
                         </div>
                       </div>
@@ -3879,9 +3879,9 @@ export default function DesignStudio({ project, onSave }: Props) {
                       {/* Unconfirmed planes banner */}
                       {roofPlanes.some(p => p.confirmed === false) && (
                         <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs">
-                          <div className="text-amber-300 font-semibold mb-1.5">🛰️ Auto-detected — Review Required</div>
+                          <div className="text-amber-300 font-semibold mb-1.5">🛰️ We found your roof sections</div>
                           <div className="text-slate-300 mb-2 leading-relaxed">
-                            Roof planes were detected from satellite data. Edge colors show type: <span className="text-red-400">ridge</span>, <span className="text-amber-400">eave</span>, <span className="text-orange-400">hip</span>, <span className="text-blue-400">valley</span>, <span className="text-lime-400">rake</span>.
+                            We automatically mapped your roof from satellite imagery. Take a quick look and confirm — or adjust anything that looks off.
                           </div>
                           <button
                             onClick={() => {
@@ -3934,7 +3934,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                               <span className="font-bold text-white">
                                 {isUnconfirmed ? '⚠ ' : '✅ '}Plane {idx + 1}
                                 {plane.source === 'solar_api' && (
-                                  <span className="ml-1 text-[10px] text-slate-500 font-normal">satellite</span>
+                                  <span className="ml-1 text-[10px] text-slate-500 font-normal">auto-detected</span>
                                 )}
                               </span>
                               <div className="flex gap-1">
@@ -3958,11 +3958,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                             </div>
                             <div className="grid grid-cols-3 gap-1 mb-1.5">
                               <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Pitch</div>
+                                <div className="text-slate-500 text-[10px]">Slope</div>
                                 <div className="text-amber-400 font-bold">{(plane.pitch ?? 0).toFixed(0)}°</div>
                               </div>
                               <div className="text-center bg-slate-900/60 rounded p-1">
-                                <div className="text-slate-500 text-[10px]">Azimuth</div>
+                                <div className="text-slate-500 text-[10px]">Faces</div>
                                 <div className="text-blue-400 font-bold">{azDir}</div>
                               </div>
                               <div className="text-center bg-slate-900/60 rounded p-1">
@@ -3970,30 +3970,10 @@ export default function DesignStudio({ project, onSave }: Props) {
                                 <div className="text-slate-300 font-bold">{((plane.area ?? 0) * 10.764).toFixed(0)} ft²</div>
                               </div>
                             </div>
-                            {/* Edge type legend */}
-                            {plane.edgeTypes && plane.edgeTypes.length > 0 && (
-                              <div className="flex flex-wrap gap-1">
-                                {Object.entries(edgeTypeCounts).map(([et, count]) => {
-                                  const etColors: Record<string, string> = {
-                                    ridge: 'bg-red-500/20 text-red-400 border-red-500/30',
-                                    eave: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-                                    hip: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-                                    valley: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-                                    rake: 'bg-lime-500/20 text-lime-400 border-lime-500/30',
-                                    wall: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
-                                    unknown: 'bg-slate-600/20 text-slate-500 border-slate-600/30',
-                                  };
-                                  return (
-                                    <span key={et} className={`px-1.5 py-0.5 rounded border text-[10px] font-medium ${etColors[et] ?? etColors.unknown}`}>
-                                      {et}{count > 1 ? ` ×${count}` : ''}
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            )}
+                            {/* Edge type legend hidden — technical jargon not useful to homeowners */}
                             {/* Pitch editor */}
                             <div className="mt-1.5 flex items-center gap-2">
-                              <span className="text-slate-500 text-[10px] flex-shrink-0">Pitch:</span>
+                              <span className="text-slate-500 text-[10px] flex-shrink-0">Adjust slope:</span>
                               <input
                                 type="range"
                                 min={0}
@@ -4009,7 +3989,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                             </div>
                             {/* Azimuth direction selector */}
                             <div className="mt-1.5">
-                              <span className="text-slate-500 text-[10px]">Face direction (slope down toward):</span>
+                              <span className="text-slate-500 text-[10px]">Which way does this roof face?</span>
                               <div className="grid grid-cols-8 gap-0.5 mt-1">
                                 {[
                                   {label:'N', az:0}, {label:'NE', az:45}, {label:'E', az:90}, {label:'SE', az:135},
@@ -4040,7 +4020,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                               className="w-full mt-2 py-1.5 bg-blue-600/80 hover:bg-blue-500 text-white rounded-lg text-[10px] font-semibold transition-colors flex items-center justify-center gap-1"
                               title="Remove existing panels and re-place with updated azimuth & pitch"
                             >
-                              ↺ Re-layout Panels with This Orientation
+                              ↺ Update Panel Layout
                             </button>
                           </div>
                         );
@@ -4052,7 +4032,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                         className="w-full py-2 border border-dashed border-slate-600 hover:border-amber-500/50 hover:text-amber-400 text-slate-500 rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5"
                       >
                         <Home size={11} />
-                        Draw Additional Roof Plane (R)
+                        Add Another Roof Section
                       </button>
 
                     </div>
