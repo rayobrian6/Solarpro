@@ -546,6 +546,7 @@ function SolarEngine3D({
 
   // v50.11: Irradiance heatmap state
   const irradianceOverlayRef = useRef<any>(null);   // Cesium GroundPrimitive
+  const irradianceGroundRef  = useRef<any>(null);   // separate overlay for ground/fence areas
   const [irradianceLoading, setIrradianceLoading] = useState(false);
   const [irradianceBounds, setIrradianceBounds] = useState<{
     west: number; south: number; east: number; north: number;
@@ -723,21 +724,23 @@ function SolarEngine3D({
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
 
-  // v50.15: Irradiance heatmap — GroundPrimitive with ClassificationType.CESIUM_3D_TILE
-  // ROOT-CAUSE FIX: imageryLayers only drape over the globe/ellipsoid surface.
-  // Google Photorealistic 3D Tiles are scene.primitives — they sit ON TOP of the
-  // globe and completely hide any imageryLayer overlay.
-  // Solution: use GroundPrimitive with ClassificationType.CESIUM_3D_TILE so the
-  // colourmap is painted directly onto the 3D tile mesh surface.
+  // v50.16: Irradiance heatmap — roof (masked) + ground/fence (unmasked, panel bbox)
+  // GroundPrimitive with ClassificationType.CESIUM_3D_TILE paints directly onto
+  // the 3D tile mesh surface. imageryLayers only reach the globe ellipsoid and
+  // are always hidden under the Google Photorealistic 3D tile mesh.
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
     if (!viewer || !C || stage !== 'done') return;
 
-    // ── Remove existing overlay ─────────────────────────────────────────────
+    // ── Remove existing overlays ────────────────────────────────────────────
     if (irradianceOverlayRef.current) {
       try { viewer.scene.primitives.remove(irradianceOverlayRef.current); } catch {}
       irradianceOverlayRef.current = null;
+    }
+    if (irradianceGroundRef.current) {
+      try { viewer.scene.primitives.remove(irradianceGroundRef.current); } catch {}
+      irradianceGroundRef.current = null;
     }
 
     if (!showIrradianceLocal) {
@@ -745,77 +748,111 @@ function SolarEngine3D({
       return;
     }
 
+    // ── Helpers ─────────────────────────────────────────────────────────────
+    function makeGroundPrimitive(
+      C: any,
+      rect: any,
+      dataUrl: string,
+    ): any {
+      const geometry = new C.RectangleGeometry({
+        rectangle:    rect,
+        vertexFormat: C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
+      });
+      const instance = new C.GeometryInstance({ geometry });
+      // color (1,1,1,1) preserves per-pixel alpha from the canvas exactly.
+      // A flat alpha multiplier < 1 would make transparent mask pixels semi-opaque.
+      const mat = C.Material.fromType('Image', {
+        image: dataUrl,
+        color: new C.Color(1.0, 1.0, 1.0, 1.0),
+      });
+      const appearance = new C.MaterialAppearance({ translucent: true, flat: true });
+      appearance.material = mat;
+      return new C.GroundPrimitive({
+        geometryInstances:  instance,
+        appearance,
+        classificationType: C.ClassificationType.CESIUM_3D_TILE,
+        asynchronous:       false,
+      });
+    }
+
     // ── Load + render ───────────────────────────────────────────────────────
     let cancelled = false;
     setIrradianceLoading(true);
     (async () => {
       try {
-        const { loadIrradianceLayer } = await import('@/lib/geotiffDecoder');
+        const { loadIrradianceLayer, loadIrradianceLayerUnmasked } = await import('@/lib/geotiffDecoder');
         const { renderIrradianceCanvas } = await import('@/lib/irradianceColormap');
 
-        const layer = await loadIrradianceLayer(lat, lng);
+        // ── 1. ROOF overlay (masked — only roof pixels coloured) ─────────────
+        const roofLayer = await loadIrradianceLayer(lat, lng);
         if (cancelled) return;
-        if (!layer) {
-          console.warn('[Irradiance] No data available for', lat, lng, '— check Solar API coverage');
-          setIrradianceLoading(false);
-          return;
+
+        if (roofLayer) {
+          console.log('[Irradiance] Roof layer:', roofLayer.width, 'x', roofLayer.height, 'mask:', roofLayer.mask ? 'YES' : 'NO');
+          const roofCanvas = renderIrradianceCanvas(roofLayer);
+          setIrradianceBounds(roofLayer.bounds);
+          const roofRect = C.Rectangle.fromDegrees(
+            roofLayer.bounds.west, roofLayer.bounds.south,
+            roofLayer.bounds.east, roofLayer.bounds.north,
+          );
+          const roofDataUrl = roofCanvas.toDataURL('image/png');
+          const roofPrimitive = makeGroundPrimitive(C, roofRect, roofDataUrl);
+          viewer.scene.primitives.add(roofPrimitive);
+          irradianceOverlayRef.current = roofPrimitive;
+          console.log('[Irradiance] ✅ Roof heatmap added (CESIUM_3D_TILE)',
+            roofLayer.minVal.toFixed(0), '–', roofLayer.maxVal.toFixed(0), 'kWh/m²/yr');
+        } else {
+          console.warn('[Irradiance] No roof data for', lat, lng);
         }
 
-        console.log('[Irradiance] Layer loaded', layer.width, 'x', layer.height, 'bounds:', layer.bounds);
-
-        // Render to canvas (RGBA image)
-        const canvas = renderIrradianceCanvas(layer);
-        setIrradianceBounds(layer.bounds);
-
-        if (cancelled) return;
-
-        const rect = C.Rectangle.fromDegrees(
-          layer.bounds.west, layer.bounds.south,
-          layer.bounds.east, layer.bounds.north,
+        // ── 2. GROUND / FENCE overlay (unmasked — full solar flux in panel area) ─
+        // Find bounding box of all ground + fence panels on screen
+        const groundFencePanels = panelsRef.current.filter(
+          p => p.systemType === 'ground' || p.systemType === 'fence'
         );
 
-        // Convert canvas → data URL for the Material image
-        const dataUrl = canvas.toDataURL('image/png');
-        console.log('[Irradiance] Canvas', canvas.width, 'x', canvas.height, 'dataURL len:', dataUrl.length);
+        if (groundFencePanels.length > 0) {
+          if (cancelled) return;
 
-        // ── GroundPrimitive with ClassificationType.CESIUM_3D_TILE ───────────
-        // This paints the heatmap directly onto the 3D tile mesh surface,
-        // which is what Google Photorealistic 3D Tiles render as. imageryLayers
-        // can never reach the tile surface — they only drape on the globe.
-        const geometry = new C.RectangleGeometry({
-          rectangle:        rect,
-          vertexFormat:     C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
-        });
+          // Compute lat/lng bbox of all ground+fence panels
+          let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+          for (const p of groundFencePanels) {
+            if (p.lat < minLat) minLat = p.lat;
+            if (p.lat > maxLat) maxLat = p.lat;
+            if (p.lng < minLng) minLng = p.lng;
+            if (p.lng > maxLng) maxLng = p.lng;
+          }
 
-        const instance = new C.GeometryInstance({ geometry });
+          if (isFinite(minLat) && isFinite(minLng)) {
+            // Expand bbox slightly so panels at the edges aren't clipped
+            const pad = 0.00008; // ~9m
+            const groundBounds = {
+              west:  minLng - pad,
+              south: minLat - pad,
+              east:  maxLng + pad,
+              north: maxLat + pad,
+            };
 
-        // Build a Material from the canvas data URL
-        const mat = C.Material.fromType('Image', {
-          image:  dataUrl,
-          color:  new C.Color(1.0, 1.0, 1.0, 0.82),
-        });
+            const groundLayer = await loadIrradianceLayerUnmasked(lat, lng);
+            if (cancelled) return;
 
-        const appearance = new C.MaterialAppearance({
-          translucent: true,
-          flat:        true,
-        });
-        appearance.material = mat;
-
-        const primitive = new C.GroundPrimitive({
-          geometryInstances:  instance,
-          appearance,
-          classificationType: C.ClassificationType.CESIUM_3D_TILE,
-          asynchronous:       false,  // render synchronously so it appears immediately
-        });
-
-        if (cancelled) return;
-
-        viewer.scene.primitives.add(primitive);
-        irradianceOverlayRef.current = primitive;
-
-        console.log('[Irradiance] ✅ GroundPrimitive added (CESIUM_3D_TILE):',
-          layer.width, 'x', layer.height,
-          'minVal=', layer.minVal.toFixed(0), 'maxVal=', layer.maxVal.toFixed(0));
+            if (groundLayer) {
+              const clippedLayer = { ...groundLayer, bounds: groundBounds };
+              const groundCanvas = renderIrradianceCanvas(clippedLayer);
+              const groundRect = C.Rectangle.fromDegrees(
+                groundBounds.west, groundBounds.south,
+                groundBounds.east, groundBounds.north,
+              );
+              const groundDataUrl = groundCanvas.toDataURL('image/png');
+              const groundPrimitive = makeGroundPrimitive(C, groundRect, groundDataUrl);
+              viewer.scene.primitives.add(groundPrimitive);
+              irradianceGroundRef.current = groundPrimitive;
+              console.log('[Irradiance] ✅ Ground/fence heatmap added —',
+                groundFencePanels.length, 'panels bbox:',
+                minLat.toFixed(5), minLng.toFixed(5), '→', maxLat.toFixed(5), maxLng.toFixed(5));
+            }
+          }
+        }
 
         try { viewer.scene.requestRender(); } catch {}
       } catch (err: unknown) {
@@ -832,6 +869,10 @@ function SolarEngine3D({
       if (irradianceOverlayRef.current && viewerRef.current) {
         try { viewerRef.current.scene.primitives.remove(irradianceOverlayRef.current); } catch {}
         irradianceOverlayRef.current = null;
+      }
+      if (irradianceGroundRef.current && viewerRef.current) {
+        try { viewerRef.current.scene.primitives.remove(irradianceGroundRef.current); } catch {}
+        irradianceGroundRef.current = null;
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

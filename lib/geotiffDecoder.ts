@@ -76,19 +76,23 @@ async function decodeGeoTiffBuffer(
   const { fromArrayBuffer } = await import('geotiff');
   const tiff  = await fromArrayBuffer(buf);
   const image = await tiff.getImage();
-  const rasters = await image.readRasters();
-  const raw = rasters[0] as Float32Array | Uint8Array | Int16Array;
+  // interleave:false returns one TypedArray per band (band 0 = the data we want)
+  const rasters = await image.readRasters({ interleave: false });
+  const raw = rasters[0] as Float32Array | Uint8Array | Int16Array | Int32Array;
   const width  = image.getWidth();
   const height = image.getHeight();
 
-  // Normalise to Float32Array (mask tiles come as Uint8, flux as Float32)
+  // Use BYTES_PER_ELEMENT to reliably detect type regardless of realm/wrapper.
+  // Mask GeoTIFFs are 1 byte/px (Uint8); flux GeoTIFFs are 4 bytes/px (Float32).
   let data: Float32Array | Uint8Array;
-  if (raw instanceof Uint8Array) {
-    data = raw;
+  if ((raw as any).BYTES_PER_ELEMENT === 1) {
+    // Uint8 — copy into a plain Uint8Array (avoids any geotiff wrapper issues)
+    data = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) data[i] = (raw as any)[i];
   } else {
-    // Cast Int16 or other types → Float32
+    // Float32 / Int16 / Int32 — normalise to Float32
     data = new Float32Array(raw.length);
-    for (let i = 0; i < raw.length; i++) data[i] = raw[i];
+    for (let i = 0; i < raw.length; i++) data[i] = (raw as any)[i];
   }
   return { data, width, height };
 }
@@ -139,14 +143,23 @@ export async function loadIrradianceLayer(
     try {
       const maskBuf = await fetchTileBytes(meta.maskUrl);
       const maskDecoded = await decodeGeoTiffBuffer(maskBuf);
-      mask = maskDecoded.data instanceof Uint8Array
-        ? maskDecoded.data
-        : (() => {
-            const m = new Uint8Array(maskDecoded.data.length);
-            maskDecoded.data.forEach((v, i) => { m[i] = v > 0 ? 255 : 0; });
-            return m;
-          })();
-    } catch { /* mask is optional */ }
+      // Use BYTES_PER_ELEMENT to reliably detect type (avoids instanceof realm issues)
+      if (maskDecoded.data.BYTES_PER_ELEMENT === 1) {
+        mask = maskDecoded.data as Uint8Array;
+      } else {
+        mask = new Uint8Array(maskDecoded.data.length);
+        for (let i = 0; i < maskDecoded.data.length; i++) {
+          mask[i] = (maskDecoded.data as Float32Array)[i] > 0 ? 255 : 0;
+        }
+      }
+      let onRoof = 0;
+      for (let i = 0; i < mask.length; i++) if (mask[i] > 0) onRoof++;
+      console.log('[Irradiance] Mask: ' + maskDecoded.width + 'x' + maskDecoded.height + ', on-roof pixels: ' + onRoof + '/' + mask.length + ' (' + (onRoof/mask.length*100).toFixed(1) + '%)');
+    } catch (e) {
+      console.warn('[Irradiance] Mask decode failed (overlay will show full bbox):', (e as Error).message);
+    }
+  } else {
+    console.warn('[Irradiance] No maskUrl in dataLayers response — overlay shows full bbox');
   }
 
   // ── 5. Compute min/max for normalisation ─────────────────────────────────
@@ -178,4 +191,20 @@ export async function loadIrradianceLayer(
 /** Clear the cache (e.g. when user switches to a new address) */
 export function clearIrradianceCache() {
   _cache.clear();
+}
+
+/**
+ * Load the irradiance layer WITHOUT the roof mask applied.
+ * Used for ground-mount and fence-mount overlays where we want to show
+ * solar flux across an arbitrary area (not just roof pixels).
+ * Returns the same cached LayerData but with mask set to null.
+ */
+export async function loadIrradianceLayerUnmasked(
+  lat: number,
+  lng: number,
+): Promise<LayerData | null> {
+  const layer = await loadIrradianceLayer(lat, lng);
+  if (!layer) return null;
+  // Return a copy with mask = null so renderIrradianceCanvas colours every pixel
+  return { ...layer, mask: null };
 }
