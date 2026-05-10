@@ -3777,7 +3777,7 @@ function SolarEngine3D({
 
       for (const panel of gatePanels) {
         try {
-          const dims = getPanelDims(panel.orientation ?? panelOrientationRef.current);
+          const _pOrient = (panel.orientation as string | undefined); const _gOrient = (panelOrientationRef.current as string); const dims = getPanelDims((_pOrient === 'hybrid' || !_pOrient ? (_gOrient === 'hybrid' ? 'portrait' : _gOrient) : _pOrient) as 'portrait' | 'landscape');
           const pos = safeCartesian3(C, panel.lng, panel.lat, panel.height ?? 0);
           if (!pos) continue;
 
@@ -5748,7 +5748,11 @@ function SolarEngine3D({
     // Phase 2: clear roof rails on auto-fill rebuild
     try { clearRoofRails(viewer); } catch {}
 
-    const orient      = panelOrientationRef.current ?? 'portrait';
+    const orientRaw   = (panelOrientationRef.current ?? 'portrait') as string;
+    // v50.23: 'hybrid' in 3D mode → use 'portrait' orientation + layoutStrategy:'mixed'
+    // The control layer's 'mixed' strategy fills portrait rows then sweeps landscape in remainder.
+    const orient      = (orientRaw === 'hybrid' ? 'portrait' : orientRaw) as 'portrait' | 'landscape';
+    const isHybrid    = orientRaw === 'hybrid';
     const groundElev  = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
     const edgeSetback = fireSetbacks?.edgeSetbackM  ?? 0.457;
     const ridgeSetback = fireSetbacks?.ridgeSetbackM ?? 0.457;
@@ -5764,11 +5768,19 @@ function SolarEngine3D({
       // Panel positions: origin + u*(col*stepU + w/2) + v*(row*stepV + h/2)  [no drift]
       const layoutId = `auto-${planeIdx}-${plane.id.slice(0,6)}`;
 
+      // v50.23: per-plane orientation override (from Roof Planes panel) beats global
+      const planeOrientRaw = (plane as any).orientation as string | undefined;
+      const planeIsHybrid  = planeOrientRaw === 'hybrid' || (!planeOrientRaw && isHybrid);
+      const planeOrient    = planeOrientRaw === 'portrait' ? 'portrait'
+                           : planeOrientRaw === 'landscape' ? 'landscape'
+                           : orient; // hybrid or undefined → use base orient (portrait for mixed)
+
       // v48.7: Route through control layer (auto_roof mode)
       const clAutoResult = placePanelsControlled({
         mode:            'auto_roof',
         plane:           plane as unknown as ControlPlane,
-        orientation:     orient,
+        orientation:     planeOrient as 'portrait' | 'landscape',
+        layoutStrategy:  planeIsHybrid ? 'mixed' : undefined,
         wattage,
         setbacks:        { eaveM: 0, ridgeM: ridgeSetback, sideM: edgeSetback },
         groundElevM:     groundElev,

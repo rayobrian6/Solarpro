@@ -1820,7 +1820,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     drawTileSourceBadge(ctx, W, H, activeTileSource, zoom);
     // Panel dimension legend (bottom-right corner) — only when panels exist
     if (panels.length > 0) {
-      drawPanelDimensionLegend(ctx, W, H, mpp, selectedPanel, orientation);
+      drawPanelDimensionLegend(ctx, W, H, mpp, selectedPanel, orientation === 'hybrid' ? 'portrait' : orientation);
     }
 
   // tileRedrawTick replaces mapTiles in deps — avoids new drawCanvas on every individual tile load
@@ -1903,7 +1903,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     ctx: CanvasRenderingContext2D,
     W: number, H: number, mpp: number,
     panel: { id?: string; manufacturer?: string; model?: string; width: number; height: number; wattage: number },
-    orientation: 'portrait' | 'landscape'
+    orientation: 'portrait' | 'landscape' | 'hybrid'
   ) {
     const pW = orientation === 'landscape' ? panel.height : panel.width;  // meters (along-ridge visual)
     const pH = orientation === 'landscape' ? panel.width  : panel.height; // meters (up-slope visual)
@@ -2327,7 +2327,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         rowSpacing,
         tilt: plane.pitch ?? tilt,
         azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override → global fallback
         fireSetbackM,
         pathwayWidthM: fireSetbacks.pathwayWidthM,
         enforcePathway: fireSetbacks.enforcePathway,
@@ -2368,7 +2368,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       newPanels = generateGroundLayoutOptimized({
         layoutId, area: points, panel: selectedPanel,
         tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
-        orientation,
+        orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
     } else if (type === 'fence') {
       newPanels = generateFenceLayout({ layoutId, fenceLine: points, panel: selectedPanel, azimuth, panelSpacing, fenceHeight, bifacialOptimized });
@@ -2380,9 +2380,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── Auto Layout: fill all existing zones with current settings ────────────────
   const [autoLayoutRunning, setAutoLayoutRunning] = useState(false);
 
-  // v47.103: Re-layout all AUTO panels immediately when orientation toggle changes.
+  // v47.103 / v50.23: Re-layout all AUTO panels immediately when orientation toggle changes.
   // Called with the NEW orientation value directly (before React state update settles).
-  const relayoutWithOrientation = useCallback((newOrientation: 'portrait' | 'landscape') => {
+  const relayoutWithOrientation = useCallback((newOrientation: 'portrait' | 'landscape' | 'hybrid') => {
     const hasZones = roofPlanes.length > 0 || groundArea.length > 0;
     if (!hasZones) return; // no zones yet, nothing to re-layout
     const hasAutoPanels = panels.some(p => p.layoutSource === 'AUTO');
@@ -2405,11 +2405,14 @@ export default function DesignStudio({ project, onSave }: Props) {
     roofPlanes.forEach(plane => {
       const layoutId = uuidv4();
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      // v50.23: per-plane orientation overrides global — use plane.orientation if set,
+      // otherwise fall back to the global orientation.
+      const planeOrientation = (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? newOrientation;
       const newPanels = generateRoofLayoutOptimized({
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback, panelSpacing, rowSpacing,
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: newOrientation,
+        orientation: planeOrientation,
         fireSetbackM,
         pathwayWidthM: fireSetbacks.pathwayWidthM,
         enforcePathway: fireSetbacks.enforcePathway,
@@ -2421,10 +2424,12 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     if (groundArea.length >= 3) {
       const layoutId = uuidv4();
+      // Ground mount doesn't support hybrid — use portrait as fallback for hybrid global mode
+      const groundOrientation = newOrientation === 'hybrid' ? 'portrait' : newOrientation;
       const newPanels = generateGroundLayoutOptimized({
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
-        orientation: newOrientation,
+        orientation: groundOrientation,
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -2465,7 +2470,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback, panelSpacing, rowSpacing,
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
@@ -2477,10 +2482,11 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     if (groundArea.length >= 3) {
       const layoutId = uuidv4();
+      const groundOrientation = orientation === 'hybrid' ? 'portrait' : orientation;
       const newPanels = generateGroundLayoutOptimized({
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
-        orientation,
+        orientation: groundOrientation,
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -2525,7 +2531,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         setback: effectiveSetback, panelSpacing: tightSpacing,
         rowSpacing: 0.02,  // v47.95: flush roof mount -- panels touch row-to-row
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
@@ -2542,7 +2548,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         tilt, azimuth,
         rowSpacing: Math.max(rowSpacing * 0.85, selectedPanel.height + 0.05),
         panelSpacing: tightSpacing, panelsPerRow, groundHeight,
-        orientation,
+        orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -2579,7 +2585,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback: optSetback, panelSpacing: 0.006, rowSpacing: optRowSpacingRoof, // v47.98: ¼" clamp gap
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
@@ -2595,7 +2601,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing: optRowSpacingGround, panelSpacing: 0.006, // v47.98: ¼" clamp gap
         panelsPerRow, groundHeight,
-        orientation,
+        orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -3119,7 +3125,7 @@ export default function DesignStudio({ project, onSave }: Props) {
               showShade={showShade3D}
               showIrradiance={showIrradiance}
               fireSetbacks={fireSetbacks}
-              orientation={orientation}
+              orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
@@ -3664,21 +3670,30 @@ export default function DesignStudio({ project, onSave }: Props) {
                   )}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
 
-                  {/* v30.9: Panel Orientation Toggle — always visible; relayoutWithOrientation is a no-op in 3D mode (see guard) */}
+                  {/* v30.9 / v50.23: Panel Orientation Toggle — portrait | landscape | hybrid */}
                   <div className="flex items-center justify-between py-1">
                     <label className="text-xs text-slate-400">Panel Orientation</label>
                     <div className="flex rounded-lg overflow-hidden border border-slate-600">
                       <button
                         onClick={() => { setOrientation('portrait'); relayoutWithOrientation('portrait'); }}
                         className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'portrait' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        title="Portrait — all panels tall (long edge vertical)"
                       >
                         ▯ Portrait
                       </button>
                       <button
                         onClick={() => { setOrientation('landscape'); relayoutWithOrientation('landscape'); }}
                         className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'landscape' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        title="Landscape — all panels wide (long edge horizontal)"
                       >
                         ▭ Landscape
+                      </button>
+                      <button
+                        onClick={() => { setOrientation('hybrid'); relayoutWithOrientation('hybrid'); }}
+                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'hybrid' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        title="Hybrid — auto-optimises each roof plane independently: portrait rows + landscape fill in ridge strip for maximum panel count"
+                      >
+                        ⚡ Hybrid
                       </button>
                     </div>
                   </div>
@@ -4109,6 +4124,45 @@ export default function DesignStudio({ project, onSave }: Props) {
                                             >{l}</button>
                                           );
                                         })}
+                                      </div>
+                                    </div>
+                                    {/* v50.23: Per-plane orientation override */}
+                                    <div>
+                                      <div className="text-[10px] text-slate-500 mb-1">Panel orientation for this plane</div>
+                                      <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                                        {([
+                                          { v: undefined,    label: 'Global', icon: '↑' },
+                                          { v: 'portrait',   label: 'Portrait',  icon: '▯' },
+                                          { v: 'landscape',  label: 'Land.',     icon: '▭' },
+                                          { v: 'hybrid',     label: 'Hybrid',    icon: '⚡' },
+                                        ] as { v: 'portrait' | 'landscape' | 'hybrid' | undefined; label: string; icon: string }[]).map(({ v, label, icon }) => {
+                                          const isActive = plane.orientation === v;
+                                          return (
+                                            <button
+                                              key={label}
+                                              onClick={() => {
+                                                setRoofPlanes(prev => prev.map(p =>
+                                                  p.id === plane.id ? { ...p, orientation: v } : p
+                                                ));
+                                              }}
+                                              className={`flex-1 py-0.5 text-[9px] font-semibold transition-colors ${
+                                                isActive
+                                                  ? v === 'hybrid' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+                                                  : 'bg-slate-700 text-slate-400 hover:text-slate-200'
+                                              }`}
+                                              title={v === undefined ? 'Use global orientation setting' : `Force ${label} on this plane`}
+                                            >
+                                              {icon} {label}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      <div className="text-[9px] text-slate-600 mt-0.5">
+                                        {plane.orientation === 'hybrid'
+                                          ? '⚡ Auto-optimising: portrait rows + landscape ridge fill'
+                                          : plane.orientation
+                                          ? `Overrides global (${orientation}) for this plane only`
+                                          : `Following global: ${orientation}`}
                                       </div>
                                     </div>
                                     {/* Re-layout */}

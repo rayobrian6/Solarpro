@@ -28,7 +28,7 @@ function metersPerDegLng(lat: number): number {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type PanelOrientation = 'portrait' | 'landscape';
+export type PanelOrientation = 'portrait' | 'landscape' | 'hybrid';
 
 /**
  * Fire setback configuration — configurable per AHJ.
