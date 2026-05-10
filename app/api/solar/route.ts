@@ -333,7 +333,31 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const enriched: SolarApiSegment[] = rawSegs.map((s: any, i: number) => ({
+    // ── Filter segments to the identified building only ─────────────────────
+    // Google's buildingInsights:findClosest returns ALL segments within the
+    // response area, which can include adjacent buildings. Use the building
+    // center (solarJson.center) returned by the API as the anchor, and keep
+    // only segments whose centroid is within MAX_SEGMENT_RADIUS_M of it.
+    // This prevents neighboring houses' roof planes appearing on the selected building.
+    const buildingCenter = solarJson.center as { latitude: number; longitude: number } | undefined;
+    const MAX_SEGMENT_RADIUS_M = 30; // meters — tight enough to exclude neighbors
+
+    const filteredSegs = buildingCenter
+      ? rawSegs.filter((s: any) => {
+          const sLat = s.center?.latitude;
+          const sLng = s.center?.longitude;
+          if (sLat == null || sLng == null) return true; // keep if no center
+          return distanceM(
+            { lat: buildingCenter.latitude, lng: buildingCenter.longitude },
+            { lat: sLat, lng: sLng },
+          ) <= MAX_SEGMENT_RADIUS_M;
+        })
+      : rawSegs;
+
+    const segsToUse = filteredSegs.length > 0 ? filteredSegs : rawSegs;
+    console.log(`[solar/POST] Segments: ${rawSegs.length} total → ${segsToUse.length} after building filter (center: ${buildingCenter?.latitude?.toFixed(5)}, ${buildingCenter?.longitude?.toFixed(5)})`);
+
+    const enriched: SolarApiSegment[] = segsToUse.map((s: any, i: number) => ({
       pitchDegrees:              s.pitchDegrees              ?? 0,
       azimuthDegrees:            s.azimuthDegrees             ?? 180,
       center:                    s.center,
