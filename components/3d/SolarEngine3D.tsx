@@ -2584,37 +2584,44 @@ function SolarEngine3D({
     let cartesian: any = null;
     let pickMethod = 'none';
 
-    // ── Priority 1: globe.pick — terrain-only, ignores ALL Cesium entities ──
-    // This is what we want for ground array: the actual ground surface under
-    // the cursor, even if a panel or racking post is sitting above it.
-    try {
-      const gp = viewer.scene.globe.pick(ray, viewer.scene);
-      if (gp && isFinite(gp.x) && C.Cartesian3.magnitude(gp) > 1_000_000) {
-        cartesian  = gp;
-        pickMethod = 'terrain';
-      }
-    } catch { /* terrain pick unavailable */ }
+    // v50.2: Priority order REVISED — 3D tiles first, globe.pick second, ellipsoid last.
+    // REASON: With EllipsoidTerrainProvider (our intentional choice to avoid tile conflicts),
+    // globe.pick always hits the WGS84 ellipsoid at h≈0 regardless of actual terrain elevation.
+    // Google Photorealistic 3D Tiles give us the REAL surface height via scene.pickPosition.
+    // We must try 3D tiles BEFORE globe.pick so we get the actual ground elevation.
 
-    // ── Priority 2: 3D tiles pick — but ONLY if it hits a tile, not a panel ─
+    // ── Priority 1: 3D tiles pick — gives real surface height from Google mesh ──
+    // Skip if the pick hit one of our own entities (panel / racking / overlay).
+    try {
+      const pickedObject = viewer.scene.pick(screenPos);
+      const entityName: string = pickedObject?.id?.name ?? pickedObject?.primitive?.id?.name ?? '';
+      const isOurEntity = entityName.startsWith('[PANEL') || entityName.startsWith('[GRAC') ||
+                          entityName.startsWith('[GND_') || entityName.includes('__gracking__') ||
+                          entityName.includes('__gnd__');
+      if (pickedObject && !isOurEntity) {
+        const pp = viewer.scene.pickPosition(screenPos);
+        if (pp && isFinite(pp.x) && C.Cartesian3.magnitude(pp) > 1_000_000) {
+          // Nudge 0.15m along surface normal so marker sits ON the surface, not inside it.
+          const surfaceNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(pp);
+          cartesian = surfaceNormal
+            ? C.Cartesian3.add(pp, C.Cartesian3.multiplyByScalar(surfaceNormal, 0.15, new C.Cartesian3()), new C.Cartesian3())
+            : pp;
+          pickMethod = '3dtiles';
+        }
+      }
+    } catch { /* tiles pick failed */ }
+
+    // ── Priority 2: globe.pick — terrain-only, last resort before ellipsoid ──
+    // NOTE: With EllipsoidTerrainProvider this returns h≈0. We handle that in the
+    // height-trust logic below by falling back to cesiumGroundElevRef.
     if (!cartesian) {
       try {
-        const pickedObject = viewer.scene.pick(screenPos);
-        // Skip if the pick hit one of our own entities (panel / racking / overlay)
-        const entityName: string = pickedObject?.id?.name ?? pickedObject?.primitive?.id?.name ?? '';
-        const isOurEntity = entityName.startsWith('[PANEL') || entityName.startsWith('[GRAC') ||
-                            entityName.startsWith('[GND_') || entityName.includes('__gracking__') ||
-                            entityName.includes('__gnd__');
-        if (pickedObject && !isOurEntity) {
-          const pp = viewer.scene.pickPosition(screenPos);
-          if (pp && isFinite(pp.x) && C.Cartesian3.magnitude(pp) > 1_000_000) {
-            const surfaceNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(pp);
-            cartesian = surfaceNormal
-              ? C.Cartesian3.add(pp, C.Cartesian3.multiplyByScalar(surfaceNormal, 0.15, new C.Cartesian3()), new C.Cartesian3())
-              : pp;
-            pickMethod = '3dtiles';
-          }
+        const gp = viewer.scene.globe.pick(ray, viewer.scene);
+        if (gp && isFinite(gp.x) && C.Cartesian3.magnitude(gp) > 1_000_000) {
+          cartesian  = gp;
+          pickMethod = 'terrain';
         }
-      } catch { /* tiles pick failed */ }
+      } catch { /* terrain pick unavailable */ }
     }
 
     // ── Priority 3: ellipsoid fallback ───────────────────────────────────────
@@ -2635,22 +2642,24 @@ function SolarEngine3D({
       if (!carto) return null;
       const pLat = C.Math.toDegrees(carto.latitude);
       const pLng = C.Math.toDegrees(carto.longitude);
-      // v48.35: Only trust carto.height from real surface picks (terrain/3dtiles).
-      // Ellipsoid intersection gives height=0 by definition — always wrong for elevated terrain.
-      // For ellipsoid fallback, use cesiumGroundElevRef (sampled at boot from terrain provider).
-      // v50.1: ALSO distrust globe.pick height when it returns near-zero (WGS84 ellipsoid surface)
-      // AND the site cesiumGroundElevRef indicates significant elevation.
-      // Root cause: EllipsoidTerrainProvider makes globe.pick return height≈0 (ellipsoid surface),
-      // identical to a raw ellipsoid pick but labeled 'terrain'. Must fall back to cesiumGroundElevRef.
+      // v50.2: Height trust logic — 3-tier approach.
+      // Priority 1 (3dtiles): scene.pickPosition gives real Google mesh height — ALWAYS trust
+      //   if the value is plausible (> -500m, i.e. not a depth-buffer artifact).
+      // Priority 2 (terrain / ellipsoid): globe.pick and ellipsoid.intersectWithRay BOTH
+      //   return h≈0 with EllipsoidTerrainProvider — distrust, use cesiumGroundElevRef.
+      // Fallback: cesiumGroundElevRef = googleOrthometric + EGM96 geoidApprox.
+      //   May be negative for low sites; clamp to 0 in that case.
       const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
-      const ELEV_TRUST_M = 5; // below 5m above WGS84 we suspect ellipsoid-surface hit
-      const isNearSeaLevel = rawH !== null && Math.abs(rawH) < ELEV_TRUST_M;
-      const siteIsElevated = cesiumGroundElevRef.current > ELEV_TRUST_M;
-      // Distrust: explicit ellipsoid pick, OR terrain/3dtiles returning near-zero at elevated site
-      const trustedH = (pickMethod !== 'ellipsoid' && !(isNearSeaLevel && siteIsElevated)) ? rawH : null;
-      const height = trustedH ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (rawH ?? 0));
+      let trustedH: number | null = null;
+      if (pickMethod === '3dtiles' && rawH !== null && rawH > -500) {
+        // 3D tiles gave us a real mesh hit with valid height — trust it directly
+        trustedH = rawH;
+      }
+      // terrain + ellipsoid both return h≈0 with EllipsoidTerrainProvider — never trust
+      const cesiumFallback = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      const height = trustedH ?? cesiumFallback;
       if (!isValidCoord(pLat, pLng)) return null;
-      addLog('GROUND', `[GROUND-PICK v50.1] method=${pickMethod} lat=${pLat.toFixed(7)} lng=${pLng.toFixed(7)} rawH=${rawH?.toFixed(2)} nearSea=${isNearSeaLevel} siteElev=${siteIsElevated} h=${height.toFixed(2)}m`);
+      addLog('GROUND', `[GROUND-PICK v50.2] method=${pickMethod} rawH=${rawH?.toFixed(2)} trusted=${trustedH?.toFixed(2) ?? 'null'} cesiumFallback=${cesiumFallback.toFixed(2)} h=${height.toFixed(2)}m lat=${pLat.toFixed(6)} lng=${pLng.toFixed(6)}`);
       return { lat: pLat, lng: pLng, height, pickMethod };
     } catch { return null; }
   }
@@ -2710,14 +2719,13 @@ function SolarEngine3D({
       // v48.11: Use actual terrain hit height so single-click ground panels appear at
       // the cursor. Fall back to boot-sampled cesiumGroundElevRef when hit height is
       // unavailable (e.g. ellipsoid-only pick returns height ~0).
-      // v48.35: Ellipsoid pick gives height=0 by definition — not terrain elevation.
-      // v50.1: ALSO distrust terrain/3dtiles picks that return near-zero height at elevated sites.
-      // EllipsoidTerrainProvider makes globe.pick return the WGS84 ellipsoid surface (h≈0).
+      // v50.2: Same 3-tier trust logic as getGroundPlanePosition.
+      // getWorldPosition uses scene.pick + pickPosition (3dtiles) first, then globe.pick, then ellipsoid.
+      // Only 3dtiles gives real mesh height; terrain+ellipsoid both return h≈0.
       const rawHeightGnd = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
-      const isNearSeaLevelGnd = rawHeightGnd !== null && Math.abs(rawHeightGnd) < 5;
-      const siteIsElevatedGnd = cesiumGroundElevRef.current > 5;
-      const hitHeightGnd = (hit.pickMethod !== 'ellipsoid' && !(isNearSeaLevelGnd && siteIsElevatedGnd)) ? rawHeightGnd : null;
-      const baseZ       = hitHeightGnd ?? (cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (rawHeightGnd ?? 0));
+      const trustedHeightGnd = (hit.pickMethod === '3dtiles' && rawHeightGnd !== null && rawHeightGnd > -500) ? rawHeightGnd : null;
+      const cesiumFallbackGnd = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      const baseZ = trustedHeightGnd ?? cesiumFallbackGnd;
       const mountPlaneZ = baseZ + MOUNT_HEIGHT_M;
       if (!isValidCoord(pLat, pLng, mountPlaneZ)) return;
 
