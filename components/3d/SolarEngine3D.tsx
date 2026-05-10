@@ -2741,7 +2741,10 @@ function SolarEngine3D({
         groundArrayKeyPrefixRef.current = `ga${Date.now().toString(36)}_`;
         groundArrayFirstRowRef.current = { start: pt, end: pt, azimuthDeg: azimuthRef.current, rowSpacingM: 0 };
         try {
-          const mPos = safeCartesian3(C, pt.lng, pt.lat, pt.height + 0.5);
+          // v50.6: dot at ground surface elevation (gpp.height), NOT mount plane height
+          // pt.height = groundElevM + MOUNT_HEIGHT_M (1.2m up) — at oblique angles that
+          // causes a visible screen-space offset. Use gpp.height + 0.05 to sit on the ground.
+          const mPos = safeCartesian3(C, pt.lng, pt.lat, gpp.height + 0.05);
           if (mPos) {
             const m = viewer.entities.add({
               position: mPos,
@@ -2811,7 +2814,8 @@ function SolarEngine3D({
         setGroundArrayRowCount(1);
         setGroundArrayPanelCount(row1.length);
         try {
-          const mPos = safeCartesian3(C, pt.lng, pt.lat, pt.height + 0.5);
+          // v50.6: dot at ground surface (gpp.height), not mount plane height
+          const mPos = safeCartesian3(C, pt.lng, pt.lat, gpp.height + 0.05);
           if (mPos) {
             const m = viewer.entities.add({ position: mPos,
               point: { pixelSize: 10, color: C.Color.fromCssColorString('#fbbf24'),
