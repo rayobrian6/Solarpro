@@ -20,6 +20,7 @@ export const dynamic  = 'force-dynamic';
 export const runtime  = 'nodejs';
 
 import { NextRequest, NextResponse } from 'next/server';
+import { requireAuth } from '@/lib/security';
 
 const API_KEY =
   process.env.GOOGLE_SOLAR_API_KEY ||
@@ -35,6 +36,9 @@ const ALLOWED_HOSTS = [
 ];
 
 export async function GET(req: NextRequest) {
+  // SECURITY: Require authenticated user (same as /api/solar)
+  const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
   const rawUrl = req.nextUrl.searchParams.get('url');
   if (!rawUrl) {
     return NextResponse.json({ error: 'Missing url parameter' }, { status: 400 });

@@ -241,7 +241,9 @@ export async function GET(req: NextRequest) {
       url = `https://solar.googleapis.com/v1/buildingInsights:findClosest?location.latitude=${lat}&location.longitude=${lng}&requiredQuality=${quality}&key=${GOOGLE_SOLAR_API_KEY}`;
     } else if (endpoint === 'dataLayers') {
       const radiusMeters = searchParams.get('radiusMeters') || '50';
-      url = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=${radiusMeters}&requiredQuality=${quality}&key=${GOOGLE_SOLAR_API_KEY}`;
+      // pixelSizeMeters=0.5 keeps tile files small (fast download); omitting it
+      // causes Google to return native-res tiles which can be 10-20x larger.
+      url = `https://solar.googleapis.com/v1/dataLayers:get?location.latitude=${lat}&location.longitude=${lng}&radiusMeters=${radiusMeters}&view=FULL_LAYERS&requiredQuality=${quality}&pixelSizeMeters=0.5&key=${GOOGLE_SOLAR_API_KEY}`;
     } else {
       return NextResponse.json(
         { error: 'Invalid endpoint. Use: buildingInsights or dataLayers' },

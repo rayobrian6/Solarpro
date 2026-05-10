@@ -723,9 +723,12 @@ function SolarEngine3D({
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
 
-  // v50.13: Irradiance heatmap — load/unload when showIrradianceLocal changes
-  // Uses SingleTileImageryProvider.fromUrl() (async static factory) so the
-  // image is fully decoded before being handed to Cesium's imagery pipeline.
+  // v50.15: Irradiance heatmap — GroundPrimitive with ClassificationType.CESIUM_3D_TILE
+  // ROOT-CAUSE FIX: imageryLayers only drape over the globe/ellipsoid surface.
+  // Google Photorealistic 3D Tiles are scene.primitives — they sit ON TOP of the
+  // globe and completely hide any imageryLayer overlay.
+  // Solution: use GroundPrimitive with ClassificationType.CESIUM_3D_TILE so the
+  // colourmap is painted directly onto the 3D tile mesh surface.
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
@@ -733,7 +736,7 @@ function SolarEngine3D({
 
     // ── Remove existing overlay ─────────────────────────────────────────────
     if (irradianceOverlayRef.current) {
-      try { viewer.imageryLayers.remove(irradianceOverlayRef.current, true); } catch {}
+      try { viewer.scene.primitives.remove(irradianceOverlayRef.current); } catch {}
       irradianceOverlayRef.current = null;
     }
 
@@ -764,33 +767,56 @@ function SolarEngine3D({
         const canvas = renderIrradianceCanvas(layer);
         setIrradianceBounds(layer.bounds);
 
+        if (cancelled) return;
+
         const rect = C.Rectangle.fromDegrees(
           layer.bounds.west, layer.bounds.south,
           layer.bounds.east, layer.bounds.north,
         );
 
-        // Convert canvas to a data URL
+        // Convert canvas → data URL for the Material image
         const dataUrl = canvas.toDataURL('image/png');
-        console.log('[Irradiance] Canvas', canvas.width, 'x', canvas.height, 'data URL len:', dataUrl.length);
+        console.log('[Irradiance] Canvas', canvas.width, 'x', canvas.height, 'dataURL len:', dataUrl.length);
 
-        // ── Use SingleTileImageryProvider.fromUrl() — the async static factory ──
-        // Unlike `new SingleTileImageryProvider({url})`, fromUrl() pre-loads the
-        // image so Cesium has immediate pixel data and renders the layer instantly.
-        const provider = await C.SingleTileImageryProvider.fromUrl(dataUrl, {
-          rectangle: rect,
-          tileWidth:  canvas.width,
-          tileHeight: canvas.height,
+        // ── GroundPrimitive with ClassificationType.CESIUM_3D_TILE ───────────
+        // This paints the heatmap directly onto the 3D tile mesh surface,
+        // which is what Google Photorealistic 3D Tiles render as. imageryLayers
+        // can never reach the tile surface — they only drape on the globe.
+        const geometry = new C.RectangleGeometry({
+          rectangle:        rect,
+          vertexFormat:     C.EllipsoidSurfaceAppearance.VERTEX_FORMAT,
+        });
+
+        const instance = new C.GeometryInstance({ geometry });
+
+        // Build a Material from the canvas data URL
+        const mat = C.Material.fromType('Image', {
+          image:  dataUrl,
+          color:  new C.Color(1.0, 1.0, 1.0, 0.82),
+        });
+
+        const appearance = new C.MaterialAppearance({
+          translucent: true,
+          flat:        true,
+        });
+        appearance.material = mat;
+
+        const primitive = new C.GroundPrimitive({
+          geometryInstances:  instance,
+          appearance,
+          classificationType: C.ClassificationType.CESIUM_3D_TILE,
+          asynchronous:       false,  // render synchronously so it appears immediately
         });
 
         if (cancelled) return;
 
-        // Add on top of existing imagery layers
-        const imageryLayer = viewer.imageryLayers.addImageryProvider(provider);
-        imageryLayer.alpha = 0.82;
+        viewer.scene.primitives.add(primitive);
+        irradianceOverlayRef.current = primitive;
 
-        irradianceOverlayRef.current = imageryLayer;
-        console.log('[Irradiance] ✅ Heatmap added to imageryLayers:', layer.width, 'x', layer.height,
+        console.log('[Irradiance] ✅ GroundPrimitive added (CESIUM_3D_TILE):',
+          layer.width, 'x', layer.height,
           'minVal=', layer.minVal.toFixed(0), 'maxVal=', layer.maxVal.toFixed(0));
+
         try { viewer.scene.requestRender(); } catch {}
       } catch (err: unknown) {
         if (!cancelled) {
@@ -804,7 +830,7 @@ function SolarEngine3D({
     return () => {
       cancelled = true;
       if (irradianceOverlayRef.current && viewerRef.current) {
-        try { viewerRef.current.imageryLayers.remove(irradianceOverlayRef.current, true); } catch {}
+        try { viewerRef.current.scene.primitives.remove(irradianceOverlayRef.current); } catch {}
         irradianceOverlayRef.current = null;
       }
     };
