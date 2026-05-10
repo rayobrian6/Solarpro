@@ -199,6 +199,7 @@ interface Props {
   fireSetbacks?: {
     edgeSetbackM: number;
     ridgeSetbackM: number;
+    eaveSetbackM: number;
     enforcePathway: boolean;
     pathwayWidthM?: number;
   };
@@ -4828,6 +4829,7 @@ function SolarEngine3D({
       const orient        = panelOrientationRef.current ?? 'portrait';
       const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
       const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
+      const eaveSetbackM  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
       const layoutId      = `plane3d-${plane.id}`;
 
       const clResult = placePanelsControlled({
@@ -4835,7 +4837,7 @@ function SolarEngine3D({
         plane:           plane as unknown as ControlPlane,
         orientation:     orient,
         wattage:         selectedPanelRef.current?.wattage ?? 400,
-        setbacks:        { eaveM: 0, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
+        setbacks:        { eaveM: eaveSetbackM, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
         groundElevM:     groundElev,
         layoutId,
         customOriginLat: customLayoutOriginRef.current?.lat,
@@ -5000,6 +5002,7 @@ function SolarEngine3D({
       const orient        = panelOrientationRef.current ?? 'portrait';
       const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
       const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
+      const eaveSetbackM  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
       const layoutId      = `surface-${plane.id}`;
 
       // v48.7: Route through control layer (surface_select mode)
@@ -5008,7 +5011,7 @@ function SolarEngine3D({
         plane:       plane as unknown as ControlPlane,
         orientation: orient,
         wattage:     selectedPanelRef.current?.wattage ?? 400,
-        setbacks:    { eaveM: 0, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
+        setbacks:    { eaveM: eaveSetbackM, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
         groundElevM: groundElev,
         layoutId,
       });
@@ -5754,8 +5757,9 @@ function SolarEngine3D({
     const orient      = (orientRaw === 'hybrid' ? 'portrait' : orientRaw) as 'portrait' | 'landscape';
     const isHybrid    = orientRaw === 'hybrid';
     const groundElev  = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-    const edgeSetback = fireSetbacks?.edgeSetbackM  ?? 0.457;
+    const edgeSetback  = fireSetbacks?.edgeSetbackM  ?? 0.457;
     const ridgeSetback = fireSetbacks?.ridgeSetbackM ?? 0.457;
+    const eaveSetback  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
     const wattage     = selectedPanelRef.current?.wattage ?? 400;
 
     const newPanels: PlacedPanel[] = [];
@@ -5782,7 +5786,7 @@ function SolarEngine3D({
         orientation:     planeOrient as 'portrait' | 'landscape',
         layoutStrategy:  planeIsHybrid ? 'mixed' : undefined,
         wattage,
-        setbacks:        { eaveM: 0, ridgeM: ridgeSetback, sideM: edgeSetback },
+        setbacks:        { eaveM: eaveSetback, ridgeM: ridgeSetback, sideM: edgeSetback },
         groundElevM:     groundElev,
         layoutId,
         customOriginLat: customLayoutOriginRef.current?.lat,

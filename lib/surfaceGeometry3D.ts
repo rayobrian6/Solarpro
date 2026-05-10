@@ -868,6 +868,10 @@ function buildSurfaceGridECEF(opts: {
 
   // ── Section 3: Centered Grid Solver ────────────────────────────────────────────────────────────
   // v47.140: Grid centered on roof bounding box (setback-inset UV space).
+  // v50.26: When eaveSetbackM === 0 (panels to gutter line), use BOTTOM-ALIGNED grid
+  //         so the first row always starts at boundVLo (the actual eave edge).
+  //         Any leftover partial-row remainder goes to the ridge side, not the eave.
+  //         When eaveSetbackM > 0, keep the centered layout (equal margin on both sides).
   //
   // Per the spec:
   //   roofWidth  = boundUHi - boundULo
@@ -877,7 +881,8 @@ function buildSurfaceGridECEF(opts: {
   //   remainingU = roofWidth  - cols * stepU   ← leftover after full panels
   //   remainingV = roofHeight - rows * stepV
   //   originU = boundULo + remainingU / 2       ← centered: equal margin both sides
-  //   originV = boundVLo + remainingV / 2
+  //   originV = boundVLo + 0                    ← bottom-aligned when eave=0
+  //           = boundVLo + remainingV / 2        ← centered otherwise
   //   panel center (col,row) = originU + col*stepU + widthM/2
   //                            originV + row*stepV + heightM/2
   //
@@ -886,15 +891,19 @@ function buildSurfaceGridECEF(opts: {
 
   const roofWidth  = boundUHi - boundULo;
   const roofHeight = boundVHi - boundVLo;
+  // v50.26: bottom-align when eave=0 so panels start at gutter edge
+  const vBottomAligned = eaveSetbackM === 0;
 
   function runFill(phaseU: number, phaseV: number): Array<{uC: number; vC: number; col: number; row: number}> {
     const cols = Math.floor(roofWidth  / stepU);
     const rows = Math.floor(roofHeight / stepV);
     const remainingU = roofWidth  - cols * stepU;
     const remainingV = roofHeight - rows * stepV;
-    // Centered origin: equal margin on both sides (Section 3)
+    // v50.26: bottom-aligned when eave=0, centered otherwise
     const originU = boundULo + remainingU / 2 + phaseU;
-    const originV = boundVLo + remainingV / 2 + phaseV;
+    const originV = vBottomAligned
+      ? boundVLo + phaseV                      // bottom-aligned: first row at eave
+      : boundVLo + remainingV / 2 + phaseV;    // centered: equal margin both sides
 
     const result: Array<{uC: number; vC: number; col: number; row: number}> = [];
     for (let row = 0; row < rows; row++) {
