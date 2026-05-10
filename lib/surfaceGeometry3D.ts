@@ -866,44 +866,31 @@ function buildSurfaceGridECEF(opts: {
   const { heading: sharedHeading, pitch: sharedPitch, roll: sharedRoll } =
     planeHPR(plane, ef, origin);
 
-  // ── Section 3: Centered Grid Solver ────────────────────────────────────────────────────────────
-  // v47.140: Grid centered on roof bounding box (setback-inset UV space).
-  // v50.26: When eaveSetbackM === 0 (panels to gutter line), use BOTTOM-ALIGNED grid
-  //         so the first row always starts at boundVLo (the actual eave edge).
-  //         Any leftover partial-row remainder goes to the ridge side, not the eave.
-  //         When eaveSetbackM > 0, keep the centered layout (equal margin on both sides).
+  // ── Section 3: Centered Grid Solver (v47.140) ─────────────────────────────
+  // Grid always centered in setback-inset UV space (equal margin both sides).
+  // This avoids polygon-boundary PIP failures that occur when panels start
+  // exactly at minV=0 (boundary points are ambiguous in ray-casting PIP).
   //
-  // Per the spec:
-  //   roofWidth  = boundUHi - boundULo
-  //   roofHeight = boundVHi - boundVLo
-  //   cols = floor(roofWidth  / stepU)
-  //   rows = floor(roofHeight / stepV)
-  //   remainingU = roofWidth  - cols * stepU   ← leftover after full panels
-  //   remainingV = roofHeight - rows * stepV
-  //   originU = boundULo + remainingU / 2       ← centered: equal margin both sides
-  //   originV = boundVLo + 0                    ← bottom-aligned when eave=0
-  //           = boundVLo + remainingV / 2        ← centered otherwise
-  //   panel center (col,row) = originU + col*stepU + widthM/2
-  //                            originV + row*stepV + heightM/2
-  //
-  // Section 5: panelFits() enforces full polygon containment (no partial panels).
-  // 4 phase candidates tried for polygon-clip recovery (non-rectangular roofs).
+  // v50.26c: Post-placement eave shift.
+  // After the best centered fill is selected, when eaveSetbackM === 0, shift
+  // all panels down (toward eave) by remainingV/2 — the exact amount the
+  // centered grid floats above the gutter.  Each panel is re-validated at
+  // the shifted position.  If polygon containment passes  → use shifted
+  // position (panel now sits at gutter line).  If it fails (e.g. tapered
+  // hip-roof corner where the polygon is narrower near the eave) → keep
+  // original centered position.  Zero panel-count regression on any roof shape.
 
   const roofWidth  = boundUHi - boundULo;
   const roofHeight = boundVHi - boundVLo;
-  // v50.26: bottom-align when eave=0 so panels start at gutter edge
-  const vBottomAligned = eaveSetbackM === 0;
 
   function runFill(phaseU: number, phaseV: number): Array<{uC: number; vC: number; col: number; row: number}> {
     const cols = Math.floor(roofWidth  / stepU);
     const rows = Math.floor(roofHeight / stepV);
     const remainingU = roofWidth  - cols * stepU;
     const remainingV = roofHeight - rows * stepV;
-    // v50.26: bottom-aligned when eave=0, centered otherwise
+    // Always centered — stable, avoids polygon-boundary PIP issues
     const originU = boundULo + remainingU / 2 + phaseU;
-    const originV = vBottomAligned
-      ? boundVLo + phaseV                      // bottom-aligned: first row at eave
-      : boundVLo + remainingV / 2 + phaseV;    // centered: equal margin both sides
+    const originV = boundVLo + remainingV / 2 + phaseV;
 
     const result: Array<{uC: number; vC: number; col: number; row: number}> = [];
     for (let row = 0; row < rows; row++) {
@@ -918,11 +905,7 @@ function buildSurfaceGridECEF(opts: {
     return result;
   }
 
-  // 4 phase candidates: base + half-step variants for non-rectangular roofs.
-  // v50.26b: All 4 phases always evaluated for maximum panel count.
-  // Tie-break: when eave=0 (bottom-aligned mode) and two phases yield equal panels,
-  // prefer the phase with the lower originV (more gutter-flush) so panels sit as
-  // close to the eave as possible without sacrificing count.
+  // 4 phase candidates: base (centered) + half-step variants for non-rect roofs
   const phaseCandidates: Array<{pu: number; pv: number}> = [
     { pu: 0,           pv: 0           },
     { pu: stepU / 2,   pv: 0           },
@@ -932,21 +915,31 @@ function buildSurfaceGridECEF(opts: {
 
   let bestFill: Array<{uC: number; vC: number; col: number; row: number}> = [];
   let bestOffset = phaseCandidates[0];
-  let bestOriginV = Infinity;
   for (const cand of phaseCandidates) {
     const fill = runFill(cand.pu, cand.pv);
-    const cols = Math.floor(roofWidth  / stepU);
-    const rows = Math.floor(roofHeight / stepV);
-    const remainingV = roofHeight - rows * stepV;
-    const thisOriginV = vBottomAligned
-      ? boundVLo + cand.pv
-      : boundVLo + remainingV / 2 + cand.pv;
-    // Accept if: more panels, OR equal panels and more gutter-flush (lower originV)
-    if (fill.length > bestFill.length ||
-        (fill.length === bestFill.length && vBottomAligned && thisOriginV < bestOriginV)) {
+    if (fill.length > bestFill.length) {
       bestFill = fill;
       bestOffset = cand;
-      bestOriginV = thisOriginV;
+    }
+  }
+
+  // ── v50.26c: Post-placement eave shift ───────────────────────────────────────
+  // When eaveSetbackM === 0 (panels to gutter line), shift every panel toward the
+  // eave by remainingV/2 (the floating gap from centering).  Re-validate each
+  // panel at the shifted position with panelFits():
+  //   • PASS → use shifted vC  (panel is now at the gutter line)
+  //   • FAIL → keep original vC (tapered/hip corner — no count regression)
+  if (eaveSetbackM === 0 && bestFill.length > 0) {
+    const rows       = Math.floor(roofHeight / stepV);
+    const remainingV = roofHeight - rows * stepV;
+    const vShift     = remainingV / 2;   // gap between gutter and first row bottom
+    if (vShift > 1e-4) {               // skip if gap is negligible (< 0.1 mm)
+      bestFill = bestFill.map(p => {
+        const shiftedVC = p.vC - vShift;
+        return panelFits(p.uC, shiftedVC)
+          ? { ...p, vC: shiftedVC }    // shifted — now at gutter line
+          : p;                          // keep original (tapered roof corner)
+      });
     }
   }
 
