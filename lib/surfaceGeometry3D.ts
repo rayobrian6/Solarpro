@@ -886,10 +886,10 @@ function buildSurfaceGridECEF(opts: {
     const remainingU = roofWidth  - cols * stepU;
     const remainingV = roofHeight - rows * stepV;
     const originU = boundULo + remainingU / 2 + phaseU;
-    // v50.27: eaveSetbackM===0 → bottom-aligned (GRID_EPSILON base); else centered (remainingV/2).
-    // phaseV offsets upward from this base — e.g. stepV/2 for tapered-roof variants.
-    const baseV   = eaveSetbackM === 0 ? GRID_EPSILON : remainingV / 2;
-    const originV = boundVLo + baseV + phaseV;
+    // Centered grid — equal margin top and bottom. Phase candidates allow half-step
+    // variants for non-rectangular roofs.  v50.28: gutter-flush shift applied after
+    // best fill is selected (see post-shift block below).
+    const originV = boundVLo + remainingV / 2 + phaseV;
 
     const result: Array<{uC: number; vC: number; col: number; row: number}> = [];
     for (let row = 0; row < rows; row++) {
@@ -922,6 +922,44 @@ function buildSurfaceGridECEF(opts: {
     }
   }
 
+  // ── v50.28: Phase-agnostic gutter-flush shift ────────────────────────────────
+  // When eaveSetbackM === 0 (panels to gutter line), shift the entire bestFill DOWN
+  // so the bottom of the lowest panel sits at GRID_EPSILON (0.1 mm) above boundVLo.
+  //
+  // WHY THIS APPROACH (vs v50.26c post-shift and v50.27 GRID_EPSILON baseV):
+  //   The phase competition (4 candidates: pv=0, stepV/2, pu=0, stepU/2) picks the
+  //   phase that maximises panel count.  On tapered/hip faces pv=stepV/2 often wins
+  //   because it avoids narrow-polygon PIP failures near the eave.  With that phase,
+  //   the centered grid origin is at boundVLo + remainingV/2 + stepV/2, placing the
+  //   bottom of row 0 at remainingV/2 + stepV/2 above the gutter — up to ~34 inches.
+  //   v50.27’s GRID_EPSILON baseV only fixed the pv=0 case; the pv=stepV/2 winner
+  //   still floated panels.
+  //
+  //   The correct approach: let the phase competition run with centered origins
+  //   (maximises count on all polygon shapes), then compute the actual floating gap
+  //   from the bestFill data itself, and shift the entire fill down by that gap.
+  //
+  // UNIFORM SHIFT — no mixing:
+  //   Every panel in bestFill shifts by the SAME amount (uniform, not per-panel).
+  //   Panels that fail panelFits at the shifted position are REMOVED entirely
+  //   (not kept at their original position).  This prevents mixed-vC rows which
+  //   caused the 25%-overlap rail artefact seen in v50.26c.
+  //
+  // COUNT REGRESSION:
+  //   Rectangular face: polygon = bounding box → all shifted panels pass → zero loss.
+  //   Tapered/hip face: row 0 corners may land outside the narrowing polygon → dropped.
+  //   This is correct behaviour — those corner slots are physically unreachable.
+  if (eaveSetbackM === 0 && bestFill.length > 0) {
+    const minVc      = Math.min(...bestFill.map(p => p.vC));
+    const actualBot  = minVc - dims.heightM / 2;         // bottom of lowest panel
+    const shift      = actualBot - GRID_EPSILON;          // gap to close (minus 0.1 mm)
+    if (shift > GRID_EPSILON) {                           // skip if already near gutter
+      bestFill = bestFill
+        .map(p  => ({ ...p, vC: p.vC - shift }))          // uniform shift — no mixing
+        .filter(p => panelFits(p.uC, p.vC));              // drop if outside polygon at new pos
+    }
+  }
+
   // ── Section 5: Edge snap pass (2cm tolerance) + post-snap polygon re-check ─────────
   // For panels whose edge is within 2cm of the setback boundary, snap them
   // to exactly align with the boundary edge. This eliminates the small gap
@@ -943,9 +981,10 @@ function buildSurfaceGridECEF(opts: {
     if (Math.abs((uC - hw) - boundULo) < SNAP_TOL) su = boundULo + hw;
     if (Math.abs((uC + hw) - boundUHi) < SNAP_TOL) su = boundUHi - hw;
     // Snap V edges
-    // v50.27: when eaveSetbackM===0 the pv=GRID_EPSILON phase already places the
-    // bottom row optimally (0.1mm above gutter). Skip the eave snap — it would
-    // move sv to exactly boundVLo+hh (boundary), triggering PIP false-negatives.
+    // v50.27/v50.28: when eaveSetbackM===0 the post-shift places the bottom row
+    // at GRID_EPSILON (0.1mm) above boundVLo.  Skip the V-lo snap — it would move
+    // sv to exactly boundVLo+hh (bottom corner on polygon boundary), re-triggering
+    // ray-casting PIP ambiguity and dropping the panel.
     if (eaveSetbackM > 0 && Math.abs((vC - hh) - boundVLo) < SNAP_TOL) sv = boundVLo + hh;
     if (Math.abs((vC + hh) - boundVHi) < SNAP_TOL) sv = boundVHi - hh;
     // v47.154: Re-validate at snapped position (only when snap moved the panel)
