@@ -516,6 +516,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
+  // v50.22: tracks the address from an explicit user pick (address search or Pick House).
+  // onTwinLoaded must not overwrite solarDataAddress/solarDataCityOnly when a pick is in flight.
+  const explicitPickAddressRef = useRef<string | null>(null);
 
   const systemSizeKw = calculateSystemSize(panels);
 
@@ -817,6 +820,8 @@ export default function DesignStudio({ project, onSave }: Props) {
     setSolarDataError(null);
     setSolarDataAddress(address ?? null);
     setSolarDataCityOnly(cityOnly);
+    // v50.22: mark an explicit pick so onTwinLoaded doesn't clobber address/cityOnly
+    if (address) explicitPickAddressRef.current = address;
     try {
       const response = await fetch(
         `/api/solar?endpoint=buildingInsights&lat=${lat}&lng=${lng}&quality=HIGH`
@@ -3120,6 +3125,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                 if (twin.solarData) setSolarApiData(twin.solarData);
                 if (twin.roofSegments) {
                   setRoofSegments(twin.roofSegments);
+                  // v50.22: If an explicit Pick House / address-search pick is in flight,
+                  // do NOT update solarDataAddress or solarDataCityOnly — those are already
+                  // set correctly by fetchSolarData and must not be clobbered by the twin
+                  // reload (which uses projectAddress, the old/saved address).
+                  if (explicitPickAddressRef.current) return;
                   // v50.10: tag segments with the address they belong to.
                   // Only set if not already anchored to an explicit Pick House / address-search pick —
                   // we never want to overwrite a user-chosen address with project boot coords.
