@@ -415,6 +415,7 @@ export default function DesignStudio({ project, onSave }: Props) {
   // Google Solar API data
   const [roofSegments, setRoofSegments] = useState<any[]>([]);
   const [solarApiData, setSolarApiData] = useState<any>(null);
+  const [solarDataAddress, setSolarDataAddress] = useState<string | null>(null); // address Solar data is actually for
   const [solarDataLoading, setSolarDataLoading] = useState(false);
   const [solarDataError, setSolarDataError] = useState<string | null>(null);
   // Solar API roof plane auto-detection status
@@ -656,41 +657,11 @@ export default function DesignStudio({ project, onSave }: Props) {
           setRestoredRoofPlaneCount(savedPlanes.length);
           console.log(`[DesignStudio] Restored ${savedPlanes.length} roof planes from DB (filtered ${(data.data?.roofPlanes?.length ?? 0) - savedPlanes.length} empty planes)`);
         } else {
-          // Solar API auto-detect: no valid saved roof planes, call POST /api/solar
-          const lat = project.lat ?? project.client?.lat;
-          const lng = project.lng ?? project.client?.lng;
-          if (lat && lng) {
-            console.log('[DesignStudio] No saved roof planes — auto-detecting via Solar API');
-            setSolarApiStatus('loading');
-            try {
-              const solarRes = await fetch('/api/solar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lat, lng, quality: 'HIGH' }),
-              });
-              const solarData = await solarRes.json();
-              if (solarData.success && solarData.roofPlanes && solarData.roofPlanes.length > 0) {
-                const unconfirmedPlanes = solarData.roofPlanes.map((p: RoofPlane) => ({
-                  ...p,
-                  confirmed: false,
-                  source: 'solar_api' as const,
-                }));
-                setRoofPlanes(unconfirmedPlanes);
-                setSolarApiStatus('loaded');
-                console.log(`[DesignStudio] Solar API auto-detected ${unconfirmedPlanes.length} roof planes`);
-                toast.info(
-                  '🛰️ Roof planes auto-detected',
-                  `${unconfirmedPlanes.length} planes found via Solar API — review and confirm below`
-                );
-              } else {
-                setSolarApiStatus('unavailable');
-                console.log('[DesignStudio] Solar API returned no planes:', solarData.error ?? 'unknown');
-              }
-            } catch (solarErr) {
-              setSolarApiStatus('unavailable');
-              console.error('[DesignStudio] Solar API auto-detect failed:', solarErr);
-            }
-          }
+          // Solar API auto-detect DISABLED on project load.
+          // Project coords may be a city centre or wrong building.
+          // Roof planes only load when user explicitly picks a building via Pick House.
+          setSolarApiStatus('idle');
+          console.log('[DesignStudio] Skipping auto-detect — waiting for explicit building pick');
         }
       } catch (e) {
         console.error('Panel restore failed:', e);
@@ -817,15 +788,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     setMapCenter({ lat: s.lat, lng: s.lng });
     setZoom(19);
     TILE_CACHE.clear(); TILE_INFLIGHT.clear(); setMapTiles(new Map());
-    fetchSolarData(s.lat, s.lng);
+    fetchSolarData(s.lat, s.lng, s.short_name ?? addressSearch);
     setLocationStatus('found');
     toast.info('Loading site model...', `${s.short_name} · Resetting 3D scene`);
   }, [toast]);
 
-  // Fetch Google Solar API data
-  const fetchSolarData = useCallback(async (lat: number, lng: number) => {
+  // Fetch Google Solar API data — only call this when a specific building has been picked
+  const fetchSolarData = useCallback(async (lat: number, lng: number, address?: string) => {
     setSolarDataLoading(true);
     setSolarDataError(null);
+    setSolarDataAddress(address ?? null);
     try {
       const response = await fetch(
         `/api/solar?endpoint=buildingInsights&lat=${lat}&lng=${lng}&quality=HIGH`
@@ -859,6 +831,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     setCalcMessage('');
     setSolarApiData(null);
     setRoofSegments([]);
+    setSolarDataAddress(null);
 
     // Update map center and address bar
     setMapCenter({ lat: pickedLat, lng: pickedLng });
@@ -868,8 +841,9 @@ export default function DesignStudio({ project, onSave }: Props) {
     // Show toast
     toast.info('🏡 House selected', `Loading solar data for ${pickedAddress}`);
 
-    // Fetch Solar API data for the new location
-    fetchSolarData(pickedLat, pickedLng);
+    // Fetch Solar API data for the explicitly picked building
+    setSolarDataAddress(null); // clear while loading
+    fetchSolarData(pickedLat, pickedLng, pickedAddress);
 
     // Save resolved coords back to project (non-fatal)
     if (project.id) {
@@ -893,7 +867,9 @@ export default function DesignStudio({ project, onSave }: Props) {
     if (hasValidCoords(project.lat, project.lng)) {
       setMapCenter({ lat: project.lat!, lng: project.lng! });
       setLocationStatus('found');
-      fetchSolarData(project.lat!, project.lng!);
+      // Do NOT auto-fetch Solar data on project load — data must be tied to a specific
+      // building the user explicitly picks. Project coords may be a city center or wrong address.
+      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null);
       if (project.address) setAddressSearch(project.address);
       return;
     }
@@ -902,7 +878,8 @@ export default function DesignStudio({ project, onSave }: Props) {
     if (hasValidCoords(project.client?.lat, project.client?.lng)) {
       setMapCenter({ lat: project.client!.lat!, lng: project.client!.lng! });
       setLocationStatus('found');
-      fetchSolarData(project.client!.lat!, project.client!.lng!);
+      // Do NOT auto-fetch Solar data — must be tied to explicit building pick
+      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null);
       if (project.client?.address) {
         setAddressSearch([project.client.address, project.client.city, project.client.state].filter(Boolean).join(', '));
       }
@@ -3782,6 +3759,21 @@ export default function DesignStudio({ project, onSave }: Props) {
 
 
                 {/* Roof Analysis - Google Solar API */}
+                {(() => {
+                  // Show section always so user knows it exists
+                  if (roofSegments.length === 0) {
+                    return (
+                      <Section title="Roof Analysis" icon={<Sun size={12} />} defaultOpen={false}>
+                        <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-3 border border-slate-700/40 text-center">
+                          <div className="text-2xl mb-1.5">🏠</div>
+                          <div className="font-semibold text-slate-300 mb-1">No building selected</div>
+                          <div className="text-slate-500 leading-relaxed">Use <span className="text-amber-400 font-medium">Pick House</span> in the 3D viewer to select a specific building — solar data will load for that exact address.</div>
+                        </div>
+                      </Section>
+                    );
+                  }
+                  return null;
+                })()}
                 {roofSegments.length > 0 && (() => {
                   // Pre-compute summary stats
                   const totalAreaFt2 = roofSegments.reduce((s: number, seg: any) => s + (seg.areaM2 ?? seg.stats?.areaMeters2 ?? 0) * 10.7639, 0);
@@ -3799,6 +3791,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                   return (
                     <Section title="Roof Analysis" icon={<Sun size={12} />} badge={`${roofSegments.length} sections`} defaultOpen={false}>
                       <div className="space-y-2">
+
+                        {/* Address tag — shows which building this data is for */}
+                        {solarDataAddress && (
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-500 bg-slate-900/60 rounded px-2 py-1 border border-slate-700/30">
+                            <span>📍</span>
+                            <span className="truncate">{solarDataAddress}</span>
+                          </div>
+                        )}
 
                         {/* Hero summary row */}
                         <div className="grid grid-cols-3 gap-1.5">
@@ -3887,6 +3887,14 @@ export default function DesignStudio({ project, onSave }: Props) {
                         <div className="text-xs text-slate-400 bg-slate-800/60 rounded-lg p-2.5 border border-slate-700/40">
                           <div className="font-semibold text-slate-300 mb-1">⚠ Auto-detect Unavailable</div>
                           <div>Use <span className="text-amber-400 font-medium">Draw Roof Zone</span> to trace planes manually.</div>
+                        </div>
+                      )}
+
+                      {/* Address tag for Roof Planes */}
+                      {solarDataAddress && roofPlanes.length > 0 && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-slate-500 bg-slate-900/60 rounded px-2 py-1 border border-slate-700/30">
+                          <span>📍</span>
+                          <span className="truncate">{solarDataAddress}</span>
                         </div>
                       )}
 
