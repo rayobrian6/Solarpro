@@ -729,9 +729,10 @@ function SolarEngine3D({
     const C = (window as any).Cesium;
     if (!viewer || !C) return;
 
-    // ── Remove existing overlay ────────────────────────────────────────────
+    // ── Remove existing overlay ─────────────────────────────────────────────
+    // irradianceOverlayRef holds an ImageryLayer (not an entity)
     if (irradianceOverlayRef.current) {
-      try { viewer.entities.remove(irradianceOverlayRef.current); } catch {}
+      try { viewer.imageryLayers.remove(irradianceOverlayRef.current, true); } catch {}
       irradianceOverlayRef.current = null;
     }
 
@@ -740,7 +741,7 @@ function SolarEngine3D({
       return;
     }
 
-    // ── Load + render ──────────────────────────────────────────────────────
+    // ── Load + render ───────────────────────────────────────────────────────
     setIrradianceLoading(true);
     (async () => {
       try {
@@ -758,24 +759,33 @@ function SolarEngine3D({
         const canvas = renderIrradianceCanvas(layer);
         setIrradianceBounds(layer.bounds);
 
-        // Build Cesium rectangle entity draped over the roof
+        // ── Use SingleTileImageryProvider — the correct Cesium approach ─────
+        // This drapes the canvas as a geo-registered flat image overlay directly
+        // on the globe/3D tiles. No GroundPrimitive, no entity rectangle, no
+        // clamp-to-ground issues. It renders at the correct lat/lng bounds.
         const rect = C.Rectangle.fromDegrees(
           layer.bounds.west, layer.bounds.south,
           layer.bounds.east, layer.bounds.north,
         );
 
-        const entity = viewer.entities.add({
-          name: '__irradiance_heatmap__',
-          rectangle: {
-            coordinates: rect,
-            material: canvas,
-            classificationType: C.ClassificationType?.CESIUM_3D_TILE ?? 0,
-            heightReference: C.HeightReference?.CLAMP_TO_GROUND ?? 0,
-          },
+        // Convert canvas to a data URL so Cesium can load it as an image
+        const dataUrl = canvas.toDataURL('image/png');
+
+        const provider = new C.SingleTileImageryProvider({
+          url: dataUrl,
+          rectangle: rect,
+          // Ensure transparency is preserved
+          tileWidth:  canvas.width,
+          tileHeight: canvas.height,
         });
 
-        irradianceOverlayRef.current = entity;
-        addLog('IRRADIANCE', `Heatmap loaded: ${layer.width}×${layer.height}px minVal=${layer.minVal.toFixed(0)} maxVal=${layer.maxVal.toFixed(0)}`);
+        // Add on top of existing imagery layers
+        const imageryLayer = viewer.imageryLayers.addImageryProvider(provider);
+        // Set alpha so the heatmap blends with the underlying 3D tiles
+        imageryLayer.alpha = 0.82;
+
+        irradianceOverlayRef.current = imageryLayer;
+        addLog('IRRADIANCE', `Heatmap loaded via SingleTileImageryProvider: ${layer.width}×${layer.height}px minVal=${layer.minVal.toFixed(0)} maxVal=${layer.maxVal.toFixed(0)}`);
         try { viewer.scene.requestRender(); } catch {}
       } catch (err: unknown) {
         addLog('IRRADIANCE', `Failed: ${(err as Error).message}`);
@@ -786,7 +796,7 @@ function SolarEngine3D({
 
     return () => {
       if (irradianceOverlayRef.current && viewerRef.current) {
-        try { viewerRef.current.entities.remove(irradianceOverlayRef.current); } catch {}
+        try { viewerRef.current.imageryLayers.remove(irradianceOverlayRef.current, true); } catch {}
         irradianceOverlayRef.current = null;
       }
     };
