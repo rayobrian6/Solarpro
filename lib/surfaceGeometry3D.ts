@@ -918,7 +918,11 @@ function buildSurfaceGridECEF(opts: {
     return result;
   }
 
-  // 4 phase candidates: base (centered) + half-step variants for non-rect roofs
+  // 4 phase candidates: base + half-step variants for non-rectangular roofs.
+  // v50.26b: All 4 phases always evaluated for maximum panel count.
+  // Tie-break: when eave=0 (bottom-aligned mode) and two phases yield equal panels,
+  // prefer the phase with the lower originV (more gutter-flush) so panels sit as
+  // close to the eave as possible without sacrificing count.
   const phaseCandidates: Array<{pu: number; pv: number}> = [
     { pu: 0,           pv: 0           },
     { pu: stepU / 2,   pv: 0           },
@@ -928,11 +932,21 @@ function buildSurfaceGridECEF(opts: {
 
   let bestFill: Array<{uC: number; vC: number; col: number; row: number}> = [];
   let bestOffset = phaseCandidates[0];
+  let bestOriginV = Infinity;
   for (const cand of phaseCandidates) {
     const fill = runFill(cand.pu, cand.pv);
-    if (fill.length > bestFill.length) {
+    const cols = Math.floor(roofWidth  / stepU);
+    const rows = Math.floor(roofHeight / stepV);
+    const remainingV = roofHeight - rows * stepV;
+    const thisOriginV = vBottomAligned
+      ? boundVLo + cand.pv
+      : boundVLo + remainingV / 2 + cand.pv;
+    // Accept if: more panels, OR equal panels and more gutter-flush (lower originV)
+    if (fill.length > bestFill.length ||
+        (fill.length === bestFill.length && vBottomAligned && thisOriginV < bestOriginV)) {
       bestFill = fill;
       bestOffset = cand;
+      bestOriginV = thisOriginV;
     }
   }
 
