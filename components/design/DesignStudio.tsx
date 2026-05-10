@@ -3757,11 +3757,11 @@ export default function DesignStudio({ project, onSave }: Props) {
                       {/* v50.25: Eave/Gutter setback — default 0" (panels go to gutter line) */}
                       <SliderRow
                         label="Eave Setback"
-                        value={Math.round(fireSetbacks.eaveSetbackM * 39.37)}
+                        value={Math.round((fireSetbacks.eaveSetbackM ?? 0) * 39.37)}
                         min={0} max={24} step={1} unit="in"
                         onChange={v => setFireSetbacks(prev => ({ ...prev, eaveSetbackM: v / 39.37 }))}
                       />
-                      {fireSetbacks.eaveSetbackM === 0 && (
+                      {(fireSetbacks.eaveSetbackM ?? 0) === 0 && (
                         <div className="text-xs text-emerald-400/80 bg-emerald-500/10 rounded-lg p-2">
                           0″ eave — panels extend to gutter line (max coverage)
                         </div>
