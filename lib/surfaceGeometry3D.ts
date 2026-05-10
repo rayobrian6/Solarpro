@@ -866,19 +866,16 @@ function buildSurfaceGridECEF(opts: {
   const { heading: sharedHeading, pitch: sharedPitch, roll: sharedRoll } =
     planeHPR(plane, ef, origin);
 
-  // ── Section 3: Centered Grid Solver (v47.140) ─────────────────────────────
-  // Grid always centered in setback-inset UV space (equal margin both sides).
-  // This avoids polygon-boundary PIP failures that occur when panels start
-  // exactly at minV=0 (boundary points are ambiguous in ray-casting PIP).
-  //
-  // v50.26c: Post-placement eave shift.
-  // After the best centered fill is selected, when eaveSetbackM === 0, shift
-  // all panels down (toward eave) by remainingV/2 — the exact amount the
-  // centered grid floats above the gutter.  Each panel is re-validated at
-  // the shifted position.  If polygon containment passes  → use shifted
-  // position (panel now sits at gutter line).  If it fails (e.g. tapered
-  // hip-roof corner where the polygon is narrower near the eave) → keep
-  // original centered position.  Zero panel-count regression on any roof shape.
+  // ── Section 3: Grid Solver (v47.140, v50.27) ─────────────────────────────
+  // When eaveSetbackM === 0 (panels to gutter): bottom-aligned grid using GRID_EPSILON
+  // as the V-base offset instead of remainingV/2 centering.  See inline comment below.
+  // When eaveSetbackM > 0: centered grid unchanged from v47.140.
+
+  // 0.1 mm inset from polygon boundary — avoids ray-casting PIP boundary ambiguity.
+  // When eaveSetbackM === 0, the V-origin is bottom-aligned (gutter-flush) using this
+  // epsilon instead of the centered remainingV/2 offset.  The epsilon means panel bottom
+  // corners are strictly inside the polygon, not on the boundary, so PIP is reliable.
+  const GRID_EPSILON = 1e-4;
 
   const roofWidth  = boundUHi - boundULo;
   const roofHeight = boundVHi - boundVLo;
@@ -888,9 +885,11 @@ function buildSurfaceGridECEF(opts: {
     const rows = Math.floor(roofHeight / stepV);
     const remainingU = roofWidth  - cols * stepU;
     const remainingV = roofHeight - rows * stepV;
-    // Always centered — stable, avoids polygon-boundary PIP issues
     const originU = boundULo + remainingU / 2 + phaseU;
-    const originV = boundVLo + remainingV / 2 + phaseV;
+    // v50.27: eaveSetbackM===0 → bottom-aligned (GRID_EPSILON base); else centered (remainingV/2).
+    // phaseV offsets upward from this base — e.g. stepV/2 for tapered-roof variants.
+    const baseV   = eaveSetbackM === 0 ? GRID_EPSILON : remainingV / 2;
+    const originV = boundVLo + baseV + phaseV;
 
     const result: Array<{uC: number; vC: number; col: number; row: number}> = [];
     for (let row = 0; row < rows; row++) {
@@ -923,26 +922,6 @@ function buildSurfaceGridECEF(opts: {
     }
   }
 
-  // ── v50.26c: Post-placement eave shift ───────────────────────────────────────
-  // When eaveSetbackM === 0 (panels to gutter line), shift every panel toward the
-  // eave by remainingV/2 (the floating gap from centering).  Re-validate each
-  // panel at the shifted position with panelFits():
-  //   • PASS → use shifted vC  (panel is now at the gutter line)
-  //   • FAIL → keep original vC (tapered/hip corner — no count regression)
-  if (eaveSetbackM === 0 && bestFill.length > 0) {
-    const rows       = Math.floor(roofHeight / stepV);
-    const remainingV = roofHeight - rows * stepV;
-    const vShift     = remainingV / 2;   // gap between gutter and first row bottom
-    if (vShift > 1e-4) {               // skip if gap is negligible (< 0.1 mm)
-      bestFill = bestFill.map(p => {
-        const shiftedVC = p.vC - vShift;
-        return panelFits(p.uC, shiftedVC)
-          ? { ...p, vC: shiftedVC }    // shifted — now at gutter line
-          : p;                          // keep original (tapered roof corner)
-      });
-    }
-  }
-
   // ── Section 5: Edge snap pass (2cm tolerance) + post-snap polygon re-check ─────────
   // For panels whose edge is within 2cm of the setback boundary, snap them
   // to exactly align with the boundary edge. This eliminates the small gap
@@ -964,7 +943,10 @@ function buildSurfaceGridECEF(opts: {
     if (Math.abs((uC - hw) - boundULo) < SNAP_TOL) su = boundULo + hw;
     if (Math.abs((uC + hw) - boundUHi) < SNAP_TOL) su = boundUHi - hw;
     // Snap V edges
-    if (Math.abs((vC - hh) - boundVLo) < SNAP_TOL) sv = boundVLo + hh;
+    // v50.27: when eaveSetbackM===0 the pv=GRID_EPSILON phase already places the
+    // bottom row optimally (0.1mm above gutter). Skip the eave snap — it would
+    // move sv to exactly boundVLo+hh (boundary), triggering PIP false-negatives.
+    if (eaveSetbackM > 0 && Math.abs((vC - hh) - boundVLo) < SNAP_TOL) sv = boundVLo + hh;
     if (Math.abs((vC + hh) - boundVHi) < SNAP_TOL) sv = boundVHi - hh;
     // v47.154: Re-validate at snapped position (only when snap moved the panel)
     if ((su !== uC || sv !== vC) && !panelFits(su, sv)) continue;
