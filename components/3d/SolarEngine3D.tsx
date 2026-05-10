@@ -723,14 +723,15 @@ function SolarEngine3D({
   // v50.11: sync prop → local state (parent can also drive the toggle)
   useEffect(() => { setShowIrradianceLocal(showIrradiance); }, [showIrradiance]);
 
-  // v50.11: Irradiance heatmap — load/unload when showIrradianceLocal changes
+  // v50.13: Irradiance heatmap — load/unload when showIrradianceLocal changes
+  // Uses SingleTileImageryProvider.fromUrl() (async static factory) so the
+  // image is fully decoded before being handed to Cesium's imagery pipeline.
   useEffect(() => {
     const viewer = viewerRef.current;
     const C = (window as any).Cesium;
-    if (!viewer || !C) return;
+    if (!viewer || !C || stage !== 'done') return;
 
     // ── Remove existing overlay ─────────────────────────────────────────────
-    // irradianceOverlayRef holds an ImageryLayer (not an entity)
     if (irradianceOverlayRef.current) {
       try { viewer.imageryLayers.remove(irradianceOverlayRef.current, true); } catch {}
       irradianceOverlayRef.current = null;
@@ -742,6 +743,7 @@ function SolarEngine3D({
     }
 
     // ── Load + render ───────────────────────────────────────────────────────
+    let cancelled = false;
     setIrradianceLoading(true);
     (async () => {
       try {
@@ -749,59 +751,65 @@ function SolarEngine3D({
         const { renderIrradianceCanvas } = await import('@/lib/irradianceColormap');
 
         const layer = await loadIrradianceLayer(lat, lng);
+        if (cancelled) return;
         if (!layer) {
-          addLog('IRRADIANCE', 'No irradiance data available for this location');
+          console.warn('[Irradiance] No data available for', lat, lng, '— check Solar API coverage');
           setIrradianceLoading(false);
           return;
         }
+
+        console.log('[Irradiance] Layer loaded', layer.width, 'x', layer.height, 'bounds:', layer.bounds);
 
         // Render to canvas (RGBA image)
         const canvas = renderIrradianceCanvas(layer);
         setIrradianceBounds(layer.bounds);
 
-        // ── Use SingleTileImageryProvider — the correct Cesium approach ─────
-        // This drapes the canvas as a geo-registered flat image overlay directly
-        // on the globe/3D tiles. No GroundPrimitive, no entity rectangle, no
-        // clamp-to-ground issues. It renders at the correct lat/lng bounds.
         const rect = C.Rectangle.fromDegrees(
           layer.bounds.west, layer.bounds.south,
           layer.bounds.east, layer.bounds.north,
         );
 
-        // Convert canvas to a data URL so Cesium can load it as an image
+        // Convert canvas to a data URL
         const dataUrl = canvas.toDataURL('image/png');
+        console.log('[Irradiance] Canvas', canvas.width, 'x', canvas.height, 'data URL len:', dataUrl.length);
 
-        const provider = new C.SingleTileImageryProvider({
-          url: dataUrl,
+        // ── Use SingleTileImageryProvider.fromUrl() — the async static factory ──
+        // Unlike `new SingleTileImageryProvider({url})`, fromUrl() pre-loads the
+        // image so Cesium has immediate pixel data and renders the layer instantly.
+        const provider = await C.SingleTileImageryProvider.fromUrl(dataUrl, {
           rectangle: rect,
-          // Ensure transparency is preserved
           tileWidth:  canvas.width,
           tileHeight: canvas.height,
         });
 
+        if (cancelled) return;
+
         // Add on top of existing imagery layers
         const imageryLayer = viewer.imageryLayers.addImageryProvider(provider);
-        // Set alpha so the heatmap blends with the underlying 3D tiles
         imageryLayer.alpha = 0.82;
 
         irradianceOverlayRef.current = imageryLayer;
-        addLog('IRRADIANCE', `Heatmap loaded via SingleTileImageryProvider: ${layer.width}×${layer.height}px minVal=${layer.minVal.toFixed(0)} maxVal=${layer.maxVal.toFixed(0)}`);
+        console.log('[Irradiance] ✅ Heatmap added to imageryLayers:', layer.width, 'x', layer.height,
+          'minVal=', layer.minVal.toFixed(0), 'maxVal=', layer.maxVal.toFixed(0));
         try { viewer.scene.requestRender(); } catch {}
       } catch (err: unknown) {
-        addLog('IRRADIANCE', `Failed: ${(err as Error).message}`);
+        if (!cancelled) {
+          console.error('[Irradiance] Failed:', (err as Error).message, err);
+        }
       } finally {
-        setIrradianceLoading(false);
+        if (!cancelled) setIrradianceLoading(false);
       }
     })();
 
     return () => {
+      cancelled = true;
       if (irradianceOverlayRef.current && viewerRef.current) {
         try { viewerRef.current.imageryLayers.remove(irradianceOverlayRef.current, true); } catch {}
         irradianceOverlayRef.current = null;
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showIrradianceLocal, lat, lng]);
+  }, [showIrradianceLocal, lat, lng, stage]);
 
   const addLog = useCallback((tag: string, msg: string) => {
     const line = log(tag, msg);
