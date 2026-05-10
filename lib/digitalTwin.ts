@@ -517,7 +517,38 @@ function expandHull(
 }
 
 export function extractRoofSegments(solarData: any, baseElevation: number): RoofSegment[] {
-  const segments = solarData?.solarPotential?.roofSegmentStats ?? [];
+  const allSegments: any[] = solarData?.solarPotential?.roofSegmentStats ?? [];
+
+  // ── Filter segments to the identified building only ────────────────────────
+  // Google Solar API findClosest returns segments for the entire response area,
+  // which can include neighbouring houses. Use solarData.center (the building
+  // anchor returned by the API) to keep only segments within 30 m.
+  // This mirrors the same filter in GET /api/solar — needed here too because
+  // extractRoofSegments is called with raw twin.solarData during DSM enrichment,
+  // bypassing the API route filter entirely.
+  const buildingCenter = solarData?.center as { latitude: number; longitude: number } | undefined;
+  const MAX_SEG_RADIUS_M = 30;
+  const segments: any[] = buildingCenter
+    ? (() => {
+        const mLat = 111320;
+        const cosLat = Math.cos(buildingCenter.latitude * Math.PI / 180);
+        const filtered = allSegments.filter((s: any) => {
+          const sLat = s.center?.latitude;
+          const sLng = s.center?.longitude;
+          if (sLat == null || sLng == null) return true;
+          const dLat = (sLat - buildingCenter.latitude) * mLat;
+          const dLng = (sLng - buildingCenter.longitude) * mLat * cosLat;
+          return Math.sqrt(dLat * dLat + dLng * dLng) <= MAX_SEG_RADIUS_M;
+        });
+        if (filtered.length > 0) {
+          if (filtered.length !== allSegments.length) {
+            console.log(`[extractRoofSegments] filtered ${allSegments.length} → ${filtered.length} segments (building center filter, r=${MAX_SEG_RADIUS_M}m)`);
+          }
+          return filtered;
+        }
+        return allSegments; // fallback: keep all if none pass
+      })()
+    : allSegments;
   // Google's pre-computed panel positions grouped by segmentIndex
   const allGooglePanels: any[] = solarData?.solarPotential?.solarPanels ?? [];
   const panelsBySegment = new Map<number, any[]>();
