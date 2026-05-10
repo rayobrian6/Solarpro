@@ -2573,6 +2573,17 @@ function SolarEngine3D({
    * Fall back to 3D tiles pick (scene.pick) if terrain pick fails.
    * Final fallback: cesiumGroundElevRef height with ray-ellipsoid.
    */
+  // ── getGroundPlanePosition v50.3: TWO-PHASE pick ─────────────────────────────────
+  // Phase A — HEIGHT: Use 3D tiles scene.pickPosition to get the true surface elevation
+  //   at the cursor. This gives the real Google mesh height (e.g. 108m for Edwardsville IL).
+  //   Needed only ONCE per ground array session (locked to first click elevation).
+  //
+  // Phase B — POSITION: Intersect the pick ray with a horizontal plane at the known
+  //   ground elevation. Ray-plane intersection is camera-angle-independent and gives
+  //   pixel-perfect lat/lng accuracy at ANY camera pitch/heading. No depth-buffer drift.
+  //
+  // This two-phase approach separates "what elevation is the ground?" (Phase A, 3D tiles)
+  // from "where exactly did the cursor land?" (Phase B, ray-plane math).
   function getGroundPlanePosition(
     viewer: any,
     C: any,
@@ -2581,17 +2592,12 @@ function SolarEngine3D({
     const ray = viewer.camera.getPickRay(screenPos);
     if (!ray) return null;
 
-    let cartesian: any = null;
-    let pickMethod = 'none';
+    // ── Phase A: Determine ground elevation ───────────────────────────────────
+    // Use locked first-row elevation if already set (row 2+ clicks reuse row 1 height).
+    // Otherwise query the surface height at this cursor position via 3D tiles.
+    let groundElevM: number | null = null;
 
-    // v50.2: Priority order REVISED — 3D tiles first, globe.pick second, ellipsoid last.
-    // REASON: With EllipsoidTerrainProvider (our intentional choice to avoid tile conflicts),
-    // globe.pick always hits the WGS84 ellipsoid at h≈0 regardless of actual terrain elevation.
-    // Google Photorealistic 3D Tiles give us the REAL surface height via scene.pickPosition.
-    // We must try 3D tiles BEFORE globe.pick so we get the actual ground elevation.
-
-    // ── Priority 1: 3D tiles pick — gives real surface height from Google mesh ──
-    // Skip if the pick hit one of our own entities (panel / racking / overlay).
+    // Try 3D tiles first — gives real mesh height from Google photorealistic tiles.
     try {
       const pickedObject = viewer.scene.pick(screenPos);
       const entityName: string = pickedObject?.id?.name ?? pickedObject?.primitive?.id?.name ?? '';
@@ -2601,67 +2607,62 @@ function SolarEngine3D({
       if (pickedObject && !isOurEntity) {
         const pp = viewer.scene.pickPosition(screenPos);
         if (pp && isFinite(pp.x) && C.Cartesian3.magnitude(pp) > 1_000_000) {
-          // Nudge 0.15m along surface normal so marker sits ON the surface, not inside it.
-          const surfaceNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(pp);
-          cartesian = surfaceNormal
-            ? C.Cartesian3.add(pp, C.Cartesian3.multiplyByScalar(surfaceNormal, 0.15, new C.Cartesian3()), new C.Cartesian3())
-            : pp;
-          pickMethod = '3dtiles';
+          const carto3d = C.Cartographic.fromCartesian(pp);
+          if (carto3d && isFinite(carto3d.height) && carto3d.height > -500) {
+            groundElevM = carto3d.height;
+          }
         }
       }
-    } catch { /* tiles pick failed */ }
+    } catch { /* tiles unavailable */ }
 
-    // ── Priority 2: globe.pick — terrain-only, last resort before ellipsoid ──
-    // NOTE: With EllipsoidTerrainProvider this returns h≈0. We handle that in the
-    // height-trust logic below by falling back to cesiumGroundElevRef.
-    if (!cartesian) {
-      try {
-        const gp = viewer.scene.globe.pick(ray, viewer.scene);
-        if (gp && isFinite(gp.x) && C.Cartesian3.magnitude(gp) > 1_000_000) {
-          cartesian  = gp;
-          pickMethod = 'terrain';
-        }
-      } catch { /* terrain pick unavailable */ }
+    // Fallback to cesiumGroundElevRef (boot-sampled from Google Elevation API + EGM96 geoid).
+    if (groundElevM === null) {
+      groundElevM = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
     }
 
-    // ── Priority 3: ellipsoid fallback ───────────────────────────────────────
-    if (!cartesian) {
-      try {
-        const ep = viewer.scene.globe.ellipsoid.intersectWithRay(ray);
-        if (ep && isFinite(ep.x) && C.Cartesian3.magnitude(ep) > 1_000_000) {
-          cartesian  = ep;
-          pickMethod = 'ellipsoid';
-        }
-      } catch { /* ellipsoid failed */ }
-    }
-
-    if (!cartesian) return null;
-
+    // ── Phase B: Ray-plane intersection at groundElevM ──────────────────────────
+    // Build a horizontal plane in ECEF at the known ground elevation.
+    // The plane passes through ECEF(lat_center, lng_center, groundElevM) and has
+    // normal = outward radial direction (away from Earth center) at that point.
+    // Intersect the pick ray with this plane to get the EXACT ground lat/lng under
+    // the cursor at ANY camera angle without depth-buffer artifacts.
     try {
-      const carto = C.Cartographic.fromCartesian(cartesian);
-      if (!carto) return null;
-      const pLat = C.Math.toDegrees(carto.latitude);
-      const pLng = C.Math.toDegrees(carto.longitude);
-      // v50.2: Height trust logic — 3-tier approach.
-      // Priority 1 (3dtiles): scene.pickPosition gives real Google mesh height — ALWAYS trust
-      //   if the value is plausible (> -500m, i.e. not a depth-buffer artifact).
-      // Priority 2 (terrain / ellipsoid): globe.pick and ellipsoid.intersectWithRay BOTH
-      //   return h≈0 with EllipsoidTerrainProvider — distrust, use cesiumGroundElevRef.
-      // Fallback: cesiumGroundElevRef = googleOrthometric + EGM96 geoidApprox.
-      //   May be negative for low sites; clamp to 0 in that case.
-      const rawH = isFinite(carto.height) && carto.height > -500 ? carto.height : null;
-      let trustedH: number | null = null;
-      if (pickMethod === '3dtiles' && rawH !== null && rawH > -500) {
-        // 3D tiles gave us a real mesh hit with valid height — trust it directly
-        trustedH = rawH;
+      // Use site center (lat/lng props) as the plane anchor point
+      const planeAnchor = C.Cartesian3.fromDegrees(lng, lat, groundElevM);
+      // Plane normal = outward radial (unit vector from Earth center to anchor)
+      const planeNormal = C.Ellipsoid.WGS84.geodeticSurfaceNormal(planeAnchor);
+      if (!planeNormal) throw new Error('no surface normal');
+
+      const cesiumPlane = C.Plane.fromPointNormal(planeAnchor, planeNormal);
+      const intersection = C.IntersectionTests.rayPlane(ray, cesiumPlane, new C.Cartesian3());
+
+      if (intersection && isFinite(intersection.x) && C.Cartesian3.magnitude(intersection) > 1_000_000) {
+        const carto = C.Cartographic.fromCartesian(intersection);
+        if (!carto) return null;
+        const pLat = C.Math.toDegrees(carto.latitude);
+        const pLng = C.Math.toDegrees(carto.longitude);
+        if (!isValidCoord(pLat, pLng)) return null;
+        addLog('GROUND', `[GROUND-PICK v50.3] rayPlane lat=${pLat.toFixed(6)} lng=${pLng.toFixed(6)} groundElevM=${groundElevM.toFixed(2)}`);
+        return { lat: pLat, lng: pLng, height: groundElevM, pickMethod: 'rayplane' };
       }
-      // terrain + ellipsoid both return h≈0 with EllipsoidTerrainProvider — never trust
-      const cesiumFallback = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-      const height = trustedH ?? cesiumFallback;
-      if (!isValidCoord(pLat, pLng)) return null;
-      addLog('GROUND', `[GROUND-PICK v50.2] method=${pickMethod} rawH=${rawH?.toFixed(2)} trusted=${trustedH?.toFixed(2) ?? 'null'} cesiumFallback=${cesiumFallback.toFixed(2)} h=${height.toFixed(2)}m lat=${pLat.toFixed(6)} lng=${pLng.toFixed(6)}`);
-      return { lat: pLat, lng: pLng, height, pickMethod };
-    } catch { return null; }
+    } catch { /* ray-plane failed */ }
+
+    // ── Last resort: ellipsoid intersection (lat/lng only — height from cesiumGroundElevRef) ──
+    try {
+      const ep = viewer.scene.globe.ellipsoid.intersectWithRay(ray);
+      if (ep && isFinite(ep.x) && C.Cartesian3.magnitude(ep) > 1_000_000) {
+        const carto = C.Cartographic.fromCartesian(ep);
+        if (!carto) return null;
+        const pLat = C.Math.toDegrees(carto.latitude);
+        const pLng = C.Math.toDegrees(carto.longitude);
+        if (!isValidCoord(pLat, pLng)) return null;
+        // Use groundElevM (not carto.height which is ≈0 on ellipsoid)
+        addLog('GROUND', `[GROUND-PICK v50.3] ellipsoid fallback lat=${pLat.toFixed(6)} lng=${pLng.toFixed(6)} h=${groundElevM.toFixed(2)}`);
+        return { lat: pLat, lng: pLng, height: groundElevM, pickMethod: 'ellipsoid' };
+      }
+    } catch { /* ellipsoid failed */ }
+
+    return null;
   }
 
   // ── Roof placement ─────────────────────────────────────────────────────────
