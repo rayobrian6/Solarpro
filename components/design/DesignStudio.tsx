@@ -3097,7 +3097,13 @@ export default function DesignStudio({ project, onSave }: Props) {
               onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
-                if (twin.roofSegments) setRoofSegments(twin.roofSegments);
+                if (twin.roofSegments) {
+                  setRoofSegments(twin.roofSegments);
+                  // v50.10: tag segments with the address they belong to.
+                  // Only set if not already anchored to an explicit Pick House / address-search pick —
+                  // we never want to overwrite a user-chosen address with project boot coords.
+                  setSolarDataAddress(prev => prev ?? (twin.address || null));
+                }
               }}
               onError={(error) => {
                 // v47.120: Log the error but do NOT hide the 3D view.
