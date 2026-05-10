@@ -141,6 +141,20 @@ function SliderRow({ label, value, min, max, step, unit, onChange }: {
 const AZIMUTH_LABELS: Record<number, string> = {
   0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW', 360: 'N'
 };
+
+/**
+ * v50.25: Map FireSetbackConfig → generateRoofLayoutOptimized per-edge param keys.
+ * getPerEdgeSetbacks() returns {eaveM, ridgeM, sideM} (used by controlLayer/planeEngine).
+ * generateRoofLayoutOptimized() expects {eaveSetbackM, ridgeSetbackM, sideSetbackM}.
+ * This bridge fixes the silent key mismatch that was dropping all per-edge setbacks.
+ */
+function toLayoutSetbacks(config: import('@/lib/placementEngine').FireSetbackConfig) {
+  return {
+    eaveSetbackM:  config.eaveSetbackM  ?? 0,
+    ridgeSetbackM: config.ridgeSetbackM ?? 0.457,
+    sideSetbackM:  config.edgeSetbackM  ?? 0.457,
+  };
+}
 function azimuthLabel(az: number) {
   const nearest = Object.keys(AZIMUTH_LABELS).map(Number).reduce((a, b) => Math.abs(b - az) < Math.abs(a - az) ? b : a);
   return AZIMUTH_LABELS[nearest];
@@ -2286,7 +2300,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       orientation, fireSetbackM,
       pathwayWidthM: fireSetbacks.pathwayWidthM,
       enforcePathway: fireSetbacks.enforcePathway,
-      ...getPerEdgeSetbacks(fireSetbacks),
+      ...toLayoutSetbacks(fireSetbacks),
       alignToEdge,
     });
     setPanels(prev => [...prev, ...newPanels]);
@@ -2331,7 +2345,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         fireSetbackM,
         pathwayWidthM: fireSetbacks.pathwayWidthM,
         enforcePathway: fireSetbacks.enforcePathway,
-        ...getPerEdgeSetbacks(fireSetbacks),
+        ...toLayoutSetbacks(fireSetbacks),
         alignToEdge,
       });
       toast.success('Panels re-laid out', `${newPanels.length} panels · ${plane.azimuth ?? azimuth}° azimuth · ${plane.pitch ?? tilt}° pitch`);
@@ -2357,7 +2371,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         orientation, fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       // Update setback zone overlay
@@ -2416,7 +2430,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         fireSetbackM,
         pathwayWidthM: fireSetbacks.pathwayWidthM,
         enforcePathway: fireSetbacks.enforcePathway,
-        ...getPerEdgeSetbacks(fireSetbacks),
+        ...toLayoutSetbacks(fireSetbacks),
         alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -2474,7 +2488,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -2535,7 +2549,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -2589,7 +2603,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -3740,6 +3754,18 @@ export default function DesignStudio({ project, onSave }: Props) {
                         min={12} max={36} step={1} unit="in"
                         onChange={v => setFireSetbacks(prev => ({ ...prev, ridgeSetbackM: v / 39.37 }))}
                       />
+                      {/* v50.25: Eave/Gutter setback — default 0" (panels go to gutter line) */}
+                      <SliderRow
+                        label="Eave Setback"
+                        value={Math.round(fireSetbacks.eaveSetbackM * 39.37)}
+                        min={0} max={24} step={1} unit="in"
+                        onChange={v => setFireSetbacks(prev => ({ ...prev, eaveSetbackM: v / 39.37 }))}
+                      />
+                      {fireSetbacks.eaveSetbackM === 0 && (
+                        <div className="text-xs text-emerald-400/80 bg-emerald-500/10 rounded-lg p-2">
+                          0″ eave — panels extend to gutter line (max coverage)
+                        </div>
+                      )}
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-slate-400">Pathway (36″)</label>
                         <button
