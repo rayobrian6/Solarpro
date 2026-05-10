@@ -3611,7 +3611,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </Section>
                 )}
                 {/* System Configuration */}
-                <Section title="Configuration" icon={<Settings size={12} />} defaultOpen={false}>
+                <Section title="Configuration" icon={<Settings size={12} />} defaultOpen={true}>
                   {/* Active Zone Type Switcher */}
                   <div className="mb-3">
                     <div className="text-xs text-slate-500 mb-1.5">Active Drawing Zone</div>
@@ -3671,26 +3671,26 @@ export default function DesignStudio({ project, onSave }: Props) {
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
 
                   {/* v30.9 / v50.23: Panel Orientation Toggle — portrait | landscape | hybrid */}
-                  <div className="flex items-center justify-between py-1">
-                    <label className="text-xs text-slate-400">Panel Orientation</label>
-                    <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                  <div className="py-1">
+                    <label className="text-xs text-slate-400 block mb-1.5">Panel Orientation</label>
+                    <div className="grid grid-cols-3 rounded-lg overflow-hidden border border-slate-600">
                       <button
                         onClick={() => { setOrientation('portrait'); relayoutWithOrientation('portrait'); }}
-                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'portrait' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        className={`py-1.5 text-xs font-medium transition-colors text-center ${orientation === 'portrait' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
                         title="Portrait — all panels tall (long edge vertical)"
                       >
                         ▯ Portrait
                       </button>
                       <button
                         onClick={() => { setOrientation('landscape'); relayoutWithOrientation('landscape'); }}
-                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'landscape' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        className={`py-1.5 text-xs font-medium transition-colors text-center border-x border-slate-600 ${orientation === 'landscape' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
                         title="Landscape — all panels wide (long edge horizontal)"
                       >
-                        ▭ Landscape
+                        ▭ Land.
                       </button>
                       <button
                         onClick={() => { setOrientation('hybrid'); relayoutWithOrientation('hybrid'); }}
-                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'hybrid' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        className={`py-1.5 text-xs font-medium transition-colors text-center ${orientation === 'hybrid' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
                         title="Hybrid — auto-optimises each roof plane independently: portrait rows + landscape fill in ridge strip for maximum panel count"
                       >
                         ⚡ Hybrid
