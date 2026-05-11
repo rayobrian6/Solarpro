@@ -1286,46 +1286,94 @@ function SolarEngine3D({
       setupCameraOptimizer(viewer, C);
       setupKeyboardHandler();
 
-      // ── Middle-click zoom-blip suppression ───────────────────────────────
-      // Browsers fire a native 'mousedown' with button=1 when the middle mouse
-      // button is pressed.  Cesium's ScreenSpaceCameraController picks this up
-      // as the start of a MIDDLE_DRAG tilt gesture — correct.  But some browsers
-      // also synthesise a one-shot wheel delta at the moment the middle button
-      // goes down, which Cesium interprets as a zoom step, causing an instant
-      // "blip" zoom the moment the user presses middle-click to start panning.
+      // ── Wheel event normalizer + middle-click blip suppressor ────────────
       //
-      // Fix: attach a native (non-React) 'mousedown' listener with { capture: true }
-      // to the Cesium canvas.  When button=1 is detected, set a flag that suppresses
-      // the very next 'wheel' event fired within a 150ms window.  This is tight
-      // enough to swallow only the synthetic wheel-on-press, while still allowing
-      // genuine scroll-wheel zooming that follows a middle-button release.
+      // ROOT CAUSE OF "HYPER SENSITIVITY" BUG:
+      // Cesium's ScreenSpaceEventHandler reads the raw DOM wheel event and
+      // converts deltaY directly to an arc-length in radians:
+      //
+      //   arcLength = 7.5 * CesiumMath.toRadians(deltaY)   [CameraEventAggregator.js]
+      //
+      // CesiumMath.toRadians(x) = x * π/180, so:
+      //
+      //   Standard mouse      deltaY ≈  100 px  →  arcLength ≈  13.1
+      //   High-DPI/gaming     deltaY ≈  400 px  →  arcLength ≈  52.4   (4× larger!)
+      //   Mac trackpad        deltaY ≈    3 px  →  arcLength ≈   0.39  (33× smaller!)
+      //
+      // Cesium was written when DOM_DELTA_PIXEL meant ~120 px per notch on all
+      // mice.  Modern high-DPI mice and trackpads report wildly different values.
+      // The result: zoom speed varies enormously between devices and even between
+      // OS-level "mouse sensitivity" settings — which is exactly the reported bug.
+      //
+      // FIX:
+      // Intercept wheel events in the capture phase (runs before Cesium's
+      // bubble-phase listener).  Stop the original event, then re-dispatch a
+      // synthetic WheelEvent with deltaY normalised to ±120 (one standard
+      // mechanical notch = 120 in the legacy wheelDelta scale).
+      // Cesium's handleWheel falls through to the `event.deltaY` branch with
+      // DOM_DELTA_PIXEL, so delta = -(±120) = ∓120, giving perfectly consistent
+      // arcLength = 7.5 * toRadians(120) = 15.7 regardless of device.
+      //
+      // MIDDLE-CLICK BLIP (same listener):
+      // Some browsers fire a synthetic wheel event at the instant the middle
+      // button goes down.  We detect this (button=1 + <150ms window) and drop
+      // the event entirely instead of re-dispatching it.
       if (cesiumRef.current) {
         const cesiumCanvas = cesiumRef.current.querySelector('canvas') as HTMLCanvasElement | null;
         if (cesiumCanvas) {
-          let middleDown = false;
+          let middleDown   = false;
           let middleDownAt = 0;
+          // Flag set while we are dispatching our own normalised event so the
+          // listener does not intercept its own re-dispatch and loop.
+          let reDispatching = false;
 
-          const onMiddleDown = (ev: MouseEvent) => {
-            if (ev.button === 1) {
-              middleDown = true;
-              middleDownAt = Date.now();
-            }
-          };
-          const onMiddleUp = (ev: MouseEvent) => {
+          cesiumCanvas.addEventListener('mousedown', (ev: MouseEvent) => {
+            if (ev.button === 1) { middleDown = true; middleDownAt = Date.now(); }
+          }, { capture: true });
+
+          cesiumCanvas.addEventListener('mouseup', (ev: MouseEvent) => {
             if (ev.button === 1) middleDown = false;
-          };
-          // Suppress wheel events that arrive within 150ms of middle-button press.
-          // This captures the synthetic zoom-on-press without blocking real scroll.
-          const onWheel = (ev: WheelEvent) => {
+          }, { capture: true });
+
+          cesiumCanvas.addEventListener('wheel', (ev: WheelEvent) => {
+            // Let our own re-dispatched events through unchanged.
+            if (reDispatching) return;
+
+            // Drop middle-click synthetic blip (button press → wheel within 150ms).
             if (middleDown && Date.now() - middleDownAt < 150) {
               ev.stopImmediatePropagation();
               ev.preventDefault();
+              return;
             }
-          };
 
-          cesiumCanvas.addEventListener('mousedown', onMiddleDown, { capture: true });
-          cesiumCanvas.addEventListener('mouseup',   onMiddleUp,   { capture: true });
-          cesiumCanvas.addEventListener('wheel',     onWheel,      { capture: true, passive: false });
+            // Normalize deltaY to ±120 so Cesium gets a consistent arc-length
+            // regardless of mouse DPI, OS sensitivity, or deltaMode.
+            // Direction only — magnitude is intentionally discarded.
+            const direction = ev.deltaY < 0 ? -1 : 1; // negative = zoom in
+            const normalizedDelta = direction * 120;
+
+            // Only normalize if the raw value differs meaningfully from ±120.
+            // Avoids an unnecessary re-dispatch for mice that already send ~120.
+            if (Math.abs(ev.deltaY) > 80 && Math.abs(ev.deltaY) < 160) return;
+
+            ev.stopImmediatePropagation();
+            ev.preventDefault();
+
+            reDispatching = true;
+            cesiumCanvas.dispatchEvent(new WheelEvent('wheel', {
+              bubbles:    true,
+              cancelable: true,
+              deltaY:     normalizedDelta,
+              deltaMode:  WheelEvent.DOM_DELTA_PIXEL,
+              clientX:    ev.clientX,
+              clientY:    ev.clientY,
+              ctrlKey:    ev.ctrlKey,
+              shiftKey:   ev.shiftKey,
+              altKey:     ev.altKey,
+              metaKey:    ev.metaKey,
+            }));
+            reDispatching = false;
+          }, { capture: true, passive: false });
         }
       }
       // ─────────────────────────────────────────────────────────────────────
