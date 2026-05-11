@@ -2081,6 +2081,12 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   // ── Mouse handlers ─────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Only left-click (button=0) should pan/drag.
+    // Middle-click (button=1) and right-click (button=2) must not trigger drag —
+    // middle-click is a scroll/pan gesture handled by the OS/browser natively, and
+    // accidentally entering drag state causes the map to jump when the mouse moves
+    // even slightly during the middle-button press.
+    if (e.button !== 0) return;
     if (drawingMode === 'select') {
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
@@ -2110,6 +2116,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   };
 
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Only process left-click release — middle/right button releases must not
+    // trigger a canvas click or interfere with drag state.
+    if (e.button !== 0) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -2216,7 +2225,13 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    setZoom(prev => Math.max(14, Math.min(21, prev + (e.deltaY < 0 ? 1 : -1))));
+    // Normalize deltaY across deltaMode values so a single notch always = 1 zoom step.
+    // deltaMode 0 = pixels (high-DPI mouse: deltaY ~100-120 per notch)
+    // deltaMode 1 = lines  (older mice:     deltaY = 3 per notch)
+    // deltaMode 2 = pages  (rare)
+    // We only care about direction, not magnitude, so just use sign.
+    const direction = e.deltaY < 0 ? 1 : -1;
+    setZoom(prev => Math.max(14, Math.min(21, prev + direction)));
   };
 
   const handleDoubleClick = () => {

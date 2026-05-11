@@ -1082,6 +1082,13 @@ function SolarEngine3D({
         // Also clear maximumTiltAngle so there's no hard angle cap at all
         ctrl.maximumTiltAngle = undefined;
 
+        // Tame inertia so panning/spinning doesn't coast after the mouse button is
+        // released and then get amplified by an accidental wheel tick.
+        // Default: inertiaSpin=0.9, inertiaZoom=0.8 (heavy coast).
+        // Lower values = camera stops quickly → no post-release zoom blips.
+        ctrl.inertiaSpin = 0.5;
+        ctrl.inertiaZoom = 0.2;
+
         // Map BOTH middle-drag AND right-drag to tilt so users can use either
         ctrl.tiltEventTypes = [
           C.CameraEventType.MIDDLE_DRAG,
@@ -1272,6 +1279,50 @@ function SolarEngine3D({
       setupFpsMonitor(viewer);
       setupCameraOptimizer(viewer, C);
       setupKeyboardHandler();
+
+      // ── Middle-click zoom-blip suppression ───────────────────────────────
+      // Browsers fire a native 'mousedown' with button=1 when the middle mouse
+      // button is pressed.  Cesium's ScreenSpaceCameraController picks this up
+      // as the start of a MIDDLE_DRAG tilt gesture — correct.  But some browsers
+      // also synthesise a one-shot wheel delta at the moment the middle button
+      // goes down, which Cesium interprets as a zoom step, causing an instant
+      // "blip" zoom the moment the user presses middle-click to start panning.
+      //
+      // Fix: attach a native (non-React) 'mousedown' listener with { capture: true }
+      // to the Cesium canvas.  When button=1 is detected, set a flag that suppresses
+      // the very next 'wheel' event fired within a 150ms window.  This is tight
+      // enough to swallow only the synthetic wheel-on-press, while still allowing
+      // genuine scroll-wheel zooming that follows a middle-button release.
+      if (cesiumRef.current) {
+        const cesiumCanvas = cesiumRef.current.querySelector('canvas') as HTMLCanvasElement | null;
+        if (cesiumCanvas) {
+          let middleDown = false;
+          let middleDownAt = 0;
+
+          const onMiddleDown = (ev: MouseEvent) => {
+            if (ev.button === 1) {
+              middleDown = true;
+              middleDownAt = Date.now();
+            }
+          };
+          const onMiddleUp = (ev: MouseEvent) => {
+            if (ev.button === 1) middleDown = false;
+          };
+          // Suppress wheel events that arrive within 150ms of middle-button press.
+          // This captures the synthetic zoom-on-press without blocking real scroll.
+          const onWheel = (ev: WheelEvent) => {
+            if (middleDown && Date.now() - middleDownAt < 150) {
+              ev.stopImmediatePropagation();
+              ev.preventDefault();
+            }
+          };
+
+          cesiumCanvas.addEventListener('mousedown', onMiddleDown, { capture: true });
+          cesiumCanvas.addEventListener('mouseup',   onMiddleUp,   { capture: true });
+          cesiumCanvas.addEventListener('wheel',     onWheel,      { capture: true, passive: false });
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
 
       if (cesiumRef.current) {
         const ro = new ResizeObserver(() => {
