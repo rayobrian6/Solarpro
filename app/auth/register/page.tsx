@@ -26,6 +26,7 @@ export default function RegisterPage() {
     company: '',
     phone: '',
     agreeTerms: false,
+    website: '', // honeypot — hidden from real users, bots auto-fill it
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -57,6 +58,7 @@ export default function RegisterPage() {
           company: form.company,
           phone: form.phone,
           tosAccepted: form.agreeTerms,
+          website: form.website, // honeypot field
         }),
       });
 
@@ -233,6 +235,20 @@ export default function RegisterPage() {
                     className="w-full bg-slate-900/60 border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/30 transition-all"
                   />
                 </div>
+              </div>
+
+              {/* Honeypot — visually hidden, never filled by real users */}
+              <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none' }} aria-hidden="true">
+                <label htmlFor="website">Website</label>
+                <input
+                  id="website"
+                  name="website"
+                  type="text"
+                  value={form.website}
+                  onChange={handleChange}
+                  tabIndex={-1}
+                  autoComplete="off"
+                />
               </div>
 
               {/* Terms */}
