@@ -1112,6 +1112,39 @@ function SolarEngine3D({
         // altitude, which is wildly aggressive when already close to the roof.
         // 3.0 gives a natural feel: noticeable zoom per notch but not jarring.
         ctrl.zoomFactor = 3.0;
+
+        // CRITICAL FIX: Stable zoom-rate distanceMeasure.
+        //
+        // Root cause of the "sensitivity all over the place when panels are on
+        // a roof" bug:
+        //
+        // Cesium's zoom3D() computes:
+        //   zoomRate = zoomFactor * distanceMeasure
+        //
+        // When camera.height < minimumPickingTerrainHeight (default 150,000 m,
+        // which is ALWAYS true at roof level), Cesium calls pickPosition() to
+        // set distanceMeasure = distance from camera to the 3D-tile geometry
+        // under the screen centre (depth-buffer ray).
+        //
+        // With Google Photorealistic 3D Tiles this is a depth-buffer lottery:
+        //   • Ray hits roof surface         → distance ≈  5–20 m
+        //   • Ray hits a wall / dormer       → distance ≈ 30–80 m
+        //   • Ray misses all geometry (sky)  → distance = camera height ≈ 100+ m
+        //
+        // zoomRate varies 5–20× between notches depending on what the ray hits.
+        // This is the "sensitivity spikes" the user experiences.  It gets worse
+        // after panels are placed because they add more tile geometry for the
+        // depth-buffer ray to randomly hit.
+        //
+        // FIX: Set minimumPickingTerrainHeight = 0 so that zoom3D's condition
+        //   needPickGlobe = height < minimumPickingTerrainHeight
+        // is NEVER true (camera height is always >= 0 above the ellipsoid).
+        // zoom3D then always falls through to:
+        //   if (!defined(distance)) distance = height;
+        // where `height` = camera's ellipsoidal altitude above WGS84 — a stable,
+        // predictable value that scales smoothly with zoom level.  No depth-buffer
+        // lottery, no sensitivity spikes, no panel-placement side effects.
+        ctrl.minimumPickingTerrainHeight = 0;
       } catch (e) { addLog('WARN', `Camera controller config: ${(e as Error).message}`); }
       // ─────────────────────────────────────────────────────────────────────────
 
@@ -1352,10 +1385,17 @@ function SolarEngine3D({
             const direction = ev.deltaY < 0 ? -1 : 1; // negative = zoom in
             const normalizedDelta = direction * 120;
 
-            // Only normalize if the raw value differs meaningfully from ±120.
-            // Avoids an unnecessary re-dispatch for mice that already send ~120.
-            if (Math.abs(ev.deltaY) > 80 && Math.abs(ev.deltaY) < 160) return;
-
+            // Always normalize — no passthrough window.
+            //
+            // A previous version let events with |deltaY| in the 80–160 range
+            // pass through unchanged on the theory that they were "already close
+            // to ±120".  This was wrong for two reasons:
+            //   1. A raw delta of 80 gives arcLength = 7.5 * toRadians(80) = 10.5,
+            //      vs 15.7 for ±120 — a 33 % difference in zoom speed.
+            //   2. The "stable height" fix (minimumPickingTerrainHeight = 0) means
+            //      distanceMeasure is now always consistent, so any remaining
+            //      variation in arcLength is the dominant source of jitter.
+            // Unconditionally re-dispatching at ±120 eliminates both issues.
             ev.stopImmediatePropagation();
             ev.preventDefault();
 
