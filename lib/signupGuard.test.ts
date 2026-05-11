@@ -8,6 +8,20 @@ import { isGibberish, isDisposableEmail, checkHoneypot } from './signupGuard';
 // ── isGibberish ─────────────────────────────────────────────────────────────
 describe('isGibberish', () => {
   // ── Known bot strings (must be detected) ──
+  // These two are the EXACT strings from the live security incident (screenshot)
+  it('detects actual incident bot name jdasson09DUmrrF7gp', () => {
+    expect(isGibberish('jdasson09DUmrrF7gp')).toBe(true);
+  });
+  it('detects actual incident bot name tAZWINSdnBiCAM', () => {
+    expect(isGibberish('tAZWINSdnBiCAM')).toBe(true);
+  });
+  // Bot passwords from the same incident — also gibberish-detectable
+  it('detects bot token GYODALRJNOSLRSHSEM', () => {
+    expect(isGibberish('GYODALRJNOSLRSHSEM')).toBe(true);
+  });
+  it('detects bot token L3yizkTVAHJA9HT0DEu', () => {
+    expect(isGibberish('L3yizkTVAHJA9HT0DEu')).toBe(true);
+  });
   it('detects bot company string QlYQBVuDHDLRnJXEslH', () => {
     expect(isGibberish('QlYQBVuDHDLRnJXEslH')).toBe(true);
   });

@@ -16,22 +16,30 @@
  * ──────────────────────────────────────────────────────────────────────────
  *
  * isGibberish(s): true when a single-word string (no spaces) looks machine-generated.
- *   Requires ALL of: length > 14, Shannon entropy > 3.4, plus at least one of:
+ *   Requires length >= 14 chars.  Two entropy paths:
  *
+ *   HIGH-ENTROPY PATH (e > 3.4):
  *   Rule 1 — high case-alternation ratio (mc > 0.35):
  *     Random generators produce upper/lower transitions on nearly every character.
  *     Normal CamelCase company names only capitalise word starts.
- *
  *   Rule 2 — extremely high entropy (> 4.0):
  *     Catches sequential-character strings that evade the mc check.
- *
  *   Rule 3 — elevated uppercase ratio + some mixing (ur > 0.38 AND mc > 0.15):
  *     Catches strings where many random chars happen to be uppercase.
  *     The mc > 0.15 guard excludes legitimate ALL-CAPS company abbreviations.
- *
  *   Rule 4 — combined mc + ur signal (mc + ur > 0.70 AND mc > 0.15):
- *     Catches mid-level cases like "meaioGMtCwSIF2ygn" where neither rule
- *     alone fires but the combined score is clearly non-human.
+ *     Catches mid-level cases like "meaioGMtCwSIF2ygn".
+ *   Rule 5 — pure-uppercase with high entropy (ur >= 0.95 AND mc == 0 AND e > 3.50):
+ *     Catches all-uppercase bot tokens (e.g. GYODALRJNOSLRSHSEM e=3.572).
+ *     Real all-caps company names top out at ~e=3.43, safely below 3.50.
+ *   Rule 6 — moderate-mc + very high entropy (mc >= 0.28 AND e > 3.75 AND len >= 16):
+ *     Catches "jdasson09DUmrrF7gp"-style strings.  TeslaEnergyProducts (e=3.682)
+ *     is safely below the e > 3.75 cutoff.
+ *
+ *   LOWER-ENTROPY PATH (3.3 < e <= 3.4):
+ *   Rule 7 — high alternation AND very high uppercase ratio (mc > 0.35 AND ur >= 0.60):
+ *     Catches "tAZWINSdnBiCAM" (mc=0.385, ur=0.714).
+ *     BrightSunEnergy (mc=0.357, ur=0.200) is safely below ur >= 0.60.
  *
  * DISPOSABLE EMAIL DOMAINS
  * ──────────────────────────────────────────────────────────────────────────
@@ -95,20 +103,36 @@ export function isGibberish(raw: string): boolean {
   const mc  = mixedCaseRatio(s);
   const ur  = uppercaseRatio(s);
 
-  // Length and entropy gate — all rules require this baseline.
-  if (len <= 14 || e <= 3.4) return false;
+  // Length gate — minimum 14 chars (shorter strings never match bot patterns reliably).
+  if (len < 14) return false;
 
-  // Rule 1: high case-alternation (classic random generator output)
-  if (mc > 0.35) return true;
+  // ── High-entropy path (e > 3.4) ──────────────────────────────────────────────────
+  if (e > 3.4) {
+    // Rule 1: high case-alternation (classic random generator output)
+    if (mc > 0.35) return true;
 
-  // Rule 2: extremely high entropy alone (sequential-unique characters)
-  if (e > 4.0) return true;
+    // Rule 2: extremely high entropy alone (sequential-unique characters)
+    if (e > 4.0) return true;
 
-  // Rule 3: many uppercase chars + some mixing (exclude pure ALL-CAPS abbreviations)
-  if (ur > 0.38 && mc > 0.15) return true;
+    // Rule 3: many uppercase chars + some mixing (exclude pure ALL-CAPS abbreviations)
+    if (ur > 0.38 && mc > 0.15) return true;
 
-  // Rule 4: combined mc + ur signal (catches mid-level cases)
-  if ((mc + ur) > 0.70 && mc > 0.15) return true;
+    // Rule 4: combined mc + ur signal (catches mid-level cases)
+    if ((mc + ur) > 0.70 && mc > 0.15) return true;
+
+    // Rule 5: pure-uppercase with high entropy — catches GYODALRJNOSLRSHSEM (e=3.572).
+    // Real all-caps names top out at ~e=3.43 (ALLUPPERCASECOMPANY), safely below 3.50.
+    if (ur >= 0.95 && mc === 0 && e > 3.50) return true;
+
+    // Rule 6: moderate case-alternation + very high entropy — catches jdasson09DUmrrF7gp
+    // (mc=0.286, e=3.837).  TeslaEnergyProducts (mc=0.278, e=3.682) stays below e>3.75.
+    if (mc >= 0.28 && e > 3.75 && len >= 16) return true;
+  }
+
+  // ── Lower-entropy path (3.3 < e ≤ 3.4) ─────────────────────────────────────────
+  // Rule 7: high alternation AND very high uppercase ratio — catches tAZWINSdnBiCAM
+  // (mc=0.385, ur=0.714).  BrightSunEnergy (mc=0.357, ur=0.200) stays below ur>=0.60.
+  if (e > 3.3 && mc > 0.35 && ur >= 0.60) return true;
 
   return false;
 }
