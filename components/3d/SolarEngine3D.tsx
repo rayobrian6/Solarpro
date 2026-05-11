@@ -1106,6 +1106,12 @@ function SolarEngine3D({
         // Allow close-up zoom without collision snapping
         ctrl.minimumZoomDistance = 1;
         ctrl.maximumZoomDistance = 50000;
+
+        // Tame scroll-wheel zoom speed.
+        // Cesium default zoomFactor = 5.0 — one notch zooms by 5× the current
+        // altitude, which is wildly aggressive when already close to the roof.
+        // 3.0 gives a natural feel: noticeable zoom per notch but not jarring.
+        ctrl.zoomFactor = 3.0;
       } catch (e) { addLog('WARN', `Camera controller config: ${(e as Error).message}`); }
       // ─────────────────────────────────────────────────────────────────────────
 
@@ -1507,11 +1513,20 @@ function SolarEngine3D({
     canvas.addEventListener('mouseleave',  onDragEnd,   { passive: true });
     canvas.addEventListener('mousemove',   onDragMove,  { passive: true });
     canvas.addEventListener('pointermove', onDragMove,  { passive: true });
-    // Scroll wheel zoom also needs continuous renders
+
+    // Scroll wheel zoom: pump renders continuously for the full duration of
+    // Cesium's zoom animation (~500ms) so it doesn't freeze mid-animation.
+    // Previous code only pumped at +100ms and +300ms — frames after 300ms were
+    // skipped, causing the zoom to stall then snap to the final position.
     canvas.addEventListener('wheel', () => {
-      try { viewer.scene.requestRender(); } catch {}
-      setTimeout(() => { try { viewer.scene.requestRender(); } catch {}; }, 100);
-      setTimeout(() => { try { viewer.scene.requestRender(); } catch {}; }, 300);
+      // Kick off a short RAF loop that runs for 600ms — covers the full
+      // Cesium zoom-inertia window without over-rendering idle frames.
+      const end = Date.now() + 600;
+      const pump = () => {
+        try { viewer.scene.requestRender(); } catch {}
+        if (Date.now() < end) requestAnimationFrame(pump);
+      };
+      requestAnimationFrame(pump);
     }, { passive: true });
   }
 

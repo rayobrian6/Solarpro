@@ -2024,6 +2024,74 @@ export default function DesignStudio({ project, onSave }: Props) {
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); window.removeEventListener('resize', resize); };
   }, [drawCanvas, show3D]);
 
+  // ── Native (non-passive) wheel listener for 2D map zoom ─────────────────
+  // React 18 registers synthetic onWheel listeners as PASSIVE at the document
+  // root, which means e.preventDefault() inside onWheel is silently ignored —
+  // the browser still scrolls the page underneath the canvas.
+  //
+  // Fixes applied here (all require a non-passive listener):
+  //   1. e.preventDefault() actually works → page no longer scrolls while zooming
+  //   2. Cursor-aware zoom: the geographic point under the cursor stays fixed
+  //      instead of zooming toward the canvas center (standard map behaviour)
+  //   3. Fractional zoom: each notch moves by 0.75 levels instead of 1.0,
+  //      making the zoom feel smooth rather than snapping between discrete levels
+  //      (tile rendering still uses Math.floor/Math.min for fetch zoom, so this
+  //       only affects the continuous scale — no extra tile fetches)
+  useEffect(() => {
+    if (show3D) return; // canvas not in DOM in 3D mode
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ZOOM_STEP = 0.75; // fractional levels per notch — smooth but not slow
+    const ZOOM_MIN  = 14;
+    const ZOOM_MAX  = 21;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      // Direction only — ignore magnitude to treat all mice/trackpads equally.
+      const direction = e.deltaY < 0 ? 1 : -1;
+
+      const rect  = canvas.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+      const W = canvas.width;
+      const H = canvas.height;
+
+      setZoom(prevZoom => {
+        const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, prevZoom + direction * ZOOM_STEP));
+        if (newZoom === prevZoom) return prevZoom;
+
+        // Cursor-aware zoom: keep the lat/lng under the cursor fixed.
+        // 1. Find the lat/lng at the cursor position BEFORE zoom change.
+        // 2. After zoom change the canvas scale changes — shift mapCenter so
+        //    that same lat/lng lands back under the cursor.
+        //
+        // latLngToWorld / worldToLatLng use mapCenter from closure (stale-safe
+        // because we're computing the DELTA, not an absolute position).
+        const centerWorld = latLngToWorld(mapCenter.lat, mapCenter.lng, prevZoom);
+        // World coords of cursor at old zoom
+        const cursorWorldX = centerWorld.x + (cursorX - W / 2);
+        const cursorWorldY = centerWorld.y + (cursorY - H / 2);
+        // Same world point at new zoom (world coords scale with 2^zoom)
+        const scale = Math.pow(2, newZoom - prevZoom);
+        const newCursorWorldX = cursorWorldX * scale;
+        const newCursorWorldY = cursorWorldY * scale;
+        // New center world coords so cursor stays fixed
+        const newCenterWorldX = newCursorWorldX - (cursorX - W / 2);
+        const newCenterWorldY = newCursorWorldY - (cursorY - H / 2);
+        const newCenter = worldToLatLng(newCenterWorldX, newCenterWorldY, newZoom);
+        setMapCenter(newCenter);
+
+        return newZoom;
+      });
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [show3D, mapCenter]); // mapCenter in deps so cursor-world math uses fresh value
+  // ────────────────────────────────────────────────────────────────────────
+
   // v31.1: Global keyboard shortcuts — tool switching + panel deletion + escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2223,15 +2291,13 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   };
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    // Normalize deltaY across deltaMode values so a single notch always = 1 zoom step.
-    // deltaMode 0 = pixels (high-DPI mouse: deltaY ~100-120 per notch)
-    // deltaMode 1 = lines  (older mice:     deltaY = 3 per notch)
-    // deltaMode 2 = pages  (rare)
-    // We only care about direction, not magnitude, so just use sign.
-    const direction = e.deltaY < 0 ? 1 : -1;
-    setZoom(prev => Math.max(14, Math.min(21, prev + direction)));
+  const handleWheel = (_e: React.WheelEvent<HTMLCanvasElement>) => {
+    // Intentionally empty — all scroll-zoom logic is handled by the native
+    // non-passive wheel listener registered in the useEffect below.
+    // React 18 registers onWheel as a passive listener at the document root,
+    // so e.preventDefault() here is silently ignored and the page scrolls
+    // underneath the canvas.  The native listener registered with
+    // { passive: false } is the only way to reliably prevent that.
   };
 
   const handleDoubleClick = () => {
