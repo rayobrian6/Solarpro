@@ -576,11 +576,11 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'Import roof model + sun path, compute per-panel shade factor, feed into sizing and production estimate.',
     track: 'engineering-core',
     priority: 'p2',
-    status: 'planned',
+    status: 'done',
     effort: 'xl',
-    notes: 'Could leverage Google Solar API shade data as a starting point.',
+    notes: 'lib/shadeAnalysis.ts: sun-path sampling (96pts/yr), obstruction/horizon mask, inter-row self-shade, per-panel annualShadeFactor. PlacedPanel.annualShadeFactor added to types. pvwatts.ts calculateProduction() applies weighted shade derate to PVWatts losses. ShadeAnalysisPanel.tsx UI with heatmap grid + obstruction inputs. 28 tests.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-06-11',
   },
 
   // ─── PLANNED — COMPLIANCE ────────────────────────────────────────────

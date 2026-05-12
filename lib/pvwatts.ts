@@ -252,17 +252,39 @@ export async function calculateProduction(
   tilt = Math.max(0, Math.min(90, isNaN(tilt) ? 20 : tilt));
   azimuth = Math.max(0, Math.min(360, isNaN(azimuth) ? 180 : azimuth));
 
+  // ── Per-panel shade derate (v1.shade) ──────────────────────────────────────
+  // If panels have annualShadeFactor set (from lib/shadeAnalysis.ts),
+  // compute the weighted-average shade derate and add it to system losses.
+  // This gives PVWatts more accurate effective losses that reflect site shading.
+  let shadeLossesPct = 0;
+  if (layout.panels && layout.panels.length > 0) {
+    const shadedPanels = layout.panels.filter((p: any) => typeof p.annualShadeFactor === 'number');
+    if (shadedPanels.length > 0) {
+      const avgShadeFactor = shadedPanels.reduce((sum: number, p: any) => sum + p.annualShadeFactor, 0) / shadedPanels.length;
+      // shadeLoss = 1 - avgShadeFactor (e.g., 0.08 = 8% shade derate)
+      shadeLossesPct = Math.round((1 - avgShadeFactor) * 1000) / 10;
+      console.log(`[pvwatts] Per-panel shade derate: ${shadeLossesPct}% (${shadedPanels.length}/${layout.panels.length} panels)`);
+    }
+  }
+
+  // Combine baseline losses (14%) with shade losses
+  // Combined: 1 - (1 - baseLoss) × (1 - shadeLoss)
+  const baseLoss    = 14;
+  const baseRetain  = 1 - baseLoss    / 100;
+  const shadeRetain = 1 - shadeLossesPct / 100;
+  const effectiveLosses = Math.min(50, Math.round((1 - baseRetain * shadeRetain) * 1000) / 10);
+
   // Try PVWatts API first, fall back to local
   let pvData = await fetchPVWatts({
     lat, lng, systemSizeKw, tilt, azimuth,
-    losses: 14,
+    losses: effectiveLosses,
     arrayType,
   });
 
   if (!pvData) {
     pvData = calculateProductionLocal({
       lat, lng, systemSizeKw, tilt, azimuth,
-      losses: 14,
+      losses: effectiveLosses,
       bifacialFactor,
     });
   } else if (systemType === 'fence' && bifacialFactor > 1.0) {
