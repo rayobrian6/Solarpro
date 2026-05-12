@@ -9,6 +9,7 @@
  *   const { data, error } = parseBody(registerSchema, body);
  */
 import { z } from 'zod';
+import { isGibberish, isDisposableEmail } from '@/lib/signupGuard';
 
 // ── Auth Schemas ──────────────────────────────────────────────────────────────
 
@@ -26,7 +27,7 @@ export const registerSchema = z.object({
     .max(200, 'Name too long.')
     .transform(s => s.trim())
     .refine(
-      s => { const { isGibberish } = require('@/lib/signupGuard'); return !isGibberish(s); },
+      s => !isGibberish(s),
       'Please enter your real full name.'
     ),
   email: z.string()
@@ -34,7 +35,7 @@ export const registerSchema = z.object({
     .max(EMAIL_MAX, 'Email too long.')
     .transform(s => s.toLowerCase().trim())
     .refine(
-      s => { const { isDisposableEmail } = require('@/lib/signupGuard'); return !isDisposableEmail(s); },
+      s => !isDisposableEmail(s),
       'Please use a real business or personal email address.'
     ),
   password: z.string()
@@ -44,7 +45,7 @@ export const registerSchema = z.object({
     .max(200, 'Company name too long.')
     .optional()
     .refine(
-      s => { if (!s) return true; const { isGibberish } = require('@/lib/signupGuard'); return !isGibberish(s); },
+      s => !s || !isGibberish(s),
       'Please enter your real company name.'
     ),
   phone: z.string().max(30, 'Phone number too long.').optional(),

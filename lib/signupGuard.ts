@@ -86,10 +86,21 @@ function uppercaseRatio(s: string): number {
   return alpha.filter(c => c === c.toUpperCase()).length / alpha.length;
 }
 
+// ── Digit ratio ───────────────────────────────────────────────────────────────────────────────────
+// Fraction of characters that are digits (0-9).
+function digitRatio(s: string): number {
+  if (!s.length) return 0;
+  return s.split('').filter(c => /[0-9]/.test(c)).length / s.length;
+}
+
 /**
  * Returns true if the string looks like a machine-generated gibberish token.
  * Only fires on single-word strings longer than 14 characters with high entropy.
  * All legitimate company names and personal names in our test suite pass through.
+ *
+ * INCIDENT 2 ADDITIONS (Rules 8–11) — new bot patterns observed May 2025:
+ *   Bots evolved to use: lower mc but digits mixed in, high-uppercase with digits,
+ *   lower-entropy mixed case, and digit-heavy alphanumeric tokens.
  */
 export function isGibberish(raw: string): boolean {
   if (!raw) return false;
@@ -102,11 +113,12 @@ export function isGibberish(raw: string): boolean {
   const e   = shannonEntropy(s);
   const mc  = mixedCaseRatio(s);
   const ur  = uppercaseRatio(s);
+  const dr  = digitRatio(s);
 
   // Length gate — minimum 14 chars (shorter strings never match bot patterns reliably).
   if (len < 14) return false;
 
-  // ── High-entropy path (e > 3.4) ──────────────────────────────────────────────────
+  // ── High-entropy path (e > 3.4) ──────────────────────────────────────────────────────────────────
   if (e > 3.4) {
     // Rule 1: high case-alternation (classic random generator output)
     if (mc > 0.35) return true;
@@ -127,16 +139,35 @@ export function isGibberish(raw: string): boolean {
     // Rule 6: moderate case-alternation + very high entropy — catches jdasson09DUmrrF7gp
     // (mc=0.286, e=3.837).  TeslaEnergyProducts (mc=0.278, e=3.682) stays below e>3.75.
     if (mc >= 0.28 && e > 3.75 && len >= 16) return true;
+
+    // Rule 8 (Incident 2): moderate mc + decent ur + has digits = alphanumeric bot garble.
+    // Catches: nikosOMIUnxF7cgn (mc=0.286, ur=0.333, dr=0.063).
+    // Safe:    MyCompanyLLCExtra (dr=0.000), TeslaEnergyProducts (ur=0.158),
+    //          ChristopherAnderson (mc=0.167).
+    if (mc >= 0.25 && ur >= 0.28 && dr > 0.03) return true;
+
+    // Rule 9 (Incident 2): high uppercase ratio, very low mc, but has digits.
+    // Catches: drklinsdoHARCHINE12 (e=3.722, ur=0.471, mc=0.063, dr=0.105).
+    // Safe:    PowerHomesSolarLLC (e=3.308, below e>3.60), HW1975Mining (e=3.252).
+    if (ur >= 0.42 && mc < 0.12 && e > 3.60 && dr > 0.03) return true;
   }
 
-  // ── Lower-entropy path (3.3 < e ≤ 3.4) ─────────────────────────────────────────
+  // ── Lower-entropy path (3.3 < e ≤ 3.4) ──────────────────────────────────────────────────────────
   // Rule 7: high alternation AND very high uppercase ratio — catches tAZWINSdnBiCAM
   // (mc=0.385, ur=0.714).  BrightSunEnergy (mc=0.357, ur=0.200) stays below ur>=0.60.
   if (e > 3.3 && mc > 0.35 && ur >= 0.60) return true;
 
+  // Rule 10 (Incident 2): lower-entropy mixed-case bot — catches weWeETRCEfwkofBgchF
+  // (e=3.221, mc=0.389, ur=0.421, len=19).
+  // Safe: BrightSunEnergy (ur=0.200), PowerHomesSolarLLC (ur=0.333, below ur>=0.38).
+  if (e > 3.15 && mc >= 0.35 && ur >= 0.38 && len >= 16) return true;
+
+  // Rule 11 (Incident 2): digit-heavy alphanumeric token — catches hw1975ming2hh891
+  // (dr=0.500, e=3.453).  Safe: HW1975Mining (dr=0.333, below dr>=0.40).
+  if (dr >= 0.40 && e > 3.3 && len >= 14) return true;
+
   return false;
 }
-
 // ── Disposable email domain blocklist ─────────────────────────────────────
 // Only high-volume, purpose-built throwaway services.
 // Legitimate free providers (gmail, yahoo, hotmail, outlook, icloud) are NOT blocked.

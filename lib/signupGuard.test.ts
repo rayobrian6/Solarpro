@@ -7,15 +7,14 @@ import { isGibberish, isDisposableEmail, checkHoneypot } from './signupGuard';
 
 // ── isGibberish ─────────────────────────────────────────────────────────────
 describe('isGibberish', () => {
-  // ── Known bot strings (must be detected) ──
-  // These two are the EXACT strings from the live security incident (screenshot)
+  // ── Known bot strings — Incident 1 (must be detected) ──
+  // These are EXACT strings from the first live security incident
   it('detects actual incident bot name jdasson09DUmrrF7gp', () => {
     expect(isGibberish('jdasson09DUmrrF7gp')).toBe(true);
   });
   it('detects actual incident bot name tAZWINSdnBiCAM', () => {
     expect(isGibberish('tAZWINSdnBiCAM')).toBe(true);
   });
-  // Bot passwords from the same incident — also gibberish-detectable
   it('detects bot token GYODALRJNOSLRSHSEM', () => {
     expect(isGibberish('GYODALRJNOSLRSHSEM')).toBe(true);
   });
@@ -39,6 +38,37 @@ describe('isGibberish', () => {
   });
   it('detects high-entropy sequential gibberish ABCDefGHIJklmNOPQRstu', () => {
     expect(isGibberish('ABCDefGHIJklmNOPQRstu')).toBe(true);
+  });
+
+  // ── Known bot strings — Incident 2 (May 2025) — new evasion patterns ──
+  // Rule 8: moderate mc + decent ur + digits present
+  it('detects incident-2 bot nikosOMIUnxF7cgn (mc=0.286, ur=0.333, dr=0.063)', () => {
+    expect(isGibberish('nikosOMIUnxF7cgn')).toBe(true);
+  });
+  // Rule 9: high ur, low mc, high entropy + digits
+  it('detects incident-2 bot drklinsdoHARCHINE12 (ur=0.471, mc=0.063, e=3.722)', () => {
+    expect(isGibberish('drklinsdoHARCHINE12')).toBe(true);
+  });
+  // Rule 10: lower-entropy mixed-case
+  it('detects incident-2 bot weWeETRCEfwkofBgchF (e=3.221, mc=0.389, ur=0.421)', () => {
+    expect(isGibberish('weWeETRCEfwkofBgchF')).toBe(true);
+  });
+  // Rule 11: digit-heavy alphanumeric token
+  it('detects incident-2 bot hw1975ming2hh891 (dr=0.500, e=3.453)', () => {
+    expect(isGibberish('hw1975ming2hh891')).toBe(true);
+  });
+  // Other incident-2 bots covered by existing rules
+  it('detects incident-2 bot VWYgJcAMYnjgvePsmH', () => {
+    expect(isGibberish('VWYgJcAMYnjgvePsmH')).toBe(true);
+  });
+  it('detects incident-2 bot GTDOEAUSDHLLXBM5H', () => {
+    expect(isGibberish('GTDOEAUSDHLLXBM5H')).toBe(true);
+  });
+  it('detects incident-2 bot LqmseYFtuFLJdYTRQx', () => {
+    expect(isGibberish('LqmseYFtuFLJdYTRQx')).toBe(true);
+  });
+  it('detects incident-2 bot mbaldiAMtCwIPType', () => {
+    expect(isGibberish('mbaldiAMtCwIPType')).toBe(true);
   });
 
   // ── Real company names (must NOT be flagged) ──
@@ -102,6 +132,19 @@ describe('isGibberish', () => {
   });
   it('allows company with spaces Solar Solutions LLC', () => {
     expect(isGibberish('Solar Solutions LLC')).toBe(false);
+  });
+  // Incident-2 false-positive guards — ensure Rule 8-11 don\'t block legit names
+  it('allows MyCompanyLLCExtra (no digits, safe from Rule 8)', () => {
+    expect(isGibberish('MyCompanyLLCExtra')).toBe(false);
+  });
+  it('allows HW1975Mining (dr=0.333, below Rule 11 threshold)', () => {
+    expect(isGibberish('HW1975Mining')).toBe(false);
+  });
+  it('allows PowerHomesSolarLLC (ur=0.333, below Rule 10 threshold)', () => {
+    expect(isGibberish('PowerHomesSolarLLC')).toBe(false);
+  });
+  it('allows drklinsdorf (short lowercase, no pattern match)', () => {
+    expect(isGibberish('drklinsdorf')).toBe(false);
   });
 });
 
