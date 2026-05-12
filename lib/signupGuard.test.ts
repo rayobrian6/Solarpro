@@ -180,6 +180,21 @@ describe('isGibberish', () => {
   it('allows NovaSolarGroup (mc=0.385, below Rule 12 threshold)', () => {
     expect(isGibberish('NovaSolarGroup')).toBe(false);
   });
+  it('allows TexasSolarAndMore (mc=0.438 but ur=0.235, below Rule 12 ur guard)', () => {
+    expect(isGibberish('TexasSolarAndMore')).toBe(false);
+  });
+  it('detects incident-3 bot iCfhgzhvctUMeartt (consonant run=9, Rule 14)', () => {
+    expect(isGibberish('iCfhgzhvctUMeartt')).toBe(true);
+  });
+  it('allows SchwartzSolarGroup (Schw=4 consonants, below Rule 14)', () => {
+    expect(isGibberish('SchwartzSolarGroup')).toBe(false);
+  });
+  it('allows SolarStrengthGroup (ngth=4 consonants, below Rule 14)', () => {
+    expect(isGibberish('SolarStrengthGroup')).toBe(false);
+  });
+  it('allows FirstSolarInstall (rstS=4 consonants, below Rule 14)', () => {
+    expect(isGibberish('FirstSolarInstall')).toBe(false);
+  });
 });
 
 // ── isDisposableEmail ────────────────────────────────────────────────────────

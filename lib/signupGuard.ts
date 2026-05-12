@@ -93,6 +93,34 @@ function digitRatio(s: string): number {
   return s.split('').filter(c => /[0-9]/.test(c)).length / s.length;
 }
 
+// ── Consonant-cluster detector ──────────────────────────────────────────────
+// Treats 'y' as a vowel (English convention for syllable-break purposes) to
+// avoid false positives on "Energy" (nrg+y), "Strategy" (tg+y), etc.
+// Real names/company names in English: max consecutive consonants = 4 or fewer
+// (e.g. "Schw" in Schwartz, "ngth" in Strength, "rstS" in FirstSolar).
+// Bot tokens routinely hit 5–11 because random character generation ignores
+// phoneme rules entirely.
+function maxConsonantRun(s: string): number {
+  // Split on CamelCase word boundaries before counting, so that "SolarStrengthGroup"
+  // is treated as ["Solar","Strength","Group"] (max=4: "ngth") rather than one run
+  // of "ngthGr"=6.  Bot tokens like "iCfhgzhvctUMeartt" split into ["i","Cfhgzhvct","U","Meartt"]
+  // — the "Cfhgzhvct" word still has a run of 9.
+  const VOWELS_Y = /[aeiouAEIOUyY]/;
+  const words = s.split(/(?=[A-Z])/).filter(w => w.length > 0);
+  let globalMax = 0;
+  for (const word of words) {
+    const alpha = word.split('').filter(c => /[a-zA-Z]/.test(c));
+    let max = 0, cur = 0;
+    for (const c of alpha) {
+      if (!VOWELS_Y.test(c)) { cur++; if (cur > max) max = cur; }
+      else cur = 0;
+    }
+    if (max > globalMax) globalMax = max;
+  }
+  return globalMax;
+}
+
+
 /**
  * Returns true if the string looks like a machine-generated gibberish token.
  * Only fires on single-word strings longer than 14 characters with high entropy.
@@ -114,6 +142,7 @@ export function isGibberish(raw: string): boolean {
   const mc  = mixedCaseRatio(s);
   const ur  = uppercaseRatio(s);
   const dr  = digitRatio(s);
+  const mcr = maxConsonantRun(s);
 
   // Length gate — minimum 14 chars (shorter strings never match bot patterns reliably).
   if (len < 14) return false;
@@ -180,6 +209,13 @@ export function isGibberish(raw: string): boolean {
   // Safe:    MyCompanyLLCExtra (ur=0.353, just below 0.355), BrightSunEnergy (ur=0.200),
   //          PowerHomesSolarLLC (ur=0.333), BlueSkyEnergyLLC (e=3.281 < 3.35).
   if (mc >= 0.30 && ur >= 0.355 && e >= 3.35 && len >= 14) return true;
+
+  // Rule 14 (Incident 3): consonant-cluster detector.
+  // Real English names never exceed 4 consecutive consonants (treating y as vowel).
+  // Bot tokens like "iCfhgzhvctUMeartt" (run=9), "gLtmTjHtvsnUJhWwg" (run=11)
+  // are immediately obvious — no human name has 9 consonants in a row.
+  // Safe: Schwartz (Schw=4), Strength (ngth=4), FirstSolar (rstS=4).
+  if (mcr >= 5 && len >= 14) return true;
 
   return false;
 }
