@@ -166,6 +166,21 @@ export function isGibberish(raw: string): boolean {
   // (dr=0.500, e=3.453).  Safe: HW1975Mining (dr=0.333, below dr>=0.40).
   if (dr >= 0.40 && e > 3.3 && len >= 14) return true;
 
+  // Rule 12 (Incident 3): high case-alternation at any entropy ≥ 3.0.
+  // Bots produce mc ≥ 0.42 even when entropy is suppressed (e.g. repeated chars).
+  // ur >= 0.30 guard distinguishes bots (random caps throughout) from legitimate
+  // multi-word CamelCase names like TexasSolarAndMore (mc=0.438 but ur=0.235).
+  // Catches: RLJjbumPbonAlbrLr (mc=0.438, ur=0.353), gLtmTjHtvsnUJhWwg (mc=0.625, ur=0.353).
+  // Safe:    TexasSolarAndMore (ur=0.235, below 0.30), BlueSkyEnergyLLC (mc=0.400, below 0.42),
+  //          SunAndWindPowerCo (mc=0.563 but ur=0.294, below 0.30).
+  if (mc >= 0.42 && ur >= 0.30 && e >= 3.0 && len >= 14) return true;
+
+  // Rule 13 (Incident 3): moderate mc + elevated ur at medium entropy.
+  // Catches: fISMSeLikrryap (mc=0.308, ur=0.357, e=3.379).
+  // Safe:    MyCompanyLLCExtra (ur=0.353, just below 0.355), BrightSunEnergy (ur=0.200),
+  //          PowerHomesSolarLLC (ur=0.333), BlueSkyEnergyLLC (e=3.281 < 3.35).
+  if (mc >= 0.30 && ur >= 0.355 && e >= 3.35 && len >= 14) return true;
+
   return false;
 }
 // ── Disposable email domain blocklist ─────────────────────────────────────

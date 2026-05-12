@@ -146,6 +146,40 @@ describe('isGibberish', () => {
   it('allows drklinsdorf (short lowercase, no pattern match)', () => {
     expect(isGibberish('drklinsdorf')).toBe(false);
   });
+
+  // ── Incident-3 bot cases (new wave) ────────────────────────────────────────
+  it('detects incident-3 bot dVurUJFXanbwHaqrcWGBXaL (caught by Rule 1)', () => {
+    expect(isGibberish('dVurUJFXanbwHaqrcWGBXaL')).toBe(true);
+  });
+  it('detects incident-3 bot RLJjbumPbonAlbrLr (mc=0.438, Rule 12)', () => {
+    expect(isGibberish('RLJjbumPbonAlbrLr')).toBe(true);
+  });
+  it('detects incident-3 bot gLtmTjHtvsnUJhWwg (mc=0.625, Rule 12)', () => {
+    expect(isGibberish('gLtmTjHtvsnUJhWwg')).toBe(true);
+  });
+  it('detects incident-3 bot fISMSeLikrryap (mc=0.308, ur=0.357, Rule 13)', () => {
+    expect(isGibberish('fISMSeLikrryap')).toBe(true);
+  });
+  it('detects incident-3 company qSTJMuuKkuHpmnuApKjxCZ (Rule 1)', () => {
+    expect(isGibberish('qSTJMuuKkuHpmnuApKjxCZ')).toBe(true);
+  });
+  it('detects incident-3 company agmAkvnMkjdLAQEYSJ (Rule 3)', () => {
+    expect(isGibberish('agmAkvnMkjdLAQEYSJ')).toBe(true);
+  });
+  it('detects incident-3 company XuRuFciiBMFFJQCJGEJcrmax (Rule 3)', () => {
+    expect(isGibberish('XuRuFciiBMFFJQCJGEJcrmax')).toBe(true);
+  });
+
+  // ── Incident-3 false-positive guards ───────────────────────────────────────
+  it('allows BlueSkyEnergyLLC (mc=0.400, below Rule 12 threshold)', () => {
+    expect(isGibberish('BlueSkyEnergyLLC')).toBe(false);
+  });
+  it('allows MyCompanyLLCExtra (ur=0.353, below Rule 13 threshold)', () => {
+    expect(isGibberish('MyCompanyLLCExtra')).toBe(false);
+  });
+  it('allows NovaSolarGroup (mc=0.385, below Rule 12 threshold)', () => {
+    expect(isGibberish('NovaSolarGroup')).toBe(false);
+  });
 });
 
 // ── isDisposableEmail ────────────────────────────────────────────────────────
