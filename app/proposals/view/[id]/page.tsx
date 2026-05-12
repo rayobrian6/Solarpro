@@ -186,27 +186,13 @@ function ProposalViewInner() {
     if (!proposal || downloadingPdf) return;
     setDownloadingPdf(true);
     try {
-      const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-      const res = await fetch(`/api/proposals/${proposal.id}/pdf${tokenQuery}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert((err as any)?.error || 'PDF generation failed. Please try again.');
-        return;
-      }
-      const contentType = res.headers.get('content-type') || '';
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const cd = res.headers.get('content-disposition') || '';
-      const match = cd.match(/filename="([^"]+)"/);
-      a.download = match?.[1] ?? `SolarPro-Proposal.${contentType.includes('pdf') ? 'pdf' : 'html'}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Use client-side html2canvas + jsPDF path — works on Vercel (no wkhtmltopdf needed).
+      // generateProposalPDF reads #proposal-document from the live DOM, so the fully-rendered
+      // view page gives much better fidelity than a headless server render.
+      const { generateProposalPDF } = await import('@/lib/proposalPDF');
+      await generateProposalPDF(proposal);
     } catch {
-      alert('Download failed. Please try again.');
+      alert('PDF generation failed. Please try again.');
     } finally {
       setDownloadingPdf(false);
     }
