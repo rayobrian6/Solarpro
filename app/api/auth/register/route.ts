@@ -10,7 +10,7 @@ import {
 import { getDbReady, DbConfigError , handleRouteDbError } from '@/lib/db-neon';
 import { isTransientDbError } from '@/lib/db-ready';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
-import { checkHoneypot } from '@/lib/signupGuard';
+import { checkHoneypot, isGibberish } from '@/lib/signupGuard';
 
 // v47.9: Explicit maxDuration for DB cold-start retry budget
 export const maxDuration = 30;
@@ -33,6 +33,16 @@ export async function POST(req: NextRequest) {
     // Return 200 (not 400/429) so bots think they succeeded.
     if (checkHoneypot(body as Record<string, unknown>)) {
       console.warn(`[REGISTER_BOT] honeypot triggered ip=${getClientIp(req)}`);
+      return NextResponse.json({ success: true }, { status: 200 });
+    }
+
+    // Gibberish-name check — catches machine-generated name tokens
+    // (e.g. "apRNkSYEBgLXMpWFmwYDu", "cVortUUXenbwHapcWGBXaL").
+    // Must run BEFORE Zod parse so we can read the raw name string.
+    // Silent 200 keeps bots from knowing they were detected.
+    const rawName = typeof body?.name === 'string' ? body.name : '';
+    if (isGibberish(rawName)) {
+      console.warn(`[REGISTER_BOT] gibberish name="${rawName}" ip=${getClientIp(req)}`);
       return NextResponse.json({ success: true }, { status: 200 });
     }
 
