@@ -601,10 +601,11 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'Some AHJs (CA Rule 21, HECO 14H, PREPA, NYC) impose tighter constraints than NEC alone. Add a per-AHJ overlay to the compliance engine.',
     track: 'compliance',
     priority: 'p2',
-    status: 'planned',
+    status: 'done',
     effort: 'l',
+    notes: 'lib/jurisdictions/ahjOverlays.ts: 7 special-case overlays (CA Rule 21/NEM3/Title24, HECO 14H/14J, PREPA/LUMA, NYC Local Law 39, FL NEM, TX PUCT/ERCOT, FL Wind). getApplicableOverlays() matches by state/utility/city. applyAhjOverlays() merges add/modify/disable items. getFullComplianceChecklist() wrapper. getAhjOverlaySummary() for UI. 32 tests.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-06-11',
   },
 
   // ─── PLANNED — BOM & PRICING ─────────────────────────────────────────
