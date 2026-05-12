@@ -1249,10 +1249,10 @@ function SolarEngine3D({
       // Called by the lat/lng change effect when cesiumGroundElevRef is updated.
       // (defined here so it’s in scope; actually called via orbitRef/applyOrbitRef).
 
-      // ── 5. Mouse event handlers ──────────────────────────────────────────────
-      const cesiumCanvas = cesiumRef.current
-        ? (cesiumRef.current.querySelector('canvas') as HTMLCanvasElement | null)
-        : null;
+      // ── 5. Mouse / Pointer event handlers ─────────────────────────────────────────────
+      // Use viewer.scene.canvas directly — guaranteed to be the Cesium rendering canvas.
+      // Previously used querySelector('canvas') which could pick a non-rendering canvas.
+      const cesiumCanvas = viewer.scene.canvas as HTMLCanvasElement | null;
 
       if (cesiumCanvas) {
         // ── 5a. Drag sensitivity constants ──────────────────────────────────────
@@ -1274,9 +1274,16 @@ function SolarEngine3D({
         let middleDownAt = 0;
         let reDispatching = false;
 
-        // ── 5c. mousedown ────────────────────────────────────────────────────────
-        cesiumCanvas.addEventListener('mousedown', (ev: MouseEvent) => {
+        // ── 5c. pointerdown (replaces mousedown) ───────────────────────────────────────
+        // Using pointerdown (fires before implicit pointer capture) so we can
+        // call setPointerCapture() and guarantee that pointermove/pointerup
+        // follow the pointer to window even on browsers that redirect them.
+        cesiumCanvas.addEventListener('pointerdown', (ev: PointerEvent) => {
           if (ev.button === 1) { middleDown = true; middleDownAt = Date.now(); }
+
+          // Capture the pointer so pointermove/pointerup come to us even if
+          // the cursor leaves the canvas (works on all modern browsers).
+          try { cesiumCanvas.setPointerCapture(ev.pointerId); } catch {}
 
           orbit.dragging   = true;
           orbit.dragButton = ev.button;
@@ -1290,9 +1297,11 @@ function SolarEngine3D({
           ev.preventDefault();
         }, { capture: true });
 
-        // ── 5d. mousemove ────────────────────────────────────────────────────────
-        // Registered on the window so drag continues even if cursor leaves canvas.
-        window.addEventListener('mousemove', (ev: MouseEvent) => {
+        // ── 5d. pointermove (replaces mousemove on window) ────────────────────────────────
+        // With pointer capture active, pointermove fires even after the cursor
+        // leaves the canvas.  We also keep a mousemove fallback on window for
+        // browsers that don’t support pointer capture on canvas.
+        const handleDragMove = (ev: PointerEvent | MouseEvent) => {
           if (!orbit.dragging) return;
 
           const dx = ev.clientX - orbit.dragStartX;
@@ -1309,21 +1318,16 @@ function SolarEngine3D({
 
           } else if (orbit.dragButton === 1) {
             // Middle-drag: pan the orbit target
-            // Convert pixel offsets to world metres in the camera's ENU frame,
+            // Convert pixel offsets to world metres in the camera’s ENU frame,
             // then shift targetLat/targetLng accordingly.
             const panScale = orbit.radius * PAN_SCALE;
 
-            // dx → move target in the East direction (right = +East when heading=0)
-            // dy → move target in the North direction (up = +North when heading=0)
-            //
             // Account for current heading so pan feels natural regardless of
             // which direction the camera is facing.
             const hSin = Math.sin(orbit.heading);
             const hCos = Math.cos(orbit.heading);
 
-            // Local camera right = East·cos(h) - North·sin(h), but for pan:
-            //   screen-right maps to camera-right vector
-            //   screen-up    maps to camera-forward (away from viewer)
+            // screen-right maps to camera-right; screen-down maps to camera-back
             const eastPan  = -dx * panScale * hCos + dy * panScale * hSin;
             const northPan =  dx * panScale * hSin + dy * panScale * hCos;
 
@@ -1336,14 +1340,32 @@ function SolarEngine3D({
           }
 
           applyOrbit();
+        };
+
+        // Primary: pointermove on canvas (pointer capture redirects here even outside canvas).
+        cesiumCanvas.addEventListener('pointermove', handleDragMove as EventListener);
+        // Dedup guard: skip window mousemove when pointermove already handled it.
+        let lastMoveX = -9999, lastMoveY = -9999;
+        const handlePointerMoveDedup = (ev: PointerEvent) => { lastMoveX = ev.clientX; lastMoveY = ev.clientY; };
+        cesiumCanvas.addEventListener('pointermove', handlePointerMoveDedup);
+        // Fallback: window mousemove for edge cases (pointer capture not active).
+        window.addEventListener('mousemove', (ev: MouseEvent) => {
+          if (ev.clientX === lastMoveX && ev.clientY === lastMoveY) return;
+          (handleDragMove as EventListener)(ev);
         });
 
-        // ── 5e. mouseup ──────────────────────────────────────────────────────────
-        window.addEventListener('mouseup', (ev: MouseEvent) => {
+        // ── 5e. pointerup + mouseup ────────────────────────────────────────────────────────
+        const handleDragEnd = (ev: PointerEvent | MouseEvent) => {
+          if ('pointerId' in ev) {
+            try { cesiumCanvas.releasePointerCapture((ev as PointerEvent).pointerId); } catch {}
+          }
           if (ev.button === 1) middleDown = false;
           orbit.dragging   = false;
           orbit.dragButton = -1;
-        });
+        };
+        cesiumCanvas.addEventListener('pointerup',     handleDragEnd as EventListener);
+        cesiumCanvas.addEventListener('pointercancel', handleDragEnd as EventListener);
+        window.addEventListener('mouseup', handleDragEnd as EventListener);
 
         // ── 5f. Wheel zoom ───────────────────────────────────────────────────────
         // Capture-phase normalizer: converts all wheel events to ±120 and
