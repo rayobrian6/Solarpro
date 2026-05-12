@@ -145,10 +145,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (body.status     && typeof body.status     === 'string' && body.status.length     > 50)  return NextResponse.json({ success: false, error: 'status too long (max 50).'      }, { status: 400 });
 
     // Public token-based status update (homeowner view page) — no auth required.
-    // Only 'viewed' and 'accepted' are allowed via this path; full edits still require ownership.
+    // Allowed via this path: 'viewed', 'accepted', and digital signature submission.
+    // Full edits still require ownership.
     const tokenParam = req.nextUrl.searchParams.get('token');
     const PUBLIC_STATUSES = new Set(['viewed', 'accepted']);
-    if (!user && tokenParam && typeof body.status === 'string' && PUBLIC_STATUSES.has(body.status)) {
+    const isPublicStatusUpdate = !user && tokenParam && typeof body.status === 'string' && PUBLIC_STATUSES.has(body.status);
+    const isSignatureSubmission = !user && tokenParam && body.signature !== undefined;
+
+    if (isPublicStatusUpdate || isSignatureSubmission) {
       const rows = await sql`
         SELECT id, share_token FROM proposals WHERE id = ${id} LIMIT 1
       `;
@@ -161,9 +165,76 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       if (!tokenValid) {
         return NextResponse.json({ success: false, error: 'Invalid token' }, { status: 403 });
       }
+
+      if (isSignatureSubmission) {
+        // Digital signature submission
+        // Validate fields
+        const sigData    = body.signature as string;           // base64 data-URL of drawn signature
+        const signerName = (body.signerName  as string) || ''; // typed full name
+        const signerEmail= (body.signerEmail as string) || ''; // optional email
+
+        if (!signerName || signerName.length < 2) {
+          return NextResponse.json({ success: false, error: 'Full name is required to sign.' }, { status: 400 });
+        }
+        if (signerName.length > 200) {
+          return NextResponse.json({ success: false, error: 'Name too long (max 200 chars).' }, { status: 400 });
+        }
+        if (signerEmail && signerEmail.length > 200) {
+          return NextResponse.json({ success: false, error: 'Email too long (max 200 chars).' }, { status: 400 });
+        }
+        // Signature data-URL sanity check (must be a data: URL, limit 512KB)
+        if (sigData && (!sigData.startsWith('data:image/') || sigData.length > 512 * 1024)) {
+          return NextResponse.json({ success: false, error: 'Invalid signature data.' }, { status: 400 });
+        }
+
+        // Get client IP
+        const signerIp = getClientIp(req);
+
+        // Store signature in data_json (in case signed_at/signer_name columns don't exist yet)
+        const existingRow = await sql`SELECT data_json FROM proposals WHERE id = ${id} LIMIT 1`;
+        const existingData = (existingRow[0]?.data_json as Record<string, unknown>) || {};
+        const updatedData = JSON.stringify({
+          ...existingData,
+          signature: {
+            signedAt:    new Date().toISOString(),
+            signerName,
+            signerEmail,
+            signerIp,
+            imageData:   sigData || null,
+          },
+        });
+
+        // Try to update dedicated columns (if migration 020 has been applied)
+        try {
+          await sql`
+            UPDATE proposals
+            SET status      = 'accepted',
+                data_json   = ${updatedData}::jsonb,
+                signed_at   = NOW(),
+                signer_name  = ${signerName},
+                signer_email = ${signerEmail || null},
+                signer_ip    = ${signerIp || null},
+                updated_at  = NOW()
+            WHERE id = ${id}
+          `;
+        } catch {
+          // Fallback: columns may not exist yet — store in data_json only
+          await sql`
+            UPDATE proposals
+            SET status     = 'accepted',
+                data_json  = ${updatedData}::jsonb,
+                updated_at = NOW()
+            WHERE id = ${id}
+          `;
+        }
+
+        return NextResponse.json({ success: true, signed: true });
+      }
+
+      // Simple status update (viewed / accepted without signature)
       await sql`
         UPDATE proposals
-        SET status = ${body.status},
+        SET status = ${body.status as string},
             updated_at = NOW()
         WHERE id = ${id}
       `;

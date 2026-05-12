@@ -8,8 +8,9 @@ import {
   ChevronRight, BarChart2, Home, Sprout, Fence,
   Percent, Tag, Download, Printer, CheckCircle,
   XCircle, Clock, AlertTriangle, ExternalLink, Info,
-  Link2, Copy, PartyPopper, Sparkles
+  Link2, Copy, PartyPopper, Sparkles, PenLine
 } from 'lucide-react';
+import SignatureModal from '@/components/SignatureModal';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine
@@ -70,6 +71,8 @@ function ProposalViewInner() {
   const [accepting, setAccepting] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [showSignModal, setShowSignModal] = useState(false);
+  const [signerName, setSignerName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -166,20 +169,14 @@ function ProposalViewInner() {
 
   const handleAccept = async () => {
     if (!proposal) return;
-    setAccepting(true);
-    try {
-      const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-      await fetch(`/api/proposals/${proposal.id}${tokenQuery}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'accepted' }),
-      });
-      setAccepted(true);
-    } catch {
-      setAccepted(true);
-    } finally {
-      setAccepting(false);
-    }
+    // Open the signature modal — actual acceptance happens after signing
+    setShowSignModal(true);
+  };
+
+  const handleSignatureSuccess = (name: string) => {
+    setShowSignModal(false);
+    setSignerName(name);
+    setAccepted(true);
   };
 
   const handleDownloadPdf = async () => {
@@ -240,23 +237,38 @@ function ProposalViewInner() {
     );
   }
 
-  return <PublicProposalView
-    proposal={proposal}
-    branding={branding}
-    pricingCfg={pricingCfg}
-    accepted={accepted}
-    accepting={accepting}
-    onAccept={handleAccept}
-    downloadingPdf={downloadingPdf}
-    onDownloadPdf={handleDownloadPdf}
-    copiedLink={copiedLink}
-    onCopyLink={handleCopyLink}
-  />;
+  return (
+    <>
+      <PublicProposalView
+        proposal={proposal}
+        branding={branding}
+        pricingCfg={pricingCfg}
+        accepted={accepted}
+        accepting={accepting}
+        signerName={signerName}
+        onAccept={handleAccept}
+        downloadingPdf={downloadingPdf}
+        onDownloadPdf={handleDownloadPdf}
+        copiedLink={copiedLink}
+        onCopyLink={handleCopyLink}
+      />
+      {showSignModal && (
+        <SignatureModal
+          proposalId={proposal.id}
+          proposalTitle={proposal.title || 'Solar Proposal'}
+          token={token}
+          primaryColor={branding.brandPrimaryColor}
+          onSuccess={handleSignatureSuccess}
+          onClose={() => setShowSignModal(false)}
+        />
+      )}
+    </>
+  );
 }
 
 // ── Public Proposal View ───────────────────────────────────────────────────
 function PublicProposalView({
-  proposal, branding, pricingCfg, accepted, accepting, onAccept,
+  proposal, branding, pricingCfg, accepted, accepting, signerName, onAccept,
   downloadingPdf, onDownloadPdf, copiedLink, onCopyLink
 }: {
   proposal: Proposal;
@@ -264,6 +276,7 @@ function PublicProposalView({
   pricingCfg: any;
   accepted: boolean;
   accepting: boolean;
+  signerName?: string | null;
   onAccept: () => void;
   downloadingPdf?: boolean;
   onDownloadPdf?: () => void;
@@ -578,14 +591,14 @@ function PublicProposalView({
                 {accepting ? (
                   <span className="w-3 h-3 border border-slate-900 border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  <CheckCircle size={13} />
+                  <PenLine size={13} />
                 )}
-                Accept Proposal
+                Sign &amp; Accept
               </button>
             )}
             {accepted && (
               <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
-                <CheckCircle size={13} /> Accepted!
+                <CheckCircle size={13} /> Signed!
               </div>
             )}
           </div>
@@ -604,8 +617,10 @@ function PublicProposalView({
               <div className="absolute inset-0 rounded-full border border-emerald-400/40 animate-ping" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-emerald-200 font-black text-sm tracking-wide">✨ Proposal Accepted!</p>
-              <p className="text-emerald-400/80 text-xs mt-0.5">Your installer has been notified and will be in touch within 24 hours to schedule next steps.</p>
+              <p className="text-emerald-200 font-black text-sm tracking-wide">✨ Proposal Signed &amp; Accepted!</p>
+              <p className="text-emerald-400/80 text-xs mt-0.5">
+                {signerName ? `Signed by ${signerName}. ` : ''}Your installer has been notified and will be in touch within 24 hours to schedule next steps.
+              </p>
             </div>
             <Sparkles size={18} className="text-emerald-400/50 flex-shrink-0 hidden sm:block" />
           </div>
@@ -1580,7 +1595,7 @@ function PublicProposalView({
             </div>
             <h2 className="text-2xl font-black text-white mb-2">Ready to Go Solar?</h2>
             <p className="text-slate-400 text-sm mb-5 max-w-md mx-auto">
-              Accept this proposal to get started. Your installer will contact you within 24 hours to schedule next steps.
+              Sign this proposal to get started. Your installer will contact you within 24 hours to schedule next steps.
             </p>
             <button
               onClick={onAccept}
@@ -1591,12 +1606,12 @@ function PublicProposalView({
               {accepting ? (
                 <span className="w-5 h-5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
               ) : (
-                <CheckCircle size={20} />
+                <PenLine size={20} />
               )}
-              Accept This Proposal
+              Sign &amp; Accept Proposal
             </button>
             <div className="flex items-center justify-center gap-4 mt-4">
-              <p className="text-slate-500 text-xs">No commitment required &mdash; accepting just notifies your installer.</p>
+              <p className="text-slate-500 text-xs">Legally binding e-signature · No DocuSign needed</p>
             </div>
             {/* Secondary: Download PDF */}
             <div className="border-t border-slate-700/40 mt-5 pt-4">
@@ -1624,7 +1639,7 @@ function PublicProposalView({
             </div>
             <h2 className="text-2xl font-black text-emerald-300 mb-2">✨ You’re Going Solar!</h2>
             <p className="text-slate-400 text-sm max-w-md mx-auto">
-              Your proposal has been accepted. Your installer will be in touch within 24 hours to schedule your site visit and next steps.
+              {signerName ? `Thank you, ${signerName}! ` : ''}ÜYour proposal has been signed & accepted. Your installer will be in touch within 24 hours to schedule your site visit and next steps.
             </p>
             <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
               <button
