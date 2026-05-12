@@ -118,6 +118,15 @@ export function handleRouteDbError(
 
   if (error instanceof DbConfigError) {
     console.error(`${routeLabel} DB_CONFIG_ERROR:`, (error as Error).message);
+    // Non-fatal for monitoring — config errors are deployment issues, not production bugs
+    import('@/lib/monitoring').then(({ captureMessage }) => {
+      captureMessage(`DB_CONFIG_ERROR at ${routeLabel}`, {
+        code:  '[DB_CONFIG_ERROR]',
+        route: routeLabel,
+        level: 'fatal',
+        extra: { message: (error as Error).message },
+      });
+    }).catch(() => {});
     return NextResponse.json(
       { success: false, error: 'Database not configured. Please contact your administrator.', code: 'DB_CONFIG_ERROR' },
       { status: 503 }
@@ -125,7 +134,13 @@ export function handleRouteDbError(
   }
 
   // All other errors (connection refused, timeout, cold-start wake-up) → DB_STARTING
+  // Transient errors are warning-level (not page-1 alerts) — they resolve on retry
+  const msg = error instanceof Error ? (error as Error).message : String(error);
+  const isTransient = !msg.toLowerCase().includes('password authentication failed');
   console.error(`${routeLabel} DB_STARTING:`, error);
+  import('@/lib/monitoring').then(({ monitorDbError }) => {
+    monitorDbError(routeLabel, error, { isTransient });
+  }).catch(() => {});
   return NextResponse.json(
     { success: false, error: 'Service temporarily unavailable. Please try again in a moment.', code: 'DB_STARTING' },
     {

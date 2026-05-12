@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+
 /**
  * Next.js App Router global error boundary.
  * Catches unhandled errors at the root layout level.
@@ -12,6 +14,17 @@ export default function GlobalError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  // Ship the error to Sentry (fire-and-forget, non-blocking)
+  useEffect(() => {
+    import('@/lib/monitoring').then(({ captureError }) => {
+      captureError(error, {
+        code:  '[GLOBAL_ERROR_BOUNDARY]',
+        route: typeof window !== 'undefined' ? window.location.pathname : 'unknown',
+        level: 'fatal',
+        extra: { digest: error.digest },
+      });
+    }).catch(() => {/* non-critical */});
+  }, [error]);
   return (
     <html lang="en" className="dark">
       <body style={{
