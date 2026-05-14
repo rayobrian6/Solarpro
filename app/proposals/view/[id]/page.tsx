@@ -866,7 +866,8 @@ function PublicProposalView({
             </div>
 
             {purchaseMode === 'finance' ? (
-              // ── Section 2: Finance mode — monthly cost truth panel ────────
+              <>
+              {/* ── Section 2: Finance mode — monthly cost truth panel */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 <div className="md:col-span-1 rounded-xl p-3 border" style={{ background: `${primaryColor}10`, borderColor: `${primaryColor}30` }}>
                   <div className="text-xs text-slate-400 mb-1">Solar Loan Payment</div>
@@ -929,6 +930,39 @@ function PublicProposalView({
                   ))}
                 </div>
               </div>
+              {/* Loan term comparison table — shows 10/15/25-yr payments side by side */}
+              {effectiveFinal > 0 && purchaseMode === 'finance' && (
+                <div className="mt-3 rounded-xl border border-slate-700/50 overflow-hidden">
+                  <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700/40">
+                    <span className="text-xs font-semibold text-slate-300">Loan Term Comparison</span>
+                    <span className="text-xs text-slate-500 ml-2">at {((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR</span>
+                  </div>
+                  <div className="grid grid-cols-3 divide-x divide-slate-700/40">
+                    {([10, 15, 25] as const).map(termYears => {
+                      const _r = ((pricingCfg?.loanApr ?? 7.99) / 100) / 12;
+                      const _n = termYears * 12;
+                      const _monthly = effectiveFinal > 0 && _r > 0
+                        ? Math.round(effectiveFinal * (_r * Math.pow(1 + _r, _n)) / (Math.pow(1 + _r, _n) - 1))
+                        : 0;
+                      const _isCurrent = termYears === (pricingCfg?.loanTermYears ?? 25);
+                      return (
+                        <div key={termYears} className={`px-3 py-2.5 text-center ${_isCurrent ? 'bg-amber-500/10' : ''}`}>
+                          <div className={`text-[10px] font-semibold mb-1 ${_isCurrent ? 'text-amber-400' : 'text-slate-500'}`}>
+                            {termYears}-Year{_isCurrent ? ' ✓' : ''}
+                          </div>
+                          <div className={`text-base font-black ${_isCurrent ? 'text-amber-400' : 'text-white'}`}>
+                            ${_monthly.toLocaleString()}/mo
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            ${Math.round(_monthly * _n).toLocaleString()} total
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              </>
             ) : (
               // ── Section 1 & 4: Cash mode — no ITC line, clean labels ─────
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
