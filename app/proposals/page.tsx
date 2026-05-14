@@ -1281,9 +1281,11 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   })();
 
   // Is financing payment higher than current utility bill?
-  const paymentExceedsBill = financeMonthlyPayment > 0 && financeMonthlyPayment > avgMonthlyBillBefore;
+  // v47.340: use TOTAL energy cost (solar + remaining utility) vs current bill for truth
+  const totalEnergyCostMonthly = cp.financial.totalMonthlyCost;
+  const paymentExceedsBill = financeMonthlyPayment > 0 && totalEnergyCostMonthly > avgMonthlyBillBefore;
   // Monthly net impact: positive = saving, negative = paying more
-  const monthlyNetImpact = avgMonthlyBillBefore - financeMonthlyPayment;
+  const monthlyNetImpact = avgMonthlyBillBefore - totalEnergyCostMonthly;
   // ─────────────────────────────────────────────────────────────────────
 
   // ── Panel count for visual grid ────────────────────────────────────────────────────────────────────────

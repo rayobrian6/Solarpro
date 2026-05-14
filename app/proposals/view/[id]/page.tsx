@@ -8,7 +8,8 @@ import {
   ChevronRight, BarChart2, Home, Sprout, Fence,
   Percent, Tag, Download, Printer, CheckCircle,
   XCircle, Clock, AlertTriangle, ExternalLink, Info,
-  Link2, Copy, PartyPopper, Sparkles, PenLine
+  Link2, Copy, PartyPopper, Sparkles, PenLine,
+  Wind, TreePine, Car, Users,
 } from 'lucide-react';
 import SignatureModal from '@/components/SignatureModal';
 import {
@@ -701,6 +702,30 @@ function PublicProposalView({
               </div>
             )}
 
+            {/* ── Satellite property image ── */}
+            {(() => {
+              const hasCoords = clientLat && clientLng &&
+                !(clientLat === 33.4484 && clientLng === -112.074);
+              if (!hasCoords) return null;
+              const GKEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+              const satUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${clientLat},${clientLng}&zoom=19&size=800x320&maptype=satellite&key=${GKEY}`;
+              return (
+                <div className="mt-3 rounded-xl overflow-hidden border border-slate-700/40 relative" style={{ height: 160 }}>
+                  <img
+                    src={satUrl}
+                    alt="Satellite view of your property"
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = 'none'; }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 to-transparent pointer-events-none" />
+                  <div className="absolute bottom-2 left-3 text-white text-xs font-semibold flex items-center gap-1">
+                    <MapPin size={11} style={{ color: primaryColor }} />
+                    Your Property — system designed for this site
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Section 7: Fence system production disclaimer */}
             {isFenceSystem && (
               <div className="mt-2 p-2 rounded-lg border border-amber-500/30 bg-amber-500/5">
@@ -759,7 +784,7 @@ function PublicProposalView({
                       <div className="text-center flex-1 rounded-lg py-1 px-2" style={{ background: `${primaryColor}15` }}>
                         <div className="text-xs text-slate-400">Toward Ownership</div>
                         <div className="text-lg font-black" style={{ color: primaryColor }}>
-                          ${ownership_delta_monthly > 0 ? `$${ownership_delta_monthly}` : `$${Math.abs(ownership_delta_monthly)}`}/mo
+                          ${ownership_delta_monthly > 0 ? ownership_delta_monthly : Math.abs(ownership_delta_monthly)}/mo
                         </div>
                       </div>
                     </div>
@@ -1567,6 +1592,159 @@ function PublicProposalView({
                 <CheckCircle size={10} /> {equipment.racking?.warranty || '25-yr structural warranty'}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* ── Environmental Impact ─────────────────────────────────────────── */}
+        {annualProduction > 0 && (() => {
+          // EPA eGRID national average: 0.386 kg CO₂ per kWh (2023)
+          const CO2_PER_KWH_KG   = 0.386;
+          const TREE_KG_CO2_YR   = 21.77;  // avg tree absorbs ~21.77 kg CO₂/yr
+          const CAR_KG_CO2_MILE  = 0.404;  // avg car 404g CO₂/mile
+          const HOME_KWH_YR      = 10632;  // avg US home annual usage (EIA 2023)
+          const annualCO2Kg      = Math.round(annualProduction * CO2_PER_KWH_KG);
+          const annualCO2Lbs     = Math.round(annualCO2Kg * 2.205);
+          const treesEquiv       = Math.round(annualCO2Kg / TREE_KG_CO2_YR);
+          const milesEquiv       = Math.round(annualCO2Kg / CAR_KG_CO2_MILE);
+          const homesEquiv       = parseFloat((annualProduction / HOME_KWH_YR).toFixed(1));
+          const lifetime25CO2Lbs = Math.round(annualCO2Lbs * 25 * 0.9); // ~10% degradation avg
+          return (
+            <div className="proposal-sec card p-4" data-block-id="environmental-impact">
+              <h3 className="font-semibold text-white text-sm mb-1 flex items-center gap-2">
+                <Leaf size={15} className="text-emerald-400" /> Your Environmental Impact
+              </h3>
+              <p className="text-slate-400 text-xs mb-4">
+                Every kWh of solar energy offsets CO₂ that would otherwise come from the grid.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                {[
+                  {
+                    icon: <Wind size={18} className="text-sky-400" />,
+                    value: `${annualCO2Lbs.toLocaleString()} lbs`,
+                    label: 'CO₂ Avoided / Year',
+                    sub: `${annualCO2Kg.toLocaleString()} kg`,
+                    color: 'border-sky-500/20 bg-sky-500/5',
+                  },
+                  {
+                    icon: <TreePine size={18} className="text-emerald-400" />,
+                    value: `${treesEquiv.toLocaleString()}`,
+                    label: 'Trees Equivalent / Year',
+                    sub: 'absorbing the same CO₂',
+                    color: 'border-emerald-500/20 bg-emerald-500/5',
+                  },
+                  {
+                    icon: <Car size={18} className="text-violet-400" />,
+                    value: `${milesEquiv.toLocaleString()}`,
+                    label: 'Car Miles Offset / Year',
+                    sub: 'not driven equivalent',
+                    color: 'border-violet-500/20 bg-violet-500/5',
+                  },
+                  {
+                    icon: <Users size={18} className="text-amber-400" />,
+                    value: `${homesEquiv}`,
+                    label: 'Homes Powered',
+                    sub: 'avg US home annual usage',
+                    color: 'border-amber-500/20 bg-amber-500/5',
+                  },
+                ].map(m => (
+                  <div key={m.label} className={`rounded-xl p-3 border ${m.color} text-center`}>
+                    <div className="flex justify-center mb-1.5">{m.icon}</div>
+                    <div className="text-lg font-black text-white">{m.value}</div>
+                    <div className="text-xs text-slate-400 mt-0.5 leading-tight">{m.label}</div>
+                    <div className="text-xs text-slate-600 mt-0.5">{m.sub}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg px-3 py-2 bg-emerald-500/5 border border-emerald-500/15 flex items-center gap-3">
+                <Leaf size={14} className="text-emerald-400 flex-shrink-0" />
+                <p className="text-xs text-slate-400">
+                  Over 25 years this system will offset an estimated{' '}
+                  <span className="text-emerald-400 font-semibold">{lifetime25CO2Lbs.toLocaleString()} lbs of CO₂</span>
+                  {' '}— equivalent to planting{' '}
+                  <span className="text-emerald-400 font-semibold">{Math.round(treesEquiv * 25 * 0.9).toLocaleString()} trees</span>.
+                  Based on EPA eGRID national average emissions factor.
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── What Happens Next — post-sign timeline ────────────────────────── */}
+        <div className="proposal-sec card p-4" data-block-id="next-steps-timeline">
+          <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
+            <ChevronRight size={15} style={{ color: primaryColor }} /> What Happens After You Sign
+          </h3>
+          <div className="space-y-0">
+            {[
+              {
+                step: 1,
+                title: 'Proposal Signed',
+                desc: 'Your installer is notified immediately and will contact you within 24 hours.',
+                time: 'Today',
+                color: 'text-emerald-400',
+                dot: 'bg-emerald-400',
+              },
+              {
+                step: 2,
+                title: 'Site Survey',
+                desc: 'A technician visits to measure your roof, check your electrical panel, and confirm the design.',
+                time: '1–5 business days',
+                color: 'text-sky-400',
+                dot: 'bg-sky-400',
+              },
+              {
+                step: 3,
+                title: 'Permits & Engineering',
+                desc: 'Your installer submits permits to the city and files interconnection paperwork with your utility.',
+                time: '2–6 weeks',
+                color: 'text-violet-400',
+                dot: 'bg-violet-400',
+              },
+              {
+                step: 4,
+                title: 'Installation Day',
+                desc: 'Your system is installed — typically 1–2 days. Panels, wiring, inverter, and monitoring.',
+                time: '1–2 days on-site',
+                color: 'text-amber-400',
+                dot: 'bg-amber-400',
+              },
+              {
+                step: 5,
+                title: 'Inspection & Permission to Operate',
+                desc: 'City inspection is completed and your utility grants Permission to Operate (PTO). System turns on.',
+                time: '1–3 weeks after install',
+                color: 'text-orange-400',
+                dot: 'bg-orange-400',
+              },
+              {
+                step: 6,
+                title: 'You\'re Generating Solar Energy',
+                desc: 'Your system is live. Monitor production from your phone and watch your bill drop.',
+                time: 'Ongoing',
+                color: 'text-green-400',
+                dot: 'bg-green-400',
+              },
+            ].map((s, idx, arr) => (
+              <div key={s.step} className="flex gap-3">
+                {/* Timeline spine */}
+                <div className="flex flex-col items-center flex-shrink-0">
+                  <div className={`w-7 h-7 rounded-full border-2 border-slate-700 flex items-center justify-center text-xs font-black ${s.color}`}>
+                    {s.step}
+                  </div>
+                  {idx < arr.length - 1 && (
+                    <div className="w-px flex-1 bg-slate-700/50 my-1" />
+                  )}
+                </div>
+                {/* Content */}
+                <div className={`pb-${idx < arr.length - 1 ? '4' : '0'} flex-1 min-w-0`}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className={`text-sm font-semibold ${s.color}`}>{s.title}</span>
+                    <span className="text-xs text-slate-500 bg-slate-800/60 px-2 py-0.5 rounded-full border border-slate-700/50">{s.time}</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{s.desc}</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 
