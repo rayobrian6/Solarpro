@@ -1220,7 +1220,7 @@ export default function CommandCenter() {
             </div>
             <Link href="/projects" className="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1">All Projects <ChevronRight size={12} /></Link>
           </div>
-          <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
             {statusPipeline.map(({ status, count }) => {
               const cfg = STAGE_CFG[status];
               const isActive = pipelineFilter === status;
