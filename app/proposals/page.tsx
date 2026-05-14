@@ -2636,6 +2636,70 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
           ))}
         </div>
 
+
+        {/* Testimonial / Company Intro block */}
+        <div className="proposal-sec card p-5" data-block-id="testimonial">
+          <div className="text-center mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/30 mb-3">
+              {branding.companyLogoUrl ? (
+                <img src={branding.companyLogoUrl} alt={branding.companyName} className="h-5 object-contain" />
+              ) : (
+                <Sun size={13} style={{ color: primaryColor }} />
+              )}
+              <span className="text-xs font-semibold text-slate-300">{branding.companyName}</span>
+            </div>
+            <h2 className="text-lg font-black text-white mb-1">Why Homeowners Choose Us</h2>
+            <p className="text-slate-400 text-sm max-w-xl mx-auto">
+              We&apos;ve helped hundreds of families take control of their energy costs with clean, locally-installed solar.
+            </p>
+          </div>
+
+          {/* Testimonial quote */}
+          <div className="relative rounded-xl p-4 border border-slate-700/40" style={{ background: `${primaryColor}08` }}>
+            <div className="text-3xl leading-none mb-2" style={{ color: primaryColor, opacity: 0.4 }}>&ldquo;</div>
+            <p className="text-slate-300 text-sm leading-relaxed italic">
+              Going solar was the best decision we made. Our electric bill dropped from $280/month to under $40, and the install crew was professional from start to finish. We&apos;ve already recommended {branding.companyName} to three of our neighbors.
+            </p>
+            <div className="flex items-center gap-3 mt-3">
+              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-slate-400 text-sm font-bold flex-shrink-0">M</div>
+              <div>
+                <div className="text-white text-xs font-semibold">Michael R. — Verified Customer</div>
+                <div className="flex items-center gap-0.5 mt-0.5">
+                  {[1,2,3,4,5].map(s => (
+                    <Star key={s} size={10} className="text-amber-400 fill-amber-400" />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Company details */}
+          {(branding.companyAddress || branding.companyPhone || branding.companyWebsite) && (
+            <div className="flex flex-wrap items-center justify-center gap-4 mt-4 pt-3 border-t border-slate-700/40">
+              {branding.companyAddress && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <MapPin size={11} className="text-slate-600" />
+                  {branding.companyAddress}
+                </div>
+              )}
+              {branding.companyPhone && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Phone size={11} className="text-slate-600" />
+                  {branding.companyPhone}
+                </div>
+              )}
+              {branding.companyWebsite && (
+                <a href={branding.companyWebsite} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs hover:text-white transition-colors"
+                  style={{ color: primaryColor }}>
+                  <ExternalLink size={11} />
+                  {branding.companyWebsite.replace(/^https?:\/\//, '')}
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* CTA — Installer Preview (Sign button shown to customers, not here) */}
         <div className="proposal-sec rounded-2xl p-6 text-center border" data-block-id="cta" data-keep-together="true" style={{ background: `${primaryColor}08`, borderColor: `${primaryColor}25` }}>
           {/* Installer Preview badge */}
