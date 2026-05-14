@@ -1919,12 +1919,12 @@ export async function POST(req: NextRequest) {
     }
     try {
       await sql`
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_proposals_user_status
-          ON proposals (user_id, status, created_at DESC)
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_proposals_user_created
+          ON proposals (user_id, created_at DESC)
       `;
-      results.push('✅ Migration 033f: idx_proposals_user_status — ensured');
+      results.push('✅ Migration 033f: idx_proposals_user_created — ensured');
     } catch (e: unknown) {
-      results.push(`⚠️ Migration 033f (idx_proposals_user_status): ${(e as Error).message}`);
+      results.push(`⚠️ Migration 033f (idx_proposals_user_created): ${(e as Error).message}`);
     }
 
         return NextResponse.json({ success: true, results });
