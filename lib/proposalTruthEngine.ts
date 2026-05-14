@@ -60,6 +60,7 @@ export type TrueUpPeriod =
 export interface ProposalUtilityProfile {
   // Identity
   utility_id: string;
+  utility_name: string;           // human-readable display name for proposals
   utility_name_pattern: string;   // regex or substring for fuzzy matching
   state: string;
 
@@ -111,6 +112,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── California ──────────────────────────────────────────────────────────────
   {
     utility_id: 'pge_ca',
+    utility_name: 'Pacific Gas & Electric (PG&E)',
     utility_name_pattern: 'pg&e|pacific gas|pge',
     state: 'CA',
     retail_rate_type: 'tiered',
@@ -138,6 +140,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'sce_ca',
+    utility_name: 'Southern California Edison',
     utility_name_pattern: 'sce|southern california edison',
     state: 'CA',
     retail_rate_type: 'tiered',
@@ -165,6 +168,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'sdge_ca',
+    utility_name: 'San Diego Gas & Electric',
     utility_name_pattern: 'sdg&e|san diego gas|sdge',
     state: 'CA',
     retail_rate_type: 'tiered',
@@ -194,6 +198,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Illinois ────────────────────────────────────────────────────────────────
   {
     utility_id: 'comed_il',
+    utility_name: 'Commonwealth Edison (ComEd)',
     utility_name_pattern: 'comed|commonwealth edison',
     state: 'IL',
     retail_rate_type: 'flat',
@@ -221,6 +226,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'ameren_il',
+    utility_name: 'Ameren Illinois',
     utility_name_pattern: 'ameren illinois|ameren il',
     state: 'IL',
     retail_rate_type: 'flat',
@@ -250,6 +256,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Florida ─────────────────────────────────────────────────────────────────
   {
     utility_id: 'fpl_fl',
+    utility_name: 'Florida Power & Light',
     utility_name_pattern: 'fpl|florida power|florida light',
     state: 'FL',
     retail_rate_type: 'flat',
@@ -277,6 +284,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'duke_fl',
+    utility_name: 'Duke Energy Florida',
     utility_name_pattern: 'duke energy florida|duke fl',
     state: 'FL',
     retail_rate_type: 'flat',
@@ -306,6 +314,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Maryland ────────────────────────────────────────────────────────────────
   {
     utility_id: 'bge_md',
+    utility_name: 'Baltimore Gas & Electric',
     utility_name_pattern: 'bge|baltimore gas|baltimore electric',
     state: 'MD',
     retail_rate_type: 'flat',
@@ -333,6 +342,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'pepco_md',
+    utility_name: 'Pepco (Maryland)',
     utility_name_pattern: 'pepco|potomac electric',
     state: 'MD',
     retail_rate_type: 'flat',
@@ -362,6 +372,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── New England ──────────────────────────────────────────────────────────────
   {
     utility_id: 'eversource_ct',
+    utility_name: 'Eversource Energy (CT)',
     utility_name_pattern: 'eversource.*ct|eversource.*connecticut',
     state: 'CT',
     retail_rate_type: 'flat',
@@ -389,6 +400,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'eversource_ma',
+    utility_name: 'Eversource Energy (MA)',
     utility_name_pattern: 'eversource.*ma|eversource.*mass',
     state: 'MA',
     retail_rate_type: 'flat',
@@ -416,6 +428,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'green_mountain_vt',
+    utility_name: 'Green Mountain Power',
     utility_name_pattern: 'green mountain power|gmp',
     state: 'VT',
     retail_rate_type: 'flat',
@@ -443,6 +456,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'cmp_me',
+    utility_name: 'Central Maine Power',
     utility_name_pattern: 'central maine power|cmp',
     state: 'ME',
     retail_rate_type: 'flat',
@@ -472,6 +486,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Mid-Atlantic / DC ────────────────────────────────────────────────────────
   {
     utility_id: 'pepco_dc',
+    utility_name: 'Pepco (DC)',
     utility_name_pattern: 'pepco.*dc|pepco.*district',
     state: 'DC',
     retail_rate_type: 'flat',
@@ -499,6 +514,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'pseg_nj',
+    utility_name: 'PSE&G',
     utility_name_pattern: 'pseg|public service enterprise|jcp&l|jersey central',
     state: 'NJ',
     retail_rate_type: 'flat',
@@ -526,6 +542,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'peco_pa',
+    utility_name: 'PECO / PPL Electric',
     utility_name_pattern: 'peco|ppl|duquesne|penelec|penn power|west penn',
     state: 'PA',
     retail_rate_type: 'flat',
@@ -555,6 +572,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Carolinas / Southeast ────────────────────────────────────────────────────
   {
     utility_id: 'duke_nc',
+    utility_name: 'Duke Energy Carolinas',
     utility_name_pattern: 'duke energy carolina|duke energy progress|duke.*nc|duke.*sc',
     state: 'NC',
     retail_rate_type: 'flat',
@@ -584,6 +602,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Midwest ──────────────────────────────────────────────────────────────────
   {
     utility_id: 'xcel_co',
+    utility_name: 'Xcel Energy Colorado',
     utility_name_pattern: 'xcel.*co|xcel.*colorado',
     state: 'CO',
     retail_rate_type: 'flat',
@@ -611,6 +630,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'dte_mi',
+    utility_name: 'DTE Energy',
     utility_name_pattern: 'dte|detroit edison',
     state: 'MI',
     retail_rate_type: 'flat',
@@ -638,6 +658,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   },
   {
     utility_id: 'consumers_mi',
+    utility_name: 'Consumers Energy',
     utility_name_pattern: 'consumers energy.*mi|consumers.*michigan',
     state: 'MI',
     retail_rate_type: 'flat',
@@ -667,6 +688,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Texas ────────────────────────────────────────────────────────────────────
   {
     utility_id: 'oncor_tx',
+    utility_name: 'Oncor Electric',
     utility_name_pattern: 'oncor|ercot',
     state: 'TX',
     retail_rate_type: 'flat',
@@ -696,6 +718,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Nevada ───────────────────────────────────────────────────────────────────
   {
     utility_id: 'nv_energy',
+    utility_name: 'NV Energy',
     utility_name_pattern: 'nv energy|nevada energy|nevada power',
     state: 'NV',
     retail_rate_type: 'flat',
@@ -725,6 +748,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── New York ──────────────────────────────────────────────────────────────────
   {
     utility_id: 'con_ed_ny',
+    utility_name: 'Con Edison',
     utility_name_pattern: 'con ed|consolidated edison|coned',
     state: 'NY',
     retail_rate_type: 'tiered',
@@ -754,6 +778,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Ohio ──────────────────────────────────────────────────────────────────────
   {
     utility_id: 'aep_oh',
+    utility_name: 'AEP Ohio',
     utility_name_pattern: 'aep ohio|ohio power|appalachian power',
     state: 'OH',
     retail_rate_type: 'flat',
@@ -783,6 +808,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Arizona ──────────────────────────────────────────────────────────────────
   {
     utility_id: 'aps_az',
+    utility_name: 'Arizona Public Service',
     utility_name_pattern: 'aps|arizona public service',
     state: 'AZ',
     retail_rate_type: 'tou',
@@ -812,6 +838,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Virginia ─────────────────────────────────────────────────────────────────
   {
     utility_id: 'dominion_va',
+    utility_name: 'Dominion Energy Virginia',
     utility_name_pattern: 'dominion energy va|dominion energy virginia|dominion.*va',
     state: 'VA',
     retail_rate_type: 'flat',
@@ -841,6 +868,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── Hawaii ───────────────────────────────────────────────────────────────────
   {
     utility_id: 'hawaiian_electric',
+    utility_name: 'Hawaiian Electric (HECO)',
     utility_name_pattern: 'hawaiian electric|heco|helco|maui electric|kiuc',
     state: 'HI',
     retail_rate_type: 'flat',
@@ -987,6 +1015,7 @@ function buildStateFallbackProfile(
     const failsafeExportRate = parseFloat((failsafeRetailRate * 0.25).toFixed(4)); // = 0.0375
     return {
       utility_id: 'unknown_failsafe',
+      utility_name: 'Your Electric Utility',
       utility_name_pattern: '',
       state: stateCode || 'US',
       retail_rate_type: 'flat',
@@ -1052,6 +1081,7 @@ function buildStateFallbackProfile(
 
   return {
     utility_id: `state_fallback_${stateCode}`,
+    utility_name: stateCode ? `Your ${stateCode} Electric Utility` : 'Your Electric Utility',
     utility_name_pattern: '',
     state: stateCode,
     retail_rate_type: 'flat',
@@ -1137,7 +1167,10 @@ function getSystemDesignGuidance(profile: ProposalUtilityProfile): string {
 function getExportRate(profile: ProposalUtilityProfile, resolvedRate: number): number {
   switch (profile.net_metering_type) {
     case 'retail_1to1':
-      return profile.export_rate_monthly ?? resolvedRate;
+      // For 1:1 NEM, export rate cannot exceed the retail rate used for savings math.
+      // If the project has a project-level rate override that is lower than the profile's
+      // hardcoded export_rate_monthly, cap at resolvedRate to stay internally consistent.
+      return Math.min(profile.export_rate_monthly ?? resolvedRate, resolvedRate);
     case 'net_billing':
       return profile.export_rate_monthly ?? profile.avoided_cost_rate;
     case 'avoided_cost':
