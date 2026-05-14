@@ -12,7 +12,7 @@ import {
   Settings, Percent, Tag, Lock, Search, Filter, Trash2,
   Archive, Copy, Pencil, MoreHorizontal, CheckSquare,
   Square, ChevronDown, SortAsc, AlertTriangle, X, Check,
-  Wind, TreePine, Car, ExternalLink, Info, Link2,
+  Wind, TreePine, Car, ExternalLink, Info,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -37,7 +37,6 @@ import {
 import {
   GLOBAL_INCENTIVES_CONFIG,
   getIncentivesComplianceMessage,
-  getIncentivesNotIncludedNotice,
   getIncentivesDebugLabel,
 } from '@/lib/incentivesConfig';
 import { UtilityRateGraph } from '@/components/proposal/UtilityRateGraph';
