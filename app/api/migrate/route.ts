@@ -1842,6 +1842,91 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 031 (cost=10 placeholder repair): ${(e as Error).message}`);
     }
 
+    // -- Migration 032: Composite covering indexes for hot dashboard queries ----
+    // Replaces single-column indexes with composite ones that cover the WHERE +
+    // ORDER BY in one B-tree scan, eliminating separate sort passes on Neon.
+    //   • idx_projects_user_active_updated  — getProjectsByUser() dashboard list
+    //   • idx_productions_project_calc      — LATERAL ORDER BY calculated_at DESC
+    //   • idx_clients_user_active_created   — getClientsByUser() list
+    // All three use CREATE INDEX CONCURRENTLY IF NOT EXISTS — idempotent + safe.
+    try {
+      await sql`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_projects_user_active_updated
+          ON projects (user_id, updated_at DESC)
+          WHERE deleted_at IS NULL
+      `;
+      results.push('✅ Migration 032a: idx_projects_user_active_updated — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 032a (idx_projects_user_active_updated): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_productions_project_calc
+          ON productions (project_id, calculated_at DESC)
+      `;
+      results.push('✅ Migration 032b: idx_productions_project_calc — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 032b (idx_productions_project_calc): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_clients_user_active_created
+          ON clients (user_id, created_at DESC)
+          WHERE deleted_at IS NULL
+      `;
+      results.push('✅ Migration 032c: idx_clients_user_active_created — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 032c (idx_clients_user_active_created): ${(e as Error).message}`);
+    }
+
+    // -- Migration 033: Digital Signatures on Proposals -------------------------
+    // Adds signed_at, signer_name, signer_email, signer_ip columns to proposals.
+    // Signature data is also stored in data_json for forward-compatibility.
+    // Two indexes: fast lookup of signed proposals + CRM user/status queries.
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signed_at    TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 033a: proposals.signed_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 033a (proposals.signed_at): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signer_name  TEXT DEFAULT NULL`;
+      results.push('✅ Migration 033b: proposals.signer_name — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 033b (proposals.signer_name): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signer_email TEXT DEFAULT NULL`;
+      results.push('✅ Migration 033c: proposals.signer_email — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 033c (proposals.signer_email): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS signer_ip    TEXT DEFAULT NULL`;
+      results.push('✅ Migration 033d: proposals.signer_ip — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 033d (proposals.signer_ip): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_proposals_signed_at
+          ON proposals (signed_at)
+          WHERE signed_at IS NOT NULL
+      `;
+      results.push('✅ Migration 033e: idx_proposals_signed_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 033e (idx_proposals_signed_at): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_proposals_user_status
+          ON proposals (user_id, status, created_at DESC)
+      `;
+      results.push('✅ Migration 033f: idx_proposals_user_status — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 033f (idx_proposals_user_status): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

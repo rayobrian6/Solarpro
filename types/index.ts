@@ -333,6 +333,11 @@ export interface PlacedPanel {
   // bypassing HeadingPitchRoll approximation for tilted roof planes.
   ecefNx?: number; ecefNy?: number; ecefNz?: number;  // plane normal (ECEF unit vector)
   ecefUx?: number; ecefUy?: number; ecefUz?: number;  // plane u-axis (ECEF unit vector)
+
+  // v1.shade: Per-panel shade analysis results
+  // annualShadeFactor: 0 (fully shaded) .. 1 (full sun, no shade)
+  // Set by computeShadeAnalysis() in lib/shadeAnalysis.ts
+  annualShadeFactor?: number;
 }
 
 // ─── Roof Plane ───────────────────────────────────────────────

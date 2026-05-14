@@ -228,7 +228,7 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 sm:p-6">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-amber-500/5 rounded-full blur-3xl" />
       </div>
@@ -253,7 +253,7 @@ function LoginForm() {
           </p>
         </div>
 
-        <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-8 backdrop-blur-sm">
+        <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 sm:p-8 backdrop-blur-sm">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs text-slate-400 mb-1.5 font-medium">Email Address</label>

@@ -468,10 +468,10 @@ html, body {
 
 /* ── Tabs ── */
 .tab-bar {
-  @apply flex gap-1 bg-slate-800/60 rounded-xl p-1 border border-slate-700/50;
+  @apply flex flex-wrap gap-1 bg-slate-800/60 rounded-xl p-1 border border-slate-700/50;
 }
 .tab-item {
-  @apply flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 transition-all duration-150 cursor-pointer;
+  @apply flex-1 min-w-0 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-slate-400 transition-all duration-150 cursor-pointer whitespace-nowrap;
 }
 .tab-item:hover {
   @apply text-slate-200 bg-slate-700/40;
@@ -725,20 +725,33 @@ html, body {
   padding: 0.25rem;
   display: flex;
   gap: 0.25rem;
+  flex-wrap: wrap;
 }
 .tab-item {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.5rem;
   border-radius: calc(var(--radius-md) - 4px);
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-secondary);
   transition: color 0.15s ease, background 0.15s ease;
   cursor: pointer;
+  white-space: nowrap;
+}
+@media (max-width: 480px) {
+  .tab-item {
+    font-size: 0;       /* hide text on very small screens — icon only */
+    padding: 0.5rem 0.75rem;
+    flex: 0 0 auto;
+  }
+  .tab-item svg {
+    font-size: initial; /* svg inherits size from lucide, not font-size */
+  }
 }
 .tab-item:hover {
   color: var(--text-primary);
@@ -1076,4 +1089,32 @@ html, body {
   color: #fcd34d;
   cursor: not-allowed;
   box-shadow: 0 0 0 1px rgba(251,191,36,0.05) inset;
+}
+
+/* ── iOS Safe Area Insets ── */
+/* Prevent content from being hidden under the iPhone home indicator */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Main app shell content area should always respect safe area */
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Portal mobile sticky footer-like areas */
+  .portal-cta-sticky {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Mobile: Reduce default page padding on very small screens ── */
+@media (max-width: 375px) {
+  .p-6 {
+    padding: 1rem; /* 16px instead of 24px on 375px-and-below */
+  }
+  .p-5 {
+    padding: 0.875rem;
+  }
 }

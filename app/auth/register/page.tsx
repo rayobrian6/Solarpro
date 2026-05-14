@@ -70,34 +70,18 @@ export default function RegisterPage() {
         return;
       }
 
-      setStep('success');
+      // Redirect to self-serve onboarding wizard instead of static success screen
+      router.push('/onboarding');
     } catch (err) {
       setError('Network error. Please check your connection and try again.');
       setLoading(false);
     }
   };
 
+  // Legacy success step kept for safety (should no longer be reached)
   if (step === 'success') {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="max-w-md w-full text-center">
-          <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-6">
-            <CheckCircle size={40} className="text-emerald-400" />
-          </div>
-          <h1 className="text-3xl font-black text-white mb-3">Account Created!</h1>
-          <p className="text-slate-400 mb-8">
-            Welcome to SolarPro, <span className="text-white font-semibold">{form.name}</span>.
-            Your account is ready — start designing solar systems now.
-          </p>
-          <Link href="/dashboard" className="btn-primary w-full justify-center text-base py-3 mb-4 block">
-            Go to Dashboard <ArrowRight size={16} />
-          </Link>
-          <Link href="/auth/subscribe" className="text-slate-400 hover:text-amber-400 text-sm transition-colors">
-            Upgrade your plan for proposals & signing →
-          </Link>
-        </div>
-      </div>
-    );
+    router.push('/onboarding');
+    return null;
   }
 
   return (
@@ -142,7 +126,7 @@ export default function RegisterPage() {
       </div>
 
       {/* Right panel — form */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-12">
         <div className="w-full max-w-md">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-3 mb-8">
@@ -162,7 +146,7 @@ export default function RegisterPage() {
             </p>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-8 backdrop-blur-sm">
+          <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 sm:p-8 backdrop-blur-sm">
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Name */}
               <div>

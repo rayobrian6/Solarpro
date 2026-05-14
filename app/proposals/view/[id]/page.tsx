@@ -8,8 +8,10 @@ import {
   ChevronRight, BarChart2, Home, Sprout, Fence,
   Percent, Tag, Download, Printer, CheckCircle,
   XCircle, Clock, AlertTriangle, ExternalLink, Info,
-  Link2, Copy, PartyPopper, Sparkles
+  Link2, Copy, PartyPopper, Sparkles, PenLine,
+  Wind, TreePine, Car, Users,
 } from 'lucide-react';
+import SignatureModal from '@/components/SignatureModal';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine
@@ -70,6 +72,8 @@ function ProposalViewInner() {
   const [accepting, setAccepting] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [showSignModal, setShowSignModal] = useState(false);
+  const [signerName, setSignerName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -166,47 +170,27 @@ function ProposalViewInner() {
 
   const handleAccept = async () => {
     if (!proposal) return;
-    setAccepting(true);
-    try {
-      const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-      await fetch(`/api/proposals/${proposal.id}${tokenQuery}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'accepted' }),
-      });
-      setAccepted(true);
-    } catch {
-      setAccepted(true);
-    } finally {
-      setAccepting(false);
-    }
+    // Open the signature modal — actual acceptance happens after signing
+    setShowSignModal(true);
+  };
+
+  const handleSignatureSuccess = (name: string) => {
+    setShowSignModal(false);
+    setSignerName(name);
+    setAccepted(true);
   };
 
   const handleDownloadPdf = async () => {
     if (!proposal || downloadingPdf) return;
     setDownloadingPdf(true);
     try {
-      const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
-      const res = await fetch(`/api/proposals/${proposal.id}/pdf${tokenQuery}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        alert((err as any)?.error || 'PDF generation failed. Please try again.');
-        return;
-      }
-      const contentType = res.headers.get('content-type') || '';
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const cd = res.headers.get('content-disposition') || '';
-      const match = cd.match(/filename="([^"]+)"/);
-      a.download = match?.[1] ?? `SolarPro-Proposal.${contentType.includes('pdf') ? 'pdf' : 'html'}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      // Use client-side html2canvas + jsPDF path — works on Vercel (no wkhtmltopdf needed).
+      // generateProposalPDF reads #proposal-document from the live DOM, so the fully-rendered
+      // view page gives much better fidelity than a headless server render.
+      const { generateProposalPDF } = await import('@/lib/proposalPDF');
+      await generateProposalPDF(proposal);
     } catch {
-      alert('Download failed. Please try again.');
+      alert('PDF generation failed. Please try again.');
     } finally {
       setDownloadingPdf(false);
     }
@@ -254,23 +238,38 @@ function ProposalViewInner() {
     );
   }
 
-  return <PublicProposalView
-    proposal={proposal}
-    branding={branding}
-    pricingCfg={pricingCfg}
-    accepted={accepted}
-    accepting={accepting}
-    onAccept={handleAccept}
-    downloadingPdf={downloadingPdf}
-    onDownloadPdf={handleDownloadPdf}
-    copiedLink={copiedLink}
-    onCopyLink={handleCopyLink}
-  />;
+  return (
+    <>
+      <PublicProposalView
+        proposal={proposal}
+        branding={branding}
+        pricingCfg={pricingCfg}
+        accepted={accepted}
+        accepting={accepting}
+        signerName={signerName}
+        onAccept={handleAccept}
+        downloadingPdf={downloadingPdf}
+        onDownloadPdf={handleDownloadPdf}
+        copiedLink={copiedLink}
+        onCopyLink={handleCopyLink}
+      />
+      {showSignModal && (
+        <SignatureModal
+          proposalId={proposal.id}
+          proposalTitle={proposal.title || 'Solar Proposal'}
+          token={token}
+          primaryColor={branding.brandPrimaryColor}
+          onSuccess={handleSignatureSuccess}
+          onClose={() => setShowSignModal(false)}
+        />
+      )}
+    </>
+  );
 }
 
 // ── Public Proposal View ───────────────────────────────────────────────────
 function PublicProposalView({
-  proposal, branding, pricingCfg, accepted, accepting, onAccept,
+  proposal, branding, pricingCfg, accepted, accepting, signerName, onAccept,
   downloadingPdf, onDownloadPdf, copiedLink, onCopyLink
 }: {
   proposal: Proposal;
@@ -278,6 +277,7 @@ function PublicProposalView({
   pricingCfg: any;
   accepted: boolean;
   accepting: boolean;
+  signerName?: string | null;
   onAccept: () => void;
   downloadingPdf?: boolean;
   onDownloadPdf?: () => void;
@@ -592,14 +592,14 @@ function PublicProposalView({
                 {accepting ? (
                   <span className="w-3 h-3 border border-slate-900 border-t-transparent rounded-full animate-spin" />
                 ) : (
-                  <CheckCircle size={13} />
+                  <PenLine size={13} />
                 )}
-                Accept Proposal
+                Sign &amp; Accept
               </button>
             )}
             {accepted && (
               <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
-                <CheckCircle size={13} /> Accepted!
+                <CheckCircle size={13} /> Signed!
               </div>
             )}
           </div>
@@ -618,8 +618,10 @@ function PublicProposalView({
               <div className="absolute inset-0 rounded-full border border-emerald-400/40 animate-ping" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-emerald-200 font-black text-sm tracking-wide">✨ Proposal Accepted!</p>
-              <p className="text-emerald-400/80 text-xs mt-0.5">Your installer has been notified and will be in touch within 24 hours to schedule next steps.</p>
+              <p className="text-emerald-200 font-black text-sm tracking-wide">✨ Proposal Signed &amp; Accepted!</p>
+              <p className="text-emerald-400/80 text-xs mt-0.5">
+                {signerName ? `Signed by ${signerName}. ` : ''}Your installer has been notified and will be in touch within 24 hours to schedule next steps.
+              </p>
             </div>
             <Sparkles size={18} className="text-emerald-400/50 flex-shrink-0 hidden sm:block" />
           </div>
@@ -700,6 +702,30 @@ function PublicProposalView({
               </div>
             )}
 
+            {/* ── Satellite property image ── */}
+            {(() => {
+              const hasCoords = clientLat && clientLng &&
+                !(clientLat === 33.4484 && clientLng === -112.074);
+              if (!hasCoords) return null;
+              const GKEY = 'AIzaSyBcXQC-i7s2TJz8PNOM1OhiU-sEhPR41wE';
+              const satUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${clientLat},${clientLng}&zoom=19&size=800x320&maptype=satellite&key=${GKEY}`;
+              return (
+                <div className="mt-3 rounded-xl overflow-hidden border border-slate-700/40 relative" style={{ height: 160 }}>
+                  <img
+                    src={satUrl}
+                    alt="Satellite view of your property"
+                    className="w-full h-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = 'none'; }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/70 to-transparent pointer-events-none" />
+                  <div className="absolute bottom-2 left-3 text-white text-xs font-semibold flex items-center gap-1">
+                    <MapPin size={11} style={{ color: primaryColor }} />
+                    Your Property — system designed for this site
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Section 7: Fence system production disclaimer */}
             {isFenceSystem && (
               <div className="mt-2 p-2 rounded-lg border border-amber-500/30 bg-amber-500/5">
@@ -758,7 +784,7 @@ function PublicProposalView({
                       <div className="text-center flex-1 rounded-lg py-1 px-2" style={{ background: `${primaryColor}15` }}>
                         <div className="text-xs text-slate-400">Toward Ownership</div>
                         <div className="text-lg font-black" style={{ color: primaryColor }}>
-                          ${ownership_delta_monthly > 0 ? `$${ownership_delta_monthly}` : `$${Math.abs(ownership_delta_monthly)}`}/mo
+                          ${ownership_delta_monthly > 0 ? ownership_delta_monthly : Math.abs(ownership_delta_monthly)}/mo
                         </div>
                       </div>
                     </div>
@@ -840,7 +866,8 @@ function PublicProposalView({
             </div>
 
             {purchaseMode === 'finance' ? (
-              // ── Section 2: Finance mode — monthly cost truth panel ────────
+              <>
+              {/* ── Section 2: Finance mode — monthly cost truth panel */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 <div className="md:col-span-1 rounded-xl p-3 border" style={{ background: `${primaryColor}10`, borderColor: `${primaryColor}30` }}>
                   <div className="text-xs text-slate-400 mb-1">Solar Loan Payment</div>
@@ -903,6 +930,39 @@ function PublicProposalView({
                   ))}
                 </div>
               </div>
+              {/* Loan term comparison table — shows 10/15/25-yr payments side by side */}
+              {effectiveFinal > 0 && purchaseMode === 'finance' && (
+                <div className="mt-3 rounded-xl border border-slate-700/50 overflow-hidden">
+                  <div className="px-3 py-2 bg-slate-800/60 border-b border-slate-700/40">
+                    <span className="text-xs font-semibold text-slate-300">Loan Term Comparison</span>
+                    <span className="text-xs text-slate-500 ml-2">at {((pricingCfg?.loanApr ?? 7.99)).toFixed(2)}% APR</span>
+                  </div>
+                  <div className="grid grid-cols-3 divide-x divide-slate-700/40">
+                    {([10, 15, 25] as const).map(termYears => {
+                      const _r = ((pricingCfg?.loanApr ?? 7.99) / 100) / 12;
+                      const _n = termYears * 12;
+                      const _monthly = effectiveFinal > 0 && _r > 0
+                        ? Math.round(effectiveFinal * (_r * Math.pow(1 + _r, _n)) / (Math.pow(1 + _r, _n) - 1))
+                        : 0;
+                      const _isCurrent = termYears === (pricingCfg?.loanTermYears ?? 25);
+                      return (
+                        <div key={termYears} className={`px-3 py-2.5 text-center ${_isCurrent ? 'bg-amber-500/10' : ''}`}>
+                          <div className={`text-[10px] font-semibold mb-1 ${_isCurrent ? 'text-amber-400' : 'text-slate-500'}`}>
+                            {termYears}-Year{_isCurrent ? ' ✓' : ''}
+                          </div>
+                          <div className={`text-base font-black ${_isCurrent ? 'text-amber-400' : 'text-white'}`}>
+                            ${_monthly.toLocaleString()}/mo
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            ${Math.round(_monthly * _n).toLocaleString()} total
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              </>
             ) : (
               // ── Section 1 & 4: Cash mode — no ITC line, clean labels ─────
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
@@ -1569,6 +1629,159 @@ function PublicProposalView({
           </div>
         </div>
 
+        {/* ── Environmental Impact ─────────────────────────────────────────── */}
+        {annualProduction > 0 && (() => {
+          // EPA eGRID national average: 0.386 kg CO₂ per kWh (2023)
+          const CO2_PER_KWH_KG   = 0.386;
+          const TREE_KG_CO2_YR   = 21.77;  // avg tree absorbs ~21.77 kg CO₂/yr
+          const CAR_KG_CO2_MILE  = 0.404;  // avg car 404g CO₂/mile
+          const HOME_KWH_YR      = 10632;  // avg US home annual usage (EIA 2023)
+          const annualCO2Kg      = Math.round(annualProduction * CO2_PER_KWH_KG);
+          const annualCO2Lbs     = Math.round(annualCO2Kg * 2.205);
+          const treesEquiv       = Math.round(annualCO2Kg / TREE_KG_CO2_YR);
+          const milesEquiv       = Math.round(annualCO2Kg / CAR_KG_CO2_MILE);
+          const homesEquiv       = parseFloat((annualProduction / HOME_KWH_YR).toFixed(1));
+          const lifetime25CO2Lbs = Math.round(annualCO2Lbs * 25 * 0.9); // ~10% degradation avg
+          return (
+            <div className="proposal-sec card p-4" data-block-id="environmental-impact">
+              <h3 className="font-semibold text-white text-sm mb-1 flex items-center gap-2">
+                <Leaf size={15} className="text-emerald-400" /> Your Environmental Impact
+              </h3>
+              <p className="text-slate-400 text-xs mb-4">
+                Every kWh of solar energy offsets CO₂ that would otherwise come from the grid.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+                {[
+                  {
+                    icon: <Wind size={18} className="text-sky-400" />,
+                    value: `${annualCO2Lbs.toLocaleString()} lbs`,
+                    label: 'CO₂ Avoided / Year',
+                    sub: `${annualCO2Kg.toLocaleString()} kg`,
+                    color: 'border-sky-500/20 bg-sky-500/5',
+                  },
+                  {
+                    icon: <TreePine size={18} className="text-emerald-400" />,
+                    value: `${treesEquiv.toLocaleString()}`,
+                    label: 'Trees Equivalent / Year',
+                    sub: 'absorbing the same CO₂',
+                    color: 'border-emerald-500/20 bg-emerald-500/5',
+                  },
+                  {
+                    icon: <Car size={18} className="text-violet-400" />,
+                    value: `${milesEquiv.toLocaleString()}`,
+                    label: 'Car Miles Offset / Year',
+                    sub: 'not driven equivalent',
+                    color: 'border-violet-500/20 bg-violet-500/5',
+                  },
+                  {
+                    icon: <Users size={18} className="text-amber-400" />,
+                    value: `${homesEquiv}`,
+                    label: 'Homes Powered',
+                    sub: 'avg US home annual usage',
+                    color: 'border-amber-500/20 bg-amber-500/5',
+                  },
+                ].map(m => (
+                  <div key={m.label} className={`rounded-xl p-3 border ${m.color} text-center`}>
+                    <div className="flex justify-center mb-1.5">{m.icon}</div>
+                    <div className="text-lg font-black text-white">{m.value}</div>
+                    <div className="text-xs text-slate-400 mt-0.5 leading-tight">{m.label}</div>
+                    <div className="text-xs text-slate-600 mt-0.5">{m.sub}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-lg px-3 py-2 bg-emerald-500/5 border border-emerald-500/15 flex items-center gap-3">
+                <Leaf size={14} className="text-emerald-400 flex-shrink-0" />
+                <p className="text-xs text-slate-400">
+                  Over 25 years this system will offset an estimated{' '}
+                  <span className="text-emerald-400 font-semibold">{lifetime25CO2Lbs.toLocaleString()} lbs of CO₂</span>
+                  {' '}— equivalent to planting{' '}
+                  <span className="text-emerald-400 font-semibold">{Math.round(treesEquiv * 25 * 0.9).toLocaleString()} trees</span>.
+                  Based on EPA eGRID national average emissions factor.
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ── What Happens Next — post-sign timeline ────────────────────────── */}
+        <div className="proposal-sec card p-4" data-block-id="next-steps-timeline">
+          <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
+            <ChevronRight size={15} style={{ color: primaryColor }} /> What Happens After You Sign
+          </h3>
+          <div className="space-y-0">
+            {[
+              {
+                step: 1,
+                title: 'Proposal Signed',
+                desc: 'Your installer is notified immediately and will contact you within 24 hours.',
+                time: 'Today',
+                color: 'text-emerald-400',
+                dot: 'bg-emerald-400',
+              },
+              {
+                step: 2,
+                title: 'Site Survey',
+                desc: 'A technician visits to measure your roof, check your electrical panel, and confirm the design.',
+                time: '1–5 business days',
+                color: 'text-sky-400',
+                dot: 'bg-sky-400',
+              },
+              {
+                step: 3,
+                title: 'Permits & Engineering',
+                desc: 'Your installer submits permits to the city and files interconnection paperwork with your utility.',
+                time: '2–6 weeks',
+                color: 'text-violet-400',
+                dot: 'bg-violet-400',
+              },
+              {
+                step: 4,
+                title: 'Installation Day',
+                desc: 'Your system is installed — typically 1–2 days. Panels, wiring, inverter, and monitoring.',
+                time: '1–2 days on-site',
+                color: 'text-amber-400',
+                dot: 'bg-amber-400',
+              },
+              {
+                step: 5,
+                title: 'Inspection & Permission to Operate',
+                desc: 'City inspection is completed and your utility grants Permission to Operate (PTO). System turns on.',
+                time: '1–3 weeks after install',
+                color: 'text-orange-400',
+                dot: 'bg-orange-400',
+              },
+              {
+                step: 6,
+                title: 'You\'re Generating Solar Energy',
+                desc: 'Your system is live. Monitor production from your phone and watch your bill drop.',
+                time: 'Ongoing',
+                color: 'text-green-400',
+                dot: 'bg-green-400',
+              },
+            ].map((s, idx, arr) => (
+              <div key={s.step} className="flex gap-3">
+                {/* Timeline spine */}
+                <div className="flex flex-col items-center flex-shrink-0">
+                  <div className={`w-7 h-7 rounded-full border-2 border-slate-700 flex items-center justify-center text-xs font-black ${s.color}`}>
+                    {s.step}
+                  </div>
+                  {idx < arr.length - 1 && (
+                    <div className="w-px flex-1 bg-slate-700/50 my-1" />
+                  )}
+                </div>
+                {/* Content */}
+                <div className={`pb-${idx < arr.length - 1 ? '4' : '0'} flex-1 min-w-0`}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className={`text-sm font-semibold ${s.color}`}>{s.title}</span>
+                    <span className="text-xs text-slate-500 bg-slate-800/60 px-2 py-0.5 rounded-full border border-slate-700/50">{s.time}</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{s.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Why Solar / Trust section */}
         <div className="proposal-sec grid grid-cols-1 md:grid-cols-3 gap-2" data-block-id="trust-performance">
           {[
@@ -1586,6 +1799,70 @@ function PublicProposalView({
           ))}
         </div>
 
+
+        {/* Testimonial / Company Intro block */}
+        <div className="proposal-sec card p-5" data-block-id="testimonial">
+          <div className="text-center mb-4">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/30 mb-3">
+              {branding.companyLogoUrl ? (
+                <img src={branding.companyLogoUrl} alt={branding.companyName} className="h-5 object-contain" />
+              ) : (
+                <Sun size={13} style={{ color: primaryColor }} />
+              )}
+              <span className="text-xs font-semibold text-slate-300">{branding.companyName}</span>
+            </div>
+            <h2 className="text-lg font-black text-white mb-1">Why Homeowners Choose Us</h2>
+            <p className="text-slate-400 text-sm max-w-xl mx-auto">
+              We&apos;ve helped hundreds of families take control of their energy costs with clean, locally-installed solar.
+            </p>
+          </div>
+
+          {/* Testimonial quote */}
+          <div className="relative rounded-xl p-4 border border-slate-700/40" style={{ background: `${primaryColor}08` }}>
+            <div className="text-3xl leading-none mb-2" style={{ color: primaryColor, opacity: 0.4 }}>&ldquo;</div>
+            <p className="text-slate-300 text-sm leading-relaxed italic">
+              Going solar was the best decision we made. Our electric bill dropped from $280/month to under $40, and the install crew was professional from start to finish. We&apos;ve already recommended {branding.companyName} to three of our neighbors.
+            </p>
+            <div className="flex items-center gap-3 mt-3">
+              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-slate-400 text-sm font-bold flex-shrink-0">M</div>
+              <div>
+                <div className="text-white text-xs font-semibold">Michael R. — Verified Customer</div>
+                <div className="flex items-center gap-0.5 mt-0.5">
+                  {[1,2,3,4,5].map(s => (
+                    <Star key={s} size={10} className="text-amber-400 fill-amber-400" />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Company details */}
+          {(branding.companyAddress || branding.companyPhone || branding.companyWebsite) && (
+            <div className="flex flex-wrap items-center justify-center gap-4 mt-4 pt-3 border-t border-slate-700/40">
+              {branding.companyAddress && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <MapPin size={11} className="text-slate-600" />
+                  {branding.companyAddress}
+                </div>
+              )}
+              {branding.companyPhone && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Phone size={11} className="text-slate-600" />
+                  {branding.companyPhone}
+                </div>
+              )}
+              {branding.companyWebsite && (
+                <a href={branding.companyWebsite} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs hover:text-white transition-colors"
+                  style={{ color: primaryColor }}>
+                  <ExternalLink size={11} />
+                  {branding.companyWebsite.replace(/^https?:\/\//, '')}
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* CTA */}
         {!accepted ? (
           <div className="proposal-sec rounded-2xl p-6 text-center border" data-block-id="cta" data-keep-together="true" style={{ background: `${primaryColor}08`, borderColor: `${primaryColor}25` }}>
@@ -1594,7 +1871,7 @@ function PublicProposalView({
             </div>
             <h2 className="text-2xl font-black text-white mb-2">Ready to Go Solar?</h2>
             <p className="text-slate-400 text-sm mb-5 max-w-md mx-auto">
-              Accept this proposal to get started. Your installer will contact you within 24 hours to schedule next steps.
+              Sign this proposal to get started. Your installer will contact you within 24 hours to schedule next steps.
             </p>
             <button
               onClick={onAccept}
@@ -1605,12 +1882,12 @@ function PublicProposalView({
               {accepting ? (
                 <span className="w-5 h-5 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
               ) : (
-                <CheckCircle size={20} />
+                <PenLine size={20} />
               )}
-              Accept This Proposal
+              Sign &amp; Accept Proposal
             </button>
             <div className="flex items-center justify-center gap-4 mt-4">
-              <p className="text-slate-500 text-xs">No commitment required &mdash; accepting just notifies your installer.</p>
+              <p className="text-slate-500 text-xs">Legally binding e-signature · No DocuSign needed</p>
             </div>
             {/* Secondary: Download PDF */}
             <div className="border-t border-slate-700/40 mt-5 pt-4">
@@ -1638,7 +1915,7 @@ function PublicProposalView({
             </div>
             <h2 className="text-2xl font-black text-emerald-300 mb-2">✨ You’re Going Solar!</h2>
             <p className="text-slate-400 text-sm max-w-md mx-auto">
-              Your proposal has been accepted. Your installer will be in touch within 24 hours to schedule your site visit and next steps.
+              {signerName ? `Thank you, ${signerName}! ` : ''}ÜYour proposal has been signed & accepted. Your installer will be in touch within 24 hours to schedule your site visit and next steps.
             </p>
             <div className="mt-5 flex items-center justify-center gap-3 flex-wrap">
               <button

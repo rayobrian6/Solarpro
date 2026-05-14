@@ -13,28 +13,11 @@ export const revalidate = 0;
  *   2. Environment variable completeness
  *   3. Base URL configuration (no wrong-domain fallback)
  *   4. Email configuration (Resend API key present)
+ *   5. Monitoring configuration (Sentry DSN present)
  *
  * Status codes:
- *   200 — healthy or degraded (app is running; degraded means optional vars missing)
- *   503 — unhealthy (required vars missing or DB unreachable)
- *
- * Response shape:
- * {
- *   status:        'healthy' | 'degraded' | 'unhealthy',
- *   version:       string,               // pkg version from package.json
- *   node_env:      string,
- *   vercel_env:    string,
- *   timestamp:     string,               // ISO 8601
- *   elapsed_ms:    number,
- *
- *   checks: {
- *     database:    { ok: boolean; latency_ms: number; error?: string },
- *     env_required:{ ok: boolean; missing: string[] },
- *     env_optional:{ ok: boolean; missing: string[] },
- *     base_url:    { ok: boolean; value: string; source: string },
- *     email:       { ok: boolean; configured: boolean },
- *   }
- * }
+ *   200 -- healthy or degraded (app is running; degraded means optional vars missing)
+ *   503 -- unhealthy (required vars missing or DB unreachable)
  */
 
 import { NextResponse } from 'next/server';
@@ -42,21 +25,17 @@ import { getDbReady } from '@/lib/db-neon';
 import { getBaseUrl } from '@/lib/env';
 import { BUILD_VERSION } from '@/lib/version';
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
 function detectBaseUrlSource(): string {
   if (process.env.NEXT_PUBLIC_APP_URL) return 'NEXT_PUBLIC_APP_URL';
   if (process.env.NEXT_PUBLIC_BASE_URL) return 'NEXT_PUBLIC_BASE_URL';
-  if (process.env.VERCEL_URL) return 'VERCEL_URL (ephemeral — set NEXT_PUBLIC_APP_URL)';
+  if (process.env.VERCEL_URL) return 'VERCEL_URL (ephemeral -- set NEXT_PUBLIC_APP_URL)';
   return 'hardcoded fallback (set NEXT_PUBLIC_APP_URL)';
 }
-
-// ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function GET() {
   const start = Date.now();
 
-  // ── 1. Database check ──────────────────────────────────────────────────────
+  // 1. Database check
   let dbOk = false;
   let dbLatency = 0;
   let dbError: string | undefined;
@@ -71,11 +50,11 @@ export async function GET() {
     dbError = (err as Error)?.message ?? 'unknown error';
   }
 
-  // ── 2. Required env vars ───────────────────────────────────────────────────
+  // 2. Required env vars
   const REQUIRED = ['DATABASE_URL', 'JWT_SECRET'];
   const missingRequired = REQUIRED.filter(v => !process.env[v]);
 
-  // ── 3. Optional/recommended env vars ──────────────────────────────────────
+  // 3. Optional/recommended env vars
   const OPTIONAL = [
     'RESEND_API_KEY',
     'NEXT_PUBLIC_APP_URL',
@@ -89,20 +68,16 @@ export async function GET() {
   const missingOptional = OPTIONAL.filter(v => {
     const val = process.env[v];
     if (!val) return true;
-    // Treat placeholder values as missing
     if (val.includes('YOUR_') || val === 're_YOUR_RESEND_API_KEY_HERE') return true;
     return false;
   });
 
-  // ── 4. Base URL check ──────────────────────────────────────────────────────
+  // 4. Base URL check
   const baseUrlValue = getBaseUrl();
   const baseUrlSource = detectBaseUrlSource();
-  // Warn if falling back to ephemeral Vercel URL or hardcoded fallback
-  const baseUrlOk = !!(
-    process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL
-  );
+  const baseUrlOk = !!(process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_BASE_URL);
 
-  // ── 5. Email check ─────────────────────────────────────────────────────────
+  // 5. Email check
   const resendKey = process.env.RESEND_API_KEY;
   const emailConfigured = !!(
     resendKey &&
@@ -110,17 +85,19 @@ export async function GET() {
     !resendKey.includes('YOUR_')
   );
 
-  // ── Overall status ─────────────────────────────────────────────────────────
+  // 6. Monitoring (Sentry) check
+  const sentryDsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN || '';
+  const monitoringOk = !!(sentryDsn && sentryDsn.startsWith('https://') && sentryDsn.includes('@'));
+  const monitoringProvider = monitoringOk ? 'sentry' : 'console-only';
+
+  // Overall status
   const unhealthy = !dbOk || missingRequired.length > 0;
   const degraded  = !unhealthy && (missingOptional.length > 0 || !baseUrlOk || !emailConfigured);
   const status    = unhealthy ? 'unhealthy' : degraded ? 'degraded' : 'healthy';
 
-  // ── Build response ─────────────────────────────────────────────────────────
-  const version = BUILD_VERSION;
-
   const body = {
     status,
-    version,
+    version:    BUILD_VERSION,
     node_env:   process.env.NODE_ENV   ?? 'unknown',
     vercel_env: process.env.VERCEL_ENV ?? 'local',
     timestamp:  new Date().toISOString(),
@@ -146,8 +123,15 @@ export async function GET() {
         source: baseUrlSource,
       },
       email: {
-        ok:           emailConfigured,
-        configured:   emailConfigured,
+        ok:         emailConfigured,
+        configured: emailConfigured,
+      },
+      monitoring: {
+        ok:       monitoringOk,
+        provider: monitoringProvider,
+        note:     monitoringOk
+          ? 'Sentry DSN configured -- errors will be reported'
+          : 'Set SENTRY_DSN env var to enable Sentry error reporting',
       },
     },
   };

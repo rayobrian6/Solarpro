@@ -106,6 +106,39 @@ export async function POST(
     const baseUrl = getBaseUrl();
     const shareUrl = `${baseUrl}/proposals/view/${proposalId}?token=${shareToken}`;
 
+    // Auto-advance homeowner stage to 'proposal' when a proposal is first shared,
+    // so the homeowner portal immediately shows the View & Sign CTA.
+    // Only advances if the current stage is BEFORE 'proposal' (lead/under_review/site_survey/design).
+    // Never downgrades a stage that's already at 'proposal', 'installation', or 'completed'.
+    const PRE_PROPOSAL_STAGES = new Set(['lead_submitted', 'under_review', 'site_survey', 'design', null]);
+    try {
+      const projRows = await sql`
+        SELECT homeowner_stage FROM projects WHERE id = ${projectId} LIMIT 1
+      `;
+      const currentStage = projRows[0]?.homeowner_stage ?? null;
+      if (PRE_PROPOSAL_STAGES.has(currentStage as string | null)) {
+        await sql`
+          UPDATE projects
+          SET homeowner_stage = 'proposal', updated_at = NOW()
+          WHERE id = ${projectId}
+        `;
+        // Write micro-stage event for audit trail
+        try {
+          await sql`
+            INSERT INTO project_micro_stages (project_id, micro_stage)
+            VALUES (${projectId}, 'proposal_sent')
+            ON CONFLICT (project_id, micro_stage) DO UPDATE SET created_at = NOW()
+          `;
+        } catch {
+          // micro_stages constraint may not exist — non-fatal
+        }
+        console.log('[share] Auto-advanced homeowner_stage to proposal for project', projectId);
+      }
+    } catch (stageErr) {
+      // Non-fatal — homeowner_stage column may not exist yet
+      console.warn('[share] Could not advance homeowner_stage:', stageErr);
+    }
+
     return NextResponse.json({
       success: true,
       shareUrl,

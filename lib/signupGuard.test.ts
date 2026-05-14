@@ -195,6 +195,19 @@ describe('isGibberish', () => {
   it('allows FirstSolarInstall (rstS=4 consonants, below Rule 14)', () => {
     expect(isGibberish('FirstSolarInstall')).toBe(false);
   });
+
+  // ── Incident 4 regression tests ────────────────────────────────────────────
+  // Two bot names observed in admin panel that bypassed the register endpoint
+  // because isGibberish() was not being called on the name field.
+  // Both are caught by Rules 1 + 2 + 3 + 4 + 6 + 12 + 13 (several redundant hits).
+  it('detects incident-4 bot apRNkSYEBgLXMpWFmwYDu (mc=0.500, e=4.202, R1+R2)', () => {
+    // mc=0.500 (>0.35 → R1), e=4.202 (>4.0 → R2), ur=0.619, dr=0.000, len=21
+    expect(isGibberish('apRNkSYEBgLXMpWFmwYDu')).toBe(true);
+  });
+  it('detects incident-4 bot cVortUUXenbwHapcWGBXaL (mc=0.429, e=4.096, R1+R2)', () => {
+    // mc=0.429 (>0.35 → R1), e=4.096 (>4.0 → R2), ur=0.455, dr=0.000, len=22
+    expect(isGibberish('cVortUUXenbwHapcWGBXaL')).toBe(true);
+  });
 });
 
 // ── isDisposableEmail ────────────────────────────────────────────────────────

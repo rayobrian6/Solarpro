@@ -171,6 +171,46 @@ export async function GET(req: NextRequest) {
     const ownerEmail   = firstProject?.owner_email   ? String(firstProject.owner_email)   : null;
     const ownerCompany = firstProject?.owner_company ? String(firstProject.owner_company) : null;
 
+    // Fetch proposals for all client projects (share_token + metadata for portal CTA)
+    // Only return proposals that have a share_token and haven't expired.
+    let proposals: {
+      id: string;
+      project_id: string;
+      name: string;
+      share_token: string;
+      share_expires_at: string | null;
+      signed_at: string | null;
+    }[] = [];
+
+    if (projectIds.length > 0) {
+      try {
+        const propRows = await sql`
+          SELECT
+            id::text,
+            project_id::text,
+            COALESCE(name, 'Solar Proposal') AS name,
+            share_token,
+            share_expires_at::text,
+            signed_at::text
+          FROM proposals
+          WHERE project_id = ANY(${projectIds})
+            AND share_token IS NOT NULL
+            AND (share_expires_at IS NULL OR share_expires_at > NOW())
+          ORDER BY created_at DESC
+        `;
+        proposals = propRows.map((r: Record<string, unknown>) => ({
+          id:               String(r.id),
+          project_id:       String(r.project_id),
+          name:             String(r.name),
+          share_token:      String(r.share_token),
+          share_expires_at: r.share_expires_at ? String(r.share_expires_at) : null,
+          signed_at:        r.signed_at        ? String(r.signed_at)        : null,
+        }));
+      } catch {
+        // proposals table may be missing share_token in older DBs — non-fatal
+      }
+    }
+
     return NextResponse.json({
       success: true,
       client: {
@@ -192,6 +232,7 @@ export async function GET(req: NextRequest) {
       stageHistory,
       microStages,
       documents,
+      proposals,
     });
   } catch (e: unknown) {
     return handleRouteDbError('[api/portal/dashboard]', e);

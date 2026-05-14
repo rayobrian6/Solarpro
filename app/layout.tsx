@@ -7,6 +7,7 @@ import { UserProvider } from '@/contexts/UserContext';
 import SolarDogWithTour from '@/components/support/SolarDogWithTour';
 import { Suspense } from 'react';
 import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
+import ClientMonitoringInit from '@/components/ClientMonitoringInit';
 import { BUILD_VERSION } from '@/lib/version';
 
 export const metadata: Metadata = {
@@ -55,6 +56,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               {/* SolarDog 🐾 — AI agent, floating widget, visible on all pages */}
               {/* SolarDogWithTour auto-starts the onboarding tour for new users */}
               <SolarDogWithTour />
+              {/* Client-side error monitoring — ships unhandled errors to Sentry when DSN is set */}
+              <ClientMonitoringInit />
               {/* Version indicator — always visible for deployment verification */}
               <div style={{
                 position: 'fixed', bottom: '4px', left: '4px',

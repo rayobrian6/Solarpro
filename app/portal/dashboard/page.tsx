@@ -6,7 +6,7 @@ import {
   Sun, MapPin, LogOut, RefreshCw,
   CheckCircle2, Circle, Clock,
   Phone, Mail, AlertCircle, Zap,
-  TrendingUp, Home, FileCheck,
+  TrendingUp, Home, FileCheck, ExternalLink, PenLine,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -60,6 +60,15 @@ interface Owner {
   phone:   string | null;
   email:   string | null;
   company: string | null;
+}
+
+interface PortalProposal {
+  id:               string;
+  project_id:       string;
+  name:             string;
+  share_token:      string;
+  share_expires_at: string | null;
+  signed_at:        string | null;
 }
 
 // ─── Stage Definitions ───────────────────────────────────────────────────────
@@ -396,6 +405,7 @@ export default function PortalDashboard() {
   const [history,       setHistory]       = useState<StageHistory[]>([]);
   const [documents,     setDocuments]     = useState<PortalDocument[]>([]);
   const [microStages,   setMicroStages]   = useState<MicroStageEvent[]>([]);
+  const [proposals,     setProposals]     = useState<PortalProposal[]>([]);
   const [billUploaded,  setBillUploaded]  = useState(false);
   const [billUploading, setBillUploading] = useState(false);
   const [billUploadErr, setBillUploadErr] = useState('');
@@ -421,6 +431,7 @@ export default function PortalDashboard() {
       setHistory(d.stageHistory ?? []);
       setDocuments(d.documents ?? []);
       setMicroStages(d.microStages ?? []);
+      setProposals(d.proposals ?? []);
       const hasBill = (d.documents ?? []).some((doc: { label: string; file_type?: string }) =>
         doc.label === 'Utility Bill' || doc.file_type === 'utility_bill'
       );
@@ -478,6 +489,9 @@ export default function PortalDashboard() {
 
   // Documents scoped to the active project
   const projectDocs = documents.filter(d => activeProject && d.project_id === activeProject.id);
+
+  // Proposals scoped to the active project (most recent first)
+  const projectProposals = proposals.filter(pr => activeProject && pr.project_id === activeProject.id);
 
   return (
     <div className="min-h-screen bg-[#07070e] text-white overflow-x-hidden">
@@ -675,6 +689,75 @@ export default function PortalDashboard() {
                     )}
                   </div>
                 )}
+
+                {/* ── Proposal CTA — shown when stage is 'proposal' and a shared proposal exists ── */}
+                {p.homeowner_stage === 'proposal' && projectProposals.length > 0 && (() => {
+                  const prop = projectProposals[0];
+                  const propUrl = `/proposals/view/${prop.id}?token=${prop.share_token}`;
+                  const isSigned = !!prop.signed_at;
+                  return (
+                    <div className="mt-6 border-t border-white/[0.05] pt-6">
+                      {isSigned ? (
+                        /* Already signed — show confirmation */
+                        <div className="rounded-2xl bg-emerald-500/[0.06] border border-emerald-500/[0.15] p-5">
+                          <div className="flex items-start gap-3">
+                            <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-bold text-emerald-300">Proposal Signed ✓</p>
+                              <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                                You signed on {new Date(prop.signed_at!).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. Your installer will be in touch to schedule installation.
+                              </p>
+                              <a
+                                href={propUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 mt-3 text-xs text-slate-400 hover:text-white transition-colors"
+                              >
+                                <ExternalLink size={11} />
+                                View proposal again
+                              </a>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Not yet signed — primary CTA */
+                        <div className="rounded-2xl bg-amber-500/[0.07] border border-amber-500/[0.18] p-5">
+                          <div className="flex items-start gap-3 mb-4">
+                            <div className="w-8 h-8 rounded-xl bg-amber-500/[0.15] border border-amber-500/[0.2] flex items-center justify-center flex-shrink-0">
+                              <PenLine size={14} className="text-amber-400" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-bold text-white">Your proposal is ready to review</p>
+                              <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                                {prop.name} — review your system design, pricing, and savings estimate, then sign to move forward.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <a
+                              href={propUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm transition-colors"
+                            >
+                              <ExternalLink size={13} />
+                              View &amp; Sign Proposal
+                            </a>
+                            <a
+                              href={propUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 bg-white/[0.04] border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/[0.15] font-medium text-sm transition-colors"
+                            >
+                              <TrendingUp size={13} />
+                              See your savings
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
