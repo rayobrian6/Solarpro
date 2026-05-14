@@ -413,7 +413,7 @@ export function buildCanonicalProposal(
   const utilityConfidence    = utilityProfile.confidence ?? utilityProfile.data_confidence ?? 'medium';
 
   const utility = {
-    provider:                  input.utilityName || utilityProfile.utility_name_pattern || 'Unknown Utility',
+    provider:                  input.utilityName || utilityProfile.utility_name || utilityProfile.utility_name_pattern || 'Your Electric Utility',
     rate:                      resolvedRate,
     annualUsageKwh:            input.annualUsageKwh,
     escalationRate,
