@@ -292,6 +292,32 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
           console.warn('[proposal signed email] lookup failed:', (emailErr as Error)?.message);
         }
 
+        // Auto-advance homeowner stage to 'installation' on signature.
+        // Only advances if still at 'proposal' — never downgrades.
+        try {
+          const projIdRows = await sql`SELECT project_id FROM proposals WHERE id = ${id} LIMIT 1`;
+          const projectId = projIdRows[0]?.project_id as string | undefined;
+          if (projectId) {
+            await sql`
+              UPDATE projects
+              SET homeowner_stage = 'installation', updated_at = NOW()
+              WHERE id = ${projectId}
+                AND homeowner_stage = 'proposal'
+            `;
+            try {
+              await sql`
+                INSERT INTO project_micro_stages (project_id, micro_stage)
+                VALUES (${projectId}, 'contract_signed')
+                ON CONFLICT (project_id, micro_stage) DO UPDATE SET created_at = NOW()
+              `;
+            } catch {
+              // non-fatal
+            }
+          }
+        } catch {
+          // homeowner_stage column may not exist — non-fatal
+        }
+
         return NextResponse.json({ success: true, signed: true });
       }
 
