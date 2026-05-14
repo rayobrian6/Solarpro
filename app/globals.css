@@ -1090,3 +1090,31 @@ html, body {
   cursor: not-allowed;
   box-shadow: 0 0 0 1px rgba(251,191,36,0.05) inset;
 }
+
+/* ── iOS Safe Area Insets ── */
+/* Prevent content from being hidden under the iPhone home indicator */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Main app shell content area should always respect safe area */
+  body {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Portal mobile sticky footer-like areas */
+  .portal-cta-sticky {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Mobile: Reduce default page padding on very small screens ── */
+@media (max-width: 375px) {
+  .p-6 {
+    padding: 1rem; /* 16px instead of 24px on 375px-and-below */
+  }
+  .p-5 {
+    padding: 0.875rem;
+  }
+}

@@ -213,7 +213,7 @@ export default function OnboardingPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 sm:p-6">
       <div className="w-full max-w-lg">
 
         {/* Logo */}
@@ -227,7 +227,7 @@ export default function OnboardingPage() {
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-8 shadow-2xl">
+        <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5 sm:p-8 shadow-2xl">
           <StepLabel step={step} />
           <ProgressBar step={step} />
 

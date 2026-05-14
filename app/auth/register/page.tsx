@@ -126,7 +126,7 @@ export default function RegisterPage() {
       </div>
 
       {/* Right panel — form */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-12">
         <div className="w-full max-w-md">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-3 mb-8">
@@ -146,7 +146,7 @@ export default function RegisterPage() {
             </p>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-8 backdrop-blur-sm">
+          <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 sm:p-8 backdrop-blur-sm">
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Name */}
               <div>
