@@ -1235,7 +1235,14 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     annualProductionKwh:   production?.annualProductionKwh ?? 0,
     monthlyProductionKwh:  production?.monthlyProductionKwh ?? [],
     utilityName:           (proj as any)?.utilityName ?? (client as any)?.utilityName ?? '',
-    stateCode:             (proj as any)?.stateCode ?? client?.state ?? '',
+    stateCode:             (() => {
+      const sc = (proj as any)?.stateCode ?? client?.state ?? '';
+      if (sc) return sc;
+      // v48.14: extract stateCode from address when not explicitly stored
+      const addr = (proj as any)?.address ?? client?.address ?? '';
+      const m = addr.match(/\b([A-Z]{2})\s+\d{5}/i) || addr.match(/,\s*([A-Z]{2})\s*$/i);
+      return m ? m[1].toUpperCase() : '';
+    })(),
     clientState:           client?.state ?? '',
     // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates are supply-only.
     // See view/[id]/page.tsx for full explanation.

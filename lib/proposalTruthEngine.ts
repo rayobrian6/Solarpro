@@ -1456,8 +1456,91 @@ export function buildUtilityProfile(project: {
 
   const utilityName = (project.utilityName || '').toLowerCase().trim();
 
+  // v48.15: ZIP-to-utility lookup table.
+  // Used when utilityName is empty/unknown — infers utility from ZIP or address string.
+  // Covers rural co-op territories where OCR rarely captures the utility name.
+  const ZIP_UTILITY_MAP: Record<string, string> = {
+    // Southwestern Electric Cooperative (SWEC) — 11-county IL territory along I-70
+    '62275': 'southwestern electric cooperative', // Pocahontas IL
+    '62215': 'southwestern electric cooperative', // Albers IL
+    '62217': 'southwestern electric cooperative', // Baldwin IL
+    '62218': 'southwestern electric cooperative', // Bartelso IL
+    '62219': 'southwestern electric cooperative', // Beckemeyer IL
+    '62220': 'southwestern electric cooperative', // Belleville IL (partial)
+    '62230': 'southwestern electric cooperative', // Breese IL
+    '62231': 'southwestern electric cooperative', // Carlyle IL
+    '62232': 'southwestern electric cooperative', // Caseyville IL
+    '62233': 'southwestern electric cooperative', // Chester IL
+    '62234': 'southwestern electric cooperative', // Collinsville IL (partial)
+    '62236': 'southwestern electric cooperative', // Columbia IL
+    '62238': 'southwestern electric cooperative', // Coulterville IL
+    '62239': 'southwestern electric cooperative', // Dupo IL
+    '62241': 'southwestern electric cooperative', // Ellis Grove IL
+    '62243': 'southwestern electric cooperative', // Freeburg IL
+    '62244': 'southwestern electric cooperative', // Fults IL
+    '62245': 'southwestern electric cooperative', // Germantown IL
+    '62246': 'southwestern electric cooperative', // Greenville IL
+    '62248': 'southwestern electric cooperative', // Hecker IL
+    '62249': 'southwestern electric cooperative', // Highland IL
+    '62250': 'southwestern electric cooperative', // Hoffman IL
+    '62253': 'southwestern electric cooperative', // Keyesport IL
+    '62254': 'southwestern electric cooperative', // Lebanon IL
+    '62255': 'southwestern electric cooperative', // Lenzburg IL
+    '62257': 'southwestern electric cooperative', // Mascoutah IL (partial)
+    '62258': 'southwestern electric cooperative', // Marissa IL
+    '62260': 'southwestern electric cooperative', // Millstadt IL
+    '62261': 'southwestern electric cooperative', // Modoc IL
+    '62262': 'southwestern electric cooperative', // Mulberry Grove IL
+    '62264': 'southwestern electric cooperative', // New Athens IL
+    '62265': 'southwestern electric cooperative', // New Baden IL
+    '62266': 'southwestern electric cooperative', // New Memphis IL
+    '62268': 'southwestern electric cooperative', // Oakdale IL
+    '62269': 'southwestern electric cooperative', // O Fallon IL (partial)
+    '62271': 'southwestern electric cooperative', // Okawville IL
+    '62272': 'southwestern electric cooperative', // Percy IL
+    '62273': 'southwestern electric cooperative', // Pierron IL
+    '62274': 'southwestern electric cooperative', // Pinckneyville IL (partial)
+    '62276': 'southwestern electric cooperative', // Prairie Du Rocher IL
+    '62277': 'southwestern electric cooperative', // Red Bud IL
+    '62278': 'southwestern electric cooperative', // Renault IL
+    '62279': 'southwestern electric cooperative', // Sparta IL
+    '62280': 'southwestern electric cooperative', // Steeleville IL
+    '62281': 'southwestern electric cooperative', // St. Jacob IL
+    '62282': 'southwestern electric cooperative', // Summerfield IL
+    '62283': 'southwestern electric cooperative', // Trenton IL
+    '62284': 'southwestern electric cooperative', // Troy IL
+    '62285': 'southwestern electric cooperative', // Valmeyer IL
+    '62286': 'southwestern electric cooperative', // Vandalia IL (partial)
+    '62288': 'southwestern electric cooperative', // Venedy IL
+    '62289': 'southwestern electric cooperative', // Waterloo IL (partial)
+    '62292': 'southwestern electric cooperative', // Worden IL
+    '62293': 'southwestern electric cooperative', // Germantown Hills IL
+    '62294': 'southwestern electric cooperative', // Troy IL
+    '62295': 'southwestern electric cooperative', // Waterloo IL
+    '62297': 'southwestern electric cooperative', // Welge IL
+    '62298': 'southwestern electric cooperative', // Winfield IL
+    // Norris Electric Cooperative — SE IL
+    '62846': 'norris electric cooperative', // Norris City IL
+    '62863': 'norris electric cooperative', // Omaha IL
+    '62869': 'norris electric cooperative', // Raleigh IL
+    // Shelby Electric Cooperative
+    '62565': 'shelby electric cooperative', // Shelbyville IL
+    '62543': 'shelby electric cooperative', // Morrisonville IL
+    '62549': 'shelby electric cooperative', // Mount Auburn IL
+    // Coles-Moultrie Electric Cooperative
+    '61920': 'coles-moultrie electric cooperative', // Charleston IL
+    '61938': 'coles-moultrie electric cooperative', // Mattoon IL
+    // Corn Belt Energy
+    '61701': 'corn belt energy', // Bloomington IL
+    '61720': 'corn belt energy', // Anchor IL
+    // Spoon River Electric
+    '61454': 'spoon river electric cooperative', // Macomb IL (partial)
+    '61472': 'spoon river electric cooperative', // Roseville IL
+  };
+
   let matchedProfile: ProposalUtilityProfile | null = null;
 
+  // Step 1: match by utility name pattern
   if (utilityName) {
     for (const p of PROPOSAL_UTILITY_PROFILES) {
       if (p.state !== stateCode && stateCode) continue;
@@ -1469,6 +1552,29 @@ export function buildUtilityProfile(project: {
         }
       } catch {
         // Pattern error — skip
+      }
+    }
+  }
+
+  // Step 2: v48.15 — if no name match, try ZIP-to-utility lookup
+  // Extracts ZIP from address string or project.zip field
+  if (!matchedProfile) {
+    const addressStr = (project as any).address || '';
+    const zipMatch = addressStr.match(/\b(\d{5})\b/) || [];
+    const zip = (project as any).zip || zipMatch[1] || '';
+    const inferredUtility = zip ? ZIP_UTILITY_MAP[zip] : null;
+    if (inferredUtility) {
+      for (const p of PROPOSAL_UTILITY_PROFILES) {
+        if (p.state !== stateCode && stateCode) continue;
+        try {
+          const pattern = new RegExp(p.utility_name_pattern, 'i');
+          if (pattern.test(inferredUtility)) {
+            matchedProfile = p;
+            break;
+          }
+        } catch {
+          // skip
+        }
       }
     }
   }
