@@ -1674,15 +1674,17 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                       </div>
                       <div className="text-slate-500 text-sm">→</div>
                       <div className="text-center flex-1 rounded-lg py-1 px-2" style={{ background: `${primaryColor}15` }}>
-                        <div className="text-xs text-slate-400">Toward Ownership</div>
-                        <div className="text-lg font-black" style={{ color: primaryColor }}>
-                          ${ownership_delta_monthly > 0 ? ownership_delta_monthly : Math.abs(ownership_delta_monthly)}/mo
+                        <div className="text-xs text-slate-400">
+                          {ownership_delta_monthly <= 0 ? 'Monthly Savings' : 'Monthly Difference'}
+                        </div>
+                        <div className="text-lg font-black" style={{ color: ownership_delta_monthly <= 0 ? '#22c55e' : primaryColor }}>
+                          {ownership_delta_monthly <= 0 ? '-' : '+'}${Math.abs(ownership_delta_monthly)}/mo
                         </div>
                       </div>
                     </div>
                     {ownership_delta_monthly > 0 && (
                       <p className="text-xs text-slate-500 mt-1.5 text-center">
-                        Redirecting ${ownership_delta_monthly}/mo from utility expense toward energy ownership. Fixed payment — utility rates keep rising.
+                        Your solar payment is fixed at ${solar_payment_monthly}/mo. As utility rates rise at {(cp.utility.escalationRate * 100).toFixed(0)}%/yr, this gap closes and reverses.
                       </p>
                     )}
                     {ownership_delta_monthly <= 0 && (
@@ -1796,12 +1798,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                       </div>
                       {ownership_delta_monthly > 0 && (
                         <p className="text-xs text-slate-500 pt-0.5">
-                          Initial monthly difference. As utility rates rise, your solar payment stays fixed.
-                        </p>
-                      )}
-                      {ownership_delta_monthly > 0 && (
-                        <p className="text-xs text-slate-500 pt-0.5">
-                          ${ownership_delta_monthly}/mo is being redirected toward energy ownership rather than utility expense.
+                          Your solar payment is fixed at ${solar_payment_monthly}/mo. As utility rates rise at {(cp.utility.escalationRate * 100).toFixed(0)}%/yr, this gap closes and reverses.
                         </p>
                       )}
                     </div>

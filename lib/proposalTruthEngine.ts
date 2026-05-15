@@ -1538,6 +1538,193 @@ export function buildUtilityProfile(project: {
     // Spoon River Electric
     '61454': 'spoon river electric cooperative', // Macomb IL (partial)
     '61472': 'spoon river electric cooperative', // Roseville IL
+    // Commonwealth Edison (ComEd) — Northern Illinois (26 counties: Cook, DuPage, Lake, Will, Kane, etc.)
+    // Chicago city ZIPs
+    '60601': 'commonwealth edison', '60602': 'commonwealth edison', '60603': 'commonwealth edison',
+    '60604': 'commonwealth edison', '60605': 'commonwealth edison', '60606': 'commonwealth edison',
+    '60607': 'commonwealth edison', '60608': 'commonwealth edison', '60609': 'commonwealth edison',
+    '60610': 'commonwealth edison', '60611': 'commonwealth edison', '60612': 'commonwealth edison',
+    '60613': 'commonwealth edison', '60614': 'commonwealth edison', '60615': 'commonwealth edison',
+    '60616': 'commonwealth edison', '60617': 'commonwealth edison', '60618': 'commonwealth edison',
+    '60619': 'commonwealth edison', '60620': 'commonwealth edison', '60621': 'commonwealth edison',
+    '60622': 'commonwealth edison', '60623': 'commonwealth edison', '60624': 'commonwealth edison',
+    '60625': 'commonwealth edison', '60626': 'commonwealth edison', '60628': 'commonwealth edison',
+    '60629': 'commonwealth edison', '60630': 'commonwealth edison', '60631': 'commonwealth edison',
+    '60632': 'commonwealth edison', '60633': 'commonwealth edison', '60634': 'commonwealth edison',
+    '60636': 'commonwealth edison', '60637': 'commonwealth edison', '60638': 'commonwealth edison',
+    '60639': 'commonwealth edison', '60640': 'commonwealth edison', '60641': 'commonwealth edison',
+    '60642': 'commonwealth edison', '60643': 'commonwealth edison', '60644': 'commonwealth edison',
+    '60645': 'commonwealth edison', '60646': 'commonwealth edison', '60647': 'commonwealth edison',
+    '60649': 'commonwealth edison', '60651': 'commonwealth edison', '60652': 'commonwealth edison',
+    '60653': 'commonwealth edison', '60654': 'commonwealth edison', '60655': 'commonwealth edison',
+    '60656': 'commonwealth edison', '60657': 'commonwealth edison', '60659': 'commonwealth edison',
+    '60660': 'commonwealth edison', '60661': 'commonwealth edison',
+    // DuPage County (Westmont, Downers Grove, Naperville, Wheaton, etc.)
+    '60516': 'commonwealth edison', // Downers Grove
+    '60515': 'commonwealth edison', // Downers Grove
+    '60514': 'commonwealth edison', // Clarendon Hills
+    '60521': 'commonwealth edison', // Hinsdale
+    '60523': 'commonwealth edison', // Oak Brook
+    '60527': 'commonwealth edison', // Willowbrook / Burr Ridge
+    '60555': 'commonwealth edison', // Warrenville
+    '60559': 'commonwealth edison', // Westmont IL — this proposal
+    '60560': 'commonwealth edison', // Yorkville (partial)
+    '60563': 'commonwealth edison', // Naperville
+    '60564': 'commonwealth edison', // Naperville
+    '60565': 'commonwealth edison', // Naperville
+    '60566': 'commonwealth edison', // Naperville
+    '60567': 'commonwealth edison', // Naperville
+    '60101': 'commonwealth edison', // Addison
+    '60103': 'commonwealth edison', // Bartlett
+    '60104': 'commonwealth edison', // Bellwood
+    '60106': 'commonwealth edison', // Bensenville
+    '60108': 'commonwealth edison', // Bloomingdale
+    '60126': 'commonwealth edison', // Elmhurst
+    '60137': 'commonwealth edison', // Glen Ellyn
+    '60139': 'commonwealth edison', // Glendale Heights
+    '60148': 'commonwealth edison', // Lombard
+    '60157': 'commonwealth edison', // Medinah
+    '60181': 'commonwealth edison', // Villa Park
+    '60187': 'commonwealth edison', // Wheaton
+    '60188': 'commonwealth edison', // Carol Stream
+    '60189': 'commonwealth edison', // Wheaton
+    '60190': 'commonwealth edison', // Winfield
+    '60191': 'commonwealth edison', // Wood Dale
+    '60504': 'commonwealth edison', // Aurora (DuPage portion)
+    '60505': 'commonwealth edison', // Aurora
+    '60506': 'commonwealth edison', // Aurora
+    '60510': 'commonwealth edison', // Batavia
+    '60517': 'commonwealth edison', // Woodridge
+    '60519': 'commonwealth edison', // Eola
+    '60532': 'commonwealth edison', // Lisle
+    '60540': 'commonwealth edison', // Naperville
+    '60558': 'commonwealth edison', // Western Springs
+    // Cook County suburbs (North/Northwest/South)
+    '60004': 'commonwealth edison', // Arlington Heights
+    '60005': 'commonwealth edison', // Arlington Heights
+    '60007': 'commonwealth edison', // Elk Grove Village
+    '60008': 'commonwealth edison', // Rolling Meadows
+    '60010': 'commonwealth edison', // Barrington
+    '60016': 'commonwealth edison', // Des Plaines
+    '60018': 'commonwealth edison', // Des Plaines / Rosemont
+    '60025': 'commonwealth edison', // Glenview
+    '60026': 'commonwealth edison', // Glenview
+    '60035': 'commonwealth edison', // Highland Park
+    '60040': 'commonwealth edison', // Highwood
+    '60043': 'commonwealth edison', // Kenilworth
+    '60045': 'commonwealth edison', // Lake Forest
+    '60047': 'commonwealth edison', // Lake Zurich
+    '60053': 'commonwealth edison', // Morton Grove
+    '60056': 'commonwealth edison', // Mount Prospect
+    '60062': 'commonwealth edison', // Northbrook
+    '60067': 'commonwealth edison', // Palatine
+    '60068': 'commonwealth edison', // Park Ridge
+    '60070': 'commonwealth edison', // Prospect Heights
+    '60074': 'commonwealth edison', // Palatine
+    '60076': 'commonwealth edison', // Skokie
+    '60077': 'commonwealth edison', // Skokie
+    '60091': 'commonwealth edison', // Wilmette
+    '60093': 'commonwealth edison', // Winnetka
+    '60094': 'commonwealth edison', // Palatine
+    '60201': 'commonwealth edison', // Evanston
+    '60202': 'commonwealth edison', // Evanston
+    '60203': 'commonwealth edison', // Evanston
+    '60301': 'commonwealth edison', // Oak Park
+    '60302': 'commonwealth edison', // Oak Park
+    '60304': 'commonwealth edison', // Oak Park
+    '60305': 'commonwealth edison', // River Forest
+    '60402': 'commonwealth edison', // Berwyn
+    '60403': 'commonwealth edison', // Crest Hill
+    '60406': 'commonwealth edison', // Blue Island
+    '60409': 'commonwealth edison', // Calumet City
+    '60411': 'commonwealth edison', // Chicago Heights
+    '60415': 'commonwealth edison', // Chicago Ridge
+    '60419': 'commonwealth edison', // Dolton
+    '60422': 'commonwealth edison', // Flossmoor
+    '60425': 'commonwealth edison', // Glenwood
+    '60426': 'commonwealth edison', // Harvey
+    '60429': 'commonwealth edison', // Hazel Crest
+    '60430': 'commonwealth edison', // Homewood
+    '60438': 'commonwealth edison', // Lansing
+    '60439': 'commonwealth edison', // Lemont
+    '60443': 'commonwealth edison', // Matteson
+    '60445': 'commonwealth edison', // Midlothian
+    '60452': 'commonwealth edison', // Oak Forest
+    '60453': 'commonwealth edison', // Oak Lawn
+    '60455': 'commonwealth edison', // Bridgeview
+    '60456': 'commonwealth edison', // Hometown
+    '60457': 'commonwealth edison', // Hickory Hills
+    '60458': 'commonwealth edison', // Justice
+    '60459': 'commonwealth edison', // Burbank
+    '60461': 'commonwealth edison', // Olympia Fields
+    '60462': 'commonwealth edison', // Orland Park
+    '60463': 'commonwealth edison', // Palos Heights
+    '60464': 'commonwealth edison', // Palos Park
+    '60465': 'commonwealth edison', // Palos Hills
+    '60466': 'commonwealth edison', // Park Forest
+    '60467': 'commonwealth edison', // Orland Park
+    '60469': 'commonwealth edison', // Posen
+    '60471': 'commonwealth edison', // Richton Park
+    '60473': 'commonwealth edison', // South Holland
+    '60476': 'commonwealth edison', // Thornton
+    '60477': 'commonwealth edison', // Tinley Park
+    '60478': 'commonwealth edison', // Country Club Hills
+    '60480': 'commonwealth edison', // Willow Springs
+    '60482': 'commonwealth edison', // Worth
+    '60487': 'commonwealth edison', // Tinley Park
+    '60490': 'commonwealth edison', // Bolingbrook
+    '60491': 'commonwealth edison', // Homer Glen
+    // Will / Kane County
+    '60431': 'commonwealth edison', // Joliet (partial)
+    '60432': 'commonwealth edison', // Joliet
+    '60433': 'commonwealth edison', // Joliet
+    '60435': 'commonwealth edison', // Joliet
+    '60436': 'commonwealth edison', // Joliet
+    '60440': 'commonwealth edison', // Bolingbrook
+    '60441': 'commonwealth edison', // Lockport
+    '60446': 'commonwealth edison', // Romeoville
+    '60447': 'commonwealth edison', // Minooka
+    '60448': 'commonwealth edison', // Mokena
+    '60449': 'commonwealth edison', // Monee
+    '60451': 'commonwealth edison', // New Lenox
+    '60472': 'commonwealth edison', // Robbins
+    '60484': 'commonwealth edison', // University Park
+    '60544': 'commonwealth edison', // Plainfield
+    '60586': 'commonwealth edison', // Plainfield
+    // Lake County
+    '60031': 'commonwealth edison', // Gurnee
+    '60046': 'commonwealth edison', // Lake Villa
+    '60048': 'commonwealth edison', // Libertyville
+    '60060': 'commonwealth edison', // Mundelein
+    '60061': 'commonwealth edison', // Vernon Hills
+    '60064': 'commonwealth edison', // North Chicago
+    '60073': 'commonwealth edison', // Round Lake
+    '60085': 'commonwealth edison', // Waukegan
+    '60087': 'commonwealth edison', // Waukegan (North)
+    '60089': 'commonwealth edison', // Buffalo Grove
+    '60099': 'commonwealth edison', // Zion
+    // Kane County
+    '60102': 'commonwealth edison', // Algonquin
+    '60118': 'commonwealth edison', // Carpentersville
+    '60119': 'commonwealth edison', // Elburn
+    '60120': 'commonwealth edison', // Elgin
+    '60123': 'commonwealth edison', // Elgin
+    '60124': 'commonwealth edison', // Elgin
+    '60134': 'commonwealth edison', // Geneva
+    '60136': 'commonwealth edison', // Gilberts
+    '60175': 'commonwealth edison', // St. Charles
+    '60177': 'commonwealth edison', // South Elgin
+    '60185': 'commonwealth edison', // West Chicago
+    '60186': 'commonwealth edison', // West Chicago
+    '60193': 'commonwealth edison', // Schaumburg
+    '60194': 'commonwealth edison', // Schaumburg
+    '60195': 'commonwealth edison', // Schaumburg
+    '60502': 'commonwealth edison', // Aurora (Kane)
+    '60503': 'commonwealth edison', // Aurora
+    '60538': 'commonwealth edison', // Montgomery
+    '60542': 'commonwealth edison', // North Aurora
+    '60543': 'commonwealth edison', // Oswego
+    '60554': 'commonwealth edison', // Sugar Grove
   };
 
   let matchedProfile: ProposalUtilityProfile | null = null;
