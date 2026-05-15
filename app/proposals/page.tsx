@@ -2123,18 +2123,18 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
                 <Sun size={15} style={{ color: primaryColor }} /> Monthly Solar Production
               </h3>
-              <div className="flex items-end gap-1 h-20 mb-1">
+              <div className="relative flex items-end gap-1 mb-1" style={{ height: '80px' }}>
                 {cp.production.monthlyKwh.map((kwh, i) => {
                   const max = Math.max(...cp.production.monthlyKwh, 1);
-                  const pct = (kwh / max) * 100;
+                  const barH = Math.max(2, Math.round((kwh / max) * 68));
                   return (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div key={i} className="flex-1 flex flex-col items-center justify-end" style={{ height: '80px' }}>
                       <div
                         className="w-full rounded-t-sm transition-all"
-                        style={{ height: `${pct}%`, background: `${primaryColor}cc` }}
+                        style={{ height: `${barH}px`, background: `${primaryColor}cc`, minHeight: '2px' }}
                         title={`${MONTHS[i]}: ${kwh.toLocaleString()} kWh`}
                       />
-                      <span className="text-xs text-slate-500">{MONTHS[i].slice(0,1)}</span>
+                      <span className="text-xs text-slate-500 mt-0.5">{MONTHS[i].slice(0,1)}</span>
                     </div>
                   );
                 })}
