@@ -2406,6 +2406,116 @@ export const NEM_SPECIAL_PROGRAMS: NemSpecialProgram[] = [
     last_verified: '2025-05',
   },
 
+  // ── California Munis: LADWP / SMUD Net Billing Tariff ────────────────────
+  // LADWP and SMUD are the two largest CA munis; both adopted NBT-style policies after CPUC NEM 3.0
+  {
+    program_id: 'ladwp_smud_nbt',
+    program_name: 'LADWP / SMUD Net Billing Tariff (NBT)',
+    utility_ids: ['ladwp_ca', 'smud_ca'],
+    type: 'nem_special',
+    status: 'active',
+    program_description:
+      'LADWP and SMUD are not CPUC-regulated but adopted Net Billing Tariff-style policies aligned with California\'s post-NEM 3.0 framework. New solar customers receive export credits at avoided-cost rates (~8–12¢/kWh for SMUD; ~9–11¢/kWh for LADWP) rather than full retail. Legacy customers grandfathered on NEM 1.0 or older NBT terms for 20 years from install date.',
+    export_rate_per_kwh: 0.10,
+    tou_export_credit: true,
+    annual_export_cap_note: 'Monthly netting; annual true-up at avoided-cost rate',
+    enrollment_url: 'https://www.ladwp.com/account/understanding-your-rates/solar-customers',
+    solar_pro_note:
+      'LADWP and SMUD customers benefit from among the most favorable export rates of any CA muni utility (avoided-cost ~10¢/kWh vs. 6¢ for IOUs). Battery storage still recommended to capture LADWP 1–5 PM on-peak rates (27¢/kWh summer) and SMUD 5–8 PM peak (30¢/kWh). Confirm current NBT step with utility before proposal.',
+    last_verified: '2025-05',
+  },
+
+  // ── California Munis: IID / Modesto ID / Turlock ID ─────────────────────
+  // These three have unique NEM tariffs independent of CPUC
+  {
+    program_id: 'ca_independent_nem',
+    program_name: 'California Independent Utility NEM (IID / Modesto ID / Turlock ID)',
+    utility_ids: ['imperial_irrigation_district_ca', 'modesto_irrigation_district_ca', 'turlock_irrigation_district_ca'],
+    type: 'nem_special',
+    status: 'active',
+    program_description:
+      'Imperial Irrigation District (IID), Modesto Irrigation District (MID), and Turlock Irrigation District (TID) are not regulated by CPUC and maintain their own net metering tariffs. All three offer near-retail-rate net metering for residential solar systems ≤ 1 MW. Export credits are set by each district\'s board and have historically been more favorable than CPUC NEM 3.0 NBT rates.',
+    export_rate_per_kwh: 0.11,
+    tou_export_credit: false,
+    annual_export_cap_note: 'Annual true-up; no statewide cap applies',
+    enrollment_url: 'https://www.iid.com/energy/customers/solar-program',
+    solar_pro_note:
+      'IID, Modesto ID, and Turlock ID customers are NOT subject to California NEM 3.0. These districts set their own solar rates and have historically maintained more favorable export credits than PG&E/SCE/SDG&E. Battery storage is still beneficial (especially for TOU arbitrage) but is not financially required the way it is for CPUC IOU customers. Verify current tariff with each district before finalizing proposal.',
+    last_verified: '2025-05',
+  },
+
+  // ── California Munis: Southern CA Munis (Burbank, Glendale, Pasadena, Anaheim) ─────
+  {
+    program_id: 'ca_socal_muni_nem',
+    program_name: 'Southern CA Municipal Utility NEM (Burbank / Glendale / Pasadena / Anaheim)',
+    utility_ids: ['burbank_wp_ca', 'glendale_water_power_ca', 'pasadena_wp_ca', 'anaheim_public_utilities_ca'],
+    type: 'nem_special',
+    status: 'active',
+    program_description:
+      'Burbank Water & Power, Glendale Water & Power, Pasadena Water & Power, and Anaheim Public Utilities are not CPUC-regulated and maintain independent net metering programs. All four offer annual net metering at near-retail rates for residential solar. Export credits are typically the utility\'s avoided-cost rate or volumetric retail rate depending on the tariff period. Systems must be interconnected per each utility\'s tariff.',
+    export_rate_per_kwh: 0.12,
+    tou_export_credit: false,
+    annual_export_cap_note: 'Annual true-up at utility avoided-cost or retail rate (varies by utility)',
+    solar_pro_note:
+      'Southern California municipal utilities (Burbank, Glendale, Pasadena, Anaheim) offer better solar economics than nearby CPUC IOUs (SCE/SDG&E) because they are NOT subject to NEM 3.0. Export credits are closer to retail rate. Battery storage is beneficial for TOU arbitrage but ROI without battery is still strong. Each utility has slightly different interconnection requirements — verify tariff and application process before install.',
+    last_verified: '2025-05',
+  },
+
+  // ── California Munis: Northern CA / Central CA Munis ───────────────────
+  {
+    program_id: 'ca_norcal_muni_nem',
+    program_name: 'NorCal / Central CA Municipal Utility NEM',
+    utility_ids: [
+      'roseville_electric_ca', 'redding_electric_utility_ca', 'silicon_valley_power_ca',
+      'lodi_electric_utility_ca', 'riverside_public_utilities_ca',
+    ],
+    type: 'nem_special',
+    status: 'active',
+    program_description:
+      'Roseville Electric, Redding Electric, Silicon Valley Power (Santa Clara), Lodi Electric, and Riverside Public Utilities are not CPUC-regulated municipal utilities offering independent net metering programs. Most offer near-retail-rate annual net metering for residential solar systems. Roseville Electric (RCEA) has an excellent solar program with favorable export rates. Silicon Valley Power offers competitive NEM through the City of Santa Clara.',
+    export_rate_per_kwh: 0.11,
+    tou_export_credit: false,
+    annual_export_cap_note: 'Annual true-up; terms set by each city\'s utility board',
+    solar_pro_note:
+      'These NorCal/Central CA munis are not subject to CPUC NEM 3.0. Export credits are set independently and tend to be more favorable than CPUC IOUs. Roseville Electric and Silicon Valley Power in particular have strong solar programs. Battery storage adds value but proposals can stand alone without battery for these utilities — unlike PG&E/SCE/SDG&E territory.',
+    last_verified: '2025-05',
+  },
+
+  // ── California Munis: Rural / Smaller CA Munis ───────────────────────
+  {
+    program_id: 'ca_rural_muni_nem',
+    program_name: 'California Rural Municipal Utility NEM (Plumas Sierra / Trinity PUD / Valley Electric)',
+    utility_ids: ['plumas_sierra_rec_ca', 'trinity_pud_ca', 'valley_electric_association_ca'],
+    type: 'nem_special',
+    status: 'active',
+    program_description:
+      'Plumas-Sierra Rural Electric Cooperative, Trinity PUD, and Valley Electric Association are small California rural utilities with their own solar interconnection and net metering rules. These utilities are not CPUC-regulated and tend to have simpler, older NEM policies that may include full retail-rate credits. Solar resources in these service territories are generally excellent due to higher elevation and more sun hours.',
+    export_rate_per_kwh: 0.10,
+    tou_export_credit: false,
+    annual_export_cap_note: 'Annual net metering; utility-specific terms',
+    solar_pro_note:
+      'Plumas-Sierra, Trinity PUD, and Valley Electric are rural CA utilities with favorable legacy NEM policies — not subject to CPUC NEM 3.0. Solar ROI without battery storage is strong in these territories. Interconnection queues are typically short vs. major IOUs. Confirm interconnection timeline and current export credit rate with utility before proposal.',
+    last_verified: '2025-05',
+  },
+
+  // ── DC: Pepco District of Columbia Net Metering ──────────────────────
+  {
+    program_id: 'pepco_dc_nem',
+    program_name: 'DC Net Metering (Pepco)',
+    utility_ids: ['pepco_dc'],
+    type: 'nem_special',
+    status: 'active',
+    program_description:
+      'Pepco District of Columbia offers full retail-rate net metering for residential solar systems under DC Public Service Commission rules. DC mandates net metering at the full retail rate for systems up to 1 MW. Solar Renewable Energy Credits (SRECs) trade in the DC SREC market, providing additional income of ~$350–450/SREC (among the highest SREC values in the nation). DC solar incentive law is among the most pro-solar in the US.',
+    export_rate_per_kwh: 0.14,
+    tou_export_credit: false,
+    annual_export_cap_note: 'Annual true-up at retail rate; DC SREC income is additional',
+    enrollment_url: 'https://pepco.com/home/producingpower/renewableenergy/',
+    solar_pro_note:
+      'DC has exceptional solar economics: full retail-rate NEM (~14¢/kWh), among the highest SREC values in the nation ($350–450/SREC), 30% federal ITC, and DC property tax exemption for solar. Battery storage adds value but is not required for strong ROI. Ensure customer is aware of DC SREC income — it significantly shortens payback period.',
+    last_verified: '2025-05',
+  },
+
   // ── Massachusetts: SMART Program ──────────────────────────────────────────
   {
     program_id: 'ma_smart',
