@@ -7472,13 +7472,15 @@ function EngineeringPageInner() {
                             ))}
                           </select>
                           {config.utilityId && config.state && (() => {
-                            const stateData = STATE_UTILITY_FALLBACK[config.state];
-                            if (!stateData) return null;
+                            // ✅ v48.24 fix: use per-utility rate from UtilityOption, not state fallback
+                            const utils = getUtilitiesByStateNational(config.state);
+                            const selectedUtil = utils.find(u => u.id === config.utilityId);
+                            if (!selectedUtil) return null;
                             return (
                               <div className="text-xs text-slate-400 mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                                <span><span className="text-slate-500">Rate:</span> <span className="text-amber-400 font-medium">${stateData.avgRate.toFixed(3)}/kWh</span></span>
-                                <span><span className="text-slate-500">NEM:</span> <span className={stateData.netMetering ? 'text-emerald-400' : 'text-red-400'}>{stateData.netMetering ? '✓ Eligible' : '✗ N/A'}</span></span>
-                                <span className="text-slate-500">Max: {stateData.interconnectionMaxKw}kW</span>
+                                <span><span className="text-slate-500">Rate:</span> <span className="text-amber-400 font-medium">${selectedUtil.avgRatePerKwh.toFixed(3)}/kWh</span></span>
+                                <span><span className="text-slate-500">NEM:</span> <span className={selectedUtil.netMeteringEligible ? 'text-emerald-400' : 'text-red-400'}>{selectedUtil.netMeteringEligible ? '✓ Eligible' : '✗ N/A'}</span></span>
+                                <span className="text-slate-500">Max: {selectedUtil.interconnectionMaxKw}kW</span>
                               </div>
                             );
                           })()}

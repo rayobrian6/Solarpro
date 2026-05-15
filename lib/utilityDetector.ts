@@ -223,7 +223,7 @@ export function getUtilityRateSummary(utility: UtilityInfo): string {
   if (!parts.length) parts.push('Flat Rate');
   return parts.join(' + ');
 }
-// ── National utility list by state (for dropdowns) ────────────────────────────
+// ─── National utility list by state (for dropdowns) ────────────────────────────────────────────
 export interface UtilityOption {
   id: string;
   name: string;
@@ -235,17 +235,67 @@ export interface UtilityOption {
   interconnectionMaxKw: number;
 }
 
+/**
+ * Returns per-utility UtilityOption objects for the given state.
+ * Rates and NEM data are sourced from PROPOSAL_UTILITY_PROFILES (proposalTruthEngine)
+ * when a matching profile exists, falling back to STATE_UTILITY_FALLBACK only when
+ * no profile match is found. This ensures each utility shows its own $/kWh rate
+ * rather than a uniform state-level average.
+ */
 export function getUtilitiesByStateNational(stateCode: string): UtilityOption[] {
+  // Lazy require to avoid circular dependency — resolved at runtime in Next.js
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { PROPOSAL_UTILITY_PROFILES } = require('./proposalTruthEngine') as {
+    PROPOSAL_UTILITY_PROFILES: Array<{
+      utility_id: string;
+      utility_name: string;
+      utility_name_pattern: string;
+      state: string;
+      blended_rate: number;
+      net_metering_type: string;
+      export_rate_monthly: number | null;
+    }>;
+  };
+
   const fallback = STATE_UTILITY_FALLBACK[stateCode];
   if (!fallback) return [];
-  return fallback.majorUtilities.map((name, i) => ({
-    id: `${stateCode.toLowerCase()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')}`,
-    name,
-    avgRatePerKwh: fallback.avgRate,
-    netMeteringEligible: fallback.netMetering,
-    netMeteringPolicy: fallback.netMeteringPolicy,
-    netMeteringMaxKw: fallback.netMeteringMaxKw,
-    exportRate: fallback.exportRate,
-    interconnectionMaxKw: fallback.interconnectionMaxKw,
-  }));
+
+  // Profiles scoped to this state for faster matching
+  const stateProfiles = PROPOSAL_UTILITY_PROFILES.filter(
+    (p) => p.state === stateCode,
+  );
+
+  return fallback.majorUtilities.map((name) => {
+    // Try to find a matching profile using the utility_name_pattern regex
+    const nameLower = name.toLowerCase();
+    const profile = stateProfiles.find((p) => {
+      try {
+        return new RegExp(p.utility_name_pattern, 'i').test(nameLower);
+      } catch {
+        return nameLower.includes(p.utility_name_pattern.toLowerCase());
+      }
+    });
+
+    // NEM eligibility: derive from profile net_metering_type when available
+    const nemEligible = profile
+      ? profile.net_metering_type !== 'none'
+      : fallback.netMetering;
+
+    // Export rate: prefer profile's export_rate_monthly, fall back to state export rate
+    const exportRate = profile
+      ? (profile.export_rate_monthly ?? fallback.exportRate)
+      : fallback.exportRate;
+
+    return {
+      id: `${stateCode.toLowerCase()}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '')}`,
+      name,
+      // ✅ Per-utility rate from PROPOSAL_UTILITY_PROFILES; state fallback only if no profile match
+      avgRatePerKwh: profile ? profile.blended_rate : fallback.avgRate,
+      netMeteringEligible: nemEligible,
+      netMeteringPolicy: fallback.netMeteringPolicy,
+      netMeteringMaxKw: fallback.netMeteringMaxKw,
+      exportRate,
+      interconnectionMaxKw: fallback.interconnectionMaxKw,
+    };
+  });
 }

@@ -521,7 +521,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'pseg_nj',
     utility_name: 'PSE&G',
-    utility_name_pattern: 'pseg|public service enterprise|jcp&l|jersey central',
+    utility_name_pattern: 'pseg|pse&g|public service enterprise|jcp&l|jersey central',
     state: 'NJ',
     retail_rate_type: 'flat',
     blended_rate: 0.227,
@@ -1215,7 +1215,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'xcel_mn',
     utility_name: 'Xcel Energy Minnesota / Northern States Power',
-    utility_name_pattern: 'xcel.*mn|xcel.*minnesota|northern states power|nsp.*mn',
+    utility_name_pattern: 'xcel energy|xcel.*mn|xcel.*minnesota|northern states power|nsp.*mn',
     state: 'MN',
     retail_rate_type: 'flat',
     blended_rate: 0.164,
@@ -1965,7 +1965,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'pacificorp_or',
     utility_name: 'Pacific Power (PacifiCorp Oregon)',
-    utility_name_pattern: 'pacific power oregon|pacific power.*oregon|pacificorp.*oregon',
+    utility_name_pattern: 'pacific power|pacific power oregon|pacificorp.*or',
     state: 'OR',
     retail_rate_type: 'tiered',
     blended_rate: 0.143,
@@ -2371,7 +2371,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'natgrid_ma',
     utility_name: 'National Grid Massachusetts (NSTAR / Eversource)',
-    utility_name_pattern: 'massachusetts electric|nstar|national grid.*mass|national grid.*ma',
+    utility_name_pattern: 'national grid|nstar|massachusetts electric',
     state: 'MA',
     retail_rate_type: 'tiered',
     blended_rate: 0.275,
@@ -2516,7 +2516,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'centerpoint_tx',
     utility_name: 'CenterPoint Energy (Houston)',
-    utility_name_pattern: 'centerpoint energy|center point energy|centerpoint.*houston|centerpoint.*texas',
+    utility_name_pattern: 'centerpoint|center point energy|centerpoint.*houston|centerpoint.*texas',
     state: 'TX',
     retail_rate_type: 'tiered',
     blended_rate: 0.138,
@@ -2632,7 +2632,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'alliant_wi',
     utility_name: 'Alliant Energy (Wisconsin Power & Light)',
-    utility_name_pattern: 'alliant.*wisconsin|wisconsin power.*light|wpl|alliant.*wpl',
+    utility_name_pattern: 'alliant energy|alliant.*wisconsin|wisconsin power.*light|wpl',
     state: 'WI',
     retail_rate_type: 'tiered',
     blended_rate: 0.175,
@@ -2661,7 +2661,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'firstenergy_oh',
     utility_name: 'FirstEnergy Ohio (CEI / Ohio Edison / Toledo Edison)',
-    utility_name_pattern: 'cleveland electric|ohio edison|toledo edison|firstenergy.*ohio|illuminating company',
+    utility_name_pattern: 'firstenergy|cleveland electric|ohio edison|toledo edison|illuminating company',
     state: 'OH',
     retail_rate_type: 'tiered',
     blended_rate: 0.148,
@@ -8809,10 +8809,6 @@ export function buildUtilityProfile(project: {
     '19979': 'delmarva power',
     '19980': 'delmarva power',
     '21916': 'delmarva maryland',
-    '216HH': 'delmarva maryland',
-    '218HH': 'delmarva maryland',
-    '218XX': 'delmarva maryland',
-    '219HH': 'delmarva maryland',
     '199HH': 'delmarva power',
     '20001': 'pepco',
     '20002': 'pepco',
