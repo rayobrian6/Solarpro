@@ -328,7 +328,18 @@ function PublicProposalView({
   const totalPanels = (layout?.totalPanels && layout.totalPanels > 0)
     ? layout.totalPanels
     : layoutSystemSizeKw > 0 ? Math.ceil(layoutSystemSizeKw / 0.44) : 0;
-  const projectStateCode = ((proj as any)?.stateCode || client?.state || '').toUpperCase().trim().slice(0, 2);
+  // v48.10: extract stateCode from address as last resort (e.g. "Pocahontas, IL 62275")
+  const extractStateFromAddress = (addr?: string): string => {
+    if (!addr) return '';
+    const m = addr.match(/\b([A-Z]{2})\s+\d{5}/i) || addr.match(/,\s*([A-Z]{2})\s*$/i);
+    return m ? m[1].toUpperCase() : '';
+  };
+  const projectStateCode = (
+    (proj as any)?.stateCode ||
+    client?.state ||
+    extractStateFromAddress((proj as any)?.address || client?.address || '') ||
+    ''
+  ).toUpperCase().trim().slice(0, 2);
   const isCommercial = pricingCfg?.isCommercial ?? false;
 
   const cp = buildCanonicalProposal({

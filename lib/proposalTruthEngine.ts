@@ -975,22 +975,29 @@ export function buildUtilityProfile(project: {
     matchedProfile = buildStateFallbackProfile(stateCode, stateFallbackData);
   }
 
-  // v48.8: Rate resolution logic
-  // - utilityRatePerKwh: strong override (from parsedBillRate / dbUtilityRate / utilityRateOverride).
-  //   Always takes priority — these come from verified bill OCR or explicit installer override.
+  // v48.10: Rate resolution logic
+  // - utilityRatePerKwh: strong override ONLY when it's a credible full blended rate.
+  //   For specific utility matches (e.g. ameren_il), the profile rate is EIA-verified.
+  //   A "strong" override only wins if it's >= 85% of the profile rate — otherwise it's
+  //   likely a supply-only OCR extraction (e.g. $0.107 when full rate is $0.155).
   // - clientUtilityRateFallback: weak override — ONLY used when there's no specific profile match.
-  //   If we matched a named utility (ameren_il, pge_ca, etc.), the EIA-sourced profile rate wins.
-  //   clientUtilityRateFallback is typically the supply-only portion from an old client record
-  //   and would under-count delivery charges, taxes, and recent rate increases.
-  // - profile rate: used for all specific matches when no strong override is present.
-  const strongRate = project.utilityRatePerKwh ?? project.client?.utilityRate ?? 0;
-  const resolvedRate = strongRate > 0.08
+  // - profile rate: always used for specific matches when override is absent or supply-only.
+  const profileRate = matchedProfile.blended_rate || matchedProfile.utility_rate;
+  const strongRate = project.utilityRatePerKwh ?? 0;
+
+  // For a specific match, only trust the override if it's >= 85% of the profile rate.
+  // This catches supply-only OCR extractions that are typically 45–70% of full retail.
+  const strongRateIsCredible = isSpecificMatch
+    ? (strongRate >= profileRate * 0.85)
+    : (strongRate > 0.08);
+
+  const resolvedRate = (strongRate > 0.08 && strongRateIsCredible)
     ? strongRate
     : isSpecificMatch
-      ? (matchedProfile.blended_rate || matchedProfile.utility_rate)
+      ? profileRate
       : ( (project.clientUtilityRateFallback ?? 0) > 0.08
           ? project.clientUtilityRateFallback!
-          : (matchedProfile.blended_rate || matchedProfile.utility_rate) );
+          : profileRate );
 
   const netMeteringSummary = getNetMeteringSummary(matchedProfile);
   const srecSummary = getSrecSummary(matchedProfile, resolvedRate);

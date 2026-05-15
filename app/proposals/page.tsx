@@ -1163,10 +1163,16 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   const lifetimeSavings = cost?.lifetimeSavings ?? 0;
 
   // State incentives — computed from project stateCode
-  // Priority: proj.stateCode > client.state > extract from project address
+  // Priority: proj.stateCode > client.state > extract from project address > ''
+  const _extractStateFromAddress = (addr?: string): string => {
+    if (!addr) return '';
+    const m = addr.match(/\b([A-Z]{2})\s+\d{5}/i) || addr.match(/,\s*([A-Z]{2})\s*$/i);
+    return m ? m[1].toUpperCase() : '';
+  };
   const projectStateCode = (
     (proj as any)?.stateCode ||
     client?.state ||
+    _extractStateFromAddress((proj as any)?.address || client?.address || '') ||
     ''
   ).toUpperCase().trim().slice(0, 2);
   // Use annualProductionKwh for SREC calculation — fall back to estimate from system size
