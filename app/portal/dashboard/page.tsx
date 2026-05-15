@@ -7,7 +7,12 @@ import {
   CheckCircle2, Circle, Clock,
   Phone, Mail, AlertCircle, Zap,
   TrendingUp, Home, FileCheck, ExternalLink, PenLine,
+  Info, CheckCircle,
 } from 'lucide-react';
+import {
+  getInterconnectionProfile,
+  getStateIcaFallback,
+} from '@/lib/utilityInterconnection';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -493,6 +498,26 @@ export default function PortalDashboard() {
   // Proposals scoped to the active project (most recent first)
   const projectProposals = proposals.filter(pr => activeProject && pr.project_id === activeProject.id);
 
+  // ── ICA / PTO lookup for installation stage ───────────────────────────────
+  // Extract state from project address or client.state for Tier 2 fallback.
+  // In portal context we don't have utility_id, so we use Tier 2 (state fallback) by default.
+  // If a matching Tier-1 profile exists for a known utility (future enhancement), it would
+  // override this — for now portal always shows state-level guidance.
+  const portalStateCode = (
+    (client as any)?.state ||
+    (() => {
+      const addr = p?.address || '';
+      const m = addr.match(/\b([A-Z]{2})\s+\d{5}/i) || addr.match(/,\s*([A-Z]{2})\s*$/i);
+      return m ? m[1].toUpperCase() : '';
+    })()
+  ).toUpperCase().trim().slice(0, 2);
+  // Try Tier 1 via any utility name on the proposal (not available in portal — skip for now)
+  const portalIcaTier1 = null as ReturnType<typeof getInterconnectionProfile>;  // reserved for future
+  void getInterconnectionProfile; // keep import used
+  // Tier 2: state fallback — always available when stage is 'installation'
+  const portalIcaFallback = portalStateCode ? getStateIcaFallback(portalStateCode) : null;
+  const showIcaSection = stage === 'installation' && (portalIcaTier1 || portalIcaFallback);
+
   return (
     <div className="min-h-screen bg-[#07070e] text-white overflow-x-hidden">
 
@@ -634,7 +659,7 @@ export default function PortalDashboard() {
                         <CheckCircle2 size={15} className="text-emerald-400 flex-shrink-0" />
                         <div>
                           <p className="text-sm font-semibold text-emerald-300">Utility bill received ✓</p>
-                          <p className="text-xs text-slate-500 mt-0.5">We're analyzing your energy usage now.</p>
+                          <p className="text-xs text-slate-500 mt-0.5">We&apos;re analyzing your energy usage now.</p>
                         </div>
                       </div>
                     ) : (
@@ -760,6 +785,116 @@ export default function PortalDashboard() {
                 })()}
               </div>
             )}
+
+            {/* ── ICA / PTO Roadmap — shown during installation stage ───────── */}
+            {showIcaSection && (portalIcaTier1 || portalIcaFallback) && (() => {
+              const tier1 = portalIcaTier1;
+              const tier2 = portalIcaFallback;
+              const steps = tier1
+                ? tier1.pto_steps
+                : (tier2?.generic_steps ?? []);
+              const icaTime = tier1
+                ? `${tier1.ica_approval_days_min}–${tier1.ica_approval_days_max} business days`
+                : tier2
+                  ? `${tier2.typical_ica_days_min}–${tier2.typical_ica_days_max} business days`
+                  : null;
+              const ptoTime = tier1
+                ? `${tier1.pto_days_min}–${tier1.pto_days_max} business days`
+                : tier2
+                  ? `${tier2.typical_pto_days_min}–${tier2.typical_pto_days_max} business days`
+                  : null;
+              const portalUrl = tier1?.application_url ?? null;
+              const rulesUrl  = tier2?.rules_url ?? null;
+              const tierLabel = tier1
+                ? tier1.utility_name
+                : tier2
+                  ? `${tier2.state_name} (${tier2.regulatory_body})`
+                  : null;
+              return (
+                <div className="rounded-2xl border border-violet-500/[0.12] bg-violet-500/[0.03] px-6 sm:px-8 py-6">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-violet-400 animate-pulse" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-violet-500/60">Interconnection &amp; PTO</span>
+                  </div>
+                  <h3 className="text-lg font-black text-white mb-1">Utility Approval Process</h3>
+                  {tierLabel && (
+                    <p className="text-xs text-slate-400 mb-4 flex items-center gap-1.5">
+                      <Info size={11} className="text-slate-500 flex-shrink-0" />
+                      {tier1 ? `Steps specific to ${tierLabel}` : `Typical steps — ${tierLabel}`}
+                    </p>
+                  )}
+                  {/* Timeline badges */}
+                  {(icaTime || ptoTime) && (
+                    <div className="flex flex-wrap gap-2 mb-5">
+                      {icaTime && (
+                        <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-violet-500/10 border border-violet-500/20">
+                          <Clock size={11} className="text-violet-400" />
+                          <span className="text-xs text-violet-300 font-medium">Interconnection approval: {icaTime}</span>
+                        </div>
+                      )}
+                      {ptoTime && (
+                        <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-emerald-500/10 border border-emerald-500/20">
+                          <CheckCircle size={11} className="text-emerald-400" />
+                          <span className="text-xs text-emerald-300 font-medium">PTO (system turn-on): {ptoTime}</span>
+                        </div>
+                      )}
+                      {portalUrl && (
+                        <a
+                          href={portalUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors"
+                        >
+                          <ExternalLink size={11} className="text-sky-400" />
+                          <span className="text-xs text-sky-300 font-medium">Utility portal</span>
+                        </a>
+                      )}
+                      {!portalUrl && rulesUrl && (
+                        <a
+                          href={rulesUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors"
+                        >
+                          <ExternalLink size={11} className="text-sky-400" />
+                          <span className="text-xs text-sky-300 font-medium">State rules</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {/* Steps */}
+                  {steps.length > 0 && (
+                    <div className="space-y-0">
+                      {steps.map((step, idx) => (
+                        <div key={idx} className="flex gap-3">
+                          <div className="flex flex-col items-center flex-shrink-0">
+                            <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 flex items-center justify-center text-xs font-black text-violet-400">
+                              {idx + 1}
+                            </div>
+                            {idx < steps.length - 1 && (
+                              <div className="w-px flex-1 bg-violet-500/20 my-1" />
+                            )}
+                          </div>
+                          <div className={`pb-${idx < steps.length - 1 ? '3' : '0'} flex-1 min-w-0`}>
+                            <p className="text-xs text-slate-300 leading-relaxed">{step}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-4 rounded-lg px-3 py-2 bg-slate-800/40 border border-slate-700/30">
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      {tier1
+                        ? `Steps specific to ${tier1.utility_name}. Your installer handles most of this on your behalf.`
+                        : tier2
+                          ? `Typical steps for utilities regulated by the ${tier2.regulatory_body}. Your installer handles most of this for you.`
+                          : 'Your installer handles the interconnection and PTO process. This timeline is typical.'
+                      }
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── 4. PROJECT DETAILS (small stats) ── */}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
