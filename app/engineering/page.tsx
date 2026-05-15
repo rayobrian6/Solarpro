@@ -95,7 +95,8 @@ import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 import { searchAhj } from '@/lib/jurisdictions/ahj-national';
 import { useEngineeringStore, simplifyPanelCountSource } from '@/store/engineeringStore';
-import { getUtilityPrograms, type TouRatePlan, type BatteryIncentiveProgram, type SolarRebateProgram, type NemSpecialProgram, type UtilityProgramBundle } from '@/lib/utilityPrograms';
+import { getUtilityPrograms, getPacePrograms, getLowIncomeProgramsByState, type TouRatePlan, type BatteryIncentiveProgram, type SolarRebateProgram, type NemSpecialProgram, type UtilityProgramBundle, type EvChargerIncentive, type PaceFinancingProgram, type LowIncomeSolarProgram } from '@/lib/utilityPrograms';
+import { getInterconnectionProfile, getTypicalTotalTimeline, type InterconnectionProfile } from '@/lib/utilityInterconnection';
 import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
@@ -675,14 +676,35 @@ function ProgramSection({
 }
 
 // Top-level panel — takes a resolved UtilityProgramBundle + utility display name
-function UtilityProgramsPanel({ programs, utilityName }: { programs: UtilityProgramBundle; utilityName: string }) {
+function UtilityProgramsPanel({
+  programs,
+  utilityName,
+  interconnection,
+  stateCode,
+}: {
+  programs: UtilityProgramBundle;
+  utilityName: string;
+  interconnection: InterconnectionProfile | null;
+  stateCode: string;
+}) {
   const [panelOpen, setPanelOpen] = React.useState(true);
+  const [icaOpen, setIcaOpen] = React.useState(false);
+
   const touCount = programs.tou_plans.length;
   const batteryCount = programs.battery_incentives.length;
   const solarCount = programs.solar_rebates.length;
   const nemCount = programs.nem_programs.length;
-  const totalCount = touCount + batteryCount + solarCount + nemCount;
-  if (totalCount === 0) return null;
+  const evCount = programs.ev_charger_incentives?.length ?? 0;
+  const liCount = programs.low_income_programs?.length ?? 0;
+  const paceProgs = getPacePrograms(stateCode);
+  const liStateProgs = getLowIncomeProgramsByState(stateCode).filter(p =>
+    !programs.low_income_programs?.some(lp => lp.program_id === p.program_id)
+  );
+  const paceCount = paceProgs.length;
+  const liTotalCount = liCount + liStateProgs.length;
+
+  const totalCount = touCount + batteryCount + solarCount + nemCount + evCount + paceCount + liTotalCount;
+  if (totalCount === 0 && !interconnection) return null;
 
   return (
     <div className="mt-2 rounded-xl border border-violet-500/25 bg-violet-500/[0.04] overflow-hidden">
@@ -696,6 +718,11 @@ function UtilityProgramsPanel({ programs, utilityName }: { programs: UtilityProg
           <span className="text-[10px] text-violet-400/70 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
             {totalCount} program{totalCount !== 1 ? 's' : ''}
           </span>
+          {interconnection && (
+            <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5">
+              ICA data ✓
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-500">tap 💡 for rep guidance</span>
@@ -788,6 +815,165 @@ function UtilityProgramsPanel({ programs, utilityName }: { programs: UtilityProg
                 />
               ))}
             </ProgramSection>
+          )}
+
+          {evCount > 0 && (
+            <ProgramSection sectionIcon="🚗" title="EV Charger Incentives" count={evCount}>
+              {programs.ev_charger_incentives!.map((p: EvChargerIncentive) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon="🚗"
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.max_rebate != null ? `Up to $${p.max_rebate.toLocaleString()} rebate` : p.incentive_delivery.replace(/_/g, ' ')}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-teal-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {paceCount > 0 && (
+            <ProgramSection sectionIcon="🏠" title="PACE Financing" count={paceCount}>
+              {paceProgs.map((p: PaceFinancingProgram) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon="🏠"
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.apr_range_description}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-indigo-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {liTotalCount > 0 && (
+            <ProgramSection sectionIcon="🤝" title="Low-Income / DAC Programs" count={liTotalCount}>
+              {[...(programs.low_income_programs ?? []), ...liStateProgs].map((p: LowIncomeSolarProgram) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon="🤝"
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.value_description}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-rose-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {/* ── Interconnection & PTO Roadmap (v48.33) ── */}
+          {interconnection && (
+            <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.04] overflow-hidden">
+              <button
+                onClick={() => setIcaOpen(o => !o)}
+                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">🔌</span>
+                  <span className="text-xs font-bold text-emerald-300">Interconnection & PTO Roadmap</span>
+                  <span className="text-[10px] text-emerald-400/70 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5">
+                    {interconnection.ica_approval_days_min}–{interconnection.ica_approval_days_max} day ICA
+                  </span>
+                  <span className="text-[10px] text-blue-400/70 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">
+                    PTO {interconnection.pto_days_min}–{interconnection.pto_days_max}d after inspection
+                  </span>
+                </div>
+                <span className="text-slate-500 text-xs">{icaOpen ? '▾' : '▸'}</span>
+              </button>
+              {icaOpen && (
+                <div className="px-3 pb-3 pt-1 space-y-3 border-t border-emerald-500/15 text-xs">
+                  {/* ICA Info */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide">Interconnection Application</div>
+                    <div className="flex gap-2 text-slate-300">
+                      <span className="text-slate-500 min-w-[90px]">Form:</span>
+                      <span>{interconnection.application_form_name}</span>
+                    </div>
+                    <div className="flex gap-2 text-slate-300">
+                      <span className="text-slate-500 min-w-[90px]">Portal:</span>
+                      <a href={interconnection.application_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
+                        {interconnection.application_url}
+                      </a>
+                    </div>
+                    {interconnection.interconnection_phone && (
+                      <div className="flex gap-2 text-slate-300">
+                        <span className="text-slate-500 min-w-[90px]">Phone:</span>
+                        <span>{interconnection.interconnection_phone}</span>
+                      </div>
+                    )}
+                    <div className="flex gap-2 text-slate-300">
+                      <span className="text-slate-500 min-w-[90px]">Timeline:</span>
+                      <span className="text-amber-300">{interconnection.ica_approval_days_min}–{interconnection.ica_approval_days_max} business days</span>
+                    </div>
+                    <div className="text-slate-400 text-[10px] italic">{interconnection.timeline_note}</div>
+                  </div>
+
+                  {/* PTO Steps */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wide">PTO Process</div>
+                    <div className="space-y-1">
+                      {interconnection.pto_steps.map((step, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <span className="flex-shrink-0 w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 text-[9px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                          <span className="text-slate-300 text-[10px] leading-relaxed">{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Homeowner Checklist */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold text-orange-400 uppercase tracking-wide">Homeowner PTO Checklist</div>
+                    <div className="space-y-1">
+                      {interconnection.homeowner_pto_checklist.map((item, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <span className="flex-shrink-0 w-3 h-3 mt-0.5 border border-orange-400/50 rounded-sm"></span>
+                          <span className="text-slate-300 text-[10px] leading-relaxed">{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Total Timeline */}
+                  <div className="p-2 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] text-emerald-300">
+                    <span className="font-bold">Total estimated timeline (ICA → PTO):</span>{' '}
+                    {getTypicalTotalTimeline(interconnection.utility_id) ?? `${interconnection.ica_approval_days_min + interconnection.pto_days_min}–${interconnection.ica_approval_days_max + interconnection.pto_days_max} business days`}
+                  </div>
+
+                  {/* Solar Pro Coaching Note */}
+                  <div className="p-2 bg-amber-500/10 rounded border border-amber-500/20">
+                    <div className="text-[9px] font-bold text-amber-400 mb-1 uppercase tracking-wide">💡 Solar Pro Coaching Note</div>
+                    <div className="text-[10px] text-slate-300 leading-relaxed">{interconnection.solar_pro_note}</div>
+                  </div>
+
+                  {/* Common Rejections */}
+                  {interconnection.common_rejections.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold text-red-400 uppercase tracking-wide">⚠️ Common Rejection Reasons</div>
+                      {interconnection.common_rejections.map((r, i) => (
+                        <div key={i} className="p-2 bg-red-500/[0.06] rounded border border-red-500/20 space-y-1">
+                          <div className="text-[10px] text-red-300 font-medium">{r.reason}</div>
+                          <div className="text-[10px] text-emerald-400">→ {r.how_to_avoid}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
         </div>
@@ -7731,8 +7917,25 @@ function EngineeringPageInner() {
                             try { return new RegExp(p.utility_name_pattern, 'i').test(nameLower); } catch { return false; }
                           });
                           const programs = matchedProfile ? getUtilityPrograms(matchedProfile.utility_id) : null;
-                          if (!programs) return null;
-                          return <UtilityProgramsPanel programs={programs} utilityName={selectedUtil.name} />;
+                          // v48.33: Also resolve interconnection profile
+                          const interconnection = matchedProfile ? getInterconnectionProfile(matchedProfile.utility_id) : null;
+                          if (!programs && !interconnection) return null;
+                          // Create empty bundle if no programs but we have interconnection data
+                          const programBundle = programs ?? {
+                            utility_id: matchedProfile?.utility_id ?? '',
+                            utility_name: selectedUtil.name,
+                            tou_plans: [], battery_incentives: [], solar_rebates: [], nem_programs: [],
+                            pace_financing: [], ev_charger_incentives: [], low_income_programs: [],
+                            summary: '',
+                          };
+                          return (
+                            <UtilityProgramsPanel
+                              programs={programBundle}
+                              utilityName={selectedUtil.name}
+                              interconnection={interconnection}
+                              stateCode={stateCode}
+                            />
+                          );
                         })()}
                         <div>
                           <label className="eng-label">Authority Having Jurisdiction (AHJ)</label>

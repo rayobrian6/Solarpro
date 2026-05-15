@@ -20,6 +20,7 @@ import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from 
 import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter } from './sections/certPages';
 import { pageValidationSummary } from './sections/validationPage';
+import { pageInterconnection } from './sections/interconnectionPage';
 import { generateBOMForPermit } from './utils/bomForPermit';
 
 export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): string {
@@ -207,7 +208,7 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     console.warn('[generatePermitHTML] BOM generation failed (non-critical):', (bomErr as Error)?.message ?? bomErr);
   }
 
-  const TOTAL = 15;
+  const TOTAL = 16;
 
   // Dynamic page assembly — CADModel + RenderContext passed to ALL page functions
   const pages = [
@@ -222,10 +223,11 @@ export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): s
     pageWarningLabels(input, cad, 9, TOTAL),                      // PV-5: Labels (system-aware)
     pageEquipmentSchedule(input, cad, 10, TOTAL),                 // SCHED (all)
     pageSpecSheetReference(input, cad, 11, TOTAL),                // APP-A (all)
-    pageEngineerCert(input, cad, 12, TOTAL),                      // CERT (all)
-    pagePELetter(input, cad, 13, TOTAL),                          // PE-1 (all)
-    pageSingleLineDiagram(input, cad, 14, TOTAL, storedSldSvg),   // E-1: SLD (all, system-labeled)
-    pageValidationSummary(input, canonical, cad, 15, TOTAL),      // VAL-1: Validation summary (engineering authority)
+    pageInterconnection(input, cad, 12, TOTAL),                   // APP-B: Utility Interconnection & PTO Roadmap (v48.33)
+    pageEngineerCert(input, cad, 13, TOTAL),                      // CERT (all)
+    pagePELetter(input, cad, 14, TOTAL),                          // PE-1 (all)
+    pageSingleLineDiagram(input, cad, 15, TOTAL, storedSldSvg),   // E-1: SLD (all, system-labeled)
+    pageValidationSummary(input, canonical, cad, 16, TOTAL),      // VAL-1: Validation summary (engineering authority)
   ];
 
   return `<!DOCTYPE html>

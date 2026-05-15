@@ -28,7 +28,11 @@ export type ProgramType =
   | 'vpp'               // Virtual Power Plant program
   | 'demand_response'   // DR program (non-battery)
   | 'ev_rate'           // EV-specific TOU rate
-  | 'community_solar';  // Community / shared solar program
+  | 'community_solar'   // Community / shared solar program
+  | 'pace_financing'    // PACE (Property Assessed Clean Energy) financing
+  | 'ev_charger_rebate' // EV charger purchase / installation rebate
+  | 'low_income_solar'  // Low-income / DAC (Disadvantaged Community) solar program
+  | 'green_tariff';     // Utility-offered green/clean energy tariff/subscription
 
 export type ProgramStatus = 'active' | 'limited' | 'waitlist' | 'pilot' | 'expired';
 
@@ -152,6 +156,12 @@ export interface UtilityProgramBundle {
   solar_rebates: SolarRebateProgram[];
   /** Special NEM programs */
   nem_programs: NemSpecialProgram[];
+  /** PACE financing programs (by state, may not be utility-specific) */
+  pace_financing: PaceFinancingProgram[];
+  /** EV charger incentive programs */
+  ev_charger_incentives: EvChargerIncentive[];
+  /** Low-income / DAC solar programs */
+  low_income_programs: LowIncomeSolarProgram[];
   /** High-level summary for Solar Pro UI */
   summary: string;
 }
@@ -4149,6 +4159,464 @@ export const NEM_SPECIAL_PROGRAMS: NemSpecialProgram[] = [
 ];
 
 // ─── UTILITY_PROGRAMS_MAP ─────────────────────────────────────────────────────
+
+// ─── New Interface: PACE Financing ─────────────────────────────────────────
+
+/** PACE (Property Assessed Clean Energy) Financing Program */
+export interface PaceFinancingProgram {
+  program_id: string;
+  program_name: string;
+  /** Which states this PACE program is available in */
+  states: string[];
+  /** Which utility territories this program is commonly used in */
+  utility_ids?: string[];
+  type: 'pace_financing';
+  status: ProgramStatus;
+  program_description: string;
+  /** Financing provider / administrator */
+  provider: string;
+  /** Typical APR range */
+  apr_range_description: string;
+  /** Maximum financing amount */
+  max_loan_amount?: number;
+  /** Maximum term in years */
+  max_term_years?: number;
+  /** Repaid as property tax assessment (true for all PACE) */
+  repaid_as_property_tax: true;
+  /** Does this transfer to new owner at sale? */
+  transferable_at_sale: boolean;
+  /** Can be used for solar only, or also battery + EV charger */
+  eligible_improvements: string[];
+  enrollment_url: string;
+  solar_pro_note: string;
+  last_verified: string;
+}
+
+// ─── New Interface: EV Charger Incentive ────────────────────────────────────
+
+/** EV Charger Rebate / Installation Incentive */
+export interface EvChargerIncentive {
+  program_id: string;
+  program_name: string;
+  utility_ids: string[];
+  type: 'ev_charger_rebate';
+  status: ProgramStatus;
+  program_description: string;
+  /** Rebate amount for Level 2 charger hardware */
+  rebate_hardware_amount?: number;
+  /** Rebate amount for installation labor */
+  rebate_installation_amount?: number;
+  /** Maximum total rebate */
+  max_rebate?: number;
+  /** Is this a rebate, bill credit, or free equipment? */
+  incentive_delivery: 'rebate_check' | 'bill_credit' | 'free_equipment' | 'discounted_equipment';
+  /** Eligible charger brands / models */
+  eligible_chargers?: string[];
+  /** Must have (or be installing) solar to qualify? */
+  requires_solar?: boolean;
+  enrollment_url: string;
+  solar_pro_note: string;
+  last_verified: string;
+}
+
+// ─── New Interface: Low-Income / DAC Solar Program ─────────────────────────
+
+/** Low-Income or Disadvantaged Community (DAC) Solar Program */
+export interface LowIncomeSolarProgram {
+  program_id: string;
+  program_name: string;
+  utility_ids: string[];
+  states: string[];
+  type: 'low_income_solar';
+  status: ProgramStatus;
+  program_description: string;
+  /** Maximum household income as % of area median income (AMI) */
+  max_income_pct_ami?: number;
+  /** Flat income threshold (annual household income in $) */
+  max_income_threshold?: number;
+  /** Value of incentive */
+  value_description: string;
+  /** One-time grant or ongoing bill credit */
+  incentive_type: 'grant' | 'rebate' | 'bill_credit' | 'free_system' | 'loan_forgiveness';
+  /** Can be stacked with federal ITC */
+  stackable_with_itc: boolean;
+  enrollment_url: string;
+  administering_agency: string;
+  solar_pro_note: string;
+  last_verified: string;
+}
+
+// ─── PACE Financing Registry ────────────────────────────────────────────────
+
+export const PACE_FINANCING_PROGRAMS: PaceFinancingProgram[] = [
+
+  // ── Ygrene Energy Fund (Nationwide PACE Leader) ────────────────────────
+  {
+    program_id: 'ygrene_pace',
+    program_name: 'Ygrene Energy Fund PACE Financing',
+    states: ['CA', 'FL', 'GA', 'MO'],
+    type: 'pace_financing',
+    status: 'active',
+    program_description: 'Ygrene PACE financing allows homeowners to finance 100% of solar, battery, EV charger, and efficiency improvements with no money down. Repayment is added to the property tax bill over 5–30 years.',
+    provider: 'Ygrene Energy Fund',
+    apr_range_description: '5.49%–8.99% APR (fixed rate, term-dependent)',
+    max_loan_amount: 200000,
+    max_term_years: 30,
+    repaid_as_property_tax: true,
+    transferable_at_sale: true,
+    eligible_improvements: ['solar panels', 'battery storage', 'EV charging station (Level 2)', 'roofing', 'HVAC', 'windows/doors', 'insulation', 'cool roof'],
+    enrollment_url: 'https://ygrene.com/homeowners',
+    solar_pro_note: 'Ygrene PACE is the strongest $0-down option for homeowners who don\'t want a solar loan or lease. Monthly property tax assessment replaces the electric bill — use the "bill shift" conversation. Key advantage: transfers to next owner at sale (no prepayment anxiety). Best used for whole-home upgrades (solar + battery + EV charger) to maximize value.',
+    last_verified: '2025-06',
+  },
+
+  // ── Mosaic PACE (Western States) ──────────────────────────────────────
+  {
+    program_id: 'mosaic_pace',
+    program_name: 'Mosaic PACE Financing',
+    states: ['CA', 'FL', 'NV', 'AZ', 'TX', 'CO'],
+    type: 'pace_financing',
+    status: 'active',
+    program_description: 'Mosaic PACE provides no-down-payment financing for residential solar and clean energy improvements through a property tax assessment. Available in participating municipalities.',
+    provider: 'Solar Mosaic / Mosaic',
+    apr_range_description: '5.99%–9.49% APR (fixed)',
+    max_loan_amount: 150000,
+    max_term_years: 25,
+    repaid_as_property_tax: true,
+    transferable_at_sale: true,
+    eligible_improvements: ['solar panels', 'battery storage', 'EV charging station', 'roofing', 'HVAC'],
+    enrollment_url: 'https://joinmosaic.com/pace',
+    solar_pro_note: 'Mosaic PACE is especially effective in CA and FL where it has broad municipal adoption. Use when a homeowner\'s credit score is too low for traditional solar loans (PACE uses property equity, not credit score). Always check if the homeowner\'s municipality participates before presenting this option.',
+    last_verified: '2025-06',
+  },
+
+  // ── Benji Finance PACE (Florida-focused) ──────────────────────────────
+  {
+    program_id: 'benji_pace_fl',
+    program_name: 'Benji Finance PACE (Florida)',
+    states: ['FL'],
+    utility_ids: ['fpl_fl', 'duke_fl', 'teco_fl', 'fpl_fl_keys'],
+    type: 'pace_financing',
+    status: 'active',
+    program_description: 'Benji Finance (formerly HERO/Renovate America) offers PACE financing across Florida through county-level programs. All 67 Florida counties participate in PACE programs under Florida Statute 163.08.',
+    provider: 'Benji Finance',
+    apr_range_description: '5.25%–8.75% APR (fixed)',
+    max_loan_amount: 125000,
+    max_term_years: 30,
+    repaid_as_property_tax: true,
+    transferable_at_sale: true,
+    eligible_improvements: ['solar panels', 'battery storage', 'EV charging station', 'roofing', 'HVAC', 'hurricane impact windows'],
+    enrollment_url: 'https://benjifinance.com',
+    solar_pro_note: 'Florida is the most PACE-friendly state in the country — all 67 counties participate by statute. When pitching solar in FL, always have PACE as a financing option alongside traditional loans. Pair solar + hurricane-rated roof + EV charger for a full PACE package that addresses multiple homeowner pain points simultaneously.',
+    last_verified: '2025-06',
+  },
+
+  // ── CalPACE / HERO (California) ───────────────────────────────────────
+  {
+    program_id: 'calpace_ca',
+    program_name: 'California PACE (CalPACE / HERO / Renovate America)',
+    states: ['CA'],
+    utility_ids: ['pge_ca', 'sce_ca', 'sdge_ca'],
+    type: 'pace_financing',
+    status: 'active',
+    program_description: 'California\'s CalPACE program and HERO/Renovate America PACE programs serve the vast majority of California homeowners. California has over 800,000 PACE loans originated — the most mature PACE market in the US.',
+    provider: 'CalPACE / Renovate America / HERO',
+    apr_range_description: '5.49%–9.99% APR (fixed). Note: CA PACE has consumer protection disclosures under AB 2693.',
+    max_loan_amount: 250000,
+    max_term_years: 30,
+    repaid_as_property_tax: true,
+    transferable_at_sale: true,
+    eligible_improvements: ['solar panels', 'battery storage (SGIP-eligible)', 'EV charging station', 'roofing', 'HVAC', 'insulation', 'window replacement'],
+    enrollment_url: 'https://www.californiapace.com',
+    solar_pro_note: 'California PACE is excellent for NEM 3.0 solar + battery packages where upfront cost is the objection. SGIP battery rebate can be applied after installation — tell homeowners to apply for SGIP immediately at PTO to stack the incentives. AB 2693 requires new consumer protection disclosures — review with homeowner at signing.',
+    last_verified: '2025-06',
+  },
+
+];
+
+// ─── EV Charger Incentive Registry ──────────────────────────────────────────
+
+export const EV_CHARGER_INCENTIVES: EvChargerIncentive[] = [
+
+  // ── PG&E EV Charger Rebate ────────────────────────────────────────────
+  {
+    program_id: 'pge_ev_charger',
+    program_name: 'PG&E EV Charge Network Rebate',
+    utility_ids: ['pge_ca'],
+    type: 'ev_charger_rebate',
+    status: 'active',
+    program_description: 'PG&E offers rebates for residential Level 2 EV charger installation through the EV Charge Network program. Rebate applies to both charger hardware and installation costs.',
+    rebate_hardware_amount: 200,
+    rebate_installation_amount: 300,
+    max_rebate: 500,
+    incentive_delivery: 'rebate_check',
+    eligible_chargers: ['ChargePoint', 'Enel X JuiceBox', 'Emporia', 'Wallbox', 'Siemens VersiCharge'],
+    requires_solar: false,
+    enrollment_url: 'https://www.pge.com/en_US/residential/solar-and-vehicles/options/clean-vehicles/charging/ev-charger-rebate.page',
+    solar_pro_note: 'Bundle EV charger installation with solar for a complete package sale. PG&E customers with EVs on TOU rate (EV2-A or E-ELEC) save an additional $500–1,200/year vs. flat rates. Always ask during discovery: "Do you own or plan to buy an EV?" This is one of the strongest upsell conversations available.',
+    last_verified: '2025-06',
+  },
+
+  // ── SCE EV Charger Rebate ─────────────────────────────────────────────
+  {
+    program_id: 'sce_ev_charger',
+    program_name: 'SCE Charge Ready Home Rebate',
+    utility_ids: ['sce_ca'],
+    type: 'ev_charger_rebate',
+    status: 'active',
+    program_description: 'Southern California Edison Charge Ready Home program provides rebates for Level 2 EV charger installation. Includes both equipment and wiring/installation costs.',
+    rebate_hardware_amount: 250,
+    rebate_installation_amount: 250,
+    max_rebate: 500,
+    incentive_delivery: 'rebate_check',
+    requires_solar: false,
+    enrollment_url: 'https://www.sce.com/residential/electric-vehicles/rebates-and-incentives/charge-ready-home',
+    solar_pro_note: 'SCE EV charger + solar is a powerful combination — SCE TOU-D-PRIME rate gives ~$0.09–0.13/kWh off-peak for overnight EV charging vs. $0.29–0.44 on-peak. Solar offsets daytime import, battery optimizes the TOU spread, and EV charger adds $500 incentive. Always present as a 3-part package.',
+    last_verified: '2025-06',
+  },
+
+  // ── DTE Energy EV Charger Rebate ──────────────────────────────────────
+  {
+    program_id: 'dte_ev_charger',
+    program_name: 'DTE Energy Charge Forward EV Charger Rebate',
+    utility_ids: ['dte_mi'],
+    type: 'ev_charger_rebate',
+    status: 'active',
+    program_description: 'DTE Energy offers $500 rebate for installation of a ENERGY STAR certified Level 2 EV charger. Available to residential DTE electric customers.',
+    max_rebate: 500,
+    incentive_delivery: 'rebate_check',
+    requires_solar: false,
+    enrollment_url: 'https://www.dteenergy.com/us/en/residential/save-energy-and-money/home-energy-improvement/electric-vehicles/ev-charger-rebate.html',
+    solar_pro_note: 'DTE Michigan offers both EV charger rebate AND ConnectedSolution battery demand-response program. Pitch all three: solar + Powerwall (for $525/year DTE demand response payment) + EV charger rebate. This triple-stack deal is one of the strongest ROI conversations in Michigan.',
+    last_verified: '2025-06',
+  },
+
+  // ── Xcel Energy EV Charger Rebate ─────────────────────────────────────
+  {
+    program_id: 'xcel_ev_charger_co',
+    program_name: 'Xcel Energy Colorado EV Charger Rebate',
+    utility_ids: ['xcel_co'],
+    type: 'ev_charger_rebate',
+    status: 'active',
+    program_description: 'Xcel Energy Colorado provides rebates for Level 2 EV charger installation for residential customers. Part of Xcel\'s Transportation Electrification Plan.',
+    rebate_hardware_amount: 250,
+    max_rebate: 500,
+    incentive_delivery: 'rebate_check',
+    requires_solar: false,
+    enrollment_url: 'https://www.xcelenergy.com/programs_and_rebates/residential_programs_and_rebates/electric_vehicles',
+    solar_pro_note: 'Xcel CO EV customers on the TOU rate save significantly on overnight charging. Pair solar + EV charger for a clean bundled pitch. Xcel TOU off-peak rate is ~$0.062/kWh vs. $0.142/kWh on-peak — EVs charge almost for free overnight with solar credit banked during the day.',
+    last_verified: '2025-06',
+  },
+
+  // ── FPL EV Rebate ─────────────────────────────────────────────────────
+  {
+    program_id: 'fpl_ev_charger',
+    program_name: 'FPL EV Charger Rebate',
+    utility_ids: ['fpl_fl'],
+    type: 'ev_charger_rebate',
+    status: 'active',
+    program_description: 'Florida Power & Light offers up to $200 rebate for Level 2 EVSE installation for residential customers. FPL also offers EV-specific TOU rates with overnight off-peak rates.',
+    max_rebate: 200,
+    incentive_delivery: 'bill_credit',
+    requires_solar: false,
+    enrollment_url: 'https://www.fpl.com/clean-energy/electric-vehicles/home-charging.html',
+    solar_pro_note: 'FPL has a strong EV penetration in South Florida. Ask every customer about EV ownership — the FPL EV-TOU rate combined with solar offsets creates a compelling "free driving" narrative. FPL EV off-peak rates start at $0.061/kWh. Solar + EV is an exceptionally strong close in the Miami/Orlando markets.',
+    last_verified: '2025-06',
+  },
+
+  // ── ComEd EV Charger Rebate ───────────────────────────────────────────
+  {
+    program_id: 'comed_ev_charger',
+    program_name: 'ComEd Illinois EV Charger Rebate',
+    utility_ids: ['comed_il'],
+    type: 'ev_charger_rebate',
+    status: 'active',
+    program_description: 'ComEd Illinois offers $200–500 rebate for qualified Level 2 EVSE installation under the Charging Forward program. Available to ComEd residential customers.',
+    max_rebate: 500,
+    incentive_delivery: 'rebate_check',
+    requires_solar: false,
+    enrollment_url: 'https://www.comed.com/SmartEnergy/MyGreenPowerConnection/Pages/EVCharging.aspx',
+    solar_pro_note: 'Illinois has strong EV adoption in the Chicago suburbs. ComEd EV-TOU rate combined with hourly pricing (PSP) and solar creates a powerful bill management story. Include EV charger in every Chicago-area solar proposal as a discovery question.',
+    last_verified: '2025-06',
+  },
+
+  // ── Pepco / Exelon EV Charger Rebate ─────────────────────────────────
+  {
+    program_id: 'pepco_ev_charger',
+    program_name: 'Pepco / BGE EV Charger Rebate (Maryland/DC)',
+    utility_ids: ['pepco_md', 'bge_md', 'pepco_dc'],
+    type: 'ev_charger_rebate',
+    status: 'active',
+    program_description: 'Pepco Maryland/DC and BGE offer rebates for Level 2 EV charger installation under Exelon utility EV programs. BGE offers up to $300 for installation.',
+    max_rebate: 300,
+    incentive_delivery: 'rebate_check',
+    requires_solar: false,
+    enrollment_url: 'https://www.bge.com/SmartEnergy/GreenEnergy/Pages/ElectricVehicles.aspx',
+    solar_pro_note: 'Maryland and DC have strong EV markets with aggressive state EV rebates (MD EV tax credit up to $3,000). Bundle solar + EV charger with Pepco/BGE rebate + MD state EV rebate for a powerful package close. SREC income adds to the financial story.',
+    last_verified: '2025-06',
+  },
+
+];
+
+// ─── Low-Income / DAC Solar Program Registry ────────────────────────────────
+
+export const LOW_INCOME_SOLAR_PROGRAMS: LowIncomeSolarProgram[] = [
+
+  // ── California SASH (Single-Family Affordable Solar Homes) ────────────
+  {
+    program_id: 'ca_sash',
+    program_name: 'California SASH Program (Single-Family Affordable Solar Homes)',
+    utility_ids: ['pge_ca', 'sce_ca', 'sdge_ca'],
+    states: ['CA'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'SASH provides upfront cash incentives for income-qualified single-family homeowners in PG&E, SCE, and SDG&E territories. Administered by GRID Alternatives. Homeowners must be at or below 80% AMI and live in a CPUC-defined low-income or disadvantaged community.',
+    max_income_pct_ami: 80,
+    value_description: '$3.00/W upfront incentive for system up to 5 kW (max $15,000 per household)',
+    incentive_type: 'grant',
+    stackable_with_itc: false,
+    enrollment_url: 'https://gridalternatives.org/what-we-do/programs/sash',
+    administering_agency: 'GRID Alternatives',
+    solar_pro_note: 'SASH is a powerful tool for California affordability objections. A 5 kW system at $3.00/W = $15,000 in free incentive money. If a prospect qualifies (≤80% AMI, in or adjacent to a DAC), direct them to GRID Alternatives immediately — waitlists exist so urgency is real. You can partner with GRID Alternatives as an approved contractor to install SASH systems.',
+    last_verified: '2025-06',
+  },
+
+  // ── California MASH (Multi-Family Affordable Solar Homes) ────────────
+  {
+    program_id: 'ca_mash',
+    program_name: 'California MASH Program (Multi-Family Affordable Solar Homes)',
+    utility_ids: ['pge_ca', 'sce_ca', 'sdge_ca'],
+    states: ['CA'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'MASH provides incentives for solar on multi-family affordable housing (apartments, condos) serving low-income residents. Track 1: incentives for common area/building owner. Track 2: low-income tenant bill credit.',
+    max_income_pct_ami: 80,
+    value_description: 'Track 1: $1.00–3.00/W for building common areas. Track 2: tenant bill credits from shared solar.',
+    incentive_type: 'grant',
+    stackable_with_itc: true,
+    enrollment_url: 'https://www.cpuc.ca.gov/industries-and-topics/electrical-energy/demand-side-management/california-solar-initiative/mash',
+    administering_agency: 'CPUC / GRID Alternatives',
+    solar_pro_note: 'MASH is less commonly used by solo reps but valuable for apartment/condo building owners serving low-income tenants. If you encounter a multi-family building owner in CA, MASH + ITC combination is highly compelling. Coordinate with a GRID Alternatives partner for tenant screening.',
+    last_verified: '2025-06',
+  },
+
+  // ── Illinois Solar for All ────────────────────────────────────────────
+  {
+    program_id: 'il_solar_for_all',
+    program_name: 'Illinois Solar for All',
+    utility_ids: ['comed_il', 'ameren_il'],
+    states: ['IL'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'Illinois Solar for All (ILSFA) provides solar access to low-income households through the Illinois Shines program. Participants receive solar at no cost or deeply subsidized cost with guaranteed bill savings. Funded by Illinois Climate and Equitable Jobs Act (CEJA).',
+    max_income_pct_ami: 80,
+    value_description: '0-cost or deeply subsidized solar installation + guaranteed 50% electric bill reduction',
+    incentive_type: 'free_system',
+    stackable_with_itc: false,
+    enrollment_url: 'https://www.illinoissfa.com',
+    administering_agency: 'Illinois Power Agency / Elevate Energy',
+    solar_pro_note: 'Illinois Solar for All is fully funded by the state — zero cost to qualified homeowners. Qualifying criteria: ≤80% AMI, in an Environmental Justice Community, or receiving other assistance programs. Excellent referral program for customers who don\'t qualify themselves but know qualifying neighbors/family. Partner with Elevate Energy as an approved ILSFA contractor.',
+    last_verified: '2025-06',
+  },
+
+  // ── New York Affordable Solar Initiative ──────────────────────────────
+  {
+    program_id: 'ny_affordable_solar',
+    program_name: 'New York State Affordable Solar Initiative',
+    utility_ids: ['coned_ny', 'rge_ny', 'nimo_ny', 'central_hudson_ny'],
+    states: ['NY'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'NY-Sun Affordable Solar incentives provide enhanced per-watt incentives for income-qualified New York homeowners. Income limit is typically 80% AMI. Administered by NYSERDA with Consolidated Edison, RG&E, National Grid, and Central Hudson.',
+    max_income_pct_ami: 80,
+    value_description: 'Enhanced NY-Sun incentive: up to $0.80/W additional incentive above standard NY-Sun rebate (total up to $1.60/W for low-income)',
+    incentive_type: 'rebate',
+    stackable_with_itc: true,
+    enrollment_url: 'https://www.nyserda.ny.gov/All-Programs/NY-Sun/Residential/Affordable-Solar',
+    administering_agency: 'NYSERDA',
+    solar_pro_note: 'New York affordable solar (NY-Sun LMI) stacks on top of federal ITC and state solar credit. A 10 kW system could qualify for: 30% federal ITC + 25% NY state credit + $0.80/W NY-Sun incentive = very strong financials. Ask income qualification questions early in every NY discovery call.',
+    last_verified: '2025-06',
+  },
+
+  // ── Massachusetts Low-Income Solar Program ────────────────────────────
+  {
+    program_id: 'ma_low_income_solar',
+    program_name: 'Massachusetts SMART Low-Income Adder',
+    utility_ids: ['eversource_ma', 'nationalgrid_ma', 'unitil_ma'],
+    states: ['MA'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'Massachusetts SMART program provides an additional $/kWh "Low-Income Adder" for solar systems on income-qualified homes. The adder is on top of the base SMART incentive and significantly improves project economics for low-income households.',
+    max_income_pct_ami: 80,
+    value_description: 'Additional $0.05–0.10/kWh on top of base SMART incentive for ≤80% AMI households',
+    incentive_type: 'bill_credit',
+    stackable_with_itc: true,
+    enrollment_url: 'https://www.masssave.com/saving/programs-and-rebates/solar',
+    administering_agency: 'MA DOER / Mass Save',
+    solar_pro_note: 'The MA SMART Low-Income Adder stacks on the base SMART incentive (already $0.15–0.20/kWh). Combined with net metering and federal ITC, low-income MA homeowners can see ROI as low as 3–5 years. Proactively ask income qualification questions in MA markets — you can expand your addressable market significantly.',
+    last_verified: '2025-06',
+  },
+
+  // ── NJ NJCEP Low-Income Solar ─────────────────────────────────────────
+  {
+    program_id: 'nj_li_solar',
+    program_name: 'NJ Community Solar Low-Income Carve-Out',
+    utility_ids: ['pseg_nj', 'jcp_l_nj', 'atlantic_city_nj', 'rce_nj'],
+    states: ['NJ'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'New Jersey\'s Community Solar program reserves 51% of capacity for low- and moderate-income (LMI) subscribers. LMI participants receive a guaranteed 10% bill discount off their utility rate for subscribing to a community solar project.',
+    max_income_pct_ami: 80,
+    value_description: '10%+ guaranteed bill discount through community solar subscription at no cost',
+    incentive_type: 'bill_credit',
+    stackable_with_itc: false,
+    enrollment_url: 'https://njcommunitysolar.com/lmi',
+    administering_agency: 'NJ BPU / NJ Clean Energy Program',
+    solar_pro_note: 'NJ Community Solar LMI carve-out is useful for renters and homeowners who can\'t install rooftop solar (roof condition, HOA, etc.). For direct install customers who qualify, note that NJ also has the Comfort Partners program offering free weatherization + small-scale solar for very low-income households. Income screening during discovery opens doors to more solutions.',
+    last_verified: '2025-06',
+  },
+
+  // ── Federal: IRA Low-Income Solar Bonus Credit (Section 48E) ─────────
+  {
+    program_id: 'ira_low_income_bonus',
+    program_name: 'IRA Low-Income Community Solar Bonus Credit (Sec. 48E / 48(e))',
+    utility_ids: [],
+    states: ['ALL'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'The Inflation Reduction Act (2022) created a 10–20% additional ITC bonus for solar systems in low-income communities or serving low-income households. Section 48E: +10% bonus for systems in low-income communities per Treasury environmental justice criteria. +20% bonus for systems on affordable housing or serving LMI households directly.',
+    max_income_pct_ami: 80,
+    value_description: '+10% ITC bonus (low-income community location) or +20% ITC bonus (affordable housing / LMI beneficiaries)',
+    incentive_type: 'grant',
+    stackable_with_itc: true,
+    enrollment_url: 'https://www.irs.gov/credits-deductions/low-income-communities-bonus-credit-program',
+    administering_agency: 'IRS / US Treasury / DOE',
+    solar_pro_note: 'The IRA Low-Income Bonus Credit (Sec 48E) is underutilized and not well understood by most solar reps. For low-income qualified systems, the ITC jumps from 30% to 40–50% — a massive increase. Check Treasury\'s Energy Communities map and low-income community census tracts to see if a project qualifies. This can be the difference between a sale and a pass for price-sensitive prospects.',
+    last_verified: '2025-06',
+  },
+
+  // ── Florida LIHEAP / Low-Income Solar ────────────────────────────────
+  {
+    program_id: 'fl_low_income_solar',
+    program_name: 'Florida LIHEAP / Weatherization + Solar Combo',
+    utility_ids: ['fpl_fl', 'duke_fl', 'teco_fl'],
+    states: ['FL'],
+    type: 'low_income_solar',
+    status: 'active',
+    program_description: 'Florida LIHEAP (Low-Income Home Energy Assistance Program) provides energy bill assistance to qualifying households. Combined with Florida\'s solar net metering rules and federal ITC, low-income FL homeowners can access free weatherization + discounted solar installations through non-profit solar programs.',
+    max_income_pct_ami: 60,
+    value_description: 'LIHEAP: Up to $5,000 in energy bill assistance. Combo with non-profit solar partner: deeply discounted or $0-down solar.',
+    incentive_type: 'grant',
+    stackable_with_itc: false,
+    enrollment_url: 'https://www.myflfamilies.com/programs/liheap',
+    administering_agency: 'Florida DCF / Local Community Action Agencies',
+    solar_pro_note: 'Florida LIHEAP recipients often have the highest energy burdens and most to gain from solar. Partner with local community action agencies to co-market to LIHEAP-enrolled households. A successful affordable solar install creates powerful word-of-mouth referrals in the community.',
+    last_verified: '2025-06',
+  },
+
+];
+
+
 // Primary lookup map: utility_id → UtilityProgramBundle
 
 const PROGRAMS_MAP: Record<string, UtilityProgramBundle> = {};
@@ -4156,12 +4624,14 @@ const PROGRAMS_MAP: Record<string, UtilityProgramBundle> = {};
 function buildProgramsMap(): Record<string, UtilityProgramBundle> {
   const map: Record<string, UtilityProgramBundle> = {};
 
-  // Collect all utility_ids from all programs
+  // Collect all utility_ids from all programs (including new program types)
   const allIds = new Set<string>([
     ...TOU_RATE_PLANS.flatMap(p => p.utility_ids),
     ...BATTERY_INCENTIVE_PROGRAMS.flatMap(p => p.utility_ids),
     ...SOLAR_REBATE_PROGRAMS.flatMap(p => p.utility_ids),
     ...NEM_SPECIAL_PROGRAMS.flatMap(p => p.utility_ids),
+    ...EV_CHARGER_INCENTIVES.flatMap(p => p.utility_ids),
+    ...LOW_INCOME_SOLAR_PROGRAMS.flatMap(p => p.utility_ids),
   ]);
 
   for (const uid of allIds) {
@@ -4169,6 +4639,11 @@ function buildProgramsMap(): Record<string, UtilityProgramBundle> {
     const batteryProgs  = BATTERY_INCENTIVE_PROGRAMS.filter(p => p.utility_ids.includes(uid));
     const solarRebates  = SOLAR_REBATE_PROGRAMS.filter(p => p.utility_ids.includes(uid));
     const nemProgs      = NEM_SPECIAL_PROGRAMS.filter(p => p.utility_ids.includes(uid));
+    const evChargers    = EV_CHARGER_INCENTIVES.filter(p => p.utility_ids.includes(uid));
+    const liPrograms    = LOW_INCOME_SOLAR_PROGRAMS.filter(p => p.utility_ids.includes(uid));
+
+    // PACE programs are state-level — not utility-specific (resolved separately)
+    const paceProgs: PaceFinancingProgram[] = [];
 
     const summaryParts: string[] = [];
     if (touPlans.length > 0) {
@@ -4189,19 +4664,51 @@ function buildProgramsMap(): Record<string, UtilityProgramBundle> {
     if (nemProgs.length > 0) {
       summaryParts.push(`NEM/export program: ${nemProgs.map(n => n.program_name).join(', ')}`);
     }
+    if (evChargers.length > 0) {
+      summaryParts.push(`${evChargers.length} EV charger incentive(s): ` +
+        evChargers.map(e => e.program_name).join(', '));
+    }
+    if (liPrograms.length > 0) {
+      summaryParts.push(`${liPrograms.length} low-income/DAC program(s): ` +
+        liPrograms.map(l => l.program_name).join(', '));
+    }
 
     map[uid] = {
       utility_id: uid,
       utility_name: uid.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      tou_plans:         touPlans,
-      battery_incentives: batteryProgs,
-      solar_rebates:     solarRebates,
-      nem_programs:      nemProgs,
-      summary:           summaryParts.join('. ') || 'Standard flat rate — no special programs on record.',
+      tou_plans:              touPlans,
+      battery_incentives:     batteryProgs,
+      solar_rebates:          solarRebates,
+      nem_programs:           nemProgs,
+      pace_financing:         paceProgs,
+      ev_charger_incentives:  evChargers,
+      low_income_programs:    liPrograms,
+      summary:                summaryParts.join('. ') || 'Standard flat rate — no special programs on record.',
     };
   }
 
   return map;
+}
+
+/**
+ * Get PACE financing programs for a specific state.
+ * PACE is state-administered, not utility-specific.
+ */
+export function getPacePrograms(stateCode: string): PaceFinancingProgram[] {
+  const state = stateCode.toUpperCase();
+  return PACE_FINANCING_PROGRAMS.filter(p =>
+    p.states.includes(state) || p.states.includes('ALL')
+  );
+}
+
+/**
+ * Get all low-income solar programs for a specific state (state-level).
+ */
+export function getLowIncomeProgramsByState(stateCode: string): LowIncomeSolarProgram[] {
+  const state = stateCode.toUpperCase();
+  return LOW_INCOME_SOLAR_PROGRAMS.filter(p =>
+    p.states.includes(state) || p.states.includes('ALL')
+  );
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
