@@ -85,6 +85,8 @@ export interface BuildCanonicalProposalInput {
   utilityName: string;
   stateCode: string;              // 2-letter state code
   clientState: string;            // full state name (fallback)
+  address?: string;               // v48.17: project address — used for ZIP lookup when utilityName is empty
+  zip?: string;                   // v48.17: explicit ZIP code override
   utilityRateOverride?: number;   // project-level rate override (must be > 0.10 to apply)
   clientUtilityRate?: number;     // client bill-derived rate (fallback)
   parsedBillRate?: number;        // v48.3: rate extracted from uploaded utility bill (highest priority)
@@ -316,11 +318,41 @@ export function buildCanonicalProposal(
   // Production comes from PVWatts/layout engine. We do NOT recalculate it.
   // Monthly array must be 12 elements; pad with zeros if short.
 
+  // v48.17: PVWatts CONUS average monthly production fractions (south-facing 20 deg tilt).
+  // Used as fallback when the snapshot has no monthly array (older proposals).
+  // Sum = 1.0000.  Source: NREL PVWatts v8 US national average.
+  const PVWATTS_MONTHLY_FRACTIONS = [
+    0.0612, // Jan
+    0.0692, // Feb
+    0.0894, // Mar
+    0.0943, // Apr
+    0.0985, // May
+    0.0972, // Jun
+    0.0962, // Jul
+    0.0928, // Aug
+    0.0837, // Sep
+    0.0728, // Oct
+    0.0547, // Nov
+    0.0500, // Dec
+  ]; // sum ≈ 1.0000
+
   const rawMonthly = input.monthlyProductionKwh ?? [];
-  const monthlyKwh: number[] = Array.from({ length: 12 }, (_, i) => rawMonthly[i] ?? 0);
-  const annualKwh  = input.annualProductionKwh > 0
+  const hasRealMonthly = rawMonthly.some((v: number) => v > 0);
+  const annualKwh = input.annualProductionKwh > 0
     ? input.annualProductionKwh
-    : monthlyKwh.reduce((a, b) => a + b, 0);
+    : rawMonthly.reduce((a: number, b: number) => a + b, 0);
+
+  // If the monthly array is all-zeros but we have an annual total, synthesise
+  // estimated monthly values using PVWatts seasonal fractions so the bar chart
+  // doesn't show as empty.  Values are clearly estimated (not from PVWatts run).
+  let monthlyKwh: number[];
+  if (hasRealMonthly) {
+    monthlyKwh = Array.from({ length: 12 }, (_: unknown, i: number) => rawMonthly[i] ?? 0);
+  } else if (annualKwh > 0) {
+    monthlyKwh = PVWATTS_MONTHLY_FRACTIONS.map((f: number) => Math.round(annualKwh * f));
+  } else {
+    monthlyKwh = Array(12).fill(0) as number[];
+  }
 
   assertTruth(
     annualKwh >= 0,
@@ -334,21 +366,32 @@ export function buildCanonicalProposal(
   // buildUtilityProfile resolves rate, NEM type, export rate, escalation,
   // SREC, and policy from structured data. No utility-name string logic.
 
-  // v48.3: 4-tier rate priority chain
-  // Tier 1: parsedBillRate  — extracted directly from uploaded utility bill (most accurate)
-  // Tier 2: dbUtilityRate   — fetched from utility_policies DB via fetchProposalUtilityRate()
-  // Tier 3: utilityRateOverride — project-level manual override
-  // Tier 4: clientUtilityRate   — client profile bill-derived rate
+  // v48.8: 4-tier rate priority chain (revised)
+  // Tier 1: parsedBillRate    — extracted directly from uploaded utility bill (most accurate)
+  // Tier 2: dbUtilityRate     — fetched from utility_policies DB via fetchProposalUtilityRate()
+  // Tier 3: utilityRateOverride — project-level manual override (installer set deliberately)
+  // Tier 4: clientUtilityRate — ONLY used when no specific profile match exists.
+  //                             When a named utility is matched (e.g. ameren_il), the profile rate
+  //                             is EIA-verified and more current than a client's manually-entered rate,
+  //                             which is often the supply-only portion, not the all-in blended rate.
+  //                             clientUtilityRate is passed to buildUtilityProfile as a weak fallback
+  //                             that the profile engine only uses for state-fallback / unknown utilities.
   // Fallback: 0.15 hardcoded national average
   function validRate(r: number | null | undefined): r is number {
     return typeof r === 'number' && isFinite(r) && r >= 0.05 && r <= 0.50;
   }
-  const utilityRatePerKwh =
+
+  // Strong overrides: parsedBillRate (OCR bill), dbUtilityRate, utilityRateOverride (manual).
+  // These take precedence over the profile rate regardless of match quality.
+  const strongRateOverride: number | undefined =
     validRate(input.parsedBillRate)      ? input.parsedBillRate      :
     validRate(input.dbUtilityRate)       ? input.dbUtilityRate       :
     validRate(input.utilityRateOverride) ? input.utilityRateOverride :
-    validRate(input.clientUtilityRate)   ? input.clientUtilityRate   :
-    0.15;
+    undefined;
+
+  // clientUtilityRate is a weak override: passed to buildUtilityProfile but only wins
+  // when no specific profile is matched (state-fallback or failsafe path).
+  const utilityRatePerKwh = strongRateOverride ?? 0;
 
   // v48.4: dev-only rate source trace — never logged in production
   if (process.env.NODE_ENV !== 'production') {
@@ -356,21 +399,27 @@ export function buildCanonicalProposal(
       validRate(input.parsedBillRate)      ? 'parsed'   :
       validRate(input.dbUtilityRate)       ? 'db'        :
       validRate(input.utilityRateOverride) ? 'override'  :
-      validRate(input.clientUtilityRate)   ? 'client'    :
-      'fallback';
-    console.log('[PROPOSAL_RATE_SOURCE]', {
+      'profile_or_client_fallback';
+    console.log('[PROPOSAL_RATE_SOURCE v48.8]', {
       source,
-      value: utilityRatePerKwh,
+      strongOverride: strongRateOverride ?? null,
+      clientRate: input.clientUtilityRate ?? null,
       utility: input.utilityName ?? 'unknown',
       state:   input.stateCode   ?? '??',
     });
   }
 
   const builtProfile = buildUtilityProfile({
-    utilityName:       input.utilityName,
-    stateCode:         input.stateCode,
-    state:             input.clientState,
+    utilityName:           input.utilityName,
+    stateCode:             input.stateCode,
+    state:                 input.clientState,
+    address:               input.address,    // v48.17: for ZIP-based lookup when utilityName is empty
+    zip:                   input.zip,
     utilityRatePerKwh,
+    // v48.8: clientUtilityRate passed separately — only used by buildUtilityProfile
+    // when there is NO specific profile match (state fallback / unknown utility).
+    // This prevents a stale client-entered rate from overriding an EIA-verified profile rate.
+    clientUtilityRateFallback: validRate(input.clientUtilityRate) ? input.clientUtilityRate : undefined,
   });
 
   const utilityProfile   = builtProfile.profile;
@@ -380,11 +429,11 @@ export function buildCanonicalProposal(
   const netMeteringType  = utilityProfile.net_metering_type;
 
   // Resolve escalation rate source + label for truth-tagged UI display
+  // v48.8: hasRateOverride reflects strong overrides only (not weak clientUtilityRate)
   const hasRateOverride = !!(
     validRate(input.parsedBillRate) ||
     validRate(input.dbUtilityRate) ||
-    validRate(input.utilityRateOverride) ||
-    validRate(input.clientUtilityRate)
+    validRate(input.utilityRateOverride)
   );
   const escalationSourceResult    = resolveEscalationSource(builtProfile, input.stateCode);
   const escalationRateSource      = escalationSourceResult.source;
@@ -413,7 +462,7 @@ export function buildCanonicalProposal(
   const utilityConfidence    = utilityProfile.confidence ?? utilityProfile.data_confidence ?? 'medium';
 
   const utility = {
-    provider:                  input.utilityName || utilityProfile.utility_name_pattern || 'Unknown Utility',
+    provider:                  input.utilityName || utilityProfile.utility_name || utilityProfile.utility_name_pattern || 'Your Electric Utility',
     rate:                      resolvedRate,
     annualUsageKwh:            input.annualUsageKwh,
     escalationRate,
@@ -721,8 +770,13 @@ export function buildCanonicalProposal(
 
   // ─── STEP 8b: PAYOFF YEAR ───────────────────────────────────────────────────
   // Canonical payoff year: when cumulative energy value produced >= systemCost.
+  // v48.6: Include Year-1 SREC income in the annual value passed to computePayoffYear.
+  // SREC income (e.g. Illinois Shines ABP) is real contracted revenue from system output.
+  // It was already computed in proj25.yearlyFlow[0].srec_income but was excluded from
+  // payoff math — corrected here. Non-SREC states: srec_income = 0, behavior unchanged.
+  const annualSrecY1 = proj25.yearlyFlow.length > 0 ? (proj25.yearlyFlow[0].srec_income ?? 0) : 0;
   const payoffYear = computePayoffYear(
-    annualEnergyValue,
+    annualEnergyValue + annualSrecY1,
     escalationRate,
     effectiveFinal,
     PANEL_DEGRADATION,

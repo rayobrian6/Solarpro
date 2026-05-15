@@ -576,11 +576,11 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'Import roof model + sun path, compute per-panel shade factor, feed into sizing and production estimate.',
     track: 'engineering-core',
     priority: 'p2',
-    status: 'planned',
+    status: 'done',
     effort: 'xl',
-    notes: 'Could leverage Google Solar API shade data as a starting point.',
+    notes: 'lib/shadeAnalysis.ts: sun-path sampling (96pts/yr), obstruction/horizon mask, inter-row self-shade, per-panel annualShadeFactor. PlacedPanel.annualShadeFactor added to types. pvwatts.ts calculateProduction() applies weighted shade derate to PVWatts losses. ShadeAnalysisPanel.tsx UI with heatmap grid + obstruction inputs. 28 tests.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-06-11',
   },
 
   // ─── PLANNED — COMPLIANCE ────────────────────────────────────────────
@@ -601,10 +601,11 @@ export const ROADMAP_ITEMS: RoadmapItem[] = [
     summary: 'Some AHJs (CA Rule 21, HECO 14H, PREPA, NYC) impose tighter constraints than NEC alone. Add a per-AHJ overlay to the compliance engine.',
     track: 'compliance',
     priority: 'p2',
-    status: 'planned',
+    status: 'done',
     effort: 'l',
+    notes: 'lib/jurisdictions/ahjOverlays.ts: 7 special-case overlays (CA Rule 21/NEM3/Title24, HECO 14H/14J, PREPA/LUMA, NYC Local Law 39, FL NEM, TX PUCT/ERCOT, FL Wind). getApplicableOverlays() matches by state/utility/city. applyAhjOverlays() merges add/modify/disable items. getFullComplianceChecklist() wrapper. getAhjOverlaySummary() for UI. 32 tests.',
     createdAt: '2026-05-10',
-    updatedAt: '2026-05-10',
+    updatedAt: '2026-06-11',
   },
 
   // ─── PLANNED — BOM & PRICING ─────────────────────────────────────────

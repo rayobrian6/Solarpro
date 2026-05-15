@@ -26,6 +26,7 @@ export default function RegisterPage() {
     company: '',
     phone: '',
     agreeTerms: false,
+    website: '', // honeypot — hidden from real users, bots auto-fill it
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -57,6 +58,7 @@ export default function RegisterPage() {
           company: form.company,
           phone: form.phone,
           tosAccepted: form.agreeTerms,
+          website: form.website, // honeypot field
         }),
       });
 
@@ -68,34 +70,18 @@ export default function RegisterPage() {
         return;
       }
 
-      setStep('success');
+      // Redirect to self-serve onboarding wizard instead of static success screen
+      router.push('/onboarding');
     } catch (err) {
       setError('Network error. Please check your connection and try again.');
       setLoading(false);
     }
   };
 
+  // Legacy success step kept for safety (should no longer be reached)
   if (step === 'success') {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
-        <div className="max-w-md w-full text-center">
-          <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center mx-auto mb-6">
-            <CheckCircle size={40} className="text-emerald-400" />
-          </div>
-          <h1 className="text-3xl font-black text-white mb-3">Account Created!</h1>
-          <p className="text-slate-400 mb-8">
-            Welcome to SolarPro, <span className="text-white font-semibold">{form.name}</span>.
-            Your account is ready — start designing solar systems now.
-          </p>
-          <Link href="/dashboard" className="btn-primary w-full justify-center text-base py-3 mb-4 block">
-            Go to Dashboard <ArrowRight size={16} />
-          </Link>
-          <Link href="/auth/subscribe" className="text-slate-400 hover:text-amber-400 text-sm transition-colors">
-            Upgrade your plan for proposals & signing →
-          </Link>
-        </div>
-      </div>
-    );
+    router.push('/onboarding');
+    return null;
   }
 
   return (
@@ -140,7 +126,7 @@ export default function RegisterPage() {
       </div>
 
       {/* Right panel — form */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-12">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-12">
         <div className="w-full max-w-md">
           {/* Mobile logo */}
           <div className="flex lg:hidden items-center gap-3 mb-8">
@@ -160,7 +146,7 @@ export default function RegisterPage() {
             </p>
           </div>
 
-          <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-8 backdrop-blur-sm">
+          <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-5 sm:p-8 backdrop-blur-sm">
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Name */}
               <div>
@@ -233,6 +219,20 @@ export default function RegisterPage() {
                     className="w-full bg-slate-900/60 border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/30 transition-all"
                   />
                 </div>
+              </div>
+
+              {/* Honeypot — visually hidden, never filled by real users */}
+              <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: 0, height: 0, overflow: 'hidden', opacity: 0, pointerEvents: 'none' }} aria-hidden="true">
+                <label htmlFor="website">Website</label>
+                <input
+                  id="website"
+                  name="website"
+                  type="text"
+                  value={form.website}
+                  onChange={handleChange}
+                  tabIndex={-1}
+                  autoComplete="off"
+                />
               </div>
 
               {/* Terms */}

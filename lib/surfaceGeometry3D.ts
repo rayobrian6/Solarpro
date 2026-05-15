@@ -821,8 +821,13 @@ function buildSurfaceGridECEF(opts: {
   // Setback-inset boundary (panels must lie inside this rectangle)
   const boundULo = minU + sideSetbackM;
   const boundUHi = maxU - sideSetbackM;
-  const boundVLo = minV + eaveSetbackM;
-  const boundVHi = maxV - ridgeSetbackM;
+  // v50.30: CORRECT setback assignment — v = cross(n,u) points DOWN-SLOPE,
+  //   so minV=0 is RIDGE end, maxV is EAVE/gutter end.
+  //   ridgeSetbackM applies at the physical RIDGE (minV side).
+  //   eaveSetbackM applies at the physical EAVE/gutter (maxV side).
+  //   Old code (v47.140–v50.29) had these swapped — masked by symmetric defaults.
+  const boundVLo = minV + ridgeSetbackM;   // physical RIDGE end
+  const boundVHi = maxV - eaveSetbackM;    // physical EAVE/gutter end
 
   if (boundUHi - boundULo < dims.widthM || boundVHi - boundVLo < dims.heightM) {
     console.warn('[SurfaceGridECEF] Plane too small after setbacks', {
@@ -866,23 +871,16 @@ function buildSurfaceGridECEF(opts: {
   const { heading: sharedHeading, pitch: sharedPitch, roll: sharedRoll } =
     planeHPR(plane, ef, origin);
 
-  // ── Section 3: Centered Grid Solver ────────────────────────────────────────────────────────────
-  // v47.140: Grid centered on roof bounding box (setback-inset UV space).
-  //
-  // Per the spec:
-  //   roofWidth  = boundUHi - boundULo
-  //   roofHeight = boundVHi - boundVLo
-  //   cols = floor(roofWidth  / stepU)
-  //   rows = floor(roofHeight / stepV)
-  //   remainingU = roofWidth  - cols * stepU   ← leftover after full panels
-  //   remainingV = roofHeight - rows * stepV
-  //   originU = boundULo + remainingU / 2       ← centered: equal margin both sides
-  //   originV = boundVLo + remainingV / 2
-  //   panel center (col,row) = originU + col*stepU + widthM/2
-  //                            originV + row*stepV + heightM/2
-  //
-  // Section 5: panelFits() enforces full polygon containment (no partial panels).
-  // 4 phase candidates tried for polygon-clip recovery (non-rectangular roofs).
+  // ── Section 3: Grid Solver (v47.140, v50.27) ─────────────────────────────
+  // When eaveSetbackM === 0 (panels to gutter): bottom-aligned grid using GRID_EPSILON
+  // as the V-base offset instead of remainingV/2 centering.  See inline comment below.
+  // When eaveSetbackM > 0: centered grid unchanged from v47.140.
+
+  // 0.1 mm inset from polygon boundary — avoids ray-casting PIP boundary ambiguity.
+  // When eaveSetbackM === 0, the V-origin is bottom-aligned (gutter-flush) using this
+  // epsilon instead of the centered remainingV/2 offset.  The epsilon means panel bottom
+  // corners are strictly inside the polygon, not on the boundary, so PIP is reliable.
+  const GRID_EPSILON = 1e-4;
 
   const roofWidth  = boundUHi - boundULo;
   const roofHeight = boundVHi - boundVLo;
@@ -892,8 +890,10 @@ function buildSurfaceGridECEF(opts: {
     const rows = Math.floor(roofHeight / stepV);
     const remainingU = roofWidth  - cols * stepU;
     const remainingV = roofHeight - rows * stepV;
-    // Centered origin: equal margin on both sides (Section 3)
     const originU = boundULo + remainingU / 2 + phaseU;
+    // Centered grid — equal margin top and bottom. Phase candidates allow half-step
+    // variants for non-rectangular roofs.  v50.28: gutter-flush shift applied after
+    // best fill is selected (see post-shift block below).
     const originV = boundVLo + remainingV / 2 + phaseV;
 
     const result: Array<{uC: number; vC: number; col: number; row: number}> = [];
@@ -927,6 +927,78 @@ function buildSurfaceGridECEF(opts: {
     }
   }
 
+  // ── v50.31: Gutter-flush shift with binary-search max-safe-shift ─────────────
+  // When eaveSetbackM === 0 (panels to gutter line), shift the entire bestFill
+  // TOWARD THE EAVE so the top edge of the panel nearest the eave sits as close
+  // as possible to boundVHi (= maxV when eave=0 = physical gutter line).
+  //
+  // UV COORDINATE ORIENTATION (v50.30):
+  //   v = cross(n, u) points DOWN-SLOPE. minV=0 = RIDGE, maxV = EAVE/gutter.
+  //   boundVLo = minV + ridgeSetbackM (physical RIDGE end)
+  //   boundVHi = maxV - eaveSetbackM  (physical EAVE/gutter end; = maxV when eave=0)
+  //
+  // WHY BINARY SEARCH (v50.31 addition):
+  //   v50.30 shifted to boundVHi - GRID_EPSILON then filtered by panelFits.
+  //   On a non-rectangular polygon (e.g. hip/trapezoidal eave), the eave edge
+  //   is not a perfectly horizontal line in UV space.  maxV may only be reached
+  //   at one corner; the rest of the eave boundary is at lower v values.
+  //   Panels shifted to v = maxV - GRID_EPSILON can have their top corners land
+  //   OUTSIDE the polygon for the angled portions of the eave edge → dropped.
+  //   Result: the bottom row (eave-most) disappears.
+  //
+  //   Fix: binary search for the MAXIMUM shift where ALL N panels survive panelFits.
+  //   Fast path: try full shift first (O(N)); falls back to binary search (O(20N)).
+  //   On rectangular polygon: full shift always valid → fast path, same as v50.30.
+  //   On tapered polygon: binary search finds the maximum safe shift → no row loss.
+  //
+  // UNIFORM SHIFT — no mixing:
+  //   Every panel shifts by the SAME amount.  Prevents mixed-vC overlap artefact.
+  //
+  // V-HI SNAP: guarded (eaveSetbackM > 0 check in snap pass below).
+  //   When eave=0: boundVHi = maxV = polygon boundary → PIP ambiguity if snapped to.
+  if (eaveSetbackM === 0 && bestFill.length > 0) {
+    const maxVc      = Math.max(...bestFill.map(p => p.vC));
+    const actualTop  = maxVc + dims.heightM / 2;          // top edge of panel nearest eave
+    const gapAtEave  = boundVHi - actualTop;              // gap between top panel and eave boundary
+    const fullShift  = gapAtEave - GRID_EPSILON;          // target: push top to boundVHi - 0.1mm
+
+    if (fullShift > GRID_EPSILON) {
+      // Fast path: try full shift first (works for rectangular / well-behaved polygons)
+      const fullyShifted = bestFill.map(p => ({ ...p, vC: p.vC + fullShift }));
+      const fullyValid   = fullyShifted.filter(p => panelFits(p.uC, p.vC));
+
+      if (fullyValid.length === bestFill.length) {
+        // All panels survive the full shift — apply it (rectangular roof fast path)
+        bestFill = fullyValid;
+      } else {
+        // Some panels dropped at full shift (non-rectangular/tapered polygon: eave
+        // edge is not a perfect horizontal line, so top-row corners at maxV-EPSILON
+        // may land outside the polygon on angled eave sides).
+        // Binary search for the MAXIMUM safe shift where ALL panels survive panelFits.
+        // Invariant: lo is always valid (all panels pass), hi may not be.
+        // O(20 × N) = ~800 panelFits calls max. Negligible cost.
+        let lo = 0;
+        let hi = fullShift;
+        for (let iter = 0; iter < 20 && (hi - lo) > GRID_EPSILON; iter++) {
+          const mid        = (lo + hi) / 2;
+          const midShifted = bestFill.map(p => ({ ...p, vC: p.vC + mid }));
+          const midValid   = midShifted.filter(p => panelFits(p.uC, p.vC));
+          if (midValid.length === bestFill.length) {
+            lo = mid;   // safe — can shift further
+          } else {
+            hi = mid;   // dropped panels — reduce shift
+          }
+        }
+        // Apply maximum safe shift (lo). If lo ≈ 0, panels were already flush.
+        if (lo > GRID_EPSILON) {
+          bestFill = bestFill
+            .map(p  => ({ ...p, vC: p.vC + lo }))
+            .filter(p => panelFits(p.uC, p.vC));          // re-validate at final position
+        }
+      }
+    }
+  }
+
   // ── Section 5: Edge snap pass (2cm tolerance) + post-snap polygon re-check ─────────
   // For panels whose edge is within 2cm of the setback boundary, snap them
   // to exactly align with the boundary edge. This eliminates the small gap
@@ -948,8 +1020,18 @@ function buildSurfaceGridECEF(opts: {
     if (Math.abs((uC - hw) - boundULo) < SNAP_TOL) su = boundULo + hw;
     if (Math.abs((uC + hw) - boundUHi) < SNAP_TOL) su = boundUHi - hw;
     // Snap V edges
-    if (Math.abs((vC - hh) - boundVLo) < SNAP_TOL) sv = boundVLo + hh;
-    if (Math.abs((vC + hh) - boundVHi) < SNAP_TOL) sv = boundVHi - hh;
+    // v50.30: boundVLo = minV + ridgeSetbackM (physical RIDGE end).
+    //   ridgeSetbackM > 0 → boundVLo is inside the polygon → V-Lo snap is safe.
+    //   ridgeSetbackM === 0 → boundVLo = minV = 0 = polygon boundary → PIP ambiguity.
+    //   Guard: skip V-Lo snap when ridgeSetbackM === 0.
+    //   (The old guard checked eaveSetbackM; eave/ridge labels are now correct.)
+    if (ridgeSetbackM > 0 && Math.abs((vC - hh) - boundVLo) < SNAP_TOL) sv = boundVLo + hh;
+    // v50.30: boundVHi = maxV - eaveSetbackM (physical EAVE/gutter end).
+    //   eaveSetbackM > 0 → boundVHi is inside the polygon → V-Hi snap is safe.
+    //   eaveSetbackM === 0 → boundVHi = maxV = polygon boundary → PIP ambiguity.
+    //   Post-shift already places top row at boundVHi - GRID_EPSILON.
+    //   Guard: skip V-Hi snap when eaveSetbackM === 0.
+    if (eaveSetbackM > 0 && Math.abs((vC + hh) - boundVHi) < SNAP_TOL) sv = boundVHi - hh;
     // v47.154: Re-validate at snapped position (only when snap moved the panel)
     if ((su !== uC || sv !== vC) && !panelFits(su, sv)) continue;
     snappedFill.push({ uC: su, vC: sv, col, row });

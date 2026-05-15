@@ -60,6 +60,7 @@ export type TrueUpPeriod =
 export interface ProposalUtilityProfile {
   // Identity
   utility_id: string;
+  utility_name: string;           // human-readable display name for proposals
   utility_name_pattern: string;   // regex or substring for fuzzy matching
   state: string;
 
@@ -111,10 +112,11 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   // ── California ──────────────────────────────────────────────────────────────
   {
     utility_id: 'pge_ca',
+    utility_name: 'Pacific Gas & Electric (PG&E)',
     utility_name_pattern: 'pg&e|pacific gas|pge',
     state: 'CA',
     retail_rate_type: 'tiered',
-    blended_rate: 0.318,
+    blended_rate: 0.338,
     net_metering_type: 'net_billing',
     rollover_rules: 'Monthly credits roll forward. Annual true-up: excess generation credited at Avoided Cost Transfer Credit (ACTC), typically $0.05–$0.08/kWh.',
     export_rate_monthly: 0.06,
@@ -126,22 +128,23 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.318,
-    escalation_rate: 0.04,
+    utility_rate: 0.338,
+    escalation_rate: 0.05,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'NEM 3.0 (Net Billing Tariff) is in effect for systems interconnected after April 2023. Export credits are significantly lower than retail rate. System should be sized to maximize self-consumption.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'sce_ca',
+    utility_name: 'Southern California Edison',
     utility_name_pattern: 'sce|southern california edison',
     state: 'CA',
     retail_rate_type: 'tiered',
-    blended_rate: 0.318,
+    blended_rate: 0.338,
     net_metering_type: 'net_billing',
     rollover_rules: 'Monthly credits roll forward. Annual true-up: excess generation credited at Avoided Cost Transfer Credit (ACTC), typically $0.05–$0.08/kWh.',
     export_rate_monthly: 0.06,
@@ -153,22 +156,23 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.318,
-    escalation_rate: 0.04,
+    utility_rate: 0.338,
+    escalation_rate: 0.05,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'NEM 3.0 (Net Billing Tariff) is in effect. Export value is significantly below retail. System should be sized for self-consumption optimization.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'sdge_ca',
+    utility_name: 'San Diego Gas & Electric',
     utility_name_pattern: 'sdg&e|san diego gas|sdge',
     state: 'CA',
     retail_rate_type: 'tiered',
-    blended_rate: 0.397,
+    blended_rate: 0.420,
     net_metering_type: 'net_billing',
     rollover_rules: 'Monthly credits roll forward. Annual true-up: excess generation credited at Avoided Cost Transfer Credit (ACTC), typically $0.05–$0.08/kWh.',
     export_rate_monthly: 0.06,
@@ -180,27 +184,31 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.397,
-    escalation_rate: 0.04,
+    utility_rate: 0.420,
+    escalation_rate: 0.05,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'NEM 3.0 (Net Billing Tariff) is in effect. SDG&E has the highest residential rates in California — high self-consumption value.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Illinois ────────────────────────────────────────────────────────────────
   {
     utility_id: 'comed_il',
+    utility_name: 'Commonwealth Edison (ComEd)',
     utility_name_pattern: 'comed|commonwealth edison',
     state: 'IL',
     retail_rate_type: 'flat',
-    blended_rate: 0.148,
+    // v48.6: Updated to 2026 all-in residential rate (~15.5¢/kWh per ICC filings + PJM capacity auction).
+    // Rates have risen +94% since 2021 (8¢ → 15.5¢). Escalation updated to 6% — conservative floor
+    // given actual historical average of 12%+/yr; defensible long-run projection per CUB & EIA data.
+    blended_rate: 0.155,
     net_metering_type: 'retail_1to1',
-    rollover_rules: 'Monthly kWh credits roll forward indefinitely. Unused annual excess paid out at avoided cost rate in April.',
-    export_rate_monthly: 0.148,
+    rollover_rules: 'Monthly kWh credits roll forward indefinitely. Unused annual excess paid out at avoided cost rate in April. NOTE: Illinois Net Metering 2.0 (Jan 1, 2025+) limits credits to supply portion only for new installs — grandfathered systems retain full 1:1 retail credit.',
+    export_rate_monthly: 0.155,
     export_rate_annual_excess: 0.035,
     true_up_period: 'annual',
     trueup_type: 'avoided_cost',
@@ -209,25 +217,29 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: 75,
     srec_price_estimate: 75,
     srec_program_name: 'Illinois Shines (Adjustable Block Program)',
-    utility_rate: 0.148,
-    escalation_rate: 0.03,
+    utility_rate: 0.155,
+    escalation_rate: 0.06,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'favorable',
-    policy_note: 'Illinois has strong net metering law (ILSR 625 ILCS 5/16-107.5). Illinois Shines ABP provides long-term REC contracts — significant additional income stream.',
+    policy_note: 'Illinois has strong net metering law (ILSR 625 ILCS 5/16-107.5). Illinois Shines ABP provides long-term REC contracts — significant additional income stream. ComEd rates have risen 94% since 2021 driven by PJM capacity auction spikes and ICC-approved delivery rate increases. Illinois NEM 2.0 (effective Jan 1, 2025) applies supply-only credits for new installs; grandfathered systems retain full retail 1:1 NEM.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'ameren_il',
-    utility_name_pattern: 'ameren illinois|ameren il',
+    utility_name: 'Ameren Illinois',
+    utility_name_pattern: 'ameren',
     state: 'IL',
     retail_rate_type: 'flat',
-    blended_rate: 0.148,
+    // v48.6: Updated to 2026 all-in residential rate (~15.5¢/kWh per ICC filings + MISO capacity auction).
+    // Ameren rates rose 94% since 2021. MISO 2025-26 capacity auction spiked 22x ($30→$666.50/MW-day).
+    // Escalation updated to 6% — conservative floor given actual historical avg of 12%+/yr.
+    blended_rate: 0.155,
     net_metering_type: 'retail_1to1',
-    rollover_rules: 'Monthly kWh credits roll forward indefinitely. Unused annual excess paid out at avoided cost rate in April.',
-    export_rate_monthly: 0.148,
+    rollover_rules: 'Monthly kWh credits roll forward indefinitely. Unused annual excess paid out at avoided cost rate in April. NOTE: Illinois Net Metering 2.0 (Jan 1, 2025+) limits credits to supply portion only for new installs — grandfathered systems retain full 1:1 retail credit.',
+    export_rate_monthly: 0.155,
     export_rate_annual_excess: 0.032,
     true_up_period: 'annual',
     trueup_type: 'avoided_cost',
@@ -236,27 +248,28 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: 75,
     srec_price_estimate: 75,
     srec_program_name: 'Illinois Shines (Adjustable Block Program)',
-    utility_rate: 0.148,
-    escalation_rate: 0.03,
+    utility_rate: 0.155,
+    escalation_rate: 0.06,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'favorable',
-    policy_note: 'Illinois Shines ABP provides long-term REC contracts through Ameren territory. Strong net metering protections in state law.',
+    policy_note: 'Ameren Illinois serves central/southern IL on the MISO grid. Illinois Shines ABP provides long-term REC contracts. Ameren rates rose 94% since 2021 driven by MISO capacity auction 22x spike and ICC-approved $308.6M delivery rate increase (Dec 2024) plus $48.4M grid modernization surcharge (Dec 2025). MISO reserve margin collapsed 6.5→2.6 GW — structural upward rate pressure projected through 2031+. Illinois NEM 2.0 (effective Jan 1, 2025) applies supply-only credits for new installs; grandfathered systems retain full retail 1:1 NEM.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Florida ─────────────────────────────────────────────────────────────────
   {
     utility_id: 'fpl_fl',
+    utility_name: 'Florida Power & Light',
     utility_name_pattern: 'fpl|florida power|florida light',
     state: 'FL',
     retail_rate_type: 'flat',
-    blended_rate: 0.138,
+    blended_rate: 0.158,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess credits paid out at avoided cost rate (typically ~$0.03–$0.04/kWh).',
-    export_rate_monthly: 0.138,
+    export_rate_monthly: 0.158,
     export_rate_annual_excess: 0.035,
     true_up_period: 'annual',
     trueup_type: 'avoided_cost',
@@ -265,25 +278,26 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.138,
-    escalation_rate: 0.03,
+    utility_rate: 0.158,
+    escalation_rate: 0.035,
     escalation_source: 'utility_profile',
     policy_status: 'under_review',
     policy_effect: 'at_risk',
     policy_note: 'Florida utilities have sought to modify net metering compensation. Current retail-rate net metering is protected through 2029 under HB 741 (2022), but annual true-up excess is paid at avoided cost. Monitor for future rate cases.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'duke_fl',
-    utility_name_pattern: 'duke energy florida|duke fl',
+    utility_name: 'Duke Energy Florida',
+    utility_name_pattern: 'duke energy florida|duke.*florida|duke fl|duke energy.*fl',
     state: 'FL',
     retail_rate_type: 'flat',
-    blended_rate: 0.138,
+    blended_rate: 0.150,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess paid at avoided cost.',
-    export_rate_monthly: 0.138,
+    export_rate_monthly: 0.150,
     export_rate_annual_excess: 0.034,
     true_up_period: 'annual',
     trueup_type: 'avoided_cost',
@@ -292,276 +306,286 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.138,
-    escalation_rate: 0.03,
+    utility_rate: 0.150,
+    escalation_rate: 0.035,
     escalation_source: 'utility_profile',
     policy_status: 'under_review',
     policy_effect: 'at_risk',
     policy_note: 'Duke Energy Florida has filed rate cases seeking to reduce export compensation. Current net metering protected through 2029 under state law.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Maryland ────────────────────────────────────────────────────────────────
   {
     utility_id: 'bge_md',
+    utility_name: 'Baltimore Gas & Electric',
     utility_name_pattern: 'bge|baltimore gas|baltimore electric',
     state: 'MD',
     retail_rate_type: 'flat',
-    blended_rate: 0.148,
+    blended_rate: 0.224,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess paid at retail rate (one of the few states with full retail true-up).',
-    export_rate_monthly: 0.148,
-    export_rate_annual_excess: 0.148,
+    export_rate_monthly: 0.224,
+    export_rate_annual_excess: 0.224,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.148,
+    avoided_cost_rate: 0.224,
     srec_available: true,
-    srec_value_estimate: 60,
-    srec_price_estimate: 60,
+    srec_value_estimate: 53,
+    srec_price_estimate: 53,
     srec_program_name: 'Maryland SREC Program',
-    utility_rate: 0.148,
-    escalation_rate: 0.03,
+    utility_rate: 0.224,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'favorable',
     policy_note: 'Maryland has strong net metering with full retail rate true-up. Active SREC market provides additional income. BGE territory benefits from both programs.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'pepco_md',
+    utility_name: 'Pepco (Maryland)',
     utility_name_pattern: 'pepco|potomac electric',
     state: 'MD',
     retail_rate_type: 'flat',
-    blended_rate: 0.148,
+    blended_rate: 0.224,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at retail rate.',
-    export_rate_monthly: 0.148,
-    export_rate_annual_excess: 0.148,
+    export_rate_monthly: 0.224,
+    export_rate_annual_excess: 0.224,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.148,
+    avoided_cost_rate: 0.224,
     srec_available: true,
-    srec_value_estimate: 60,
-    srec_price_estimate: 60,
+    srec_value_estimate: 53,
+    srec_price_estimate: 53,
     srec_program_name: 'Maryland SREC Program',
-    utility_rate: 0.148,
-    escalation_rate: 0.03,
+    utility_rate: 0.224,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'favorable',
     policy_note: 'Maryland net metering at retail rate with active SREC market. Favorable policy environment for residential solar.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── New England ──────────────────────────────────────────────────────────────
   {
     utility_id: 'eversource_ct',
-    utility_name_pattern: 'eversource.*ct|eversource.*connecticut',
+    utility_name: 'Eversource Energy (CT)',
+    utility_name_pattern: 'eversource',
     state: 'CT',
     retail_rate_type: 'flat',
-    blended_rate: 0.252,
+    blended_rate: 0.278,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess paid at retail rate.',
-    export_rate_monthly: 0.252,
-    export_rate_annual_excess: 0.252,
+    export_rate_monthly: 0.278,
+    export_rate_annual_excess: 0.278,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.252,
-    srec_available: true,
-    srec_value_estimate: 45,
-    srec_price_estimate: 45,
-    srec_program_name: 'Connecticut ZREC / LREC Program',
-    utility_rate: 0.252,
-    escalation_rate: 0.035,
+    avoided_cost_rate: 0.278,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: 'Connecticut ZREC/LREC (utility-contracted, not open-market SREC)',
+    utility_rate: 0.278,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'favorable',
     policy_note: 'Connecticut has strong net metering at retail rate. ZREC/LREC program provides performance payments. High electricity rates make solar economics excellent.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'eversource_ma',
-    utility_name_pattern: 'eversource.*ma|eversource.*mass',
+    utility_name: 'Eversource Energy (MA)',
+    utility_name_pattern: 'eversource',
     state: 'MA',
     retail_rate_type: 'flat',
-    blended_rate: 0.248,
+    blended_rate: 0.315,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward at retail rate. Unused annual excess paid to charity or carried forward.',
-    export_rate_monthly: 0.248,
-    export_rate_annual_excess: 0.248,
+    export_rate_monthly: 0.315,
+    export_rate_annual_excess: 0.315,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.248,
+    avoided_cost_rate: 0.315,
     srec_available: false,
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: 'MA SMART Program (replaces SRECs)',
-    utility_rate: 0.248,
-    escalation_rate: 0.035,
+    utility_rate: 0.315,
+    escalation_rate: 0.05,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Massachusetts SMART program provides fixed incentive payments. Net metering at retail rate. High electricity rates improve solar economics significantly.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'green_mountain_vt',
+    utility_name: 'Green Mountain Power',
     utility_name_pattern: 'green mountain power|gmp',
     state: 'VT',
     retail_rate_type: 'flat',
-    blended_rate: 0.215,
+    blended_rate: 0.249,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward at retail rate for 12 months. Annual excess paid out.',
-    export_rate_monthly: 0.215,
-    export_rate_annual_excess: 0.215,
+    export_rate_monthly: 0.249,
+    export_rate_annual_excess: 0.249,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.215,
+    avoided_cost_rate: 0.249,
     srec_available: false,
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.215,
-    escalation_rate: 0.03,
+    utility_rate: 0.249,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Vermont has strong net metering law. Green Mountain Power actively supports rooftop solar and battery storage programs.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'cmp_me',
+    utility_name: 'Central Maine Power',
     utility_name_pattern: 'central maine power|cmp',
     state: 'ME',
     retail_rate_type: 'flat',
-    blended_rate: 0.265,
+    blended_rate: 0.296,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at retail rate.',
-    export_rate_monthly: 0.265,
-    export_rate_annual_excess: 0.265,
+    export_rate_monthly: 0.296,
+    export_rate_annual_excess: 0.296,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.265,
+    avoided_cost_rate: 0.296,
     srec_available: false,
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.265,
-    escalation_rate: 0.03,
+    utility_rate: 0.296,
+    escalation_rate: 0.05,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Maine offers retail-rate net metering. High electricity rates make solar economically strong.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Mid-Atlantic / DC ────────────────────────────────────────────────────────
   {
     utility_id: 'pepco_dc',
-    utility_name_pattern: 'pepco.*dc|pepco.*district',
+    utility_name: 'Pepco (DC)',
+    utility_name_pattern: 'pepco',
     state: 'DC',
     retail_rate_type: 'flat',
-    blended_rate: 0.168,
+    blended_rate: 0.240,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits at retail rate. Annual true-up: excess paid at retail.',
-    export_rate_monthly: 0.168,
-    export_rate_annual_excess: 0.168,
+    export_rate_monthly: 0.240,
+    export_rate_annual_excess: 0.240,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.168,
+    avoided_cost_rate: 0.240,
     srec_available: true,
-    srec_value_estimate: 380,
-    srec_price_estimate: 380,
+    srec_value_estimate: 383,
+    srec_price_estimate: 383,
     srec_program_name: 'DC SREC Market (highest-value in US)',
-    utility_rate: 0.168,
-    escalation_rate: 0.03,
+    utility_rate: 0.240,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'favorable',
     policy_note: 'DC SRECs are among the most valuable in the nation (~$350–$430/MWh) due to aggressive RPS requirements. Significant additional income stream for DC solar owners.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'pseg_nj',
+    utility_name: 'PSE&G',
     utility_name_pattern: 'pseg|public service enterprise|jcp&l|jersey central',
     state: 'NJ',
     retail_rate_type: 'flat',
-    blended_rate: 0.178,
+    blended_rate: 0.227,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at retail rate.',
-    export_rate_monthly: 0.178,
-    export_rate_annual_excess: 0.178,
+    export_rate_monthly: 0.227,
+    export_rate_annual_excess: 0.227,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.178,
-    srec_available: false,
-    srec_value_estimate: null,
-    srec_price_estimate: 0,
-    srec_program_name: 'NJ Transition Renewable Energy Certificate (TREC)',
-    utility_rate: 0.178,
-    escalation_rate: 0.03,
+    avoided_cost_rate: 0.227,
+    srec_available: true,
+    srec_value_estimate: 25,
+    srec_price_estimate: 25,
+    srec_program_name: 'New Jersey SREC Market / TREC Program',
+    utility_rate: 0.227,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'New Jersey has strong net metering. TREC program replaced SRECs — provides performance-based incentive.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'peco_pa',
+    utility_name: 'PECO / PPL Electric',
     utility_name_pattern: 'peco|ppl|duquesne|penelec|penn power|west penn',
     state: 'PA',
     retail_rate_type: 'flat',
-    blended_rate: 0.148,
+    blended_rate: 0.206,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess paid at wholesale/avoided cost rate.',
-    export_rate_monthly: 0.148,
+    export_rate_monthly: 0.206,
     export_rate_annual_excess: 0.04,
     true_up_period: 'annual',
     trueup_type: 'avoided_cost',
     avoided_cost_rate: 0.04,
     srec_available: true,
-    srec_value_estimate: 20,
-    srec_price_estimate: 20,
+    srec_value_estimate: 23,
+    srec_price_estimate: 23,
     srec_program_name: 'Pennsylvania SREC Market',
-    utility_rate: 0.148,
-    escalation_rate: 0.03,
+    utility_rate: 0.206,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Pennsylvania has retail-rate net metering with annual avoided-cost true-up on excess. Active but lower-value SREC market (~$10–$30/MWh).',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Carolinas / Southeast ────────────────────────────────────────────────────
   {
     utility_id: 'duke_nc',
-    utility_name_pattern: 'duke energy carolina|duke energy progress|duke.*nc|duke.*sc',
+    utility_name: 'Duke Energy Carolinas',
+    utility_name_pattern: 'duke energy|duke.*carolina|duke.*progress|duke.*nc|duke.*sc',
     state: 'NC',
     retail_rate_type: 'flat',
-    blended_rate: 0.118,
+    blended_rate: 0.151,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess paid at avoided cost rate.',
-    export_rate_monthly: 0.118,
+    export_rate_monthly: 0.151,
     export_rate_annual_excess: 0.038,
     true_up_period: 'annual',
     trueup_type: 'avoided_cost',
@@ -570,51 +594,53 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.118,
-    escalation_rate: 0.03,
+    utility_rate: 0.151,
+    escalation_rate: 0.035,
     escalation_source: 'utility_profile',
     policy_status: 'under_review',
     policy_effect: 'at_risk',
     policy_note: 'Duke Energy has filed proceedings to reduce net metering compensation in both NC and SC. Current retail-rate net metering may be modified. Monitor Duke rate cases.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Midwest ──────────────────────────────────────────────────────────────────
   {
     utility_id: 'xcel_co',
-    utility_name_pattern: 'xcel.*co|xcel.*colorado',
+    utility_name: 'Xcel Energy Colorado',
+    utility_name_pattern: 'xcel',
     state: 'CO',
     retail_rate_type: 'flat',
-    blended_rate: 0.138,
+    blended_rate: 0.163,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at retail rate.',
-    export_rate_monthly: 0.138,
-    export_rate_annual_excess: 0.138,
+    export_rate_monthly: 0.163,
+    export_rate_annual_excess: 0.163,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.138,
+    avoided_cost_rate: 0.163,
     srec_available: false,
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.138,
-    escalation_rate: 0.03,
+    utility_rate: 0.163,
+    escalation_rate: 0.035,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Colorado has strong net metering law. Xcel Energy offers retail-rate net metering with full annual rollover.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'dte_mi',
+    utility_name: 'DTE Energy',
     utility_name_pattern: 'dte|detroit edison',
     state: 'MI',
     retail_rate_type: 'flat',
-    blended_rate: 0.188,
+    blended_rate: 0.206,
     net_metering_type: 'net_billing',
     rollover_rules: 'Inflow/Outflow billing: exported kWh credited at avoided cost rate (~$0.09/kWh). Monthly net billing — no rollover.',
     export_rate_monthly: 0.09,
@@ -626,22 +652,23 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.188,
-    escalation_rate: 0.03,
+    utility_rate: 0.206,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'changing',
     policy_effect: 'at_risk',
     policy_note: 'Michigan transitioned from traditional net metering to Inflow/Outflow billing in 2023. Exported energy is credited at avoided cost (~$0.09/kWh), significantly below the retail rate (~$0.188/kWh). System should be sized for self-consumption.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
   {
     utility_id: 'consumers_mi',
-    utility_name_pattern: 'consumers energy.*mi|consumers.*michigan',
+    utility_name: 'Consumers Energy',
+    utility_name_pattern: 'consumers energy|consumers',
     state: 'MI',
     retail_rate_type: 'flat',
-    blended_rate: 0.188,
+    blended_rate: 0.206,
     net_metering_type: 'net_billing',
     rollover_rules: 'Inflow/Outflow billing: exported kWh credited at avoided cost. No monthly rollover.',
     export_rate_monthly: 0.088,
@@ -653,24 +680,25 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.188,
-    escalation_rate: 0.03,
+    utility_rate: 0.206,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'changing',
     policy_effect: 'at_risk',
     policy_note: 'Michigan Inflow/Outflow billing applies. Exported energy credited well below retail. Optimize system for self-consumption over export.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Texas ────────────────────────────────────────────────────────────────────
   {
     utility_id: 'oncor_tx',
+    utility_name: 'Oncor Electric',
     utility_name_pattern: 'oncor|ercot',
     state: 'TX',
     retail_rate_type: 'flat',
-    blended_rate: 0.128,
+    blended_rate: 0.162,
     net_metering_type: 'none',
     rollover_rules: 'No statewide net metering mandate. Individual REPs (retail electric providers) may offer buy-back programs at their discretion, typically at wholesale rates ($0.02–$0.05/kWh).',
     export_rate_monthly: null,
@@ -682,24 +710,25 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.128,
-    escalation_rate: 0.03,
+    utility_rate: 0.162,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Texas has no statewide net metering law. Export value depends on the retail electric provider (REP). System value comes primarily from self-consumption savings. Sizing to match daytime usage is optimal.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Nevada ───────────────────────────────────────────────────────────────────
   {
     utility_id: 'nv_energy',
+    utility_name: 'NV Energy',
     utility_name_pattern: 'nv energy|nevada energy|nevada power',
     state: 'NV',
     retail_rate_type: 'flat',
-    blended_rate: 0.118,
+    blended_rate: 0.138,
     net_metering_type: 'net_billing',
     rollover_rules: 'Monthly credits roll forward. Annual true-up: excess paid at avoided cost rate. NV Energy transitioned to NEM 3.0-style net billing.',
     export_rate_monthly: 0.075,
@@ -711,82 +740,85 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.118,
-    escalation_rate: 0.03,
+    utility_rate: 0.138,
+    escalation_rate: 0.035,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Nevada net metering 3.0 is in effect. Export credit rate is below retail. System should be sized for self-consumption optimization.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── New York ──────────────────────────────────────────────────────────────────
   {
     utility_id: 'con_ed_ny',
+    utility_name: 'Con Edison',
     utility_name_pattern: 'con ed|consolidated edison|coned',
     state: 'NY',
     retail_rate_type: 'tiered',
-    blended_rate: 0.218,
+    blended_rate: 0.271,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess paid at average retail rate under VDER (Value of Distributed Energy Resources).',
-    export_rate_monthly: 0.218,
-    export_rate_annual_excess: 0.218,
+    export_rate_monthly: 0.271,
+    export_rate_annual_excess: 0.271,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.218,
+    avoided_cost_rate: 0.271,
     srec_available: false,
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: 'NY-Sun Incentive Program',
-    utility_rate: 0.218,
-    escalation_rate: 0.035,
+    utility_rate: 0.271,
+    escalation_rate: 0.05,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'New York VDER (Value Stack) provides compensation based on time and location of generation. High electricity rates make solar economics strong.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Ohio ──────────────────────────────────────────────────────────────────────
   {
     utility_id: 'aep_oh',
-    utility_name_pattern: 'aep ohio|ohio power|appalachian power',
+    utility_name: 'AEP Ohio',
+    utility_name_pattern: 'aep ohio|aep|ohio power|appalachian power',
     state: 'OH',
     retail_rate_type: 'flat',
-    blended_rate: 0.128,
+    blended_rate: 0.179,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at retail rate.',
-    export_rate_monthly: 0.128,
-    export_rate_annual_excess: 0.128,
+    export_rate_monthly: 0.179,
+    export_rate_annual_excess: 0.179,
     true_up_period: 'annual',
     trueup_type: 'retail',
-    avoided_cost_rate: 0.128,
+    avoided_cost_rate: 0.179,
     srec_available: true,
-    srec_value_estimate: 6,
-    srec_price_estimate: 6,
+    srec_value_estimate: 3,
+    srec_price_estimate: 3,
     srec_program_name: 'Ohio SREC Market (PJM)',
-    utility_rate: 0.128,
-    escalation_rate: 0.03,
+    utility_rate: 0.179,
+    escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'Ohio has retail-rate net metering. SREC market is active but lower-value (~$5–$10/MWh). Standard favorable solar policy environment.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Arizona ──────────────────────────────────────────────────────────────────
   {
     utility_id: 'aps_az',
+    utility_name: 'Arizona Public Service',
     utility_name_pattern: 'aps|arizona public service',
     state: 'AZ',
     retail_rate_type: 'tou',
-    blended_rate: 0.128,
+    blended_rate: 0.156,
     net_metering_type: 'avoided_cost',
     rollover_rules: 'Exported energy credited at Excess Generation Credit (~$0.076/kWh). No monthly kWh rollover — each month settled independently.',
     export_rate_monthly: 0.076,
@@ -798,27 +830,28 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.128,
-    escalation_rate: 0.03,
+    utility_rate: 0.156,
+    escalation_rate: 0.035,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: 'APS moved away from retail-rate net metering. Exported energy is compensated at the Excess Generation Credit rate (~$0.076/kWh), below the retail rate. System should be sized to minimize excess export.',
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'high',
   },
 
   // ── Virginia ─────────────────────────────────────────────────────────────────
   {
     utility_id: 'dominion_va',
-    utility_name_pattern: 'dominion energy va|dominion energy virginia|dominion.*va',
+    utility_name: 'Dominion Energy Virginia',
+    utility_name_pattern: 'dominion',
     state: 'VA',
     retail_rate_type: 'flat',
-    blended_rate: 0.128,
+    blended_rate: 0.164,
     net_metering_type: 'retail_1to1',
     rollover_rules: 'Monthly kWh credits roll forward. Annual true-up: excess paid at avoided cost rate.',
-    export_rate_monthly: 0.128,
+    export_rate_monthly: 0.164,
     export_rate_annual_excess: 0.035,
     true_up_period: 'annual',
     trueup_type: 'avoided_cost',
@@ -827,24 +860,25 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.128,
-    escalation_rate: 0.03,
+    utility_rate: 0.164,
+    escalation_rate: 0.035,
     escalation_source: 'utility_profile',
     policy_status: 'under_review',
     policy_effect: 'at_risk',
     policy_note: 'Dominion Energy Virginia has sought modifications to net metering in rate cases. Current retail-rate net metering is in place, but future changes are possible as the utility pursues rate reform.',
     confidence: 'medium',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
     data_confidence: 'medium',
   },
 
   // ── Hawaii ───────────────────────────────────────────────────────────────────
   {
     utility_id: 'hawaiian_electric',
+    utility_name: 'Hawaiian Electric (HECO)',
     utility_name_pattern: 'hawaiian electric|heco|helco|maui electric|kiuc',
     state: 'HI',
     retail_rate_type: 'flat',
-    blended_rate: 0.395,
+    blended_rate: 0.420,
     net_metering_type: 'net_billing',
     rollover_rules: 'Customer Self-Supply (CSS): exported energy credited at customer-generator avoided cost rate. Grid-supply option available for larger systems.',
     export_rate_monthly: 0.10,
@@ -856,14 +890,522 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
     srec_value_estimate: null,
     srec_price_estimate: 0,
     srec_program_name: '',
-    utility_rate: 0.395,
+    utility_rate: 0.420,
     escalation_rate: 0.04,
     escalation_source: 'utility_profile',
     policy_status: 'stable',
     policy_effect: 'neutral',
     policy_note: "Hawaii eliminated traditional net metering in 2015. CSS program credits exports at avoided cost. However, Hawaii's extremely high electricity rates make self-consumption savings very high. Battery storage strongly recommended.",
     confidence: 'high',
-    last_updated: '2025-01',
+    last_updated: '2026-07',
+    data_confidence: 'high',
+  },
+
+  // ─── Illinois Co-ops + additional states (EIA 861 + direct tariff sources) ────
+  {
+    utility_id: 'swec_il',
+    utility_name: 'Southwestern Electric Cooperative',
+    utility_name_pattern: 'southwestern electric|swec|sw electric coop|southwestern electric coop',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.148,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost. Illinois NEM 2.0 (Jan 2025+) limits new installs to supply-only credits.',
+    export_rate_monthly: 0.148,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.148,
+    escalation_rate: 0.06,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'IL co-op purchasing from Wabash Valley Power. MISO capacity costs jumped to $666.50/MW-day in 2025. Serves 11 counties along I-70 corridor (Pocahontas/Greenville/Vandalia area). Illinois Shines SREC available. EIA 861 IL co-op avg 2025.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'coles_moultrie_il',
+    utility_name: 'Coles-Moultrie Electric Cooperative',
+    utility_name_pattern: 'coles.moultrie|coles moultrie electric',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.143,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.143,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.143,
+    escalation_rate: 0.06,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'IL co-op — EIA 861 IL co-op avg 2025. Illinois Shines SREC available.',
+    confidence: 'medium',
+    last_updated: '2026-05',
+    data_confidence: 'medium',
+  },
+  {
+    utility_id: 'norris_electric_il',
+    utility_name: 'Norris Electric Cooperative',
+    utility_name_pattern: 'norris electric|norris electric coop',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.143,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.143,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.143,
+    escalation_rate: 0.06,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'IL co-op — EIA 861 IL co-op avg 2025. Illinois Shines SREC available.',
+    confidence: 'medium',
+    last_updated: '2026-05',
+    data_confidence: 'medium',
+  },
+  {
+    utility_id: 'shelby_electric_il',
+    utility_name: 'Shelby Electric Cooperative',
+    utility_name_pattern: 'shelby electric|shelby electric coop',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.143,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.143,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.143,
+    escalation_rate: 0.06,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'IL co-op — EIA 861 IL co-op avg 2025. Illinois Shines SREC available.',
+    confidence: 'medium',
+    last_updated: '2026-05',
+    data_confidence: 'medium',
+  },
+  {
+    utility_id: 'corn_belt_energy_il',
+    utility_name: 'Corn Belt Energy',
+    utility_name_pattern: 'corn belt energy|corn belt electric',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.143,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.143,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.143,
+    escalation_rate: 0.06,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'IL co-op — EIA 861 IL co-op avg 2025. Illinois Shines SREC available.',
+    confidence: 'medium',
+    last_updated: '2026-05',
+    data_confidence: 'medium',
+  },
+  {
+    utility_id: 'spoon_river_il',
+    utility_name: 'Spoon River Electric Cooperative',
+    utility_name_pattern: 'spoon river electric|spoon river coop',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.143,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.143,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.143,
+    escalation_rate: 0.06,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'IL co-op — EIA 861 IL co-op avg 2025. Illinois Shines SREC available.',
+    confidence: 'medium',
+    last_updated: '2026-05',
+    data_confidence: 'medium',
+  },
+  {
+    utility_id: 'cwlp_il',
+    utility_name: 'City Water Light & Power Springfield IL',
+    utility_name_pattern: 'cwlp|city water light|springfield.*electric|city of springfield.*electric',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.152,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.152,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.152,
+    escalation_rate: 0.05,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'City-owned municipal utility, Springfield IL. EIA 861 municipal avg 2025. Illinois Shines SREC available.',
+    confidence: 'medium',
+    last_updated: '2026-05',
+    data_confidence: 'medium',
+  },
+  {
+    utility_id: 'midamerican_il',
+    utility_name: 'MidAmerican Energy Illinois',
+    utility_name_pattern: 'midamerican|mid-american|mid american energy',
+    state: 'IL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.118,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly kWh credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.118,
+    export_rate_annual_excess: 0.032,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.032,
+    srec_available: true,
+    srec_value_estimate: 75,
+    srec_price_estimate: 75,
+    srec_program_name: 'Illinois Shines (Adjustable Block Program)',
+    utility_rate: 0.118,
+    escalation_rate: 0.04,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'MidAmerican Energy serves western IL. EIA 861 2025. Illinois Shines SREC available.',
+    confidence: 'medium',
+    last_updated: '2026-05',
+    data_confidence: 'medium',
+  },
+
+  // ─── Additional major utilities ─────────────────────────────────────────
+  {
+    utility_id: 'georgia_power',
+    utility_name: 'Georgia Power',
+    utility_name_pattern: 'georgia power|southern company.*ga|georgia electric',
+    state: 'GA',
+    retail_rate_type: 'flat',
+    blended_rate: 0.146,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.146,
+    export_rate_annual_excess: 0.040,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.040,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.146,
+    escalation_rate: 0.03,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 GA avg 14.60¢. Georgia Power net metering at retail rate up to 10kW (residential).',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'entergy_ar',
+    utility_name: 'Entergy Arkansas',
+    utility_name_pattern: 'entergy arkansas|entergy ar',
+    state: 'AR',
+    retail_rate_type: 'flat',
+    blended_rate: 0.133,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.133,
+    export_rate_annual_excess: 0.035,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.035,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.133,
+    escalation_rate: 0.03,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 AR avg 13.32¢. Net metering at retail rate up to 25kW.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'entergy_la',
+    utility_name: 'Entergy Louisiana',
+    utility_name_pattern: 'entergy louisiana|entergy la|cleco|entergy new orleans',
+    state: 'LA',
+    retail_rate_type: 'flat',
+    blended_rate: 0.124,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.124,
+    export_rate_annual_excess: 0.035,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.035,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.124,
+    escalation_rate: 0.025,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 LA avg 12.44¢. Cheapest state in US.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'xcel_mn',
+    utility_name: 'Xcel Energy Minnesota / Northern States Power',
+    utility_name_pattern: 'xcel.*mn|xcel.*minnesota|northern states power|nsp.*mn',
+    state: 'MN',
+    retail_rate_type: 'flat',
+    blended_rate: 0.164,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual excess paid at avoided cost.',
+    export_rate_monthly: 0.164,
+    export_rate_annual_excess: 0.040,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.040,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.164,
+    escalation_rate: 0.04,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 MN avg 16.44¢. Xcel/NSP serves metro MN.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'we_energies_wi',
+    utility_name: 'We Energies / WPS Wisconsin',
+    utility_name_pattern: 'we energies|wisconsin electric|wisconsin public service|wps|wpsc',
+    state: 'WI',
+    retail_rate_type: 'flat',
+    blended_rate: 0.185,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual excess paid at avoided cost.',
+    export_rate_monthly: 0.185,
+    export_rate_annual_excess: 0.040,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.040,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.185,
+    escalation_rate: 0.04,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 WI avg 18.45¢. We Energies + WPS serve most of WI.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'idaho_power',
+    utility_name: 'Idaho Power',
+    utility_name_pattern: 'idaho power|ipco',
+    state: 'ID',
+    retail_rate_type: 'flat',
+    blended_rate: 0.125,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual excess paid at avoided cost.',
+    export_rate_monthly: 0.125,
+    export_rate_annual_excess: 0.040,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.040,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.125,
+    escalation_rate: 0.025,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 ID avg 12.51¢. Idaho Power NEM at retail rate up to 100kW.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'alabama_power',
+    utility_name: 'Alabama Power',
+    utility_name_pattern: 'alabama power|southern company.*al',
+    state: 'AL',
+    retail_rate_type: 'flat',
+    blended_rate: 0.168,
+    net_metering_type: 'avoided_cost',
+    rollover_rules: 'Exports credited at avoided cost only. No rollover credit.',
+    export_rate_monthly: 0.060,
+    export_rate_annual_excess: 0.060,
+    true_up_period: 'monthly',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.060,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.168,
+    escalation_rate: 0.03,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 AL avg 16.79¢. Alabama Power credits exports at avoided cost (~6¢). Self-consumption is primary value driver — size system accordingly.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'kentucky_utilities',
+    utility_name: 'Kentucky Utilities / LG&E',
+    utility_name_pattern: 'kentucky utilities|lge|louisville gas|kentucky power|aep.*ky|big sandy',
+    state: 'KY',
+    retail_rate_type: 'flat',
+    blended_rate: 0.137,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.137,
+    export_rate_annual_excess: 0.035,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.035,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.137,
+    escalation_rate: 0.03,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 KY avg 13.68¢. KU/LG&E serve most of KY.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'tva_tn',
+    utility_name: 'TVA / Local Power Company Tennessee',
+    utility_name_pattern: 'tva|tennessee valley|local power company|lcub|kub|epb|mte.*tn|cub.*tn',
+    state: 'TN',
+    retail_rate_type: 'flat',
+    blended_rate: 0.131,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual true-up at avoided cost.',
+    export_rate_monthly: 0.131,
+    export_rate_annual_excess: 0.035,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.035,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.131,
+    escalation_rate: 0.025,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'neutral',
+    policy_note: 'EIA May 2026 TN avg 13.12¢. TVA Green Power Providers program for excess solar.',
+    confidence: 'high',
+    last_updated: '2026-05',
+    data_confidence: 'high',
+  },
+  {
+    utility_id: 'national_grid_ri',
+    utility_name: 'National Grid Rhode Island',
+    utility_name_pattern: 'national grid.*ri|national grid.*rhode|rhode island energy|ri energy',
+    state: 'RI',
+    retail_rate_type: 'flat',
+    blended_rate: 0.313,
+    net_metering_type: 'retail_1to1',
+    rollover_rules: 'Monthly credits roll forward. Annual excess paid at avoided cost.',
+    export_rate_monthly: 0.313,
+    export_rate_annual_excess: 0.060,
+    true_up_period: 'annual',
+    trueup_type: 'avoided_cost',
+    avoided_cost_rate: 0.060,
+    srec_available: false,
+    srec_value_estimate: null,
+    srec_price_estimate: 0,
+    srec_program_name: '',
+    utility_rate: 0.313,
+    escalation_rate: 0.05,
+    escalation_source: 'utility_profile',
+    policy_status: 'stable',
+    policy_effect: 'favorable',
+    policy_note: 'EIA May 2026 RI avg 31.30¢. 4th most expensive state. Excellent solar ROI.',
+    confidence: 'high',
+    last_updated: '2026-05',
     data_confidence: 'high',
   },
 ];
@@ -896,7 +1438,14 @@ export function buildUtilityProfile(project: {
   utilityName?: string;
   state?: string;
   stateCode?: string;
+  address?: string;               // v48.17: project address — used for ZIP lookup
+  zip?: string;                   // v48.17: explicit ZIP code override
   utilityRatePerKwh?: number;
+  // v48.8: weak fallback — only used when no specific profile is matched.
+  // A named utility match (e.g. ameren_il) has an EIA-verified rate that is more
+  // accurate than a client's manually-entered or OCR-parsed bill rate, which often
+  // reflects only the supply charge and not the full all-in blended rate.
+  clientUtilityRateFallback?: number;
   client?: { state?: string; utilityRate?: number };
 }): BuiltUtilityProfile {
 
@@ -909,8 +1458,278 @@ export function buildUtilityProfile(project: {
 
   const utilityName = (project.utilityName || '').toLowerCase().trim();
 
+  // v48.15: ZIP-to-utility lookup table.
+  // Used when utilityName is empty/unknown — infers utility from ZIP or address string.
+  // Covers rural co-op territories where OCR rarely captures the utility name.
+  const ZIP_UTILITY_MAP: Record<string, string> = {
+    // Southwestern Electric Cooperative (SWEC) — 11-county IL territory along I-70
+    '62275': 'southwestern electric cooperative', // Pocahontas IL
+    '62215': 'southwestern electric cooperative', // Albers IL
+    '62217': 'southwestern electric cooperative', // Baldwin IL
+    '62218': 'southwestern electric cooperative', // Bartelso IL
+    '62219': 'southwestern electric cooperative', // Beckemeyer IL
+    '62220': 'southwestern electric cooperative', // Belleville IL (partial)
+    '62230': 'southwestern electric cooperative', // Breese IL
+    '62231': 'southwestern electric cooperative', // Carlyle IL
+    '62232': 'southwestern electric cooperative', // Caseyville IL
+    '62233': 'southwestern electric cooperative', // Chester IL
+    '62234': 'southwestern electric cooperative', // Collinsville IL (partial)
+    '62236': 'southwestern electric cooperative', // Columbia IL
+    '62238': 'southwestern electric cooperative', // Coulterville IL
+    '62239': 'southwestern electric cooperative', // Dupo IL
+    '62241': 'southwestern electric cooperative', // Ellis Grove IL
+    '62243': 'southwestern electric cooperative', // Freeburg IL
+    '62244': 'southwestern electric cooperative', // Fults IL
+    '62245': 'southwestern electric cooperative', // Germantown IL
+    '62246': 'southwestern electric cooperative', // Greenville IL
+    '62248': 'southwestern electric cooperative', // Hecker IL
+    '62249': 'southwestern electric cooperative', // Highland IL
+    '62250': 'southwestern electric cooperative', // Hoffman IL
+    '62253': 'southwestern electric cooperative', // Keyesport IL
+    '62254': 'southwestern electric cooperative', // Lebanon IL
+    '62255': 'southwestern electric cooperative', // Lenzburg IL
+    '62257': 'southwestern electric cooperative', // Mascoutah IL (partial)
+    '62258': 'southwestern electric cooperative', // Marissa IL
+    '62260': 'southwestern electric cooperative', // Millstadt IL
+    '62261': 'southwestern electric cooperative', // Modoc IL
+    '62262': 'southwestern electric cooperative', // Mulberry Grove IL
+    '62264': 'southwestern electric cooperative', // New Athens IL
+    '62265': 'southwestern electric cooperative', // New Baden IL
+    '62266': 'southwestern electric cooperative', // New Memphis IL
+    '62268': 'southwestern electric cooperative', // Oakdale IL
+    '62269': 'southwestern electric cooperative', // O Fallon IL (partial)
+    '62271': 'southwestern electric cooperative', // Okawville IL
+    '62272': 'southwestern electric cooperative', // Percy IL
+    '62273': 'southwestern electric cooperative', // Pierron IL
+    '62274': 'southwestern electric cooperative', // Pinckneyville IL (partial)
+    '62276': 'southwestern electric cooperative', // Prairie Du Rocher IL
+    '62277': 'southwestern electric cooperative', // Red Bud IL
+    '62278': 'southwestern electric cooperative', // Renault IL
+    '62279': 'southwestern electric cooperative', // Sparta IL
+    '62280': 'southwestern electric cooperative', // Steeleville IL
+    '62281': 'southwestern electric cooperative', // St. Jacob IL
+    '62282': 'southwestern electric cooperative', // Summerfield IL
+    '62283': 'southwestern electric cooperative', // Trenton IL
+    '62284': 'southwestern electric cooperative', // Troy IL
+    '62285': 'southwestern electric cooperative', // Valmeyer IL
+    '62286': 'southwestern electric cooperative', // Vandalia IL (partial)
+    '62288': 'southwestern electric cooperative', // Venedy IL
+    '62289': 'southwestern electric cooperative', // Waterloo IL (partial)
+    '62292': 'southwestern electric cooperative', // Worden IL
+    '62293': 'southwestern electric cooperative', // Germantown Hills IL
+    '62294': 'southwestern electric cooperative', // Troy IL
+    '62295': 'southwestern electric cooperative', // Waterloo IL
+    '62297': 'southwestern electric cooperative', // Welge IL
+    '62298': 'southwestern electric cooperative', // Winfield IL
+    // Norris Electric Cooperative — SE IL
+    '62846': 'norris electric cooperative', // Norris City IL
+    '62863': 'norris electric cooperative', // Omaha IL
+    '62869': 'norris electric cooperative', // Raleigh IL
+    // Shelby Electric Cooperative
+    '62565': 'shelby electric cooperative', // Shelbyville IL
+    '62543': 'shelby electric cooperative', // Morrisonville IL
+    '62549': 'shelby electric cooperative', // Mount Auburn IL
+    // Coles-Moultrie Electric Cooperative
+    '61920': 'coles-moultrie electric cooperative', // Charleston IL
+    '61938': 'coles-moultrie electric cooperative', // Mattoon IL
+    // Corn Belt Energy
+    '61701': 'corn belt energy', // Bloomington IL
+    '61720': 'corn belt energy', // Anchor IL
+    // Spoon River Electric
+    '61454': 'spoon river electric cooperative', // Macomb IL (partial)
+    '61472': 'spoon river electric cooperative', // Roseville IL
+    // Commonwealth Edison (ComEd) — Northern Illinois (26 counties: Cook, DuPage, Lake, Will, Kane, etc.)
+    // Chicago city ZIPs
+    '60601': 'commonwealth edison', '60602': 'commonwealth edison', '60603': 'commonwealth edison',
+    '60604': 'commonwealth edison', '60605': 'commonwealth edison', '60606': 'commonwealth edison',
+    '60607': 'commonwealth edison', '60608': 'commonwealth edison', '60609': 'commonwealth edison',
+    '60610': 'commonwealth edison', '60611': 'commonwealth edison', '60612': 'commonwealth edison',
+    '60613': 'commonwealth edison', '60614': 'commonwealth edison', '60615': 'commonwealth edison',
+    '60616': 'commonwealth edison', '60617': 'commonwealth edison', '60618': 'commonwealth edison',
+    '60619': 'commonwealth edison', '60620': 'commonwealth edison', '60621': 'commonwealth edison',
+    '60622': 'commonwealth edison', '60623': 'commonwealth edison', '60624': 'commonwealth edison',
+    '60625': 'commonwealth edison', '60626': 'commonwealth edison', '60628': 'commonwealth edison',
+    '60629': 'commonwealth edison', '60630': 'commonwealth edison', '60631': 'commonwealth edison',
+    '60632': 'commonwealth edison', '60633': 'commonwealth edison', '60634': 'commonwealth edison',
+    '60636': 'commonwealth edison', '60637': 'commonwealth edison', '60638': 'commonwealth edison',
+    '60639': 'commonwealth edison', '60640': 'commonwealth edison', '60641': 'commonwealth edison',
+    '60642': 'commonwealth edison', '60643': 'commonwealth edison', '60644': 'commonwealth edison',
+    '60645': 'commonwealth edison', '60646': 'commonwealth edison', '60647': 'commonwealth edison',
+    '60649': 'commonwealth edison', '60651': 'commonwealth edison', '60652': 'commonwealth edison',
+    '60653': 'commonwealth edison', '60654': 'commonwealth edison', '60655': 'commonwealth edison',
+    '60656': 'commonwealth edison', '60657': 'commonwealth edison', '60659': 'commonwealth edison',
+    '60660': 'commonwealth edison', '60661': 'commonwealth edison',
+    // DuPage County (Westmont, Downers Grove, Naperville, Wheaton, etc.)
+    '60516': 'commonwealth edison', // Downers Grove
+    '60515': 'commonwealth edison', // Downers Grove
+    '60514': 'commonwealth edison', // Clarendon Hills
+    '60521': 'commonwealth edison', // Hinsdale
+    '60523': 'commonwealth edison', // Oak Brook
+    '60527': 'commonwealth edison', // Willowbrook / Burr Ridge
+    '60555': 'commonwealth edison', // Warrenville
+    '60559': 'commonwealth edison', // Westmont IL — this proposal
+    '60560': 'commonwealth edison', // Yorkville (partial)
+    '60563': 'commonwealth edison', // Naperville
+    '60564': 'commonwealth edison', // Naperville
+    '60565': 'commonwealth edison', // Naperville
+    '60566': 'commonwealth edison', // Naperville
+    '60567': 'commonwealth edison', // Naperville
+    '60101': 'commonwealth edison', // Addison
+    '60103': 'commonwealth edison', // Bartlett
+    '60104': 'commonwealth edison', // Bellwood
+    '60106': 'commonwealth edison', // Bensenville
+    '60108': 'commonwealth edison', // Bloomingdale
+    '60126': 'commonwealth edison', // Elmhurst
+    '60137': 'commonwealth edison', // Glen Ellyn
+    '60139': 'commonwealth edison', // Glendale Heights
+    '60148': 'commonwealth edison', // Lombard
+    '60157': 'commonwealth edison', // Medinah
+    '60181': 'commonwealth edison', // Villa Park
+    '60187': 'commonwealth edison', // Wheaton
+    '60188': 'commonwealth edison', // Carol Stream
+    '60189': 'commonwealth edison', // Wheaton
+    '60190': 'commonwealth edison', // Winfield
+    '60191': 'commonwealth edison', // Wood Dale
+    '60504': 'commonwealth edison', // Aurora (DuPage portion)
+    '60505': 'commonwealth edison', // Aurora
+    '60506': 'commonwealth edison', // Aurora
+    '60510': 'commonwealth edison', // Batavia
+    '60517': 'commonwealth edison', // Woodridge
+    '60519': 'commonwealth edison', // Eola
+    '60532': 'commonwealth edison', // Lisle
+    '60540': 'commonwealth edison', // Naperville
+    '60558': 'commonwealth edison', // Western Springs
+    // Cook County suburbs (North/Northwest/South)
+    '60004': 'commonwealth edison', // Arlington Heights
+    '60005': 'commonwealth edison', // Arlington Heights
+    '60007': 'commonwealth edison', // Elk Grove Village
+    '60008': 'commonwealth edison', // Rolling Meadows
+    '60010': 'commonwealth edison', // Barrington
+    '60016': 'commonwealth edison', // Des Plaines
+    '60018': 'commonwealth edison', // Des Plaines / Rosemont
+    '60025': 'commonwealth edison', // Glenview
+    '60026': 'commonwealth edison', // Glenview
+    '60035': 'commonwealth edison', // Highland Park
+    '60040': 'commonwealth edison', // Highwood
+    '60043': 'commonwealth edison', // Kenilworth
+    '60045': 'commonwealth edison', // Lake Forest
+    '60047': 'commonwealth edison', // Lake Zurich
+    '60053': 'commonwealth edison', // Morton Grove
+    '60056': 'commonwealth edison', // Mount Prospect
+    '60062': 'commonwealth edison', // Northbrook
+    '60067': 'commonwealth edison', // Palatine
+    '60068': 'commonwealth edison', // Park Ridge
+    '60070': 'commonwealth edison', // Prospect Heights
+    '60074': 'commonwealth edison', // Palatine
+    '60076': 'commonwealth edison', // Skokie
+    '60077': 'commonwealth edison', // Skokie
+    '60091': 'commonwealth edison', // Wilmette
+    '60093': 'commonwealth edison', // Winnetka
+    '60094': 'commonwealth edison', // Palatine
+    '60201': 'commonwealth edison', // Evanston
+    '60202': 'commonwealth edison', // Evanston
+    '60203': 'commonwealth edison', // Evanston
+    '60301': 'commonwealth edison', // Oak Park
+    '60302': 'commonwealth edison', // Oak Park
+    '60304': 'commonwealth edison', // Oak Park
+    '60305': 'commonwealth edison', // River Forest
+    '60402': 'commonwealth edison', // Berwyn
+    '60403': 'commonwealth edison', // Crest Hill
+    '60406': 'commonwealth edison', // Blue Island
+    '60409': 'commonwealth edison', // Calumet City
+    '60411': 'commonwealth edison', // Chicago Heights
+    '60415': 'commonwealth edison', // Chicago Ridge
+    '60419': 'commonwealth edison', // Dolton
+    '60422': 'commonwealth edison', // Flossmoor
+    '60425': 'commonwealth edison', // Glenwood
+    '60426': 'commonwealth edison', // Harvey
+    '60429': 'commonwealth edison', // Hazel Crest
+    '60430': 'commonwealth edison', // Homewood
+    '60438': 'commonwealth edison', // Lansing
+    '60439': 'commonwealth edison', // Lemont
+    '60443': 'commonwealth edison', // Matteson
+    '60445': 'commonwealth edison', // Midlothian
+    '60452': 'commonwealth edison', // Oak Forest
+    '60453': 'commonwealth edison', // Oak Lawn
+    '60455': 'commonwealth edison', // Bridgeview
+    '60456': 'commonwealth edison', // Hometown
+    '60457': 'commonwealth edison', // Hickory Hills
+    '60458': 'commonwealth edison', // Justice
+    '60459': 'commonwealth edison', // Burbank
+    '60461': 'commonwealth edison', // Olympia Fields
+    '60462': 'commonwealth edison', // Orland Park
+    '60463': 'commonwealth edison', // Palos Heights
+    '60464': 'commonwealth edison', // Palos Park
+    '60465': 'commonwealth edison', // Palos Hills
+    '60466': 'commonwealth edison', // Park Forest
+    '60467': 'commonwealth edison', // Orland Park
+    '60469': 'commonwealth edison', // Posen
+    '60471': 'commonwealth edison', // Richton Park
+    '60473': 'commonwealth edison', // South Holland
+    '60476': 'commonwealth edison', // Thornton
+    '60477': 'commonwealth edison', // Tinley Park
+    '60478': 'commonwealth edison', // Country Club Hills
+    '60480': 'commonwealth edison', // Willow Springs
+    '60482': 'commonwealth edison', // Worth
+    '60487': 'commonwealth edison', // Tinley Park
+    '60490': 'commonwealth edison', // Bolingbrook
+    '60491': 'commonwealth edison', // Homer Glen
+    // Will / Kane County
+    '60431': 'commonwealth edison', // Joliet (partial)
+    '60432': 'commonwealth edison', // Joliet
+    '60433': 'commonwealth edison', // Joliet
+    '60435': 'commonwealth edison', // Joliet
+    '60436': 'commonwealth edison', // Joliet
+    '60440': 'commonwealth edison', // Bolingbrook
+    '60441': 'commonwealth edison', // Lockport
+    '60446': 'commonwealth edison', // Romeoville
+    '60447': 'commonwealth edison', // Minooka
+    '60448': 'commonwealth edison', // Mokena
+    '60449': 'commonwealth edison', // Monee
+    '60451': 'commonwealth edison', // New Lenox
+    '60472': 'commonwealth edison', // Robbins
+    '60484': 'commonwealth edison', // University Park
+    '60544': 'commonwealth edison', // Plainfield
+    '60586': 'commonwealth edison', // Plainfield
+    // Lake County
+    '60031': 'commonwealth edison', // Gurnee
+    '60046': 'commonwealth edison', // Lake Villa
+    '60048': 'commonwealth edison', // Libertyville
+    '60060': 'commonwealth edison', // Mundelein
+    '60061': 'commonwealth edison', // Vernon Hills
+    '60064': 'commonwealth edison', // North Chicago
+    '60073': 'commonwealth edison', // Round Lake
+    '60085': 'commonwealth edison', // Waukegan
+    '60087': 'commonwealth edison', // Waukegan (North)
+    '60089': 'commonwealth edison', // Buffalo Grove
+    '60099': 'commonwealth edison', // Zion
+    // Kane County
+    '60102': 'commonwealth edison', // Algonquin
+    '60118': 'commonwealth edison', // Carpentersville
+    '60119': 'commonwealth edison', // Elburn
+    '60120': 'commonwealth edison', // Elgin
+    '60123': 'commonwealth edison', // Elgin
+    '60124': 'commonwealth edison', // Elgin
+    '60134': 'commonwealth edison', // Geneva
+    '60136': 'commonwealth edison', // Gilberts
+    '60175': 'commonwealth edison', // St. Charles
+    '60177': 'commonwealth edison', // South Elgin
+    '60185': 'commonwealth edison', // West Chicago
+    '60186': 'commonwealth edison', // West Chicago
+    '60193': 'commonwealth edison', // Schaumburg
+    '60194': 'commonwealth edison', // Schaumburg
+    '60195': 'commonwealth edison', // Schaumburg
+    '60502': 'commonwealth edison', // Aurora (Kane)
+    '60503': 'commonwealth edison', // Aurora
+    '60538': 'commonwealth edison', // Montgomery
+    '60542': 'commonwealth edison', // North Aurora
+    '60543': 'commonwealth edison', // Oswego
+    '60554': 'commonwealth edison', // Sugar Grove
+  };
+
   let matchedProfile: ProposalUtilityProfile | null = null;
 
+  // Step 1: match by utility name pattern
   if (utilityName) {
     for (const p of PROPOSAL_UTILITY_PROFILES) {
       if (p.state !== stateCode && stateCode) continue;
@@ -926,6 +1745,29 @@ export function buildUtilityProfile(project: {
     }
   }
 
+  // Step 2: v48.15 — if no name match, try ZIP-to-utility lookup
+  // Extracts ZIP from address string or project.zip field
+  if (!matchedProfile) {
+    const addressStr = project.address || (project as any).address || '';
+    const zipMatch = addressStr.match(/\b(\d{5})\b/) || [];
+    const zip = project.zip || (project as any).zip || zipMatch[1] || '';
+    const inferredUtility = zip ? ZIP_UTILITY_MAP[zip] : null;
+    if (inferredUtility) {
+      for (const p of PROPOSAL_UTILITY_PROFILES) {
+        if (p.state !== stateCode && stateCode) continue;
+        try {
+          const pattern = new RegExp(p.utility_name_pattern, 'i');
+          if (pattern.test(inferredUtility)) {
+            matchedProfile = p;
+            break;
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+  }
+
   const isSpecificMatch = matchedProfile !== null;
   const isStateFallback = !isSpecificMatch;
   const usingConservativeEstimates = !stateCode;
@@ -936,10 +1778,32 @@ export function buildUtilityProfile(project: {
     matchedProfile = buildStateFallbackProfile(stateCode, stateFallbackData);
   }
 
-  const projectRate = project.utilityRatePerKwh ?? project.client?.utilityRate ?? 0;
-  const resolvedRate = projectRate > 0.08
-    ? projectRate
-    : (matchedProfile.blended_rate || matchedProfile.utility_rate);
+  // v48.10: Rate resolution logic
+  // - utilityRatePerKwh: strong override ONLY when it's a credible full blended rate.
+  //   For specific utility matches (e.g. ameren_il), the profile rate is EIA-verified.
+  //   A "strong" override only wins if it's >= 85% of the profile rate — otherwise it's
+  //   likely a supply-only OCR extraction (e.g. $0.107 when full rate is $0.155).
+  // - clientUtilityRateFallback: weak override — ONLY used when there's no specific profile match.
+  // - profile rate: always used for specific matches when override is absent or supply-only.
+  const profileRate = matchedProfile.blended_rate || matchedProfile.utility_rate;
+  const strongRate = project.utilityRatePerKwh ?? 0;
+
+  // v48.16: Apply 85% threshold universally — specific match AND state fallback.
+  // Supply-only OCR rates (e.g. $0.107 energy charge only) are typically 45–70% of the
+  // full blended retail rate. They must never override an EIA-verified profile rate.
+  // State fallback IL = $0.1882: 0.107/0.1882 = 56.8% → rejected.
+  // A manually-entered installer rate of $0.15 on an IL project: 0.15/0.1882 = 79.7% → rejected too.
+  // Only rates >= 85% of the reference profile are treated as credible blended retail rates.
+  // Reference: specific match → profile rate; state fallback → state avg rate.
+  const strongRateIsCredible = strongRate >= profileRate * 0.85;
+
+  const resolvedRate = (strongRate > 0.08 && strongRateIsCredible)
+    ? strongRate
+    : isSpecificMatch
+      ? profileRate
+      : ( (project.clientUtilityRateFallback ?? 0) >= profileRate * 0.85
+          ? project.clientUtilityRateFallback!
+          : profileRate );
 
   const netMeteringSummary = getNetMeteringSummary(matchedProfile);
   const srecSummary = getSrecSummary(matchedProfile, resolvedRate);
@@ -987,6 +1851,7 @@ function buildStateFallbackProfile(
     const failsafeExportRate = parseFloat((failsafeRetailRate * 0.25).toFixed(4)); // = 0.0375
     return {
       utility_id: 'unknown_failsafe',
+      utility_name: 'Your Electric Utility',
       utility_name_pattern: '',
       state: stateCode || 'US',
       retail_rate_type: 'flat',
@@ -1052,6 +1917,7 @@ function buildStateFallbackProfile(
 
   return {
     utility_id: `state_fallback_${stateCode}`,
+    utility_name: stateCode ? `Your ${stateCode} Electric Utility` : 'Your Electric Utility',
     utility_name_pattern: '',
     state: stateCode,
     retail_rate_type: 'flat',
@@ -1137,7 +2003,10 @@ function getSystemDesignGuidance(profile: ProposalUtilityProfile): string {
 function getExportRate(profile: ProposalUtilityProfile, resolvedRate: number): number {
   switch (profile.net_metering_type) {
     case 'retail_1to1':
-      return profile.export_rate_monthly ?? resolvedRate;
+      // For 1:1 NEM, export rate cannot exceed the retail rate used for savings math.
+      // If the project has a project-level rate override that is lower than the profile's
+      // hardcoded export_rate_monthly, cap at resolvedRate to stay internally consistent.
+      return Math.min(profile.export_rate_monthly ?? resolvedRate, resolvedRate);
     case 'net_billing':
       return profile.export_rate_monthly ?? profile.avoided_cost_rate;
     case 'avoided_cost':

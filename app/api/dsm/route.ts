@@ -248,9 +248,27 @@ export async function GET(req: NextRequest) {
 
     roofPlanes.sort((a,b) => b.areaM2 - a.areaM2);
 
+    // ── Filter to the selected building only ──────────────────────────────────
+    // The DSM tile covers a 60 m radius — multiple buildings appear in it.
+    // Keep only planes whose centre is within MAX_PLANE_RADIUS_M of the
+    // request lat/lng (the picked building's location).
+    const MAX_PLANE_RADIUS_M = 30;
+    const mLat = 111320;
+    const cosLat = Math.cos(lat * Math.PI / 180);
+    const nearbyPlanes = roofPlanes.filter((p: any) => {
+      const dLat = (p.center.lat - lat) * mLat;
+      const dLng = (p.center.lng - lng) * mLat * cosLat;
+      return Math.sqrt(dLat * dLat + dLng * dLng) <= MAX_PLANE_RADIUS_M;
+    });
+    const planesToReturn = nearbyPlanes.length > 0 ? nearbyPlanes : roofPlanes;
+    console.log(
+      `[dsm] roofPlanes: ${roofPlanes.length} total → ${planesToReturn.length} after building filter` +
+      ` (r=${MAX_PLANE_RADIUS_M}m from ${lat.toFixed(5)}, ${lng.toFixed(5)})`
+    );
+
     return NextResponse.json({
       groundElevationM: Math.round(groundLevel * 100) / 100,
-      roofPlanes: roofPlanes.slice(0, 20),
+      roofPlanes: planesToReturn.slice(0, 20),
       utmZone: zone,
     });
 

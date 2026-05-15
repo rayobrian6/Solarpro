@@ -1,5 +1,16 @@
 /**
- * panelLayoutOptimized.ts — Panel Grid Generation (CAD Geometry Engine)  v47.101
+ * panelLayoutOptimized.ts — Panel Grid Generation (CAD Geometry Engine)  v50.23
+ *
+ * v50.23: Added 'hybrid' orientation mode — per-plane auto-optimised mix.
+ *
+ * Orientation behaviour:
+ *   'portrait'  → Portrait pass first. If result=0, try landscape as fallback.
+ *   'landscape' → Landscape pass first. If result=0, try portrait as fallback.
+ *   'hybrid'    → Run full 3-pass solver (portrait / landscape / mixed) on the
+ *                 plane independently and pick the winner. Identical to the
+ *                 'undefined' (auto) path but exposed explicitly in the UI so
+ *                 the user can lock a specific plane to hybrid mode.
+ *   undefined   → Same as 'hybrid' (3-pass auto solver, portrait-first scoring).
  *
  * v47.101: Portrait-First Solver — fixed orientation control + row iteration
  *
@@ -15,7 +26,7 @@
  *      calls it twice (portrait + landscape) and merges.
  *   4. Panel spacing clamped to 0.25" (0.00635m) minimum — simulates mid-clamp gap.
  *
- * Algorithm (auto mode, orientation undefined):
+ * Algorithm (hybrid/auto mode):
  *   Pass 1: portrait-only  → score = count + 0.5   (portrait preference bonus)
  *   Pass 2: landscape-only → score = count          (no bonus)
  *   Pass 3: mixed-fill     → score = count + 0.25   (mixed preference bonus)
@@ -86,7 +97,9 @@ const MIN_PANEL_SPACING_M = 0.00635;
  * Orientation behavior:
  *   'portrait'  → Portrait pass first. If result=0, try landscape as fallback.
  *   'landscape' → Landscape pass first. If result=0, try portrait as fallback.
- *   undefined   → 3-pass auto solver: portrait-first with scoring.
+ *   'hybrid'    → Run full 3-pass auto solver on this plane independently,
+ *                 picking portrait / landscape / mixed for maximum panel count.
+ *   undefined   → Same as 'hybrid' (3-pass auto solver).
  */
 export function generateRoofLayoutOptimized(params: {
   layoutId:        string;
@@ -97,7 +110,7 @@ export function generateRoofLayoutOptimized(params: {
   rowSpacing:      number;
   tilt:            number;
   azimuth:         number;
-  orientation?:    'portrait' | 'landscape';
+  orientation?:    'portrait' | 'landscape' | 'hybrid';
   fireSetbackM?:   number;
   pathwayWidthM?:  number;
   enforcePathway?: boolean;
@@ -118,7 +131,7 @@ export function generateRoofLayoutOptimized(params: {
   // Fire setback: use larger of manual setback or fire setback (legacy uniform)
   const setback = Math.max(params.setback, params.fireSetbackM ?? 0);
 
-  const orientation = params.orientation; // undefined = auto
+  const orientation = params.orientation; // undefined or 'hybrid' = auto
   // Per-edge setbacks (v47.111)
   const eaveSetbackM  = params.eaveSetbackM;
   const ridgeSetbackM = params.ridgeSetbackM;
@@ -159,7 +172,11 @@ export function generateRoofLayoutOptimized(params: {
     return tagStrategy(pPanels, 'PORTRAIT');
   }
 
-  // ── AUTO MODE (orientation undefined) — 3-pass portrait-first solver ───
+  // ── HYBRID / AUTO MODE (orientation === 'hybrid' | undefined) — 3-pass solver ──
+  // Run the full 3-pass solver on this plane independently:
+  //   portrait-only / landscape-only / mixed-fill (portrait rows + landscape ridge strip)
+  // Picks whichever strategy yields the most panels, honouring all fire setbacks.
+  // 'hybrid' is identical to undefined (auto) — exposed explicitly for per-plane UI control.
   return solveRoofLayout({
     layoutId, roofPlane, panel,
     setbackM:       setback,
@@ -178,8 +195,8 @@ export function generateRoofLayoutOptimized(params: {
 // ─── 3-Pass Auto Solver ──────────────────────────────────────────────────────
 
 /**
- * Portrait-first 3-pass solver (auto mode only).
- * Used when orientation is undefined (system default).
+ * Portrait-first 3-pass solver (hybrid/auto mode).
+ * Used when orientation is undefined or 'hybrid'.
  */
 export function solveRoofLayout(params: {
   layoutId:        string;

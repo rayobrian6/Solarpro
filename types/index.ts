@@ -314,7 +314,7 @@ export interface PlacedPanel {
   systemType?: 'roof' | 'ground' | 'fence';
   arrayId?: string;
   // v30.9: Panel orientation (portrait = tall, landscape = wide)
-  orientation?: 'portrait' | 'landscape';
+  orientation?: 'portrait' | 'landscape' | 'hybrid';
   // v47.93: Architecture stabilization -- dual placement system
   layoutSource?: 'AUTO' | 'MANUAL';
   placementType?: 'ROOF' | 'GROUND' | 'FENCE';
@@ -333,6 +333,11 @@ export interface PlacedPanel {
   // bypassing HeadingPitchRoll approximation for tilted roof planes.
   ecefNx?: number; ecefNy?: number; ecefNz?: number;  // plane normal (ECEF unit vector)
   ecefUx?: number; ecefUy?: number; ecefUz?: number;  // plane u-axis (ECEF unit vector)
+
+  // v1.shade: Per-panel shade analysis results
+  // annualShadeFactor: 0 (fully shaded) .. 1 (full sun, no shade)
+  // Set by computeShadeAnalysis() in lib/shadeAnalysis.ts
+  annualShadeFactor?: number;
 }
 
 // ─── Roof Plane ───────────────────────────────────────────────
@@ -378,8 +383,8 @@ export interface RoofPlane {
   verticesLocal?: { xFeet: number; yFeet: number }[];
   centroidLocal?: { xFeet: number; yFeet: number };
 
-  // v47.96 -- Per-plane panel orientation (portrait = tall, landscape = wide)
-  orientation?: 'portrait' | 'landscape';
+  // v47.96 -- Per-plane panel orientation (portrait = tall, landscape = wide, hybrid = auto-optimised mix)
+  orientation?: 'portrait' | 'landscape' | 'hybrid';
 
   // v47.118 -- Primary axis detection: bearing of longest polygon edge [0,180)
   // Computed once at plane creation via longestEdgeBearing(vertices).

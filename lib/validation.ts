@@ -9,6 +9,7 @@
  *   const { data, error } = parseBody(registerSchema, body);
  */
 import { z } from 'zod';
+import { isGibberish, isDisposableEmail } from '@/lib/signupGuard';
 
 // ── Auth Schemas ──────────────────────────────────────────────────────────────
 
@@ -21,12 +22,32 @@ const PASSWORD_MAX = 1000;
 const EMAIL_MAX    = 320; // RFC 5321 maximum email length
 
 export const registerSchema = z.object({
-  name: z.string().min(1, 'Full name is required.').max(200, 'Name too long.').transform(s => s.trim()),
-  email: z.string().email('Valid email is required.').max(EMAIL_MAX, 'Email too long.').transform(s => s.toLowerCase().trim()),
+  name: z.string()
+    .min(1, 'Full name is required.')
+    .max(200, 'Name too long.')
+    .transform(s => s.trim())
+    .refine(
+      s => !isGibberish(s),
+      'Please enter your real full name.'
+    ),
+  email: z.string()
+    .email('Valid email is required.')
+    .max(EMAIL_MAX, 'Email too long.')
+    .transform(s => s.toLowerCase().trim())
+    .refine(
+      s => !isDisposableEmail(s),
+      'Please use a real business or personal email address.'
+    ),
   password: z.string()
     .min(8, 'Password must be at least 8 characters.')
     .max(PASSWORD_MAX, 'Password too long.'),
-  company: z.string().max(200, 'Company name too long.').optional(),
+  company: z.string()
+    .max(200, 'Company name too long.')
+    .optional()
+    .refine(
+      s => !s || !isGibberish(s),
+      'Please enter your real company name.'
+    ),
   phone: z.string().max(30, 'Phone number too long.').optional(),
   tosAccepted: z.literal(true, { error: 'You must accept the Terms of Service and Confidentiality Agreement to create an account.' }),
 });

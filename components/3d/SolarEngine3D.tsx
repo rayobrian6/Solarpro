@@ -199,6 +199,7 @@ interface Props {
   fireSetbacks?: {
     edgeSetbackM: number;
     ridgeSetbackM: number;
+    eaveSetbackM: number;
     enforcePathway: boolean;
     pathwayWidthM?: number;
   };
@@ -403,6 +404,21 @@ function SolarEngine3D({
   const pendingPanelsRef    = useRef<PlacedPanel[]>([]);
   // renderAllPanelsRef: exposes renderAllPanels to the panels useEffect below.
   const renderAllPanelsRef  = useRef<((viewer: any, C: any, list: PlacedPanel[]) => void) | null>(null);
+
+  // orbitRef: mutable orbit state for the custom turntable camera controller.
+  // Updated inside mousedown/mousemove/wheel handlers inside boot().
+  // Read by applyOrbitRef.current() to reposition the Cesium camera.
+  const orbitRef = useRef({
+    targetLat: lat, targetLng: lng, targetAlt: 0,
+    heading: 0.0, pitch: -1.134, radius: 150.0,
+    dragging: false, dragButton: -1,
+    dragStartX: 0, dragStartY: 0,
+    dragStartH: 0.0, dragStartP: 0.0,
+    dragStartTLat: 0.0, dragStartTLng: 0.0,
+  });
+  // applyOrbitRef: function that reads orbitRef and calls camera.setView().
+  // Assigned inside boot() once the Cesium viewer is available.
+  const applyOrbitRef = useRef<(() => void) | null>(null);
   // Performance: debounce timer for panel re-renders during bulk operations
   const renderDebounceRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Performance: snapshot of last rendered panel list for incremental diff
@@ -931,24 +947,25 @@ function SolarEngine3D({
     prevLatRef.current = lat;
     prevLngRef.current = lng;
     const elev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-    const altitude = Math.max(elev + 150, 300); // v47.215: closer default altitude (150m above ground, 300m min)
-    try {
-      // v47.215: -65° pitch gives better top-down view for panel placement
-      viewer.camera.flyTo({
-        destination: C.Cartesian3.fromDegrees(lng, lat, altitude),
-        orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-65), roll: 0 },
-        duration: 2.0,
-        complete: () => {
-          // Render pump after camera arrives
-          [200, 600, 1500, 3000].forEach(t =>
-            setTimeout(() => { try { viewer.resize(); viewer.scene.requestRender(); } catch {} }, t)
-          );
-        },
-      });
-      addLog('FLY', `Address change → fly to ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
-    } catch (e: unknown) {
-      addLog('WARN', `flyTo failed: ${(e as Error).message}`);
+    // Update orbit state for new address — snap camera to site at default pose
+    const o = orbitRef.current;
+    o.targetLat = lat;
+    o.targetLng = lng;
+    o.targetAlt = elev;
+    o.heading   = 0;
+    o.pitch     = -1.134;  // -65° — top-down-ish view
+    o.radius    = Math.max(150, elev > 0 ? 150 : 300);
+    o.dragging  = false;
+    if (applyOrbitRef.current) {
+      applyOrbitRef.current();
+      addLog('FLY', `Address change → orbit to ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+    } else {
+      // applyOrbit not yet ready (boot hasn’t run); will be applied when applyOrbitRef is set
+      addLog('FLY', `Address change queued (applyOrbit not ready)`);
     }
+    [200, 600, 1500, 3000].forEach(t =>
+      setTimeout(() => { try { viewer.resize(); viewer.scene.requestRender(); } catch {} }, t)
+    );
 
     // Reload digital twin for new location (Pick House / address change)
     // Clear old overlays and reload Solar API data for the new lat/lng
@@ -976,6 +993,10 @@ function SolarEngine3D({
       addLog('FLY', `cesiumGroundElev updated: ${cesiumGroundElevRef.current.toFixed(1)}m (geoidApprox: ${geoidApprox.toFixed(1)}m) [no terrain sample]`);
       terrainReadyRef.current = true;
       setTerrainReady(true);
+      // Sync orbit target altitude now that ground elevation is known
+      const oo = orbitRef.current;
+      oo.targetAlt = cesiumGroundElevRef.current;
+      applyOrbitRef.current?.();
 
       // Redraw overlays for new location
       drawOverlays(viewer, C, newTwin);
@@ -1055,50 +1076,343 @@ function SolarEngine3D({
       viewer.resize();
       viewerRef.current = viewer;
 
-      // ── FREE CAMERA: ensure all mouse/touch inputs are fully enabled ──────────
-      // Explicitly configure ScreenSpaceCameraController so no input is locked.
-      // - Left-drag   → orbit/rotate around the scene
-      // - Middle-drag → tilt (look up/down)
-      // - Right-drag  → tilt (same as middle — matches user expectation)
-      // - Scroll      → zoom in/out
-      // - Two-finger  → pinch zoom + tilt on touch devices
+      // ── CUSTOM ORBIT CAMERA CONTROLLER ────────────────────────────────────────
+      //
+      // WHY A CUSTOM CONTROLLER?
+      // Cesium's built-in ScreenSpaceCameraController is designed for planet-scale
+      // navigation.  At roof level (camera altitude 10–200 m), its spin3D() function
+      // randomly switches between pan3D / look3D / strafe / rotate3D depending on
+      // what the depth-buffer ray hits each frame.  The result is the "mind of its
+      // own" behaviour: dragging the mouse causes the camera to lurch, snap to
+      // first-person look, or fly off at high speed depending on whether the ray
+      // lands on a roof tile, a wall, or open sky.
+      //
+      // rotate3D() (the "good" orbit function) uses rho = |camera.position| from
+      // Earth centre (~6,370,100 m at roof level), so one full drag rotates by
+      // roughly 0.006° — completely invisible.  All of Cesium's built-in modes
+      // are calibrated for distances ≥ 1,000 km.
+      //
+      // SOLUTION: disable Cesium's input system entirely and implement a clean
+      // turntable orbit using camera.setView() each frame:
+      //
+      //   Camera position = target + R·(spherical heading/pitch)
+      //
+      // where:
+      //   target  = building centre (lat/lng/groundElev, stable ref point)
+      //   R       = orbit radius (metres, updated by scroll)
+      //   heading = azimuth around target (radians, updated by left/right drag)
+      //   pitch   = elevation angle  (radians, −π/2 = top-down, updated by up/down drag)
+      //
+      // camera.setView() is fully deterministic and always produces the correct
+      // camera position+orientation regardless of what tiles are loaded.
+      //
+      // CONTROLS:
+      //   Left-drag     → orbit (heading + pitch)
+      //   Right-drag    → tilt (pitch only, finer control)
+      //   Middle-drag   → pan orbit target (translate reference point)
+      //   Scroll wheel  → zoom (adjust orbit radius)
+      //   Middle-click  → zoom to cursor is NOT supported; middle is pan only
+
+      // ── 1. Disable Cesium's built-in camera input ────────────────────────────
       try {
         const ctrl = viewer.scene.screenSpaceCameraController;
-        ctrl.enableInputs   = true;
-        ctrl.enableRotate   = true;
-        ctrl.enableTilt     = true;
-        ctrl.enableZoom     = true;
-        ctrl.enableLook     = true;
-        ctrl.enableTranslate = true;
-
-        // KEY FIX: Disable collision detection — this is what causes Cesium to
-        // snap the camera BACK to top-down when the user tilts past ~45°.
-        // Cesium's default enableCollisionDetection=true prevents the camera from
-        // "going below terrain", which it interprets as any tilt beyond ~45° when
-        // close to the ground. Disabling it gives truly free tilt from 0° to 90°+.
+        ctrl.enableInputs     = false;   // disables all Cesium mouse/touch handling
+        ctrl.enableRotate     = false;
+        ctrl.enableTilt       = false;
+        ctrl.enableZoom       = false;
+        ctrl.enableLook       = false;
+        ctrl.enableTranslate  = false;
+        // Keep collision detection off so we can tilt past 90°
         ctrl.enableCollisionDetection = false;
+      } catch (e) { addLog('WARN', `ctrl disable: ${(e as Error).message}`); }
 
-        // Also clear maximumTiltAngle so there's no hard angle cap at all
-        ctrl.maximumTiltAngle = undefined;
+      // ── 2. Orbit state ───────────────────────────────────────────────────────
+      //
+      // These are plain numbers in a closure object — no React state, no re-renders.
+      // All mutations happen inside event handlers; camera.setView() is called at
+      // the end of each mutation to apply the change immediately.
+      const orbit = {
+        // Orbit target: building centre on the ground surface
+        // Updated at boot-end (after cesiumGroundElevRef is resolved) and when
+        // the user pans (middle-drag).  Stored as Cartesian3 for efficiency.
+        targetLat: lat,
+        targetLng: lng,
+        targetAlt: 0 as number,   // filled in after terrain sampling completes
 
-        // Map BOTH middle-drag AND right-drag to tilt so users can use either
-        ctrl.tiltEventTypes = [
-          C.CameraEventType.MIDDLE_DRAG,
-          C.CameraEventType.RIGHT_DRAG,
-          { eventType: C.CameraEventType.LEFT_DRAG, modifier: C.KeyboardEventModifier.CTRL },
-        ];
-        // Left-drag = free orbit/rotate
-        ctrl.rotateEventTypes = [C.CameraEventType.LEFT_DRAG];
-        // Scroll wheel + pinch = zoom
-        ctrl.zoomEventTypes = [
-          C.CameraEventType.WHEEL,
-          C.CameraEventType.PINCH,
-          { eventType: C.CameraEventType.LEFT_DRAG, modifier: C.KeyboardEventModifier.SHIFT },
-        ];
-        // Allow close-up zoom without collision snapping
-        ctrl.minimumZoomDistance = 1;
-        ctrl.maximumZoomDistance = 50000;
-      } catch (e) { addLog('WARN', `Camera controller config: ${(e as Error).message}`); }
+        // Spherical camera pose
+        heading: 0.0,             // radians, 0 = north, CW positive
+        pitch:   -1.134,          // radians, -65° (initial boot angle)
+        radius:  150.0,           // metres from target
+
+        // Drag state
+        dragging:      false as boolean,
+        dragButton:    -1    as number,  // 0=left, 1=middle, 2=right
+        dragStartX:    0     as number,
+        dragStartY:    0     as number,
+        dragStartH:    0.0   as number,  // heading at drag start
+        dragStartP:    0.0   as number,  // pitch at drag start
+        dragStartTLat: 0.0   as number,  // target lat at drag start (pan)
+        dragStartTLng: 0.0   as number,  // target lng at drag start (pan)
+      };
+
+      // Point orbitRef.current to this orbit object so it is accessible
+      // from anywhere in the component (fitCameraToRoofPlanes, flyToProperty, etc.)
+      orbitRef.current = orbit;
+
+      // ── 3. camera.setView() helper ───────────────────────────────────────────
+      //
+      // Computes the camera position from the orbit state and calls setView().
+      // This is the ONLY place that moves the Cesium camera — one clean function.
+      //
+      // MATH:
+      //   orbit.heading = angle of camera POSITION relative to target (0=N, CW+)
+      //   orbit.pitch   = Cesium convention: 0=horizontal, -π/2=straight down
+      //   orbit.radius  = metres from target to camera
+      //
+      //   Camera sits at:
+      //     ENU east  =  R · cos(−pitch) · sin(heading)
+      //     ENU north =  R · cos(−pitch) · cos(heading)
+      //     ENU up    = −R · sin(pitch)          (positive when pitch<0 = cam is above target)
+      //
+      //   Camera looks TOWARD target, so look-direction = −enuOffset (normalised).
+      //   Cesium setView HPR derives orientation from the heading+pitch of the camera’s
+      //   look direction, NOT the camera position direction.
+      //   Look-direction heading = orbit.heading + π   (camera faces opposite to its position)
+      //   Look-direction pitch   = −orbit.pitch         (inverse: cam above target → look down)
+      function applyOrbit() {
+        const cam = viewer.camera;
+        if (!cam) return;
+
+        const C3   = C.Cartesian3;
+        const CMath = C.Math;
+
+        // Clamp to safe values
+        orbit.pitch  = CMath.clamp(orbit.pitch,  -CMath.PI_OVER_TWO + 0.02,  CMath.PI_OVER_TWO - 0.05);
+        orbit.radius = CMath.clamp(orbit.radius, 1.5, 50000);
+
+        // Elevation angle: -pitch in Cesium convention (pitch=-π/2 = looking straight down = camera is overhead)
+        const elev  = -orbit.pitch;   // elevation above horizontal (positive = camera is above target)
+        const pSin  = Math.sin(elev);  // how high the camera is (>0 = above)
+        const pCos  = Math.cos(elev);  // horizontal distance scale
+        const hSin  = Math.sin(orbit.heading);
+        const hCos  = Math.cos(orbit.heading);
+
+        // Camera offset from target in ENU metres
+        const eastM  = orbit.radius * pCos * hSin;
+        const northM = orbit.radius * pCos * hCos;
+        const upM    = orbit.radius * pSin;
+
+        // Convert ENU offset to world Cartesian3.
+        // Cesium’s eastNorthUpToFixedFrame(origin) gives a 4×4 matrix where:
+        //   col0 = East unit vector in ECEF
+        //   col1 = North unit vector in ECEF
+        //   col2 = Up unit vector in ECEF
+        //   col3 = origin (target) in ECEF
+        //
+        // multiplyByPointAsVector (3×4 × [x,y,z,0]) gives the ROTATION ONLY,
+        // i.e. ecef_offset = R · enuVec (no translation).
+        // Camera position = origin + ecef_offset.
+        const targetCart = C3.fromDegrees(orbit.targetLng, orbit.targetLat, orbit.targetAlt);
+        const enuToEcef  = C.Transforms.eastNorthUpToFixedFrame(targetCart);
+
+        // Use multiplyByPointAsVector to get rotation-only (no translation baked in)
+        const enuVec    = new C3(eastM, northM, upM);
+        const ecefVec   = C.Matrix4.multiplyByPointAsVector(enuToEcef, enuVec, new C3());
+        const camPos    = C3.add(targetCart, ecefVec, new C3());
+
+        // Camera look-direction heading & pitch:
+        // The camera sits at position = target + offset, and must look TOWARD target.
+        // Look direction = −offset (normalised).
+        // In Cesium HPR convention for setView:
+        //   heading = compass bearing of look direction = orbit.heading + π  (camera is opposite side of target)
+        //   pitch   = elevation of look direction = −elev (camera above → look down, i.e. negative pitch)
+        const lookHeading = orbit.heading + Math.PI;
+        const lookPitch   = -elev;   // same as orbit.pitch
+
+        cam.setView({
+          destination: camPos,
+          orientation: {
+            heading: lookHeading,
+            pitch:   lookPitch,
+            roll:    0,
+          },
+        });
+
+        viewer.scene.requestRender();
+      }
+
+      // ── 4. Expose applyOrbit via ref so flyTo/fitCamera can update orbit state
+      applyOrbitRef.current = applyOrbit;
+
+      // Seed orbit.targetAlt once terrain is available (deferred)
+      // syncOrbitAlt: updates orbit target altitude after terrain elevation is resolved.
+      // Called by the lat/lng change effect when cesiumGroundElevRef is updated.
+      // (defined here so it’s in scope; actually called via orbitRef/applyOrbitRef).
+
+      // ── 5. Mouse / Pointer event handlers ─────────────────────────────────────────────
+      // Use viewer.scene.canvas directly — guaranteed to be the Cesium rendering canvas.
+      // Previously used querySelector('canvas') which could pick a non-rendering canvas.
+      const cesiumCanvas = viewer.scene.canvas as HTMLCanvasElement | null;
+
+      if (cesiumCanvas) {
+        // ── 5a. Drag sensitivity constants ──────────────────────────────────────
+        // ORBIT_DRAG: radians of heading/pitch change per pixel of mouse movement.
+        // At 0.004 rad/px: dragging 400px across a 1600-wide canvas rotates ~92°.
+        const ORBIT_DRAG  = 0.004;  // rad/px for left-drag orbit
+        const TILT_DRAG   = 0.003;  // rad/px for right-drag tilt (finer)
+
+        // PAN_DRAG: metres of orbit target shift per pixel.
+        // At orbit.radius = 150m: 1px → 150*0.001 = 0.15m pan.  Scales with zoom.
+        const PAN_SCALE   = 0.001;  // world metres per pixel per metre of orbit radius
+
+        // ── 5b. Wheel zoom ──────────────────────────────────────────────────────
+        // The upstream normalizer (see wheel listener below) already converts all
+        // wheel events to ±120.  We apply a fixed proportional step per notch.
+        const ZOOM_FACTOR = 0.15;   // 15% of current radius per notch
+
+        let middleDown   = false;
+        let middleDownAt = 0;
+        let reDispatching = false;
+
+        // ── 5c. pointerdown (replaces mousedown) ───────────────────────────────────────
+        // Using pointerdown (fires before implicit pointer capture) so we can
+        // call setPointerCapture() and guarantee that pointermove/pointerup
+        // follow the pointer to window even on browsers that redirect them.
+        cesiumCanvas.addEventListener('pointerdown', (ev: PointerEvent) => {
+          if (ev.button === 1) { middleDown = true; middleDownAt = Date.now(); }
+
+          // Capture the pointer so pointermove/pointerup come to us even if
+          // the cursor leaves the canvas (works on all modern browsers).
+          try { cesiumCanvas.setPointerCapture(ev.pointerId); } catch {}
+
+          orbit.dragging   = true;
+          orbit.dragButton = ev.button;
+          orbit.dragStartX = ev.clientX;
+          orbit.dragStartY = ev.clientY;
+          orbit.dragStartH    = orbit.heading;
+          orbit.dragStartP    = orbit.pitch;
+          orbit.dragStartTLat = orbit.targetLat;
+          orbit.dragStartTLng = orbit.targetLng;
+
+          ev.preventDefault();
+        }, { capture: true });
+
+        // ── 5d. pointermove (replaces mousemove on window) ────────────────────────────────
+        // With pointer capture active, pointermove fires even after the cursor
+        // leaves the canvas.  We also keep a mousemove fallback on window for
+        // browsers that don’t support pointer capture on canvas.
+        const handleDragMove = (ev: PointerEvent | MouseEvent) => {
+          if (!orbit.dragging) return;
+
+          const dx = ev.clientX - orbit.dragStartX;
+          const dy = ev.clientY - orbit.dragStartY;
+
+          if (orbit.dragButton === 0) {
+            // Left-drag: full orbit (heading + pitch)
+            orbit.heading = orbit.dragStartH - dx * ORBIT_DRAG;
+            orbit.pitch   = orbit.dragStartP + dy * ORBIT_DRAG;
+
+          } else if (orbit.dragButton === 2) {
+            // Right-drag: tilt only (pitch)
+            orbit.pitch   = orbit.dragStartP + dy * TILT_DRAG;
+
+          } else if (orbit.dragButton === 1) {
+            // Middle-drag: pan the orbit target
+            // Convert pixel offsets to world metres in the camera’s ENU frame,
+            // then shift targetLat/targetLng accordingly.
+            const panScale = orbit.radius * PAN_SCALE;
+
+            // Account for current heading so pan feels natural regardless of
+            // which direction the camera is facing.
+            const hSin = Math.sin(orbit.heading);
+            const hCos = Math.cos(orbit.heading);
+
+            // screen-right maps to camera-right; screen-down maps to camera-back
+            const eastPan  = -dx * panScale * hCos + dy * panScale * hSin;
+            const northPan =  dx * panScale * hSin + dy * panScale * hCos;
+
+            // Convert metres to degrees (approx, valid for small offsets)
+            const mPerDegLat = 111320;
+            const mPerDegLng = 111320 * Math.cos(orbit.targetLat * Math.PI / 180);
+
+            orbit.targetLat = orbit.dragStartTLat + northPan / mPerDegLat;
+            orbit.targetLng = orbit.dragStartTLng + eastPan  / mPerDegLng;
+          }
+
+          applyOrbit();
+        };
+
+        // Primary: pointermove on canvas (pointer capture redirects here even outside canvas).
+        cesiumCanvas.addEventListener('pointermove', handleDragMove as EventListener);
+        // Dedup guard: skip window mousemove when pointermove already handled it.
+        let lastMoveX = -9999, lastMoveY = -9999;
+        const handlePointerMoveDedup = (ev: PointerEvent) => { lastMoveX = ev.clientX; lastMoveY = ev.clientY; };
+        cesiumCanvas.addEventListener('pointermove', handlePointerMoveDedup);
+        // Fallback: window mousemove for edge cases (pointer capture not active).
+        window.addEventListener('mousemove', (ev: MouseEvent) => {
+          if (ev.clientX === lastMoveX && ev.clientY === lastMoveY) return;
+          (handleDragMove as EventListener)(ev);
+        });
+
+        // ── 5e. pointerup + mouseup ────────────────────────────────────────────────────────
+        const handleDragEnd = (ev: PointerEvent | MouseEvent) => {
+          if ('pointerId' in ev) {
+            try { cesiumCanvas.releasePointerCapture((ev as PointerEvent).pointerId); } catch {}
+          }
+          if (ev.button === 1) middleDown = false;
+          orbit.dragging   = false;
+          orbit.dragButton = -1;
+        };
+        cesiumCanvas.addEventListener('pointerup',     handleDragEnd as EventListener);
+        cesiumCanvas.addEventListener('pointercancel', handleDragEnd as EventListener);
+        window.addEventListener('mouseup', handleDragEnd as EventListener);
+
+        // ── 5f. Wheel zoom ───────────────────────────────────────────────────────
+        // Capture-phase normalizer: converts all wheel events to ±120 and
+        // drops middle-click synthetic blips.  Then applyOrbit() handles zoom.
+        cesiumCanvas.addEventListener('wheel', (ev: WheelEvent) => {
+          if (reDispatching) return;
+
+          // Drop middle-click synthetic blip (button press → wheel within 150ms)
+          if (middleDown && Date.now() - middleDownAt < 150) {
+            ev.stopImmediatePropagation();
+            ev.preventDefault();
+            return;
+          }
+
+          ev.stopImmediatePropagation();
+          ev.preventDefault();
+
+          // ev.deltaY > 0 = scroll down = zoom out (increase radius)
+          const direction = ev.deltaY > 0 ? 1 : -1;
+          orbit.radius = orbit.radius * (1 + direction * ZOOM_FACTOR);
+
+          applyOrbit();
+
+          // Pump renders for the zoom animation window
+          const end = Date.now() + 600;
+          const pump = () => {
+            try { viewer.scene.requestRender(); } catch {}
+            if (Date.now() < end) requestAnimationFrame(pump);
+          };
+          requestAnimationFrame(pump);
+
+        }, { capture: true, passive: false });
+
+        // Context menu suppression (right-drag should not open browser menu)
+        cesiumCanvas.addEventListener('contextmenu', (ev: Event) => {
+          ev.preventDefault();
+        });
+      }
+      // ─────────────────────────────────────────────────────────────────────────
+
+      if (cesiumRef.current) {
+        const ro = new ResizeObserver(() => {
+          try { viewer.resize(); viewer.scene.requestRender(); } catch {}
+        });
+        ro.observe(cesiumRef.current);
+      }
+
       // ─────────────────────────────────────────────────────────────────────────
 
       // Global render error handler - prevents freeze
@@ -1248,12 +1562,15 @@ function SolarEngine3D({
       // NOW set twin state - cesiumGroundElevRef is ready, so drawOverlays will use correct elevation
       if (twinData) setTwin(twinData);
 
-      // v47.215: -65° pitch (more top-down, better for roof viewing) + 150m altitude (closer than 200m)
-      viewer.camera.flyTo({
-        destination: C.Cartesian3.fromDegrees(lng, lat, cesiumGroundElev + 150),
-        orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-65), roll: 0 },
-        duration: 1.5,
-      });
+      // Set initial orbit state using terrain-corrected elevation
+      const oo = orbitRef.current;
+      oo.targetLat = lat;
+      oo.targetLng = lng;
+      oo.targetAlt = cesiumGroundElev;
+      oo.heading   = 0;
+      oo.pitch     = -1.134;   // -65° top-down-ish
+      oo.radius    = 150;
+      applyOrbitRef.current?.();
 
       setProgress(90);
       // Draw overlays AFTER terrain sampling so geoidOffset is correctly applied
@@ -1272,12 +1589,10 @@ function SolarEngine3D({
       setupCameraOptimizer(viewer, C);
       setupKeyboardHandler();
 
-      if (cesiumRef.current) {
-        const ro = new ResizeObserver(() => {
-          try { viewer.resize(); viewer.scene.requestRender(); } catch {}
-        });
-        ro.observe(cesiumRef.current);
-      }
+
+      // Initial camera position via orbit (also called at end of missing section above)
+      // applyOrbit() was already called after cesiumGroundElev was set above
+
 
       // Expose renderAllPanels so the panels useEffect can call it after boot
       renderAllPanelsRef.current = renderAllPanels;
@@ -1455,52 +1770,50 @@ function SolarEngine3D({
     canvas.addEventListener('mouseleave',  onDragEnd,   { passive: true });
     canvas.addEventListener('mousemove',   onDragMove,  { passive: true });
     canvas.addEventListener('pointermove', onDragMove,  { passive: true });
-    // Scroll wheel zoom also needs continuous renders
+
+    // Scroll wheel zoom: pump renders continuously for the full duration of
+    // Cesium's zoom animation (~500ms) so it doesn't freeze mid-animation.
+    // Previous code only pumped at +100ms and +300ms — frames after 300ms were
+    // skipped, causing the zoom to stall then snap to the final position.
     canvas.addEventListener('wheel', () => {
-      try { viewer.scene.requestRender(); } catch {}
-      setTimeout(() => { try { viewer.scene.requestRender(); } catch {}; }, 100);
-      setTimeout(() => { try { viewer.scene.requestRender(); } catch {}; }, 300);
+      // Kick off a short RAF loop that runs for 600ms — covers the full
+      // Cesium zoom-inertia window without over-rendering idle frames.
+      const end = Date.now() + 600;
+      const pump = () => {
+        try { viewer.scene.requestRender(); } catch {}
+        if (Date.now() < end) requestAnimationFrame(pump);
+      };
+      requestAnimationFrame(pump);
     }, { passive: true });
   }
 
   // ── v47.215: Fit camera to all placed panels (bounding box zoom) ─────────────────
   // Called by the "Fit View" toolbar button and automatically after any placement.
   // Works for both auto-fill and manually placed panels.
-  function fitCameraToRoofPlanes(viewer: any, C: any) {
+  function fitCameraToRoofPlanes(_viewer: any, _C: any) {
     const panels = panelsRef.current;
+    const o = orbitRef.current;
     if (!panels || panels.length === 0) {
-      // No panels — fly to project site at comfortable altitude
-      const elev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-      viewer.camera.flyTo({
-        destination: C.Cartesian3.fromDegrees(lng, lat, elev + 150),
-        orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-65), roll: 0 },
-        duration: 1.5,
-      });
-      return;
+      // No panels — reset to site at default pose
+      o.targetLat = lat; o.targetLng = lng;
+      o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      o.heading = 0; o.pitch = -1.134; o.radius = 150;
+    } else {
+      const lats = panels.map((p: PlacedPanel) => p.lat);
+      const lngs = panels.map((p: PlacedPanel) => p.lng);
+      const centLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+      const centLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+      const latSpanM = (Math.max(...lats) - Math.min(...lats)) * 111320;
+      const lngSpanM = (Math.max(...lngs) - Math.min(...lngs)) * 111320 * Math.cos(centLat * Math.PI / 180);
+      const spanM    = Math.max(latSpanM, lngSpanM, 15);
+      const radius   = Math.max(50, spanM * 1.4);
+      o.targetLat = centLat; o.targetLng = centLng;
+      o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+      o.heading = 0; o.pitch = -1.222;  // -70°
+      o.radius  = radius;
+      addLog('FIT', `Fit view: ${panels.length} panels, span=${spanM.toFixed(0)}m, radius=${radius.toFixed(0)}m`);
     }
-    const lats = panels.map((p: PlacedPanel) => p.lat);
-    const lngs = panels.map((p: PlacedPanel) => p.lng);
-    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-    const centLat = (minLat + maxLat) / 2;
-    const centLng = (minLng + maxLng) / 2;
-    // Adaptive altitude: scale with the footprint of all panels
-    const latSpanM = (maxLat - minLat) * 111320;
-    const lngSpanM = (maxLng - minLng) * 111320 * Math.cos(centLat * Math.PI / 180);
-    const spanM    = Math.max(latSpanM, lngSpanM, 15); // at least 15m
-    const altAboveRoof = Math.max(50, spanM * 1.4);    // 1.4x span for ~60-deg FOV with margin
-    const avgPanelH = panels.reduce((s: number, p: PlacedPanel) => s + (p.height ?? 0), 0) / panels.length;
-    const flyAlt = (isFinite(avgPanelH) && avgPanelH > 0 ? avgPanelH : cesiumGroundElevRef.current) + altAboveRoof;
-    try {
-      viewer.camera.flyTo({
-        destination: C.Cartesian3.fromDegrees(centLng, centLat, flyAlt),
-        orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-70), roll: 0 },
-        duration: 1.2,
-      });
-      addLog('FIT', `Fit view: ${panels.length} panels, span=${spanM.toFixed(0)}m, alt=${flyAlt.toFixed(0)}m`);
-    } catch (e: unknown) {
-      addLog('WARN', `fitCameraToRoofPlanes failed: ${(e as Error).message}`);
-    }
+    applyOrbitRef.current?.();
   }
 
   // ── Draw all overlays ──────────────────────────────────────────────────────
@@ -3777,7 +4090,7 @@ function SolarEngine3D({
 
       for (const panel of gatePanels) {
         try {
-          const dims = getPanelDims(panel.orientation ?? panelOrientationRef.current);
+          const _pOrient = (panel.orientation as string | undefined); const _gOrient = (panelOrientationRef.current as string); const dims = getPanelDims((_pOrient === 'hybrid' || !_pOrient ? (_gOrient === 'hybrid' ? 'portrait' : _gOrient) : _pOrient) as 'portrait' | 'landscape');
           const pos = safeCartesian3(C, panel.lng, panel.lat, panel.height ?? 0);
           if (!pos) continue;
 
@@ -4828,6 +5141,7 @@ function SolarEngine3D({
       const orient        = panelOrientationRef.current ?? 'portrait';
       const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
       const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
+      const eaveSetbackM  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
       const layoutId      = `plane3d-${plane.id}`;
 
       const clResult = placePanelsControlled({
@@ -4835,7 +5149,7 @@ function SolarEngine3D({
         plane:           plane as unknown as ControlPlane,
         orientation:     orient,
         wattage:         selectedPanelRef.current?.wattage ?? 400,
-        setbacks:        { eaveM: 0, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
+        setbacks:        { eaveM: eaveSetbackM, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
         groundElevM:     groundElev,
         layoutId,
         customOriginLat: customLayoutOriginRef.current?.lat,
@@ -5000,6 +5314,7 @@ function SolarEngine3D({
       const orient        = panelOrientationRef.current ?? 'portrait';
       const edgeSetbackM  = fireSetbacks?.edgeSetbackM  ?? 0.457;
       const ridgeSetbackM = fireSetbacks?.ridgeSetbackM ?? 0.457;
+      const eaveSetbackM  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
       const layoutId      = `surface-${plane.id}`;
 
       // v48.7: Route through control layer (surface_select mode)
@@ -5008,7 +5323,7 @@ function SolarEngine3D({
         plane:       plane as unknown as ControlPlane,
         orientation: orient,
         wattage:     selectedPanelRef.current?.wattage ?? 400,
-        setbacks:    { eaveM: 0, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
+        setbacks:    { eaveM: eaveSetbackM, ridgeM: ridgeSetbackM, sideM: edgeSetbackM },
         groundElevM: groundElev,
         layoutId,
       });
@@ -5748,10 +6063,15 @@ function SolarEngine3D({
     // Phase 2: clear roof rails on auto-fill rebuild
     try { clearRoofRails(viewer); } catch {}
 
-    const orient      = panelOrientationRef.current ?? 'portrait';
+    const orientRaw   = (panelOrientationRef.current ?? 'portrait') as string;
+    // v50.23: 'hybrid' in 3D mode → use 'portrait' orientation + layoutStrategy:'mixed'
+    // The control layer's 'mixed' strategy fills portrait rows then sweeps landscape in remainder.
+    const orient      = (orientRaw === 'hybrid' ? 'portrait' : orientRaw) as 'portrait' | 'landscape';
+    const isHybrid    = orientRaw === 'hybrid';
     const groundElev  = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
-    const edgeSetback = fireSetbacks?.edgeSetbackM  ?? 0.457;
+    const edgeSetback  = fireSetbacks?.edgeSetbackM  ?? 0.457;
     const ridgeSetback = fireSetbacks?.ridgeSetbackM ?? 0.457;
+    const eaveSetback  = fireSetbacks?.eaveSetbackM  ?? 0;      // v50.26: wire eave setback
     const wattage     = selectedPanelRef.current?.wattage ?? 400;
 
     const newPanels: PlacedPanel[] = [];
@@ -5764,13 +6084,21 @@ function SolarEngine3D({
       // Panel positions: origin + u*(col*stepU + w/2) + v*(row*stepV + h/2)  [no drift]
       const layoutId = `auto-${planeIdx}-${plane.id.slice(0,6)}`;
 
+      // v50.23: per-plane orientation override (from Roof Planes panel) beats global
+      const planeOrientRaw = (plane as any).orientation as string | undefined;
+      const planeIsHybrid  = planeOrientRaw === 'hybrid' || (!planeOrientRaw && isHybrid);
+      const planeOrient    = planeOrientRaw === 'portrait' ? 'portrait'
+                           : planeOrientRaw === 'landscape' ? 'landscape'
+                           : orient; // hybrid or undefined → use base orient (portrait for mixed)
+
       // v48.7: Route through control layer (auto_roof mode)
       const clAutoResult = placePanelsControlled({
         mode:            'auto_roof',
         plane:           plane as unknown as ControlPlane,
-        orientation:     orient,
+        orientation:     planeOrient as 'portrait' | 'landscape',
+        layoutStrategy:  planeIsHybrid ? 'mixed' : undefined,
         wattage,
-        setbacks:        { eaveM: 0, ridgeM: ridgeSetback, sideM: edgeSetback },
+        setbacks:        { eaveM: eaveSetback, ridgeM: ridgeSetback, sideM: edgeSetback },
         groundElevM:     groundElev,
         layoutId,
         customOriginLat: customLayoutOriginRef.current?.lat,
@@ -5838,29 +6166,24 @@ function SolarEngine3D({
       setTimeout(() => { try { viewer.scene.requestRender(); } catch {} }, t)
     );
 
-    // v47.215: Fly camera to centroid of ALL panels (bounding box center), not just first panel
-    try {
-      if (newPanels.length > 0) {
+    // v47.215 / orbit update: fit camera to all placed panels via orbit state
+    if (newPanels.length > 0) {
+      try {
         const lats = newPanels.map(p => p.lat);
         const lngs = newPanels.map(p => p.lng);
-        const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-        const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-        const centLat = (minLat + maxLat) / 2;
-        const centLng = (minLng + maxLng) / 2;
-        // Adaptive altitude: fit all panels in view using ~60 FOV heuristic
-        const latSpanM  = (maxLat - minLat) * 111320;
-        const lngSpanM  = (maxLng - minLng) * 111320 * Math.cos(centLat * Math.PI / 180);
-        const spanM     = Math.max(latSpanM, lngSpanM, 20); // at least 20m
-        const altAboveRoof = Math.max(60, spanM * 1.4);     // 1.4x span for ~60 FOV with margin
-        const avgPanelH = newPanels.reduce((s, p) => s + (p.height ?? 0), 0) / newPanels.length;
-        const flyAlt = (isFinite(avgPanelH) && avgPanelH > 0 ? avgPanelH : cesiumGroundElevRef.current) + altAboveRoof;
-        viewer.camera.flyTo({
-          destination: C.Cartesian3.fromDegrees(centLng, centLat, flyAlt),
-          orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-70), roll: 0 },
-          duration: 1.5,
-        });
-      }
-    } catch {}
+        const centLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+        const centLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
+        const latSpanM = (Math.max(...lats) - Math.min(...lats)) * 111320;
+        const lngSpanM = (Math.max(...lngs) - Math.min(...lngs)) * 111320 * Math.cos(centLat * Math.PI / 180);
+        const spanM    = Math.max(latSpanM, lngSpanM, 20);
+        const radius   = Math.max(60, spanM * 1.4);
+        const o = orbitRef.current;
+        o.targetLat = centLat; o.targetLng = centLng;
+        o.targetAlt = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : 0;
+        o.heading = 0; o.pitch = -1.222; o.radius = radius;  // -70° pitch
+        applyOrbitRef.current?.();
+      } catch {}
+    }
 
     setTimeout(() => {
       autoFillRunningRef.current = false;
@@ -6379,15 +6702,11 @@ function SolarEngine3D({
   }
 
   function flyToProperty() {
-    const viewer = viewerRef.current;
-    const C = (window as any).Cesium;
-    if (!viewer || !C) return;
-    const elevation = twinRef.current?.elevation ?? 0;
-    viewer.camera.flyTo({
-      destination: C.Cartesian3.fromDegrees(lng, lat, elevation + 200),
-      orientation: { heading: C.Math.toRadians(0), pitch: C.Math.toRadians(-45), roll: 0 },
-      duration: 2,
-    });
+    const elev = cesiumGroundElevRef.current > 0 ? cesiumGroundElevRef.current : (twinRef.current?.elevation ?? 0);
+    const o = orbitRef.current;
+    o.targetLat = lat; o.targetLng = lng; o.targetAlt = elev;
+    o.heading = 0; o.pitch = -0.785; o.radius = 200;  // -45° pitch
+    applyOrbitRef.current?.();
   }
 
   function formatHour(h: number): string {
@@ -6673,9 +6992,9 @@ function SolarEngine3D({
                 {([
                   { icon: '\u26F6',        tip: 'Fit View: zoom to placed panels',   action: () => { const v = viewerRef.current; const C = (window as any).Cesium; if (v&&C) fitCameraToRoofPlanes(v,C); } },
                   { icon: '\u{1F3E0}',     tip: 'Fly Home: return to property',      action: flyToProperty },
-                  { icon: '\u{1F9ED}',     tip: 'Orient North: reset heading',       action: () => { const v=viewerRef.current; const C=(window as any).Cesium; if(!v||!C)return; const el=cesiumGroundElevRef.current; v.camera.flyTo({destination:C.Cartesian3.fromDegrees(lng,lat,el+200),orientation:{heading:C.Math.toRadians(0),pitch:C.Math.toRadians(-45),roll:0},duration:1.5}); setStatusMsg('\u{1F9ED} North up'); } },
-                  { icon: '\u{1F4D0}',     tip: 'Tilt: 3D angled perspective view', action: () => { const v=viewerRef.current; const C=(window as any).Cesium; if(!v||!C)return; const el=cesiumGroundElevRef.current; v.camera.flyTo({destination:C.Cartesian3.fromDegrees(lng-0.002,lat-0.003,el+280),orientation:{heading:C.Math.toRadians(330),pitch:C.Math.toRadians(-30),roll:0},duration:1.5}); setStatusMsg('\u{1F4D0} Perspective'); } },
-                  { icon: '\u{1F52D}',     tip: "Top-Down: bird's eye view",        action: () => { const v=viewerRef.current; const C=(window as any).Cesium; if(!v||!C)return; const el=cesiumGroundElevRef.current; v.camera.flyTo({destination:C.Cartesian3.fromDegrees(lng,lat,el+150),orientation:{heading:C.Math.toRadians(0),pitch:C.Math.toRadians(-89),roll:0},duration:1.5}); setStatusMsg('\u{1F52D} Top-down'); } },
+                  { icon: '\u{1F9ED}',     tip: 'Orient North: reset heading',       action: () => { const o=orbitRef.current; o.heading=0; o.pitch=-0.785; applyOrbitRef.current?.(); setStatusMsg('\u{1F9ED} North up'); } },
+                  { icon: '\u{1F4D0}',     tip: 'Tilt: 3D angled perspective view', action: () => { const o=orbitRef.current; o.heading=5.76; o.pitch=-0.524; o.radius=280; applyOrbitRef.current?.(); setStatusMsg('\u{1F4D0} Perspective'); } },
+                  { icon: '\u{1F52D}',     tip: "Top-Down: bird's eye view",        action: () => { const o=orbitRef.current; o.heading=0; o.pitch=-1.553; o.radius=150; applyOrbitRef.current?.(); setStatusMsg('\u{1F52D} Top-down'); } },
                   { icon: '\u{1F5D1}',     tip: 'Clear All: remove all panels',     action: clearPanels, danger: true },
                 ] as { icon: string; tip: string; action: () => void; danger?: boolean }[]).map(({ icon, tip, action, danger }) => (
                   <button key={tip}

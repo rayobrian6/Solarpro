@@ -141,6 +141,20 @@ function SliderRow({ label, value, min, max, step, unit, onChange }: {
 const AZIMUTH_LABELS: Record<number, string> = {
   0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW', 360: 'N'
 };
+
+/**
+ * v50.25: Map FireSetbackConfig → generateRoofLayoutOptimized per-edge param keys.
+ * getPerEdgeSetbacks() returns {eaveM, ridgeM, sideM} (used by controlLayer/planeEngine).
+ * generateRoofLayoutOptimized() expects {eaveSetbackM, ridgeSetbackM, sideSetbackM}.
+ * This bridge fixes the silent key mismatch that was dropping all per-edge setbacks.
+ */
+function toLayoutSetbacks(config: import('@/lib/placementEngine').FireSetbackConfig) {
+  return {
+    eaveSetbackM:  config.eaveSetbackM  ?? 0,
+    ridgeSetbackM: config.ridgeSetbackM ?? 0.457,
+    sideSetbackM:  config.edgeSetbackM  ?? 0.457,
+  };
+}
 function azimuthLabel(az: number) {
   const nearest = Object.keys(AZIMUTH_LABELS).map(Number).reduce((a, b) => Math.abs(b - az) < Math.abs(a - az) ? b : a);
   return AZIMUTH_LABELS[nearest];
@@ -516,6 +530,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const panelsRef2 = useRef<PlacedPanel[]>(panels);
   const roofPlanesRef = useRef<RoofPlane[]>([]); // keeps roofPlanes accessible in saveLayoutToDB
+  // v50.22: tracks the address from an explicit user pick (address search or Pick House).
+  // onTwinLoaded must not overwrite solarDataAddress/solarDataCityOnly when a pick is in flight.
+  const explicitPickAddressRef = useRef<string | null>(null);
 
   const systemSizeKw = calculateSystemSize(panels);
 
@@ -817,6 +834,8 @@ export default function DesignStudio({ project, onSave }: Props) {
     setSolarDataError(null);
     setSolarDataAddress(address ?? null);
     setSolarDataCityOnly(cityOnly);
+    // v50.22: mark an explicit pick so onTwinLoaded doesn't clobber address/cityOnly
+    if (address) explicitPickAddressRef.current = address;
     try {
       const response = await fetch(
         `/api/solar?endpoint=buildingInsights&lat=${lat}&lng=${lng}&quality=HIGH`
@@ -1815,7 +1834,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     drawTileSourceBadge(ctx, W, H, activeTileSource, zoom);
     // Panel dimension legend (bottom-right corner) — only when panels exist
     if (panels.length > 0) {
-      drawPanelDimensionLegend(ctx, W, H, mpp, selectedPanel, orientation);
+      drawPanelDimensionLegend(ctx, W, H, mpp, selectedPanel, orientation === 'hybrid' ? 'portrait' : orientation);
     }
 
   // tileRedrawTick replaces mapTiles in deps — avoids new drawCanvas on every individual tile load
@@ -1898,7 +1917,7 @@ export default function DesignStudio({ project, onSave }: Props) {
     ctx: CanvasRenderingContext2D,
     W: number, H: number, mpp: number,
     panel: { id?: string; manufacturer?: string; model?: string; width: number; height: number; wattage: number },
-    orientation: 'portrait' | 'landscape'
+    orientation: 'portrait' | 'landscape' | 'hybrid'
   ) {
     const pW = orientation === 'landscape' ? panel.height : panel.width;  // meters (along-ridge visual)
     const pH = orientation === 'landscape' ? panel.width  : panel.height; // meters (up-slope visual)
@@ -2005,6 +2024,74 @@ export default function DesignStudio({ project, onSave }: Props) {
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); window.removeEventListener('resize', resize); };
   }, [drawCanvas, show3D]);
 
+  // ── Native (non-passive) wheel listener for 2D map zoom ─────────────────
+  // React 18 registers synthetic onWheel listeners as PASSIVE at the document
+  // root, which means e.preventDefault() inside onWheel is silently ignored —
+  // the browser still scrolls the page underneath the canvas.
+  //
+  // Fixes applied here (all require a non-passive listener):
+  //   1. e.preventDefault() actually works → page no longer scrolls while zooming
+  //   2. Cursor-aware zoom: the geographic point under the cursor stays fixed
+  //      instead of zooming toward the canvas center (standard map behaviour)
+  //   3. Fractional zoom: each notch moves by 0.75 levels instead of 1.0,
+  //      making the zoom feel smooth rather than snapping between discrete levels
+  //      (tile rendering still uses Math.floor/Math.min for fetch zoom, so this
+  //       only affects the continuous scale — no extra tile fetches)
+  useEffect(() => {
+    if (show3D) return; // canvas not in DOM in 3D mode
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ZOOM_STEP = 0.75; // fractional levels per notch — smooth but not slow
+    const ZOOM_MIN  = 14;
+    const ZOOM_MAX  = 21;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+
+      // Direction only — ignore magnitude to treat all mice/trackpads equally.
+      const direction = e.deltaY < 0 ? 1 : -1;
+
+      const rect  = canvas.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+      const W = canvas.width;
+      const H = canvas.height;
+
+      setZoom(prevZoom => {
+        const newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, prevZoom + direction * ZOOM_STEP));
+        if (newZoom === prevZoom) return prevZoom;
+
+        // Cursor-aware zoom: keep the lat/lng under the cursor fixed.
+        // 1. Find the lat/lng at the cursor position BEFORE zoom change.
+        // 2. After zoom change the canvas scale changes — shift mapCenter so
+        //    that same lat/lng lands back under the cursor.
+        //
+        // latLngToWorld / worldToLatLng use mapCenter from closure (stale-safe
+        // because we're computing the DELTA, not an absolute position).
+        const centerWorld = latLngToWorld(mapCenter.lat, mapCenter.lng, prevZoom);
+        // World coords of cursor at old zoom
+        const cursorWorldX = centerWorld.x + (cursorX - W / 2);
+        const cursorWorldY = centerWorld.y + (cursorY - H / 2);
+        // Same world point at new zoom (world coords scale with 2^zoom)
+        const scale = Math.pow(2, newZoom - prevZoom);
+        const newCursorWorldX = cursorWorldX * scale;
+        const newCursorWorldY = cursorWorldY * scale;
+        // New center world coords so cursor stays fixed
+        const newCenterWorldX = newCursorWorldX - (cursorX - W / 2);
+        const newCenterWorldY = newCursorWorldY - (cursorY - H / 2);
+        const newCenter = worldToLatLng(newCenterWorldX, newCenterWorldY, newZoom);
+        setMapCenter(newCenter);
+
+        return newZoom;
+      });
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, [show3D, mapCenter]); // mapCenter in deps so cursor-world math uses fresh value
+  // ────────────────────────────────────────────────────────────────────────
+
   // v31.1: Global keyboard shortcuts — tool switching + panel deletion + escape
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2062,6 +2149,12 @@ export default function DesignStudio({ project, onSave }: Props) {
 
   // ── Mouse handlers ─────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Only left-click (button=0) should pan/drag.
+    // Middle-click (button=1) and right-click (button=2) must not trigger drag —
+    // middle-click is a scroll/pan gesture handled by the OS/browser natively, and
+    // accidentally entering drag state causes the map to jump when the mouse moves
+    // even slightly during the middle-button press.
+    if (e.button !== 0) return;
     if (drawingMode === 'select') {
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
@@ -2091,6 +2184,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   };
 
   const handleMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    // Only process left-click release — middle/right button releases must not
+    // trigger a canvas click or interfere with drag state.
+    if (e.button !== 0) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -2195,9 +2291,13 @@ export default function DesignStudio({ project, onSave }: Props) {
     }
   };
 
-  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    setZoom(prev => Math.max(14, Math.min(21, prev + (e.deltaY < 0 ? 1 : -1))));
+  const handleWheel = (_e: React.WheelEvent<HTMLCanvasElement>) => {
+    // Intentionally empty — all scroll-zoom logic is handled by the native
+    // non-passive wheel listener registered in the useEffect below.
+    // React 18 registers onWheel as a passive listener at the document root,
+    // so e.preventDefault() here is silently ignored and the page scrolls
+    // underneath the canvas.  The native listener registered with
+    // { passive: false } is the only way to reliably prevent that.
   };
 
   const handleDoubleClick = () => {
@@ -2281,7 +2381,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       orientation, fireSetbackM,
       pathwayWidthM: fireSetbacks.pathwayWidthM,
       enforcePathway: fireSetbacks.enforcePathway,
-      ...getPerEdgeSetbacks(fireSetbacks),
+      ...toLayoutSetbacks(fireSetbacks),
       alignToEdge,
     });
     setPanels(prev => [...prev, ...newPanels]);
@@ -2322,11 +2422,11 @@ export default function DesignStudio({ project, onSave }: Props) {
         rowSpacing,
         tilt: plane.pitch ?? tilt,
         azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override → global fallback
         fireSetbackM,
         pathwayWidthM: fireSetbacks.pathwayWidthM,
         enforcePathway: fireSetbacks.enforcePathway,
-        ...getPerEdgeSetbacks(fireSetbacks),
+        ...toLayoutSetbacks(fireSetbacks),
         alignToEdge,
       });
       toast.success('Panels re-laid out', `${newPanels.length} panels · ${plane.azimuth ?? azimuth}° azimuth · ${plane.pitch ?? tilt}° pitch`);
@@ -2352,7 +2452,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         orientation, fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       // Update setback zone overlay
@@ -2363,7 +2463,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       newPanels = generateGroundLayoutOptimized({
         layoutId, area: points, panel: selectedPanel,
         tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
-        orientation,
+        orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
     } else if (type === 'fence') {
       newPanels = generateFenceLayout({ layoutId, fenceLine: points, panel: selectedPanel, azimuth, panelSpacing, fenceHeight, bifacialOptimized });
@@ -2375,9 +2475,9 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── Auto Layout: fill all existing zones with current settings ────────────────
   const [autoLayoutRunning, setAutoLayoutRunning] = useState(false);
 
-  // v47.103: Re-layout all AUTO panels immediately when orientation toggle changes.
+  // v47.103 / v50.23: Re-layout all AUTO panels immediately when orientation toggle changes.
   // Called with the NEW orientation value directly (before React state update settles).
-  const relayoutWithOrientation = useCallback((newOrientation: 'portrait' | 'landscape') => {
+  const relayoutWithOrientation = useCallback((newOrientation: 'portrait' | 'landscape' | 'hybrid') => {
     const hasZones = roofPlanes.length > 0 || groundArea.length > 0;
     if (!hasZones) return; // no zones yet, nothing to re-layout
     const hasAutoPanels = panels.some(p => p.layoutSource === 'AUTO');
@@ -2400,15 +2500,18 @@ export default function DesignStudio({ project, onSave }: Props) {
     roofPlanes.forEach(plane => {
       const layoutId = uuidv4();
       const fireSetbackM = calcEffectiveSetback(fireSetbacks);
+      // v50.23: per-plane orientation overrides global — use plane.orientation if set,
+      // otherwise fall back to the global orientation.
+      const planeOrientation = (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? newOrientation;
       const newPanels = generateRoofLayoutOptimized({
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback, panelSpacing, rowSpacing,
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: newOrientation,
+        orientation: planeOrientation,
         fireSetbackM,
         pathwayWidthM: fireSetbacks.pathwayWidthM,
         enforcePathway: fireSetbacks.enforcePathway,
-        ...getPerEdgeSetbacks(fireSetbacks),
+        ...toLayoutSetbacks(fireSetbacks),
         alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -2416,10 +2519,12 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     if (groundArea.length >= 3) {
       const layoutId = uuidv4();
+      // Ground mount doesn't support hybrid — use portrait as fallback for hybrid global mode
+      const groundOrientation = newOrientation === 'hybrid' ? 'portrait' : newOrientation;
       const newPanels = generateGroundLayoutOptimized({
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
-        orientation: newOrientation,
+        orientation: groundOrientation,
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -2460,11 +2565,11 @@ export default function DesignStudio({ project, onSave }: Props) {
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback, panelSpacing, rowSpacing,
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -2472,10 +2577,11 @@ export default function DesignStudio({ project, onSave }: Props) {
 
     if (groundArea.length >= 3) {
       const layoutId = uuidv4();
+      const groundOrientation = orientation === 'hybrid' ? 'portrait' : orientation;
       const newPanels = generateGroundLayoutOptimized({
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing, panelSpacing, panelsPerRow, groundHeight,
-        orientation,
+        orientation: groundOrientation,
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -2520,11 +2626,11 @@ export default function DesignStudio({ project, onSave }: Props) {
         setback: effectiveSetback, panelSpacing: tightSpacing,
         rowSpacing: 0.02,  // v47.95: flush roof mount -- panels touch row-to-row
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -2537,7 +2643,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         tilt, azimuth,
         rowSpacing: Math.max(rowSpacing * 0.85, selectedPanel.height + 0.05),
         panelSpacing: tightSpacing, panelsPerRow, groundHeight,
-        orientation,
+        orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -2574,11 +2680,11 @@ export default function DesignStudio({ project, onSave }: Props) {
         layoutId, roofPlane: plane, panel: selectedPanel,
         setback: optSetback, panelSpacing: 0.006, rowSpacing: optRowSpacingRoof, // v47.98: ¼" clamp gap
         tilt: plane.pitch ?? tilt, azimuth: plane.azimuth ?? azimuth,
-        orientation: orientation, // v47.96: per-plane orientation
+        orientation: (plane.orientation as 'portrait' | 'landscape' | 'hybrid' | undefined) ?? orientation, // v50.23: per-plane override
         fireSetbackM,
        pathwayWidthM: fireSetbacks.pathwayWidthM,
        enforcePathway: fireSetbacks.enforcePathway,
-       ...getPerEdgeSetbacks(fireSetbacks),
+       ...toLayoutSetbacks(fireSetbacks),
        alignToEdge,
       });
       allNew = [...allNew, ...newPanels];
@@ -2590,7 +2696,7 @@ export default function DesignStudio({ project, onSave }: Props) {
         layoutId, area: groundArea, panel: selectedPanel,
         tilt, azimuth, rowSpacing: optRowSpacingGround, panelSpacing: 0.006, // v47.98: ¼" clamp gap
         panelsPerRow, groundHeight,
-        orientation,
+        orientation: (orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape',
       });
       allNew = [...allNew, ...newPanels];
     }
@@ -3114,12 +3220,17 @@ export default function DesignStudio({ project, onSave }: Props) {
               showShade={showShade3D}
               showIrradiance={showIrradiance}
               fireSetbacks={fireSetbacks}
-              orientation={orientation}
+              orientation={(orientation === 'hybrid' ? 'portrait' : orientation) as 'portrait' | 'landscape'}
               onOrientationChange={(o) => setOrientation(o)}
               onTwinLoaded={(twin) => {
                 if (twin.solarData) setSolarApiData(twin.solarData);
                 if (twin.roofSegments) {
                   setRoofSegments(twin.roofSegments);
+                  // v50.22: If an explicit Pick House / address-search pick is in flight,
+                  // do NOT update solarDataAddress or solarDataCityOnly — those are already
+                  // set correctly by fetchSolarData and must not be clobbered by the twin
+                  // reload (which uses projectAddress, the old/saved address).
+                  if (explicitPickAddressRef.current) return;
                   // v50.10: tag segments with the address they belong to.
                   // Only set if not already anchored to an explicit Pick House / address-search pick —
                   // we never want to overwrite a user-chosen address with project boot coords.
@@ -3595,7 +3706,7 @@ export default function DesignStudio({ project, onSave }: Props) {
                   </Section>
                 )}
                 {/* System Configuration */}
-                <Section title="Configuration" icon={<Settings size={12} />} defaultOpen={false}>
+                <Section title="Configuration" icon={<Settings size={12} />} defaultOpen={true}>
                   {/* Active Zone Type Switcher */}
                   <div className="mb-3">
                     <div className="text-xs text-slate-500 mb-1.5">Active Drawing Zone</div>
@@ -3654,21 +3765,30 @@ export default function DesignStudio({ project, onSave }: Props) {
                   )}
                   <SliderRow label="Panel Spacing" value={panelSpacing} min={0.001} max={0.05} step={0.001} unit="m" onChange={v => { clearGridCache(); setPanelSpacing(v); }} />
 
-                  {/* v30.9: Panel Orientation Toggle — always visible; relayoutWithOrientation is a no-op in 3D mode (see guard) */}
-                  <div className="flex items-center justify-between py-1">
-                    <label className="text-xs text-slate-400">Panel Orientation</label>
-                    <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                  {/* v30.9 / v50.23: Panel Orientation Toggle — portrait | landscape | hybrid */}
+                  <div className="py-1">
+                    <label className="text-xs text-slate-400 block mb-1.5">Panel Orientation</label>
+                    <div className="grid grid-cols-3 rounded-lg overflow-hidden border border-slate-600">
                       <button
                         onClick={() => { setOrientation('portrait'); relayoutWithOrientation('portrait'); }}
-                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'portrait' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        className={`py-1.5 text-xs font-medium transition-colors text-center ${orientation === 'portrait' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        title="Portrait — all panels tall (long edge vertical)"
                       >
                         ▯ Portrait
                       </button>
                       <button
                         onClick={() => { setOrientation('landscape'); relayoutWithOrientation('landscape'); }}
-                        className={`px-2.5 py-1 text-xs font-medium transition-colors ${orientation === 'landscape' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        className={`py-1.5 text-xs font-medium transition-colors text-center border-x border-slate-600 ${orientation === 'landscape' ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        title="Landscape — all panels wide (long edge horizontal)"
                       >
-                        ▭ Landscape
+                        ▭ Land.
+                      </button>
+                      <button
+                        onClick={() => { setOrientation('hybrid'); relayoutWithOrientation('hybrid'); }}
+                        className={`py-1.5 text-xs font-medium transition-colors text-center ${orientation === 'hybrid' ? 'bg-emerald-500 text-white' : 'bg-slate-700 text-slate-400 hover:text-slate-200'}`}
+                        title="Hybrid — auto-optimises each roof plane independently: portrait rows + landscape fill in ridge strip for maximum panel count"
+                      >
+                        ⚡ Hybrid
                       </button>
                     </div>
                   </div>
@@ -3715,6 +3835,18 @@ export default function DesignStudio({ project, onSave }: Props) {
                         min={12} max={36} step={1} unit="in"
                         onChange={v => setFireSetbacks(prev => ({ ...prev, ridgeSetbackM: v / 39.37 }))}
                       />
+                      {/* v50.25: Eave/Gutter setback — default 0" (panels go to gutter line) */}
+                      <SliderRow
+                        label="Eave Setback"
+                        value={Math.round((fireSetbacks.eaveSetbackM ?? 0) * 39.37)}
+                        min={0} max={24} step={1} unit="in"
+                        onChange={v => setFireSetbacks(prev => ({ ...prev, eaveSetbackM: v / 39.37 }))}
+                      />
+                      {(fireSetbacks.eaveSetbackM ?? 0) === 0 && (
+                        <div className="text-xs text-emerald-400/80 bg-emerald-500/10 rounded-lg p-2">
+                          0″ eave — panels extend to gutter line (max coverage)
+                        </div>
+                      )}
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-slate-400">Pathway (36″)</label>
                         <button
@@ -4099,6 +4231,45 @@ export default function DesignStudio({ project, onSave }: Props) {
                                             >{l}</button>
                                           );
                                         })}
+                                      </div>
+                                    </div>
+                                    {/* v50.23: Per-plane orientation override */}
+                                    <div>
+                                      <div className="text-[10px] text-slate-500 mb-1">Panel orientation for this plane</div>
+                                      <div className="flex rounded-lg overflow-hidden border border-slate-600">
+                                        {([
+                                          { v: undefined,    label: 'Global', icon: '↑' },
+                                          { v: 'portrait',   label: 'Portrait',  icon: '▯' },
+                                          { v: 'landscape',  label: 'Land.',     icon: '▭' },
+                                          { v: 'hybrid',     label: 'Hybrid',    icon: '⚡' },
+                                        ] as { v: 'portrait' | 'landscape' | 'hybrid' | undefined; label: string; icon: string }[]).map(({ v, label, icon }) => {
+                                          const isActive = plane.orientation === v;
+                                          return (
+                                            <button
+                                              key={label}
+                                              onClick={() => {
+                                                setRoofPlanes(prev => prev.map(p =>
+                                                  p.id === plane.id ? { ...p, orientation: v } : p
+                                                ));
+                                              }}
+                                              className={`flex-1 py-0.5 text-[9px] font-semibold transition-colors ${
+                                                isActive
+                                                  ? v === 'hybrid' ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+                                                  : 'bg-slate-700 text-slate-400 hover:text-slate-200'
+                                              }`}
+                                              title={v === undefined ? 'Use global orientation setting' : `Force ${label} on this plane`}
+                                            >
+                                              {icon} {label}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                      <div className="text-[9px] text-slate-600 mt-0.5">
+                                        {plane.orientation === 'hybrid'
+                                          ? '⚡ Auto-optimising: portrait rows + landscape ridge fill'
+                                          : plane.orientation
+                                          ? `Overrides global (${orientation}) for this plane only`
+                                          : `Following global: ${orientation}`}
                                       </div>
                                     </div>
                                     {/* Re-layout */}

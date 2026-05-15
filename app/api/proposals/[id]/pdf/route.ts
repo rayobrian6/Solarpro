@@ -212,7 +212,8 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
       const totalPanels = (layout?.totalPanels && layout.totalPanels > 0)
         ? layout.totalPanels
         : layoutSystemSizeKw > 0 ? Math.ceil(layoutSystemSizeKw / 0.44) : 0;
-      const projectStateCode = ((proj as any).stateCode || client?.state || '').toUpperCase().trim().slice(0, 2);
+      const _extractState = (addr?: string) => { if (!addr) return ''; const m = addr.match(/\b([A-Z]{2})\s+\d{5}/i) || addr.match(/,\s*([A-Z]{2})\s*$/i); return m ? m[1].toUpperCase() : ''; };
+      const projectStateCode = ((proj as any).stateCode || client?.state || _extractState((proj as any).address || client?.address || '') || '').toUpperCase().trim().slice(0, 2);
       const systemType = (proj as any).systemType || 'roof';
       const isCommercial = pricingCfg.isCommercial ?? false;
       const purchaseMode: 'finance' | 'cash' = pricingCfg.purchaseMode === 'cash' ? 'cash' : 'finance';
@@ -238,9 +239,11 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
         utilityName:         (proj as any).utilityName || '',
         stateCode:           projectStateCode,
         clientState:         client?.state || '',
-        parsedBillRate:      (proj as any).billData?._utilityRatePerKwh
-                               ?? (proj as any).billData?.electricityRate
-                               ?? undefined,
+        address:             (proj as any).address || client?.address || '',  // v48.17: ZIP lookup
+        zip:                 (proj as any).zip || '',
+        // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates are supply-only.
+        // See view/[id]/page.tsx for full explanation.
+        parsedBillRate:      undefined,
         utilityRateOverride: (proj as any).utilityRatePerKwh,
         clientUtilityRate:   client?.utilityRate,
         dbUtilityRate:       proposal.dbUtilityRate ?? undefined,

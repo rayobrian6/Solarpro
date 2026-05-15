@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import {
   FileText, Send, Eye, Download, CheckCircle, Clock, XCircle,
   ArrowRight, AlertTriangle, DollarSign, Loader2, Sparkles, ExternalLink,
-  ShieldOff,
+  ShieldOff, Home, ChevronRight,
 } from 'lucide-react';
 import {
   GLOBAL_INCENTIVES_CONFIG,
@@ -355,6 +355,314 @@ export default function ProposalTab({ project }: ProposalTabProps) {
           <FileText size={24} className="text-slate-600 mx-auto mb-2" />
           <p className="text-slate-500 text-sm">No proposals yet</p>
           <p className="text-slate-600 text-xs mt-1">Generate your first proposal above</p>
+        </div>
+      )}
+
+      {/* ── Homeowner Portal Status ── */}
+      <PortalStageCard project={project} />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PortalStageCard — lets the installer manually set homeowner_stage
+// ─────────────────────────────────────────────────────────────────────────────
+
+type HomeownerStage =
+  | 'lead_submitted'
+  | 'under_review'
+  | 'site_survey'
+  | 'design'
+  | 'proposal'
+  | 'installation'
+  | 'completed';
+
+const PORTAL_STAGES: {
+  value: HomeownerStage;
+  label: string;
+  color: string;         // text + border + bg (Tailwind classes, space-separated)
+  dot: string;           // solid dot colour
+  desc: string;
+}[] = [
+  {
+    value: 'lead_submitted',
+    label: 'Lead Submitted',
+    color: 'text-slate-300  border-slate-500/30  bg-slate-500/10',
+    dot: 'bg-slate-400',
+    desc: 'Initial enquiry received.',
+  },
+  {
+    value: 'under_review',
+    label: 'Under Review',
+    color: 'text-blue-300   border-blue-500/30   bg-blue-500/10',
+    dot: 'bg-blue-400',
+    desc: 'Your team is reviewing the project.',
+  },
+  {
+    value: 'site_survey',
+    label: 'Site Survey',
+    color: 'text-cyan-300   border-cyan-500/30   bg-cyan-500/10',
+    dot: 'bg-cyan-400',
+    desc: 'On-site assessment scheduled or complete.',
+  },
+  {
+    value: 'design',
+    label: 'Design',
+    color: 'text-violet-300 border-violet-500/30 bg-violet-500/10',
+    dot: 'bg-violet-400',
+    desc: 'System design in progress.',
+  },
+  {
+    value: 'proposal',
+    label: 'Proposal',
+    color: 'text-amber-300  border-amber-500/30  bg-amber-500/10',
+    dot: 'bg-amber-400',
+    desc: 'Proposal shared — awaiting signature.',
+  },
+  {
+    value: 'installation',
+    label: 'Installation',
+    color: 'text-orange-300 border-orange-500/30 bg-orange-500/10',
+    dot: 'bg-orange-400',
+    desc: 'System being installed.',
+  },
+  {
+    value: 'completed',
+    label: 'Completed',
+    color: 'text-green-300  border-green-500/30  bg-green-500/10',
+    dot: 'bg-green-400',
+    desc: 'Installation complete.',
+  },
+];
+
+function portalStageMeta(stage: HomeownerStage | null) {
+  return PORTAL_STAGES.find(s => s.value === stage) ?? null;
+}
+
+interface PortalStageCardProps {
+  project: import('@/types').Project;
+}
+
+function PortalStageCard({ project }: PortalStageCardProps) {
+  const [stage, setStage]           = useState<HomeownerStage | null>(null);
+  const [fetchDone, setFetchDone]   = useState(false);
+  const [fetchError, setFetchError] = useState(false);
+  const [selected, setSelected]     = useState<HomeownerStage | ''>('');
+  const [saving, setSaving]         = useState(false);
+  const [toast, setToast]           = useState<{ msg: string; ok: boolean } | null>(null);
+
+  // Load current stage from dedicated endpoint
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/projects/${project.id}/homeowner-stage`)
+      .then(r => r.json())
+      .then(d => {
+        if (cancelled) return;
+        if (d.success) {
+          const s = (d.stage as HomeownerStage | null) ?? null;
+          setStage(s);
+          setSelected(s ?? '');
+        } else {
+          setFetchError(true);
+        }
+      })
+      .catch(() => { if (!cancelled) setFetchError(true); })
+      .finally(() => { if (!cancelled) setFetchDone(true); });
+    return () => { cancelled = true; };
+  }, [project.id]);
+
+  function showToast(msg: string, ok = true) {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 3500);
+  }
+
+  async function handleSave() {
+    if (!selected || selected === stage || saving) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/homeowner-stage`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stage: selected }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.success) {
+        showToast(d.error ?? 'Failed to update stage', false);
+        return;
+      }
+      setStage(selected as HomeownerStage);
+      showToast(`Stage updated to "${portalStageMeta(selected as HomeownerStage)?.label ?? selected}"`);
+    } catch {
+      showToast('Network error — please try again', false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const currentMeta = portalStageMeta(stage);
+  const isDirty     = selected !== '' && selected !== stage;
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  return (
+    <div className="card p-5 border border-white/[0.06]">
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-4">
+        <Home size={14} className="text-slate-400 flex-shrink-0" />
+        <h4 className="text-sm font-semibold text-white">Homeowner Portal Stage</h4>
+      </div>
+
+      {/* Loading skeleton */}
+      {!fetchDone && (
+        <div className="flex items-center gap-2 py-1">
+          <div className="w-5 h-5 rounded-full bg-slate-700 animate-pulse" />
+          <div className="h-4 w-28 rounded bg-slate-700 animate-pulse" />
+        </div>
+      )}
+
+      {/* Fetch error */}
+      {fetchDone && fetchError && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+          <AlertTriangle size={13} className="text-red-400 flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-red-300">Could not load portal stage. Refresh and try again.</p>
+        </div>
+      )}
+
+      {/* Main UI — once loaded with no error */}
+      {fetchDone && !fetchError && (
+        <>
+          {/* Current stage badge */}
+          <div className="mb-4">
+            <p className="text-xs text-slate-500 mb-1.5">Current stage</p>
+            {currentMeta ? (
+              <span
+                className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${currentMeta.color}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${currentMeta.dot}`} />
+                {currentMeta.label}
+              </span>
+            ) : (
+              <span className="text-xs text-slate-500 italic">Not set</span>
+            )}
+            {currentMeta?.desc && (
+              <p className="text-xs text-slate-500 mt-1">{currentMeta.desc}</p>
+            )}
+          </div>
+
+          {/* Stage pipeline — visual stepper */}
+          <div className="flex items-center gap-0 mb-5 overflow-x-auto pb-1">
+            {PORTAL_STAGES.map((s, idx) => {
+              const stageIdx    = stage ? PORTAL_STAGES.findIndex(x => x.value === stage) : -1;
+              const isCurrent   = s.value === stage;
+              const isPast      = stageIdx >= 0 && idx < stageIdx;
+              const isFuture    = stageIdx < 0 || idx > stageIdx;
+              const isLast      = idx === PORTAL_STAGES.length - 1;
+
+              return (
+                <React.Fragment key={s.value}>
+                  <button
+                    type="button"
+                    onClick={() => setSelected(s.value)}
+                    title={s.label}
+                    className={`
+                      flex flex-col items-center gap-1 px-1.5 py-1 rounded-lg transition-colors flex-shrink-0
+                      ${selected === s.value ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}
+                    `}
+                  >
+                    {/* Dot */}
+                    <span
+                      className={`
+                        w-3 h-3 rounded-full border-2 flex-shrink-0 transition-all
+                        ${isCurrent
+                          ? `${s.dot} border-transparent ring-2 ring-offset-1 ring-offset-slate-900 ring-white/30`
+                          : isPast
+                            ? `${s.dot} border-transparent opacity-60`
+                            : isFuture
+                              ? 'bg-transparent border-slate-600'
+                              : 'bg-transparent border-slate-600'
+                        }
+                        ${selected === s.value && !isCurrent ? 'ring-2 ring-offset-1 ring-offset-slate-900 ring-blue-400/50' : ''}
+                      `}
+                    />
+                    {/* Label */}
+                    <span
+                      className={`text-[9px] font-medium text-center leading-tight whitespace-nowrap
+                        ${isCurrent ? 'text-white' : isPast ? 'text-slate-400' : 'text-slate-600'}
+                        ${selected === s.value && !isCurrent ? '!text-blue-300' : ''}
+                      `}
+                    >
+                      {s.label.split(' ').join('\n')}
+                    </span>
+                  </button>
+                  {!isLast && (
+                    <ChevronRight
+                      size={10}
+                      className={`flex-shrink-0 mx-0.5 ${
+                        stageIdx >= 0 && idx < stageIdx ? 'text-slate-500' : 'text-slate-700'
+                      }`}
+                    />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          {/* Dropdown + Save row */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={selected}
+              onChange={e => setSelected(e.target.value as HomeownerStage | '')}
+              className="flex-1 min-w-0 text-xs rounded-lg bg-slate-800 border border-white/[0.08]
+                         text-slate-200 px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500/50
+                         cursor-pointer"
+            >
+              <option value="" disabled>Select a stage…</option>
+              {PORTAL_STAGES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!isDirty || saving}
+              className={`btn-sm flex items-center gap-1.5 flex-shrink-0 ${
+                isDirty && !saving ? 'btn-primary' : 'btn-secondary opacity-50 cursor-not-allowed'
+              }`}
+            >
+              {saving ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" /> Saving…
+                </>
+              ) : (
+                <>
+                  <CheckCircle size={12} /> Update Stage
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Informational note */}
+          <p className="text-xs text-slate-600 mt-2.5">
+            Stages also advance automatically when you share a proposal (→ Proposal)
+            or the homeowner signs (→ Installation).
+          </p>
+        </>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`mt-3 flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium border
+            ${toast.ok
+              ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+              : 'bg-red-500/10    border-red-500/20    text-red-300'
+            }`}
+        >
+          {toast.ok
+            ? <CheckCircle size={13} className="flex-shrink-0" />
+            : <AlertTriangle size={13} className="flex-shrink-0" />
+          }
+          {toast.msg}
         </div>
       )}
     </div>
