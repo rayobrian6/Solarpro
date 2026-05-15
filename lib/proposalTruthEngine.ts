@@ -931,6 +931,11 @@ export function buildUtilityProfile(project: {
   state?: string;
   stateCode?: string;
   utilityRatePerKwh?: number;
+  // v48.8: weak fallback — only used when no specific profile is matched.
+  // A named utility match (e.g. ameren_il) has an EIA-verified rate that is more
+  // accurate than a client's manually-entered or OCR-parsed bill rate, which often
+  // reflects only the supply charge and not the full all-in blended rate.
+  clientUtilityRateFallback?: number;
   client?: { state?: string; utilityRate?: number };
 }): BuiltUtilityProfile {
 
@@ -970,10 +975,22 @@ export function buildUtilityProfile(project: {
     matchedProfile = buildStateFallbackProfile(stateCode, stateFallbackData);
   }
 
-  const projectRate = project.utilityRatePerKwh ?? project.client?.utilityRate ?? 0;
-  const resolvedRate = projectRate > 0.08
-    ? projectRate
-    : (matchedProfile.blended_rate || matchedProfile.utility_rate);
+  // v48.8: Rate resolution logic
+  // - utilityRatePerKwh: strong override (from parsedBillRate / dbUtilityRate / utilityRateOverride).
+  //   Always takes priority — these come from verified bill OCR or explicit installer override.
+  // - clientUtilityRateFallback: weak override — ONLY used when there's no specific profile match.
+  //   If we matched a named utility (ameren_il, pge_ca, etc.), the EIA-sourced profile rate wins.
+  //   clientUtilityRateFallback is typically the supply-only portion from an old client record
+  //   and would under-count delivery charges, taxes, and recent rate increases.
+  // - profile rate: used for all specific matches when no strong override is present.
+  const strongRate = project.utilityRatePerKwh ?? project.client?.utilityRate ?? 0;
+  const resolvedRate = strongRate > 0.08
+    ? strongRate
+    : isSpecificMatch
+      ? (matchedProfile.blended_rate || matchedProfile.utility_rate)
+      : ( (project.clientUtilityRateFallback ?? 0) > 0.08
+          ? project.clientUtilityRateFallback!
+          : (matchedProfile.blended_rate || matchedProfile.utility_rate) );
 
   const netMeteringSummary = getNetMeteringSummary(matchedProfile);
   const srecSummary = getSrecSummary(matchedProfile, resolvedRate);
