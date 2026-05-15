@@ -1438,6 +1438,8 @@ export function buildUtilityProfile(project: {
   utilityName?: string;
   state?: string;
   stateCode?: string;
+  address?: string;               // v48.17: project address — used for ZIP lookup
+  zip?: string;                   // v48.17: explicit ZIP code override
   utilityRatePerKwh?: number;
   // v48.8: weak fallback — only used when no specific profile is matched.
   // A named utility match (e.g. ameren_il) has an EIA-verified rate that is more
@@ -1456,8 +1458,278 @@ export function buildUtilityProfile(project: {
 
   const utilityName = (project.utilityName || '').toLowerCase().trim();
 
+  // v48.15: ZIP-to-utility lookup table.
+  // Used when utilityName is empty/unknown — infers utility from ZIP or address string.
+  // Covers rural co-op territories where OCR rarely captures the utility name.
+  const ZIP_UTILITY_MAP: Record<string, string> = {
+    // Southwestern Electric Cooperative (SWEC) — 11-county IL territory along I-70
+    '62275': 'southwestern electric cooperative', // Pocahontas IL
+    '62215': 'southwestern electric cooperative', // Albers IL
+    '62217': 'southwestern electric cooperative', // Baldwin IL
+    '62218': 'southwestern electric cooperative', // Bartelso IL
+    '62219': 'southwestern electric cooperative', // Beckemeyer IL
+    '62220': 'southwestern electric cooperative', // Belleville IL (partial)
+    '62230': 'southwestern electric cooperative', // Breese IL
+    '62231': 'southwestern electric cooperative', // Carlyle IL
+    '62232': 'southwestern electric cooperative', // Caseyville IL
+    '62233': 'southwestern electric cooperative', // Chester IL
+    '62234': 'southwestern electric cooperative', // Collinsville IL (partial)
+    '62236': 'southwestern electric cooperative', // Columbia IL
+    '62238': 'southwestern electric cooperative', // Coulterville IL
+    '62239': 'southwestern electric cooperative', // Dupo IL
+    '62241': 'southwestern electric cooperative', // Ellis Grove IL
+    '62243': 'southwestern electric cooperative', // Freeburg IL
+    '62244': 'southwestern electric cooperative', // Fults IL
+    '62245': 'southwestern electric cooperative', // Germantown IL
+    '62246': 'southwestern electric cooperative', // Greenville IL
+    '62248': 'southwestern electric cooperative', // Hecker IL
+    '62249': 'southwestern electric cooperative', // Highland IL
+    '62250': 'southwestern electric cooperative', // Hoffman IL
+    '62253': 'southwestern electric cooperative', // Keyesport IL
+    '62254': 'southwestern electric cooperative', // Lebanon IL
+    '62255': 'southwestern electric cooperative', // Lenzburg IL
+    '62257': 'southwestern electric cooperative', // Mascoutah IL (partial)
+    '62258': 'southwestern electric cooperative', // Marissa IL
+    '62260': 'southwestern electric cooperative', // Millstadt IL
+    '62261': 'southwestern electric cooperative', // Modoc IL
+    '62262': 'southwestern electric cooperative', // Mulberry Grove IL
+    '62264': 'southwestern electric cooperative', // New Athens IL
+    '62265': 'southwestern electric cooperative', // New Baden IL
+    '62266': 'southwestern electric cooperative', // New Memphis IL
+    '62268': 'southwestern electric cooperative', // Oakdale IL
+    '62269': 'southwestern electric cooperative', // O Fallon IL (partial)
+    '62271': 'southwestern electric cooperative', // Okawville IL
+    '62272': 'southwestern electric cooperative', // Percy IL
+    '62273': 'southwestern electric cooperative', // Pierron IL
+    '62274': 'southwestern electric cooperative', // Pinckneyville IL (partial)
+    '62276': 'southwestern electric cooperative', // Prairie Du Rocher IL
+    '62277': 'southwestern electric cooperative', // Red Bud IL
+    '62278': 'southwestern electric cooperative', // Renault IL
+    '62279': 'southwestern electric cooperative', // Sparta IL
+    '62280': 'southwestern electric cooperative', // Steeleville IL
+    '62281': 'southwestern electric cooperative', // St. Jacob IL
+    '62282': 'southwestern electric cooperative', // Summerfield IL
+    '62283': 'southwestern electric cooperative', // Trenton IL
+    '62284': 'southwestern electric cooperative', // Troy IL
+    '62285': 'southwestern electric cooperative', // Valmeyer IL
+    '62286': 'southwestern electric cooperative', // Vandalia IL (partial)
+    '62288': 'southwestern electric cooperative', // Venedy IL
+    '62289': 'southwestern electric cooperative', // Waterloo IL (partial)
+    '62292': 'southwestern electric cooperative', // Worden IL
+    '62293': 'southwestern electric cooperative', // Germantown Hills IL
+    '62294': 'southwestern electric cooperative', // Troy IL
+    '62295': 'southwestern electric cooperative', // Waterloo IL
+    '62297': 'southwestern electric cooperative', // Welge IL
+    '62298': 'southwestern electric cooperative', // Winfield IL
+    // Norris Electric Cooperative — SE IL
+    '62846': 'norris electric cooperative', // Norris City IL
+    '62863': 'norris electric cooperative', // Omaha IL
+    '62869': 'norris electric cooperative', // Raleigh IL
+    // Shelby Electric Cooperative
+    '62565': 'shelby electric cooperative', // Shelbyville IL
+    '62543': 'shelby electric cooperative', // Morrisonville IL
+    '62549': 'shelby electric cooperative', // Mount Auburn IL
+    // Coles-Moultrie Electric Cooperative
+    '61920': 'coles-moultrie electric cooperative', // Charleston IL
+    '61938': 'coles-moultrie electric cooperative', // Mattoon IL
+    // Corn Belt Energy
+    '61701': 'corn belt energy', // Bloomington IL
+    '61720': 'corn belt energy', // Anchor IL
+    // Spoon River Electric
+    '61454': 'spoon river electric cooperative', // Macomb IL (partial)
+    '61472': 'spoon river electric cooperative', // Roseville IL
+    // Commonwealth Edison (ComEd) — Northern Illinois (26 counties: Cook, DuPage, Lake, Will, Kane, etc.)
+    // Chicago city ZIPs
+    '60601': 'commonwealth edison', '60602': 'commonwealth edison', '60603': 'commonwealth edison',
+    '60604': 'commonwealth edison', '60605': 'commonwealth edison', '60606': 'commonwealth edison',
+    '60607': 'commonwealth edison', '60608': 'commonwealth edison', '60609': 'commonwealth edison',
+    '60610': 'commonwealth edison', '60611': 'commonwealth edison', '60612': 'commonwealth edison',
+    '60613': 'commonwealth edison', '60614': 'commonwealth edison', '60615': 'commonwealth edison',
+    '60616': 'commonwealth edison', '60617': 'commonwealth edison', '60618': 'commonwealth edison',
+    '60619': 'commonwealth edison', '60620': 'commonwealth edison', '60621': 'commonwealth edison',
+    '60622': 'commonwealth edison', '60623': 'commonwealth edison', '60624': 'commonwealth edison',
+    '60625': 'commonwealth edison', '60626': 'commonwealth edison', '60628': 'commonwealth edison',
+    '60629': 'commonwealth edison', '60630': 'commonwealth edison', '60631': 'commonwealth edison',
+    '60632': 'commonwealth edison', '60633': 'commonwealth edison', '60634': 'commonwealth edison',
+    '60636': 'commonwealth edison', '60637': 'commonwealth edison', '60638': 'commonwealth edison',
+    '60639': 'commonwealth edison', '60640': 'commonwealth edison', '60641': 'commonwealth edison',
+    '60642': 'commonwealth edison', '60643': 'commonwealth edison', '60644': 'commonwealth edison',
+    '60645': 'commonwealth edison', '60646': 'commonwealth edison', '60647': 'commonwealth edison',
+    '60649': 'commonwealth edison', '60651': 'commonwealth edison', '60652': 'commonwealth edison',
+    '60653': 'commonwealth edison', '60654': 'commonwealth edison', '60655': 'commonwealth edison',
+    '60656': 'commonwealth edison', '60657': 'commonwealth edison', '60659': 'commonwealth edison',
+    '60660': 'commonwealth edison', '60661': 'commonwealth edison',
+    // DuPage County (Westmont, Downers Grove, Naperville, Wheaton, etc.)
+    '60516': 'commonwealth edison', // Downers Grove
+    '60515': 'commonwealth edison', // Downers Grove
+    '60514': 'commonwealth edison', // Clarendon Hills
+    '60521': 'commonwealth edison', // Hinsdale
+    '60523': 'commonwealth edison', // Oak Brook
+    '60527': 'commonwealth edison', // Willowbrook / Burr Ridge
+    '60555': 'commonwealth edison', // Warrenville
+    '60559': 'commonwealth edison', // Westmont IL — this proposal
+    '60560': 'commonwealth edison', // Yorkville (partial)
+    '60563': 'commonwealth edison', // Naperville
+    '60564': 'commonwealth edison', // Naperville
+    '60565': 'commonwealth edison', // Naperville
+    '60566': 'commonwealth edison', // Naperville
+    '60567': 'commonwealth edison', // Naperville
+    '60101': 'commonwealth edison', // Addison
+    '60103': 'commonwealth edison', // Bartlett
+    '60104': 'commonwealth edison', // Bellwood
+    '60106': 'commonwealth edison', // Bensenville
+    '60108': 'commonwealth edison', // Bloomingdale
+    '60126': 'commonwealth edison', // Elmhurst
+    '60137': 'commonwealth edison', // Glen Ellyn
+    '60139': 'commonwealth edison', // Glendale Heights
+    '60148': 'commonwealth edison', // Lombard
+    '60157': 'commonwealth edison', // Medinah
+    '60181': 'commonwealth edison', // Villa Park
+    '60187': 'commonwealth edison', // Wheaton
+    '60188': 'commonwealth edison', // Carol Stream
+    '60189': 'commonwealth edison', // Wheaton
+    '60190': 'commonwealth edison', // Winfield
+    '60191': 'commonwealth edison', // Wood Dale
+    '60504': 'commonwealth edison', // Aurora (DuPage portion)
+    '60505': 'commonwealth edison', // Aurora
+    '60506': 'commonwealth edison', // Aurora
+    '60510': 'commonwealth edison', // Batavia
+    '60517': 'commonwealth edison', // Woodridge
+    '60519': 'commonwealth edison', // Eola
+    '60532': 'commonwealth edison', // Lisle
+    '60540': 'commonwealth edison', // Naperville
+    '60558': 'commonwealth edison', // Western Springs
+    // Cook County suburbs (North/Northwest/South)
+    '60004': 'commonwealth edison', // Arlington Heights
+    '60005': 'commonwealth edison', // Arlington Heights
+    '60007': 'commonwealth edison', // Elk Grove Village
+    '60008': 'commonwealth edison', // Rolling Meadows
+    '60010': 'commonwealth edison', // Barrington
+    '60016': 'commonwealth edison', // Des Plaines
+    '60018': 'commonwealth edison', // Des Plaines / Rosemont
+    '60025': 'commonwealth edison', // Glenview
+    '60026': 'commonwealth edison', // Glenview
+    '60035': 'commonwealth edison', // Highland Park
+    '60040': 'commonwealth edison', // Highwood
+    '60043': 'commonwealth edison', // Kenilworth
+    '60045': 'commonwealth edison', // Lake Forest
+    '60047': 'commonwealth edison', // Lake Zurich
+    '60053': 'commonwealth edison', // Morton Grove
+    '60056': 'commonwealth edison', // Mount Prospect
+    '60062': 'commonwealth edison', // Northbrook
+    '60067': 'commonwealth edison', // Palatine
+    '60068': 'commonwealth edison', // Park Ridge
+    '60070': 'commonwealth edison', // Prospect Heights
+    '60074': 'commonwealth edison', // Palatine
+    '60076': 'commonwealth edison', // Skokie
+    '60077': 'commonwealth edison', // Skokie
+    '60091': 'commonwealth edison', // Wilmette
+    '60093': 'commonwealth edison', // Winnetka
+    '60094': 'commonwealth edison', // Palatine
+    '60201': 'commonwealth edison', // Evanston
+    '60202': 'commonwealth edison', // Evanston
+    '60203': 'commonwealth edison', // Evanston
+    '60301': 'commonwealth edison', // Oak Park
+    '60302': 'commonwealth edison', // Oak Park
+    '60304': 'commonwealth edison', // Oak Park
+    '60305': 'commonwealth edison', // River Forest
+    '60402': 'commonwealth edison', // Berwyn
+    '60403': 'commonwealth edison', // Crest Hill
+    '60406': 'commonwealth edison', // Blue Island
+    '60409': 'commonwealth edison', // Calumet City
+    '60411': 'commonwealth edison', // Chicago Heights
+    '60415': 'commonwealth edison', // Chicago Ridge
+    '60419': 'commonwealth edison', // Dolton
+    '60422': 'commonwealth edison', // Flossmoor
+    '60425': 'commonwealth edison', // Glenwood
+    '60426': 'commonwealth edison', // Harvey
+    '60429': 'commonwealth edison', // Hazel Crest
+    '60430': 'commonwealth edison', // Homewood
+    '60438': 'commonwealth edison', // Lansing
+    '60439': 'commonwealth edison', // Lemont
+    '60443': 'commonwealth edison', // Matteson
+    '60445': 'commonwealth edison', // Midlothian
+    '60452': 'commonwealth edison', // Oak Forest
+    '60453': 'commonwealth edison', // Oak Lawn
+    '60455': 'commonwealth edison', // Bridgeview
+    '60456': 'commonwealth edison', // Hometown
+    '60457': 'commonwealth edison', // Hickory Hills
+    '60458': 'commonwealth edison', // Justice
+    '60459': 'commonwealth edison', // Burbank
+    '60461': 'commonwealth edison', // Olympia Fields
+    '60462': 'commonwealth edison', // Orland Park
+    '60463': 'commonwealth edison', // Palos Heights
+    '60464': 'commonwealth edison', // Palos Park
+    '60465': 'commonwealth edison', // Palos Hills
+    '60466': 'commonwealth edison', // Park Forest
+    '60467': 'commonwealth edison', // Orland Park
+    '60469': 'commonwealth edison', // Posen
+    '60471': 'commonwealth edison', // Richton Park
+    '60473': 'commonwealth edison', // South Holland
+    '60476': 'commonwealth edison', // Thornton
+    '60477': 'commonwealth edison', // Tinley Park
+    '60478': 'commonwealth edison', // Country Club Hills
+    '60480': 'commonwealth edison', // Willow Springs
+    '60482': 'commonwealth edison', // Worth
+    '60487': 'commonwealth edison', // Tinley Park
+    '60490': 'commonwealth edison', // Bolingbrook
+    '60491': 'commonwealth edison', // Homer Glen
+    // Will / Kane County
+    '60431': 'commonwealth edison', // Joliet (partial)
+    '60432': 'commonwealth edison', // Joliet
+    '60433': 'commonwealth edison', // Joliet
+    '60435': 'commonwealth edison', // Joliet
+    '60436': 'commonwealth edison', // Joliet
+    '60440': 'commonwealth edison', // Bolingbrook
+    '60441': 'commonwealth edison', // Lockport
+    '60446': 'commonwealth edison', // Romeoville
+    '60447': 'commonwealth edison', // Minooka
+    '60448': 'commonwealth edison', // Mokena
+    '60449': 'commonwealth edison', // Monee
+    '60451': 'commonwealth edison', // New Lenox
+    '60472': 'commonwealth edison', // Robbins
+    '60484': 'commonwealth edison', // University Park
+    '60544': 'commonwealth edison', // Plainfield
+    '60586': 'commonwealth edison', // Plainfield
+    // Lake County
+    '60031': 'commonwealth edison', // Gurnee
+    '60046': 'commonwealth edison', // Lake Villa
+    '60048': 'commonwealth edison', // Libertyville
+    '60060': 'commonwealth edison', // Mundelein
+    '60061': 'commonwealth edison', // Vernon Hills
+    '60064': 'commonwealth edison', // North Chicago
+    '60073': 'commonwealth edison', // Round Lake
+    '60085': 'commonwealth edison', // Waukegan
+    '60087': 'commonwealth edison', // Waukegan (North)
+    '60089': 'commonwealth edison', // Buffalo Grove
+    '60099': 'commonwealth edison', // Zion
+    // Kane County
+    '60102': 'commonwealth edison', // Algonquin
+    '60118': 'commonwealth edison', // Carpentersville
+    '60119': 'commonwealth edison', // Elburn
+    '60120': 'commonwealth edison', // Elgin
+    '60123': 'commonwealth edison', // Elgin
+    '60124': 'commonwealth edison', // Elgin
+    '60134': 'commonwealth edison', // Geneva
+    '60136': 'commonwealth edison', // Gilberts
+    '60175': 'commonwealth edison', // St. Charles
+    '60177': 'commonwealth edison', // South Elgin
+    '60185': 'commonwealth edison', // West Chicago
+    '60186': 'commonwealth edison', // West Chicago
+    '60193': 'commonwealth edison', // Schaumburg
+    '60194': 'commonwealth edison', // Schaumburg
+    '60195': 'commonwealth edison', // Schaumburg
+    '60502': 'commonwealth edison', // Aurora (Kane)
+    '60503': 'commonwealth edison', // Aurora
+    '60538': 'commonwealth edison', // Montgomery
+    '60542': 'commonwealth edison', // North Aurora
+    '60543': 'commonwealth edison', // Oswego
+    '60554': 'commonwealth edison', // Sugar Grove
+  };
+
   let matchedProfile: ProposalUtilityProfile | null = null;
 
+  // Step 1: match by utility name pattern
   if (utilityName) {
     for (const p of PROPOSAL_UTILITY_PROFILES) {
       if (p.state !== stateCode && stateCode) continue;
@@ -1469,6 +1741,29 @@ export function buildUtilityProfile(project: {
         }
       } catch {
         // Pattern error — skip
+      }
+    }
+  }
+
+  // Step 2: v48.15 — if no name match, try ZIP-to-utility lookup
+  // Extracts ZIP from address string or project.zip field
+  if (!matchedProfile) {
+    const addressStr = project.address || (project as any).address || '';
+    const zipMatch = addressStr.match(/\b(\d{5})\b/) || [];
+    const zip = project.zip || (project as any).zip || zipMatch[1] || '';
+    const inferredUtility = zip ? ZIP_UTILITY_MAP[zip] : null;
+    if (inferredUtility) {
+      for (const p of PROPOSAL_UTILITY_PROFILES) {
+        if (p.state !== stateCode && stateCode) continue;
+        try {
+          const pattern = new RegExp(p.utility_name_pattern, 'i');
+          if (pattern.test(inferredUtility)) {
+            matchedProfile = p;
+            break;
+          }
+        } catch {
+          // skip
+        }
       }
     }
   }
@@ -1493,17 +1788,20 @@ export function buildUtilityProfile(project: {
   const profileRate = matchedProfile.blended_rate || matchedProfile.utility_rate;
   const strongRate = project.utilityRatePerKwh ?? 0;
 
-  // For a specific match, only trust the override if it's >= 85% of the profile rate.
-  // This catches supply-only OCR extractions that are typically 45–70% of full retail.
-  const strongRateIsCredible = isSpecificMatch
-    ? (strongRate >= profileRate * 0.85)
-    : (strongRate > 0.08);
+  // v48.16: Apply 85% threshold universally — specific match AND state fallback.
+  // Supply-only OCR rates (e.g. $0.107 energy charge only) are typically 45–70% of the
+  // full blended retail rate. They must never override an EIA-verified profile rate.
+  // State fallback IL = $0.1882: 0.107/0.1882 = 56.8% → rejected.
+  // A manually-entered installer rate of $0.15 on an IL project: 0.15/0.1882 = 79.7% → rejected too.
+  // Only rates >= 85% of the reference profile are treated as credible blended retail rates.
+  // Reference: specific match → profile rate; state fallback → state avg rate.
+  const strongRateIsCredible = strongRate >= profileRate * 0.85;
 
   const resolvedRate = (strongRate > 0.08 && strongRateIsCredible)
     ? strongRate
     : isSpecificMatch
       ? profileRate
-      : ( (project.clientUtilityRateFallback ?? 0) > 0.08
+      : ( (project.clientUtilityRateFallback ?? 0) >= profileRate * 0.85
           ? project.clientUtilityRateFallback!
           : profileRate );
 

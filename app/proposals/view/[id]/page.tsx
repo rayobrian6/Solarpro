@@ -363,6 +363,8 @@ function PublicProposalView({
     utilityName:         (proj as any)?.utilityName || '',
     stateCode:           projectStateCode,
     clientState:         client?.state || '',
+    address:             (proj as any)?.address || client?.address || '',  // v48.17: for ZIP lookup
+    zip:                 (proj as any)?.zip || '',
     // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates (_utilityRatePerKwh,
     // electricityRate) are supply-only and exclude delivery/capacity charges. Passing them as
     // Tier 1 overrides EIA-verified profile rates (~$0.155 Ameren/SWEC) with a supply-only
@@ -794,15 +796,17 @@ function PublicProposalView({
                       </div>
                       <div className="text-slate-500 text-sm">→</div>
                       <div className="text-center flex-1 rounded-lg py-1 px-2" style={{ background: `${primaryColor}15` }}>
-                        <div className="text-xs text-slate-400">Toward Ownership</div>
-                        <div className="text-lg font-black" style={{ color: primaryColor }}>
-                          ${ownership_delta_monthly > 0 ? ownership_delta_monthly : Math.abs(ownership_delta_monthly)}/mo
+                        <div className="text-xs text-slate-400">
+                          {ownership_delta_monthly <= 0 ? 'Monthly Savings' : 'Monthly Difference'}
+                        </div>
+                        <div className="text-lg font-black" style={{ color: ownership_delta_monthly <= 0 ? '#22c55e' : primaryColor }}>
+                          {ownership_delta_monthly <= 0 ? '-' : '+'}${Math.abs(ownership_delta_monthly)}/mo
                         </div>
                       </div>
                     </div>
                     {ownership_delta_monthly > 0 && (
                       <p className="text-xs text-slate-500 mt-1.5 text-center">
-                        Redirecting ${ownership_delta_monthly}/mo from utility expense toward energy ownership. Fixed payment — utility rates keep rising.
+                        Your solar payment is fixed at ${solar_payment_monthly}/mo. As utility rates rise at {(cp.utility.escalationRate * 100).toFixed(0)}%/yr, this gap closes and reverses.
                       </p>
                     )}
                     {ownership_delta_monthly <= 0 && (
@@ -916,12 +920,7 @@ function PublicProposalView({
                       </div>
                       {ownership_delta_monthly > 0 && (
                         <p className="text-xs text-slate-500 pt-0.5">
-                          Initial monthly difference. As utility rates rise, your solar payment stays fixed.
-                        </p>
-                      )}
-                      {ownership_delta_monthly > 0 && (
-                        <p className="text-xs text-slate-500 pt-0.5">
-                          ${ownership_delta_monthly}/mo is being redirected toward energy ownership rather than utility expense.
+                          Your solar payment is fixed at ${solar_payment_monthly}/mo. As utility rates rise at {(cp.utility.escalationRate * 100).toFixed(0)}%/yr, this gap closes and reverses.
                         </p>
                       )}
                     </div>
@@ -1246,18 +1245,18 @@ function PublicProposalView({
               <h3 className="font-semibold text-white text-sm mb-4 flex items-center gap-2">
                 <Sun size={15} style={{ color: primaryColor }} /> Monthly Solar Production
               </h3>
-              <div className="flex items-end gap-1 h-20 mb-1">
+              <div className="relative flex items-end gap-1 mb-1" style={{ height: '80px' }}>
                 {cp.production.monthlyKwh.map((kwh, i) => {
                   const max = Math.max(...cp.production.monthlyKwh, 1);
-                  const pct = (kwh / max) * 100;
+                  const barH = Math.max(2, Math.round((kwh / max) * 68));
                   return (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div key={i} className="flex-1 flex flex-col items-center justify-end" style={{ height: '80px' }}>
                       <div
                         className="w-full rounded-t-sm transition-all"
-                        style={{ height: `${pct}%`, background: `${primaryColor}cc` }}
+                        style={{ height: `${barH}px`, background: `${primaryColor}cc`, minHeight: '2px' }}
                         title={`${MONTHS[i]}: ${kwh.toLocaleString()} kWh`}
                       />
-                      <span className="text-xs text-slate-500">{MONTHS[i].slice(0,1)}</span>
+                      <span className="text-xs text-slate-500 mt-0.5">{MONTHS[i].slice(0,1)}</span>
                     </div>
                   );
                 })}

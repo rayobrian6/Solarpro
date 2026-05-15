@@ -239,6 +239,8 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
         utilityName:         (proj as any).utilityName || '',
         stateCode:           projectStateCode,
         clientState:         client?.state || '',
+        address:             (proj as any).address || client?.address || '',  // v48.17: ZIP lookup
+        zip:                 (proj as any).zip || '',
         // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates are supply-only.
         // See view/[id]/page.tsx for full explanation.
         parsedBillRate:      undefined,
