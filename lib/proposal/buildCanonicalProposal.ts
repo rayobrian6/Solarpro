@@ -85,6 +85,8 @@ export interface BuildCanonicalProposalInput {
   utilityName: string;
   stateCode: string;              // 2-letter state code
   clientState: string;            // full state name (fallback)
+  address?: string;               // v48.17: project address — used for ZIP lookup when utilityName is empty
+  zip?: string;                   // v48.17: explicit ZIP code override
   utilityRateOverride?: number;   // project-level rate override (must be > 0.10 to apply)
   clientUtilityRate?: number;     // client bill-derived rate (fallback)
   parsedBillRate?: number;        // v48.3: rate extracted from uploaded utility bill (highest priority)
@@ -316,11 +318,41 @@ export function buildCanonicalProposal(
   // Production comes from PVWatts/layout engine. We do NOT recalculate it.
   // Monthly array must be 12 elements; pad with zeros if short.
 
+  // v48.17: PVWatts CONUS average monthly production fractions (south-facing 20 deg tilt).
+  // Used as fallback when the snapshot has no monthly array (older proposals).
+  // Sum = 1.0000.  Source: NREL PVWatts v8 US national average.
+  const PVWATTS_MONTHLY_FRACTIONS = [
+    0.0612, // Jan
+    0.0692, // Feb
+    0.0894, // Mar
+    0.0943, // Apr
+    0.0985, // May
+    0.0972, // Jun
+    0.0962, // Jul
+    0.0928, // Aug
+    0.0837, // Sep
+    0.0728, // Oct
+    0.0547, // Nov
+    0.0500, // Dec
+  ]; // sum ≈ 1.0000
+
   const rawMonthly = input.monthlyProductionKwh ?? [];
-  const monthlyKwh: number[] = Array.from({ length: 12 }, (_, i) => rawMonthly[i] ?? 0);
-  const annualKwh  = input.annualProductionKwh > 0
+  const hasRealMonthly = rawMonthly.some((v: number) => v > 0);
+  const annualKwh = input.annualProductionKwh > 0
     ? input.annualProductionKwh
-    : monthlyKwh.reduce((a, b) => a + b, 0);
+    : rawMonthly.reduce((a: number, b: number) => a + b, 0);
+
+  // If the monthly array is all-zeros but we have an annual total, synthesise
+  // estimated monthly values using PVWatts seasonal fractions so the bar chart
+  // doesn't show as empty.  Values are clearly estimated (not from PVWatts run).
+  let monthlyKwh: number[];
+  if (hasRealMonthly) {
+    monthlyKwh = Array.from({ length: 12 }, (_: unknown, i: number) => rawMonthly[i] ?? 0);
+  } else if (annualKwh > 0) {
+    monthlyKwh = PVWATTS_MONTHLY_FRACTIONS.map((f: number) => Math.round(annualKwh * f));
+  } else {
+    monthlyKwh = Array(12).fill(0) as number[];
+  }
 
   assertTruth(
     annualKwh >= 0,
@@ -381,6 +413,8 @@ export function buildCanonicalProposal(
     utilityName:           input.utilityName,
     stateCode:             input.stateCode,
     state:                 input.clientState,
+    address:               input.address,    // v48.17: for ZIP-based lookup when utilityName is empty
+    zip:                   input.zip,
     utilityRatePerKwh,
     // v48.8: clientUtilityRate passed separately — only used by buildUtilityProfile
     // when there is NO specific profile match (state fallback / unknown utility).

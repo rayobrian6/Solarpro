@@ -1244,6 +1244,8 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
       return m ? m[1].toUpperCase() : '';
     })(),
     clientState:           client?.state ?? '',
+    address:               (proj as any)?.address || client?.address || '',  // v48.17: ZIP lookup
+    zip:                   (proj as any)?.zip || '',
     // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates are supply-only.
     // See view/[id]/page.tsx for full explanation.
     parsedBillRate:        undefined,

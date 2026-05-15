@@ -403,8 +403,9 @@ export async function generateProposalPDF(proposal: Proposal): Promise<void> {
         for (const block of page.blocks) {
           const clone = block.element.cloneNode(true) as HTMLElement;
 
-          // Force white background except hero, savings-punch, and CTA (intentionally dark)
-          const isDark = block.id === 'hero' || block.id === 'cta' || block.id === 'savings-punch';
+          // Force white background except blocks with dark Tailwind text-white values 
+          // v48.17: 'environmental-impact' uses text-white for metric values — keep dark bg
+          const isDark = block.id === 'hero' || block.id === 'cta' || block.id === 'savings-punch' || block.id === 'environmental-impact';
           if (!isDark) {
             clone.style.background = 'white';
           }

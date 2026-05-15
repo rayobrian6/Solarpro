@@ -1438,6 +1438,8 @@ export function buildUtilityProfile(project: {
   utilityName?: string;
   state?: string;
   stateCode?: string;
+  address?: string;               // v48.17: project address — used for ZIP lookup
+  zip?: string;                   // v48.17: explicit ZIP code override
   utilityRatePerKwh?: number;
   // v48.8: weak fallback — only used when no specific profile is matched.
   // A named utility match (e.g. ameren_il) has an EIA-verified rate that is more
@@ -1559,9 +1561,9 @@ export function buildUtilityProfile(project: {
   // Step 2: v48.15 — if no name match, try ZIP-to-utility lookup
   // Extracts ZIP from address string or project.zip field
   if (!matchedProfile) {
-    const addressStr = (project as any).address || '';
+    const addressStr = project.address || (project as any).address || '';
     const zipMatch = addressStr.match(/\b(\d{5})\b/) || [];
-    const zip = (project as any).zip || zipMatch[1] || '';
+    const zip = project.zip || (project as any).zip || zipMatch[1] || '';
     const inferredUtility = zip ? ZIP_UTILITY_MAP[zip] : null;
     if (inferredUtility) {
       for (const p of PROPOSAL_UTILITY_PROFILES) {

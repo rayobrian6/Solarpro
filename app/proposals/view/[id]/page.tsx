@@ -363,6 +363,8 @@ function PublicProposalView({
     utilityName:         (proj as any)?.utilityName || '',
     stateCode:           projectStateCode,
     clientState:         client?.state || '',
+    address:             (proj as any)?.address || client?.address || '',  // v48.17: for ZIP lookup
+    zip:                 (proj as any)?.zip || '',
     // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates (_utilityRatePerKwh,
     // electricityRate) are supply-only and exclude delivery/capacity charges. Passing them as
     // Tier 1 overrides EIA-verified profile rates (~$0.155 Ameren/SWEC) with a supply-only
