@@ -657,12 +657,65 @@ function pageIncentives(cp: CanonicalProposal): string {
       </table>
     </div>
 
-    ${cp.policy.utilityProgramsNote ? `
-    <div class="sec-hdr">Utility Rate Plans &amp; Incentive Programs</div>
+
+    ${(cp.policy.utilityPrograms || cp.policy.utilityProgramsNote) ? `
+    <div class="sec-hdr">Utility Rate Plans & Incentive Programs</div>
+    ${cp.policy.utilityPrograms ? (() => {
+      const prog = cp.policy.utilityPrograms;
+      const statusBadge = (s: string) => {
+        const colors: Record<string, string> = {
+          active:   'background:#dcfce7;color:#15803d;border:1px solid #86efac;',
+          pilot:    'background:#fef9c3;color:#a16207;border:1px solid #fde047;',
+          limited:  'background:#ffedd5;color:#c2410c;border:1px solid #fed7aa;',
+          waitlist: 'background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;',
+          expired:  'background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1;',
+        };
+        const style = colors[s] ?? colors.active;
+        return `<span style="font-size:7px;font-weight:700;padding:1px 4px;border-radius:3px;${style}">${s.toUpperCase()}</span>`;
+      };
+      const rows: string[] = [];
+      prog.tou_plans.forEach((p: any) => {
+        const typeLabel = p.type === 'hourly_pricing' ? 'Hourly Pricing' : p.solar_friendly ? 'TOU Solar' : p.battery_optimized ? 'TOU Battery' : 'TOU Rate';
+        const flags = [p.solar_friendly && 'Solar-friendly', p.battery_optimized && 'Battery-optimized', p.nem_compatible && 'NEM OK'].filter(Boolean).join(' · ');
+        rows.push(`<tr style="background:#faf5ff;"><td style="font-weight:600;">${p.plan_name}</td><td>${typeLabel}</td><td style="color:#6b21a8;">${flags || 'Rate Plan'}</td><td>—</td><td>Active</td><td>${p.enrollment_url ? `<a href="${p.enrollment_url}" style="color:#7c3aed;font-size:7px;">Enroll</a>` : '—'}</td></tr>`);
+        rows.push(`<tr><td colspan="6" style="font-size:7.5px;color:#374151;padding:3px 6px 6px 14px;"><strong style="color:#92400e;">Rep note:</strong> ${p.solar_pro_note}${p.last_verified ? ` <span style="color:#9ca3af;">(verified ${p.last_verified})</span>` : ''}</td></tr>`);
+      });
+      prog.battery_incentives.forEach((p: any) => {
+        const typeLabel = p.type === 'vpp' ? 'VPP' : p.type === 'demand_response' ? 'Demand Response' : 'Battery Rebate';
+        rows.push(`<tr style="background:#f0fdf4;"><td style="font-weight:600;">${p.program_name}</td><td>${typeLabel}</td><td style="color:#15803d;font-weight:600;">${p.value_description}</td><td>${p.max_value != null ? `Up to $${p.max_value.toLocaleString()}` : '—'}</td><td>${statusBadge(p.status)}</td><td>${p.enrollment_url ? `<a href="${p.enrollment_url}" style="color:#7c3aed;font-size:7px;">Enroll</a>` : '—'}</td></tr>`);
+        rows.push(`<tr><td colspan="6" style="font-size:7.5px;color:#374151;padding:3px 6px 6px 14px;"><strong style="color:#92400e;">Rep note:</strong> ${p.solar_pro_note}${p.last_verified ? ` <span style="color:#9ca3af;">(verified ${p.last_verified})</span>` : ''}</td></tr>`);
+      });
+      prog.solar_rebates.forEach((p: any) => {
+        rows.push(`<tr style="background:#fefce8;"><td style="font-weight:600;">${p.program_name}</td><td>Solar Rebate</td><td style="color:#15803d;font-weight:600;">${p.value_description}</td><td>${p.max_value != null ? `Up to $${p.max_value.toLocaleString()}` : '—'}</td><td>${statusBadge(p.status)}</td><td>${p.enrollment_url ? `<a href="${p.enrollment_url}" style="color:#7c3aed;font-size:7px;">Enroll</a>` : '—'}</td></tr>`);
+        rows.push(`<tr><td colspan="6" style="font-size:7.5px;color:#374151;padding:3px 6px 6px 14px;"><strong style="color:#92400e;">Rep note:</strong> ${p.solar_pro_note}${p.last_verified ? ` <span style="color:#9ca3af;">(verified ${p.last_verified})</span>` : ''}</td></tr>`);
+      });
+      prog.nem_programs.forEach((p: any) => {
+        const exportVal = p.export_rate_per_kwh != null ? `${(p.export_rate_per_kwh * 100).toFixed(1)}¢/kWh credit` : 'See program';
+        rows.push(`<tr style="background:#ecfeff;"><td style="font-weight:600;">${p.program_name}</td><td>Net Metering</td><td style="color:#0369a1;">${exportVal}</td><td>${p.tou_export_credit ? 'TOU-based credits' : 'Fixed-rate credits'}</td><td>${statusBadge(p.status)}</td><td>${p.enrollment_url ? `<a href="${p.enrollment_url}" style="color:#7c3aed;font-size:7px;">Details</a>` : '—'}</td></tr>`);
+        rows.push(`<tr><td colspan="6" style="font-size:7.5px;color:#374151;padding:3px 6px 6px 14px;"><strong style="color:#92400e;">Rep note:</strong> ${p.solar_pro_note}${p.last_verified ? ` <span style="color:#9ca3af;">(verified ${p.last_verified})</span>` : ''}</td></tr>`);
+      });
+      if (rows.length === 0) return '';
+      return `<div style="margin-bottom:12px;border:1px solid #ddd6fe;border-radius:4px;overflow:hidden;">
+        <table style="width:100%;border-collapse:collapse;font-size:8px;">
+          <thead><tr style="background:#7c3aed;color:#fff;">
+            <th style="padding:4px 6px;text-align:left;width:22%;">Program / Plan</th>
+            <th style="padding:4px 6px;text-align:left;width:11%;">Type</th>
+            <th style="padding:4px 6px;text-align:left;width:24%;">Value / Detail</th>
+            <th style="padding:4px 6px;text-align:left;width:17%;">Cap / Notes</th>
+            <th style="padding:4px 6px;text-align:left;width:11%;">Status</th>
+            <th style="padding:4px 6px;text-align:left;width:11%;">Link</th>
+          </tr></thead>
+          <tbody>${rows.join('')}</tbody>
+        </table>
+        <div style="padding:4px 8px;background:#f5f3ff;font-size:7px;color:#6b7280;border-top:1px solid #ddd6fe;">Program details are informational. Enrollment subject to utility eligibility and funding availability. Verify current status before committing to customer.</div>
+      </div>`;
+    })() : ''}
+    ${!cp.policy.utilityPrograms && cp.policy.utilityProgramsNote ? `
     <div style="padding:10px;border:1px solid #ddd6fe;border-radius:4px;background:#faf5ff;margin-bottom:12px;font-size:9px;">
       ${cp.policy.utilityProgramsNote.split('\n').map((line: string) => `<div style="margin-bottom:5px;">${line}</div>`).join('')}
-      <div style="margin-top:6px;color:#6b7280;font-size:8px;">Program details are informational. Enrollment subject to utility eligibility requirements and funding availability. Verify current program status with your utility.</div>
+      <div style="margin-top:6px;color:#6b7280;font-size:8px;">Program details are informational. Verify current program status with your utility.</div>
     </div>` : ''}
+    ` : ''}
 
     <div class="sec-hdr">Combined Incentive Summary</div>
     <table class="equip-table">
