@@ -804,7 +804,7 @@ function PublicProposalView({
                     </div>
                     {ownership_delta_monthly > 0 && (
                       <p className="text-xs text-slate-500 mt-1.5 text-center">
-                        Redirecting ${ownership_delta_monthly}/mo from utility expense toward energy ownership. Fixed payment — utility rates keep rising.
+                        Your solar payment is fixed at ${solar_payment_monthly}/mo while utility rates keep rising. The ${ownership_delta_monthly}/mo gap closes as rates increase.
                       </p>
                     )}
                     {ownership_delta_monthly <= 0 && (
@@ -923,7 +923,7 @@ function PublicProposalView({
                       )}
                       {ownership_delta_monthly > 0 && (
                         <p className="text-xs text-slate-500 pt-0.5">
-                          ${ownership_delta_monthly}/mo is being redirected toward energy ownership rather than utility expense.
+                          Your solar payment is fixed — as utility rates rise at {(cp.utility.escalationRate * 100).toFixed(0)}%/yr, the gap closes and reverses.
                         </p>
                       )}
                     </div>
