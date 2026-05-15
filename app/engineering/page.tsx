@@ -96,6 +96,7 @@ import { getAhjsByState } from '@/lib/computed-plan';
 import { searchAhj } from '@/lib/jurisdictions/ahj-national';
 import { useEngineeringStore, simplifyPanelCountSource } from '@/store/engineeringStore';
 import { getUtilityPrograms } from '@/lib/utilityPrograms';
+import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -7492,8 +7493,16 @@ function EngineeringPageInner() {
                           const utils = getUtilitiesByStateNational(config.state || '');
                           const selectedUtil = utils.find(u => u.id === config.utilityId);
                           if (!selectedUtil) return null;
-                          // Map utility dropdown ID to proposalTruthEngine utility_id (they use the same IDs)
-                          const programs = getUtilityPrograms(config.utilityId);
+                          // v48.27 fix: config.utilityId is in slug format ("il-ameren-illinois") but
+                          // getUtilityPrograms() expects proposalTruthEngine utility_id format ("ameren_il").
+                          // Bridge the two by pattern-matching selectedUtil.name against PROPOSAL_UTILITY_PROFILES.
+                          const nameLower = selectedUtil.name.toLowerCase();
+                          const stateCode = (config.state || '').toUpperCase();
+                          const stateProfiles = PROPOSAL_UTILITY_PROFILES.filter(p => p.state === stateCode);
+                          const matchedProfile = stateProfiles.find(p => {
+                            try { return new RegExp(p.utility_name_pattern, 'i').test(nameLower); } catch { return false; }
+                          });
+                          const programs = matchedProfile ? getUtilityPrograms(matchedProfile.utility_id) : null;
                           if (!programs) return null;
                           const hasTou = programs.tou_plans.length > 0;
                           const hasBattery = programs.battery_incentives.length > 0;
