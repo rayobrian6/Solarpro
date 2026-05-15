@@ -338,6 +338,62 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     const owned = await sql`SELECT id FROM proposals WHERE id = ${id} AND user_id = ${user.id} LIMIT 1`;
     if (owned.length === 0) return NextResponse.json({ success: false, error: 'Not found or access denied' }, { status: 403 });
 
+    // v48.8: refresh_snapshot action — re-pull live project data and rebuild the frozen snapshot.
+    // Fixes stale utility name / stateCode / client data that was frozen at original proposal creation.
+    // The financial figures (production, cost, pricing) are refreshed from the live project.
+    if (body.action === 'refresh_snapshot') {
+      const existing2 = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;
+      if (!existing2.length) return NextResponse.json({ success: false, error: 'Not found' }, { status: 404 });
+      const currentData2 = (existing2[0].data_json as Record<string, unknown>) || {};
+      const projectId2 = existing2[0].project_id as string;
+
+      // Re-fetch live project (with client, layout, production, costEstimate)
+      const liveProjectRows = await sql`
+        SELECT proj.*,
+          row_to_json(c.*) AS client,
+          row_to_json(l.*) AS layout,
+          row_to_json(pd.*) AS production,
+          row_to_json(ce.*) AS "costEstimate"
+        FROM projects proj
+        LEFT JOIN clients c ON c.id = proj.client_id
+        LEFT JOIN project_layouts l ON l.project_id = proj.id
+        LEFT JOIN project_productions pd ON pd.project_id = proj.id
+        LEFT JOIN project_cost_estimates ce ON ce.project_id = proj.id
+        WHERE proj.id = ${projectId2}
+        LIMIT 1
+      `.catch(() => [] as any[]);
+
+      if (!liveProjectRows.length) {
+        return NextResponse.json({ success: false, error: 'Live project not found — cannot refresh snapshot' }, { status: 404 });
+      }
+
+      const liveProject = liveProjectRows[0];
+
+      // Re-fetch dbUtilityRate with current utility name + state
+      const { fetchProposalUtilityRate } = await import('@/lib/proposal/buildCanonicalProposal');
+      const freshDbRate = await fetchProposalUtilityRate(
+        (liveProject as any).utility_name ?? (liveProject as any).utilityName ?? null,
+        (liveProject as any).state_code   ?? (liveProject as any).stateCode   ?? null,
+      ).catch(() => null);
+
+      const refreshedDataJson = JSON.stringify({
+        ...currentData2,
+        project: liveProject,           // full live snapshot (utility name, state, layout, production)
+        snapshotAt: new Date().toISOString(),
+        snapshotRefreshedAt: new Date().toISOString(),
+        dbUtilityRate: freshDbRate,
+      });
+
+      const refreshedRows = await sql`
+        UPDATE proposals
+        SET data_json = ${refreshedDataJson}::jsonb, updated_at = NOW()
+        WHERE id = ${id}
+        RETURNING *
+      `;
+
+      return NextResponse.json({ success: true, data: refreshedRows[0], refreshed: true });
+    }
+
     const existing = await sql`SELECT * FROM proposals WHERE id = ${id} LIMIT 1`;
     const currentData = (existing[0].data_json as Record<string, unknown>) || {};
     const updatedDataJson = JSON.stringify({ ...currentData, ...body });

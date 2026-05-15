@@ -12,7 +12,7 @@ import {
   Settings, Percent, Tag, Lock, Search, Filter, Trash2,
   Archive, Copy, Pencil, MoreHorizontal, CheckSquare,
   Square, ChevronDown, SortAsc, AlertTriangle, X, Check,
-  Wind, TreePine, Car, ExternalLink, Info,
+  Wind, TreePine, Car, ExternalLink, Info, RefreshCw,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -132,11 +132,12 @@ function RenameInput({ current, onSave, onCancel }: { current: string; onSave: (
 
 // ── Row Action Menu ──────────────────────────────────────────────────────────
 function ActionMenu({
-  proposal, onRename, onDuplicate, onArchive, onDelete, onClose,
+  proposal, onRename, onDuplicate, onRefresh, onArchive, onDelete, onClose,
 }: {
   proposal: Proposal;
   onRename: () => void;
   onDuplicate: () => void;
+  onRefresh: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onClose: () => void;
@@ -149,12 +150,16 @@ function ActionMenu({
   }, [onClose]);
 
   return (
-    <div ref={ref} className="absolute right-0 top-8 z-30 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+    <div ref={ref} className="absolute right-0 top-8 z-30 w-52 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
       <button onClick={() => { onRename(); onClose(); }} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-700 transition-colors text-left">
         <Pencil size={13} className="text-slate-400" /> Rename
       </button>
       <button onClick={() => { onDuplicate(); onClose(); }} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-700 transition-colors text-left">
         <Copy size={13} className="text-slate-400" /> Duplicate
+      </button>
+      {/* v48.9: Refresh Snapshot — re-pulls live project data (fixes stale utility rates/payback) */}
+      <button onClick={() => { onRefresh(); onClose(); }} className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-blue-400 hover:bg-blue-500/10 transition-colors text-left">
+        <RefreshCw size={13} className="text-blue-400" /> Refresh Data
       </button>
       <div className="h-px bg-slate-700 my-0.5" />
       {proposal.status !== 'archived' && (
@@ -357,6 +362,38 @@ function ProposalContent() {
     });
     const data = await res.json();
     if (data.success) setProposals(prev => [data.data, ...prev]);
+  };
+
+  // v48.9: Refresh snapshot — re-pulls live project data (utility name, state, production, layout)
+  // into the frozen proposal snapshot. Fixes stale utility matching that caused wrong rates/payback.
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
+  const refreshSnapshot = async (proposal: Proposal) => {
+    setRefreshingId(proposal.id);
+    try {
+      const res = await fetch(`/api/proposals/${proposal.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'refresh_snapshot' }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Reload the proposal list to pick up refreshed snapshot
+        const listRes = await fetch('/api/proposals');
+        const listData = await listRes.json();
+        if (listData.success) setProposals(listData.data || []);
+        // If currently viewing this proposal, reload
+        if (activeProposal?.id === proposal.id) {
+          setActiveProposal(data.data ? {
+            ...activeProposal,
+            project: (data.data.data_json && typeof data.data.data_json === 'object')
+              ? (data.data.data_json as any).project ?? activeProposal.project
+              : activeProposal.project,
+          } : activeProposal);
+        }
+      }
+    } finally {
+      setRefreshingId(null);
+    }
   };
 
   const archiveProposal = async (id: string) => {
@@ -904,14 +941,19 @@ function ProposalContent() {
                       <button
                         onClick={() => setActionMenuId(prev => prev === proposal.id ? null : proposal.id)}
                         className="btn-ghost p-1.5 rounded-lg text-slate-500 hover:text-slate-300"
+                        title={refreshingId === proposal.id ? 'Refreshing data…' : 'More options'}
                       >
-                        <MoreHorizontal size={15} />
+                        {refreshingId === proposal.id
+                          ? <RefreshCw size={15} className="text-blue-400 animate-spin" />
+                          : <MoreHorizontal size={15} />
+                        }
                       </button>
                       {menuOpen && (
                         <ActionMenu
                           proposal={proposal}
                           onRename={() => setRenameId(proposal.id)}
                           onDuplicate={() => duplicateProposal(proposal)}
+                          onRefresh={() => refreshSnapshot(proposal)}
                           onArchive={() => archiveProposal(proposal.id)}
                           onDelete={() => setConfirmDelete({ ids: [proposal.id] })}
                           onClose={() => setActionMenuId(null)}

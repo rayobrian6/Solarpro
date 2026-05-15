@@ -230,7 +230,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'ameren_il',
     utility_name: 'Ameren Illinois',
-    utility_name_pattern: 'ameren illinois|ameren il',
+    utility_name_pattern: 'ameren',
     state: 'IL',
     retail_rate_type: 'flat',
     // v48.6: Updated to 2026 all-in residential rate (~15.5¢/kWh per ICC filings + MISO capacity auction).
@@ -291,7 +291,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'duke_fl',
     utility_name: 'Duke Energy Florida',
-    utility_name_pattern: 'duke energy florida|duke fl',
+    utility_name_pattern: 'duke energy florida|duke.*florida|duke fl|duke energy.*fl',
     state: 'FL',
     retail_rate_type: 'flat',
     blended_rate: 0.150,
@@ -379,7 +379,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'eversource_ct',
     utility_name: 'Eversource Energy (CT)',
-    utility_name_pattern: 'eversource.*ct|eversource.*connecticut',
+    utility_name_pattern: 'eversource',
     state: 'CT',
     retail_rate_type: 'flat',
     blended_rate: 0.278,
@@ -407,7 +407,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'eversource_ma',
     utility_name: 'Eversource Energy (MA)',
-    utility_name_pattern: 'eversource.*ma|eversource.*mass',
+    utility_name_pattern: 'eversource',
     state: 'MA',
     retail_rate_type: 'flat',
     blended_rate: 0.315,
@@ -493,7 +493,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'pepco_dc',
     utility_name: 'Pepco (DC)',
-    utility_name_pattern: 'pepco.*dc|pepco.*district',
+    utility_name_pattern: 'pepco',
     state: 'DC',
     retail_rate_type: 'flat',
     blended_rate: 0.240,
@@ -579,7 +579,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'duke_nc',
     utility_name: 'Duke Energy Carolinas',
-    utility_name_pattern: 'duke energy carolina|duke energy progress|duke.*nc|duke.*sc',
+    utility_name_pattern: 'duke energy|duke.*carolina|duke.*progress|duke.*nc|duke.*sc',
     state: 'NC',
     retail_rate_type: 'flat',
     blended_rate: 0.151,
@@ -609,7 +609,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'xcel_co',
     utility_name: 'Xcel Energy Colorado',
-    utility_name_pattern: 'xcel.*co|xcel.*colorado',
+    utility_name_pattern: 'xcel',
     state: 'CO',
     retail_rate_type: 'flat',
     blended_rate: 0.163,
@@ -665,7 +665,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'consumers_mi',
     utility_name: 'Consumers Energy',
-    utility_name_pattern: 'consumers energy.*mi|consumers.*michigan',
+    utility_name_pattern: 'consumers energy|consumers',
     state: 'MI',
     retail_rate_type: 'flat',
     blended_rate: 0.206,
@@ -785,7 +785,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'aep_oh',
     utility_name: 'AEP Ohio',
-    utility_name_pattern: 'aep ohio|ohio power|appalachian power',
+    utility_name_pattern: 'aep ohio|aep|ohio power|appalachian power',
     state: 'OH',
     retail_rate_type: 'flat',
     blended_rate: 0.179,
@@ -845,7 +845,7 @@ export const PROPOSAL_UTILITY_PROFILES: ProposalUtilityProfile[] = [
   {
     utility_id: 'dominion_va',
     utility_name: 'Dominion Energy Virginia',
-    utility_name_pattern: 'dominion energy va|dominion energy virginia|dominion.*va',
+    utility_name_pattern: 'dominion',
     state: 'VA',
     retail_rate_type: 'flat',
     blended_rate: 0.164,
