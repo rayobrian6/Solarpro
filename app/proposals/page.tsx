@@ -1237,10 +1237,9 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     utilityName:           (proj as any)?.utilityName ?? (client as any)?.utilityName ?? '',
     stateCode:             (proj as any)?.stateCode ?? client?.state ?? '',
     clientState:           client?.state ?? '',
-    // v48.4: Tier 1 — direct bill-extracted rate (primary: enriched _utilityRatePerKwh only)
-    // NOTE: billData.electricityRate is raw OCR supply-only — excluded from parsedBillRate
-    // because it under-counts delivery charges and would override EIA-verified profile rates.
-    parsedBillRate:        (proj as any)?.billData?._utilityRatePerKwh ?? undefined,
+    // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates are supply-only.
+    // See view/[id]/page.tsx for full explanation.
+    parsedBillRate:        undefined,
     utilityRateOverride:   (proj as any)?.utilityRatePerKwh,
     clientUtilityRate:     client?.utilityRate,
     dbUtilityRate:         proposal.dbUtilityRate ?? undefined,

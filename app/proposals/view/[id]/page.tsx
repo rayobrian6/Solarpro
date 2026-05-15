@@ -363,10 +363,11 @@ function PublicProposalView({
     utilityName:         (proj as any)?.utilityName || '',
     stateCode:           projectStateCode,
     clientState:         client?.state || '',
-    // v48.4: Tier 1 — direct bill-extracted rate (primary: enriched _utilityRatePerKwh only)
-    // NOTE: billData.electricityRate is raw OCR supply-only — excluded from parsedBillRate
-    // because it under-counts delivery charges and would override EIA-verified profile rates.
-    parsedBillRate:      (proj as any)?.billData?._utilityRatePerKwh ?? undefined,
+    // v48.14: parsedBillRate intentionally undefined — OCR-extracted rates (_utilityRatePerKwh,
+    // electricityRate) are supply-only and exclude delivery/capacity charges. Passing them as
+    // Tier 1 overrides EIA-verified profile rates (~$0.155 Ameren/SWEC) with a supply-only
+    // rate (~$0.107), producing a wrong Year 18 payback. Profile rate always wins for named utilities.
+    parsedBillRate:      undefined,
     utilityRateOverride: (proj as any)?.utilityRatePerKwh,
     clientUtilityRate:   client?.utilityRate,
     dbUtilityRate:       proposal.dbUtilityRate ?? undefined,
