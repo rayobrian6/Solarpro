@@ -238,9 +238,8 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
         utilityName:         (proj as any).utilityName || '',
         stateCode:           projectStateCode,
         clientState:         client?.state || '',
-        parsedBillRate:      (proj as any).billData?._utilityRatePerKwh
-                               ?? (proj as any).billData?.electricityRate
-                               ?? undefined,
+        // v48.10: exclude raw OCR electricityRate — supply-only, under-counts full blended rate
+        parsedBillRate:      (proj as any).billData?._utilityRatePerKwh ?? undefined,
         utilityRateOverride: (proj as any).utilityRatePerKwh,
         clientUtilityRate:   client?.utilityRate,
         dbUtilityRate:       proposal.dbUtilityRate ?? undefined,

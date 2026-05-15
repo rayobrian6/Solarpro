@@ -984,16 +984,16 @@ const UTILITY_RATE_BREAKDOWNS: Record<string, UtilityRateBreakdown> = {
     lastUpdated: '2024-06-01',
     rateSource: 'ICC ComEd BES tariff 2024',
   },
-  // Ameren IL: residential rate all-in 2024
+  // Ameren IL: residential rate all-in — updated to EIA Electric Power Monthly May 2026
   'ameren': {
-    retailRate: 0.128,
-    supplyRate: 0.060,
-    distributionRate: 0.055,
-    transmissionRate: 0.010,
+    retailRate: 0.155,
+    supplyRate: 0.070,
+    distributionRate: 0.065,
+    transmissionRate: 0.012,
     fixedMonthlyCharge: 11.00,
     netMeteringType: 'retail_rate',
-    lastUpdated: '2024-06-01',
-    rateSource: 'ICC Ameren IL residential tariff 2024',
+    lastUpdated: '2026-05-01',
+    rateSource: 'EIA Electric Power Monthly May 2026',
   },
   // -- Illinois co-ops (EIA 861 IL co-op avg 2023/2024) ---------------------
   'swec-il':             { retailRate: 0.132, fixedMonthlyCharge: 15.00, netMeteringType: 'retail_rate', lastUpdated: '2024-01-01', rateSource: 'EIA 861 IL co-op avg 2023' },
@@ -1146,12 +1146,15 @@ export function validateAndCorrectUtilityRate(
     extractedRate > MAX_VALID_RETAIL_RATE;
 
   if (!isSuspect) {
-    // Rate is in valid range — but if DB rate exists and extracted is far below DB, flag as suspect
-    const isUnreasonablyLow = dbRate !== null && extractedRate! < dbRate * 0.5;
+    // Rate is in valid range — but if DB rate exists and extracted is far below DB, flag as suspect.
+    // v48.10: threshold raised from 50% → 75% to catch supply-only OCR extractions.
+    // Supply-only rates are typically 45-65% of the full blended retail rate, so anything
+    // below 75% of the known DB rate is likely a partial (supply-only) extraction.
+    const isUnreasonablyLow = dbRate !== null && extractedRate! < dbRate * 0.75;
     if (!isUnreasonablyLow) {
       return { rate: extractedRate!, corrected: false, originalRate: original, source: 'extracted', suspect: false };
     }
-    // Extracted is less than 50% of known DB rate — likely a supply-only component
+    // Extracted is less than 75% of known DB rate — likely a supply-only component
     if (dbRate) {
       return { rate: dbRate, corrected: true, originalRate: original, source: 'utility_db', suspect: true };
     }

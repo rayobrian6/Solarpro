@@ -367,18 +367,34 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         return NextResponse.json({ success: false, error: 'Live project not found — cannot refresh snapshot' }, { status: 404 });
       }
 
-      const liveProject = liveProjectRows[0];
+      const liveProjectRaw = liveProjectRows[0];
+
+      // v48.10: normalize raw SQL row (snake_case) → typed Project (camelCase) so
+      // the proposal view reads utilityName / stateCode correctly after refresh.
+      // The JOIN aliases (client, layout, production, costEstimate) are preserved separately
+      // because rowToProject only processes the top-level project columns.
+      const { rowToProject } = await import('@/lib/db-neon');
+      const liveProjectNormalized = rowToProject(liveProjectRaw);
+
+      // Re-attach the JOIN-aliased nested objects (already camelCase from SQL aliases)
+      const liveProject = {
+        ...liveProjectNormalized,
+        client:       liveProjectRaw.client       ?? liveProjectNormalized.client,
+        layout:       liveProjectRaw.layout       ?? (liveProjectNormalized as any).layout,
+        production:   liveProjectRaw.production   ?? (liveProjectNormalized as any).production,
+        costEstimate: liveProjectRaw.costEstimate ?? (liveProjectNormalized as any).costEstimate,
+      };
 
       // Re-fetch dbUtilityRate with current utility name + state
       const { fetchProposalUtilityRate } = await import('@/lib/proposal/buildCanonicalProposal');
       const freshDbRate = await fetchProposalUtilityRate(
-        (liveProject as any).utility_name ?? (liveProject as any).utilityName ?? null,
-        (liveProject as any).state_code   ?? (liveProject as any).stateCode   ?? null,
+        liveProject.utilityName ?? null,
+        liveProject.stateCode   ?? null,
       ).catch(() => null);
 
       const refreshedDataJson = JSON.stringify({
         ...currentData2,
-        project: liveProject,           // full live snapshot (utility name, state, layout, production)
+        project: liveProject,           // full live snapshot (camelCase, utility name, state, layout, production)
         snapshotAt: new Date().toISOString(),
         snapshotRefreshedAt: new Date().toISOString(),
         dbUtilityRate: freshDbRate,

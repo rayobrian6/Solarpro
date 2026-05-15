@@ -214,7 +214,7 @@ function rowToClient(row: Record<string, unknown>): Client {
   };
 }
 
-function rowToProject(row: Record<string, unknown>): Project {
+export function rowToProject(row: Record<string, unknown>): Project {
   // Hydrate bill_data JSONB into typed BillAnalysis + utility fields
   const rawBillData = row.bill_data as Record<string, unknown> | undefined;
   let billAnalysis: import('@/types').BillAnalysis | undefined;
