@@ -657,6 +657,13 @@ function pageIncentives(cp: CanonicalProposal): string {
       </table>
     </div>
 
+    ${cp.policy.utilityProgramsNote ? `
+    <div class="sec-hdr">Utility Rate Plans &amp; Incentive Programs</div>
+    <div style="padding:10px;border:1px solid #ddd6fe;border-radius:4px;background:#faf5ff;margin-bottom:12px;font-size:9px;">
+      ${cp.policy.utilityProgramsNote.split('\n').map((line: string) => `<div style="margin-bottom:5px;">${line}</div>`).join('')}
+      <div style="margin-top:6px;color:#6b7280;font-size:8px;">Program details are informational. Enrollment subject to utility eligibility requirements and funding availability. Verify current program status with your utility.</div>
+    </div>` : ''}
+
     <div class="sec-hdr">Combined Incentive Summary</div>
     <table class="equip-table">
       <thead><tr><th>Incentive</th><th>Type</th><th>Amount</th><th>Timing</th></tr></thead>

@@ -21,6 +21,11 @@
  */
 
 import { STATE_UTILITY_FALLBACK } from './utilityDetector';
+import {
+  getUtilityPrograms,
+  getUtilityProgramNote,
+  type UtilityProgramBundle,
+} from './utilityPrograms';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION 2: ProposalUtilityProfile Interface
@@ -29888,6 +29893,10 @@ export interface BuiltUtilityProfile {
   };
   policy_message: string | null;
   using_conservative_estimates: boolean;
+  // v48.27: Per-utility programs — TOU plans, battery incentives, solar rebates, special NEM
+  utility_programs: UtilityProgramBundle | null;
+  // v48.27: Human-readable Solar Pro note summarizing available programs
+  utility_programs_note: string | null;
 }
 
 export function buildUtilityProfile(project: {
@@ -63082,6 +63091,10 @@ export function buildUtilityProfile(project: {
 
   const policyMessage = getPolicyMessage(matchedProfile);
 
+  // v48.27: Look up per-utility programs (TOU plans, battery incentives, rebates, special NEM)
+  const utilityPrograms = getUtilityPrograms(matchedProfile.utility_id);
+  const utilityProgramsNote = getUtilityProgramNote(matchedProfile.utility_id);
+
   return {
     profile: matchedProfile,
     is_specific_match: isSpecificMatch,
@@ -63093,6 +63106,8 @@ export function buildUtilityProfile(project: {
     financial_rules: financialRules,
     policy_message: policyMessage,
     using_conservative_estimates: usingConservativeEstimates,
+    utility_programs: utilityPrograms,
+    utility_programs_note: utilityProgramsNote,
   };
 }
 

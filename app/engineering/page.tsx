@@ -95,6 +95,7 @@ import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 import { searchAhj } from '@/lib/jurisdictions/ahj-national';
 import { useEngineeringStore, simplifyPanelCountSource } from '@/store/engineeringStore';
+import { getUtilityPrograms } from '@/lib/utilityPrograms';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -7485,6 +7486,72 @@ function EngineeringPageInner() {
                             );
                           })()}
                         </div>
+
+                        {/* v48.27: Utility Programs Panel — TOU, battery incentives, rebates, special NEM */}
+                        {config.utilityId && (() => {
+                          const utils = getUtilitiesByStateNational(config.state || '');
+                          const selectedUtil = utils.find(u => u.id === config.utilityId);
+                          if (!selectedUtil) return null;
+                          // Map utility dropdown ID to proposalTruthEngine utility_id (they use the same IDs)
+                          const programs = getUtilityPrograms(config.utilityId);
+                          if (!programs) return null;
+                          const hasTou = programs.tou_plans.length > 0;
+                          const hasBattery = programs.battery_incentives.length > 0;
+                          const hasSolar = programs.solar_rebates.length > 0;
+                          const hasNem = programs.nem_programs.length > 0;
+                          if (!hasTou && !hasBattery && !hasSolar && !hasNem) return null;
+                          const hourlyPlan = programs.tou_plans.find(t => t.type === 'hourly_pricing');
+                          const solarTou = programs.tou_plans.find(t => t.solar_friendly);
+                          const batteryTou = programs.tou_plans.find(t => t.battery_optimized);
+                          const activeBattery = programs.battery_incentives.filter(b => b.status === 'active' || b.status === 'pilot');
+                          const activeRebates = programs.solar_rebates.filter(r => r.status === 'active');
+                          const nemProg = programs.nem_programs[0];
+                          return (
+                            <div className="mt-2 p-2.5 bg-violet-500/5 border border-violet-500/20 rounded-xl">
+                              <div className="text-xs font-bold text-violet-400 mb-1.5 flex items-center gap-1.5">
+                                <span>⚡</span> {selectedUtil.name} — Programs & Rate Plans
+                              </div>
+                              <div className="space-y-1.5">
+                                {hourlyPlan && (
+                                  <div className="text-xs text-slate-300 flex gap-1.5">
+                                    <span className="text-amber-400 flex-shrink-0">⚡</span>
+                                    <span><span className="text-amber-300 font-medium">{hourlyPlan.plan_name}</span> — Hourly real-time pricing based on wholesale market. Battery storage maximizes savings by dispatching during high-price hours.{hourlyPlan.enrollment_url && <> <a href={hourlyPlan.enrollment_url} target="_blank" rel="noopener noreferrer" className="text-violet-400 underline ml-1">Enroll →</a></>}</span>
+                                  </div>
+                                )}
+                                {!hourlyPlan && solarTou && (
+                                  <div className="text-xs text-slate-300 flex gap-1.5">
+                                    <span className="text-emerald-400 flex-shrink-0">☀️</span>
+                                    <span><span className="text-emerald-300 font-medium">{solarTou.plan_name}</span> — Solar-friendly TOU: {solarTou.plan_description.slice(0, 120)}{solarTou.plan_description.length > 120 ? '…' : ''}</span>
+                                  </div>
+                                )}
+                                {!hourlyPlan && !solarTou && batteryTou && (
+                                  <div className="text-xs text-slate-300 flex gap-1.5">
+                                    <span className="text-blue-400 flex-shrink-0">🔋</span>
+                                    <span><span className="text-blue-300 font-medium">{batteryTou.plan_name}</span> — Battery-optimized TOU: {batteryTou.solar_pro_note.slice(0, 120)}{batteryTou.solar_pro_note.length > 120 ? '…' : ''}</span>
+                                  </div>
+                                )}
+                                {activeBattery.length > 0 && (
+                                  <div className="text-xs text-slate-300 flex gap-1.5">
+                                    <span className="text-green-400 flex-shrink-0">💰</span>
+                                    <span><span className="text-green-300 font-medium">{activeBattery[0].program_name}</span> {activeBattery[0].status === 'pilot' ? <span className="text-yellow-400">[Pilot]</span> : <span className="text-emerald-400">[Active]</span>} — {activeBattery[0].value_description}{activeBattery[0].enrollment_url && <> <a href={activeBattery[0].enrollment_url} target="_blank" rel="noopener noreferrer" className="text-violet-400 underline ml-1">Details →</a></>}</span>
+                                  </div>
+                                )}
+                                {activeRebates.length > 0 && (
+                                  <div className="text-xs text-slate-300 flex gap-1.5">
+                                    <span className="text-yellow-400 flex-shrink-0">🌞</span>
+                                    <span><span className="text-yellow-300 font-medium">{activeRebates[0].program_name}</span> — {activeRebates[0].value_description}{activeRebates[0].enrollment_url && <> <a href={activeRebates[0].enrollment_url} target="_blank" rel="noopener noreferrer" className="text-violet-400 underline ml-1">Details →</a></>}</span>
+                                  </div>
+                                )}
+                                {nemProg && (
+                                  <div className="text-xs text-slate-300 flex gap-1.5">
+                                    <span className="text-cyan-400 flex-shrink-0">📋</span>
+                                    <span><span className="text-cyan-300 font-medium">{nemProg.program_name}</span> — {nemProg.program_description.slice(0, 150)}{nemProg.program_description.length > 150 ? '…' : ''}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
                         <div>
                           <label className="eng-label">Authority Having Jurisdiction (AHJ)</label>
                           <select value={config.ahjId} onChange={e => updateConfig({ ahjId: e.target.value })} className="eng-select">
