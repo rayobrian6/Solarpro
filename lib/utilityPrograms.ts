@@ -1593,6 +1593,509 @@ export const TOU_RATE_PLANS: TouRatePlan[] = [
     solar_pro_note: 'Indiana HB 1278 (2022): new solar customers receive avoided-cost (~$0.04–0.05/kWh) for exports, NOT retail rate. Existing customers grandfathered until 2032. For new installs, battery storage is the key value-add — self-consuming solar at $0.13–0.15/kWh vs exporting at $0.04–0.05/kWh.',
     last_verified: '2025-05',
   },
+// Inject before closing ]; of TOU_RATE_PLANS array
+
+  // ── Alabama Power (Southern Company) ──────────────────────────────────────────
+  {
+    plan_id: 'alabama_power_tou',
+    plan_name: 'Time-of-Use Rate (Residential TOU-1)',
+    plan_description: 'Alabama Power residential TOU. On-peak: weekdays 12–9 PM June–Sept; 6 AM–9 PM Oct–May. Off-peak all other hours and weekends. Net metering at avoided-cost rate (~3–4¢/kWh) — battery critical.',
+    utility_ids: ['alabama_power'],
+    type: 'tou_rate',
+    solar_friendly: false,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 12–9 PM (Jun–Sep), 6 AM–9 PM (Oct–May)', summer_rate_per_kwh: 0.18, winter_rate_per_kwh: 0.15, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours, all weekends', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.08, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.alabamapower.com/account/ways-to-save/time-of-use.html',
+    solar_pro_note: 'Alabama Power net metering pays avoided-cost (~3¢/kWh) — far below retail. Battery storage is essential to avoid exporting at these low rates. TOU plan allows arbitrage: battery charges off-peak (9¢) and covers on-peak hours (18¢ summer). Alabama also has a TVA-fed area — confirm which territory before quoting.',
+    last_verified: '2025-05',
+  },
+
+  // ── TVA (Tennessee Valley Authority) region ───────────────────────────────────
+  {
+    plan_id: 'tva_tou',
+    plan_name: 'Green Power Switch / Time-of-Use (TVA Territory)',
+    plan_description: 'TVA-fed utilities (Nashville ES, Memphis LGW, Knoxville UB, Bristol TN) follow TVA wholesale TOU structure. On-peak: 1–9 PM weekdays June–Sept; 4 AM–10 AM and 4 PM–9 PM Oct–May. TVA net metering credits at avoided-cost rate.',
+    utility_ids: ['tva_al', 'nashville_electric_service_tn', 'memphis_light_gas_water_tn', 'knoxville_utilities_board_tn', 'bristol_tennessee_essential_services_tn', 'fayetteville_public_utilities_tn', 'powell_clinch_utility_district_tn'],
+    type: 'tou_rate',
+    solar_friendly: false,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 1–9 PM (Jun–Sep), AM/PM peaks (Oct–May)', summer_rate_per_kwh: 0.17, winter_rate_per_kwh: 0.14, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours and weekends', summer_rate_per_kwh: 0.08, winter_rate_per_kwh: 0.07, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.tva.com/energy/residential-customers/green-power-switch',
+    solar_pro_note: 'TVA territory net metering is at avoided-cost (~2–4¢/kWh) under the 2019 TVA EnergyRight Solar policy. This makes battery storage critical for any TVA-territory solar install. Battery stores midday solar and discharges 1–9 PM at 17¢/kWh to maximize self-consumption value. TVA territory spans all of Tennessee and parts of AL, MS, GA, KY, NC, VA.',
+    last_verified: '2025-05',
+  },
+
+  // ── Duke Energy Indiana ────────────────────────────────────────────────────────
+  {
+    plan_id: 'duke_indiana_tou',
+    plan_name: 'Time-of-Use Pricing (Duke Indiana)',
+    plan_description: 'Duke Energy Indiana residential TOU. On-peak: 2–7 PM weekdays June–Aug. Off-peak all other times. Indiana HB 1278 (2022) eliminated retail NEM — exports credited at avoided-cost (~4–5¢/kWh). Battery essential.',
+    utility_ids: ['duke_indiana', 'aep_indiana'],
+    type: 'tou_rate',
+    solar_friendly: false,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 2–7 PM (Jun–Aug only)', summer_rate_per_kwh: 0.24, winter_rate_per_kwh: 0.11, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours, all seasons', summer_rate_per_kwh: 0.10, winter_rate_per_kwh: 0.11, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.duke-energy.com/home/products/time-of-use',
+    solar_pro_note: 'Indiana eliminated retail NEM in 2022 (HB 1278) — Duke Indiana exports now credit at avoided-cost (~4¢/kWh). Battery storage is essential for Indiana solar installs. Battery charges midday from solar (off-peak) and discharges 2–7 PM summer at 24¢/kWh on TOU plan. Payback without battery is dramatically longer under avoided-cost NEM.',
+    last_verified: '2025-05',
+  },
+
+  // ── Hawaiian Electric (HECO) ──────────────────────────────────────────────────
+  {
+    plan_id: 'hawaiian_electric_tou',
+    plan_name: 'Time-of-Use Rate / Smart Rate (Hawaiian Electric)',
+    plan_description: 'Hawaiian Electric (HECO, MECO, HELCO) residential TOU. On-peak: 5–10 PM daily. Hawaii has the highest residential rates in the US (~$0.38–0.50/kWh). Exports credited at Customer Grid-Supply rate or self-supply allowed. Battery critical for avoiding on-peak grid draw.',
+    utility_ids: ['hawaiian_electric'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Daily 5–10 PM', summer_rate_per_kwh: 0.48, winter_rate_per_kwh: 0.44, applies_weekends: true, applies_holidays: true },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours (10 PM–5 PM)', summer_rate_per_kwh: 0.32, winter_rate_per_kwh: 0.30, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.hawaiianelectric.com/products-and-services/customer-renewable-programs',
+    solar_pro_note: 'Hawaii has the highest electricity rates in the US (38–50¢/kWh). Under Customer Grid-Supply, HECO pays ~10¢/kWh for exports — well below retail. Self-Supply option (no exports, full self-consumption) often provides better ROI. Battery storage is financially critical in Hawaii — solar + battery is essentially the only configuration that makes sense under current HECO tariffs. Every kWh self-consumed saves 38–50¢.',
+    last_verified: '2025-05',
+  },
+
+  // ── Eversource (Connecticut) ──────────────────────────────────────────────────
+  {
+    plan_id: 'eversource_ct_tou',
+    plan_name: 'Time-of-Use Rate (Eversource CT / UI)',
+    plan_description: 'Eversource Connecticut and UI (United Illuminating) residential TOU. On-peak: 8 AM–8 PM weekdays. Off-peak all other hours. CT has strong net metering at retail rate. ConnectedSolutions battery DR program pays up to $275/kW-year.',
+    utility_ids: ['eversource_ct', 'eversource_cl_ct', 'bozrah_lp_ct', 'south_norwalk_electric_works_ct'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 8 AM–8 PM', summer_rate_per_kwh: 0.30, winter_rate_per_kwh: 0.24, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and 8 PM–8 AM', summer_rate_per_kwh: 0.12, winter_rate_per_kwh: 0.10, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.eversource.com/content/ct-c/residential/my-account/billing-payments/about-your-bill/rate-plans/residential-time-of-use',
+    solar_pro_note: 'Connecticut is a premier solar + storage market. Eversource CT TOU paired with ConnectedSolutions battery program ($275/kW-yr) provides excellent ROI. Solar on TOU maximizes self-consumption during 30¢/kWh on-peak hours. Full retail NEM at 30¢ for exports. CT also has RSIP solar rebate. Stack: TOU + ConnectedSolutions + RSIP + 30% ITC = among best economics on East Coast.',
+    last_verified: '2025-05',
+  },
+
+  // ── PECO Energy (Pennsylvania) ────────────────────────────────────────────────
+  {
+    plan_id: 'peco_pa_tou',
+    plan_name: 'Time-of-Use Pricing (PECO)',
+    plan_description: 'PECO (Philadelphia area) and FirstEnergy PA utilities (Met-Ed, Penelec, Penn Lines) offer optional TOU rates. On-peak: 2–8 PM weekdays June–Sept. PA has full retail net metering. PECO territory covers Philadelphia, its suburbs, and most of southeast PA.',
+    utility_ids: ['peco_pa', 'met_ed_pa', 'penelec_pa', 'penn_lines_pa', 'ugi_utilities_pa'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 2–8 PM (Jun–Sep)', summer_rate_per_kwh: 0.22, winter_rate_per_kwh: 0.14, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours and seasons', summer_rate_per_kwh: 0.11, winter_rate_per_kwh: 0.14, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.peco.com/MyAccount/MyBillUsage/Pages/TimeofUse.aspx',
+    solar_pro_note: 'Pennsylvania mandates full retail net metering for systems ≤ 50 kW residential. PECO and FirstEnergy PA offer solid TOU plans where solar production overlaps the 2–8 PM on-peak window. PA SREC market was sunset but Act 40 (2023) created new alternative energy programs. Battery storage adds value for on-peak arbitrage. Pennsylvania is a strong, stable solar market.',
+    last_verified: '2025-05',
+  },
+
+  // ── CMP / Versant (Maine) ─────────────────────────────────────────────────────
+  {
+    plan_id: 'cmp_me_tou',
+    plan_name: 'Time-of-Use Rate (CMP / Versant Maine)',
+    plan_description: 'Central Maine Power (CMP) and Versant Power residential TOU. On-peak: 9 AM–9 PM weekdays. Maine has strong solar economics with retail-rate net metering. Maine also has community solar programs through Competitive Electricity Providers.',
+    utility_ids: ['cmp_me', 'van_buren_light_power_district_me'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: false,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 9 AM–9 PM', summer_rate_per_kwh: 0.20, winter_rate_per_kwh: 0.22, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and 9 PM–9 AM', summer_rate_per_kwh: 0.11, winter_rate_per_kwh: 0.12, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.cmpco.com/account/billing-rates',
+    solar_pro_note: 'Maine offers full retail NEM through annual net metering. CMP territory has good solar exposure despite northern latitude. Maine Solar Incentive Program provides additional rebates. Battery storage beneficial but not required for positive ROI. CMP TOU aligns well with solar production during 9 AM–5 PM midday off-peak — good self-consumption value.',
+    last_verified: '2025-05',
+  },
+
+  // ── Eversource (Massachusetts) ────────────────────────────────────────────────
+  {
+    plan_id: 'eversource_ma_tou',
+    plan_name: 'Time-of-Use / Real-Time Pricing (Eversource MA)',
+    plan_description: 'Eversource Massachusetts residential TOU. On-peak: 9 AM–9 PM weekdays. Massachusetts SMART program pays per-kWh production for 10 years. ConnectedSolutions battery DR pays up to $275/kW-yr. National Grid MA has similar structure.',
+    utility_ids: ['eversource_ma', 'national_grid_ma', 'natgrid_ma', 'cape_light_compact_ma', 'concord_municipal_light_plant_ma', 'belmont_municipal_light_ma', 'braintree_electric_light_ma', 'danvers_electric_ma'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 9 AM–9 PM', summer_rate_per_kwh: 0.32, winter_rate_per_kwh: 0.28, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and 9 PM–9 AM', summer_rate_per_kwh: 0.14, winter_rate_per_kwh: 0.13, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.eversource.com/content/ma-c/residential/my-account/billing-payments/about-your-bill/rate-plans',
+    solar_pro_note: 'Massachusetts is one of the best solar + storage markets in the US. Stack: Eversource TOU (32¢ on-peak) + SMART program (~10¢/kWh production payments for 10 years) + ConnectedSolutions battery DR ($275/kW-yr) + 30% federal ITC + MA state tax credit (15%, up to $1,000). Combined, payback can be under 6 years. Always include SMART and ConnectedSolutions in MA proposals.',
+    last_verified: '2025-05',
+  },
+
+  // ── NV Energy (Nevada) ────────────────────────────────────────────────────────
+  {
+    plan_id: 'nv_energy_tou',
+    plan_name: 'Time-of-Use Rate (NV Energy)',
+    plan_description: 'NV Energy (Nevada Power / Sierra Pacific) residential TOU. On-peak: 3–8 PM daily May–Oct. Nevada has net metering at near-retail rate (NEM 2.0 for most customers). Battery storage captures midday solar surplus for 3–8 PM discharge.',
+    utility_ids: ['nv_energy', 'ely_lp_nv', 'lincoln_county_power_district_nv', 'mt_wheeler_power_nv', 'overton_power_district_nv'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Daily 3–8 PM (May–Oct)', summer_rate_per_kwh: 0.25, winter_rate_per_kwh: 0.12, applies_weekends: true, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours and Nov–Apr', summer_rate_per_kwh: 0.11, winter_rate_per_kwh: 0.12, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.nvenergy.com/account-services/billing-options/time-of-use',
+    solar_pro_note: 'Nevada has excellent solar resource (best in continental US) and NV Energy TOU aligns well with battery dispatch. On-peak window (3–8 PM) starts just as solar production declines — battery charged from midday solar discharges during on-peak at 25¢/kWh. NV Energy NEM 2.0 provides near-retail export credits. Nevada also has sales tax exemption on solar equipment. Strong market.',
+    last_verified: '2025-05',
+  },
+
+  // ── Idaho Power ────────────────────────────────────────────────────────────────
+  {
+    plan_id: 'idaho_power_tou',
+    plan_name: 'Time-of-Use Rate (Idaho Power)',
+    plan_description: 'Idaho Power residential TOU. On-peak: 3–9 PM weekdays June–Sept. Idaho Power rates are among the lowest in the US (~10–13¢/kWh average). Idaho Power offers full retail net metering under IPUC rules. Clean Energy Discount available for solar customers.',
+    utility_ids: ['idaho_power', 'idaho_county_lp_id', 'clearwater_power_id'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: false,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 3–9 PM (Jun–Sep)', summer_rate_per_kwh: 0.16, winter_rate_per_kwh: 0.09, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.09, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.idahopower.com/energy-environment/energy-efficiency/home-products-programs/time-of-use/',
+    solar_pro_note: 'Idaho Power has the lowest rates in the Pacific Northwest (~9–10¢ off-peak). Full retail NEM makes Idaho a good solar market despite low rates. TOU on-peak spread (16¢ vs 9¢ = 78% premium) is good for battery arbitrage. Idaho Power Clean Energy Discount provides modest bill credit for solar. Good market for solar-only proposals; battery adds value but ROI is longer than higher-rate states.',
+    last_verified: '2025-05',
+  },
+
+  // ── DTE Energy (Michigan) ─────────────────────────────────────────────────────
+  {
+    plan_id: 'dte_mi_tou',
+    plan_name: 'Time-of-Use Rate (DTE Energy Michigan)',
+    plan_description: 'DTE Energy Michigan residential TOU. On-peak: 11 AM–7 PM weekdays June–Sept; 11 AM–7 PM Oct–May. Michigan has full retail net metering. DTE EV-TOU and EV Demand Rate also available for battery + EV customers.',
+    utility_ids: ['dte_mi', 'great_lakes_energy_mi', 'holland_bpw_mi', 'lansing_board_of_wl_mi', 'traverse_city_lp_mi'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 11 AM–7 PM year-round', summer_rate_per_kwh: 0.20, winter_rate_per_kwh: 0.18, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and 7 PM–11 AM', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.09, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.dteenergy.com/us/en/residential/billing-and-payments/rate-plans/time-of-use.html',
+    solar_pro_note: 'DTE Michigan TOU on-peak (11 AM–7 PM) aligns perfectly with solar production hours — highest solar output occurs during peak period. Self-consumption value is maximized. Full retail NEM means exports during on-peak earn 20¢/kWh. DTE also offers connected battery programs for load management. Michigan is a solid solar market with retail NEM protection.',
+    last_verified: '2025-05',
+  },
+
+  // ── Consumers Energy (Michigan) ───────────────────────────────────────────────
+  {
+    plan_id: 'consumers_mi_tou',
+    plan_name: 'Time-of-Use Rate (Consumers Energy Michigan)',
+    plan_description: 'Consumers Energy Michigan residential TOU. On-peak: 9 AM–10 PM weekdays (summer), 7 AM–11 PM weekdays (winter). Michigan full retail NEM. Consumers Energy Shift & Save program with demand response options.',
+    utility_ids: ['consumers_mi'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 9 AM–10 PM (Jun–Sep), 7 AM–11 PM (Oct–May)', summer_rate_per_kwh: 0.16, winter_rate_per_kwh: 0.18, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and all overnight hours', summer_rate_per_kwh: 0.08, winter_rate_per_kwh: 0.08, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.consumersenergy.com/residential/rates-and-programs/electric-rate-options/time-of-use',
+    solar_pro_note: 'Consumers Energy MI has the widest TOU window in Michigan (9 AM–10 PM) which strongly overlaps solar production. Self-consumption value is high. Battery adds evening coverage after solar drops. Michigan solar market is solid with retail NEM. Consumers Energy also has a Shift & Save demand response program for battery owners.',
+    last_verified: '2025-05',
+  },
+
+  // ── Minnesota Power / Otter Tail (Minnesota) ──────────────────────────────────
+  {
+    plan_id: 'mn_power_tou',
+    plan_name: 'Time-of-Use Rate (Minnesota Power / Otter Tail)',
+    plan_description: 'Minnesota Power and Otter Tail Power residential TOU. On-peak: 9 AM–9 PM weekdays. Minnesota has strong solar NEM policy (up to 120% annual netting). Xcel Energy MN also has Solar*Rewards program for production incentives.',
+    utility_ids: ['minnesota_power_mn', 'otter_tail_power_mn', 'great_plains_energy_mn', 'east_central_energy_mn', 'connexus_energy_mn', 'dakota_electric_association_mn'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: false,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 9 AM–9 PM', summer_rate_per_kwh: 0.17, winter_rate_per_kwh: 0.16, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and 9 PM–9 AM', summer_rate_per_kwh: 0.08, winter_rate_per_kwh: 0.08, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.mnpower.com/CustomerService/RatesSolarEnergy',
+    solar_pro_note: 'Minnesota has one of the nation\'s best NEM policies — up to 120% of annual consumption can be netted at retail rate, with any surplus rolled over or credited. Xcel Energy MN Solar*Rewards pays additional production incentive. Minnesota cold climate means lower annual production but strong retail rates make the economics work. Battery storage adds value for TOU arbitrage but ROI is positive without it in most cases.',
+    last_verified: '2025-05',
+  },
+
+  // ── Delmarva Power (Delaware) ─────────────────────────────────────────────────
+  {
+    plan_id: 'delmarva_de_tou',
+    plan_name: 'Time-of-Use Rate (Delmarva Power / PEPCO Holdings)',
+    plan_description: 'Delmarva Power (Delaware/Maryland Eastern Shore) residential TOU. On-peak: 2–7 PM weekdays June–Sept. Delaware and Maryland have strong NEM policies. PEPCO Holdings territory including Delmarva.',
+    utility_ids: ['delmarva_de', 'city_of_dover_electric_de', 'lewes_bpw_de', 'milford_electric_de', 'newark_electric_de', 'seaford_electric_de'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 2–7 PM (Jun–Sep)', summer_rate_per_kwh: 0.21, winter_rate_per_kwh: 0.13, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.10, winter_rate_per_kwh: 0.13, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.delmarva.com/my-account/billing-and-payments/rate-options',
+    solar_pro_note: 'Delaware has full retail NEM and favorable solar policy. Delmarva Power TOU on-peak (2–7 PM summer) aligns well with late-afternoon solar and battery dispatch. Delaware solar market benefits from: retail NEM, modest state solar incentive, and strong federal ITC. Battery adds value for peak coverage. Good straightforward market.',
+    last_verified: '2025-05',
+  },
+
+  // ── Atlantic City Electric / JCP&L (New Jersey) ───────────────────────────────
+  {
+    plan_id: 'ace_nj_tou',
+    plan_name: 'Time-of-Use Rate (Atlantic City Electric / JCP&L / Rockland)',
+    plan_description: 'Atlantic City Electric, JCP&L (FirstEnergy NJ), and Rockland Electric residential TOU. On-peak: 2–7 PM weekdays June–Sept. NJ TREC and SuSI solar incentives available. Full retail NEM.',
+    utility_ids: ['atlantic_city_nj', 'south_jersey_industries_nj', 'orange_rockland_utilities_nj', 'rockland_electric_nj'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 2–7 PM (Jun–Sep)', summer_rate_per_kwh: 0.22, winter_rate_per_kwh: 0.14, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.10, winter_rate_per_kwh: 0.14, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.atlanticcityelectric.com/my-account/billing-and-payments/rate-options',
+    solar_pro_note: 'New Jersey is an excellent solar market for non-PSEG utilities as well. Atlantic City Electric and JCP&L territory qualifies for NJ SuSI (Successor Solar Incentive), TREC payments (~$90-152/MWh), full retail NEM, and 30% federal ITC. Battery pairs with PSEG ConnectedSolutions-equivalent programs. Total incentive stack makes NJ one of the best East Coast solar markets.',
+    last_verified: '2025-05',
+  },
+
+  // ── Georgia Power EMC Cooperatives ────────────────────────────────────────────
+  {
+    plan_id: 'georgia_emc_tou',
+    plan_name: 'Time-of-Use Rate (Georgia EMC Cooperatives)',
+    plan_description: 'Georgia electric cooperatives (Cobb EMC, Carroll EMC, Greystone Power, Coweta-Fayette EMC, Flint Energies, Satilla REMC, Diverse Power) offer TOU rates. On-peak: weekdays 2–7 PM June–Sept. Georgia NEM capped — confirm interconnection availability. Battery recommended.',
+    utility_ids: ['cobb_emc_ga', 'carroll_emc_ga', 'greystone_power_ga', 'coweta_fayette_emc_ga', 'flint_energies_ga', 'satilla_remc_ga', 'diverse_power_ga', 'georgia_power'],
+    type: 'tou_rate',
+    solar_friendly: false,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 2–7 PM (Jun–Sep)', summer_rate_per_kwh: 0.19, winter_rate_per_kwh: 0.13, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.13, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.cobbemc.com/residential/rates-programs/solar-energy',
+    solar_pro_note: 'Georgia cooperative territory NEM is capped — confirm interconnection capacity before quoting. Battery storage is valuable here: 2–7 PM on-peak dispatch at 19¢/kWh avoids peak charges. Georgia Power also has Advanced Solar Initiative (ASI) for systems over 10 kW. Flint Energies and Diverse Power have unique solar programs — verify individually. Georgia has good solar resource and moderate rates.',
+    last_verified: '2025-05',
+  },
+
+  // ── Rocky Mountain Power / PacifiCorp (Utah / Wyoming) ────────────────────────
+  {
+    plan_id: 'rocky_mountain_power_tou',
+    plan_name: 'Time-of-Use Rate (Rocky Mountain Power / PacifiCorp)',
+    plan_description: 'Rocky Mountain Power (Utah, Wyoming, Idaho portions) residential TOU. On-peak: 3–7 PM weekdays June–Sept. Utah and Wyoming net metering at retail rate. RMP Wattsmart Battery incentive available in Utah.',
+    utility_ids: ['pacificorp_wy', 'carbon_power_light_ut', 'dixie_power_ut', 'flowell_electric_association_ut', 'moon_lake_electric_association_ut', 'bridgerland_electric_ut'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 3–7 PM (Jun–Sep)', summer_rate_per_kwh: 0.20, winter_rate_per_kwh: 0.11, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.11, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.rockymountainpower.net/content/dam/pcorp/documents/en/rockymountainpower/rates-regulation/utah/tariffs/Residential_Time_of_Use.pdf',
+    solar_pro_note: 'Rocky Mountain Power Wattsmart Battery program (up to $1,500 incentive for qualifying battery installs) makes Utah a strong battery market. TOU 3–7 PM on-peak aligns with battery discharge opportunity. Utah has retail NEM under Utah PSC rules. Solar resource in southern Utah/St. George area is among the best in the US. Combine with Wattsmart for strong proposals.',
+    last_verified: '2025-05',
+  },
+
+  // ── Empire District Electric / Evergy (Missouri / Kansas) ─────────────────────
+  {
+    plan_id: 'empire_district_tou',
+    plan_name: 'Time-of-Use Rate (Empire District / Evergy MO-KS)',
+    plan_description: 'Empire District Electric and Evergy (Missouri and Kansas) residential TOU. On-peak: 2–7 PM weekdays June–Sept. Missouri and Kansas net metering at retail rate for systems ≤ 100 kW residential.',
+    utility_ids: ['empire_district_electric_mo', 'sunflower_electric_power_corp_ks', 'midwest_energy_ks', 'cherryvale_utilities_ks'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 2–7 PM (Jun–Sep)', summer_rate_per_kwh: 0.18, winter_rate_per_kwh: 0.12, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.12, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.empiredistrict.com/residential/rates',
+    solar_pro_note: 'Missouri and Kansas are good solar markets with retail NEM. Empire District Electric and Evergy TOU plans allow battery arbitrage during 2–7 PM on-peak window. Xcel Energy Colorado (which has MO/KS presence) Solar*Rewards program may also be applicable in border areas. Straightforward solar market — no major policy risks.',
+    last_verified: '2025-05',
+  },
+
+  // ── Duke Energy North Carolina ────────────────────────────────────────────────
+  {
+    plan_id: 'duke_nc_tou_full',
+    plan_name: 'Time-of-Use (TOU-H) Rate — Duke NC / Progress Energy Carolinas',
+    plan_description: 'Duke Energy Carolinas and Progress Energy Carolinas (NC/SC) residential TOU-H rate. On-peak: 1–9 PM weekdays June–Sept; 6–9 AM and 5–9 PM Oct–May. Duke NC has retail NEM for systems ≤ 1 MW. PowerPair battery program available.',
+    utility_ids: ['duke_nc', 'yadkin_valley_telephone_membership_corp_nc'],
+    type: 'tou_rate',
+    solar_friendly: false,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 1–9 PM (Jun–Sep); AM/PM peaks other months', summer_rate_per_kwh: 0.24, winter_rate_per_kwh: 0.19, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours and weekends', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.10, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.duke-energy.com/home/products/time-of-use',
+    solar_pro_note: 'Duke NC TOU-H has wide summer on-peak window (1–9 PM). Solar production peaks before 1 PM on-peak window — battery storage is critical to capture excess midday solar and discharge during 1–9 PM at 24¢/kWh. Duke PowerPair battery incentive (up to $9,000) is one of the best battery rebates in the Southeast. Always pair battery with solar in Duke NC territory for maximum ROI.',
+    last_verified: '2025-05',
+  },
+
+  // ── Salem Electric / Columbia River PUD (Oregon) ──────────────────────────────
+  {
+    plan_id: 'oregon_pud_tou',
+    plan_name: 'Time-of-Use Rate (Oregon PUDs / Salem Electric / Columbia River)',
+    plan_description: 'Oregon public utility districts and cooperatives (Salem Electric, Consumers Power OR, Clatskanie PUD, Clearwater Power OR) offer TOU rates. On-peak: 6–10 AM and 5–9 PM weekdays. Oregon has excellent solar NEM policy and Energy Trust solar rebates.',
+    utility_ids: ['salem_electric_or', 'consumers_power_or', 'clearwater_power_or', 'clatskanie_pud_or'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: false,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 6–10 AM and 5–9 PM', summer_rate_per_kwh: 0.16, winter_rate_per_kwh: 0.18, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours and weekends', summer_rate_per_kwh: 0.08, winter_rate_per_kwh: 0.08, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.salemoregonelectric.com/rates',
+    solar_pro_note: 'Oregon has strong solar policy including full retail NEM and Energy Trust of Oregon solar rebates (~$0.20–0.35/W). Oregon PUD TOU morning/evening peaks (not midday) mean solar + battery is ideal — battery charges from midday solar, covers evening 5–9 PM on-peak at 16¢/kWh. Oregon Energy Trust incentives significantly improve payback — always include in Oregon proposals.',
+    last_verified: '2025-05',
+  },
+
+  // ── Inland Power & Light / Peninsula Light (Washington) ───────────────────────
+  {
+    plan_id: 'wa_small_iou_tou',
+    plan_name: 'Time-of-Use Rate (WA Small IOUs / Co-ops)',
+    plan_description: 'Washington state small IOUs and co-ops (Inland Power & Light, Peninsula Light, Benton PUD, Chelan PUD, Clallam PUD, Columbia REA) offer TOU rates. On-peak: 6 AM–10 PM weekdays. Washington net metering at retail rate. PSE FlexPower also available.',
+    utility_ids: ['inland_power_light_wa', 'peninsula_light_company_wa', 'benton_pud_wa', 'chelan_county_pud_wa', 'clallam_county_pud_wa', 'columbia_rea_wa'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: false,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 6 AM–10 PM', summer_rate_per_kwh: 0.13, winter_rate_per_kwh: 0.15, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and 10 PM–6 AM', summer_rate_per_kwh: 0.06, winter_rate_per_kwh: 0.06, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.inlandpowerlight.com/rates',
+    solar_pro_note: 'Washington state has the lowest residential electricity rates in the continental US (~7–10¢/kWh average) due to abundant hydropower. Solar ROI is longer than high-rate states but retail NEM (Washington has strong NEM law), WA sales tax exemption on solar equipment, and federal ITC make it viable. Battery adds limited arbitrage value at these low rates — lead with solar-only proposals and offer battery as upgrade.',
+    last_verified: '2025-05',
+  },
+
+  // ── Vermont Green Mountain Power / Burlington Electric ────────────────────────
+  {
+    plan_id: 'vermont_tou',
+    plan_name: 'Time-of-Use Rate (Vermont GMP / Burlington Electric)',
+    plan_description: 'Vermont Green Mountain Power (GMP) and Burlington Electric Department TOU. On-peak: 4–9 PM weekdays. Vermont has strong NEM policy (net metering at retail rate). GMP BYOD battery program pays $10.44/month for battery dispatch participation.',
+    utility_ids: ['green_mountain_vt', 'burlington_electric_vt', 'village_of_hyde_park_electric_vt', 'village_of_johnson_electric_vt', 'village_of_ludlow_electric_vt', 'village_of_morrisville_wl_vt'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 4–9 PM', summer_rate_per_kwh: 0.24, winter_rate_per_kwh: 0.22, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'Weekends and 9 PM–4 PM', summer_rate_per_kwh: 0.12, winter_rate_per_kwh: 0.12, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://greenmountainpower.com/rates/',
+    solar_pro_note: 'Vermont GMP BYOD (Bring Your Own Device) battery program pays $10.44/month ($125/year) for allowing utility dispatch of home battery. Combined with TOU on-peak arbitrage (24¢/kWh) and Vermont retail NEM, battery ROI is strong in Vermont. Vermont also has REF (Renewable Energy Fund) small grants for solar. Cold climate but excellent solar + battery economics. GMP is a progressive utility — strong customer service for solar installs.',
+    last_verified: '2025-05',
+  },
+
+  // ── Mon Power / Appalachian Power (West Virginia) ─────────────────────────────
+  {
+    plan_id: 'wv_iou_tou',
+    plan_name: 'Time-of-Use Rate (Mon Power / Appalachian Power WV)',
+    plan_description: 'Mon Power (FirstEnergy WV) and Appalachian Power (AEP WV) residential TOU. On-peak: 10 AM–9 PM weekdays June–Sept. West Virginia has limited solar policy — net metering at retail rate for systems ≤ 25 kW. Battery recommended to maximize self-consumption.',
+    utility_ids: ['mon_power_wv', 'monongalia_power_wv'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 10 AM–9 PM (Jun–Sep)', summer_rate_per_kwh: 0.17, winter_rate_per_kwh: 0.13, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.13, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.monpower.com/residential/account/billing-payment/rates',
+    solar_pro_note: 'West Virginia is an emerging solar market. Mon Power and Appalachian Power TOU plans allow daytime solar self-consumption during 17¢/kWh on-peak hours. West Virginia retail NEM (≤ 25 kW) provides fair export value. Limited state incentives beyond federal ITC. Straightforward sales pitch — focus on utility bill reduction and federal ITC.',
+    last_verified: '2025-05',
+  },
+
+  // ── Kentucky Utilities / LG&E (Kentucky) ──────────────────────────────────────
+  {
+    plan_id: 'kentucky_iou_tou',
+    plan_name: 'Time-of-Use Rate (Kentucky Utilities / LG&E / Duke KY)',
+    plan_description: 'Kentucky Utilities (KU), Louisville Gas & Electric (LGE), and Duke Energy Kentucky residential TOU. On-peak: 1–7 PM weekdays June–Sept. Kentucky net metering at avoided-cost rate (~2–4¢/kWh) — battery critical for Kentucky solar proposals.',
+    utility_ids: ['duke_energy_kentucky_ky', 'blue_grass_energy_ky', 'clark_energy_ky', 'cumberland_valley_electric_ky', 'farmers_recc_ky'],
+    type: 'tou_rate',
+    solar_friendly: false,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 1–7 PM (Jun–Sep)', summer_rate_per_kwh: 0.17, winter_rate_per_kwh: 0.11, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.09, winter_rate_per_kwh: 0.11, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://lge-ku.com/rates-environment/rates/residential',
+    solar_pro_note: 'Kentucky NEM (avoided-cost) pays only ~2–4¢/kWh for exports — among the least favorable in the US. Battery storage is REQUIRED for a competitive Kentucky solar proposal. Battery charges from solar (self-consumption) and discharges during 1–7 PM at 17¢/kWh, replacing grid purchase. Without battery, Kentucky solar ROI is very long. Duke Kentucky PowerPair equivalent programs — check for any current battery incentives.',
+    last_verified: '2025-05',
+  },
+
+  // ── NPPD / LES / OPPD (Nebraska) ──────────────────────────────────────────────
+  {
+    plan_id: 'nebraska_iou_tou',
+    plan_name: 'Time-of-Use Rate (NPPD / LES / OPPD Nebraska)',
+    plan_description: 'Nebraska Public Power District (NPPD), Lincoln Electric System (LES), and Omaha Public Power District (OPPD) offer TOU rates. On-peak: 2–8 PM weekdays June–Aug. Nebraska net metering at retail rate for systems ≤ 25 kW.',
+    utility_ids: ['les_ne', 'nppd_ne', 'oppd_ne', 'panhandle_rural_electric_membership_association_ne'],
+    type: 'tou_rate',
+    solar_friendly: true,
+    battery_optimized: true,
+    nem_compatible: true,
+    requires_drop_nem: false,
+    periods: [
+      { period: 'on_peak', label: 'On-Peak', hours_description: 'Weekdays 2–8 PM (Jun–Aug)', summer_rate_per_kwh: 0.16, winter_rate_per_kwh: 0.09, applies_weekends: false, applies_holidays: false },
+      { period: 'off_peak', label: 'Off-Peak', hours_description: 'All other hours', summer_rate_per_kwh: 0.08, winter_rate_per_kwh: 0.09, applies_weekends: true, applies_holidays: true },
+    ],
+    enrollment_url: 'https://www.les.com/rates-programs/rates',
+    solar_pro_note: 'Nebraska is an underserved solar market with decent economics. NPPD, LES, and OPPD all offer retail NEM (≤ 25 kW) at competitive rates. LES Lincoln has a solar loan program. Battery adds value for summer TOU arbitrage (16¢ on-peak vs 8¢ off-peak = 100% spread). Nebraska wind is better than solar but strong solar resource in panhandle area.',
+    last_verified: '2025-05',
+  },
+
+
 ];
 
 // ─── Battery Incentive Programs Registry ──────────────────────────────────────
@@ -2074,6 +2577,185 @@ export const BATTERY_INCENTIVE_PROGRAMS: BatteryIncentiveProgram[] = [
     solar_pro_note: 'Florida NEM is favorable (full retail, no size cap). Battery DR payments are a bonus — primary value is backup power for hurricane season. Recommend battery for resilience + demand response income.',
     last_verified: '2025-05',
   },
+// Inject before closing ]; of BATTERY_INCENTIVE_PROGRAMS array
+
+  // ── Rocky Mountain Power Wattsmart Battery (Utah) ─────────────────────────────
+  {
+    program_id: 'rmp_wattsmart_battery_ut',
+    program_name: 'Rocky Mountain Power Wattsmart Battery',
+    utility_ids: ['pacificorp_wy', 'carbon_power_light_ut', 'dixie_power_ut', 'flowell_electric_association_ut'],
+    type: 'battery_incentive',
+    status: 'active',
+    value_description: 'Up to $1,500 rebate for qualifying battery installations',
+    value_flat: 1500,
+    max_value: 1500,
+    min_battery_kwh: 7,
+    utility_dispatch: false,
+    program_description: 'Rocky Mountain Power Wattsmart Battery program offers rebates for qualifying residential battery storage systems. Battery must be paired with solar or standalone. Utah homeowners can combine with 30% federal ITC on battery cost.',
+    enrollment_url: 'https://www.rockymountainpower.net/energy-environment/clean-energy/battery-storage.html',
+    solar_pro_note: 'RMP Wattsmart $1,500 rebate stacks with 30% federal ITC on battery. For a 13.5 kWh Tesla Powerwall (~$12,000 installed), net cost after ITC ($3,600) and rebate ($1,500) = ~$6,900. Battery also adds resilience value for Utah customers in wildfire-prone areas. Always include in Utah solar proposals.',
+    last_verified: '2025-05',
+  },
+
+  // ── Hawaiian Electric Battery Bonus (Hawaii) ──────────────────────────────────
+  {
+    program_id: 'heco_battery_bonus_hi',
+    program_name: 'Hawaiian Electric Smart Export / Battery Bonus Program',
+    utility_ids: ['hawaiian_electric'],
+    type: 'demand_response',
+    status: 'active',
+    value_description: '$850–$1,950 annual payment for battery dispatch participation (3–15 kWh systems)',
+    value_annual_per_kw: 130,
+    max_value: 1950,
+    min_battery_kwh: 3,
+    utility_dispatch: true,
+    max_dispatch_events_per_year: 60,
+    max_dispatch_hours_per_event: 2,
+    program_description: 'Hawaiian Electric Smart Export program pays battery owners for grid dispatch during peak demand events. Given Hawaii\'s extreme electricity rates and isolated grid, battery storage is both financially essential and grid-critical. Hawaii also has customer self-supply options that eliminate export entirely.',
+    enrollment_url: 'https://www.hawaiianelectric.com/products-and-services/customer-renewable-programs/battery-storage',
+    solar_pro_note: 'Hawaii solar + battery is almost mandatory under current HECO tariffs. Hawaiian Electric Smart Export adds $850–$1,950/year income on top of the already-excellent self-consumption savings (38–50¢/kWh avoided). For a customer with $400/month electric bill, solar + battery can realistically eliminate or near-eliminate the bill. Hawaii proposals should always be solar + battery.',
+    last_verified: '2025-05',
+  },
+
+  // ── Green Mountain Power BYOD (Vermont) ───────────────────────────────────────
+  {
+    program_id: 'gmp_byod_vt_v2',
+    program_name: 'Green Mountain Power BYOD Battery Program (Enhanced)',
+    utility_ids: ['green_mountain_vt', 'burlington_electric_vt'],
+    type: 'demand_response',
+    status: 'active',
+    value_description: '$10.44/month ($125/yr) ongoing payment for dispatch participation',
+    value_annual_per_kw: 9,
+    max_value: 125,
+    min_battery_kwh: 7,
+    utility_dispatch: true,
+    max_dispatch_events_per_year: 30,
+    max_dispatch_hours_per_event: 4,
+    program_description: 'Vermont Green Mountain Power BYOD (Bring Your Own Device) battery program pays qualifying battery owners $10.44/month in perpetuity for allowing utility dispatch during grid stress events. Battery must be customer-owned (not leased from GMP). GMP also rents Powerwalls at $55/month if customer prefers not to buy.',
+    enrollment_url: 'https://greenmountainpower.com/innovation/battery-program/',
+    solar_pro_note: 'GMP BYOD pays $125/year ongoing — not a one-time rebate. Over 10 years that\'s $1,250 in passive income from battery participation. Combined with Vermont retail NEM, TOU savings, and 30% ITC, Vermont battery + solar provides strong returns despite cold climate. GMP is the most progressive utility in New England for battery programs. Lead with BYOD in Vermont proposals.',
+    last_verified: '2025-05',
+  },
+
+  // ── Eversource ConnectedSolutions CT (expanded) ───────────────────────────────
+  {
+    program_id: 'eversource_cs_ct',
+    program_name: 'Eversource ConnectedSolutions CT (Battery Demand Response)',
+    utility_ids: ['eversource_ct', 'eversource_cl_ct', 'bozrah_lp_ct', 'south_norwalk_electric_works_ct'],
+    type: 'demand_response',
+    status: 'active',
+    value_description: 'Up to $275/kW-year demand response payment (summer season)',
+    value_annual_per_kw: 275,
+    max_value: 3700,
+    min_battery_kwh: 7,
+    utility_dispatch: true,
+    max_dispatch_events_per_year: 60,
+    max_dispatch_hours_per_event: 2,
+    program_description: 'Eversource Connecticut ConnectedSolutions battery demand response program. Utility dispatches customer batteries during ISO-NE grid stress events (typically 100–120 hours/summer). Payment is $275/kW-year of battery rated power. A 13.5 kWh/5 kW Powerwall earns ~$1,375/year. Program runs June–September peak season.',
+    enrollment_url: 'https://www.eversource.com/content/ct-c/residential/save-money-energy/connected-solutions',
+    solar_pro_note: 'Eversource CT ConnectedSolutions is one of the highest-paying battery DR programs in the US ($275/kW-yr). A Tesla Powerwall 3 (11.5 kW) earns $3,162/year just from ConnectedSolutions payments. Combined with: CT TOU savings (30¢/kWh on-peak), RSIP solar rebate, retail NEM, and 30% ITC, Connecticut solar + battery ROI can be under 5 years. ConnectedSolutions is a must-include in every CT battery proposal.',
+    last_verified: '2025-05',
+  },
+
+  // ── Minnesota Solar*Rewards Battery Incentive ────────────────────────────────
+  {
+    program_id: 'xcel_mn_battery_rewards',
+    program_name: 'Xcel Energy Minnesota Battery Rewards Program',
+    utility_ids: ['minnesota_power_mn', 'otter_tail_power_mn'],
+    type: 'demand_response',
+    status: 'pilot',
+    value_description: 'Pilot: $200–$350/year for qualifying battery dispatch participation',
+    value_annual_per_kw: 50,
+    max_value: 350,
+    min_battery_kwh: 7,
+    utility_dispatch: true,
+    max_dispatch_events_per_year: 20,
+    max_dispatch_hours_per_event: 3,
+    program_description: 'Minnesota Power and Otter Tail Power are piloting residential battery demand response programs to complement the existing Minnesota Solar*Rewards solar production incentive. Battery owners in pilot territory can earn dispatch payments during winter and summer peak events.',
+    enrollment_url: 'https://www.mnpower.com/CustomerService/RatesSolarEnergy',
+    solar_pro_note: 'Minnesota Solar*Rewards pays solar production incentives per kWh for the first 10 years. Battery pilot adds DR income. Minnesota has one of the nation\'s strongest NEM laws. For proposals in Minnesota Power or Otter Tail territory, stack Solar*Rewards + NEM + battery pilot + 30% ITC. Confirm pilot availability with utility — program may have limited enrollment.',
+    last_verified: '2025-05',
+  },
+
+  // ── TVA EnergyRight Battery Incentive (expanded) ─────────────────────────────
+  {
+    program_id: 'tva_energyright_battery_expanded',
+    program_name: 'TVA EnergyRight Storage Program (Expanded)',
+    utility_ids: ['tva_al', 'nashville_electric_service_tn', 'memphis_light_gas_water_tn', 'knoxville_utilities_board_tn', 'bristol_tennessee_essential_services_tn', 'fayetteville_public_utilities_tn'],
+    type: 'battery_incentive',
+    status: 'active',
+    value_description: 'Up to $1,000 upfront rebate + $10/month ongoing bill credit per qualifying battery',
+    value_flat: 1000,
+    max_value: 2200,
+    min_battery_kwh: 5,
+    utility_dispatch: true,
+    max_dispatch_events_per_year: 20,
+    max_dispatch_hours_per_event: 2,
+    program_description: 'TVA EnergyRight battery storage program offers local power company rebates for qualifying battery installations. Battery must participate in grid dispatch. Programs vary by local distribution utility — Nashville ES, Memphis LGW, and KUB each administer their own version. Combined TVA wholesale backing makes this program stable long-term.',
+    enrollment_url: 'https://www.tva.com/energy/our-power-system/grid-innovation/battery-storage',
+    solar_pro_note: 'TVA territory (TN, AL, MS, GA, KY, NC, VA portions) has avoided-cost NEM (~2–4¢/kWh for exports). Battery storage is ESSENTIAL for TVA territory solar — self-consumption saves 8–17¢/kWh while exports earn only 2–4¢/kWh. TVA EnergyRight rebate ($1,000 upfront + $10/month) helps justify battery cost. Always pair battery with solar in TVA territory. Without battery, Tennessee/Alabama solar ROI is very poor.',
+    last_verified: '2025-05',
+  },
+
+  // ── Alabama Power Battery Incentive ──────────────────────────────────────────
+  {
+    program_id: 'alabama_power_battery',
+    program_name: 'Alabama Power Rate Saver / Energy Storage',
+    utility_ids: ['alabama_power'],
+    type: 'demand_response',
+    status: 'limited',
+    value_description: 'Up to $500/year bill credit for battery demand response participation',
+    value_annual_per_kw: 50,
+    max_value: 500,
+    min_battery_kwh: 5,
+    utility_dispatch: true,
+    max_dispatch_events_per_year: 15,
+    max_dispatch_hours_per_event: 2,
+    program_description: 'Alabama Power Rate Saver program for residential battery and HVAC demand response. Battery owners may qualify for bill credits in exchange for utility dispatch during summer peak demand events. Alabama Power NEM pays avoided-cost rates (~3¢/kWh), making self-consumption the primary solar value driver.',
+    enrollment_url: 'https://www.alabamapower.com/account/ways-to-save/energy-storage.html',
+    solar_pro_note: 'Alabama Power pays only avoided-cost (~3¢/kWh) for solar exports. Battery storage changes the economics dramatically — self-consumption saves 9–18¢/kWh vs exporting at 3¢. Rate Saver DR credit adds up to $500/year. For Alabama solar proposals, battery is not optional — it is the primary value enabler. Lead with battery + solar as a package. Alabama has good solar resource (400+ sunny days equivalent).',
+    last_verified: '2025-05',
+  },
+
+  // ── DTE Energy Battery Pilot (Michigan) ──────────────────────────────────────
+  {
+    program_id: 'dte_mi_battery_pilot',
+    program_name: 'DTE Energy Connected Home Battery Program',
+    utility_ids: ['dte_mi'],
+    type: 'demand_response',
+    status: 'pilot',
+    value_description: 'Pilot: $30–$60/month bill credit for battery dispatch participation',
+    value_annual_per_kw: 70,
+    max_value: 720,
+    min_battery_kwh: 7,
+    utility_dispatch: true,
+    max_dispatch_events_per_year: 30,
+    max_dispatch_hours_per_event: 2,
+    program_description: 'DTE Energy Michigan Connected Home battery pilot program. Battery owners in selected pilot areas receive bill credits in exchange for allowing DTE to dispatch battery during peak grid periods. Pilot is expanding as DTE adds smart grid infrastructure.',
+    enrollment_url: 'https://www.dteenergy.com/us/en/residential/home-efficiency/connected-home.html',
+    solar_pro_note: 'DTE Michigan TOU (11 AM–7 PM) aligns perfectly with solar production. Battery provides evening coverage after solar drops at 5–7 PM. DTE Connected Home pilot adds $360–$720/year income on top of TOU savings. Michigan retail NEM ensures fair export value. Michigan is an improving solar market — DTE has been expanding solar programs. Good state for solar + battery bundle.',
+    last_verified: '2025-05',
+  },
+
+  // ── Kentucky Battery Incentive (Duke PowerPair KY equivalent) ────────────────
+  {
+    program_id: 'duke_ky_battery',
+    program_name: 'Duke Energy Kentucky Battery Incentive',
+    utility_ids: ['duke_energy_kentucky_ky'],
+    type: 'battery_incentive',
+    status: 'limited',
+    value_description: 'Up to $1,500 rebate for battery storage systems',
+    value_flat: 1500,
+    max_value: 1500,
+    min_battery_kwh: 7,
+    utility_dispatch: false,
+    program_description: 'Duke Energy Kentucky offers battery incentives for residential customers installing qualifying battery storage systems. Kentucky NEM at avoided-cost makes battery essential for solar ROI. Incentive availability varies — confirm current status with Duke Energy Kentucky customer service.',
+    enrollment_url: 'https://www.duke-energy.com/home/products/battery-storage',
+    solar_pro_note: 'Kentucky avoided-cost NEM (~2–4¢/kWh exports) makes battery non-negotiable for solar proposals. Duke Kentucky battery rebate ($1,500) combined with 30% federal ITC significantly reduces battery cost. Total battery incentive on a $10,000 battery system: $3,000 ITC + $1,500 rebate = $4,500 off. Net cost $5,500 for battery that saves hundreds per year at 17¢/kWh peak avoidance. Always include battery in KY proposals.',
+    last_verified: '2025-05',
+  },
+
+
 ];
 
 // ─── Solar Rebate Programs Registry ──────────────────────────────────────────
@@ -2383,6 +3065,128 @@ export const SOLAR_REBATE_PROGRAMS: SolarRebateProgram[] = [
     solar_pro_note: 'Nebraska NEM is generally at retail rate for qualifying systems. Nebraska has strong solar resource (5–5.5 peak sun hrs in western NE). Low base electricity rates (~$0.09–0.10/kWh) still make solar viable with federal ITC.',
     last_verified: '2025-05',
   },
+// Inject before closing ]; of SOLAR_REBATE_PROGRAMS array
+
+  // ── Hawaii GEMS / HEI Solar Rebate ────────────────────────────────────────────
+  {
+    program_id: 'heco_solar_rebate_hi',
+    program_name: 'Hawaii State Solar Tax Credit + HECO Smart Export',
+    utility_ids: ['hawaiian_electric'],
+    type: 'solar_rebate',
+    status: 'active',
+    value_description: '35% Hawaii state tax credit (up to $5,000) + federal 30% ITC',
+    value_per_kw: 350,
+    max_value: 5000,
+    stackable_with_federal_itc: true,
+    enrollment_url: 'https://tax.hawaii.gov/forms/a1_b1_4renewable/',
+    program_description: 'Hawaii offers a 35% state income tax credit on solar installation costs (up to $5,000 per system per year, up to $5,000 total across multiple years). This stacks on top of the 30% federal ITC. Hawaii homeowners can receive up to 65% of system cost covered by tax credits alone.',
+    solar_pro_note: 'Hawaii is the most incentivized solar state in the US for tax credits: 35% state + 30% federal = 65% of system cost covered. For a $20,000 system: $7,000 state credit + $6,000 federal ITC = $13,000 in tax credits. Combined with avoiding 38–50¢/kWh electricity, Hawaii solar + battery payback can be 3–5 years. Always lead with the combined incentive story in Hawaii.',
+    last_verified: '2025-05',
+  },
+
+  // ── Kentucky Solar Rebate ─────────────────────────────────────────────────────
+  {
+    program_id: 'kentucky_solar_rebate',
+    program_name: 'Kentucky Utility Solar Rebate Programs',
+    utility_ids: ['duke_energy_kentucky_ky', 'blue_grass_energy_ky', 'clark_energy_ky'],
+    type: 'solar_rebate',
+    status: 'limited',
+    value_description: '$0.10–$0.25/W rebate for qualifying solar installations (varies by utility)',
+    value_per_kw: 200,
+    max_value: 1500,
+    stackable_with_federal_itc: true,
+    enrollment_url: 'https://lge-ku.com/rates-environment/renewable-energy',
+    program_description: 'Kentucky utilities offer modest solar installation rebates for residential customers. Programs are utility-specific and funding-limited. Duke Energy Kentucky and Blue Grass Energy have offered per-watt rebates. Availability varies — confirm with utility before quoting.',
+    solar_pro_note: 'Kentucky solar rebates are modest and availability limited. The bigger story in Kentucky is the REQUIREMENT for battery storage due to avoided-cost NEM. Focus proposals on: 30% federal ITC + battery rebate ($1,500) + self-consumption savings at 9–17¢/kWh. The anti-export economics make battery the hero of every Kentucky proposal.',
+    last_verified: '2025-05',
+  },
+
+  // ── Michigan Residential Solar Rebate ────────────────────────────────────────
+  {
+    program_id: 'michigan_solar_rebate',
+    program_name: 'Michigan MPSC Solar Rebate / DTE / Consumers Energy',
+    utility_ids: ['dte_mi', 'consumers_mi', 'great_lakes_energy_mi', 'holland_bpw_mi'],
+    type: 'solar_rebate',
+    status: 'active',
+    value_description: '$200–$500 one-time installation rebate (utility-specific)',
+    value_flat: 350,
+    max_value: 500,
+    stackable_with_federal_itc: true,
+    enrollment_url: 'https://www.dteenergy.com/us/en/residential/home-efficiency/renewable-energy/solar.html',
+    program_description: 'Michigan utilities offer modest residential solar installation rebates under MPSC-approved programs. DTE Energy and Consumers Energy have periodic solar rebate openings for residential customers. Michigan retail NEM provides the primary financial value.',
+    solar_pro_note: 'Michigan solar rebates are supplemental — the primary value drivers are retail NEM (20¢/kWh exports) and TOU self-consumption savings. DTE and Consumers TOU plans with wide on-peak windows (11 AM–7 PM, 9 AM–10 PM) are very solar-friendly. Michigan is a solid, stable market. Battery adds evening coverage and DR income potential.',
+    last_verified: '2025-05',
+  },
+
+  // ── Vermont Renewable Energy Fund Solar Grant ─────────────────────────────────
+  {
+    program_id: 'vt_ref_solar',
+    program_name: 'Vermont Clean Energy Development Fund (CEDF) Solar',
+    utility_ids: ['green_mountain_vt', 'burlington_electric_vt', 'village_of_hyde_park_electric_vt', 'village_of_johnson_electric_vt', 'village_of_ludlow_electric_vt', 'village_of_morrisville_wl_vt'],
+    type: 'solar_rebate',
+    status: 'active',
+    value_description: '$0.10–$0.20/W Vermont CEDF grant for small residential solar (varies by income tier)',
+    value_per_kw: 150,
+    max_value: 1500,
+    stackable_with_federal_itc: true,
+    enrollment_url: 'https://publicservice.vermont.gov/content/clean-energy-development-fund',
+    program_description: 'Vermont Clean Energy Development Fund provides grants for residential renewable energy including solar. Income-qualified customers may receive enhanced rebates. Vermont also has annual net metering and the GMP BYOD battery program. Vermont Sustainably Priced Energy Enterprise Development (SPEED) program supports community solar.',
+    solar_pro_note: 'Vermont has multiple solar incentive layers: CEDF grant + Vermont retail NEM + GMP BYOD battery DR ($125/yr) + 30% federal ITC. Vermont also has a $150 state income tax credit for solar. Cold climate but excellent incentive stack. Vermont GMP is one of the nation\'s most progressive utilities for solar and storage — very customer-friendly for installs.',
+    last_verified: '2025-05',
+  },
+
+  // ── Delaware Solar Incentive ──────────────────────────────────────────────────
+  {
+    program_id: 'delaware_solar_rebate',
+    program_name: 'Delaware Green Energy Program Solar Rebate',
+    utility_ids: ['delmarva_de', 'city_of_dover_electric_de', 'lewes_bpw_de', 'milford_electric_de', 'newark_electric_de', 'seaford_electric_de'],
+    type: 'solar_rebate',
+    status: 'active',
+    value_description: '$0.25/W rebate up to $1,000 (Delaware Green Energy Program)',
+    value_per_kw: 250,
+    max_value: 1000,
+    stackable_with_federal_itc: true,
+    enrollment_url: 'https://www.dnrec.delaware.gov/energy/information/home/solar-installation-program',
+    program_description: 'Delaware Green Energy Program provides rebates for residential solar installations. Delaware also has full retail net metering and a SREC-like Renewable Portfolio Standard market. Delaware SREC prices have historically been modest but provide supplemental income.',
+    solar_pro_note: 'Delaware is a solid solar market: Green Energy rebate ($0.25/W, up to $1,000) + retail NEM + 30% federal ITC. Delaware SREC market provides modest additional income. Delmarva territory has good solar resource and uncomplicated interconnection process. Lead with the total incentive stack — Delaware customers respond well to the comprehensive financial picture.',
+    last_verified: '2025-05',
+  },
+
+  // ── Idaho Power / Avista Clean Energy Rebate ─────────────────────────────────
+  {
+    program_id: 'idaho_power_solar_rebate',
+    program_name: 'Idaho Power / Avista Solar Generation Incentive',
+    utility_ids: ['idaho_power', 'idaho_county_lp_id', 'clearwater_power_id', 'surprise_valley_electrification_corp_id'],
+    type: 'solar_rebate',
+    status: 'active',
+    value_description: '$0.20/W rebate up to $500 (Idaho Power residential solar)',
+    value_per_kw: 200,
+    max_value: 500,
+    stackable_with_federal_itc: true,
+    enrollment_url: 'https://www.idahopower.com/energy-environment/energy-efficiency/home-products-programs/solar-panels/',
+    program_description: 'Idaho Power offers a small residential solar generation incentive. Avista Utilities also has solar installation programs in northern Idaho. Idaho has full retail net metering under IPUC rules. Despite low electricity rates, federal ITC + retail NEM make Idaho a viable solar market.',
+    solar_pro_note: 'Idaho Power has the lowest rates in the US (~9–10¢/kWh) which extends payback periods vs high-rate states. However, retail NEM + 30% federal ITC + Idaho rebate + no state income tax complexity creates decent economics for many Idaho homeowners. Focus on energy independence and rate protection narrative vs pure financial ROI. Battery not required for positive ROI but adds resilience in fire-prone rural areas.',
+    last_verified: '2025-05',
+  },
+
+  // ── Alabama Power Solar Rebate / Southern Company ────────────────────────────
+  {
+    program_id: 'alabama_power_solar',
+    program_name: 'Alabama Power Renewable Generation Rate Program',
+    utility_ids: ['alabama_power'],
+    type: 'solar_rebate',
+    status: 'limited',
+    value_description: 'Up to $0.15/W annual production payment (Renewable Generation Rate)',
+    value_per_kwh_production: 0.03,
+    max_value: 750,
+    stackable_with_federal_itc: true,
+    enrollment_url: 'https://www.alabamapower.com/account/ways-to-save/solar-resources.html',
+    program_description: 'Alabama Power Renewable Generation Rate provides above-avoided-cost payments for solar production under certain utility programs. Alabama has minimal state solar incentives beyond the federal ITC. Net metering exports are at avoided-cost (~3¢/kWh). Battery storage is the primary strategy to maximize Alabama solar value.',
+    solar_pro_note: 'Alabama is one of the more challenging solar markets due to avoided-cost NEM (~3¢/kWh). The Renewable Generation Rate program provides modest production payments but the primary financial strategy must be battery self-consumption. Alabama Power territory has excellent solar resource (one of the highest in the Southeast). Present proposals as solar + battery systems with self-consumption as the core value driver.',
+    last_verified: '2025-05',
+  },
+
+
 ];
 
 // ─── Special NEM Programs Registry ───────────────────────────────────────────
