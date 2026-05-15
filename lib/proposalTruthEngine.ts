@@ -1599,17 +1599,20 @@ export function buildUtilityProfile(project: {
   const profileRate = matchedProfile.blended_rate || matchedProfile.utility_rate;
   const strongRate = project.utilityRatePerKwh ?? 0;
 
-  // For a specific match, only trust the override if it's >= 85% of the profile rate.
-  // This catches supply-only OCR extractions that are typically 45–70% of full retail.
-  const strongRateIsCredible = isSpecificMatch
-    ? (strongRate >= profileRate * 0.85)
-    : (strongRate > 0.08);
+  // v48.16: Apply 85% threshold universally — specific match AND state fallback.
+  // Supply-only OCR rates (e.g. $0.107 energy charge only) are typically 45–70% of the
+  // full blended retail rate. They must never override an EIA-verified profile rate.
+  // State fallback IL = $0.1882: 0.107/0.1882 = 56.8% → rejected.
+  // A manually-entered installer rate of $0.15 on an IL project: 0.15/0.1882 = 79.7% → rejected too.
+  // Only rates >= 85% of the reference profile are treated as credible blended retail rates.
+  // Reference: specific match → profile rate; state fallback → state avg rate.
+  const strongRateIsCredible = strongRate >= profileRate * 0.85;
 
   const resolvedRate = (strongRate > 0.08 && strongRateIsCredible)
     ? strongRate
     : isSpecificMatch
       ? profileRate
-      : ( (project.clientUtilityRateFallback ?? 0) > 0.08
+      : ( (project.clientUtilityRateFallback ?? 0) >= profileRate * 0.85
           ? project.clientUtilityRateFallback!
           : profileRate );
 
