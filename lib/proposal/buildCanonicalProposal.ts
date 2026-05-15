@@ -721,8 +721,13 @@ export function buildCanonicalProposal(
 
   // ─── STEP 8b: PAYOFF YEAR ───────────────────────────────────────────────────
   // Canonical payoff year: when cumulative energy value produced >= systemCost.
+  // v48.6: Include Year-1 SREC income in the annual value passed to computePayoffYear.
+  // SREC income (e.g. Illinois Shines ABP) is real contracted revenue from system output.
+  // It was already computed in proj25.yearlyFlow[0].srec_income but was excluded from
+  // payoff math — corrected here. Non-SREC states: srec_income = 0, behavior unchanged.
+  const annualSrecY1 = proj25.yearlyFlow.length > 0 ? (proj25.yearlyFlow[0].srec_income ?? 0) : 0;
   const payoffYear = computePayoffYear(
-    annualEnergyValue,
+    annualEnergyValue + annualSrecY1,
     escalationRate,
     effectiveFinal,
     PANEL_DEGRADATION,

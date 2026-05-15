@@ -2042,7 +2042,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <div className="mt-4 pt-3 border-t border-slate-700/40 flex items-center justify-between gap-4">
                 <div>
                   <div className="text-xs font-semibold text-slate-300">System Payoff</div>
-                  <div className="text-xs text-slate-500 mt-0.5">When cumulative energy value produced ≥ system cost</div>
+                  <div className="text-xs text-slate-500 mt-0.5">{utilityProfile.profile.srec_available ? 'Energy value + state incentives ≥ system cost' : 'When cumulative energy value produced ≥ system cost'}</div>
                 </div>
                 <div className="text-base font-black text-blue-400">Year {payoffYear}</div>
               </div>
