@@ -4,6 +4,7 @@ import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
 import { UserProvider } from '@/contexts/UserContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 import SolarDogWithTour from '@/components/support/SolarDogWithTour';
 import { Suspense } from 'react';
 import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
@@ -68,6 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <StoreProvider>
             {/* UserProvider wraps entire app — single source of truth for user state */}
             <UserProvider>
+              <ThemeProvider>
               {/* Impersonation banner — only visible when admin is impersonating a user */}
               <Suspense fallback={null}>
                 <ImpersonationBanner />
@@ -88,6 +90,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               }}>
                 {BUILD_VERSION}
               </div>
+              </ThemeProvider>
             </UserProvider>
           </StoreProvider>
         </ToastProvider>

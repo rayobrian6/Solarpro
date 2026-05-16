@@ -11,8 +11,9 @@ import {
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import OrganizationPanel from '@/components/settings/OrganizationPanel';
+import { useTheme, THEME_CONFIG, type Theme } from '@/contexts/ThemeContext';
 
-type Tab = 'profile' | 'branding' | 'subscription' | 'organization';
+type Tab = 'profile' | 'branding' | 'subscription' | 'organization' | 'notifications';
 
 interface BrandingSettings {
   companyName: string;
@@ -65,6 +66,7 @@ export default function SettingsPage() {
 
   // ✅ v40.8: Read from global UserContext — no independent /api/auth/me fetch
   const { user, loading: userLoading } = useUser();
+  const { theme, setTheme } = useTheme();
 
   // Derived values from UserContext — always in sync with DB
   const currentPlan = user?.plan || 'starter';
@@ -235,10 +237,11 @@ export default function SettingsPage() {
   const planInfo = PLAN_LABELS[currentPlan] || PLAN_LABELS['professional'];
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'profile',      label: 'Profile',      icon: <User size={16} /> },
-    { id: 'branding',     label: 'Branding',     icon: <Palette size={16} /> },
-    { id: 'subscription', label: 'Subscription', icon: <CreditCard size={16} /> },
-    { id: 'organization', label: 'Organization', icon: <Building2 size={16} /> },
+    { id: 'profile',       label: 'Profile',        icon: <User size={16} /> },
+    { id: 'branding',      label: 'Branding',       icon: <Palette size={16} /> },
+    { id: 'subscription',  label: 'Subscription',   icon: <CreditCard size={16} /> },
+    { id: 'organization',  label: 'Organization',   icon: <Building2 size={16} /> },
+    { id: 'notifications', label: 'Notifications',  icon: <Bell size={16} /> },
   ];
 
   return (
@@ -291,61 +294,89 @@ export default function SettingsPage() {
 
         {/* ── PROFILE TAB ── */}
         {activeTab === 'profile' && (
-          <div className="card p-6 space-y-5">
-            <h2 className="text-lg font-bold text-white">Profile Information</h2>
+          <div className="space-y-4">
+            <div className="card p-6 space-y-5">
+              <h2 className="text-lg font-bold text-white">Profile Information</h2>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Full Name</label>
-                <input
-                  type="text"
-                  value={profile.name}
-                  onChange={e => setProfile(p => ({ ...p, name: e.target.value }))}
-                  className="input w-full"
-                  placeholder="Your full name"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Full Name</label>
+                  <input
+                    type="text"
+                    value={profile.name}
+                    onChange={e => setProfile(p => ({ ...p, name: e.target.value }))}
+                    className="input w-full"
+                    placeholder="Your full name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Email Address</label>
+                  <input
+                    type="email"
+                    value={profile.email}
+                    onChange={e => setProfile(p => ({ ...p, email: e.target.value }))}
+                    className="input w-full"
+                    placeholder="you@company.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Company Name</label>
+                  <input
+                    type="text"
+                    value={profile.company}
+                    onChange={e => setProfile(p => ({ ...p, company: e.target.value }))}
+                    className="input w-full"
+                    placeholder="Your company name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={profile.phone}
+                    onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
+                    className="input w-full"
+                    placeholder="(555) 000-0000"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Email Address</label>
-                <input
-                  type="email"
-                  value={profile.email}
-                  onChange={e => setProfile(p => ({ ...p, email: e.target.value }))}
-                  className="input w-full"
-                  placeholder="you@company.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Company Name</label>
-                <input
-                  type="text"
-                  value={profile.company}
-                  onChange={e => setProfile(p => ({ ...p, company: e.target.value }))}
-                  className="input w-full"
-                  placeholder="Your company name"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 mb-1.5">Phone Number</label>
-                <input
-                  type="tel"
-                  value={profile.phone}
-                  onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
-                  className="input w-full"
-                  placeholder="(555) 000-0000"
-                />
+
+              <div className="flex justify-end pt-2">
+                <button
+                  onClick={handleSaveProfile}
+                  disabled={saving}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  {saving ? <RefreshCw size={15} className="animate-spin" /> : <Save size={15} />}
+                  Save Profile
+                </button>
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
-              <button
-                onClick={handleSaveProfile}
-                disabled={saving}
-                className="btn-primary flex items-center gap-2"
-              >
-                {saving ? <RefreshCw size={15} className="animate-spin" /> : <Save size={15} />}
-                Save Profile
-              </button>
+            {/* Theme / Appearance */}
+            <div className="card p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Sun size={16} className="text-amber-400" />
+                <h2 className="text-base font-bold text-white">Appearance</h2>
+              </div>
+              <p className="text-xs text-slate-500 mb-4">Choose how SolarPro looks on your device. Stored locally in your browser.</p>
+              <div className="grid grid-cols-3 gap-3">
+                {(Object.entries(THEME_CONFIG) as [Theme, typeof THEME_CONFIG[Theme]][]).map(([key, cfg]) => (
+                  <button
+                    key={key}
+                    onClick={() => setTheme(key)}
+                    className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
+                      theme === key
+                        ? 'border-amber-500/60 bg-amber-500/10 text-amber-300'
+                        : 'border-white/10 bg-white/3 text-slate-400 hover:border-white/20 hover:text-white'
+                    }`}
+                  >
+                    <span className="text-2xl leading-none">{cfg.icon}</span>
+                    <span className="text-xs font-semibold">{cfg.label}</span>
+                    <span className="text-[10px] text-slate-500 text-center leading-tight">{cfg.description}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -692,9 +723,248 @@ export default function SettingsPage() {
           <OrganizationPanel userId={user.id} />
         )}
 
+        {/* ── NOTIFICATIONS TAB ── */}
+        {activeTab === 'notifications' && (
+          <NotificationsPanel />
+        )}
+
     </AppShell>
   );
 }
+
+// ── Notification Preferences Panel ──────────────────────────────────────────
+
+interface NotifPrefs {
+  email_proposal_signed:  boolean;
+  email_proposal_expiry:  boolean;
+  email_stage_change:     boolean;
+  email_new_lead:         boolean;
+  email_survey_completed: boolean;
+  email_weekly_summary:   boolean;
+  email_billing_alerts:   boolean;
+  inapp_proposal_signed:  boolean;
+  inapp_stage_change:     boolean;
+  inapp_new_lead:         boolean;
+  inapp_survey_completed: boolean;
+  inapp_system_alerts:    boolean;
+}
+
+const DEFAULT_PREFS: NotifPrefs = {
+  email_proposal_signed:  true,
+  email_proposal_expiry:  true,
+  email_stage_change:     true,
+  email_new_lead:         true,
+  email_survey_completed: true,
+  email_weekly_summary:   false,
+  email_billing_alerts:   true,
+  inapp_proposal_signed:  true,
+  inapp_stage_change:     true,
+  inapp_new_lead:         true,
+  inapp_survey_completed: true,
+  inapp_system_alerts:    true,
+};
+
+function NotifToggle({
+  label,
+  description,
+  checked,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-slate-700/40 last:border-0">
+      <div className="flex-1 pr-4">
+        <p className="text-sm font-medium text-white">{label}</p>
+        {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
+      </div>
+      <button
+        onClick={() => onChange(!checked)}
+        className={`relative w-11 h-6 rounded-full transition-colors duration-200 flex-shrink-0 ${
+          checked ? 'bg-amber-500' : 'bg-slate-700'
+        }`}
+        role="switch"
+        aria-checked={checked}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${
+            checked ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
+function NotificationsPanel() {
+  const [prefs, setPrefs] = React.useState<NotifPrefs>(DEFAULT_PREFS);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving]   = React.useState(false);
+  const [status, setStatus]   = React.useState<'idle' | 'saved' | 'error'>('idle');
+
+  React.useEffect(() => {
+    fetch('/api/settings/notifications')
+      .then(r => r.json())
+      .then(d => {
+        if (d.success) setPrefs({ ...DEFAULT_PREFS, ...d.prefs });
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async (updated: NotifPrefs) => {
+    setSaving(true);
+    setStatus('idle');
+    try {
+      const res = await fetch('/api/settings/notifications', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(updated),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setPrefs({ ...DEFAULT_PREFS, ...d.prefs });
+        setStatus('saved');
+        setTimeout(() => setStatus('idle'), 2500);
+      } else {
+        setStatus('error');
+      }
+    } catch {
+      setStatus('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = (key: keyof NotifPrefs) => {
+    const updated = { ...prefs, [key]: !prefs[key] };
+    setPrefs(updated);
+    save(updated);
+  };
+
+  if (loading) {
+    return (
+      <div className="card p-6 text-center text-slate-500 text-sm">
+        <RefreshCw size={16} className="animate-spin inline mr-2" />Loading preferences…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Email notifications */}
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Mail size={16} className="text-amber-400" />
+          <h3 className="font-semibold text-white text-sm">Email Notifications</h3>
+        </div>
+        <NotifToggle
+          label="Proposal Signed"
+          description="Email when a client signs a proposal"
+          checked={prefs.email_proposal_signed}
+          onChange={() => toggle('email_proposal_signed')}
+        />
+        <NotifToggle
+          label="Proposal Expiry Reminder"
+          description="Email 3 days before a proposal expires"
+          checked={prefs.email_proposal_expiry}
+          onChange={() => toggle('email_proposal_expiry')}
+        />
+        <NotifToggle
+          label="Project Stage Change"
+          description="Email when a project advances to a new stage"
+          checked={prefs.email_stage_change}
+          onChange={() => toggle('email_stage_change')}
+        />
+        <NotifToggle
+          label="New Lead Added"
+          description="Email when a new lead is created in your account"
+          checked={prefs.email_new_lead}
+          onChange={() => toggle('email_new_lead')}
+        />
+        <NotifToggle
+          label="Site Survey Completed"
+          description="Email when a site survey is submitted from the app"
+          checked={prefs.email_survey_completed}
+          onChange={() => toggle('email_survey_completed')}
+        />
+        <NotifToggle
+          label="Weekly Activity Digest"
+          description="Summary of proposals, leads, and projects sent every Monday"
+          checked={prefs.email_weekly_summary}
+          onChange={() => toggle('email_weekly_summary')}
+        />
+        <NotifToggle
+          label="Billing & Subscription Alerts"
+          description="Payment failures, plan changes, and renewal reminders"
+          checked={prefs.email_billing_alerts}
+          onChange={() => toggle('email_billing_alerts')}
+        />
+      </div>
+
+      {/* In-app notifications */}
+      <div className="card p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <Bell size={16} className="text-amber-400" />
+          <h3 className="font-semibold text-white text-sm">In-App Notifications</h3>
+          <span className="text-xs text-slate-500">(Bell icon in navbar)</span>
+        </div>
+        <NotifToggle
+          label="Proposal Signed"
+          description="Show notification when a client signs a proposal"
+          checked={prefs.inapp_proposal_signed}
+          onChange={() => toggle('inapp_proposal_signed')}
+        />
+        <NotifToggle
+          label="Project Stage Change"
+          description="Show notification when a project stage changes"
+          checked={prefs.inapp_stage_change}
+          onChange={() => toggle('inapp_stage_change')}
+        />
+        <NotifToggle
+          label="New Lead Added"
+          description="Show notification for new leads"
+          checked={prefs.inapp_new_lead}
+          onChange={() => toggle('inapp_new_lead')}
+        />
+        <NotifToggle
+          label="Site Survey Completed"
+          description="Show notification when a survey is submitted"
+          checked={prefs.inapp_survey_completed}
+          onChange={() => toggle('inapp_survey_completed')}
+        />
+        <NotifToggle
+          label="System Alerts"
+          description="Maintenance windows, feature announcements, and errors"
+          checked={prefs.inapp_system_alerts}
+          onChange={() => toggle('inapp_system_alerts')}
+        />
+      </div>
+
+      {/* Status indicator */}
+      {(saving || status !== 'idle') && (
+        <div className={`flex items-center gap-2 text-sm px-4 py-2 rounded-lg ${
+          saving       ? 'bg-slate-700/40 text-slate-400' :
+          status === 'saved' ? 'bg-green-500/10 text-green-400 border border-green-500/20' :
+          'bg-red-500/10 text-red-400 border border-red-500/20'
+        }`}>
+          {saving ? (
+            <><RefreshCw size={13} className="animate-spin" /> Saving…</>
+          ) : status === 'saved' ? (
+            <><CheckCircle size={13} /> Preferences saved</>
+          ) : (
+            <><AlertCircle size={13} /> Failed to save — try again</>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function MigrateButton() {
   const [status, setStatus] = React.useState<'idle' | 'running' | 'done' | 'error'>('idle');

@@ -2041,6 +2041,14 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 037b (idx_leads_lead_source): ${(e as Error).message}`);
     }
 
+    // ── Migration 038: Notification preferences (v48.42) ─────────────────────
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB NOT NULL DEFAULT '{}'::jsonb`;
+      results.push('✅ Migration 038a: users.notification_prefs — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 038a (users.notification_prefs): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
