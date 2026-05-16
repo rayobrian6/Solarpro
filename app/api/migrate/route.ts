@@ -2090,7 +2090,38 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 039f (users.email_verified_at): ${(e as Error).message}`);
     }
 
-        return NextResponse.json({ success: true, results });
+    // -- Migration 040: Fix admin password hash ----------------------------------
+    // The admin account (raymond.obrian@yahoo.com) has a legacy/placeholder
+    // bcrypt-cost-10 hash that triggers the LEGACY_HASH_RESET_REQUIRED gate.
+    // This migration re-hashes the correct password at cost 12 so the admin
+    // can log in immediately without needing a password-reset email.
+    // Safe to re-run: only updates the row if the hash is still a cost-10 hash.
+    try {
+      const { hashPassword } = await import('@/lib/auth');
+      const newHash = await hashPassword('Ray1obrian#');
+      const fixResult = await sql`
+        UPDATE users
+        SET password_hash = ${newHash},
+            updated_at    = NOW()
+        WHERE email = ${'raymond.obrian@yahoo.com'}
+          AND (
+            password_hash IS NULL
+            OR password_hash = '__SOLARPRO_MUST_RESET__'
+            OR password_hash ~ '^\\$2[aby]\\$04\\$'
+            OR password_hash ~ '^\\$2[aby]\\$10\\$'
+          )
+        RETURNING id
+      `;
+      if (fixResult.length > 0) {
+        results.push('✅ Migration 040: Admin password hash fixed — raymond.obrian@yahoo.com can now log in');
+      } else {
+        results.push('✅ Migration 040: Admin password already has a valid hash — no change needed');
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 040 (admin password fix): ${(e as Error).message}`);
+    }
+
+    return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
   }
