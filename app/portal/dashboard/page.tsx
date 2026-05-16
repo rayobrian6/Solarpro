@@ -1,20 +1,20 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Sun, MapPin, LogOut, RefreshCw,
   CheckCircle2, Circle, Clock,
   Phone, Mail, AlertCircle, Zap,
   TrendingUp, Home, FileCheck, ExternalLink, PenLine,
-  Info, CheckCircle,
+  Info, CheckCircle, ChevronRight, Star,
 } from 'lucide-react';
 import {
   getInterconnectionProfile,
   getStateIcaFallback,
 } from '@/lib/utilityInterconnection';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type HomeownerStage =
   | 'lead_submitted'
@@ -76,45 +76,38 @@ interface PortalProposal {
   signed_at:        string | null;
 }
 
-// ─── Stage Definitions ───────────────────────────────────────────────────────
+// ─── Stage Definitions ────────────────────────────────────────────────────────
 
 type StageContent = {
-  roadmapLabel: string;
-  stepLabel: string;
-  headline: string;
-  body: string;
-  next: string;
-  action: string;
+  roadmapLabel:     string;
+  stepNum:          number;
+  headline:         string;
+  body:             string;
+  next:             string;
+  action:           string;
   actionIsRequired: boolean;
-  icon: string;
+  emoji:            string;
+  color:            'amber' | 'blue' | 'emerald' | 'violet';
 };
 
-// ─── Human-readable micro-stage labels (homeowner-facing ONLY) ───────────────
-// Rules: no technical names, no timestamps, plain English, max ~4 words
-
 const MICRO_STAGE_LABELS: Record<string, string> = {
-  // lead_submitted
   lead_created:             'Project opened',
   project_created:          'Project created',
-  // under_review
   bill_uploaded:            'Utility bill received',
   bill_parsed:              'Energy usage analyzed',
   usage_calculated:         'Usage calculated',
   pre_design_complete:      'Pre-design completed',
-  // site_survey
-  survey_scheduled:         'Survey appointment set',
+  survey_scheduled:         'Survey scheduled',
   survey_started:           'Site visit in progress',
-  survey_photos_uploaded:   'Site photos uploaded',
+  survey_photos_uploaded:   'Site photos received',
   survey_submitted:         'Survey submitted',
   survey_reviewed:          'Survey reviewed',
-  // design
-  layout_started:           'System layout started',
-  layout_completed:         'System layout completed',
+  layout_started:           'Layout in progress',
+  layout_completed:         'Layout completed',
   engineering_started:      'Engineering underway',
-  engineering_completed:    'Engineering completed',
-  sld_generated:            'Electrical diagram created',
-  planset_generated:        'Plan set completed',
-  // proposal
+  engineering_completed:    'Engineering complete',
+  sld_generated:            'Electrical diagram done',
+  planset_generated:        'Plan set complete',
   final_proposal_generated: 'Proposal prepared',
   proposal_sent:            'Proposal sent to you',
   proposal_viewed:          'Proposal reviewed',
@@ -122,21 +115,18 @@ const MICRO_STAGE_LABELS: Record<string, string> = {
   contract_sent:            'Contract sent',
   contract_viewed:          'Contract reviewed',
   contract_signed:          'Contract signed',
-  // installation
   permit_submitted:         'Permit application filed',
   permit_approved:          'Permit approved',
-  install_scheduled:        'Installation date set',
+  install_scheduled:        'Install date confirmed',
   install_started:          'Installation underway',
   install_completed:        'Installation complete',
   inspection_passed:        'Inspection passed',
   pto_submitted:            'Grid connection filed',
   pto_approved:             'Grid connection approved',
-  // completed
   system_live:              'System is live',
   monitoring_active:        'Monitoring activated',
 };
 
-// Which micro-stages belong to each homeowner stage
 const STAGE_MICRO_MAP: Record<HomeownerStage, string[]> = {
   lead_submitted: ['lead_created', 'project_created'],
   under_review:   ['bill_uploaded', 'bill_parsed', 'usage_calculated', 'pre_design_complete'],
@@ -159,74 +149,60 @@ const ROADMAP_STEPS: HomeownerStage[] = [
 
 const STAGE_CONTENT: Record<HomeownerStage, StageContent> = {
   lead_submitted: {
-    roadmapLabel:    'Request Received',
-    stepLabel:       'Step 1 of 7',
-    headline:        'We got your request.',
-    body:            "We're getting familiar with your home and energy needs. Your project has been created and we'll be in touch soon.",
-    next:            "Next: We'll review your project and reach out.",
-    action:          'Nothing to do right now.',
-    actionIsRequired: false,
-    icon:            '📋',
+    roadmapLabel: 'Request Received', stepNum: 1,
+    headline: 'We got your request.',
+    body: "We're getting familiar with your home and energy needs. Your project has been created and we'll be in touch soon.",
+    next: "We'll review your project and reach out shortly.",
+    action: 'Nothing to do right now.',
+    actionIsRequired: false, emoji: '📋', color: 'amber',
   },
   under_review: {
-    roadmapLabel:    'Under Review',
-    stepLabel:       'Step 2 of 7',
-    headline:        "We're reviewing your project.",
-    body:            "We're looking at your home, roof, and energy usage to figure out the right system for you. This usually takes 1–2 business days.",
-    next:            "Next: We'll schedule your site survey.",
-    action:          'Nothing to do right now.',
-    actionIsRequired: false,
-    icon:            '🔍',
+    roadmapLabel: 'Under Review', stepNum: 2,
+    headline: "We're reviewing your project.",
+    body: "We're analyzing your home, roof, and energy usage to size the right system for you. This usually takes 1–2 business days.",
+    next: "We'll schedule your site survey.",
+    action: 'Nothing to do right now.',
+    actionIsRequired: false, emoji: '🔍', color: 'amber',
   },
   site_survey: {
-    roadmapLabel:    'Site Survey',
-    stepLabel:       'Step 3 of 7',
-    headline:        'Your site survey is coming up.',
-    body:            "We're sending someone to your home to measure your roof and confirm the setup details. This lets us build an accurate design.",
-    next:            "Next: After the visit, we'll start designing your system.",
-    action:          "Action needed: We'll reach out to confirm your appointment. Please be available.",
-    actionIsRequired: true,
-    icon:            '📐',
+    roadmapLabel: 'Site Survey', stepNum: 3,
+    headline: 'Your site survey is coming up.',
+    body: "We're sending a technician to your home to measure your roof and verify all setup details — this ensures your system design is accurate.",
+    next: "We'll start designing your system right after the visit.",
+    action: "We'll reach out to confirm your appointment. Please be available.",
+    actionIsRequired: true, emoji: '📐', color: 'blue',
   },
   design: {
-    roadmapLabel:    'System Design',
-    stepLabel:       'Step 4 of 7',
-    headline:        "We're designing your system.",
-    body:            "Our team is building a solar layout specifically for your home — size, placement, and output are all being worked out.",
-    next:            "Next: We'll put together your proposal.",
-    action:          'Nothing to do right now.',
-    actionIsRequired: false,
-    icon:            '⚡',
+    roadmapLabel: 'System Design', stepNum: 4,
+    headline: "We're designing your system.",
+    body: "Our engineers are building a custom solar layout for your home — optimizing panel placement, system size, and projected output.",
+    next: "We'll put together your proposal.",
+    action: 'Nothing to do right now.',
+    actionIsRequired: false, emoji: '⚡', color: 'amber',
   },
   proposal: {
-    roadmapLabel:    'Proposal Ready',
-    stepLabel:       'Step 5 of 7',
-    headline:        'Your proposal is ready.',
-    body:            "We've put together your solar plan — system size, estimated savings, and your financing options are all included.",
-    next:            "Next: Once you approve, we'll move to installation.",
-    action:          'Action needed: Review your proposal and let us know if you have questions.',
-    actionIsRequired: true,
-    icon:            '📄',
+    roadmapLabel: 'Proposal Ready', stepNum: 5,
+    headline: 'Your proposal is ready.',
+    body: "We've built your complete solar plan — including system size, estimated annual savings, and your financing options.",
+    next: "Once you approve, we move to installation.",
+    action: 'Review your proposal below and let us know if you have questions.',
+    actionIsRequired: true, emoji: '📄', color: 'amber',
   },
   installation: {
-    roadmapLabel:    'Installation',
-    stepLabel:       'Step 6 of 7',
-    headline:        'Installation is being scheduled.',
-    body:            "We're handling permits and lining up your crew. Everything is moving forward — you'll hear from us soon with a date.",
-    next:            "Next: We'll confirm your install date.",
-    action:          "Action needed: Watch for our call or email with scheduling details.",
-    actionIsRequired: true,
-    icon:            '🔧',
+    roadmapLabel: 'Installation', stepNum: 6,
+    headline: 'Installation is being scheduled.',
+    body: "We're pulling permits and coordinating your installation crew. Everything is moving forward — you'll hear from us soon with a confirmed date.",
+    next: "We'll confirm your install date.",
+    action: "Watch for our call or email with scheduling details.",
+    actionIsRequired: true, emoji: '🔧', color: 'blue',
   },
   completed: {
-    roadmapLabel:    'Complete',
-    stepLabel:       'Step 7 of 7',
-    headline:        'Your system is live.',
-    body:            "Your solar panels are installed and running. You're now generating your own power.",
-    next:            '',
-    action:          "You're all set. Enjoy the savings.",
-    actionIsRequired: false,
-    icon:            '🌟',
+    roadmapLabel: 'Complete', stepNum: 7,
+    headline: 'Your system is live. 🎉',
+    body: "Your solar panels are installed, inspected, and generating clean power. Welcome to energy independence.",
+    next: '',
+    action: "You're all set. Enjoy the savings.",
+    actionIsRequired: false, emoji: '🌟', color: 'emerald',
   },
 };
 
@@ -234,122 +210,125 @@ function getStageIndex(stage: HomeownerStage | null): number {
   if (!stage) return -1;
   return ROADMAP_STEPS.indexOf(stage);
 }
-
-function getFirstName(name: string): string {
-  return name.split(' ')[0];
-}
-
+function getFirstName(name: string): string { return name.split(' ')[0]; }
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'long', day: 'numeric', year: 'numeric',
-  });
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
-
-function getTimeOfDayGreeting(): string {
+function getGreeting(): string {
   const h = new Date().getHours();
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
 }
 
-// ─── Progress Ring ────────────────────────────────────────────────────────────
+// ─── Progress Arc ─────────────────────────────────────────────────────────────
 
-function ProgressRing({ pct }: { pct: number }) {
-  const r = 36, circ = 2 * Math.PI * r;
+function ProgressArc({ pct, stage }: { pct: number; stage: HomeownerStage | null }) {
+  const r = 52, circ = 2 * Math.PI * r;
+  const isComplete = stage === 'completed';
   return (
-    <div className="relative w-24 h-24 flex items-center justify-center flex-shrink-0">
-      <svg className="absolute inset-0 -rotate-90" viewBox="0 0 88 88" width="88" height="88">
-        <circle cx="44" cy="44" r={r} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="5" />
-        <circle cx="44" cy="44" r={r} fill="none" stroke="url(#ringGrad)" strokeWidth="5"
-          strokeLinecap="round" strokeDasharray={circ}
+    <div className="relative flex flex-col items-center justify-center" style={{ width: 140, height: 140 }}>
+      <svg className="-rotate-90 absolute inset-0" viewBox="0 0 128 128" width="140" height="140">
+        <circle cx="64" cy="64" r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="7" />
+        <circle cx="64" cy="64" r={r} fill="none"
+          stroke={isComplete ? '#10b981' : 'url(#arcGrad)'}
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray={circ}
           strokeDashoffset={circ - (pct / 100) * circ}
-          style={{ transition: 'stroke-dashoffset 1s ease-out' }}
+          style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(0.4,0,0.2,1)' }}
         />
         <defs>
-          <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#10b981" />
-            <stop offset="100%" stopColor="#f59e0b" />
+          <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#fbbf24" />
           </linearGradient>
         </defs>
       </svg>
-      <div className="text-center z-10">
-        <p className="text-xl font-black text-white leading-none">{pct}%</p>
-        <p className="text-[9px] text-slate-500 uppercase tracking-wider mt-0.5">Done</p>
+      <div className="relative z-10 text-center">
+        {isComplete
+          ? <Star size={28} className="text-emerald-400 mx-auto" />
+          : <>
+              <span className="text-3xl font-black text-white leading-none">{pct}</span>
+              <span className="text-sm font-bold text-amber-400">%</span>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">complete</p>
+            </>
+        }
       </div>
     </div>
   );
 }
 
-// ─── Roadmap ──────────────────────────────────────────────────────────────────
+// ─── Step Timeline ─────────────────────────────────────────────────────────────
 
-function Roadmap({ stage }: { stage: HomeownerStage | null }) {
+function StepTimeline({ stage }: { stage: HomeownerStage | null }) {
   const ci = getStageIndex(stage);
   return (
     <>
-      {/* Desktop */}
-      <div className="hidden md:block">
-        <div className="relative flex items-start pt-8 pb-6">
-          <div className="absolute top-[38px] left-0 right-0 h-[2px] bg-white/[0.05] z-0" />
-          {ROADMAP_STEPS.map((s, i) => {
-            const past = i < ci, cur = i === ci;
-            const c = STAGE_CONTENT[s];
-            return (
-              <div key={s} className="flex-1 flex flex-col items-center relative z-10">
-                {i > 0 && (
-                  <div className={`absolute top-[38px] right-1/2 left-[-50%] h-[2px] z-0 transition-all duration-700 ${
-                    past || cur ? 'bg-gradient-to-r from-emerald-500/60 to-emerald-400/40' : 'bg-white/[0.05]'
-                  }`} />
-                )}
-                <div className={`relative flex items-center justify-center rounded-full transition-all duration-500 z-10 ${
-                  cur  ? 'w-[56px] h-[56px] bg-gradient-to-br from-amber-400 to-amber-600 border-2 border-amber-300/50 shadow-xl shadow-amber-500/30'
-                  : past ? 'w-10 h-10 bg-emerald-500/15 border-2 border-emerald-500/40'
-                         : 'w-10 h-10 bg-white/[0.03] border-2 border-white/[0.08]'
-                }`}>
-                  {past
-                    ? <CheckCircle2 size={18} className="text-emerald-400" />
-                    : cur
-                    ? <span className="text-xl leading-none">{c.icon}</span>
-                    : <Circle size={16} className="text-white/[0.08]" />}
-                  {cur && (
-                    <div className="absolute inset-0 rounded-full bg-amber-500/15 animate-ping scale-[1.6] pointer-events-none" />
-                  )}
-                </div>
-                <span className={`mt-3 text-[10px] font-bold text-center leading-tight max-w-[72px] ${
-                  cur ? 'text-amber-300' : past ? 'text-emerald-400/60' : 'text-white/15'
-                }`}>{c.roadmapLabel}</span>
-                {cur  && <span className="mt-1 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span>}
-                {past && <span className="mt-1 text-[9px] text-emerald-500/35 uppercase tracking-wider">✓</span>}
+      {/* Desktop horizontal */}
+      <div className="hidden md:flex items-start relative pt-2 pb-1 gap-0">
+        {ROADMAP_STEPS.map((s, i) => {
+          const done = i < ci, cur = i === ci, future = i > ci;
+          const c = STAGE_CONTENT[s];
+          return (
+            <div key={s} className="flex-1 flex flex-col items-center relative group">
+              {/* connector left */}
+              {i > 0 && (
+                <div className={`absolute top-[18px] right-1/2 w-1/2 h-[2px] ${done || cur ? 'bg-amber-500/50' : 'bg-white/[0.07]'}`} />
+              )}
+              {/* connector right */}
+              {i < ROADMAP_STEPS.length - 1 && (
+                <div className={`absolute top-[18px] left-1/2 w-1/2 h-[2px] ${done ? 'bg-amber-500/50' : 'bg-white/[0.07]'}`} />
+              )}
+              {/* dot */}
+              <div className={`relative z-10 flex items-center justify-center rounded-full border-2 transition-all duration-500 ${
+                cur    ? 'w-10 h-10 bg-amber-500 border-amber-400 shadow-lg shadow-amber-500/40'
+                : done  ? 'w-8 h-8 bg-emerald-500/20 border-emerald-500/60'
+                        : 'w-8 h-8 bg-white/[0.03] border-white/[0.1]'
+              }`}>
+                {done
+                  ? <CheckCircle2 size={15} className="text-emerald-400" />
+                  : cur
+                  ? <span className="text-base leading-none">{c.emoji}</span>
+                  : <span className="text-xs font-black text-white/20">{i + 1}</span>
+                }
+                {cur && <span className="absolute inset-0 rounded-full bg-amber-500/20 animate-ping" />}
               </div>
-            );
-          })}
-        </div>
+              {/* label */}
+              <span className={`mt-2.5 text-[10px] font-bold text-center leading-tight px-1 max-w-[72px] ${
+                cur ? 'text-amber-300' : done ? 'text-emerald-400/70' : future ? 'text-white/20' : 'text-white/20'
+              }`}>{c.roadmapLabel}</span>
+              {cur && <span className="mt-0.5 text-[9px] font-black text-amber-500/50 uppercase tracking-widest">NOW</span>}
+            </div>
+          );
+        })}
       </div>
-      {/* Mobile */}
+
+      {/* Mobile vertical */}
       <div className="md:hidden space-y-0">
         {ROADMAP_STEPS.map((s, i) => {
-          const past = i < ci, cur = i === ci, last = i === ROADMAP_STEPS.length - 1;
+          const done = i < ci, cur = i === ci, last = i === ROADMAP_STEPS.length - 1;
           const c = STAGE_CONTENT[s];
           return (
             <div key={s} className="flex items-start gap-3">
-              <div className="flex flex-col items-center w-9 flex-shrink-0">
-                <div className={`rounded-full flex items-center justify-center border-2 flex-shrink-0 transition-all ${
-                  cur  ? 'w-9 h-9 bg-gradient-to-br from-amber-400 to-amber-600 border-amber-300/40 shadow-lg shadow-amber-500/25'
-                  : past ? 'w-8 h-8 bg-emerald-500/10 border-emerald-500/35'
-                         : 'w-8 h-8 bg-white/[0.03] border-white/[0.07]'
+              <div className="flex flex-col items-center w-8 flex-shrink-0">
+                <div className={`rounded-full flex items-center justify-center border-2 flex-shrink-0 ${
+                  cur  ? 'w-8 h-8 bg-amber-500 border-amber-400 shadow-md shadow-amber-500/30'
+                  : done ? 'w-7 h-7 bg-emerald-500/15 border-emerald-500/40'
+                        : 'w-7 h-7 bg-white/[0.03] border-white/[0.08]'
                 }`}>
-                  {past ? <CheckCircle2 size={14} className="text-emerald-400" />
-                    : cur ? <span className="text-sm">{c.icon}</span>
-                           : <Circle size={14} className="text-white/[0.08]" />}
+                  {done ? <CheckCircle2 size={13} className="text-emerald-400" />
+                    : cur ? <span className="text-xs">{c.emoji}</span>
+                          : <span className="text-[9px] font-black text-white/15">{i + 1}</span>}
                 </div>
-                {!last && <div className={`w-[2px] flex-1 min-h-[24px] mt-1 rounded-full ${past ? 'bg-emerald-500/25' : 'bg-white/[0.04]'}`} />}
+                {!last && <div className={`w-px flex-1 min-h-[20px] my-1 rounded-full ${done ? 'bg-emerald-500/25' : 'bg-white/[0.05]'}`} />}
               </div>
-              <div className={`pb-5 pt-1 flex-1 ${last ? 'pb-0' : ''}`}>
+              <div className={`pb-4 pt-1 flex-1 ${last ? 'pb-0' : ''}`}>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`text-sm font-bold ${cur ? 'text-amber-300' : past ? 'text-white/35' : 'text-white/15'}`}>
+                  <span className={`text-sm font-semibold ${cur ? 'text-amber-300' : done ? 'text-white/30' : 'text-white/15'}`}>
                     {c.roadmapLabel}
                   </span>
-                  {cur  && <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span>}
-                  {past && <span className="text-[9px] text-emerald-500/40">✓</span>}
+                  {cur && <span className="text-[9px] font-black bg-amber-500/15 text-amber-400 px-2 py-0.5 rounded-full uppercase tracking-wider">Now</span>}
                 </div>
               </div>
             </div>
@@ -360,41 +339,24 @@ function Roadmap({ stage }: { stage: HomeownerStage | null }) {
   );
 }
 
-// ─── CompletedSoFar — the new milestone subsection ───────────────────────────
-// Shows only completed micro-stages for the CURRENT stage, max 4, no timestamps
+// ─── Milestone Chips ──────────────────────────────────────────────────────────
 
-function CompletedSoFar({
-  stage,
-  microStages,
-}: {
-  stage: HomeownerStage;
-  microStages: MicroStageEvent[];
-}) {
-  const stageKeys  = STAGE_MICRO_MAP[stage] ?? [];
-  const completedSet = new Set(microStages.map(m => m.micro_stage));
-
-  // Only completed items that belong to this stage, preserve natural order, max 4
-  const completed = stageKeys
-    .filter(key => completedSet.has(key))
-    .slice(0, 4);
-
+function MilestoneChips({ stage, microStages }: { stage: HomeownerStage; microStages: MicroStageEvent[] }) {
+  const keys = STAGE_MICRO_MAP[stage] ?? [];
+  const done = new Set(microStages.map(m => m.micro_stage));
+  const completed = keys.filter(k => done.has(k)).slice(0, 5);
   if (completed.length === 0) return null;
-
   return (
-    <div className="mt-6 border-t border-white/[0.05] pt-6">
-      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">
-        Completed so far
-      </p>
-      <ul className="flex flex-col gap-2">
-        {completed.map((key) => (
-          <li key={key} className="flex items-center gap-2.5">
-            <span className="text-emerald-400 text-sm leading-none flex-shrink-0">✔</span>
-            <span className="text-sm text-slate-300 leading-none">
-              {MICRO_STAGE_LABELS[key] ?? key}
-            </span>
-          </li>
+    <div className="mt-5 pt-5 border-t border-white/[0.06]">
+      <p className="text-[10px] font-black uppercase tracking-widest text-slate-600 mb-3">Completed this stage</p>
+      <div className="flex flex-wrap gap-2">
+        {completed.map(key => (
+          <span key={key} className="inline-flex items-center gap-1.5 text-xs bg-emerald-500/[0.07] border border-emerald-500/[0.15] text-emerald-300 rounded-full px-3 py-1 font-medium">
+            <CheckCircle2 size={10} className="text-emerald-400 flex-shrink-0" />
+            {MICRO_STAGE_LABELS[key] ?? key}
+          </span>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
@@ -418,7 +380,6 @@ export default function PortalDashboard() {
   const [error,         setError]         = useState('');
   const [mounted,       setMounted]       = useState(false);
 
-  // suppress unused warning — history kept for potential future use
   void history;
 
   const load = async () => {
@@ -442,7 +403,7 @@ export default function PortalDashboard() {
       );
       setBillUploaded(hasBill);
     } catch { setError('Connection error. Please refresh the page.'); }
-    finally { setLoading(false); setTimeout(() => setMounted(true), 80); }
+    finally { setLoading(false); setTimeout(() => setMounted(true), 60); }
   };
 
   useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -452,6 +413,7 @@ export default function PortalDashboard() {
     router.replace('/portal/login');
   };
 
+  // ── Loading ──
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center bg-[#07070e]">
       <div className="flex flex-col items-center gap-4">
@@ -462,7 +424,7 @@ export default function PortalDashboard() {
           <div className="absolute inset-0 rounded-2xl bg-amber-500/10 animate-ping" />
         </div>
         <span className="text-sm text-slate-600 flex items-center gap-2">
-          <RefreshCw size={13} className="animate-spin" /> Loading your project…
+          <RefreshCw size={13} className="animate-spin" /> Loading your portal…
         </span>
       </div>
     </div>
@@ -471,38 +433,26 @@ export default function PortalDashboard() {
   if (error) return (
     <div className="min-h-screen flex items-center justify-center bg-[#07070e] px-4">
       <div className="text-center max-w-sm">
-        <div className="w-12 h-12 rounded-2xl bg-red-500/10 border border-red-500/15 flex items-center justify-center mx-auto mb-4">
-          <AlertCircle size={20} className="text-red-400" />
-        </div>
+        <AlertCircle size={32} className="text-red-400 mx-auto mb-4" />
         <p className="text-red-400 text-sm mb-4">{error}</p>
         <button onClick={load} className="px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white hover:bg-white/8 transition-all">Try Again</button>
       </div>
     </div>
   );
 
-  const p           = activeProject;
-  const stage       = p?.homeowner_stage ?? null;
-  const content     = stage ? STAGE_CONTENT[stage] : null;
-  const stageIdx    = getStageIndex(stage);
-  const pct         = stage ? Math.round(((stageIdx + 1) / ROADMAP_STEPS.length) * 100) : 0;
-  const lastUpdated = p ? formatDate(p.updated_at) : null;
-  const greeting    = getTimeOfDayGreeting();
-  const firstName   = client ? getFirstName(client.name) : 'there';
+  const p            = activeProject;
+  const stage        = p?.homeowner_stage ?? null;
+  const content      = stage ? STAGE_CONTENT[stage] : null;
+  const stageIdx     = getStageIndex(stage);
+  const pct          = stage ? Math.round(((stageIdx + 1) / ROADMAP_STEPS.length) * 100) : 0;
+  const firstName    = client ? getFirstName(client.name) : 'there';
+  const greeting     = getGreeting();
+  const projectMicros   = microStages.filter(m => p && m.project_id === p.id);
+  const projectDocs     = documents.filter(d => p && d.project_id === p.id);
+  const projectProposals = proposals.filter(pr => p && pr.project_id === p.id);
+  const isComplete   = stage === 'completed';
 
-  // Micro-stages scoped to the active project
-  const projectMicros = microStages.filter(m => activeProject && m.project_id === activeProject.id);
-
-  // Documents scoped to the active project
-  const projectDocs = documents.filter(d => activeProject && d.project_id === activeProject.id);
-
-  // Proposals scoped to the active project (most recent first)
-  const projectProposals = proposals.filter(pr => activeProject && pr.project_id === activeProject.id);
-
-  // ── ICA / PTO lookup for installation stage ───────────────────────────────
-  // Extract state from project address or client.state for Tier 2 fallback.
-  // In portal context we don't have utility_id, so we use Tier 2 (state fallback) by default.
-  // If a matching Tier-1 profile exists for a known utility (future enhancement), it would
-  // override this — for now portal always shows state-level guidance.
+  // ICA / PTO
   const portalStateCode = (
     (client as any)?.state ||
     (() => {
@@ -511,52 +461,47 @@ export default function PortalDashboard() {
       return m ? m[1].toUpperCase() : '';
     })()
   ).toUpperCase().trim().slice(0, 2);
-  // Try Tier 1 via any utility name on the proposal (not available in portal — skip for now)
-  const portalIcaTier1 = null as ReturnType<typeof getInterconnectionProfile>;  // reserved for future
-  void getInterconnectionProfile; // keep import used
-  // Tier 2: state fallback — always available when stage is 'installation'
+  const portalIcaTier1 = null as ReturnType<typeof getInterconnectionProfile>;
+  void getInterconnectionProfile;
   const portalIcaFallback = portalStateCode ? getStateIcaFallback(portalStateCode) : null;
   const showIcaSection = stage === 'installation' && (portalIcaTier1 || portalIcaFallback);
 
   return (
     <div className="min-h-screen bg-[#07070e] text-white overflow-x-hidden">
 
-      {/* Subtle ambient */}
+      {/* Ambient glow */}
       <div className="pointer-events-none fixed inset-0 overflow-hidden z-0">
-        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-[800px] h-[400px] rounded-full bg-amber-500/[0.02] blur-[120px]" />
-        <div className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full bg-blue-600/[0.015] blur-[100px]" />
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 w-[900px] h-[500px] rounded-full bg-amber-500/[0.025] blur-[140px]" />
+        <div className="absolute bottom-0 right-0 w-[500px] h-[500px] rounded-full bg-blue-600/[0.012] blur-[120px]" />
       </div>
 
-      {/* NAV */}
+      {/* ── NAV ── */}
       <header className="sticky top-0 z-30 border-b border-white/[0.05] bg-[#07070e]/95 backdrop-blur-xl">
-        <div className="max-w-4xl mx-auto px-5 sm:px-8 py-3.5 flex items-center justify-between">
+        <div className="max-w-3xl mx-auto px-5 sm:px-8 py-3.5 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/15 flex items-center justify-center">
               <Sun size={14} className="text-amber-400" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white leading-none">
-                {owner?.company ?? 'Solar Portal'}
-              </div>
-              <div className="text-[10px] text-slate-600 mt-0.5">Homeowner Portal</div>
+              <p className="text-sm font-bold text-white leading-none">{owner?.company ?? 'Solar Portal'}</p>
+              <p className="text-[10px] text-slate-600 mt-0.5">Homeowner Portal</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {client && (
-              <span className="hidden sm:block text-xs text-slate-600">{client.email}</span>
-            )}
-            <button onClick={handleLogout} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-300 border border-white/[0.06] hover:border-white/15 rounded-lg px-3 py-1.5 transition-all">
+            {client && <span className="hidden sm:block text-xs text-slate-600">{client.email}</span>}
+            <button onClick={handleLogout}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 border border-white/[0.06] hover:border-white/15 rounded-lg px-3 py-1.5 transition-all">
               <LogOut size={11} /> Sign out
             </button>
           </div>
         </div>
       </header>
 
-      <main className={`max-w-4xl mx-auto px-5 sm:px-8 py-10 relative z-10 space-y-8 transition-all duration-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3'}`}>
+      <main className={`max-w-3xl mx-auto px-5 sm:px-8 py-10 relative z-10 transition-all duration-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
 
         {/* Project switcher */}
         {projects.length > 1 && (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 mb-8">
             {projects.map(proj => (
               <button key={proj.id} onClick={() => setActiveProject(proj)}
                 className={`flex-shrink-0 text-xs font-medium px-3 py-1.5 rounded-full border transition-all ${activeProject?.id === proj.id ? 'bg-amber-500/15 border-amber-500/25 text-amber-300' : 'bg-white/[0.03] border-white/[0.07] text-slate-500 hover:text-white'}`}>
@@ -567,91 +512,131 @@ export default function PortalDashboard() {
         )}
 
         {p ? (
-          <>
-            {/* ── 1. HEADER ── */}
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-amber-500/50 mb-3">Your Solar Project</p>
-              <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight">
-                {greeting},{' '}
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">{firstName}</span>
-              </h1>
-              {p.address && (
-                <div className="flex items-center gap-2 mt-3">
-                  <MapPin size={12} className="text-slate-600 flex-shrink-0" />
-                  <span className="text-sm text-slate-400">{p.address}</span>
+          <div className="space-y-5">
+
+            {/* ══ HERO BLOCK ══════════════════════════════════════════════ */}
+            <div className="rounded-2xl overflow-hidden border border-white/[0.06] bg-gradient-to-br from-white/[0.03] via-white/[0.015] to-transparent">
+              {/* Top strip */}
+              <div className={`h-1 w-full ${isComplete ? 'bg-gradient-to-r from-emerald-500 to-teal-400' : 'bg-gradient-to-r from-amber-500 to-amber-400'}`} style={{ width: `${pct}%` }} />
+
+              <div className="px-6 sm:px-8 pt-7 pb-6">
+                <div className="flex items-start justify-between gap-6">
+                  {/* Left: greeting + address */}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold uppercase tracking-widest text-amber-500/50 mb-2">Your Solar Project</p>
+                    <h1 className="text-3xl sm:text-4xl font-black text-white leading-tight tracking-tight">
+                      {greeting},{' '}
+                      <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 to-amber-500">{firstName}</span>
+                    </h1>
+                    {p.address && (
+                      <div className="flex items-center gap-1.5 mt-3">
+                        <MapPin size={11} className="text-slate-600 flex-shrink-0" />
+                        <span className="text-sm text-slate-400 truncate">{p.address}</span>
+                      </div>
+                    )}
+                    {p.updated_at && (
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <Clock size={10} className="text-slate-700 flex-shrink-0" />
+                        <span className="text-xs text-slate-600">Last updated {formatDate(p.updated_at)}</span>
+                      </div>
+                    )}
+
+                    {/* Quick stats row */}
+                    <div className="flex flex-wrap gap-3 mt-5">
+                      {p.system_size_kw && (
+                        <div className="flex items-center gap-2 rounded-xl bg-amber-500/[0.07] border border-amber-500/[0.12] px-3.5 py-2">
+                          <Zap size={13} className="text-amber-400 flex-shrink-0" />
+                          <div>
+                            <span className="text-base font-black text-amber-300">{p.system_size_kw}</span>
+                            <span className="text-xs text-amber-500/60 ml-1">kW system</span>
+                          </div>
+                        </div>
+                      )}
+                      {content && (
+                        <div className="flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/[0.07] px-3.5 py-2">
+                          <Home size={13} className="text-slate-500 flex-shrink-0" />
+                          <span className="text-sm text-slate-300 font-medium">Step {content.stepNum} of 7</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: progress ring */}
+                  <div className="flex-shrink-0 hidden sm:block">
+                    <ProgressArc pct={pct} stage={stage} />
+                  </div>
                 </div>
-              )}
-              {lastUpdated && (
-                <div className="flex items-center gap-2 mt-1.5">
-                  <Clock size={11} className="text-slate-700 flex-shrink-0" />
-                  <span className="text-xs text-slate-600">Last updated {lastUpdated}</span>
+              </div>
+
+              {/* ── STEP TIMELINE ── */}
+              <div className="px-6 sm:px-8 pb-7 border-t border-white/[0.04] pt-6">
+                <div className="flex items-center justify-between mb-5">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-500">Your Journey</p>
+                  <span className="sm:hidden text-sm font-black text-amber-400">{pct}% done</span>
                 </div>
-              )}
+                <StepTimeline stage={stage} />
+
+                {/* Progress bar */}
+                <div className="mt-5 h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-1000 ${isComplete ? 'bg-emerald-500' : 'bg-gradient-to-r from-amber-500 to-amber-400'}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
             </div>
 
-            {/* ── 2. ROADMAP (dominant) ── */}
-            <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] px-6 sm:px-10 py-8">
-              <div className="flex items-center justify-between mb-1">
-                <div>
-                  <h2 className="text-base font-black text-white">Project Roadmap</h2>
-                  <p className="text-xs text-slate-600 mt-0.5">Your journey from inquiry to installation</p>
-                </div>
-                <ProgressRing pct={pct} />
-              </div>
-              <Roadmap stage={stage} />
-              <div className="mt-5 h-1 bg-white/[0.04] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-500 to-amber-500 rounded-full transition-all duration-1000"
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-1.5">
-                <span className="text-[10px] text-slate-700">Start</span>
-                <span className="text-[10px] text-slate-700">Complete</span>
-              </div>
-            </div>
-
-            {/* ── 3. CURRENT STAGE — single narrative block ── */}
+            {/* ══ CURRENT STAGE CARD ══════════════════════════════════════ */}
             {content && stage && (
-              <div className="rounded-2xl border border-amber-500/[0.12] bg-amber-500/[0.04] px-6 sm:px-10 py-8">
-                <div className="flex items-center gap-2 mb-5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                  <span className="text-[10px] font-black uppercase tracking-widest text-amber-500/60">Current Stage</span>
+              <div className={`rounded-2xl border px-6 sm:px-8 py-7 ${
+                isComplete
+                  ? 'border-emerald-500/[0.15] bg-emerald-500/[0.03]'
+                  : content.actionIsRequired
+                  ? 'border-blue-500/[0.15] bg-blue-500/[0.03]'
+                  : 'border-amber-500/[0.12] bg-amber-500/[0.03]'
+              }`}>
+                {/* Stage badge */}
+                <div className="flex items-center gap-2 mb-4">
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${isComplete ? 'bg-emerald-400' : content.actionIsRequired ? 'bg-blue-400' : 'bg-amber-400'}`} />
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${isComplete ? 'text-emerald-500/70' : content.actionIsRequired ? 'text-blue-500/70' : 'text-amber-500/70'}`}>
+                    {content.actionIsRequired ? 'Action Needed' : 'In Progress'} · {content.roadmapLabel}
+                  </span>
                 </div>
 
-                {/* Stage title */}
-                <h2 className="text-2xl sm:text-3xl font-black text-white leading-snug mb-4">
+                {/* Headline */}
+                <h2 className="text-2xl sm:text-3xl font-black text-white leading-snug mb-3">
                   {content.headline}
                 </h2>
 
-                {/* Stage description */}
-                <p className="text-sm text-slate-300 leading-relaxed max-w-2xl">
-                  {content.body}
-                </p>
+                {/* Body */}
+                <p className="text-sm text-slate-300 leading-relaxed max-w-xl">{content.body}</p>
 
-                {/* ── Completed so far (NEW) ── */}
-                <CompletedSoFar stage={stage} microStages={projectMicros} />
+                {/* Milestone chips */}
+                <MilestoneChips stage={stage} microStages={projectMicros} />
 
-                {/* Next step */}
-                {content.next && (
-                  <p className="text-sm text-slate-400 mt-6">
-                    {content.next}
-                  </p>
-                )}
-
-                {/* Action */}
-                <div className={`mt-4 inline-flex items-center gap-2.5 rounded-xl px-4 py-2.5 border ${
-                  content.actionIsRequired
-                    ? 'bg-blue-500/[0.08] border-blue-500/[0.15] text-blue-300'
-                    : 'bg-emerald-500/[0.07] border-emerald-500/[0.12] text-emerald-300'
-                }`}>
-                  {content.actionIsRequired
-                    ? <AlertCircle size={13} className="text-blue-400 flex-shrink-0" />
-                    : <CheckCircle2 size={13} className="text-emerald-400 flex-shrink-0" />}
-                  <span className="text-sm font-medium">{content.action}</span>
+                {/* Next + Action */}
+                <div className="mt-5 space-y-2.5">
+                  {content.next && (
+                    <div className="flex items-start gap-2.5">
+                      <ChevronRight size={14} className="text-slate-600 mt-0.5 flex-shrink-0" />
+                      <p className="text-sm text-slate-400">{content.next}</p>
+                    </div>
+                  )}
+                  <div className={`inline-flex items-center gap-2.5 rounded-xl px-4 py-2.5 border ${
+                    content.actionIsRequired
+                      ? 'bg-blue-500/[0.08] border-blue-500/[0.18] text-blue-300'
+                      : isComplete
+                      ? 'bg-emerald-500/[0.08] border-emerald-500/[0.18] text-emerald-300'
+                      : 'bg-emerald-500/[0.07] border-emerald-500/[0.12] text-emerald-300'
+                  }`}>
+                    {content.actionIsRequired
+                      ? <AlertCircle size={13} className="text-blue-400 flex-shrink-0" />
+                      : <CheckCircle2 size={13} className="text-emerald-400 flex-shrink-0" />}
+                    <span className="text-sm font-medium">{content.action}</span>
+                  </div>
                 </div>
 
-                {/* Bill upload — only for lead_submitted or under_review */}
+                {/* ── Bill upload ── */}
                 {(p.homeowner_stage === 'lead_submitted' || p.homeowner_stage === 'under_review') && (
                   <div className="mt-6 border-t border-white/[0.05] pt-6">
                     {billUploaded ? (
@@ -659,35 +644,26 @@ export default function PortalDashboard() {
                         <CheckCircle2 size={15} className="text-emerald-400 flex-shrink-0" />
                         <div>
                           <p className="text-sm font-semibold text-emerald-300">Utility bill received ✓</p>
-                          <p className="text-xs text-slate-500 mt-0.5">We&apos;re analyzing your energy usage now.</p>
+                          <p className="text-xs text-slate-500 mt-0.5">We're analyzing your energy usage now.</p>
                         </div>
                       </div>
                     ) : (
                       <div>
-                        <p className="text-sm font-semibold text-white mb-1">Upload Your Utility Bill</p>
-                        <p className="text-xs text-slate-500 mb-4">Upload your electric bill so we can analyze your usage and design the right system.</p>
-                        {billUploadErr && (
-                          <p className="text-xs text-red-400 mb-3">{billUploadErr}</p>
-                        )}
+                        <p className="text-sm font-bold text-white mb-1">Upload Your Utility Bill</p>
+                        <p className="text-xs text-slate-500 mb-4">Share your electric bill so we can size your system correctly.</p>
+                        {billUploadErr && <p className="text-xs text-red-400 mb-3">{billUploadErr}</p>}
                         <label className={`inline-flex items-center gap-2.5 rounded-xl px-5 py-2.5 border cursor-pointer transition-all ${
                           billUploading
                             ? 'bg-white/[0.02] border-white/[0.06] text-slate-600 cursor-not-allowed'
                             : 'bg-amber-500/[0.08] border-amber-500/[0.15] text-amber-300 hover:bg-amber-500/[0.12] hover:border-amber-500/[0.25]'
                         }`}>
                           <FileCheck size={13} className="flex-shrink-0" />
-                          <span className="text-sm font-semibold">
-                            {billUploading ? 'Uploading...' : 'Upload Bill'}
-                          </span>
-                          <input
-                            type="file"
-                            accept=".pdf,.jpg,.jpeg,.png,.webp"
-                            className="hidden"
-                            disabled={billUploading}
+                          <span className="text-sm font-semibold">{billUploading ? 'Uploading...' : 'Upload Bill'}</span>
+                          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={billUploading}
                             onChange={async (e) => {
                               const file = e.target.files?.[0];
                               if (!file || !p.id) return;
-                              setBillUploading(true);
-                              setBillUploadErr('');
+                              setBillUploading(true); setBillUploadErr('');
                               try {
                                 const fd = new FormData();
                                 fd.append('file', file);
@@ -696,17 +672,13 @@ export default function PortalDashboard() {
                                 const json = await res.json();
                                 if (json.success) {
                                   setBillUploaded(true);
-                                  if (json.stageAdvanced) {
-                                    await load();
-                                  }
+                                  if (json.stageAdvanced) await load();
                                 } else {
                                   setBillUploadErr(json.error || 'Upload failed. Please try again.');
                                 }
                               } catch {
                                 setBillUploadErr('Connection error. Please try again.');
-                              } finally {
-                                setBillUploading(false);
-                              }
+                              } finally { setBillUploading(false); }
                             }}
                           />
                         </label>
@@ -715,7 +687,7 @@ export default function PortalDashboard() {
                   </div>
                 )}
 
-                {/* ── Proposal CTA — shown when stage is 'proposal' OR a signed proposal exists (signed proposals always stay visible) ── */}
+                {/* ── Proposal CTA ── */}
                 {(p.homeowner_stage === 'proposal' || projectProposals.some(pr => !!pr.signed_at)) && projectProposals.length > 0 && (() => {
                   const prop = projectProposals[0];
                   const propUrl = `/proposals/view/${prop.id}?token=${prop.share_token}`;
@@ -723,7 +695,6 @@ export default function PortalDashboard() {
                   return (
                     <div className="mt-6 border-t border-white/[0.05] pt-6">
                       {isSigned ? (
-                        /* Already signed — show confirmation */
                         <div className="rounded-2xl bg-emerald-500/[0.06] border border-emerald-500/[0.15] p-5">
                           <div className="flex items-start gap-3">
                             <CheckCircle2 size={18} className="text-emerald-400 flex-shrink-0 mt-0.5" />
@@ -732,50 +703,34 @@ export default function PortalDashboard() {
                               <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
                                 You signed on {new Date(prop.signed_at!).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}. Your installer will be in touch to schedule installation.
                               </p>
-                              <a
-                                href={propUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 mt-3 text-xs text-slate-400 hover:text-white transition-colors"
-                              >
-                                <ExternalLink size={11} />
-                                View proposal again
+                              <a href={propUrl} target="_blank" rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 mt-3 text-xs text-slate-400 hover:text-white transition-colors">
+                                <ExternalLink size={11} /> View proposal again
                               </a>
                             </div>
                           </div>
                         </div>
                       ) : (
-                        /* Not yet signed — primary CTA */
                         <div className="rounded-2xl bg-amber-500/[0.07] border border-amber-500/[0.18] p-5">
                           <div className="flex items-start gap-3 mb-4">
-                            <div className="w-8 h-8 rounded-xl bg-amber-500/[0.15] border border-amber-500/[0.2] flex items-center justify-center flex-shrink-0">
-                              <PenLine size={14} className="text-amber-400" />
+                            <div className="w-9 h-9 rounded-xl bg-amber-500/[0.15] border border-amber-500/[0.2] flex items-center justify-center flex-shrink-0">
+                              <PenLine size={15} className="text-amber-400" />
                             </div>
                             <div className="min-w-0 flex-1">
                               <p className="text-sm font-bold text-white">Your proposal is ready to review</p>
                               <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                                {prop.name} — review your system design, pricing, and savings estimate, then sign to move forward.
+                                {prop.name} — review your system design, pricing, and savings estimate.
                               </p>
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            <a
-                              href={propUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm transition-colors"
-                            >
-                              <ExternalLink size={13} />
-                              View &amp; Sign Proposal
+                            <a href={propUrl} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-black font-bold text-sm transition-colors shadow-lg shadow-amber-500/20">
+                              <PenLine size={13} /> View &amp; Sign Proposal
                             </a>
-                            <a
-                              href={propUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 bg-white/[0.04] border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/[0.15] font-medium text-sm transition-colors"
-                            >
-                              <TrendingUp size={13} />
-                              See your savings
+                            <a href={propUrl} target="_blank" rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 bg-white/[0.04] border border-white/[0.08] text-slate-300 hover:text-white hover:border-white/[0.15] font-medium text-sm transition-colors">
+                              <TrendingUp size={13} /> See your savings
                             </a>
                           </div>
                         </div>
@@ -786,30 +741,16 @@ export default function PortalDashboard() {
               </div>
             )}
 
-            {/* ── ICA / PTO Roadmap — shown during installation stage ───────── */}
+            {/* ══ ICA / PTO ═══════════════════════════════════════════════ */}
             {showIcaSection && (portalIcaTier1 || portalIcaFallback) && (() => {
               const tier1 = portalIcaTier1;
               const tier2 = portalIcaFallback;
-              const steps = tier1
-                ? tier1.pto_steps
-                : (tier2?.generic_steps ?? []);
-              const icaTime = tier1
-                ? `${tier1.ica_approval_days_min}–${tier1.ica_approval_days_max} business days`
-                : tier2
-                  ? `${tier2.typical_ica_days_min}–${tier2.typical_ica_days_max} business days`
-                  : null;
-              const ptoTime = tier1
-                ? `${tier1.pto_days_min}–${tier1.pto_days_max} business days`
-                : tier2
-                  ? `${tier2.typical_pto_days_min}–${tier2.typical_pto_days_max} business days`
-                  : null;
+              const steps = tier1 ? tier1.pto_steps : (tier2?.generic_steps ?? []);
+              const icaTime = tier1 ? `${tier1.ica_approval_days_min}–${tier1.ica_approval_days_max} biz days` : tier2 ? `${tier2.typical_ica_days_min}–${tier2.typical_ica_days_max} biz days` : null;
+              const ptoTime = tier1 ? `${tier1.pto_days_min}–${tier1.pto_days_max} biz days` : tier2 ? `${tier2.typical_pto_days_min}–${tier2.typical_pto_days_max} biz days` : null;
               const portalUrl = tier1?.application_url ?? null;
               const rulesUrl  = tier2?.rules_url ?? null;
-              const tierLabel = tier1
-                ? tier1.utility_name
-                : tier2
-                  ? `${tier2.state_name} (${tier2.regulatory_body})`
-                  : null;
+              const tierLabel = tier1 ? tier1.utility_name : tier2 ? `${tier2.state_name} (${tier2.regulatory_body})` : null;
               return (
                 <div className="rounded-2xl border border-violet-500/[0.12] bg-violet-500/[0.03] px-6 sm:px-8 py-6">
                   <div className="flex items-center gap-2 mb-1">
@@ -823,57 +764,41 @@ export default function PortalDashboard() {
                       {tier1 ? `Steps specific to ${tierLabel}` : `Typical steps — ${tierLabel}`}
                     </p>
                   )}
-                  {/* Timeline badges */}
-                  {(icaTime || ptoTime) && (
-                    <div className="flex flex-wrap gap-2 mb-5">
-                      {icaTime && (
-                        <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-violet-500/10 border border-violet-500/20">
-                          <Clock size={11} className="text-violet-400" />
-                          <span className="text-xs text-violet-300 font-medium">Interconnection approval: {icaTime}</span>
-                        </div>
-                      )}
-                      {ptoTime && (
-                        <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-emerald-500/10 border border-emerald-500/20">
-                          <CheckCircle size={11} className="text-emerald-400" />
-                          <span className="text-xs text-emerald-300 font-medium">PTO (system turn-on): {ptoTime}</span>
-                        </div>
-                      )}
-                      {portalUrl && (
-                        <a
-                          href={portalUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors"
-                        >
-                          <ExternalLink size={11} className="text-sky-400" />
-                          <span className="text-xs text-sky-300 font-medium">Utility portal</span>
-                        </a>
-                      )}
-                      {!portalUrl && rulesUrl && (
-                        <a
-                          href={rulesUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors"
-                        >
-                          <ExternalLink size={11} className="text-sky-400" />
-                          <span className="text-xs text-sky-300 font-medium">State rules</span>
-                        </a>
-                      )}
-                    </div>
-                  )}
-                  {/* Steps */}
+                  <div className="flex flex-wrap gap-2 mb-5">
+                    {icaTime && (
+                      <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-violet-500/10 border border-violet-500/20">
+                        <Clock size={11} className="text-violet-400" />
+                        <span className="text-xs text-violet-300 font-medium">Interconnection: {icaTime}</span>
+                      </div>
+                    )}
+                    {ptoTime && (
+                      <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-emerald-500/10 border border-emerald-500/20">
+                        <CheckCircle size={11} className="text-emerald-400" />
+                        <span className="text-xs text-emerald-300 font-medium">PTO (turn-on): {ptoTime}</span>
+                      </div>
+                    )}
+                    {portalUrl && (
+                      <a href={portalUrl} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors">
+                        <ExternalLink size={11} className="text-sky-400" />
+                        <span className="text-xs text-sky-300 font-medium">Utility portal</span>
+                      </a>
+                    )}
+                    {!portalUrl && rulesUrl && (
+                      <a href={rulesUrl} target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors">
+                        <ExternalLink size={11} className="text-sky-400" />
+                        <span className="text-xs text-sky-300 font-medium">State rules</span>
+                      </a>
+                    )}
+                  </div>
                   {steps.length > 0 && (
                     <div className="space-y-0">
                       {steps.map((step, idx) => (
                         <div key={idx} className="flex gap-3">
                           <div className="flex flex-col items-center flex-shrink-0">
-                            <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 flex items-center justify-center text-xs font-black text-violet-400">
-                              {idx + 1}
-                            </div>
-                            {idx < steps.length - 1 && (
-                              <div className="w-px flex-1 bg-violet-500/20 my-1" />
-                            )}
+                            <div className="w-6 h-6 rounded-full border-2 border-violet-500/30 flex items-center justify-center text-xs font-black text-violet-400">{idx + 1}</div>
+                            {idx < steps.length - 1 && <div className="w-px flex-1 bg-violet-500/20 my-1" />}
                           </div>
                           <div className={`pb-${idx < steps.length - 1 ? '3' : '0'} flex-1 min-w-0`}>
                             <p className="text-xs text-slate-300 leading-relaxed">{step}</p>
@@ -884,75 +809,38 @@ export default function PortalDashboard() {
                   )}
                   <div className="mt-4 rounded-lg px-3 py-2 bg-slate-800/40 border border-slate-700/30">
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      {tier1
-                        ? `Steps specific to ${tier1.utility_name}. Your installer handles most of this on your behalf.`
-                        : tier2
-                          ? `Typical steps for utilities regulated by the ${tier2.regulatory_body}. Your installer handles most of this for you.`
-                          : 'Your installer handles the interconnection and PTO process. This timeline is typical.'
-                      }
+                      {tier1 ? `Your installer handles most of this on your behalf.` : `Your installer handles the interconnection and PTO process for you.`}
                     </p>
                   </div>
                 </div>
               );
             })()}
 
-            {/* ── 4. PROJECT DETAILS (small stats) ── */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Home size={13} className="text-slate-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Property</p>
-                </div>
-                <p className="text-sm font-semibold text-white leading-snug">{p.address ? p.address.split(',')[0] : '—'}</p>
-                {p.address?.includes(',') && <p className="text-xs text-slate-600 mt-0.5">{p.address.split(',').slice(1).join(',').trim()}</p>}
-              </div>
-
-              <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Zap size={13} className="text-slate-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">System Size</p>
-                </div>
-                {p.system_size_kw
-                  ? <><p className="text-xl font-black text-amber-400">{p.system_size_kw}</p><p className="text-xs text-slate-600">kilowatts</p></>
-                  : <p className="text-sm text-slate-600">Pending design</p>
-                }
-              </div>
-
-              <div className="rounded-xl border border-white/[0.05] bg-white/[0.02] p-4 col-span-2 sm:col-span-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp size={13} className="text-slate-600" />
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-600">Progress</p>
-                </div>
-                <p className="text-xl font-black text-white">{pct}<span className="text-sm font-bold text-slate-600">%</span></p>
-                <p className="text-xs text-slate-600">{content?.roadmapLabel ?? '—'} · {content?.stepLabel ?? ''}</p>
-              </div>
-            </div>
-
-            {/* ── 5. DOCUMENTS RECEIVED (standalone, clean) ── */}
+            {/* ══ DOCUMENTS ═══════════════════════════════════════════════ */}
             {projectDocs.length > 0 && (
-              <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="w-6 h-6 rounded-lg bg-blue-500/10 border border-blue-500/15 flex items-center justify-center">
-                    <FileCheck size={11} className="text-blue-400" />
+              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.015] overflow-hidden">
+                <div className="px-6 sm:px-8 pt-5 pb-4 flex items-center gap-3 border-b border-white/[0.05]">
+                  <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/15 flex items-center justify-center">
+                    <FileCheck size={13} className="text-blue-400" />
                   </div>
-                  <h3 className="text-sm font-bold text-white">Documents Received</h3>
-                  <span className="ml-auto text-[10px] text-slate-600">{projectDocs.length} file{projectDocs.length !== 1 ? 's' : ''}</span>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-bold text-white">Your Documents</h3>
+                    <p className="text-xs text-slate-600 mt-0.5">{projectDocs.length} file{projectDocs.length !== 1 ? 's' : ''} on your project</p>
+                  </div>
                 </div>
-                <div className="flex flex-col gap-1.5">
+                <div className="divide-y divide-white/[0.04]">
                   {projectDocs.map((doc, i) => (
-                    <div key={i} className="flex items-center justify-between rounded-xl bg-white/[0.02] border border-white/[0.04] px-3 py-2.5">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-5 h-5 rounded-md bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                          <CheckCircle2 size={10} className="text-emerald-400" />
+                    <div key={i} className="flex items-center justify-between px-6 sm:px-8 py-3.5 hover:bg-white/[0.02] transition-colors">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-7 h-7 rounded-lg bg-emerald-500/8 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                          <CheckCircle2 size={12} className="text-emerald-400" />
                         </div>
-                        <div>
-                          <p className="text-xs font-semibold text-white leading-none">{doc.label}</p>
-                          <p className="text-[9px] text-slate-600 mt-0.5 uppercase tracking-wide">
-                            {doc.doc_type?.replace(/_/g, ' ') ?? 'Document'}
-                          </p>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-white leading-none truncate">{doc.label}</p>
+                          <p className="text-[10px] text-slate-600 mt-0.5 uppercase tracking-wide">{doc.doc_type?.replace(/_/g, ' ') ?? 'Document'}</p>
                         </div>
                       </div>
-                      <p className="text-[10px] text-slate-600 flex-shrink-0 ml-3">
+                      <p className="text-xs text-slate-600 flex-shrink-0 ml-4">
                         {new Date(doc.uploaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                       </p>
                     </div>
@@ -961,32 +849,32 @@ export default function PortalDashboard() {
               </div>
             )}
 
-            {/* ── 6. CONTACT ── */}
+            {/* ══ CONTACT ══════════════════════════════════════════════════ */}
             {(owner?.phone || owner?.email) && (
-              <div className="rounded-2xl border border-white/[0.05] bg-white/[0.015] px-6 sm:px-8 py-6">
-                <h3 className="text-sm font-bold text-white mb-1">Have a question?</h3>
+              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.015] px-6 sm:px-8 py-6">
+                <h3 className="text-sm font-bold text-white mb-1">Questions? We're here.</h3>
                 <p className="text-xs text-slate-600 mb-5">Reach out to your project team anytime.</p>
                 <div className="flex flex-col sm:flex-row gap-3">
                   {owner.phone && (
                     <a href={`tel:${owner.phone}`}
-                      className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group">
-                      <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
-                        <Phone size={12} className="text-amber-400" />
+                      className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group flex-1">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
+                        <Phone size={13} className="text-amber-400" />
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-600 uppercase tracking-wide">Phone</p>
+                        <p className="text-[10px] text-slate-600 uppercase tracking-wide">Call Us</p>
                         <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors">{owner.phone}</p>
                       </div>
                     </a>
                   )}
                   {owner.email && (
                     <a href={`mailto:${owner.email}`}
-                      className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group">
-                      <div className="w-7 h-7 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
-                        <Mail size={12} className="text-amber-400" />
+                      className="flex items-center gap-3 bg-white/[0.03] hover:bg-white/[0.05] border border-white/[0.07] hover:border-white/[0.12] rounded-xl px-4 py-3 transition-all group flex-1">
+                      <div className="w-8 h-8 rounded-lg bg-amber-500/8 border border-amber-500/12 flex items-center justify-center flex-shrink-0">
+                        <Mail size={13} className="text-amber-400" />
                       </div>
                       <div>
-                        <p className="text-[10px] text-slate-600 uppercase tracking-wide">Email</p>
+                        <p className="text-[10px] text-slate-600 uppercase tracking-wide">Email Us</p>
                         <p className="text-sm font-semibold text-white group-hover:text-amber-300 transition-colors">{owner.email}</p>
                       </div>
                     </a>
@@ -995,25 +883,24 @@ export default function PortalDashboard() {
               </div>
             )}
 
-          </>
+          </div>
         ) : (
           <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-16 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-amber-500/8 border border-amber-500/12 flex items-center justify-center mx-auto mb-4">
-              <Sun size={24} className="text-amber-400/40" />
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/8 border border-amber-500/12 flex items-center justify-center mx-auto mb-5">
+              <Sun size={28} className="text-amber-400/40" />
             </div>
-            <h3 className="text-base font-bold text-white mb-2">Your project is being set up</h3>
+            <h3 className="text-lg font-bold text-white mb-2">Your project is being set up</h3>
             <p className="text-sm text-slate-600 max-w-sm mx-auto">It'll appear here within 1 business day of your inquiry.</p>
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-3 pt-2 pb-6">
+        <div className="flex items-center justify-center gap-3 pt-8 pb-4">
           <div className="h-px flex-1 bg-white/[0.03]" />
           <span className="text-[10px] text-white/10 flex items-center gap-1.5">
             <Sun size={9} className="text-amber-500/20" /> {owner?.company ?? 'Solar Portal'}
           </span>
           <div className="h-px flex-1 bg-white/[0.03]" />
         </div>
-
       </main>
     </div>
   );
