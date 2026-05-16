@@ -46,6 +46,7 @@ export async function POST(
 
     // Fetch proposal + project + client in one query
     // NOTE: proposals table uses "name" (not "title") — aliased to title for clarity
+    // NOTE: organizations table uses "name" (not "company_name")
     const rows = await sql`
       SELECT
         p.id,
@@ -59,7 +60,7 @@ export async function POST(
         c.name         AS client_name,
         c.email        AS client_email,
         u.name         AS rep_name,
-        o.company_name AS company_name
+        o.name         AS company_name
       FROM proposals   p
       JOIN projects    pr ON pr.id   = p.project_id
       JOIN clients     c  ON c.id    = pr.client_id
@@ -151,11 +152,6 @@ export async function POST(
     });
 
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error('[send-email] RAW ERROR:', msg);
-    return NextResponse.json(
-      { success: false, error: msg, code: 'DEBUG' },
-      { status: 503 }
-    );
+    return handleRouteDbError('[api/proposals/[id]/send-email]', e);
   }
 }

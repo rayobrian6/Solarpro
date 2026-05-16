@@ -39,19 +39,15 @@ export async function GET(req: NextRequest, context: RouteContext) {
         pr.id,
         pr.project_id,
         p.name   AS project_name,
-        pr.title,
-        pr.status,
-        pr.prepared_date,
-        pr.valid_until,
+        pr.name  AS title,
         pr.sent_at,
         pr.sent_to_email,
-        (pr.data_json -> 'costEstimate' ->> 'netCost')::numeric  AS net_cost
+        (pr.data_json -> 'project' -> 'costEstimate' ->> 'netCost')::numeric AS net_cost
       FROM proposals pr
       JOIN projects p ON p.id = pr.project_id
       WHERE p.client_id   = ${id}
         AND p.user_id     = ${user.id}
-        AND pr.deleted_at IS NULL
-      ORDER BY pr.prepared_date DESC NULLS LAST, pr.created_at DESC
+      ORDER BY pr.created_at DESC
       LIMIT 200
     `;
 

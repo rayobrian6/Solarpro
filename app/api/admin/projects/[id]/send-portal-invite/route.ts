@@ -46,7 +46,7 @@ export async function POST(
         c.name             AS client_name,
         c.email            AS client_email,
         u.name             AS rep_name,
-        o.company_name     AS company_name
+        o.name             AS company_name
       FROM projects p
       LEFT JOIN clients      c ON c.id    = p.client_id
       LEFT JOIN users        u ON u.id    = p.user_id
