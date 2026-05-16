@@ -1106,10 +1106,10 @@ function SolarEngine3D({
       // camera.setView() is fully deterministic and always produces the correct
       // camera position+orientation regardless of what tiles are loaded.
       //
-      // CONTROLS:
-      //   Left-drag     → orbit (heading + pitch)
-      //   Right-drag    → tilt (pitch only, finer control)
-      //   Middle-drag   → pan orbit target (translate reference point)
+      // CONTROLS (v52.2):
+      //   Left-drag     → pan (translate orbit target — matches 2D map drag)
+      //   Right-drag    → orbit (heading + pitch)
+      //   Middle-drag   → orbit (heading + pitch)
       //   Scroll wheel  → zoom (adjust orbit radius)
       //   Middle-click  → zoom to cursor is NOT supported; middle is pan only
 
@@ -1307,36 +1307,28 @@ function SolarEngine3D({
           const dx = ev.clientX - orbit.dragStartX;
           const dy = ev.clientY - orbit.dragStartY;
 
+          // v52.2: Swapped left/right-drag controls to match GIS/Google-Maps convention:
+          //   Left-drag   → pan (translate target) — matches 2D map drag behaviour
+          //   Right-drag  → full orbit (heading + pitch)
+          //   Middle-drag → orbit (heading + pitch, same as right-drag)
+          // Previously left=orbit, right=tilt — felt inverted vs 2D map expectations.
           if (orbit.dragButton === 0) {
-            // Left-drag: full orbit (heading + pitch)
-            orbit.heading = orbit.dragStartH - dx * ORBIT_DRAG;
-            orbit.pitch   = orbit.dragStartP + dy * ORBIT_DRAG;
-
-          } else if (orbit.dragButton === 2) {
-            // Right-drag: tilt only (pitch)
-            orbit.pitch   = orbit.dragStartP + dy * TILT_DRAG;
-
-          } else if (orbit.dragButton === 1) {
-            // Middle-drag: pan the orbit target
-            // Convert pixel offsets to world metres in the camera’s ENU frame,
-            // then shift targetLat/targetLng accordingly.
+            // Left-drag: pan the orbit target (like 2D map drag)
             const panScale = orbit.radius * PAN_SCALE;
-
-            // Account for current heading so pan feels natural regardless of
-            // which direction the camera is facing.
             const hSin = Math.sin(orbit.heading);
             const hCos = Math.cos(orbit.heading);
-
             // screen-right maps to camera-right; screen-down maps to camera-back
             const eastPan  = -dx * panScale * hCos + dy * panScale * hSin;
             const northPan =  dx * panScale * hSin + dy * panScale * hCos;
-
-            // Convert metres to degrees (approx, valid for small offsets)
             const mPerDegLat = 111320;
             const mPerDegLng = 111320 * Math.cos(orbit.targetLat * Math.PI / 180);
-
             orbit.targetLat = orbit.dragStartTLat + northPan / mPerDegLat;
             orbit.targetLng = orbit.dragStartTLng + eastPan  / mPerDegLng;
+
+          } else if (orbit.dragButton === 2 || orbit.dragButton === 1) {
+            // Right-drag or middle-drag: full orbit (heading + pitch)
+            orbit.heading = orbit.dragStartH - dx * ORBIT_DRAG;
+            orbit.pitch   = orbit.dragStartP + dy * ORBIT_DRAG;
           }
 
           applyOrbit();

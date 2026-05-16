@@ -710,6 +710,36 @@ export default function DesignStudio({ project, onSave }: Props) {
     });
   }, []);
 
+  // ── Geocode address for initial fly-to (does NOT clear panels or fetch Solar data) ───────
+  // Used on project load to fly the camera to the correct street-level address without
+  // destroying the saved panel layout or triggering Solar API auto-fetch.
+  const geocodeAddressForFlyTo = async (address: string) => {
+    if (!address.trim()) return;
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(address)}&mode=search`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        const newLat = data.data.lat;
+        const newLng = data.data.lng;
+        setMapCenter({ lat: newLat, lng: newLng });
+        setZoom(19);
+        setLocationStatus('found');
+        // Persist street-level coords back to project so future loads skip geocoding
+        if (project.id) {
+          fetch(`/api/projects/${project.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: newLat, lng: newLng }),
+          }).catch(() => {}); // non-fatal
+        }
+      } else {
+        setLocationStatus('failed');
+      }
+    } catch {
+      setLocationStatus('failed');
+    }
+  };
+
   // ── Address geocoding ──────────────────────────────────────
   const geocodeAddress = async (address: string) => {
     if (!address.trim()) return;
@@ -895,62 +925,64 @@ export default function DesignStudio({ project, onSave }: Props) {
   }, [fetchSolarData, project.id, toast]);
 
   // ── Resolve location on load ─────────────────────────────────────────
-  // Phase 3-6: Priority chain:
-  //   1. project.lat/lng (saved at creation — fastest, no async needed)
-  //   2. project.client.lat/lng (client geocoded coords)
-  //   3. Geocode project.address
-  //   4. Geocode client address
-  // Camera flies immediately to resolved coords — no wrong-location flash.
+  // v52.1: Street-level geocode always wins over stored coords.
+  // Stored project.lat/lng may be city-center (from bill-parse which geocodes the city,
+  // not the street address). If we have a street-level address (starts with a house number),
+  // always geocode it to get precise parcel coords, even if stored coords look valid.
+  // This fixes the "flew to wrong city downtown" bug after bill parse + project creation.
   useEffect(() => {
-    // Phase 3: Project has its own geocoded coords (set at creation)
+    setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null); setSolarDataCityOnly(false);
+
+    const projectAddr = project.address?.trim();
+    const clientAddr  = project.client?.address;
+
+    // Best full address available for geocoding
+    const fullClientAddr = clientAddr
+      ? [clientAddr, project.client?.city, project.client?.state, project.client?.zip].filter(Boolean).join(', ')
+      : null;
+    const addrToGeocode = projectAddr || fullClientAddr;
+
+    // If we have a street-level address (house number present), geocode it for precise coords.
+    // Pre-position camera at stored coords so the 3D scene isn't blank during geocoding.
+    if (addrToGeocode && isStreetLevelAddress(addrToGeocode)) {
+      if (hasValidCoords(project.lat, project.lng)) {
+        setMapCenter({ lat: project.lat!, lng: project.lng! });
+      } else if (hasValidCoords(project.client?.lat, project.client?.lng)) {
+        setMapCenter({ lat: project.client!.lat!, lng: project.client!.lng! });
+      }
+      setLocationStatus('locating');
+      setAddressSearch(addrToGeocode);
+      geocodeAddressForFlyTo(addrToGeocode); // will call setMapCenter with precise street coords
+      return;
+    }
+
+    // No street number — use stored coords (city-level is fine when no street address to geocode).
     if (hasValidCoords(project.lat, project.lng)) {
       setMapCenter({ lat: project.lat!, lng: project.lng! });
       setLocationStatus('found');
-      // Do NOT auto-fetch Solar data on project load — data must be tied to a specific
-      // building the user explicitly picks. Project coords may be a city center or wrong address.
-      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null); setSolarDataCityOnly(false);
-      if (project.address) setAddressSearch(project.address);
+      if (projectAddr) setAddressSearch(projectAddr);
       return;
     }
 
-    // Phase 6 fallback: try client coords
     if (hasValidCoords(project.client?.lat, project.client?.lng)) {
       setMapCenter({ lat: project.client!.lat!, lng: project.client!.lng! });
       setLocationStatus('found');
-      // Do NOT auto-fetch Solar data — must be tied to explicit building pick
-      setSolarApiData(null); setRoofSegments([]); setSolarDataAddress(null); setSolarDataCityOnly(false);
-      if (project.client?.address) {
-        setAddressSearch([project.client.address, project.client.city, project.client.state].filter(Boolean).join(', '));
-      }
+      if (fullClientAddr) setAddressSearch(fullClientAddr);
       return;
     }
 
-    // Phase 6 fallback: geocode project address
-    const projectAddr = project.address?.trim();
-    if (projectAddr) {
+    // Last resort: geocode whatever address we have (even city-level)
+    if (addrToGeocode) {
       setLocationStatus('locating');
-      setAddressSearch(projectAddr);
-      geocodeAddress(projectAddr);
-      return;
-    }
-
-    // Phase 6 fallback: geocode client address
-    if (project.client?.address) {
-      setLocationStatus('locating');
-      const fullAddress = [
-        project.client.address,
-        project.client.city,
-        project.client.state,
-        project.client.zip,
-      ].filter(Boolean).join(', ');
-      setAddressSearch(fullAddress);
-      geocodeAddress(fullAddress);
+      setAddressSearch(addrToGeocode);
+      geocodeAddressForFlyTo(addrToGeocode);
       return;
     }
 
     // No address at all — stay at default, let user search manually
     setLocationStatus('failed');
   }, [project.id]); // Only run once when project loads
+
 
   // ── Load map tiles ──────────────────────────────────────────────────────────
   // Provider priority (v47.87):
