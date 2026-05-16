@@ -87,7 +87,12 @@ export async function GET(req: NextRequest) {
       }));
     }
 
-    // Fetch documents for all client projects (project_files + site_survey_files)
+    // Fetch documents — HOMEOWNER-SAFE ONLY
+    // Only surfaces files the homeowner uploaded themselves:
+    //   utility_bill  — their uploaded electric bill
+    //   portal_upload — anything they submitted via the portal
+    // Internal ops files (permit packets, BOM, SLD, engineering reports,
+    // site survey photos, client profile, etc.) are intentionally excluded.
     let documents: {
       project_id: string;
       doc_type: string;
@@ -96,8 +101,6 @@ export async function GET(req: NextRequest) {
     }[] = [];
 
     if (projectIds.length > 0) {
-      // project_files (utility bills, portal uploads, survey documents)
-      // file_url = external URL (survey photo fetch); file_data = inline binary (portal uploads)
       const pfRows = await sql`
         SELECT
           project_id::text,
@@ -107,39 +110,19 @@ export async function GET(req: NextRequest) {
           created_at::text         AS uploaded_at
         FROM project_files
         WHERE project_id = ANY(${projectIds})
+          AND file_type IN ('utility_bill', 'portal_upload')
           AND (file_url IS NOT NULL OR file_data IS NOT NULL)
           AND status != 'failed'
         ORDER BY created_at DESC
       `;
 
-      // site_survey_files (photos from field survey)
-      const ssfRows = await sql`
-        SELECT
-          ss.project_id::text,
-          'site_survey_file' AS doc_type,
-          COALESCE(ssf.label, ssf.filename, 'Site Survey Photo') AS label,
-          ssf.created_at::text AS uploaded_at
-        FROM site_survey_files ssf
-        JOIN site_surveys ss ON ss.id = ssf.survey_id
-        WHERE ss.project_id = ANY(${projectIds})
-        ORDER BY ssf.created_at DESC
-      `;
-
-      documents = [
-        ...pfRows.map((r: Record<string, unknown>) => ({
-          project_id:  String(r.project_id),
-          doc_type:    String(r.doc_type),
-          file_type:   r.file_type ? String(r.file_type) : undefined,
-          label:       normalizeDocumentLabel(String(r.label)),
-          uploaded_at: String(r.uploaded_at),
-        })),
-        ...ssfRows.map((r: Record<string, unknown>) => ({
-          project_id:  String(r.project_id),
-          doc_type:    String(r.doc_type),
-          label:       normalizeDocumentLabel(String(r.label)),
-          uploaded_at: String(r.uploaded_at),
-        })),
-      ].sort((a, b) => b.uploaded_at.localeCompare(a.uploaded_at));
+      documents = pfRows.map((r: Record<string, unknown>) => ({
+        project_id:  String(r.project_id),
+        doc_type:    String(r.doc_type),
+        file_type:   r.file_type ? String(r.file_type) : undefined,
+        label:       normalizeDocumentLabel(String(r.label)),
+        uploaded_at: String(r.uploaded_at),
+      }));
     }
 
     // Fetch micro stages for all client projects (internal progress events)

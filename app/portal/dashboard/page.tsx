@@ -6,7 +6,7 @@ import {
   Sun, MapPin, LogOut, RefreshCw,
   CheckCircle2, Circle, Clock,
   Phone, Mail, AlertCircle, Zap,
-  TrendingUp, Home, FileCheck, ExternalLink, PenLine,
+  TrendingUp, Home, ExternalLink, PenLine,
   Info, CheckCircle, ChevronRight, Star,
 } from 'lucide-react';
 import {
@@ -381,6 +381,7 @@ export default function PortalDashboard() {
   const [mounted,       setMounted]       = useState(false);
 
   void history;
+  void documents; // API returns homeowner-safe docs only; currently used for bill upload check
 
   const load = async () => {
     setLoading(true); setError('');
@@ -447,8 +448,7 @@ export default function PortalDashboard() {
   const pct          = stage ? Math.round(((stageIdx + 1) / ROADMAP_STEPS.length) * 100) : 0;
   const firstName    = client ? getFirstName(client.name) : 'there';
   const greeting     = getGreeting();
-  const projectMicros   = microStages.filter(m => p && m.project_id === p.id);
-  const projectDocs     = documents.filter(d => p && d.project_id === p.id);
+  const projectMicros    = microStages.filter(m => p && m.project_id === p.id);
   const projectProposals = proposals.filter(pr => p && pr.project_id === p.id);
   const isComplete   = stage === 'completed';
 
@@ -657,7 +657,7 @@ export default function PortalDashboard() {
                             ? 'bg-white/[0.02] border-white/[0.06] text-slate-600 cursor-not-allowed'
                             : 'bg-amber-500/[0.08] border-amber-500/[0.15] text-amber-300 hover:bg-amber-500/[0.12] hover:border-amber-500/[0.25]'
                         }`}>
-                          <FileCheck size={13} className="flex-shrink-0" />
+                          <CheckCircle2 size={13} className="flex-shrink-0" />
                           <span className="text-sm font-semibold">{billUploading ? 'Uploading...' : 'Upload Bill'}</span>
                           <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" disabled={billUploading}
                             onChange={async (e) => {
@@ -816,38 +816,9 @@ export default function PortalDashboard() {
               );
             })()}
 
-            {/* ══ DOCUMENTS ═══════════════════════════════════════════════ */}
-            {projectDocs.length > 0 && (
-              <div className="rounded-2xl border border-white/[0.06] bg-white/[0.015] overflow-hidden">
-                <div className="px-6 sm:px-8 pt-5 pb-4 flex items-center gap-3 border-b border-white/[0.05]">
-                  <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/15 flex items-center justify-center">
-                    <FileCheck size={13} className="text-blue-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-bold text-white">Your Documents</h3>
-                    <p className="text-xs text-slate-600 mt-0.5">{projectDocs.length} file{projectDocs.length !== 1 ? 's' : ''} on your project</p>
-                  </div>
-                </div>
-                <div className="divide-y divide-white/[0.04]">
-                  {projectDocs.map((doc, i) => (
-                    <div key={i} className="flex items-center justify-between px-6 sm:px-8 py-3.5 hover:bg-white/[0.02] transition-colors">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-emerald-500/8 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                          <CheckCircle2 size={12} className="text-emerald-400" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-white leading-none truncate">{doc.label}</p>
-                          <p className="text-[10px] text-slate-600 mt-0.5 uppercase tracking-wide">{doc.doc_type?.replace(/_/g, ' ') ?? 'Document'}</p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-600 flex-shrink-0 ml-4">
-                        {new Date(doc.uploaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {/* Documents section intentionally removed — internal ops files are
+                not for the homeowner. Their proposal is surfaced in the stage
+                card above. Utility bill upload confirmation is shown there too. */}
 
             {/* ══ CONTACT ══════════════════════════════════════════════════ */}
             {(owner?.phone || owner?.email) && (
