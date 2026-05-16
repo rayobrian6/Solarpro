@@ -151,6 +151,11 @@ export async function POST(
     });
 
   } catch (e: unknown) {
-    return handleRouteDbError('[api/proposals/[id]/send-email]', e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[send-email] RAW ERROR:', msg);
+    return NextResponse.json(
+      { success: false, error: msg, code: 'DEBUG' },
+      { status: 503 }
+    );
   }
 }
