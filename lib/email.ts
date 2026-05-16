@@ -609,3 +609,143 @@ ${opts.companyName} — Powered by SolarPro
     text,
   });
 }
+
+// ─── Portal OTP Login Email ───────────────────────────────────────────────────
+
+/**
+ * sendPortalOtpEmail — sends a 6-digit one-time passcode to a homeowner.
+ * Called during the portal login flow; code expires in 10 minutes.
+ */
+export async function sendPortalOtpEmail(opts: {
+  to:        string;
+  name:      string;
+  code:      string;        // 6-digit plaintext code (not stored)
+  expiresIn: string;        // human-readable, e.g. "10 minutes"
+}): Promise<{ success: boolean; error?: string }> {
+  const displayName = opts.name.split(' ')[0] || opts.name;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your SolarPro Login Code</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+
+        <!-- Header -->
+        <tr>
+          <td align="center" style="padding-bottom:32px;">
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:linear-gradient(135deg,rgba(245,158,11,0.25),rgba(245,158,11,0.08));
+                            border:1px solid rgba(245,158,11,0.25);border-radius:14px;
+                            padding:12px;width:48px;height:48px;text-align:center;vertical-align:middle;">
+                  <span style="font-size:24px;line-height:1;">☀️</span>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:12px 0 0;font-size:13px;font-weight:700;color:#fff;letter-spacing:0.04em;">
+              SolarPro Homeowner Portal
+            </p>
+          </td>
+        </tr>
+
+        <!-- Card -->
+        <tr>
+          <td style="background:#0f172a;border:1px solid rgba(255,255,255,0.06);
+                     border-radius:20px;padding:40px 36px;">
+
+            <p style="margin:0 0 8px;font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.02em;">
+              Hi ${displayName} 👋
+            </p>
+            <p style="margin:0 0 28px;font-size:15px;color:#94a3b8;line-height:1.6;">
+              Here's your one-time login code for the homeowner portal.
+              It expires in <strong style="color:#f59e0b;">${opts.expiresIn}</strong>.
+            </p>
+
+            <!-- OTP block -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td align="center"
+                    style="background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(245,158,11,0.05));
+                           border:1.5px solid rgba(245,158,11,0.3);border-radius:16px;
+                           padding:24px;">
+                  <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#f59e0b;
+                             letter-spacing:0.2em;text-transform:uppercase;">Your login code</p>
+                  <p style="margin:0;font-size:42px;font-weight:900;color:#fff;
+                             letter-spacing:0.18em;font-family:'Courier New',monospace;">
+                    ${opts.code}
+                  </p>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 24px;font-size:13px;color:#64748b;line-height:1.6;text-align:center;">
+              Enter this code on the login page to access your project dashboard.<br/>
+              If you didn't request this code, you can safely ignore this email.
+            </p>
+
+            <!-- Divider -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr><td style="border-top:1px solid rgba(255,255,255,0.06);height:1px;font-size:0;">&nbsp;</td></tr>
+            </table>
+
+            <!-- Security note -->
+            <table cellpadding="0" cellspacing="0" style="width:100%;">
+              <tr>
+                <td style="width:32px;vertical-align:top;padding-top:2px;">
+                  <span style="font-size:16px;">🔒</span>
+                </td>
+                <td style="font-size:12px;color:#475569;line-height:1.5;">
+                  We'll never ask for your code over the phone or by email.
+                  Keep it private.
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td align="center" style="padding-top:24px;">
+            <p style="margin:0;font-size:11px;color:#334155;">
+              SolarPro &mdash; Homeowner Portal &nbsp;|&nbsp; Powered by SolarPro
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  const text = `
+Hi ${displayName},
+
+Your one-time login code for the SolarPro Homeowner Portal is:
+
+  ${opts.code}
+
+This code expires in ${opts.expiresIn}.
+Enter it on the portal login page to access your project dashboard.
+
+If you didn't request this, you can safely ignore this email.
+
+— SolarPro Homeowner Portal
+`.trim();
+
+  return sendEmail({
+    to:      opts.to,
+    subject: '🔑 Your SolarPro Portal Login Code',
+    html,
+    text,
+  });
+}

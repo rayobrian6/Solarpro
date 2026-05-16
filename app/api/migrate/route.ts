@@ -1927,6 +1927,52 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 033f (idx_proposals_user_created): ${(e as Error).message}`);
     }
 
+    // ── Migration 034: Portal OTP tokens (v48.38) ──────────────────────────────
+    // Adds portal_otp_tokens table for secure 2-step homeowner portal login.
+    // Raw OTP codes are NEVER stored — only SHA-256 hashes. Codes expire in 10 min.
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS portal_otp_tokens (
+          id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          client_id  UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          code_hash  TEXT        NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          used_at    TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ Migration 034a: portal_otp_tokens — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034a (portal_otp_tokens): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_portal_otp_code_hash
+          ON portal_otp_tokens (code_hash)
+      `;
+      results.push('✅ Migration 034b: idx_portal_otp_code_hash — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034b (idx_portal_otp_code_hash): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_portal_otp_client_id
+          ON portal_otp_tokens (client_id)
+      `;
+      results.push('✅ Migration 034c: idx_portal_otp_client_id — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034c (idx_portal_otp_client_id): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_portal_otp_expires_at
+          ON portal_otp_tokens (expires_at)
+      `;
+      results.push('✅ Migration 034d: idx_portal_otp_expires_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034d (idx_portal_otp_expires_at): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

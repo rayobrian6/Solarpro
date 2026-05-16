@@ -1,20 +1,39 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+/**
+ * Portal Login — Two-step OTP flow
+ *
+ * Step 1: Enter email → POST /api/portal/login  → OTP emailed
+ * Step 2: Enter 6-digit code → POST /api/portal/verify-otp → JWT cookie issued
+ */
+
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Sun, Mail, ArrowRight, AlertCircle,
+  Sun, Mail, ArrowRight, AlertCircle, KeyRound,
   Loader2, Shield, Zap, TrendingUp, Leaf, CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
+
+type Step = 'email' | 'otp';
 
 export default function PortalLogin() {
   const router = useRouter();
+
+  const [step,    setStep]    = useState<Step>('email');
   const [email,   setEmail]   = useState('');
+  const [otp,     setOtp]     = useState('');
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
+  const [resent,  setResent]  = useState(false);
   const [mounted, setMounted] = useState(false);
 
+  // Six individual digit boxes for the OTP
+  const [digits, setDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const digitRefs = useRef<(HTMLInputElement | null)[]>([]);
+
   useEffect(() => {
+    // Already logged in? Skip to dashboard
     fetch('/api/portal/dashboard')
       .then(r => r.json())
       .then(d => { if (d.success) router.replace('/portal/dashboard'); })
@@ -22,7 +41,8 @@ export default function PortalLogin() {
     setTimeout(() => setMounted(true), 80);
   }, [router]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // ─── Step 1: Request OTP ──────────────────────────────────────────────────
+  const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     const trimmed = email.trim().toLowerCase();
@@ -37,9 +57,44 @@ export default function PortalLogin() {
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ email: trimmed }),
       });
+      if (res.status === 429) {
+        setError('Too many attempts. Please wait a moment and try again.');
+        return;
+      }
+      // Always move to OTP step regardless of whether the email exists
+      // (prevents enumeration — user sees same UX either way)
+      setStep('otp');
+      setDigits(['', '', '', '', '', '']);
+      setTimeout(() => digitRefs.current[0]?.focus(), 150);
+    } catch {
+      setError('Connection error. Please check your internet and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Step 2: Submit OTP ───────────────────────────────────────────────────
+  const submitOtp = async (code: string) => {
+    if (code.length !== 6) return;
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/portal/verify-otp', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim().toLowerCase(), code }),
+      });
       const d = await res.json();
-      if (res.status === 429) { setError('Too many attempts. Please wait a moment and try again.'); return; }
-      if (!d.success) { setError(d.error || 'Something went wrong. Please try again.'); return; }
+      if (res.status === 429) {
+        setError('Too many attempts. Please wait 15 minutes.');
+        return;
+      }
+      if (!d.success) {
+        setError(d.error || 'Invalid or expired code. Please try again.');
+        setDigits(['', '', '', '', '', '']);
+        setTimeout(() => digitRefs.current[0]?.focus(), 100);
+        return;
+      }
       router.replace('/portal/dashboard');
     } catch {
       setError('Connection error. Please check your internet and try again.');
@@ -48,6 +103,70 @@ export default function PortalLogin() {
     }
   };
 
+  // ─── OTP digit box handlers ───────────────────────────────────────────────
+  const handleDigitChange = (index: number, value: string) => {
+    // Allow paste of full 6-digit code
+    if (value.length > 1) {
+      const clean = value.replace(/\D/g, '').slice(0, 6);
+      if (clean.length === 6) {
+        const arr = clean.split('');
+        setDigits(arr);
+        digitRefs.current[5]?.focus();
+        void submitOtp(clean);
+        return;
+      }
+    }
+    const char = value.replace(/\D/g, '').slice(-1);
+    const next = [...digits];
+    next[index] = char;
+    setDigits(next);
+    if (char && index < 5) {
+      digitRefs.current[index + 1]?.focus();
+    }
+    const code = next.join('');
+    if (code.length === 6 && !next.includes('')) {
+      void submitOtp(code);
+    }
+  };
+
+  const handleDigitKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Backspace') {
+      if (digits[index] === '' && index > 0) {
+        digitRefs.current[index - 1]?.focus();
+        const next = [...digits];
+        next[index - 1] = '';
+        setDigits(next);
+      } else {
+        const next = [...digits];
+        next[index] = '';
+        setDigits(next);
+      }
+    }
+  };
+
+  // ─── Resend OTP ───────────────────────────────────────────────────────────
+  const handleResend = async () => {
+    if (resent || loading) return;
+    setError('');
+    setLoading(true);
+    try {
+      await fetch('/api/portal/login', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      setResent(true);
+      setDigits(['', '', '', '', '', '']);
+      setTimeout(() => { setResent(false); }, 30_000); // re-enable after 30s
+      setTimeout(() => digitRefs.current[0]?.focus(), 100);
+    } catch {
+      setError('Could not resend. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ─── Feature list ─────────────────────────────────────────────────────────
   const features = [
     { icon: Zap,        label: 'Track your project in real time' },
     { icon: TrendingUp, label: 'View estimated savings & impact' },
@@ -60,7 +179,6 @@ export default function PortalLogin() {
 
       {/* ── LEFT PANEL (desktop only) ── */}
       <div className="hidden lg:flex lg:w-[52%] relative flex-col justify-between p-12 overflow-hidden">
-        {/* Background layers */}
         <div className="absolute inset-0 bg-gradient-to-br from-amber-900/20 via-[#07070e] to-[#07070e]" />
         <div className="absolute inset-0">
           <div className="absolute top-[-10%] left-[-10%] w-[600px] h-[600px] rounded-full bg-amber-500/[0.06] blur-[130px]" />
@@ -156,79 +274,180 @@ export default function PortalLogin() {
             <p className="text-sm text-slate-400 mt-1 text-center">Homeowner Portal</p>
           </div>
 
-          {/* Form header */}
-          <div className="mb-8">
-            <h2 className="text-2xl font-black text-white tracking-tight">Sign In</h2>
-            <p className="text-sm text-slate-400 mt-1.5">
-              Enter your email to access your project dashboard.
-            </p>
-          </div>
-
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-                <input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  autoFocus
-                  value={email}
-                  onChange={e => { setEmail(e.target.value); setError(''); }}
-                  placeholder="you@example.com"
-                  disabled={loading}
-                  className="w-full bg-white/[0.04] border border-white/[0.09] rounded-xl pl-10 pr-4 py-3.5 text-sm text-white placeholder-slate-600
-                             focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20
-                             hover:border-white/[0.14] hover:bg-white/[0.05]
-                             disabled:opacity-50 transition-all duration-200"
-                />
+          {/* ─── STEP 1: Email ─── */}
+          {step === 'email' && (
+            <>
+              <div className="mb-8">
+                <h2 className="text-2xl font-black text-white tracking-tight">Sign In</h2>
+                <p className="text-sm text-slate-400 mt-1.5">
+                  Enter your email and we'll send you a one-time login code.
+                </p>
               </div>
-            </div>
 
-            {error && (
-              <div className="flex items-start gap-2.5 text-sm text-red-400 bg-red-500/[0.08] border border-red-500/[0.18] rounded-xl px-4 py-3">
-                <AlertCircle size={14} className="shrink-0 mt-0.5" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loading || !email.trim()}
-              className="w-full flex items-center justify-center gap-2
-                         bg-gradient-to-r from-amber-500 to-amber-400
-                         hover:from-amber-400 hover:to-amber-300
-                         text-black font-black py-3.5 rounded-xl transition-all duration-200
-                         shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:shadow-xl
-                         disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none
-                         active:scale-[0.98]"
-            >
-              {loading
-                ? <><Loader2 size={16} className="animate-spin" /> Signing in…</>
-                : <>View My Project <ArrowRight size={16} /></>
-              }
-            </button>
-          </form>
-
-          {/* Trust row */}
-          <div className="mt-8 space-y-3">
-            <div className="h-px bg-white/[0.05]" />
-            <div className="flex items-center justify-center gap-5 pt-1">
-              {[
-                { icon: Shield,       label: 'Secure login' },
-                { icon: CheckCircle2, label: 'No password needed' },
-              ].map((item, i) => (
-                <div key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
-                  <item.icon size={12} />
-                  {item.label}
+              <form onSubmit={handleEmailSubmit} className="space-y-4">
+                <div>
+                  <label htmlFor="email" className="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                    <input
+                      id="email"
+                      type="email"
+                      autoComplete="email"
+                      autoFocus
+                      value={email}
+                      onChange={e => { setEmail(e.target.value); setError(''); }}
+                      placeholder="you@example.com"
+                      disabled={loading}
+                      className="w-full bg-white/[0.04] border border-white/[0.09] rounded-xl pl-10 pr-4 py-3.5 text-sm text-white placeholder-slate-600
+                                 focus:outline-none focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/20
+                                 hover:border-white/[0.14] hover:bg-white/[0.05]
+                                 disabled:opacity-50 transition-all duration-200"
+                    />
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
+
+                {error && (
+                  <div className="flex items-start gap-2.5 text-sm text-red-400 bg-red-500/[0.08] border border-red-500/[0.18] rounded-xl px-4 py-3">
+                    <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={loading || !email.trim()}
+                  className="w-full flex items-center justify-center gap-2
+                             bg-gradient-to-r from-amber-500 to-amber-400
+                             hover:from-amber-400 hover:to-amber-300
+                             text-black font-black py-3.5 rounded-xl transition-all duration-200
+                             shadow-lg shadow-amber-500/20 hover:shadow-amber-500/30 hover:shadow-xl
+                             disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none
+                             active:scale-[0.98]"
+                >
+                  {loading
+                    ? <><Loader2 size={16} className="animate-spin" /> Sending code…</>
+                    : <>Send Login Code <ArrowRight size={16} /></>
+                  }
+                </button>
+              </form>
+
+              {/* Trust row */}
+              <div className="mt-8 space-y-3">
+                <div className="h-px bg-white/[0.05]" />
+                <div className="flex items-center justify-center gap-5 pt-1">
+                  {[
+                    { icon: Shield,       label: 'Secure login' },
+                    { icon: CheckCircle2, label: 'No password needed' },
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <item.icon size={12} />
+                      {item.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ─── STEP 2: OTP ─── */}
+          {step === 'otp' && (
+            <>
+              <div className="mb-8">
+                {/* Icon */}
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-5">
+                  <KeyRound size={22} className="text-amber-400" />
+                </div>
+                <h2 className="text-2xl font-black text-white tracking-tight">Check your email</h2>
+                <p className="text-sm text-slate-400 mt-1.5">
+                  We sent a 6-digit code to{' '}
+                  <span className="text-amber-400 font-semibold">{email}</span>.
+                  Enter it below — it expires in 10 minutes.
+                </p>
+              </div>
+
+              {/* 6-box OTP input */}
+              <div className="flex gap-2.5 justify-center mb-6">
+                {digits.map((d, i) => (
+                  <input
+                    key={i}
+                    ref={el => { digitRefs.current[i] = el; }}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="\d*"
+                    maxLength={6}           // allow paste
+                    value={d}
+                    onChange={e => handleDigitChange(i, e.target.value)}
+                    onKeyDown={e => handleDigitKeyDown(i, e)}
+                    onFocus={e => e.target.select()}
+                    disabled={loading}
+                    className={`
+                      w-12 h-14 text-center text-xl font-black rounded-xl
+                      bg-white/[0.04] border transition-all duration-150
+                      text-white caret-amber-400
+                      focus:outline-none focus:ring-1 focus:ring-amber-500/40
+                      disabled:opacity-40
+                      ${d
+                        ? 'border-amber-500/50 bg-amber-500/[0.06]'
+                        : 'border-white/[0.09] hover:border-white/[0.18]'
+                      }
+                    `}
+                  />
+                ))}
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2.5 text-sm text-red-400 bg-red-500/[0.08] border border-red-500/[0.18] rounded-xl px-4 py-3 mb-4">
+                  <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {loading && (
+                <div className="flex items-center justify-center gap-2 text-sm text-slate-400 mb-4">
+                  <Loader2 size={14} className="animate-spin" />
+                  Verifying…
+                </div>
+              )}
+
+              {/* Resend + back */}
+              <div className="flex items-center justify-between text-xs text-slate-500 mt-2">
+                <button
+                  type="button"
+                  onClick={() => { setStep('email'); setError(''); setDigits(['', '', '', '', '', '']); }}
+                  className="hover:text-slate-300 transition-colors"
+                >
+                  ← Change email
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resent || loading}
+                  className="flex items-center gap-1.5 hover:text-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <RefreshCw size={11} />
+                  {resent ? 'Code sent!' : 'Resend code'}
+                </button>
+              </div>
+
+              {/* Trust row */}
+              <div className="mt-8 space-y-3">
+                <div className="h-px bg-white/[0.05]" />
+                <div className="flex items-center justify-center gap-5 pt-1">
+                  {[
+                    { icon: Shield,       label: 'Expires in 10 min' },
+                    { icon: CheckCircle2, label: 'Single use only' },
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center gap-1.5 text-xs text-slate-600">
+                      <item.icon size={12} />
+                      {item.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
 
           <p className="text-center text-xs text-slate-600 mt-6">
             Don't have a project yet?{' '}

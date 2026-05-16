@@ -124,6 +124,7 @@ export type LimiterKey =
   | 'migrate'
   // Homeowner portal
   | 'portal_login'
+  | 'portal_verify_otp'
   | 'portal_read'
   // Public forms (no auth)
   | 'public_lead';
@@ -169,6 +170,7 @@ const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   'migrate':                _migrateLimiter,
   // Homeowner portal
   'portal_login':           _loginLimiter,
+  'portal_verify_otp':      makeLimiter(10, '15 m'),   // 10 OTP guesses per 15 min — brute-force proof
   'portal_read':            _standardLimiter,
   // Public forms
   'public_lead':            _publicLeadLimiter,
