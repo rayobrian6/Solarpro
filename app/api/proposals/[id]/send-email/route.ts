@@ -150,6 +150,20 @@ export async function POST(
     });
 
   } catch (e: unknown) {
-    return handleRouteDbError('[api/proposals/[id]/send-email]', e);
+    // Temporary diagnostic: expose real error message to identify root cause
+    const errMsg = e instanceof Error ? e.message : String(e);
+    const errStack = e instanceof Error ? (e.stack ?? '') : '';
+    console.error('[send-email] DIAGNOSTIC ERROR:', errMsg, errStack);
+    // Return real error in response for debugging (remove once fixed)
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Service temporarily unavailable. Please try again in a moment.',
+        code: 'DB_STARTING',
+        _debug_error: errMsg,
+        _debug_stack: errStack.split('\n').slice(0, 5).join(' | '),
+      },
+      { status: 503, headers: { 'Retry-After': '3' } }
+    );
   }
 }
