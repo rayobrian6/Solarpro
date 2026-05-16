@@ -4,6 +4,8 @@ import Link from 'next/link';
 import {
   Search, RefreshCw, Plus, UserPlus, Phone, Mail,
   MapPin, CheckCircle, Clock, AlertCircle, XCircle, Star,
+  Globe, Users, DoorOpen, PhoneCall, Share2, Megaphone,
+  Handshake, Calendar, HelpCircle,
 } from 'lucide-react';
 
 type Lead = {
@@ -14,6 +16,7 @@ type Lead = {
   address: string | null;
   notes: string | null;
   status: 'new' | 'contacted' | 'qualified' | 'converted' | 'closed';
+  lead_source: string | null;
   converted_project_id: string | null;
   converted_client_id: string | null;
   converted_at: string | null;
@@ -24,14 +27,44 @@ type Lead = {
 };
 
 const STATUS_CONFIG = {
-  new:       { label: 'New',       color: 'bg-blue-500/20 text-blue-400',   icon: Star },
+  new:       { label: 'New',       color: 'bg-blue-500/20 text-blue-400',    icon: Star },
   contacted: { label: 'Contacted', color: 'bg-yellow-500/20 text-yellow-400', icon: Clock },
   qualified: { label: 'Qualified', color: 'bg-purple-500/20 text-purple-400', icon: AlertCircle },
-  converted: { label: 'Converted', color: 'bg-green-500/20 text-green-400',  icon: CheckCircle },
+  converted: { label: 'Converted', color: 'bg-green-500/20 text-green-400',   icon: CheckCircle },
   closed:    { label: 'Closed',    color: 'bg-slate-500/20 text-slate-400',   icon: XCircle },
 };
 
+const LEAD_SOURCE_CONFIG: Record<string, { label: string; icon: React.ElementType; color: string }> = {
+  referral:    { label: 'Referral',    icon: Users,      color: 'text-emerald-400' },
+  website:     { label: 'Website',     icon: Globe,      color: 'text-blue-400' },
+  door_knock:  { label: 'Door Knock',  icon: DoorOpen,   color: 'text-amber-400' },
+  phone:       { label: 'Phone',       icon: PhoneCall,  color: 'text-cyan-400' },
+  social_media:{ label: 'Social',      icon: Share2,     color: 'text-pink-400' },
+  paid_ad:     { label: 'Paid Ad',     icon: Megaphone,  color: 'text-violet-400' },
+  trade_show:  { label: 'Trade Show',  icon: Calendar,   color: 'text-orange-400' },
+  partner:     { label: 'Partner',     icon: Handshake,  color: 'text-teal-400' },
+  other:       { label: 'Other',       icon: HelpCircle, color: 'text-slate-400' },
+};
+
+const VALID_SOURCES = [
+  'referral', 'website', 'door_knock', 'phone',
+  'social_media', 'paid_ad', 'trade_show', 'partner', 'other',
+] as const;
+
 const STATUSES = ['all', 'new', 'contacted', 'qualified', 'converted', 'closed'] as const;
+
+function LeadSourceBadge({ source }: { source: string | null }) {
+  if (!source) return <span className="text-xs text-slate-600">—</span>;
+  const cfg = LEAD_SOURCE_CONFIG[source];
+  if (!cfg) return <span className="text-xs text-slate-400 capitalize">{source.replace(/_/g, ' ')}</span>;
+  const Icon = cfg.icon;
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-medium ${cfg.color}`}>
+      <Icon size={10} />
+      {cfg.label}
+    </span>
+  );
+}
 
 export default function AdminLeads() {
   const [leads, setLeads]       = useState<Lead[]>([]);
@@ -43,18 +76,28 @@ export default function AdminLeads() {
   const [toast, setToast]       = useState<{ msg: string; ok: boolean } | null>(null);
 
   // Modal state
-  const [showModal, setShowModal]       = useState(false);
-  const [saving, setSaving]             = useState(false);
-  const [formName, setFormName]         = useState('');
-  const [formEmail, setFormEmail]       = useState('');
-  const [formPhone, setFormPhone]       = useState('');
-  const [formAddress, setFormAddress]   = useState('');
-  const [formNotes, setFormNotes]       = useState('');
+  const [showModal, setShowModal]         = useState(false);
+  const [saving, setSaving]               = useState(false);
+  const [formName, setFormName]           = useState('');
+  const [formEmail, setFormEmail]         = useState('');
+  const [formPhone, setFormPhone]         = useState('');
+  const [formAddress, setFormAddress]     = useState('');
+  const [formNotes, setFormNotes]         = useState('');
+  const [formSource, setFormSource]       = useState<string>('');
   const LIMIT = 50;
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const resetForm = () => {
+    setFormName('');
+    setFormEmail('');
+    setFormPhone('');
+    setFormAddress('');
+    setFormNotes('');
+    setFormSource('');
   };
 
   const handleCreate = async () => {
@@ -68,21 +111,18 @@ export default function AdminLeads() {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({
-          name:    formName.trim(),
-          email:   formEmail.trim(),
-          phone:   formPhone.trim() || null,
-          address: formAddress.trim() || null,
-          notes:   formNotes.trim() || null,
+          name:        formName.trim(),
+          email:       formEmail.trim(),
+          phone:       formPhone.trim() || null,
+          address:     formAddress.trim() || null,
+          notes:       formNotes.trim() || null,
+          lead_source: formSource || null,
         }),
       });
       const d = await res.json();
       if (d.success) {
         setShowModal(false);
-        setFormName('');
-        setFormEmail('');
-        setFormPhone('');
-        setFormAddress('');
-        setFormNotes('');
+        resetForm();
         showToast('✓ Lead created');
         load();
       } else {
@@ -178,6 +218,7 @@ export default function AdminLeads() {
                 <th className="text-left px-4 py-3 font-medium">Lead</th>
                 <th className="text-left px-4 py-3 font-medium">Contact</th>
                 <th className="text-left px-4 py-3 font-medium">Address</th>
+                <th className="text-left px-4 py-3 font-medium">Source</th>
                 <th className="text-left px-4 py-3 font-medium">Status</th>
                 <th className="text-left px-4 py-3 font-medium">Owner</th>
                 <th className="text-left px-4 py-3 font-medium">Created</th>
@@ -187,13 +228,13 @@ export default function AdminLeads() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     <RefreshCw size={16} className="animate-spin inline mr-2" /> Loading…
                   </td>
                 </tr>
               ) : leads.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
                     No leads found.
                   </td>
                 </tr>
@@ -228,11 +269,14 @@ export default function AdminLeads() {
                       {lead.address ? (
                         <div className="flex items-center gap-1 text-xs text-slate-400">
                           <MapPin size={11} className="text-slate-500 shrink-0" />
-                          <span className="truncate max-w-[180px]">{lead.address}</span>
+                          <span className="truncate max-w-[160px]">{lead.address}</span>
                         </div>
                       ) : (
                         <span className="text-xs text-slate-600">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <LeadSourceBadge source={lead.lead_source} />
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${cfg.color}`}>
@@ -313,7 +357,7 @@ export default function AdminLeads() {
             </div>
 
             {/* Form */}
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-1">
                   Name *
@@ -378,6 +422,25 @@ export default function AdminLeads() {
                 </div>
               </div>
 
+              {/* Lead Source dropdown */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Lead Source
+                </label>
+                <select
+                  value={formSource}
+                  onChange={e => setFormSource(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500/50 appearance-none"
+                >
+                  <option value="">— Unknown / Not set —</option>
+                  {VALID_SOURCES.map(s => (
+                    <option key={s} value={s} className="bg-[#0f1015]">
+                      {LEAD_SOURCE_CONFIG[s]?.label ?? s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-400 mb-1">
                   Notes
@@ -395,7 +458,7 @@ export default function AdminLeads() {
             {/* Footer */}
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/10 bg-white/2">
               <button
-                onClick={() => setShowModal(false)}
+                onClick={() => { setShowModal(false); resetForm(); }}
                 className="text-xs font-medium text-slate-400 hover:text-white transition-colors px-4 py-2"
                 disabled={saving}
               >
@@ -406,7 +469,7 @@ export default function AdminLeads() {
                 disabled={saving || !formName.trim() || !formEmail.trim()}
                 className="flex items-center gap-2 text-xs font-semibold text-black bg-amber-500 hover:bg-amber-400 rounded-lg px-4 py-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                {saving ? <CheckCircle size={12} className="animate-spin" /> : <CheckCircle size={12} />}
+                {saving ? <RefreshCw size={12} className="animate-spin" /> : <CheckCircle size={12} />}
                 {saving ? 'Creating...' : 'Create Lead'}
               </button>
             </div>

@@ -7,7 +7,7 @@
 //   1. Load proposal from DB (verifies ownership or share token)
 //   2. Build CanonicalProposal via buildCanonicalProposal()
 //   3. Render HTML via renderProposalHTML()
-//   4. Convert to PDF via wkhtmltopdf (falls back to HTML if unavailable)
+//   4. Convert to PDF via Puppeteer+chromium (falls back to HTML if unavailable)
 //   5. Return PDF buffer with Content-Disposition: attachment
 // ============================================================
 
@@ -21,10 +21,7 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, isValidUUID, handleRouteDbError } from '@/lib/db-neon';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
 import { renderProposalHTML, ProposalBranding } from '@/lib/proposal/renderProposalHTML';
-// exec/promisify moved to inline imports in generatePDF() — using execFile arg array
-import { writeFile, readFile, unlink } from 'fs/promises';
-import path from 'path';
-import os from 'os';
+import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import type { Proposal } from '@/types';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
@@ -106,51 +103,9 @@ async function loadBranding(userId: string): Promise<ProposalBranding> {
   }
 }
 
-// ── PDF generation via wkhtmltopdf ────────────────────────────────────────────
 
-async function generatePDF(html: string, _filename: string): Promise<Uint8Array | null> {
-  const tmpDir  = os.tmpdir();
-  const ts      = Date.now();
-  const htmlPath = path.join(tmpDir, `proposal-${ts}.html`);
-  const pdfPath  = path.join(tmpDir, `proposal-${ts}.pdf`);
 
-  try {
-    await writeFile(htmlPath, html, 'utf8');
-
-    // SECURITY: Use execFile with argument array (not shell string interpolation)
-    // to prevent any risk of shell injection.
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-    await execFileAsync('wkhtmltopdf', [
-      '--page-size', 'Letter',
-      '--orientation', 'Portrait',
-      '--margin-top', '0',
-      '--margin-right', '0',
-      '--margin-bottom', '0',
-      '--margin-left', '0',
-      '--dpi', '150',
-      '--image-dpi', '150',
-      '--image-quality', '90',
-      '--enable-local-file-access',
-      '--disable-smart-shrinking',
-      '--zoom', '1.0',
-      '--quiet',
-      '--print-media-type',
-      htmlPath,
-      pdfPath,
-    ], { timeout: 40000 });
-    return new Uint8Array(await readFile(pdfPath));
-  } catch (err) {
-    console.warn('[proposal-pdf] wkhtmltopdf failed:', (err as Error).message);
-    return null;
-  } finally {
-    try { await unlink(htmlPath); } catch {}
-    try { await unlink(pdfPath); } catch {}
-  }
-}
-
-// ── Sanitise filename ─────────────────────────────────────────────────────────
+// ── Sanitise filename ─────────────────────────────────────────────────────
 
 function safeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9\-_]/g, '_').substring(0, 60);
@@ -292,26 +247,26 @@ async function handleRequest(req: NextRequest, context: RouteContext): Promise<N
       });
     }
 
-    // Generate PDF
+    // Generate PDF via Puppeteer+chromium (Vercel-compatible)
     const projectLabel = safeFilename(proposal.project?.name ?? proposal.title ?? 'Solar-Proposal');
     const filename = `SolarPro-Proposal-${projectLabel}.pdf`;
 
-    const pdfBuffer = await generatePDF(html, filename); // Uint8Array | null
+    const pdfResult = await generatePdfFromHtml(html, { format: 'Letter', printBackground: true });
 
-    if (pdfBuffer) {
-      return new NextResponse(pdfBuffer as unknown as BodyInit, {
+    if (pdfResult) {
+      return new NextResponse(pdfResult.pdf as unknown as BodyInit, {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="${filename}"`,
           'Cache-Control': 'no-store',
-          'X-Pdf-Method': 'wkhtmltopdf',
+          'X-Pdf-Method': pdfResult.method,
         },
       });
     }
 
-    // Fallback: return HTML if wkhtmltopdf unavailable (e.g. Vercel serverless)
-    console.warn('[proposal-pdf] Falling back to HTML — wkhtmltopdf not available');
+    // Fallback: return HTML if PDF generation failed
+    console.warn('[proposal-pdf] Falling back to HTML — PDF generation unavailable');
     return new NextResponse(html, {
       status: 200,
       headers: {

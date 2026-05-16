@@ -10,13 +10,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, isValidUUID } from '@/lib/db-neon';
 import { checkPipelineGuard, extractCanonicalSnapshot } from '@/lib/engineering/pipelineGuard';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
-import os from 'os';
 import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 
 // Permit engine imports (modularized)
 import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
@@ -34,7 +29,6 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
 export const maxDuration = 60;            // 60s — aerial API calls can take 10-15s total
 
-const execAsync = promisify(exec);
 
 // ─── Route Handler ────────────────────────────────────────────────────────────
 
@@ -137,57 +131,29 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // PDF via wkhtmltopdf — with HTML fallback
-    const tmpDir  = path.join(os.tmpdir(), `permit-get-${Date.now()}`);
-    if (!existsSync(tmpDir)) await mkdir(tmpDir, { recursive: true });
+    // PDF via Puppeteer+chromium (Vercel-compatible)
+    const pdfResult = await generatePdfFromHtml(html, {
+      landscape: true,
+      widthIn: PDF_PAGE_CONFIG.width,
+      heightIn: PDF_PAGE_CONFIG.height,
+    });
 
-    const htmlPath = path.join(tmpDir, 'permit.html');
-    const pdfPath  = path.join(tmpDir, 'permit.pdf');
-    await writeFile(htmlPath, html, 'utf-8');
-
-    const cmd = [
-      'wkhtmltopdf',
-      `--page-width ${PDF_PAGE_CONFIG.width}`,
-      `--page-height ${PDF_PAGE_CONFIG.height}`,
-      '--margin-top 0',
-      '--margin-bottom 0',
-      '--margin-left 0',
-      '--margin-right 0',
-      '--dpi 150',
-      '--enable-local-file-access',
-      '--disable-smart-shrinking',
-      '--print-media-type',
-      `"${htmlPath}"`,
-      `"${pdfPath}"`,
-    ].join(' ');
-
-    let pdfBuffer: Buffer | null = null;
-    try {
-      await execAsync(cmd, { timeout: 45000 });
-      pdfBuffer = await readFile(pdfPath);
-    } catch (wkErr: unknown) {
-      console.warn('[permit/GET] wkhtmltopdf failed, falling back to HTML:', (wkErr as Error).message);
-    }
-
-    await unlink(htmlPath).catch(() => {});
-    await unlink(pdfPath).catch(() => {});
-
-    if (!pdfBuffer) {
-      return new NextResponse(html, {
+    if (pdfResult) {
+      return new NextResponse(pdfResult.pdf as unknown as BodyInit, {
         headers: {
-          'Content-Type': 'text/html',
-          'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
-          'X-Pdf-Method': 'html-fallback',
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.pdf"`,
+          'Cache-Control': 'no-store',
+          'X-Pdf-Method': pdfResult.method,
         },
       });
     }
 
-    return new NextResponse(new Uint8Array(pdfBuffer), {
+    return new NextResponse(html, {
       headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.pdf"`,
-        'Content-Length': pdfBuffer.length.toString(),
-        'X-Pdf-Method': 'wkhtmltopdf',
+        'Content-Type': 'text/html',
+        'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
+        'X-Pdf-Method': 'html-fallback',
       },
     });
 
@@ -715,62 +681,29 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // PDF via wkhtmltopdf — with HTML fallback if binary is unavailable (e.g. Vercel serverless)
-    const tmpDir = path.join(os.tmpdir(), `permit-${Date.now()}`);
-    if (!existsSync(tmpDir)) await mkdir(tmpDir, { recursive: true });
+    // PDF via Puppeteer+chromium (Vercel-compatible)
+    const pdfResult = await generatePdfFromHtml(html, {
+      landscape: true,
+      widthIn: PDF_PAGE_CONFIG.width,
+      heightIn: PDF_PAGE_CONFIG.height,
+    });
 
-    const htmlPath = path.join(tmpDir, 'permit.html');
-    const pdfPath = path.join(tmpDir, 'permit.pdf');
-
-    await writeFile(htmlPath, html, 'utf-8');
-
-    const cmd = [
-      'wkhtmltopdf',
-      `--page-width ${PDF_PAGE_CONFIG.width}`,
-      `--page-height ${PDF_PAGE_CONFIG.height}`,
-      '--margin-top 0',
-      '--margin-bottom 0',
-      '--margin-left 0',
-      '--margin-right 0',
-      '--dpi 150',
-      '--enable-local-file-access',
-      '--disable-smart-shrinking',
-      '--print-media-type',
-      `"${htmlPath}"`,
-      `"${pdfPath}"`,
-    ].join(' ');
-
-    let pdfBuffer: Buffer | null = null;
-    let pdfMethod = 'wkhtmltopdf';
-
-    try {
-      await execAsync(cmd, { timeout: 45000 });
-      pdfBuffer = await readFile(pdfPath);
-    } catch (wkErr: unknown) {
-      console.warn('[permit/POST] wkhtmltopdf failed, falling back to HTML:', (wkErr as Error).message);
-      pdfMethod = 'html';
-    }
-
-    await unlink(htmlPath).catch(() => {});
-    await unlink(pdfPath).catch(() => {});
-
-    if (pdfMethod === 'html' || !pdfBuffer) {
-      // Fallback: return the HTML directly so the user still gets their permit document
-      return new NextResponse(html, {
+    if (pdfResult) {
+      return new NextResponse(pdfResult.pdf as unknown as BodyInit, {
         headers: {
-          'Content-Type': 'text/html',
-          'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
-          'X-Pdf-Method': 'html-fallback',
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.pdf"`,
+          'Cache-Control': 'no-store',
+          'X-Pdf-Method': pdfResult.method,
         },
       });
     }
 
-    return new NextResponse(new Uint8Array(pdfBuffer as Buffer), {
+    return new NextResponse(html, {
       headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.pdf"`,
-        'Content-Length': (pdfBuffer as Buffer).length.toString(),
-        'X-Pdf-Method': 'wkhtmltopdf',
+        'Content-Type': 'text/html',
+        'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
+        'X-Pdf-Method': 'html-fallback',
       },
     });
 

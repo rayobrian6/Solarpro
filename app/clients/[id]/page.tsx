@@ -10,6 +10,7 @@ import {
   FolderOpen, Map, FileText, ChevronRight, Calendar,
   User, CheckCircle, AlertCircle, Clock, Camera,
   RefreshCw, AlertTriangle, Eye,
+  StickyNote, Send, MessageSquare, Trash2, ExternalLink, TrendingUp,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -40,6 +41,233 @@ const TYPE_ICONS: Record<string, string> = { roof: '🏠', ground: '🌱', fence
 const TYPE_BG: Record<string, string> = {
   roof: 'bg-amber-500/10', ground: 'bg-teal-500/10', fence: 'bg-purple-500/10',
 };
+
+// ---------------------------------------------------------------------------
+// ProposalsSection — shows all proposals linked to this client's projects
+// ---------------------------------------------------------------------------
+interface ProposalRow {
+  id: string;
+  project_id: string;
+  project_name: string | null;
+  title: string | null;
+  status: string;
+  prepared_date: string | null;
+  valid_until: string | null;
+  sent_at: string | null;
+  sent_to_email: string | null;
+  net_cost: number | null;
+}
+
+const PROPOSAL_STATUS: Record<string, { label: string; cls: string }> = {
+  draft:    { label: 'Draft',    cls: 'bg-slate-700/60 text-slate-300 border border-slate-600/40' },
+  sent:     { label: 'Sent',     cls: 'bg-blue-900/60 text-blue-300 border border-blue-700/40' },
+  signed:   { label: 'Signed',   cls: 'bg-emerald-900/60 text-emerald-300 border border-emerald-700/40' },
+  expired:  { label: 'Expired',  cls: 'bg-red-900/60 text-red-300 border border-red-700/40' },
+  declined: { label: 'Declined', cls: 'bg-rose-900/60 text-rose-300 border border-rose-700/40' },
+};
+
+function ProposalsSection({ clientId }: { clientId: string }) {
+  const [proposals, setProposals] = useState<ProposalRow[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/proposals`);
+      const json = await res.json();
+      if (!json.success) { setError(json.error ?? 'Failed to load'); return; }
+      setProposals(json.proposals ?? []);
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
+  }, [clientId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/50">
+        <div className="flex items-center gap-2">
+          <TrendingUp size={15} className="text-violet-400" />
+          <span className="font-semibold text-white text-sm">Proposals</span>
+          {proposals.length > 0 && (
+            <span className="text-xs text-slate-500 font-mono">({proposals.length})</span>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="px-5 py-6 text-center text-slate-500 text-sm">
+          <RefreshCw size={14} className="animate-spin inline mr-2" />Loading…
+        </div>
+      ) : error ? (
+        <div className="px-5 py-4 text-sm text-red-400">{error}</div>
+      ) : proposals.length === 0 ? (
+        <div className="px-5 py-6 text-center text-slate-600 text-sm">No proposals yet.</div>
+      ) : (
+        <div className="divide-y divide-slate-700/40">
+          {proposals.map(p => {
+            const sc = PROPOSAL_STATUS[p.status] ?? { label: p.status, cls: 'bg-slate-700/60 text-slate-300 border border-slate-600/40' };
+            return (
+              <div key={p.id} className="flex items-center justify-between px-5 py-3 hover:bg-white/3 transition-colors">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-white truncate">
+                      {p.title ?? 'Proposal'}
+                    </span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sc.cls}`}>
+                      {sc.label}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-0.5 text-xs text-slate-500 flex-wrap">
+                    {p.project_name && (
+                      <span className="flex items-center gap-1">
+                        <FolderOpen size={9} />{p.project_name}
+                      </span>
+                    )}
+                    {p.net_cost != null && (
+                      <span className="text-emerald-400/70">${p.net_cost.toLocaleString()}</span>
+                    )}
+                    {p.sent_at && (
+                      <span className="flex items-center gap-1">
+                        <Send size={9} />Sent {new Date(p.sent_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <Link
+                  href={`/admin/projects/${p.project_id}`}
+                  className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors ml-3 flex-shrink-0"
+                >
+                  <ExternalLink size={11} />View
+                </Link>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// NotesSection — add/delete client notes with timestamps
+// ---------------------------------------------------------------------------
+interface Note {
+  id: string;
+  note: string;
+  created_at: string;
+  author_name?: string | null;
+}
+
+function NotesSection({ clientId }: { clientId: string }) {
+  const [notes, setNotes]     = useState<Note[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [text, setText]       = useState('');
+  const [saving, setSaving]   = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/notes`);
+      const json = await res.json();
+      if (!json.success) { setError(json.error ?? 'Failed to load'); return; }
+      setNotes(json.notes ?? []);
+    } catch { setError('Network error'); }
+    finally { setLoading(false); }
+  }, [clientId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const addNote = async () => {
+    if (!text.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/clients/${clientId}/notes`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ note: text.trim() }),
+      });
+      const json = await res.json();
+      if (json.success) { setText(''); load(); }
+      else setError(json.error ?? 'Failed to add note');
+    } catch { setError('Network error'); }
+    finally { setSaving(false); }
+  };
+
+  const deleteNote = async (noteId: string) => {
+    try {
+      await fetch(`/api/clients/${clientId}/notes?noteId=${noteId}`, { method: 'DELETE' });
+      load();
+    } catch { /* silent */ }
+  };
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-4 border-b border-slate-700/50">
+        <StickyNote size={15} className="text-amber-400" />
+        <span className="font-semibold text-white text-sm">Notes</span>
+        {notes.length > 0 && (
+          <span className="text-xs text-slate-500 font-mono">({notes.length})</span>
+        )}
+      </div>
+
+      {/* Add note */}
+      <div className="px-5 py-4 border-b border-slate-700/30 bg-slate-800/20">
+        <div className="flex gap-2">
+          <textarea
+            value={text}
+            onChange={e => setText(e.target.value)}
+            placeholder="Add a note… (max 2000 chars)"
+            rows={2}
+            maxLength={2000}
+            className="flex-1 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500/50 resize-none"
+          />
+          <button
+            onClick={addNote}
+            disabled={saving || !text.trim()}
+            className="flex items-center gap-1.5 text-xs font-semibold text-black bg-amber-500 hover:bg-amber-400 rounded-lg px-3 py-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed self-start mt-0.5"
+          >
+            {saving ? <RefreshCw size={11} className="animate-spin" /> : <MessageSquare size={11} />}
+            Add
+          </button>
+        </div>
+        {error && <p className="text-xs text-red-400 mt-1.5">{error}</p>}
+      </div>
+
+      {/* Notes list */}
+      {loading ? (
+        <div className="px-5 py-5 text-center text-slate-500 text-sm">
+          <RefreshCw size={14} className="animate-spin inline mr-2" />Loading…
+        </div>
+      ) : notes.length === 0 ? (
+        <div className="px-5 py-5 text-center text-slate-600 text-sm">No notes yet.</div>
+      ) : (
+        <div className="divide-y divide-slate-700/30 max-h-64 overflow-y-auto">
+          {notes.map(n => (
+            <div key={n.id} className="flex items-start gap-3 px-5 py-3 group hover:bg-white/3 transition-colors">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-slate-200 whitespace-pre-wrap break-words">{n.note}</p>
+                <p className="text-xs text-slate-600 mt-1">
+                  {n.author_name ? `${n.author_name} · ` : ''}
+                  {new Date(n.created_at).toLocaleString()}
+                </p>
+              </div>
+              <button
+                onClick={() => deleteNote(n.id)}
+                className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all flex-shrink-0 mt-0.5"
+                title="Delete note"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // SiteSurveysSection — inline survey list for the client page
@@ -430,6 +658,12 @@ export default function ClientDetailPage() {
 
         {/* Site Surveys */}
         <SiteSurveysSection clientId={id} />
+
+        {/* Proposals */}
+        <ProposalsSection clientId={id} />
+
+        {/* Notes */}
+        <NotesSection clientId={id} />
 
         {/* Monthly Usage Chart */}
         <div className="card p-5">

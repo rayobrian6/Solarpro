@@ -1999,6 +1999,48 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 035c (idx_proposals_sent_at): ${(e as Error).message}`);
     }
 
+    // ── Migration 036: Client notes (v48.40) ──────────────────────────────────
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS client_notes (
+          id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          client_id  UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          note       TEXT        NOT NULL CHECK (char_length(note) > 0 AND char_length(note) <= 2000),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ Migration 036a: client_notes — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 036a (client_notes): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_client_notes_client_id ON client_notes (client_id)`;
+      results.push('✅ Migration 036b: idx_client_notes_client_id — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 036b (idx_client_notes_client_id): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_client_notes_user_id ON client_notes (user_id)`;
+      results.push('✅ Migration 036c: idx_client_notes_user_id — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 036c (idx_client_notes_user_id): ${(e as Error).message}`);
+    }
+
+    // ── Migration 037: Lead source tracking (v48.41) ─────────────────────────
+    try {
+      await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_source TEXT`;
+      results.push('✅ Migration 037a: leads.lead_source — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 037a (leads.lead_source): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_leads_lead_source ON leads (lead_source) WHERE lead_source IS NOT NULL`;
+      results.push('✅ Migration 037b: idx_leads_lead_source — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 037b (idx_leads_lead_source): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

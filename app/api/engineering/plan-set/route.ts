@@ -27,11 +27,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
-// execSync removed — plan-set PDF generation now uses execFileSync via inline require()
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { existsSync, unlinkSync } from 'fs';
 import { randomUUID } from 'crypto';
+import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 
 import { buildCoverSheet, type CoverSheetInput } from '@/lib/plan-set/cover-sheet';
 import { buildElectricalSheet, type ElectricalSheetInput } from '@/lib/plan-set/electrical-sheet';
@@ -827,46 +825,20 @@ export async function POST(req: NextRequest) {
     const docTitle = `${clientName || 'Client'} — Solar PV Plan Set ${BUILD_VERSION} — ${today}`;
     const html = wrapDocument(pages, docTitle);
 
-    const uid      = randomUUID();
-    const htmlPath = join(tmpdir(), `planset_${uid}.html`);
-    const pdfPath  = join(tmpdir(), `planset_${uid}.pdf`);
-    tmpFiles.push(htmlPath, pdfPath);
-
-    writeFileSync(htmlPath, html, 'utf8');
-
-    let pdfBuffer: Buffer;
-    let pdfMethod = 'wkhtmltopdf';
-
-    try {
-      // SECURITY: Use execFileSync with argument array (not shell string interpolation)
-      // to prevent any risk of shell injection. Even though paths are UUID-based,
-      // this avoids spawning a shell at all.
-      const { execFileSync: _execFileSync } = require('child_process');
-      _execFileSync('wkhtmltopdf', [
-        '--page-width', '11in',
-        '--page-height', '8.5in',
-        '--orientation', 'Landscape',
-        '--margin-top', '0',
-        '--margin-bottom', '0',
-        '--margin-left', '0',
-        '--margin-right', '0',
-        '--enable-local-file-access',
-        '--quiet',
-        htmlPath,
-        pdfPath,
-      ], { timeout: 45000 });
-      pdfBuffer = readFileSync(pdfPath);
-    } catch (wkErr: unknown) {
-      console.warn('[plan-set] wkhtmltopdf failed, returning HTML:', (wkErr as Error).message);
-      pdfBuffer = Buffer.from(html, 'utf8');
-      pdfMethod = 'html';
-    }
+    // PDF via Puppeteer+chromium (Vercel-compatible)
+    const pdfResult = await generatePdfFromHtml(html, {
+      landscape: true,
+      widthIn: '11in',
+      heightIn: '8.5in',
+    });
 
     const safeClient = (clientName || 'SolarPro').replace(/[^a-zA-Z0-9_-]/g, '_');
     const dateStr    = new Date().toISOString().slice(0, 10);
-    const ext        = pdfMethod === 'html' ? 'html' : 'pdf';
+    const pdfMethod  = pdfResult ? pdfResult.method : 'html';
+    const ext        = pdfResult ? 'pdf' : 'html';
     const fileName   = `Plan_Set_${safeClient}_${dateStr}.${ext}`;
-    const mimeType   = pdfMethod === 'html' ? 'text/html' : 'application/pdf';
+    const mimeType   = pdfResult ? 'application/pdf' : 'text/html';
+    const pdfBuffer  = pdfResult ? Buffer.from(pdfResult.pdf) : Buffer.from(html, 'utf8');
 
     // ── No projectId → return file directly ──────────────────────────────
     if (!saveToProject) {
