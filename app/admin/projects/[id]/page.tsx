@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, RefreshCw, CheckCircle, AlertCircle,
-  Clock, MapPin, Zap, User, Building2, History,
+  Clock, MapPin, Zap, User, Building2, History, Activity,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -46,6 +46,14 @@ interface StageHistoryEntry {
   changed_by_email: string | null;
 }
 
+interface ActivityEntry {
+  id: string;
+  type: string;
+  title: string;
+  details: string | null;
+  created_at: string;
+}
+
 // ─── Stage config ─────────────────────────────────────────────────────────────
 
 const STAGES: { value: HomeownerStage; label: string; color: string; dot: string }[] = [
@@ -79,6 +87,7 @@ export default function AdminProjectDetail() {
   const [selectedStage, setSelectedStage] = useState<HomeownerStage | ''>('');
   const [note, setNote]               = useState('');
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
+  const [activity, setActivity]       = useState<ActivityEntry[]>([]);
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok });
@@ -94,6 +103,11 @@ export default function AdminProjectDetail() {
         setProject(d.project);
         setHistory(d.stageHistory ?? []);
         setSelectedStage(d.project.homeowner_stage ?? '');
+        // #15 FIX: Load activity feed for this project
+        fetch(`/api/activity?project_id=${id}&limit=20`)
+          .then(r => r.json())
+          .then(ad => { if (ad.activity) setActivity(ad.activity); })
+          .catch(() => {});
       } else {
         showToast(d.error || 'Failed to load project', false);
       }
@@ -396,6 +410,35 @@ export default function AdminProjectDetail() {
           </div>
         )}
       </div>
+
+      {/* ── Activity Feed ─────────────────────────────────────────────────────── */}
+      {activity.length > 0 && (
+        <div className="rounded-xl border border-white/5 bg-white/2 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={14} className="text-slate-500" />
+            <h2 className="text-sm font-bold text-white">Activity Feed</h2>
+            <span className="text-xs text-slate-600">({activity.length})</span>
+          </div>
+          <div className="space-y-3">
+            {activity.map(entry => (
+              <div key={entry.id} className="flex items-start gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-slate-600 mt-2 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-300">{entry.title}</span>
+                    <span className="text-xs text-slate-600">
+                      {new Date(entry.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {entry.details && (
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">{entry.details}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Meta row */}
       <div className="flex items-center gap-4 text-xs text-slate-600 pb-2">

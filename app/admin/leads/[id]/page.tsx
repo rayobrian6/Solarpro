@@ -140,14 +140,20 @@ export default function AdminLeadDetail() {
   };
 
   const handleConvert = async () => {
-    if (!confirm('Convert this lead to a client and project?')) return;
+    if (!confirm('Convert this lead to a client and project? You will be taken to the new project.')) return;
     setConverting(true);
     try {
       const res = await fetch(`/api/admin/leads/${id}/convert`, { method: 'POST' });
       const d = await res.json();
       if (d.success) {
         showToast('Converted — client and project created');
-        await load();
+        // #13 FIX: Navigate directly to the new project so the rep can continue
+        // (design, proposal, etc.) without having to find it in the project list
+        if (d.projectId) {
+          router.push(`/projects/${d.projectId}`);
+        } else {
+          await load();
+        }
       } else {
         showToast(d.error || 'Conversion failed', false);
       }

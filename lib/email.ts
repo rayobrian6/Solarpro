@@ -913,3 +913,124 @@ Questions? Contact ${opts.repName} at ${opts.companyName}.
     text,
   });
 }
+
+// ─── Proposal Expiry Reminder Email ──────────────────────────────────────────
+
+/**
+ * sendProposalExpiryReminderEmail — notifies the solar rep that a sent proposal
+ * is expiring soon (Vercel cron fires 3 days before share_expires_at).
+ */
+export async function sendProposalExpiryReminderEmail(opts: {
+  to:             string;   // rep email
+  repName:        string;
+  clientName:     string;
+  proposalTitle:  string;
+  proposalUrl:    string;
+  expiresAt:      Date;
+}): Promise<{ success: boolean; error?: string }> {
+  const daysLeft = Math.ceil((opts.expiresAt.getTime() - Date.now()) / 86400000);
+  const expireLabel = daysLeft === 1 ? 'tomorrow' : `in ${daysLeft} days`;
+  const dateStr = opts.expiresAt.toLocaleDateString('en-US', {
+    month: 'long', day: 'numeric', year: 'numeric',
+  });
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proposal Expiring Soon</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+
+        <!-- Header -->
+        <tr>
+          <td align="center" style="padding-bottom:24px;">
+            <div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.25);
+                        border-radius:14px;padding:12px;display:inline-block;">
+              <span style="font-size:24px;">⏰</span>
+            </div>
+            <p style="margin:10px 0 0;font-size:13px;font-weight:700;color:#fff;">SolarPro</p>
+          </td>
+        </tr>
+
+        <!-- Card -->
+        <tr>
+          <td style="background:#0f172a;border:1px solid rgba(255,255,255,0.06);
+                     border-radius:20px;padding:36px;">
+
+            <p style="margin:0 0 6px;font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.02em;">
+              Proposal expiring ${expireLabel}
+            </p>
+            <p style="margin:0 0 24px;font-size:14px;color:#94a3b8;line-height:1.6;">
+              Hi ${opts.repName}, your proposal for <strong style="color:#e2e8f0;">${opts.clientName}</strong>
+              expires on <strong style="color:#f59e0b;">${dateStr}</strong>.
+              Follow up now to keep the deal moving.
+            </p>
+
+            <!-- Proposal details box -->
+            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
+                        border-radius:12px;padding:16px;margin-bottom:24px;">
+              <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#64748b;letter-spacing:0.08em;text-transform:uppercase;">Proposal</p>
+              <p style="margin:0;font-size:14px;font-weight:700;color:#fff;">${opts.proposalTitle}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;">Client: ${opts.clientName}</p>
+            </div>
+
+            <!-- CTA button -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr>
+                <td align="center">
+                  <a href="${opts.proposalUrl}"
+                     style="display:inline-block;padding:14px 32px;
+                            background:linear-gradient(135deg,#f59e0b,#fbbf24);
+                            color:#0f172a;font-size:14px;font-weight:800;
+                            text-decoration:none;border-radius:12px;">
+                    View & Resend Proposal →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0;font-size:12px;color:#475569;text-align:center;">
+              Proposal links can be resent any time from the Proposals page.
+            </p>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td align="center" style="padding-top:20px;">
+            <p style="margin:0;font-size:11px;color:#334155;">SolarPro &mdash; Proposal Reminders</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  const text = `
+Hi ${opts.repName},
+
+Your proposal "${opts.proposalTitle}" for client ${opts.clientName} is expiring ${expireLabel} (${dateStr}).
+
+Follow up to keep the deal moving:
+${opts.proposalUrl}
+
+— SolarPro Proposal Reminders
+`.trim();
+
+  return sendEmail({
+    to:      opts.to,
+    subject: `⏰ Proposal expiring ${expireLabel} — ${opts.clientName}`,
+    html,
+    text,
+  });
+}
