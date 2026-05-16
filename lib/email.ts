@@ -749,3 +749,167 @@ If you didn't request this, you can safely ignore this email.
     text,
   });
 }
+
+// ─── Send Proposal to Client Email ───────────────────────────────────────────
+
+/**
+ * sendProposalToClientEmail — sends a branded proposal delivery email to a homeowner.
+ * Triggered when a rep clicks "Send to Client" on the proposals page.
+ */
+export async function sendProposalToClientEmail(opts: {
+  to:           string;        // client email
+  clientName:   string;
+  proposalTitle: string;
+  companyName:  string;
+  repName:      string;
+  proposalUrl:  string;        // shareable public URL
+  systemSizeKw?: number;
+  annualSavings?: number;      // $ per year
+  netCost?:     number;        // total cost
+}): Promise<{ success: boolean; error?: string }> {
+  const firstName = opts.clientName.split(' ')[0] || opts.clientName;
+  const fmtCurrency = (v?: number) => v && v > 0
+    ? v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`
+    : null;
+
+  const systemLine = opts.systemSizeKw && opts.systemSizeKw > 0
+    ? `<p style="margin:0 0 8px;font-size:14px;color:#94a3b8;">☀️ <strong style="color:#fff;">${opts.systemSizeKw.toFixed(2)} kW</strong> solar system designed for your home</p>`
+    : '';
+  const savingsLine = fmtCurrency(opts.annualSavings)
+    ? `<p style="margin:0 0 8px;font-size:14px;color:#94a3b8;">📈 Estimated savings: <strong style="color:#4ade80;">${fmtCurrency(opts.annualSavings)}/year</strong></p>`
+    : '';
+  const costLine = fmtCurrency(opts.netCost)
+    ? `<p style="margin:0;font-size:14px;color:#94a3b8;">💰 Total investment: <strong style="color:#f59e0b;">${fmtCurrency(opts.netCost)}</strong></p>`
+    : '';
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Solar Proposal is Ready</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+
+        <!-- Header -->
+        <tr>
+          <td align="center" style="padding-bottom:28px;">
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:linear-gradient(135deg,rgba(245,158,11,0.25),rgba(245,158,11,0.08));
+                            border:1px solid rgba(245,158,11,0.25);border-radius:14px;
+                            padding:12px;width:48px;height:48px;text-align:center;vertical-align:middle;">
+                  <span style="font-size:24px;line-height:1;">☀️</span>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:10px 0 0;font-size:15px;font-weight:800;color:#fff;">
+              ${opts.companyName}
+            </p>
+            <p style="margin:4px 0 0;font-size:12px;color:#475569;">Solar Design Proposal</p>
+          </td>
+        </tr>
+
+        <!-- Card -->
+        <tr>
+          <td style="background:#0f172a;border:1px solid rgba(255,255,255,0.06);
+                     border-radius:20px;padding:40px 36px;">
+
+            <p style="margin:0 0 8px;font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em;">
+              Hi ${firstName}! 👋
+            </p>
+            <p style="margin:0 0 24px;font-size:15px;color:#94a3b8;line-height:1.6;">
+              Your personalized solar proposal is ready to review.
+              ${opts.repName} at <strong style="color:#e2e8f0;">${opts.companyName}</strong> has prepared a
+              custom design for your home.
+            </p>
+
+            <!-- System highlights -->
+            ${(systemLine || savingsLine || costLine) ? `
+            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
+                        border-radius:14px;padding:20px;margin-bottom:28px;">
+              ${systemLine}
+              ${savingsLine}
+              ${costLine}
+            </div>
+            ` : ''}
+
+            <!-- CTA button -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td align="center">
+                  <a href="${opts.proposalUrl}"
+                     style="display:inline-block;padding:16px 36px;
+                            background:linear-gradient(135deg,#f59e0b,#fbbf24);
+                            color:#0f172a;font-size:15px;font-weight:800;
+                            text-decoration:none;border-radius:14px;
+                            box-shadow:0 4px 20px rgba(245,158,11,0.35);
+                            letter-spacing:0.01em;">
+                    View My Solar Proposal →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.6;text-align:center;">
+              Or copy this link:
+              <a href="${opts.proposalUrl}" style="color:#f59e0b;text-decoration:none;word-break:break-all;">${opts.proposalUrl}</a>
+            </p>
+
+            <!-- Divider -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr><td style="border-top:1px solid rgba(255,255,255,0.06);height:1px;font-size:0;">&nbsp;</td></tr>
+            </table>
+
+            <p style="margin:0;font-size:12px;color:#475569;line-height:1.5;">
+              Questions? Reply to this email or contact ${opts.repName} directly.
+              This proposal link expires in 30 days.
+            </p>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td align="center" style="padding-top:24px;">
+            <p style="margin:0;font-size:11px;color:#334155;">
+              ${opts.companyName} &mdash; Powered by SolarPro &nbsp;|&nbsp;
+              <a href="${opts.proposalUrl}" style="color:#475569;">View Proposal</a>
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  const text = `
+Hi ${firstName},
+
+Your solar proposal is ready to review!
+
+${opts.repName} at ${opts.companyName} has prepared a custom solar design for your home.
+
+${opts.systemSizeKw ? `System Size: ${opts.systemSizeKw.toFixed(2)} kW\n` : ''}${opts.annualSavings ? `Estimated Savings: ${fmtCurrency(opts.annualSavings)}/year\n` : ''}${opts.netCost ? `Total Investment: ${fmtCurrency(opts.netCost)}\n` : ''}
+View your proposal here:
+${opts.proposalUrl}
+
+Questions? Contact ${opts.repName} at ${opts.companyName}.
+
+— ${opts.companyName}, powered by SolarPro
+`.trim();
+
+  return sendEmail({
+    to:      opts.to,
+    subject: `☀️ Your Solar Proposal from ${opts.companyName} is Ready`,
+    html,
+    text,
+  });
+}

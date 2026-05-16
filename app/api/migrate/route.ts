@@ -1973,6 +1973,32 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 034d (idx_portal_otp_expires_at): ${(e as Error).message}`);
     }
 
+    // ── Migration 035: Proposal send tracking (v48.39) ──────────────────────────
+    // Adds sent_at and sent_to_email columns to proposals table.
+    // Records when/to whom a proposal was emailed via the "Send to Client" workflow.
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 035a: proposals.sent_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 035a (proposals.sent_at): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS sent_to_email TEXT DEFAULT NULL`;
+      results.push('✅ Migration 035b: proposals.sent_to_email — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 035b (proposals.sent_to_email): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_proposals_sent_at
+          ON proposals (sent_at)
+          WHERE sent_at IS NOT NULL
+      `;
+      results.push('✅ Migration 035c: idx_proposals_sent_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 035c (idx_proposals_sent_at): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

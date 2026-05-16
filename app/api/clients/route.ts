@@ -4,9 +4,10 @@ export const runtime = 'nodejs';
 export const revalidate = 0;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
-import { getClientsByUser, createClient , handleRouteDbError } from '@/lib/db-neon';
-import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { getUserFromRequest }                                  from '@/lib/auth';
+import { getClientsByUser, createClient, handleRouteDbError, getDbReady } from '@/lib/db-neon';
+import { checkRateLimit, getClientIp }                        from '@/lib/rateLimiter';
+import { getPlanPermissions }                                  from '@/lib/stripe';
 
 export async function GET(req: NextRequest) {
   try {
@@ -59,6 +60,29 @@ export async function POST(req: NextRequest) {
       (monthlyKwh ? monthlyKwh.reduce((s: number, v: number) => s + v, 0) : (averageMonthlyKwh || 1000) * 12);
     const calcAvgMonthly = averageMonthlyKwh || Math.round(calcAnnualKwh / 12);
     const calcRate = utilityRate || (averageMonthlyBill && calcAvgMonthly ? averageMonthlyBill / calcAvgMonthly : 0.13);
+
+    // #16 FIX: Enforce client limit at API level (prevents bypass via API calls/SolarDog)
+    const sql    = await getDbReady();
+    const userRow = await sql`SELECT plan FROM users WHERE id = ${user.id} LIMIT 1`;
+    const planId  = (userRow[0]?.plan as string) || 'starter';
+    const perms   = getPlanPermissions(planId as any);
+    if (perms.maxClients !== null) {
+      const countResult = await sql`
+        SELECT COUNT(*)::int AS cnt
+        FROM clients
+        WHERE user_id = ${user.id} AND deleted_at IS NULL
+      `;
+      const currentCount = Number(countResult[0]?.cnt ?? 0);
+      if (currentCount >= perms.maxClients) {
+        return NextResponse.json({
+          success: false,
+          error: `Client limit reached. Your ${planId} plan includes up to ${perms.maxClients} clients. Upgrade to Professional for unlimited clients.`,
+          limitReached: true,
+          limit: perms.maxClients,
+          current: currentCount,
+        }, { status: 403 });
+      }
+    }
 
     const client = await createClient({
       userId: user.id,

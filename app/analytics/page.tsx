@@ -143,21 +143,43 @@ export default function AnalyticsPage() {
   const projects = useMemo(() => filterByRange(allProjects, range), [allProjects, range]);
   const prevProjects = useMemo(() => getPreviousPeriod(allProjects, range), [allProjects, range]);
 
+  // ══════════════════════════════════════════════════════════════════════════════════
+  // REVENUE HELPERS
+  // ══════════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * #9 FIX: getProjectRevenue()
+   * Returns net cost for a project. We only count projects that *actually* have
+   * pricing data — i.e. costEstimate?.netCost > 0 — so empty/in-progress projects
+   * don't inflate the denominator and drag revenue metrics to near-zero.
+   */
+  function getProjectRevenue(p: Project): number {
+    return (p.costEstimate?.netCost ?? 0) > 0 ? (p.costEstimate!.netCost) : 0;
+  }
+
+  /** % of projects that have real cost data */
+  const pricedProjectCount = projects.filter(p => getProjectRevenue(p) > 0).length;
+  const revenueDataQuality = projects.length > 0
+    ? Math.round((pricedProjectCount / projects.length) * 100)
+    : 100; // 100 = "no data" edge case, hide banner
+
   // ════════════════════════════════════════════════════════════
   // KPI CALCULATIONS
   // ════════════════════════════════════════════════════════════
-  const totalRevenue = projects.reduce((s, p) => s + (p.costEstimate?.netCost || 0), 0);
-  const prevRevenue = prevProjects.reduce((s, p) => s + (p.costEstimate?.netCost || 0), 0);
+  const totalRevenue = projects.reduce((s, p) => s + getProjectRevenue(p), 0);
+  const prevRevenue = prevProjects.reduce((s, p) => s + getProjectRevenue(p), 0);
 
   const closedDeals = projects.filter(p => p.status === 'approved' || p.status === 'installed');
   const prevClosed = prevProjects.filter(p => p.status === 'approved' || p.status === 'installed');
   const closeRate = projects.length > 0 ? Math.round((closedDeals.length / projects.length) * 100) : 0;
   const prevCloseRate = prevProjects.length > 0 ? Math.round((prevClosed.length / prevProjects.length) * 100) : 0;
 
-  const avgDealSize = closedDeals.length > 0
-    ? closedDeals.reduce((s, p) => s + (p.costEstimate?.netCost || 0), 0) / closedDeals.length : 0;
-  const prevAvgDeal = prevClosed.length > 0
-    ? prevClosed.reduce((s, p) => s + (p.costEstimate?.netCost || 0), 0) / prevClosed.length : 0;
+  const closedWithRevenue = closedDeals.filter(p => getProjectRevenue(p) > 0);
+  const avgDealSize = closedWithRevenue.length > 0
+    ? closedWithRevenue.reduce((s, p) => s + getProjectRevenue(p), 0) / closedWithRevenue.length : 0;
+  const prevClosedWithRevenue = prevClosed.filter(p => getProjectRevenue(p) > 0);
+  const prevAvgDeal = prevClosedWithRevenue.length > 0
+    ? prevClosedWithRevenue.reduce((s, p) => s + getProjectRevenue(p), 0) / prevClosedWithRevenue.length : 0;
 
   const avgDaysToClose = closedDeals.length > 0
     ? Math.round(closedDeals.reduce((s, p) => s + daysBetween(p.createdAt, p.updatedAt), 0) / closedDeals.length) : 0;
@@ -198,7 +220,7 @@ export default function AnalyticsPage() {
         const cd = new Date(p.createdAt);
         return cd >= d && cd <= monthEnd;
       });
-      const rev = monthProjects.reduce((s, p) => s + (p.costEstimate?.netCost || 0), 0);
+      const rev = monthProjects.reduce((s, p) => s + getProjectRevenue(p), 0);
       cumulative += rev;
       data.push({ month: label, revenue: Math.round(rev), cumulative: Math.round(cumulative) });
     }
@@ -285,7 +307,7 @@ export default function AnalyticsPage() {
   const statusBreakdown = useMemo(() => STATUS_ORDER.map(s => ({
     status: STATUS_LABELS[s],
     count: projects.filter(p => p.status === s).length,
-    revenue: projects.filter(p => p.status === s).reduce((sum, p) => sum + (p.costEstimate?.netCost || 0), 0),
+    revenue: projects.filter(p => p.status === s).reduce((sum, p) => sum + getProjectRevenue(p), 0),
     color: STATUS_COLORS[s],
   })), [projects]);
 
@@ -294,14 +316,14 @@ export default function AnalyticsPage() {
   // ════════════════════════════════════════════════════════════
   const topProjects = useMemo(() => [...projects]
     .filter(p => p.costEstimate?.netCost)
-    .sort((a, b) => (b.costEstimate?.netCost || 0) - (a.costEstimate?.netCost || 0))
+    .sort((a, b) => getProjectRevenue(b) - getProjectRevenue(a))
     .slice(0, 5), [projects]);
 
   const topClients = useMemo(() => clients.map(c => ({
     ...c,
     projectCount: projects.filter(p => p.clientId === c.id).length,
     totalKw: projects.filter(p => p.clientId === c.id).reduce((s, p) => s + (p.layout?.systemSizeKw || 0), 0),
-    revenue: projects.filter(p => p.clientId === c.id).reduce((s, p) => s + (p.costEstimate?.netCost || 0), 0),
+    revenue: projects.filter(p => p.clientId === c.id).reduce((s, p) => s + getProjectRevenue(p), 0),
   })).filter(c => c.projectCount > 0).sort((a, b) => b.revenue - a.revenue).slice(0, 5), [clients, projects]);
 
   // ════════════════════════════════════════════════════════════
@@ -343,6 +365,20 @@ export default function AnalyticsPage() {
           </div>
 
           {/* ═══ KPI STRIP ═══ */}
+
+          {/* #9 FIX: Revenue data quality banner — shown when <80% of projects have pricing */}
+          {!loading && projects.length > 0 && revenueDataQuality < 80 && (
+            <div className="flex items-start gap-3 rounded-xl px-4 py-3 text-xs"
+              style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.18)' }}>
+              <span style={{ color: '#f59e0b', fontSize: 16, lineHeight: 1, marginTop: 1 }}>⚠</span>
+              <span style={{ color: '#94a3b8' }}>
+                Revenue figures only include projects with completed proposals
+                ({pricedProjectCount} of {projects.length} projects have pricing data).
+                Complete proposals to see accurate revenue metrics.
+              </span>
+            </div>
+          )}
+
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <KpiCard icon={<DollarSign size={18} style={{ color: '#4ADE80' }} />}
             label="Total Revenue" value={fmtK(totalRevenue)}
@@ -374,7 +410,14 @@ export default function AnalyticsPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Revenue Over Time</h3>
-              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>Monthly revenue + cumulative pipeline</p>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                Monthly revenue + cumulative pipeline
+                {pricedProjectCount < projects.length && projects.length > 0 && (
+                  <span style={{ color: 'rgba(245,158,11,0.7)', marginLeft: 6 }}>
+                    · {pricedProjectCount}/{projects.length} projects priced
+                  </span>
+                )}
+              </p>
             </div>
             <div className="flex items-center gap-4 text-[10px] font-medium" style={{ color: 'var(--text-muted)' }}>
               <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-emerald-500 inline-block" />Revenue</span>
@@ -635,7 +678,7 @@ export default function AnalyticsPage() {
                         <span className="text-[10px] font-bold w-4" style={{ color: 'var(--text-muted)' }}>#{idx + 1}</span>
                         <span className="text-xs font-medium flex-1 truncate group-hover:text-amber-300 transition-colors"
                           style={{ color: 'var(--text-primary)' }}>{project.name}</span>
-                        <span className="text-xs font-bold" style={{ color: '#4ADE80' }}>{fmtK(project.costEstimate?.netCost || 0)}</span>
+                        <span className="text-xs font-bold" style={{ color: '#4ADE80' }}>{fmtK(getProjectRevenue(project))}</span>
                       </div>
                       <div className="ml-7 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--bg-muted)' }}>
                         <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
