@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const revalidate = 0;
+export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady , handleRouteDbError} from '@/lib/db-neon';

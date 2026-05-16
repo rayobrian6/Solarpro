@@ -2,6 +2,8 @@
 // GET /api/clients/[id]/site-surveys — list all surveys for a client
 // ============================================================================
 
+export const maxDuration = 30;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { getSiteSurveysByClient, isValidUUID } from '@/lib/db-neon';

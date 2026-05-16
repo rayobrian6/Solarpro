@@ -9,6 +9,8 @@
 // Returns 410 Gone to signal stale callers clearly.
 // ============================================================================
 
+export const maxDuration = 30;
+
 import { NextResponse } from 'next/server';
 
 export async function POST() {

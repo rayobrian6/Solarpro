@@ -4,6 +4,7 @@
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, isValidUUID } from '@/lib/db-neon';

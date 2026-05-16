@@ -5,6 +5,7 @@ import { getDbReady , handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 // GET /api/admin/set-roles?secret=YOUR_SECRET
 // Emergency endpoint to normalise DB role constraints — dev/staging only.

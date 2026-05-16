@@ -29,6 +29,7 @@
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const revalidate = 0;
+export const maxDuration = 30;
 
 import { NextResponse } from 'next/server';
 import { BUILD_VERSION, BUILD_FEATURES } from '@/lib/version';

@@ -17,6 +17,7 @@
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';

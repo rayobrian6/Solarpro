@@ -40,6 +40,7 @@ import { requireAuth } from '@/lib/security';
 export const dynamic   = 'force-dynamic';
 export const runtime   = 'nodejs';
 export const revalidate = 0;
+export const maxDuration = 30;
 
 export async function GET(req: NextRequest) {
   try {

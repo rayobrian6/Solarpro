@@ -3,6 +3,8 @@
 // PATCH /api/site-surveys/[surveyId]  — update (attach project, status, notes)
 // ============================================================================
 
+export const maxDuration = 30;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import {

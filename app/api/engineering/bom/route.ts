@@ -15,6 +15,7 @@ import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 import { generateBOMV4, bomToMarkdown, bomToCSV, BOMGenerationInputV4 } from '@/lib/bom-engine-v4';
 import { deriveStructuralBOM, type BOMSystemType, type StructuralBOMItem } from '@/lib/bom-system-profiles';
 import type { BOMGenerationResultV4, BOMLineItemV4, BOMStageResult, BOMStageId } from '@/lib/bom-engine-v4';

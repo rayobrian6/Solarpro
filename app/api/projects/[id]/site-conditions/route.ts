@@ -6,6 +6,7 @@ type RouteContext = { params: Promise<{id: string}> };
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 // UUID format validation
 function isValidUUID(id: string): boolean {

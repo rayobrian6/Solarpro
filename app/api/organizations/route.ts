@@ -10,6 +10,7 @@ import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req);

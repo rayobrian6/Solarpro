@@ -17,6 +17,7 @@ import { requireAdminApi } from '@/lib/adminAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 // Hard-coded allow-list. Adding to this requires code review.
 const ALLOWED = [
