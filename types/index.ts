@@ -709,6 +709,8 @@ export interface Proposal {
   snapshotAt?: string;                              // ISO timestamp when snapshot was taken
   // v48.3: DB-fetched utility rate (utility_policies lookup, server-side only)
   dbUtilityRate?: number | null;
+  // v48.36: explicit state code snapshot — avoids address regex fallback failures
+  stateCode?: string | null;
 }
 
 // ─── Dashboard Stats ──────────────────────────────────────────

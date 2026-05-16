@@ -38,6 +38,8 @@ function rowToProposal(row: Record<string, unknown>, project?: import('@/types')
     snapshotAt:      (dj.snapshotAt as string) ?? undefined,
     // v48.5: read cached DB rate from data_json (set at proposal creation)
     dbUtilityRate:   typeof dj.dbUtilityRate === 'number' ? dj.dbUtilityRate : null,
+    // v48.36: read cached stateCode from data_json (set at proposal creation)
+    stateCode:       typeof dj.stateCode === 'string' ? dj.stateCode : null,
   };
 }
 
@@ -144,6 +146,20 @@ export async function POST(req: NextRequest) {
       (project as any).stateCode   ?? null
     ).catch(() => null);
 
+    // v48.36: extract and cache stateCode at snapshot time so ICA/PTO works even when
+    // client.state is missing from the live DB later. Fallback chain: project.stateCode
+    // → client.state → regex on address.
+    const _extractStateCode = (addr?: string): string => {
+      if (!addr) return '';
+      const m = addr.match(/\b([A-Z]{2})\s+\d{5}/i) || addr.match(/,\s*([A-Z]{2})\s*$/i);
+      return m ? m[1].toUpperCase() : '';
+    };
+    const snapshotStateCode = (
+      (project as any).stateCode ??
+      (project as any).client?.state ??
+      _extractStateCode((project as any).address ?? '')
+    ) || null;
+
     const dataJson = JSON.stringify({
       status: 'draft',
       title: proposalName,
@@ -155,6 +171,7 @@ export async function POST(req: NextRequest) {
       pricingSnapshot,            // frozen pricing config at time of generation
       snapshotAt,
       dbUtilityRate,              // v48.5: cached at creation — no live re-fetch on reads
+      stateCode: snapshotStateCode, // v48.36: explicit state code for ICA/PTO lookup
     });
 
     const rows = await sql`

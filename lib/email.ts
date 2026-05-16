@@ -471,3 +471,141 @@ SolarPro — Operated by Under The Sun Solar
     text,
   });
 }
+
+// ── Project Stage Advance Notification ──────────────────────────────────────
+// Sent to the homeowner when their project stage is advanced.
+// Gives them the new stage name, what it means, and a link to their portal.
+
+export async function sendStageAdvanceEmail(opts: {
+  homeownerEmail:  string;
+  homeownerName:   string;
+  projectName:     string;
+  newStage:        string;
+  stageLabel:      string;
+  stageBody:       string;
+  stageNext:       string;
+  portalUrl:       string;
+  companyName:     string;
+}): Promise<{ success: boolean; error?: string }> {
+  const stageColors: Record<string, string> = {
+    lead_submitted:  '#64748b',
+    under_review:    '#3b82f6',
+    site_survey:     '#06b6d4',
+    design:          '#8b5cf6',
+    proposal:        '#f59e0b',
+    installation:    '#f97316',
+    completed:       '#10b981',
+  };
+  const accentColor = stageColors[opts.newStage] ?? '#f59e0b';
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Solar Project Update</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background:#0f1015;border-radius:14px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;max-width:560px;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#0a0d14 0%,#0f1015 100%);padding:28px 36px;border-bottom:3px solid ${accentColor};">
+              <table cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="width:40px;height:40px;background:linear-gradient(135deg,#f97316,#fbbf24);border-radius:10px;text-align:center;vertical-align:middle;">
+                    <span style="font-size:20px;line-height:40px;">☀️</span>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <div style="font-size:17px;font-weight:900;color:#ffffff;line-height:1.2;">${opts.companyName}</div>
+                    <div style="font-size:10px;color:#fbbf24;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Solar Project Update</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Stage Badge -->
+          <tr>
+            <td style="padding:28px 36px 0;">
+              <div style="display:inline-block;background:${accentColor}18;border:1px solid ${accentColor}44;border-radius:20px;padding:5px 14px;">
+                <span style="font-size:11px;font-weight:700;color:${accentColor};letter-spacing:0.06em;text-transform:uppercase;">🔔 Stage Update</span>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:18px 36px 28px;">
+              <h1 style="font-size:21px;font-weight:800;color:#ffffff;margin:0 0 10px;">Hi ${opts.homeownerName} 👋</h1>
+              <p style="font-size:15px;color:rgba(255,255,255,0.7);line-height:1.7;margin:0 0 20px;">
+                Great news! Your solar project <strong style="color:#ffffff;">${opts.projectName}</strong> has just moved to a new stage:
+              </p>
+
+              <!-- Stage card -->
+              <div style="background:${accentColor}0d;border:1px solid ${accentColor}33;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+                <div style="font-size:12px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">New Stage</div>
+                <div style="font-size:22px;font-weight:900;color:${accentColor};margin-bottom:10px;">${opts.stageLabel}</div>
+                <p style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.6;margin:0 0 10px;">${opts.stageBody}</p>
+                <div style="font-size:12px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">What's next</div>
+                <p style="font-size:13px;color:rgba(255,255,255,0.65);margin:0;">${opts.stageNext}</p>
+              </div>
+
+              <!-- CTA -->
+              <table cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <a href="${opts.portalUrl}"
+                       style="display:inline-block;background:${accentColor};color:#000000;font-size:15px;font-weight:700;text-decoration:none;padding:13px 32px;border-radius:8px;letter-spacing:0.01em;">
+                      View My Project Dashboard →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:rgba(0,0,0,0.25);padding:18px 36px;border-top:1px solid rgba(255,255,255,0.05);">
+              <p style="font-size:11px;color:rgba(255,255,255,0.25);margin:0;text-align:center;line-height:1.7;">
+                ${opts.companyName} — Powered by SolarPro<br/>
+                You're receiving this because you have an active solar project with us.<br/>
+                <a href="${opts.portalUrl}" style="color:rgba(255,255,255,0.35);text-decoration:underline;">View your portal</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
+
+  const text = `
+Hi ${opts.homeownerName},
+
+Your solar project "${opts.projectName}" has moved to a new stage: ${opts.stageLabel}
+
+${opts.stageBody}
+
+What's next: ${opts.stageNext}
+
+View your project dashboard: ${opts.portalUrl}
+
+---
+${opts.companyName} — Powered by SolarPro
+`.trim();
+
+  return sendEmail({
+    to:      opts.homeownerEmail,
+    subject: `☀️ Project Update: ${opts.stageLabel} — ${opts.projectName}`,
+    html,
+    text,
+  });
+}

@@ -1170,6 +1170,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     return m ? m[1].toUpperCase() : '';
   };
   const projectStateCode = (
+    (proposal as any)?.stateCode ||
     (proj as any)?.stateCode ||
     client?.state ||
     _extractStateFromAddress((proj as any)?.address || client?.address || '') ||

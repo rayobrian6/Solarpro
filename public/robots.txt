@@ -1,0 +1,24 @@
+User-agent: *
+Allow: /
+Allow: /pricing
+Allow: /auth/login
+Allow: /auth/register
+Allow: /terms
+
+# Block private/app areas
+Disallow: /api/
+Disallow: /admin/
+Disallow: /portal/
+Disallow: /dashboard/
+Disallow: /analytics/
+Disallow: /settings/
+Disallow: /projects/
+Disallow: /proposals/
+Disallow: /clients/
+Disallow: /engineering/
+Disallow: /design/
+Disallow: /operations/
+Disallow: /onboarding/
+Disallow: /debug/
+
+Sitemap: https://www.solarpro.solutions/sitemap.xml
