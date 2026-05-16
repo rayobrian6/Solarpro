@@ -107,8 +107,10 @@ const nextConfig = {
     serverComponentsExternalPackages: [
       'pdf2pic', 'openai', 'pdf-parse', 'pdfjs-dist',
       'tesseract.js', 'tesseract.js-core',
-      'sharp',          // native bindings — must not be bundled by webpack
-      'exif-reader',    // native EXIF parsing
+      'sharp',                 // native bindings — must not be bundled by webpack
+      'exif-reader',           // native EXIF parsing
+      'puppeteer-core',        // Puppeteer PDF generation
+      '@sparticuz/chromium-min', // Sparticuz Chromium for Vercel serverless
     ],
   },
   images: {
@@ -130,6 +132,8 @@ const nextConfig = {
       'tesseract.js-core',
       'sharp',
       'exif-reader',
+      'puppeteer-core',
+      '@sparticuz/chromium-min',
     ];
     return config;
   },
