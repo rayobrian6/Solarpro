@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
         p.homeowner_stage,
         p.updated_at,
         p.created_at,
+        u.name           AS owner_name,
         u.company_phone  AS owner_phone,
         u.email          AS owner_email,
         u.company        AS owner_company
@@ -150,6 +151,7 @@ export async function GET(req: NextRequest) {
 
     // Derive owner contact info from the first project's owner (most recent project)
     const firstProject = projects[0] as Record<string, unknown> | undefined;
+    const ownerName    = firstProject?.owner_name    ? String(firstProject.owner_name)    : null;
     const ownerPhone   = firstProject?.owner_phone   ? String(firstProject.owner_phone)   : null;
     const ownerEmail   = firstProject?.owner_email   ? String(firstProject.owner_email)   : null;
     const ownerCompany = firstProject?.owner_company ? String(firstProject.owner_company) : null;
@@ -207,6 +209,7 @@ export async function GET(req: NextRequest) {
         zip:     client.zip || null,
       },
       owner: {
+        name:    ownerName,
         phone:   ownerPhone,
         email:   ownerEmail,
         company: ownerCompany,
