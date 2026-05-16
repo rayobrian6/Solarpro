@@ -99,6 +99,7 @@ export async function POST(
 
     const baseUrl     = getBaseUrl();
     const proposalUrl = `${baseUrl}/proposals/view/${proposalId}?token=${shareToken}`;
+    const portalUrl   = `${baseUrl}/portal/login?email=${encodeURIComponent(row.client_email)}`;
     const companyName = row.company_name || 'SolarPro';
     const repName     = row.rep_name    || user.name || 'Your Solar Rep';
 
@@ -121,6 +122,7 @@ export async function POST(
       companyName,
       repName,
       proposalUrl,
+      portalUrl,
       systemSizeKw:  systemSizeKw  > 0 ? systemSizeKw  : undefined,
       annualSavings: annualSavings > 0 ? annualSavings : undefined,
       netCost:       netCost       > 0 ? netCost       : undefined,

@@ -763,6 +763,7 @@ export async function sendProposalToClientEmail(opts: {
   companyName:  string;
   repName:      string;
   proposalUrl:  string;        // shareable public URL
+  portalUrl?:   string;        // homeowner portal deep-link (pre-fills email)
   systemSizeKw?: number;
   annualSavings?: number;      // $ per year
   netCost?:     number;        // total cost
@@ -838,8 +839,8 @@ export async function sendProposalToClientEmail(opts: {
             </div>
             ` : ''}
 
-            <!-- CTA button -->
-            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+            <!-- CTA: View Proposal -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:16px;">
               <tr>
                 <td align="center">
                   <a href="${opts.proposalUrl}"
@@ -854,6 +855,25 @@ export async function sendProposalToClientEmail(opts: {
                 </td>
               </tr>
             </table>
+
+            ${opts.portalUrl ? `
+            <!-- CTA: Client Portal -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td align="center">
+                  <a href="${opts.portalUrl}"
+                     style="display:inline-block;padding:13px 32px;
+                            background:transparent;
+                            border:1px solid rgba(245,158,11,0.45);
+                            color:#f59e0b;font-size:14px;font-weight:600;
+                            text-decoration:none;border-radius:12px;
+                            letter-spacing:0.01em;">
+                    Access My Client Portal →
+                  </a>
+                </td>
+              </tr>
+            </table>
+            ` : `<div style="margin-bottom:28px;"></div>`}
 
             <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.6;text-align:center;">
               Or copy this link:

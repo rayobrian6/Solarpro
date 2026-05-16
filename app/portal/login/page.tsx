@@ -7,8 +7,8 @@
  * Step 2: Enter 6-digit code → POST /api/portal/verify-otp → JWT cookie issued
  */
 
-import { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useRef, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Sun, Mail, ArrowRight, AlertCircle, KeyRound,
   Loader2, Shield, Zap, TrendingUp, Leaf, CheckCircle2,
@@ -17,8 +17,17 @@ import {
 
 type Step = 'email' | 'otp';
 
-export default function PortalLogin() {
+export default function PortalLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#07070e]" />}>
+      <PortalLogin />
+    </Suspense>
+  );
+}
+
+function PortalLogin() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [step,    setStep]    = useState<Step>('email');
   const [email,   setEmail]   = useState('');
@@ -33,13 +42,17 @@ export default function PortalLogin() {
   const digitRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
+    // Pre-fill email from ?email= query param (set by proposal email link)
+    const emailParam = searchParams.get('email');
+    if (emailParam) setEmail(decodeURIComponent(emailParam));
+
     // Already logged in? Skip to dashboard
     fetch('/api/portal/dashboard')
       .then(r => r.json())
       .then(d => { if (d.success) router.replace('/portal/dashboard'); })
       .catch(() => {});
     setTimeout(() => setMounted(true), 80);
-  }, [router]);
+  }, [router, searchParams]);
 
   // ─── Step 1: Request OTP ──────────────────────────────────────────────────
   const handleEmailSubmit = async (e: React.FormEvent) => {
