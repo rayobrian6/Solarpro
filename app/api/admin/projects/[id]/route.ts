@@ -43,12 +43,16 @@ export async function GET(
           p.id, p.name, p.address, p.system_size_kw, p.status,
           p.origin, p.deleted_at, p.created_at, p.updated_at,
           p.homeowner_stage,
-          u.name  AS owner_name,
-          u.email AS owner_email,
-          u.id    AS owner_id,
-          c.name  AS client_name,
-          c.email AS client_email,
-          c.id    AS client_id
+          u.name         AS owner_name,
+          u.email        AS owner_email,
+          u.company_phone AS owner_phone,
+          u.company      AS owner_company,
+          u.id           AS owner_id,
+          c.name         AS client_name,
+          c.email        AS client_email,
+          c.phone        AS client_phone,
+          c.state        AS client_state,
+          c.id           AS client_id
         FROM projects p
         LEFT JOIN users   u ON u.id = p.user_id
         LEFT JOIN clients c ON c.id = p.client_id
@@ -114,12 +118,52 @@ export async function GET(
       console.warn(`[api/admin/projects/[id]] GET micro_stages failsafe: ${msg}`);
     }
 
+    // ── Proposals (for portal CTA preview) ──────────────────────────────────
+    let proposals: {
+      id: string; project_id: string; name: string;
+      share_token: string; share_expires_at: string | null; signed_at: string | null;
+    }[] = [];
+    try {
+      const propRows = await sql`
+        SELECT
+          id::text,
+          project_id::text,
+          COALESCE(name, 'Solar Proposal') AS name,
+          share_token,
+          share_expires_at::text,
+          signed_at::text
+        FROM proposals
+        WHERE project_id = ${id}
+          AND share_token IS NOT NULL
+          AND (share_expires_at IS NULL OR share_expires_at > NOW())
+        ORDER BY created_at DESC
+      `;
+      proposals = propRows.map((r: Record<string, unknown>) => ({
+        id:               String(r.id),
+        project_id:       String(r.project_id),
+        name:             String(r.name),
+        share_token:      String(r.share_token),
+        share_expires_at: r.share_expires_at ? String(r.share_expires_at) : null,
+        signed_at:        r.signed_at        ? String(r.signed_at)        : null,
+      }));
+    } catch {
+      // non-fatal — proposals table may not have share_token in older envs
+    }
+
+    const row = rows[0] as Record<string, unknown>;
     return NextResponse.json({
       success: true,
-      project: rows[0],
+      project: row,
+      owner: {
+        phone:   row.owner_phone   ? String(row.owner_phone)   : null,
+        email:   row.owner_email   ? String(row.owner_email)   : null,
+        company: row.owner_company ? String(row.owner_company) : null,
+      },
+      clientState: row.client_state ? String(row.client_state) : null,
       stageHistory: historyRows,
       documents,
       microStages,
+      proposals,
     });
   } catch (e: unknown) {
     return handleRouteDbError('[api/admin/projects/[id]] GET', e);
