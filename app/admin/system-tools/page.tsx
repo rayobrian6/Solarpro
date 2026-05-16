@@ -213,11 +213,12 @@ export default function SystemToolsPage() {
               <select
                 value={selectedMig}
                 onChange={e => setSelectedMig(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                className="w-full bg-slate-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-amber-500/50"
+                style={{ backgroundColor: '#1e293b', color: '#f1f5f9' }}
               >
-                <option value="">Select migration file...</option>
+                <option value="" style={{ backgroundColor: '#1e293b', color: '#94a3b8' }}>Select migration file...</option>
                 {migrations.map(m => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m} style={{ backgroundColor: '#1e293b', color: '#f1f5f9' }}>{m}</option>
                 ))}
               </select>
             ) : (

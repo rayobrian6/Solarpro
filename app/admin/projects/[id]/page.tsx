@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft, RefreshCw, CheckCircle, AlertCircle,
-  Clock, MapPin, Zap, User, Building2, History,
+  Clock, MapPin, Zap, User, Building2, History, Activity, Send,
 } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -46,6 +46,14 @@ interface StageHistoryEntry {
   changed_by_email: string | null;
 }
 
+interface ActivityEntry {
+  id: string;
+  type: string;
+  title: string;
+  details: string | null;
+  created_at: string;
+}
+
 // ─── Stage config ─────────────────────────────────────────────────────────────
 
 const STAGES: { value: HomeownerStage; label: string; color: string; dot: string }[] = [
@@ -79,10 +87,38 @@ export default function AdminProjectDetail() {
   const [selectedStage, setSelectedStage] = useState<HomeownerStage | ''>('');
   const [note, setNote]               = useState('');
   const [toast, setToast]             = useState<{ msg: string; ok: boolean } | null>(null);
+  const [activity, setActivity]       = useState<ActivityEntry[]>([]);
+  const [inviteSending, setInviteSending] = useState(false);
+  const [inviteStatus, setInviteStatus]   = useState<'idle' | 'sent' | 'error'>('idle');
 
   const showToast = (msg: string, ok = true) => {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 3500);
+  };
+
+  const handleSendPortalInvite = async () => {
+    if (!project || inviteSending) return;
+    setInviteSending(true);
+    setInviteStatus('idle');
+    try {
+      const res  = await fetch(`/api/admin/projects/${project.id}/send-portal-invite`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setInviteStatus('sent');
+        showToast(`Portal invite sent to ${data.sentTo}`);
+        setTimeout(() => setInviteStatus('idle'), 5000);
+      } else {
+        setInviteStatus('error');
+        showToast(data.error || 'Failed to send invite.', false);
+        setTimeout(() => setInviteStatus('idle'), 5000);
+      }
+    } catch {
+      setInviteStatus('error');
+      showToast('Connection error. Please try again.', false);
+      setTimeout(() => setInviteStatus('idle'), 5000);
+    } finally {
+      setInviteSending(false);
+    }
   };
 
   const load = useCallback(async () => {
@@ -94,6 +130,11 @@ export default function AdminProjectDetail() {
         setProject(d.project);
         setHistory(d.stageHistory ?? []);
         setSelectedStage(d.project.homeowner_stage ?? '');
+        // #15 FIX: Load activity feed for this project
+        fetch(`/api/activity?project_id=${id}&limit=20`)
+          .then(r => r.json())
+          .then(ad => { if (ad.activity) setActivity(ad.activity); })
+          .catch(() => {});
       } else {
         showToast(d.error || 'Failed to load project', false);
       }
@@ -323,16 +364,38 @@ export default function AdminProjectDetail() {
       <div className="rounded-xl border border-white/5 bg-white/2 p-5">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm font-bold text-white">Homeowner Portal</h2>
-          <button
-            onClick={() => {
-              const url = `${window.location.origin}/portal/login`;
-              navigator.clipboard.writeText(url).then(() => showToast('Portal link copied'));
-            }}
-            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-1.5 transition-all"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
-            Copy Portal Link
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSendPortalInvite}
+              disabled={inviteSending || !project?.client_email}
+              title={!project?.client_email ? 'No client email on file' : 'Email the portal link to the homeowner'}
+              className={`flex items-center gap-1.5 text-xs border rounded-lg px-3 py-1.5 transition-all
+                ${inviteStatus === 'sent'
+                  ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
+                  : inviteStatus === 'error'
+                  ? 'text-red-400 border-red-500/30 bg-red-500/10'
+                  : !project?.client_email
+                  ? 'text-slate-600 border-white/5 cursor-not-allowed'
+                  : 'text-amber-400 hover:text-amber-300 border-amber-500/30 hover:border-amber-500/50 hover:bg-amber-500/10'
+                }`}
+            >
+              {inviteSending
+                ? <RefreshCw size={11} className="animate-spin" />
+                : <Send size={11} />
+              }
+              {inviteStatus === 'sent' ? 'Invite Sent!' : inviteStatus === 'error' ? 'Failed' : 'Send Invite'}
+            </button>
+            <button
+              onClick={() => {
+                const url = `${window.location.origin}/portal/login`;
+                navigator.clipboard.writeText(url).then(() => showToast('Portal link copied'));
+              }}
+              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-1.5 transition-all"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+              Copy Link
+            </button>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -357,7 +420,7 @@ export default function AdminProjectDetail() {
         </div>
       </div>
 
-      {/* ── Stage History ─────────────────────────────────────────────────── */}
+            {/* ── Stage History ─────────────────────────────────────────────────── */}
       <div className="rounded-xl border border-white/5 bg-white/2 p-5">
         <div className="flex items-center gap-2 mb-4">
           <History size={14} className="text-slate-500" />
@@ -396,6 +459,35 @@ export default function AdminProjectDetail() {
           </div>
         )}
       </div>
+
+      {/* ── Activity Feed ─────────────────────────────────────────────────────── */}
+      {activity.length > 0 && (
+        <div className="rounded-xl border border-white/5 bg-white/2 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <Activity size={14} className="text-slate-500" />
+            <h2 className="text-sm font-bold text-white">Activity Feed</h2>
+            <span className="text-xs text-slate-600">({activity.length})</span>
+          </div>
+          <div className="space-y-3">
+            {activity.map(entry => (
+              <div key={entry.id} className="flex items-start gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-slate-600 mt-2 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-300">{entry.title}</span>
+                    <span className="text-xs text-slate-600">
+                      {new Date(entry.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {entry.details && (
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">{entry.details}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Meta row */}
       <div className="flex items-center gap-4 text-xs text-slate-600 pb-2">

@@ -9,6 +9,7 @@ import { handleRouteDbError } from '@/lib/db-neon';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 import { resolveTopology, TopologyManagerContext } from '@/lib/topology-manager';
 import { TOPOLOGY_LABELS_V4 } from '@/lib/equipment-registry-v4';
 import { requireAuth } from '@/lib/security';

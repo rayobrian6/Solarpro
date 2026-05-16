@@ -9,18 +9,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import { handleRouteDbError } from '@/lib/db-neon';
 import { renderSLDProfessional, SLDProfessionalInput } from '@/lib/sld-professional-renderer';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import { writeFile, readFile, unlink } from 'fs/promises';
-import path from 'path';
-import os from 'os';
+import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-const execAsync = promisify(exec);
 
 // ─── HTML wrapper for wkhtmltopdf ─────────────────────────────────────────────
 function escHtml(s: string): string {
@@ -190,51 +185,33 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Generate PDF via wkhtmltopdf
-    const tmpDir = os.tmpdir();
+    // Generate PDF via Puppeteer+chromium (Vercel-compatible)
     const ts = Date.now();
-    const htmlPath = path.join(tmpDir, `sld-${ts}.html`);
-    const pdfPath  = path.join(tmpDir, `sld-${ts}.pdf`);
+    const html = wrapSVGinHTML(svg, input.projectName);
+    const pdfResult = await generatePdfFromHtml(html, { landscape: true, widthIn: '24in', heightIn: '18in' });
 
-    try {
-      const html = wrapSVGinHTML(svg, input.projectName);
-      await writeFile(htmlPath, html, 'utf8');
-
-      const cmd = [
-        'wkhtmltopdf',
-        '--page-width 24in',
-        '--page-height 18in',
-        '--orientation Landscape',
-        '--margin-top 0',
-        '--margin-right 0',
-        '--margin-bottom 0',
-        '--margin-left 0',
-        '--dpi 150',
-        '--image-dpi 150',
-        '--image-quality 95',
-        '--enable-local-file-access',
-        '--disable-smart-shrinking',
-        '--zoom 1.0',
-        '--quiet',
-        `"${htmlPath}"`,
-        `"${pdfPath}"`,
-      ].join(' ');
-
-      await execAsync(cmd, { timeout: 30000 });
-      const pdfBuffer = await readFile(pdfPath);
-
-      return new NextResponse(pdfBuffer, {
+    if (pdfResult) {
+      return new NextResponse(pdfResult.pdf as unknown as BodyInit, {
         status: 200,
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="SLD-${input.projectName.replace(/[^a-zA-Z0-9]/g, '_')}-${ts}.pdf"`,
           'Cache-Control': 'no-store',
+          'X-Pdf-Method': pdfResult.method,
         },
       });
-    } finally {
-      try { await unlink(htmlPath); } catch {}
-      try { await unlink(pdfPath); } catch {}
     }
+
+    // Fallback: return SVG
+    return new NextResponse(svg, {
+      status: 200,
+      headers: {
+        'Content-Type': 'image/svg+xml',
+        'Content-Disposition': `attachment; filename="sld-${ts}.svg"`,
+        'Cache-Control': 'no-store',
+        'X-Pdf-Method': 'svg-fallback',
+      },
+    });
 
   } catch (err: unknown) {
     return handleRouteDbError('[SLD PDF err]', err);

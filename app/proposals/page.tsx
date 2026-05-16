@@ -12,7 +12,7 @@ import {
   Settings, Percent, Tag, Lock, Search, Filter, Trash2,
   Archive, Copy, Pencil, MoreHorizontal, CheckSquare,
   Square, ChevronDown, SortAsc, AlertTriangle, X, Check,
-  Wind, TreePine, Car, ExternalLink, Info, RefreshCw,
+  Wind, TreePine, Car, ExternalLink, Info, RefreshCw, SendHorizontal,
 } from 'lucide-react';
 import Link from 'next/link';
 import {
@@ -1038,6 +1038,38 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
   const [shareCopied, setShareCopied] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
 
+  // #5 FIX: "Send to Client" email workflow
+  const [sendEmailLoading, setSendEmailLoading] = useState(false);
+  const [sendEmailStatus,  setSendEmailStatus]  = useState<'idle' | 'sent' | 'error'>('idle');
+  const [sendEmailMsg,     setSendEmailMsg]     = useState('');
+
+  const handleSendToClient = async () => {
+    setSendEmailLoading(true);
+    setSendEmailStatus('idle');
+    try {
+      const res  = await fetch(`/api/proposals/${proposal.id}/send-email`, { method: 'POST' });
+      const data = await res.json();
+      if (res.status === 429) {
+        setSendEmailStatus('error');
+        setSendEmailMsg('Too many requests. Please wait.');
+        return;
+      }
+      if (!data.success) {
+        setSendEmailStatus('error');
+        setSendEmailMsg(data.error || 'Email failed. Please try again.');
+        return;
+      }
+      setSendEmailStatus('sent');
+      setSendEmailMsg(`Proposal sent to ${data.sentTo}`);
+      setTimeout(() => setSendEmailStatus('idle'), 5000);
+    } catch {
+      setSendEmailStatus('error');
+      setSendEmailMsg('Connection error. Please try again.');
+    } finally {
+      setSendEmailLoading(false);
+    }
+  };
+
   // v47.245: ITC toggle — lives in the toolbar so it works from any navigation path
   const [noItc, setNoItc] = useState<boolean>((proposal.project as any)?.noItc ?? false);
   // Sync if proposal prop changes (e.g. parent re-fetches live project)
@@ -1170,6 +1202,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     return m ? m[1].toUpperCase() : '';
   };
   const projectStateCode = (
+    (proposal as any)?.stateCode ||
     (proj as any)?.stateCode ||
     client?.state ||
     _extractStateFromAddress((proj as any)?.address || client?.address || '') ||
@@ -1502,6 +1535,36 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
           {shareLink && (
             <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs text-emerald-300 max-w-xs">
               <span className="truncate">{shareLink}</span>
+            </div>
+          )}
+          {/* #5 FIX: Send to Client email button */}
+          <button
+            onClick={handleSendToClient}
+            disabled={sendEmailLoading}
+            title="Email proposal link directly to the client"
+            className={`btn-sm flex items-center gap-1.5 font-medium transition-all ${
+              sendEmailStatus === 'sent'  ? 'btn-ghost text-emerald-400 hover:text-emerald-300' :
+              sendEmailStatus === 'error' ? 'btn-ghost text-red-400 hover:text-red-300' :
+              'btn-secondary'
+            }`}
+          >
+            {sendEmailLoading
+              ? <span className="spinner w-3 h-3" />
+              : sendEmailStatus === 'sent'
+                ? <Check size={13} />
+                : <SendHorizontal size={13} />
+            }
+            {sendEmailStatus === 'sent'  ? 'Sent!' :
+             sendEmailStatus === 'error' ? 'Failed' :
+             'Send to Client'}
+          </button>
+          {(sendEmailStatus === 'sent' || sendEmailStatus === 'error') && sendEmailMsg && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs max-w-xs ${
+              sendEmailStatus === 'sent'
+                ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+                : 'bg-red-500/10 border border-red-500/30 text-red-400'
+            }`}>
+              <span className="truncate">{sendEmailMsg}</span>
             </div>
           )}
           <button onClick={() => window.print()} className="btn-secondary btn-sm hidden md:flex"><Printer size={13} /> Print</button>
@@ -2783,7 +2846,34 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               {shareLoading ? <span className="spinner w-4 h-4" /> : <Share2 size={15} />}
               {shareCopied ? 'Link Copied!' : 'Share Proposal'}
             </button>
+            {/* #5 FIX: Send to Client — emails proposal link directly to the homeowner */}
+            <button
+              onClick={handleSendToClient}
+              disabled={sendEmailLoading}
+              className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                sendEmailStatus === 'sent'
+                  ? 'border border-emerald-500/40 text-emerald-400 bg-emerald-500/10'
+                  : sendEmailStatus === 'error'
+                  ? 'border border-red-500/40 text-red-400 bg-red-500/10'
+                  : 'border border-amber-500/30 text-amber-400 hover:border-amber-500/60 hover:bg-amber-500/10'
+              }`}
+            >
+              {sendEmailLoading
+                ? <span className="spinner w-4 h-4" />
+                : sendEmailStatus === 'sent'
+                  ? <Check size={15} />
+                  : <SendHorizontal size={15} />
+              }
+              {sendEmailStatus === 'sent' ? 'Emailed to Client!' :
+               sendEmailStatus === 'error' ? 'Send Failed' :
+               'Send to Client'}
+            </button>
           </div>
+          {(sendEmailStatus === 'sent' || sendEmailStatus === 'error') && sendEmailMsg && (
+            <p className={`text-xs text-center mt-1 ${sendEmailStatus === 'sent' ? 'text-emerald-400' : 'text-red-400'}`}>
+              {sendEmailMsg}
+            </p>
+          )}
         </div>
 
         {/* Footer */}

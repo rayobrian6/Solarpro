@@ -18,6 +18,7 @@ import { resolveIngestOwner } from '@/lib/survey/ingest/ownerResolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 export async function GET(req: NextRequest) {
   const admin = await requireAdminApi(req);

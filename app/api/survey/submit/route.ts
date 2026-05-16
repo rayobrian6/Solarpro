@@ -25,6 +25,8 @@
 // Pure ASCII, no Unicode.
 // ============================================================================
 
+export const maxDuration = 30;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyHandoffToken } from '../../../../lib/survey/handoff/tokenMinter';
 import { REQUIRED_PHOTO_CATEGORIES, STANDALONE_PROJECT_ID } from '../../../../lib/survey/v2/types';

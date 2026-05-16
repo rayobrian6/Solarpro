@@ -1118,3 +1118,33 @@ html, body {
     padding: 0.875rem;
   }
 }
+
+/* ── Theme Classes ─────────────────────────────────────────────────────────── */
+/* Applied by ThemeContext.tsx to <html> element */
+
+/* Default: no modifier (same as theme-dark) */
+:root {
+  --theme-brightness: 1;
+  --theme-saturation: 1;
+  --theme-bg-shift: 0;
+}
+
+/* Standard dark — same as current app (no change) */
+.theme-dark {
+  --theme-brightness: 1;
+  --theme-saturation: 1;
+}
+
+/* OLED dark — deeper blacks, higher contrast */
+.theme-darker {
+  --theme-brightness: 0.9;
+  --theme-saturation: 1.15;
+  filter: brightness(0.92) saturate(1.1);
+}
+
+/* Dim mode — warmer, softer for low-light */
+.theme-dim {
+  --theme-brightness: 0.82;
+  --theme-saturation: 0.9;
+  filter: brightness(0.84) sepia(0.08) saturate(0.92);
+}

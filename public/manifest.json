@@ -1,0 +1,35 @@
+{
+  "name": "SolarPro Design Platform",
+  "short_name": "SolarPro",
+  "description": "Professional solar design and proposal platform for solar installers",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#07080f",
+  "theme_color": "#f59e0b",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/dashboard",
+      "description": "View your project pipeline"
+    },
+    {
+      "name": "Proposals",
+      "url": "/proposals",
+      "description": "View and create proposals"
+    },
+    {
+      "name": "Clients",
+      "url": "/clients",
+      "description": "Manage your clients"
+    }
+  ]
+}

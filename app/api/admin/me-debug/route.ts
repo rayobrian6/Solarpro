@@ -5,6 +5,7 @@ import { productionGuard } from '@/lib/security';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 /**
  * GET /api/admin/me-debug

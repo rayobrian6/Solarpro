@@ -471,3 +471,566 @@ SolarPro — Operated by Under The Sun Solar
     text,
   });
 }
+
+// ── Project Stage Advance Notification ──────────────────────────────────────
+// Sent to the homeowner when their project stage is advanced.
+// Gives them the new stage name, what it means, and a link to their portal.
+
+export async function sendStageAdvanceEmail(opts: {
+  homeownerEmail:  string;
+  homeownerName:   string;
+  projectName:     string;
+  newStage:        string;
+  stageLabel:      string;
+  stageBody:       string;
+  stageNext:       string;
+  portalUrl:       string;
+  companyName:     string;
+}): Promise<{ success: boolean; error?: string }> {
+  const stageColors: Record<string, string> = {
+    lead_submitted:  '#64748b',
+    under_review:    '#3b82f6',
+    site_survey:     '#06b6d4',
+    design:          '#8b5cf6',
+    proposal:        '#f59e0b',
+    installation:    '#f97316',
+    completed:       '#10b981',
+  };
+  const accentColor = stageColors[opts.newStage] ?? '#f59e0b';
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Solar Project Update</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="560" cellpadding="0" cellspacing="0" style="background:#0f1015;border-radius:14px;border:1px solid rgba(255,255,255,0.08);overflow:hidden;max-width:560px;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#0a0d14 0%,#0f1015 100%);padding:28px 36px;border-bottom:3px solid ${accentColor};">
+              <table cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="width:40px;height:40px;background:linear-gradient(135deg,#f97316,#fbbf24);border-radius:10px;text-align:center;vertical-align:middle;">
+                    <span style="font-size:20px;line-height:40px;">☀️</span>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <div style="font-size:17px;font-weight:900;color:#ffffff;line-height:1.2;">${opts.companyName}</div>
+                    <div style="font-size:10px;color:#fbbf24;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;">Solar Project Update</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Stage Badge -->
+          <tr>
+            <td style="padding:28px 36px 0;">
+              <div style="display:inline-block;background:${accentColor}18;border:1px solid ${accentColor}44;border-radius:20px;padding:5px 14px;">
+                <span style="font-size:11px;font-weight:700;color:${accentColor};letter-spacing:0.06em;text-transform:uppercase;">🔔 Stage Update</span>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:18px 36px 28px;">
+              <h1 style="font-size:21px;font-weight:800;color:#ffffff;margin:0 0 10px;">Hi ${opts.homeownerName} 👋</h1>
+              <p style="font-size:15px;color:rgba(255,255,255,0.7);line-height:1.7;margin:0 0 20px;">
+                Great news! Your solar project <strong style="color:#ffffff;">${opts.projectName}</strong> has just moved to a new stage:
+              </p>
+
+              <!-- Stage card -->
+              <div style="background:${accentColor}0d;border:1px solid ${accentColor}33;border-radius:12px;padding:20px 24px;margin-bottom:24px;">
+                <div style="font-size:12px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">New Stage</div>
+                <div style="font-size:22px;font-weight:900;color:${accentColor};margin-bottom:10px;">${opts.stageLabel}</div>
+                <p style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.6;margin:0 0 10px;">${opts.stageBody}</p>
+                <div style="font-size:12px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">What's next</div>
+                <p style="font-size:13px;color:rgba(255,255,255,0.65);margin:0;">${opts.stageNext}</p>
+              </div>
+
+              <!-- CTA -->
+              <table cellpadding="0" cellspacing="0" width="100%">
+                <tr>
+                  <td align="center">
+                    <a href="${opts.portalUrl}"
+                       style="display:inline-block;background:${accentColor};color:#000000;font-size:15px;font-weight:700;text-decoration:none;padding:13px 32px;border-radius:8px;letter-spacing:0.01em;">
+                      View My Project Dashboard →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:rgba(0,0,0,0.25);padding:18px 36px;border-top:1px solid rgba(255,255,255,0.05);">
+              <p style="font-size:11px;color:rgba(255,255,255,0.25);margin:0;text-align:center;line-height:1.7;">
+                ${opts.companyName} — Powered by SolarPro<br/>
+                You're receiving this because you have an active solar project with us.<br/>
+                <a href="${opts.portalUrl}" style="color:rgba(255,255,255,0.35);text-decoration:underline;">View your portal</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim();
+
+  const text = `
+Hi ${opts.homeownerName},
+
+Your solar project "${opts.projectName}" has moved to a new stage: ${opts.stageLabel}
+
+${opts.stageBody}
+
+What's next: ${opts.stageNext}
+
+View your project dashboard: ${opts.portalUrl}
+
+---
+${opts.companyName} — Powered by SolarPro
+`.trim();
+
+  return sendEmail({
+    to:      opts.homeownerEmail,
+    subject: `☀️ Project Update: ${opts.stageLabel} — ${opts.projectName}`,
+    html,
+    text,
+  });
+}
+
+// ─── Portal OTP Login Email ───────────────────────────────────────────────────
+
+/**
+ * sendPortalOtpEmail — sends a 6-digit one-time passcode to a homeowner.
+ * Called during the portal login flow; code expires in 10 minutes.
+ */
+export async function sendPortalOtpEmail(opts: {
+  to:        string;
+  name:      string;
+  code:      string;        // 6-digit plaintext code (not stored)
+  expiresIn: string;        // human-readable, e.g. "10 minutes"
+}): Promise<{ success: boolean; error?: string }> {
+  const displayName = opts.name.split(' ')[0] || opts.name;
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your SolarPro Login Code</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+
+        <!-- Header -->
+        <tr>
+          <td align="center" style="padding-bottom:32px;">
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:linear-gradient(135deg,rgba(245,158,11,0.25),rgba(245,158,11,0.08));
+                            border:1px solid rgba(245,158,11,0.25);border-radius:14px;
+                            padding:12px;width:48px;height:48px;text-align:center;vertical-align:middle;">
+                  <span style="font-size:24px;line-height:1;">☀️</span>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:12px 0 0;font-size:13px;font-weight:700;color:#fff;letter-spacing:0.04em;">
+              SolarPro Homeowner Portal
+            </p>
+          </td>
+        </tr>
+
+        <!-- Card -->
+        <tr>
+          <td style="background:#0f172a;border:1px solid rgba(255,255,255,0.06);
+                     border-radius:20px;padding:40px 36px;">
+
+            <p style="margin:0 0 8px;font-size:22px;font-weight:800;color:#fff;letter-spacing:-0.02em;">
+              Hi ${displayName} 👋
+            </p>
+            <p style="margin:0 0 28px;font-size:15px;color:#94a3b8;line-height:1.6;">
+              Here's your one-time login code for the homeowner portal.
+              It expires in <strong style="color:#f59e0b;">${opts.expiresIn}</strong>.
+            </p>
+
+            <!-- OTP block -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td align="center"
+                    style="background:linear-gradient(135deg,rgba(245,158,11,0.12),rgba(245,158,11,0.05));
+                           border:1.5px solid rgba(245,158,11,0.3);border-radius:16px;
+                           padding:24px;">
+                  <p style="margin:0 0 6px;font-size:11px;font-weight:700;color:#f59e0b;
+                             letter-spacing:0.2em;text-transform:uppercase;">Your login code</p>
+                  <p style="margin:0;font-size:42px;font-weight:900;color:#fff;
+                             letter-spacing:0.18em;font-family:'Courier New',monospace;">
+                    ${opts.code}
+                  </p>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 24px;font-size:13px;color:#64748b;line-height:1.6;text-align:center;">
+              Enter this code on the login page to access your project dashboard.<br/>
+              If you didn't request this code, you can safely ignore this email.
+            </p>
+
+            <!-- Divider -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr><td style="border-top:1px solid rgba(255,255,255,0.06);height:1px;font-size:0;">&nbsp;</td></tr>
+            </table>
+
+            <!-- Security note -->
+            <table cellpadding="0" cellspacing="0" style="width:100%;">
+              <tr>
+                <td style="width:32px;vertical-align:top;padding-top:2px;">
+                  <span style="font-size:16px;">🔒</span>
+                </td>
+                <td style="font-size:12px;color:#475569;line-height:1.5;">
+                  We'll never ask for your code over the phone or by email.
+                  Keep it private.
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td align="center" style="padding-top:24px;">
+            <p style="margin:0;font-size:11px;color:#334155;">
+              SolarPro &mdash; Homeowner Portal &nbsp;|&nbsp; Powered by SolarPro
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  const text = `
+Hi ${displayName},
+
+Your one-time login code for the SolarPro Homeowner Portal is:
+
+  ${opts.code}
+
+This code expires in ${opts.expiresIn}.
+Enter it on the portal login page to access your project dashboard.
+
+If you didn't request this, you can safely ignore this email.
+
+— SolarPro Homeowner Portal
+`.trim();
+
+  return sendEmail({
+    to:      opts.to,
+    subject: '🔑 Your SolarPro Portal Login Code',
+    html,
+    text,
+  });
+}
+
+// ─── Send Proposal to Client Email ───────────────────────────────────────────
+
+/**
+ * sendProposalToClientEmail — sends a branded proposal delivery email to a homeowner.
+ * Triggered when a rep clicks "Send to Client" on the proposals page.
+ */
+export async function sendProposalToClientEmail(opts: {
+  to:           string;        // client email
+  clientName:   string;
+  proposalTitle: string;
+  companyName:  string;
+  repName:      string;
+  proposalUrl:  string;        // shareable public URL
+  systemSizeKw?: number;
+  annualSavings?: number;      // $ per year
+  netCost?:     number;        // total cost
+}): Promise<{ success: boolean; error?: string }> {
+  const firstName = opts.clientName.split(' ')[0] || opts.clientName;
+  const fmtCurrency = (v?: number) => v && v > 0
+    ? v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`
+    : null;
+
+  const systemLine = opts.systemSizeKw && opts.systemSizeKw > 0
+    ? `<p style="margin:0 0 8px;font-size:14px;color:#94a3b8;">☀️ <strong style="color:#fff;">${opts.systemSizeKw.toFixed(2)} kW</strong> solar system designed for your home</p>`
+    : '';
+  const savingsLine = fmtCurrency(opts.annualSavings)
+    ? `<p style="margin:0 0 8px;font-size:14px;color:#94a3b8;">📈 Estimated savings: <strong style="color:#4ade80;">${fmtCurrency(opts.annualSavings)}/year</strong></p>`
+    : '';
+  const costLine = fmtCurrency(opts.netCost)
+    ? `<p style="margin:0;font-size:14px;color:#94a3b8;">💰 Total investment: <strong style="color:#f59e0b;">${fmtCurrency(opts.netCost)}</strong></p>`
+    : '';
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Solar Proposal is Ready</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;">
+
+        <!-- Header -->
+        <tr>
+          <td align="center" style="padding-bottom:28px;">
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:linear-gradient(135deg,rgba(245,158,11,0.25),rgba(245,158,11,0.08));
+                            border:1px solid rgba(245,158,11,0.25);border-radius:14px;
+                            padding:12px;width:48px;height:48px;text-align:center;vertical-align:middle;">
+                  <span style="font-size:24px;line-height:1;">☀️</span>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:10px 0 0;font-size:15px;font-weight:800;color:#fff;">
+              ${opts.companyName}
+            </p>
+            <p style="margin:4px 0 0;font-size:12px;color:#475569;">Solar Design Proposal</p>
+          </td>
+        </tr>
+
+        <!-- Card -->
+        <tr>
+          <td style="background:#0f172a;border:1px solid rgba(255,255,255,0.06);
+                     border-radius:20px;padding:40px 36px;">
+
+            <p style="margin:0 0 8px;font-size:24px;font-weight:800;color:#fff;letter-spacing:-0.02em;">
+              Hi ${firstName}! 👋
+            </p>
+            <p style="margin:0 0 24px;font-size:15px;color:#94a3b8;line-height:1.6;">
+              Your personalized solar proposal is ready to review.
+              ${opts.repName} at <strong style="color:#e2e8f0;">${opts.companyName}</strong> has prepared a
+              custom design for your home.
+            </p>
+
+            <!-- System highlights -->
+            ${(systemLine || savingsLine || costLine) ? `
+            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
+                        border-radius:14px;padding:20px;margin-bottom:28px;">
+              ${systemLine}
+              ${savingsLine}
+              ${costLine}
+            </div>
+            ` : ''}
+
+            <!-- CTA button -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+              <tr>
+                <td align="center">
+                  <a href="${opts.proposalUrl}"
+                     style="display:inline-block;padding:16px 36px;
+                            background:linear-gradient(135deg,#f59e0b,#fbbf24);
+                            color:#0f172a;font-size:15px;font-weight:800;
+                            text-decoration:none;border-radius:14px;
+                            box-shadow:0 4px 20px rgba(245,158,11,0.35);
+                            letter-spacing:0.01em;">
+                    View My Solar Proposal →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 20px;font-size:13px;color:#64748b;line-height:1.6;text-align:center;">
+              Or copy this link:
+              <a href="${opts.proposalUrl}" style="color:#f59e0b;text-decoration:none;word-break:break-all;">${opts.proposalUrl}</a>
+            </p>
+
+            <!-- Divider -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr><td style="border-top:1px solid rgba(255,255,255,0.06);height:1px;font-size:0;">&nbsp;</td></tr>
+            </table>
+
+            <p style="margin:0;font-size:12px;color:#475569;line-height:1.5;">
+              Questions? Reply to this email or contact ${opts.repName} directly.
+              This proposal link expires in 30 days.
+            </p>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td align="center" style="padding-top:24px;">
+            <p style="margin:0;font-size:11px;color:#334155;">
+              ${opts.companyName} &mdash; Powered by SolarPro &nbsp;|&nbsp;
+              <a href="${opts.proposalUrl}" style="color:#475569;">View Proposal</a>
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  const text = `
+Hi ${firstName},
+
+Your solar proposal is ready to review!
+
+${opts.repName} at ${opts.companyName} has prepared a custom solar design for your home.
+
+${opts.systemSizeKw ? `System Size: ${opts.systemSizeKw.toFixed(2)} kW\n` : ''}${opts.annualSavings ? `Estimated Savings: ${fmtCurrency(opts.annualSavings)}/year\n` : ''}${opts.netCost ? `Total Investment: ${fmtCurrency(opts.netCost)}\n` : ''}
+View your proposal here:
+${opts.proposalUrl}
+
+Questions? Contact ${opts.repName} at ${opts.companyName}.
+
+— ${opts.companyName}, powered by SolarPro
+`.trim();
+
+  return sendEmail({
+    to:      opts.to,
+    subject: `☀️ Your Solar Proposal from ${opts.companyName} is Ready`,
+    html,
+    text,
+  });
+}
+
+// ─── Proposal Expiry Reminder Email ──────────────────────────────────────────
+
+/**
+ * sendProposalExpiryReminderEmail — notifies the solar rep that a sent proposal
+ * is expiring soon (Vercel cron fires 3 days before share_expires_at).
+ */
+export async function sendProposalExpiryReminderEmail(opts: {
+  to:             string;   // rep email
+  repName:        string;
+  clientName:     string;
+  proposalTitle:  string;
+  proposalUrl:    string;
+  expiresAt:      Date;
+}): Promise<{ success: boolean; error?: string }> {
+  const daysLeft = Math.ceil((opts.expiresAt.getTime() - Date.now()) / 86400000);
+  const expireLabel = daysLeft === 1 ? 'tomorrow' : `in ${daysLeft} days`;
+  const dateStr = opts.expiresAt.toLocaleDateString('en-US', {
+    month: 'long', day: 'numeric', year: 'numeric',
+  });
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Proposal Expiring Soon</title>
+</head>
+<body style="margin:0;padding:0;background:#07070e;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#07070e;padding:40px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+
+        <!-- Header -->
+        <tr>
+          <td align="center" style="padding-bottom:24px;">
+            <div style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.25);
+                        border-radius:14px;padding:12px;display:inline-block;">
+              <span style="font-size:24px;">⏰</span>
+            </div>
+            <p style="margin:10px 0 0;font-size:13px;font-weight:700;color:#fff;">SolarPro</p>
+          </td>
+        </tr>
+
+        <!-- Card -->
+        <tr>
+          <td style="background:#0f172a;border:1px solid rgba(255,255,255,0.06);
+                     border-radius:20px;padding:36px;">
+
+            <p style="margin:0 0 6px;font-size:20px;font-weight:800;color:#fff;letter-spacing:-0.02em;">
+              Proposal expiring ${expireLabel}
+            </p>
+            <p style="margin:0 0 24px;font-size:14px;color:#94a3b8;line-height:1.6;">
+              Hi ${opts.repName}, your proposal for <strong style="color:#e2e8f0;">${opts.clientName}</strong>
+              expires on <strong style="color:#f59e0b;">${dateStr}</strong>.
+              Follow up now to keep the deal moving.
+            </p>
+
+            <!-- Proposal details box -->
+            <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);
+                        border-radius:12px;padding:16px;margin-bottom:24px;">
+              <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#64748b;letter-spacing:0.08em;text-transform:uppercase;">Proposal</p>
+              <p style="margin:0;font-size:14px;font-weight:700;color:#fff;">${opts.proposalTitle}</p>
+              <p style="margin:4px 0 0;font-size:12px;color:#64748b;">Client: ${opts.clientName}</p>
+            </div>
+
+            <!-- CTA button -->
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;">
+              <tr>
+                <td align="center">
+                  <a href="${opts.proposalUrl}"
+                     style="display:inline-block;padding:14px 32px;
+                            background:linear-gradient(135deg,#f59e0b,#fbbf24);
+                            color:#0f172a;font-size:14px;font-weight:800;
+                            text-decoration:none;border-radius:12px;">
+                    View & Resend Proposal →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0;font-size:12px;color:#475569;text-align:center;">
+              Proposal links can be resent any time from the Proposals page.
+            </p>
+
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td align="center" style="padding-top:20px;">
+            <p style="margin:0;font-size:11px;color:#334155;">SolarPro &mdash; Proposal Reminders</p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  const text = `
+Hi ${opts.repName},
+
+Your proposal "${opts.proposalTitle}" for client ${opts.clientName} is expiring ${expireLabel} (${dateStr}).
+
+Follow up to keep the deal moving:
+${opts.proposalUrl}
+
+— SolarPro Proposal Reminders
+`.trim();
+
+  return sendEmail({
+    to:      opts.to,
+    subject: `⏰ Proposal expiring ${expireLabel} — ${opts.clientName}`,
+    html,
+    text,
+  });
+}

@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { userId, name, phone, email, address, notes, status } = body;
+    const { userId, name, phone, email, address, notes, status, lead_source } = body;
 
     // userId is optional for inline lead creation (not yet tied to a system user)
     if (userId && typeof userId !== 'string') {
@@ -114,13 +114,16 @@ export async function POST(req: NextRequest) {
     const validStatuses = ['new', 'contacted', 'qualified', 'converted', 'closed'];
     const leadStatus = validStatuses.includes(status) ? status : 'new';
 
+    const validSources = ['referral', 'website', 'door_knock', 'phone', 'social_media', 'paid_ad', 'trade_show', 'partner', 'other'];
+    const leadSource = validSources.includes(lead_source) ? lead_source : null;
+
     const sql = await getDbReady();
 
     // Try insert. If user_id NOT NULL constraint fails, run migration and retry.
     let rows;
     try {
       rows = await sql`
-        INSERT INTO leads (user_id, name, phone, email, address, notes, status)
+        INSERT INTO leads (user_id, name, phone, email, address, notes, status, lead_source)
         VALUES (
           ${userId || null},
           ${name.trim()},
@@ -128,7 +131,8 @@ export async function POST(req: NextRequest) {
           ${email ? email.trim().toLowerCase() : null},
           ${address || null},
           ${notes || null},
-          ${leadStatus}
+          ${leadStatus},
+          ${leadSource}
         )
         RETURNING *
       `;
@@ -140,7 +144,7 @@ export async function POST(req: NextRequest) {
           await sql`ALTER TABLE leads ALTER COLUMN user_id DROP NOT NULL`;
           // Retry insert
           rows = await sql`
-            INSERT INTO leads (user_id, name, phone, email, address, notes, status)
+            INSERT INTO leads (user_id, name, phone, email, address, notes, status, lead_source)
             VALUES (
               ${userId || null},
               ${name.trim()},
@@ -148,7 +152,8 @@ export async function POST(req: NextRequest) {
               ${email ? email.trim().toLowerCase() : null},
               ${address || null},
               ${notes || null},
-              ${leadStatus}
+              ${leadStatus},
+              ${leadSource}
             )
             RETURNING *
           `;

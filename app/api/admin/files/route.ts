@@ -5,6 +5,7 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 export async function GET(req: NextRequest) {
   const admin = await requireAdminApi(req);

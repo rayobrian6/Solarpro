@@ -20,6 +20,8 @@
 // Pure ASCII, no Unicode.
 // ============================================================================
 
+export const maxDuration = 30;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyHandoffToken } from '../../../../lib/survey/handoff/tokenMinter';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';

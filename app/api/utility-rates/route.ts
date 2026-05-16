@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 const NREL_API_KEY = process.env.NREL_API_KEY || 'DEMO_KEY';
 const URDB_URL = 'https://api.openei.org/utility_rates';

@@ -3,6 +3,8 @@ import { requireAdminApi } from '@/lib/adminAuth';
 import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 import { writeMicroStage } from '@/lib/microStage';
+import { sendStageAdvanceEmail } from '@/lib/email';
+import { getBaseUrl } from '@/lib/env';
 
 export const maxDuration = 30;
 export const dynamic = 'force-dynamic';
@@ -233,13 +235,62 @@ export async function PATCH(
         });
       }
 
+      // ── Send stage-advance email to homeowner (non-fatal, fire-and-forget) ──
+      void (async () => {
+        try {
+          const emailRows = await sql`
+            SELECT
+              p.name    AS project_name,
+              c.email   AS client_email,
+              c.name    AS client_name,
+              u.company AS company_name
+            FROM projects p
+            LEFT JOIN clients c ON c.id = p.client_id AND c.deleted_at IS NULL
+            LEFT JOIN users   u ON u.id = p.user_id
+            WHERE p.id = ${id}
+            LIMIT 1
+          `;
+          if (!emailRows.length) return;
+          const row = emailRows[0];
+          const clientEmail = row.client_email ? String(row.client_email) : null;
+          if (!clientEmail) return;
+
+          const STAGE_EMAIL_CONTENT: Record<string, { label: string; body: string; next: string }> = {
+            lead_submitted:  { label: 'Lead Submitted',  body: "We\'ve received your information and are reviewing your solar project.", next: 'Our team will reach out to you shortly to discuss your project.' },
+            under_review:    { label: 'Under Review',    body: 'Our team is reviewing your utility bill and project details.',          next: 'We\'ll complete our review and schedule a site survey.' },
+            site_survey:     { label: 'Site Survey',     body: 'A site survey has been scheduled or is in progress at your property.',  next: 'Our technician will visit to measure your roof and assess your electrical setup.' },
+            design:          { label: 'System Design',   body: 'Our engineers are designing your custom solar system.',                 next: 'We\'ll prepare a detailed proposal with your system specs and savings estimate.' },
+            proposal:        { label: 'Proposal Ready',  body: 'Your solar proposal is ready to review — check your portal!',          next: 'Review and sign your proposal to move forward with installation.' },
+            installation:    { label: 'Installation',    body: 'Your solar system is being installed! Our crew is on-site.',           next: 'After installation we\'ll complete inspections and apply for Permission to Operate (PTO).' },
+            completed:       { label: 'System Live! 🎉', body: 'Congratulations — your solar system is live and generating clean energy!', next: 'You can monitor your system\'s production in your portal.' },
+          };
+          const content = STAGE_EMAIL_CONTENT[stage as string];
+          if (!content) return;
+
+          const portalUrl = `${getBaseUrl()}/portal/dashboard`;
+          const companyName = row.company_name ? String(row.company_name) : 'Your Solar Installer';
+
+          await sendStageAdvanceEmail({
+            homeownerEmail: clientEmail,
+            homeownerName:  row.client_name ? String(row.client_name) : 'Valued Customer',
+            projectName:    row.project_name ? String(row.project_name) : 'Your Solar Project',
+            newStage:       stage as string,
+            stageLabel:     content.label,
+            stageBody:      content.body,
+            stageNext:      content.next,
+            portalUrl,
+            companyName,
+          });
+        } catch (emailErr) {
+          console.warn('[api/admin/projects/[id]] Stage email error:', (emailErr as Error)?.message);
+        }
+      })();
+
       return NextResponse.json({
         success: true,
         project: updated[0],
       });
     }
-
-    return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
   } catch (e: unknown) {
     return handleRouteDbError('[api/admin/projects/[id]] PATCH', e);
   }

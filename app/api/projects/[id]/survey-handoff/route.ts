@@ -10,6 +10,8 @@
 // any cached/bookmarked calls during the transition period.
 // ============================================================================
 
+export const maxDuration = 30;
+
 import { NextResponse } from 'next/server';
 
 export async function POST() {

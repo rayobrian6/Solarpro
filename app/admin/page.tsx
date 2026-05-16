@@ -125,11 +125,11 @@ export default function AdminDashboard() {
         <StatCard label="Total Users"       value={u.total ?? 0}    sub={`${u.last30 ?? 0} in last 30 days`}   icon={Users}       color="amber" />
         <StatCard label="Total Projects"    value={p.total ?? 0}    sub={`${p.last30 ?? 0} in last 30 days`}   icon={FolderOpen}  color="blue" />
         <StatCard label="Proposals"         value={pr.total ?? 0}   sub={`${pr.last30 ?? 0} in last 30 days`}  icon={FileText}    color="purple" />
-        <StatCard label="Engineering Runs"  value={l.total ?? 0}    sub="Total layouts generated"              icon={Cpu}         color="amber" />
-        <StatCard label="Files Stored"      value={f.total ?? 0}    sub={`${((f.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB`} icon={HardDrive} color="slate" />
-        <StatCard label="Plans (last 30d)"  value={pr.last30 ?? 0}  sub="Proposals generated"                  icon={TrendingUp}  color="green" />
-        <StatCard label="Layouts Total"     value={l.total ?? 0}    sub="All time"                             icon={CheckCircle} color="green" />
-        <StatCard label="Storage Used"      value={`${((f.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB`} sub={`${f.total ?? 0} files`} icon={Database} color="red" />
+        <StatCard label="Engineering Runs"  value={l.total ?? 0}    sub={`${l.last30 ?? 0} in last 30 days`}   icon={Cpu}         color="amber" />
+        <StatCard label="Files Stored"      value={f.total ?? 0}    sub={`${((f.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB total`} icon={HardDrive} color="slate" />
+        <StatCard label="New Users (30d)"   value={u.last30 ?? 0}   sub="Registered this month"                icon={TrendingUp}  color="green" />
+        <StatCard label="New Projects (30d)" value={p.last30 ?? 0}  sub="Created this month"                   icon={CheckCircle} color="green" />
+        <StatCard label="Storage Used"      value={`${((f.totalBytes ?? 0) / 1024 / 1024).toFixed(1)} MB`} sub={`${f.total ?? 0} total files`} icon={Database} color="red" />
       </div>
 
       {/* Charts Row */}

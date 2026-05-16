@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SolarPro Platform — Visual Demo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; color: #1a1a1a; }
+
+  /* ── NAV ── */
+  .nav { background: #1a1a2e; color: #fff; padding: 14px 32px; display: flex; align-items: center; gap: 24px; }
+  .nav-logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; color: #f59e0b; }
+  .nav-logo span { color: #fff; }
+  .nav-tabs { display: flex; gap: 4px; margin-left: auto; }
+  .nav-tab { padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; color: #aaa; border: none; background: none; transition: all 0.2s; }
+  .nav-tab.active { background: #f59e0b; color: #000; }
+  .nav-tab:hover:not(.active) { background: rgba(255,255,255,0.1); color: #fff; }
+
+  /* ── LAYOUT ── */
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 20px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ── SECTION HEADERS ── */
+  .section-label { font-size: 11px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #888; margin-bottom: 8px; }
+  .section-title { font-size: 26px; font-weight: 800; color: #111; margin-bottom: 6px; }
+  .section-sub { font-size: 14px; color: #666; margin-bottom: 28px; line-height: 1.6; }
+
+  /* ── CARD ── */
+  .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 24px; }
+  .card-header { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; display: flex; align-items: center; gap: 12px; }
+  .card-title { font-size: 15px; font-weight: 700; }
+  .card-body { padding: 20px; }
+  .badge { padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+  .badge-green { background: #d1fae5; color: #065f46; }
+  .badge-yellow { background: #fef3c7; color: #92400e; }
+  .badge-blue { background: #dbeafe; color: #1e40af; }
+  .badge-gray { background: #f3f4f6; color: #374151; }
+
+  /* ── ENGINEERING PANEL ── */
+  .utility-selector { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .util-btn { padding: 8px 16px; border-radius: 8px; border: 2px solid #e5e7eb; background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .util-btn:hover { border-color: #f59e0b; }
+  .util-btn.active { border-color: #f59e0b; background: #fffbeb; color: #92400e; }
+
+  .panel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .panel-section { background: #f9fafb; border-radius: 8px; padding: 16px; border: 1px solid #e5e7eb; }
+  .panel-section-title { font-size: 11px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: #6b7280; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+  .panel-section-title .icon { font-size: 14px; }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid #e5e7eb; font-size: 13px; }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: #6b7280; font-weight: 500; }
+  .stat-value { font-weight: 700; color: #111; text-align: right; }
+  .step-list { list-style: none; }
+  .step-list li { display: flex; gap: 10px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #e5e7eb; }
+  .step-list li:last-child { border-bottom: none; }
+  .step-num { width: 20px; height: 20px; background: #1a1a2e; color: #f59e0b; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; flex-shrink: 0; margin-top: 1px; }
+  .step-text { color: #374151; line-height: 1.4; }
+  .checklist-item { display: flex; gap: 8px; padding: 5px 0; font-size: 13px; color: #374151; border-bottom: 1px solid #e5e7eb; align-items: flex-start; }
+  .checklist-item:last-child { border-bottom: none; }
+  .check { color: #059669; font-size: 14px; flex-shrink: 0; }
+  .rejection { background: #fef2f2; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px; }
+  .rejection-reason { font-size: 12px; font-weight: 700; color: #991b1b; margin-bottom: 4px; }
+  .rejection-fix { font-size: 12px; color: #6b7280; }
+  .pro-note { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px 14px; margin-top: 16px; }
+  .pro-note-label { font-size: 11px; font-weight: 800; color: #92400e; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .pro-note-text { font-size: 13px; color: #78350f; line-height: 1.5; }
+  .apply-btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; background: #1a1a2e; color: #f59e0b; border-radius: 8px; font-size: 13px; font-weight: 700; text-decoration: none; margin-top: 12px; }
+  .apply-btn:hover { background: #2d2d4e; }
+
+  .full-width { grid-column: 1 / -1; }
+
+  /* ── PERMIT PACKAGE VIEW ── */
+  .permit-frame { background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,0.12); overflow: hidden; }
+  .permit-toolbar { background: #2d2d4e; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+  .permit-toolbar span { color: #aaa; font-size: 12px; }
+  .permit-toolbar .pages { color: #f59e0b; font-weight: 700; font-size: 12px; margin-left: auto; }
+  .permit-page { padding: 28px 32px; border-bottom: 3px dashed #e5e7eb; }
+  .permit-page:last-child { border-bottom: none; }
+
+  /* ── PERMIT PAGE STYLES (mirrors actual output) ── */
+  .p-title-block { border: 2px solid #1a1a2e; margin-bottom: 16px; }
+  .p-title-top { background: #1a1a2e; color: #f59e0b; padding: 6px 12px; display: flex; justify-content: space-between; align-items: center; }
+  .p-title-top .company { font-size: 13px; font-weight: 800; letter-spacing: 0.5px; }
+  .p-title-top .sheet { font-size: 11px; color: #ccc; }
+  .p-title-bottom { padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; }
+  .p-title-bottom .client { font-size: 12px; }
+  .p-title-bottom .page-title { font-size: 14px; font-weight: 800; letter-spacing: 0.5px; }
+  .p-title-bottom .pg { font-size: 11px; color: #888; }
+
+  .p-section { border: 1.5px solid #e0e0e0; border-radius: 3px; overflow: hidden; margin-bottom: 12px; }
+  .p-section-hdr { background: #1a1a2e; color: #f59e0b; padding: 5px 10px; font-size: 9px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; }
+  .p-section-hdr.gray { background: #444; color: #fff; }
+  .p-section-hdr.green { background: #065f46; color: #d1fae5; }
+  .p-section-body { padding: 10px 12px; }
+  .p-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  .p-table th { background: #f5f5f5; padding: 4px 8px; text-align: left; border-bottom: 1px solid #ddd; font-weight: 900; font-size: 9px; letter-spacing: 0.5px; }
+  .p-table td { padding: 4px 8px; border-bottom: 1px solid #eee; font-size: 10px; }
+  .p-table tr:last-child td { border-bottom: none; }
+  .p-table tr:nth-child(even) { background: #fafafa; }
+  .p-step-list { list-style: none; }
+  .p-step-list li { display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px solid #f0f0f0; font-size: 10px; }
+  .p-step-list li:last-child { border-bottom: none; }
+  .p-step-num { background: #1a1a2e; color: #f59e0b; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 900; flex-shrink: 0; }
+  .p-checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .p-check-item { display: flex; gap: 6px; font-size: 9.5px; align-items: flex-start; }
+  .p-check-box { width: 12px; height: 12px; border: 1.5px solid #1a1a2e; border-radius: 2px; flex-shrink: 0; margin-top: 1px; }
+  .p-warning { background: #fff3cd; border: 1px solid #e0b000; border-radius: 3px; padding: 6px 10px; font-size: 9px; color: #856404; margin-top: 8px; }
+  .p-pro-note { background: #fffbeb; border: 1px solid #f59e0b; border-radius: 3px; padding: 6px 10px; font-size: 9px; color: #78350f; margin-top: 8px; }
+  .p-timeline-bar { display: flex; margin: 8px 0; gap: 2px; }
+  .p-timeline-seg { flex: 1; padding: 5px 6px; font-size: 8px; font-weight: 700; text-align: center; border-radius: 2px; }
+  .p-url-box { background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 3px; padding: 6px 10px; font-size: 9px; margin-top: 6px; }
+  .p-url-label { font-weight: 900; color: #0369a1; margin-bottom: 2px; }
+  .p-url-link { color: #0369a1; word-break: break-all; }
+
+  /* ── WHAT'S LIVE vs BACKEND ── */
+  .legend { display: flex; gap: 20px; margin-bottom: 24px; padding: 16px 20px; background: #fff; border-radius: 10px; border: 1px solid #e5e7eb; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green { background: #10b981; }
+  .dot-blue { background: #3b82f6; }
+  .dot-gray { background: #9ca3af; }
+
+  .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .feature-card { background: #fff; border-radius: 10px; border: 2px solid #e5e7eb; padding: 16px; }
+  .feature-card.live { border-color: #10b981; }
+  .feature-card.backend { border-color: #3b82f6; }
+  .feature-card.planned { border-color: #e5e7eb; opacity: 0.7; }
+  .feature-status { font-size: 10px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 8px; }
+  .status-live { color: #059669; }
+  .status-backend { color: #2563eb; }
+  .status-planned { color: #9ca3af; }
+  .feature-name { font-size: 14px; font-weight: 700; color: #111; margin-bottom: 6px; }
+  .feature-desc { font-size: 12px; color: #6b7280; line-height: 1.5; }
+
+  /* responsive */
+  @media (max-width: 700px) {
+    .panel-grid { grid-template-columns: 1fr; }
+    .feature-grid { grid-template-columns: 1fr; }
+    .p-checklist { grid-template-columns: 1fr; }
+  }
+</style>
+<script src="https://sites.super.myninja.ai/_assets/ninja-daytona-script.js"></script>
+</head>
+<body>
+
+<div class="nav">
+  <div class="nav-logo">Solar<span>Pro</span></div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" onclick="showView('overview')">📊 What's Where</button>
+    <button class="nav-tab" onclick="showView('engineering')">⚡ Engineering Panel</button>
+    <button class="nav-tab" onclick="showView('permit')">📄 Permit Package Page</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!--  VIEW 1: OVERVIEW — What's live vs backend                    -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="view-overview" class="view active">
+<div class="container">
+  <div class="section-label">Platform Status</div>
+  <div class="section-title">What's Live vs. What's Backend Data</div>
+  <div class="section-sub">
+    A clear map of every feature built — what a rep or homeowner can see right now, what lives in the data layer powering it, and what's planned next.
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot dot-green"></div> <strong>Live &amp; Visible</strong> — Reps/homeowners see this in the app today</div>
+    <div class="legend-item"><div class="legend-dot dot-blue"></div> <strong>Backend Data</strong> — Built &amp; in the codebase, powers features, not yet a standalone UI page</div>
+    <div class="legend-item"><div class="legend-dot dot-gray"></div> <strong>Planned</strong> — On the roadmap, not started</div>
+  </div>
+
+  <div class="feature-grid">
+
+    <div class="feature-card live">
+      <div class="feature-status status-live">✅ Live &amp; Visible</div>
+      <div class="feature-name">📄 Permit Package (16 pages)</div>
+      <div class="feature-desc">Full permit planset PDF generated per job — cover, SLD, load calc, roof plan, spec pages, fire setbacks, and now: the ICA + PTO Roadmap page (Appendix B).</div>
+    </div>
+
+    <div class="feature-card live">
+      <div class="feature-status status-live">✅ Live &amp; Visible</div>
+      <div class="feature-name">⚡ Engineering Panel</div>
+      <div class="feature-desc">On the Engineering page, reps see utility-specific TOU rates, battery incentives, solar rebates, EV charger rebates, PACE financing, low-income programs, and the ICA/PTO roadmap for the job's utility.</div>
+    </div>
+
+    <div class="feature-card live">
+      <div class="feature-status status-live">✅ Live &amp; Visible</div>
+      <div class="feature-name">🔗 Interconnection Links</div>
+      <div class="feature-desc">The permit package Appendix B and the Engineering panel both show the verified, live URL for the homeowner to start their interconnection application — now fixed for all 22 utilities.</div>
+    </div>
+
+    <div class="feature-card backend">
+      <div class="feature-status status-backend">🔵 Backend Data Layer</div>
+      <div class="feature-name">🏢 22-Utility Interconnection Registry</div>
+      <div class="feature-desc">Full per-utility data: ICA requirements, timeline (days min/max), PTO steps, homeowner checklist, common rejection reasons, solar pro notes. All verified URLs. Powers Appendix B and the Engineering panel.</div>
+    </div>
+
+    <div class="feature-card backend">
+      <div class="feature-status status-backend">🔵 Backend Data Layer</div>
+      <div class="feature-name">💰 Utility Programs Database</div>
+      <div class="feature-desc">TOU rates, battery incentives, solar rebates, NEM policies for 20+ states. Plus PACE financing (4 programs), EV charger rebates (7 utilities), low-income/DAC programs (8 utilities). Powers the Engineering panel.</div>
+    </div>
+
+    <div class="feature-card backend">
+      <div class="feature-status status-backend">🔵 Backend Data Layer</div>
+      <div class="feature-name">🗺️ Utility Detection Engine</div>
+      <div class="feature-desc">Automatically detects which utility serves any address — used to pull the right rates, programs, and interconnection profile for every job without the rep having to look anything up.</div>
+    </div>
+
+    <div class="feature-card planned">
+      <div class="feature-status status-planned">⬜ Planned</div>
+      <div class="feature-name">📈 SREC Income Layer</div>
+      <div class="feature-desc">Per-state SREC market prices (NJ, MA, IL, MD, OH, PA, DC) added to proposals as a real dollar income stream the homeowner earns from selling certificates.</div>
+    </div>
+
+    <div class="feature-card planned">
+      <div class="feature-status status-planned">⬜ Planned</div>
+      <div class="feature-name">🗂️ State Solar Tax Credit Table</div>
+      <div class="feature-desc">State-level credits stacked on top of the federal ITC — MA, NY, SC, AZ, etc. — displayed in the proposal finance section.</div>
+    </div>
+
+    <div class="feature-card planned">
+      <div class="feature-status status-planned">⬜ Planned</div>
+      <div class="feature-name">🏠 Client Auto-Complete UX</div>
+      <div class="feature-desc">Type a homeowner's address → instantly auto-fill their utility, rate plan, applicable incentives, and interconnection timeline. Reduces rep data entry to near zero.</div>
+    </div>
+
+  </div>
+
+  <div style="margin-top: 28px; padding: 20px; background: #fff; border-radius: 10px; border: 1px solid #e5e7eb;">
+    <div class="section-label" style="margin-bottom: 8px;">Bottom Line</div>
+    <p style="font-size: 14px; color: #374151; line-height: 1.7;">
+      The <strong>permit package</strong> and <strong>engineering panel</strong> are the two customer-facing surfaces where everything comes together. 
+      All the database work (utilities, programs, interconnection profiles) is infrastructure that feeds those two surfaces — 
+      it doesn't have its own page because it doesn't need one. 
+      Clicking the tabs above shows you exactly what a rep sees in each surface right now.
+    </p>
+  </div>
+</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!--  VIEW 2: ENGINEERING PANEL                                     -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="view-engineering" class="view">
+<div class="container">
+  <div class="section-label">Engineering Page → Utility Programs Panel</div>
+  <div class="section-title">What a Rep Sees on the Engineering Page</div>
+  <div class="section-sub">
+    Pick a utility below. This mirrors what the panel shows to a rep when they open a job in that utility's territory.
+    All data is pulled automatically from the job's address — the rep doesn't have to look anything up.
+  </div>
+
+  <div class="utility-selector">
+    <button class="util-btn active" onclick="showUtil('ameren')">Ameren IL</button>
+    <button class="util-btn" onclick="showUtil('comed')">ComEd</button>
+    <button class="util-btn" onclick="showUtil('fpl')">FPL (Florida)</button>
+    <button class="util-btn" onclick="showUtil('pge')">PG&E (California)</button>
+  </div>
+
+  <!-- AMEREN IL -->
+  <div id="util-ameren" class="util-panel">
+    <div class="card">
+      <div class="card-header">
+        <span style="font-size:22px;">⚡</span>
+        <div>
+          <div class="card-title">Ameren Illinois — Utility Programs &amp; ICA Data</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">Illinois · Central / Southern IL service territory</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <span class="badge badge-green">ICA data ✓</span>
+          <span class="badge badge-blue">TOU available</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="panel-grid">
+
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">⏱️</span> Interconnection Timeline</div>
+            <div class="stat-row"><span class="stat-label">ICA approval (typical)</span><span class="stat-value">15–30 business days</span></div>
+            <div class="stat-row"><span class="stat-label">PTO after inspection</span><span class="stat-value">5–15 business days</span></div>
+            <div class="stat-row"><span class="stat-label">Total ICA → PTO</span><span class="stat-value">~6–8 weeks</span></div>
+            <div class="stat-row"><span class="stat-label">Application portal</span><span class="stat-value">Online (Ameren portal)</span></div>
+            <div class="stat-row"><span class="stat-label">Stamped planset needed?</span><span class="stat-value">❌ Not required ≤10 kW</span></div>
+            <a href="https://www.ameren.com/service/renewables/solar" target="_blank" class="apply-btn">
+              🔗 Ameren IL Solar / ICA Page ↗
+            </a>
+          </div>
+
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">📋</span> ICA Requirements</div>
+            <div class="stat-row"><span class="stat-label">DG Interconnection App</span><span class="stat-value badge badge-green">Required</span></div>
+            <div class="stat-row"><span class="stat-label">Single-Line Diagram</span><span class="stat-value badge badge-green">Required</span></div>
+            <div class="stat-row"><span class="stat-label">NEM application</span><span class="stat-value badge badge-yellow">Submit simultaneously</span></div>
+            <div class="stat-row"><span class="stat-label">Signed ICA</span><span class="stat-value badge badge-green">Required</span></div>
+            <div class="stat-row"><span class="stat-label">Anti-islanding cert</span><span class="stat-value badge badge-gray">Not required</span></div>
+          </div>
+
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">🚦</span> PTO Steps</div>
+            <ul class="step-list">
+              <li><div class="step-num">1</div><div class="step-text">Pass AHJ final inspection</div></li>
+              <li><div class="step-num">2</div><div class="step-text">Installer uploads inspection docs to Ameren portal</div></li>
+              <li><div class="step-num">3</div><div class="step-text">Ameren reviews &amp; may schedule meter exchange (bidirectional)</div></li>
+              <li><div class="step-num">4</div><div class="step-text">Ameren issues PTO letter electronically</div></li>
+              <li><div class="step-num">5</div><div class="step-text">Energize system. Enroll in Power Smart Pricing (TOU) for extra savings.</div></li>
+            </ul>
+          </div>
+
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">✅</span> Homeowner PTO Checklist</div>
+            <div class="checklist-item"><span class="check">☐</span> AHJ final inspection passed</div>
+            <div class="checklist-item"><span class="check">☐</span> Interconnection agreement signed</div>
+            <div class="checklist-item"><span class="check">☐</span> Installer submitted PTO request with inspection card</div>
+            <div class="checklist-item"><span class="check">☐</span> Enroll in Power Smart Pricing after PTO for hourly rate savings</div>
+          </div>
+
+          <div class="panel-section full-width">
+            <div class="panel-section-title"><span class="icon">⚠️</span> Common Rejection Reasons</div>
+            <div class="rejection">
+              <div class="rejection-reason">Net metering application not submitted simultaneously with ICA</div>
+              <div class="rejection-fix">💡 Submit NEM application at same time as interconnection application to avoid 2–3 week delay.</div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="pro-note">
+          <div class="pro-note-label">⚡ Solar Pro Note</div>
+          <div class="pro-note-text">Ameren Illinois's Power Smart Pricing (PSP) is a powerful sales tool — hourly rates can swing $0.02–$0.15/kWh, and battery owners can consistently dodge peak charges. Mention PSP enrollment at proposal stage. ICA + PTO typically 6–8 weeks total.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMED -->
+  <div id="util-comed" class="util-panel" style="display:none;">
+    <div class="card">
+      <div class="card-header">
+        <span style="font-size:22px;">⚡</span>
+        <div>
+          <div class="card-title">ComEd (Commonwealth Edison) — Utility Programs &amp; ICA Data</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">Illinois · Chicagoland &amp; Northern IL</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <span class="badge badge-green">ICA data ✓</span>
+          <span class="badge badge-blue">SREC program</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="panel-grid">
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">⏱️</span> Interconnection Timeline</div>
+            <div class="stat-row"><span class="stat-label">ICA approval (typical)</span><span class="stat-value">10–20 business days</span></div>
+            <div class="stat-row"><span class="stat-label">PTO after inspection</span><span class="stat-value">5–10 business days</span></div>
+            <div class="stat-row"><span class="stat-label">Total ICA → PTO</span><span class="stat-value">~5–7 weeks</span></div>
+            <div class="stat-row"><span class="stat-label">Application portal</span><span class="stat-value">Online (ComEd portal)</span></div>
+            <a href="https://www.comed.com/SmartEnergy/SolarEnergy/Pages/InterconnectionProcessOverview.aspx" target="_blank" class="apply-btn">
+              🔗 ComEd Interconnection Page ↗
+            </a>
+          </div>
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">🚦</span> PTO Steps</div>
+            <ul class="step-list">
+              <li><div class="step-num">1</div><div class="step-text">Submit ICA application online with SLD + equipment specs</div></li>
+              <li><div class="step-num">2</div><div class="step-text">ComEd issues Interconnection Agreement — homeowner signs</div></li>
+              <li><div class="step-num">3</div><div class="step-text">Pass AHJ final inspection</div></li>
+              <li><div class="step-num">4</div><div class="step-text">Submit PTO request with inspection sign-off</div></li>
+              <li><div class="step-num">5</div><div class="step-text">ComEd installs net meter — PTO letter issued. Energize.</div></li>
+            </ul>
+          </div>
+        </div>
+        <div class="pro-note">
+          <div class="pro-note-label">⚡ Solar Pro Note</div>
+          <div class="pro-note-text">ComEd territory is Illinois's highest-value SREC market. Customers with ≥10 panels qualify for the Illinois Shines SREC program — worth $60–$80/MWh over 15 years. Always mention Illinois Shines in the proposal — it dramatically improves payback.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FPL -->
+  <div id="util-fpl" class="util-panel" style="display:none;">
+    <div class="card">
+      <div class="card-header">
+        <span style="font-size:22px;">☀️</span>
+        <div>
+          <div class="card-title">Florida Power &amp; Light (FPL) — Utility Programs &amp; ICA Data</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">Florida · South &amp; Central FL (largest US utility by customers)</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <span class="badge badge-green">ICA data ✓</span>
+          <span class="badge badge-yellow">Net metering available</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="panel-grid">
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">⏱️</span> Interconnection Timeline</div>
+            <div class="stat-row"><span class="stat-label">ICA approval (typical)</span><span class="stat-value">20–45 business days</span></div>
+            <div class="stat-row"><span class="stat-label">PTO after inspection</span><span class="stat-value">10–20 business days</span></div>
+            <div class="stat-row"><span class="stat-label">Total ICA → PTO</span><span class="stat-value">~8–12 weeks</span></div>
+            <div class="stat-row"><span class="stat-label">Application portal</span><span class="stat-value">Online (FPL portal)</span></div>
+            <div class="stat-row"><span class="stat-label">Stamped planset needed?</span><span class="stat-value">✅ Required ≥10 kW</span></div>
+            <a href="https://www.fpl.com/netmetering.html" target="_blank" class="apply-btn">
+              🔗 FPL Net Metering Page ↗
+            </a>
+          </div>
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">⚠️</span> Common Rejection Reasons</div>
+            <div class="rejection">
+              <div class="rejection-reason">Incomplete equipment documentation</div>
+              <div class="rejection-fix">💡 Submit inverter spec sheet + module spec sheet together with initial application.</div>
+            </div>
+            <div class="rejection" style="margin-bottom:0;">
+              <div class="rejection-reason">System size exceeds hosting capacity on circuit</div>
+              <div class="rejection-fix">💡 Check FPL's DER map before design — some circuits in South FL are near capacity.</div>
+            </div>
+          </div>
+        </div>
+        <div class="pro-note">
+          <div class="pro-note-label">⚡ Solar Pro Note</div>
+          <div class="pro-note-text">FPL's net metering is 1:1 retail credit but no cash-out — excess rolls to next month. Battery is the play here: FPL's on-peak rate (4–9 PM) is significantly higher than off-peak. Frame battery as a TOU hedge, not just backup.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PGE -->
+  <div id="util-pge" class="util-panel" style="display:none;">
+    <div class="card">
+      <div class="card-header">
+        <span style="font-size:22px;">🌉</span>
+        <div>
+          <div class="card-title">Pacific Gas &amp; Electric (PG&amp;E) — Utility Programs &amp; ICA Data</div>
+          <div style="font-size:12px;color:#888;margin-top:2px;">California · Northern &amp; Central CA</div>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px;">
+          <span class="badge badge-green">ICA data ✓</span>
+          <span class="badge badge-blue">NEM 3.0 territory</span>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="panel-grid">
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">⏱️</span> Interconnection Timeline</div>
+            <div class="stat-row"><span class="stat-label">ICA approval (typical)</span><span class="stat-value">30–60 business days</span></div>
+            <div class="stat-row"><span class="stat-label">PTO after inspection</span><span class="stat-value">10–20 business days</span></div>
+            <div class="stat-row"><span class="stat-label">Total ICA → PTO</span><span class="stat-value">~10–16 weeks</span></div>
+            <div class="stat-row"><span class="stat-label">Net metering policy</span><span class="stat-value">NEM 3.0 (Apr 2023+)</span></div>
+            <div class="stat-row"><span class="stat-label">Export compensation</span><span class="stat-value">~$0.05/kWh avg</span></div>
+            <a href="https://www.pge.com/en/about/doing-business-with-pge/interconnections/net-energy-metering-program.html" target="_blank" class="apply-btn">
+              🔗 PG&E NEM Program Page ↗
+            </a>
+          </div>
+          <div class="panel-section">
+            <div class="panel-section-title"><span class="icon">🔋</span> Why Battery is Critical Here</div>
+            <div style="font-size:13px;color:#374151;line-height:1.6;">
+              Under NEM 3.0, grid export earns ~$0.05/kWh — but buying back costs $0.30–$0.45/kWh. 
+              <strong>Every kWh stored in a battery instead of exported is worth 6–9× more.</strong>
+              Battery payback in PG&E territory is 5–7 years vs. 10–12 without battery.
+            </div>
+          </div>
+          <div class="panel-section full-width">
+            <div class="panel-section-title"><span class="icon">⚠️</span> Common Rejection Reasons</div>
+            <div class="rejection" style="display:inline-block;width:48%;margin-right:2%;">
+              <div class="rejection-reason">Rule 21 technical requirements not met</div>
+              <div class="rejection-fix">💡 Ensure inverter is Rule 21 certified (most modern string/microinverters are).</div>
+            </div>
+            <div class="rejection" style="display:inline-block;width:48%;">
+              <div class="rejection-reason">Incomplete installer license documentation</div>
+              <div class="rejection-fix">💡 Include C-46 or C-10 license number on all application docs.</div>
+            </div>
+          </div>
+        </div>
+        <div class="pro-note">
+          <div class="pro-note-label">⚡ Solar Pro Note</div>
+          <div class="pro-note-text">NEM 3.0 fundamentally changed the solar pitch in CA — lead with self-consumption and battery, not net metering credits. A properly sized battery + solar system still achieves 7–10 year payback. PG&E's timeline is slow (10–16 weeks ICA to PTO) — set expectations early with the homeowner.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════ -->
+<!--  VIEW 3: PERMIT PACKAGE PAGE (Appendix B)                     -->
+<!-- ══════════════════════════════════════════════════════════════ -->
+<div id="view-permit" class="view">
+<div class="container">
+  <div class="section-label">Permit Package → Page 12 of 16</div>
+  <div class="section-title">Appendix B: ICA &amp; PTO Roadmap</div>
+  <div class="section-sub">
+    This is what's printed in every permit package handed to a homeowner. It's page 12 of 16 — after the structural and electrical pages — 
+    and it tells the homeowner exactly what happens after installation: how to get their interconnection agreement and how to get Permission to Operate.
+    Below is a real render using Ameren Illinois as the example.
+  </div>
+
+  <div class="permit-frame">
+    <div class="permit-toolbar">
+      <span>📄 PERMIT PACKAGE</span>
+      <span>|</span>
+      <span>123 Maple Street, Springfield, IL 62701</span>
+      <span>|</span>
+      <span>Ameren Illinois</span>
+      <div class="pages">PAGE 12 / 16 — APP-B</div>
+    </div>
+
+    <div class="permit-page">
+
+      <!-- Title Block -->
+      <div class="p-title-block">
+        <div class="p-title-top">
+          <span class="company">SOLARPRO ENGINEERING</span>
+          <span class="sheet">APP-B</span>
+        </div>
+        <div class="p-title-bottom">
+          <div class="p-client">
+            <div style="font-size:11px;font-weight:700;">CLIENT: Smith Residence</div>
+            <div style="font-size:10px;color:#666;">123 Maple Street, Springfield, IL 62701</div>
+            <div style="font-size:10px;color:#666;">Ameren Illinois · 9.6 kW DC / 8.0 kW AC</div>
+          </div>
+          <div class="p-title-page-title" style="font-size:14px;font-weight:800;letter-spacing:0.5px;">UTILITY INTERCONNECTION &amp; PTO ROADMAP</div>
+          <div class="p-pg" style="font-size:11px;color:#888;">12 / 16</div>
+        </div>
+      </div>
+
+      <!-- Intro note -->
+      <div style="font-size:9px;color:#555;margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border-left:3px solid #1a1a2e;">
+        <strong>IMPORTANT:</strong> Your solar system cannot be turned on until two approvals are received from <strong>Ameren Illinois</strong>: 
+        (1) Interconnection Agreement (ICA) — obtained before/during construction, and 
+        (2) Permission to Operate (PTO) — obtained after final inspection. 
+        This page is your step-by-step guide. Do not energize the system before receiving the PTO letter.
+      </div>
+
+      <!-- Section 1: ICA Requirements -->
+      <div class="p-section">
+        <div class="p-section-hdr">SECTION 1 — INTERCONNECTION APPLICATION REQUIREMENTS · AMEREN ILLINOIS</div>
+        <div class="p-section-body">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th style="width:30%;">DOCUMENT / REQUIREMENT</th>
+                <th style="width:45%;">DETAILS</th>
+                <th style="width:15%;">PREPARED BY</th>
+                <th style="width:10%;">REQUIRED</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>DG Interconnection Application</strong></td>
+                <td>Online at ameren.com. Include: system capacity (kW-DC and kW-AC), inverter model, service address, installer contact.</td>
+                <td>Contractor</td>
+                <td style="color:#059669;font-weight:700;">YES</td>
+              </tr>
+              <tr>
+                <td><strong>Single-Line Diagram (SLD)</strong></td>
+                <td>Single-line diagram plus inverter spec sheet.</td>
+                <td>Contractor</td>
+                <td style="color:#059669;font-weight:700;">YES</td>
+              </tr>
+              <tr>
+                <td><strong>NEM Application</strong></td>
+                <td>Submit simultaneously with ICA to avoid 2–3 week delay.</td>
+                <td>Contractor</td>
+                <td style="color:#d97706;font-weight:700;">SIMULTANEOUS</td>
+              </tr>
+              <tr>
+                <td><strong>Signed ICA</strong></td>
+                <td>Ameren will send agreement after technical review. Homeowner must sign before construction.</td>
+                <td>Homeowner</td>
+                <td style="color:#059669;font-weight:700;">YES</td>
+              </tr>
+              <tr>
+                <td><strong>Stamped Planset</strong></td>
+                <td>Not required for systems ≤10 kW on Simplified Process. Required for systems &gt;10 kW.</td>
+                <td>Engineer</td>
+                <td style="color:#6b7280;font-weight:700;">≤10kW: NO</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="p-url-box">
+            <div class="p-url-label">📎 APPLY AT:</div>
+            <div class="p-url-link">https://www.ameren.com/service/renewables/solar</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 2: Timeline -->
+      <div class="p-section">
+        <div class="p-section-hdr">SECTION 2 — EXPECTED TIMELINE</div>
+        <div class="p-section-body">
+          <div class="p-timeline-bar">
+            <div class="p-timeline-seg" style="background:#dbeafe;color:#1e40af;flex:2;">
+              ICA APPROVAL<br><strong>15–30 bus. days</strong>
+            </div>
+            <div class="p-timeline-seg" style="background:#d1fae5;color:#065f46;flex:1.5;">
+              CONSTRUCTION<br><strong>1–3 weeks</strong>
+            </div>
+            <div class="p-timeline-seg" style="background:#fef3c7;color:#92400e;flex:1;">
+              AHJ INSPECT<br><strong>1–2 weeks</strong>
+            </div>
+            <div class="p-timeline-seg" style="background:#f3e8ff;color:#6d28d9;flex:1.5;">
+              PTO APPROVAL<br><strong>5–15 bus. days</strong>
+            </div>
+          </div>
+          <div style="font-size:9px;color:#555;margin-top:4px;">Typical total from ICA application to system energization: <strong>6–8 weeks.</strong> Rural circuits and oversized systems may take longer. Ameren has good hosting capacity across most of Central/Southern IL.</div>
+        </div>
+      </div>
+
+      <!-- Section 3: PTO Steps -->
+      <div class="p-section">
+        <div class="p-section-hdr">SECTION 3 — PERMISSION TO OPERATE (PTO) STEPS</div>
+        <div class="p-section-body">
+          <ul class="p-step-list">
+            <li><div class="p-step-num">1</div><div>Pass AHJ (city/county) final electrical inspection.</div></li>
+            <li><div class="p-step-num">2</div><div>Installer uploads final inspection documentation to Ameren Illinois portal.</div></li>
+            <li><div class="p-step-num">3</div><div>Ameren reviews documentation and may schedule meter exchange for bidirectional (net metering) meter.</div></li>
+            <li><div class="p-step-num">4</div><div>Ameren Illinois issues PTO letter electronically to installer and homeowner.</div></li>
+            <li><div class="p-step-num">5</div><div>Energize system after PTO letter received. Consider enrolling in Power Smart Pricing (hourly TOU) to maximize savings.</div></li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Section 4: Homeowner Checklist -->
+      <div class="p-section">
+        <div class="p-section-hdr green">SECTION 4 — HOMEOWNER PTO CHECKLIST</div>
+        <div class="p-section-body">
+          <div class="p-checklist">
+            <div class="p-check-item"><div class="p-check-box"></div><span>AHJ final inspection passed</span></div>
+            <div class="p-check-item"><div class="p-check-box"></div><span>Interconnection agreement signed (before construction)</span></div>
+            <div class="p-check-item"><div class="p-check-box"></div><span>Installer submitted PTO request with inspection card to Ameren</span></div>
+            <div class="p-check-item"><div class="p-check-box"></div><span>PTO letter received from Ameren Illinois</span></div>
+            <div class="p-check-item"><div class="p-check-box"></div><span>System energized only AFTER PTO letter</span></div>
+            <div class="p-check-item"><div class="p-check-box"></div><span>Enroll in Power Smart Pricing (TOU) for hourly rate savings</span></div>
+          </div>
+          <div class="p-warning">⚠️ <strong>DO NOT energize (turn on) your solar system before receiving the PTO letter from Ameren Illinois.</strong> Energizing without PTO is a tariff violation that may result in disconnection of your system.</div>
+        </div>
+      </div>
+
+      <!-- Section 5: Common Rejections -->
+      <div class="p-section">
+        <div class="p-section-hdr gray">SECTION 5 — COMMON REJECTION REASONS &amp; HOW TO AVOID THEM</div>
+        <div class="p-section-body">
+          <table class="p-table">
+            <thead>
+              <tr>
+                <th style="width:45%;">COMMON REJECTION REASON</th>
+                <th>HOW TO AVOID</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Net metering application not submitted simultaneously with ICA</td>
+                <td>Submit NEM application at same time as interconnection application to avoid 2–3 week delay.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Pro Note (shown to reps, could be stripped for homeowner copy) -->
+      <div class="p-pro-note">
+        <strong>SOLAR PRO NOTE (Internal):</strong> Ameren Illinois's Power Smart Pricing (PSP) is a powerful sales tool — hourly rates can swing $0.02–$0.15/kWh, and battery owners can consistently dodge peak charges. Mention PSP enrollment at proposal stage.
+      </div>
+
+    </div>
+  </div>
+
+  <div style="margin-top:20px;padding:16px 20px;background:#fff;border-radius:10px;border:1px solid #e5e7eb;">
+    <div class="section-label" style="margin-bottom:6px;">What this page does for you</div>
+    <p style="font-size:13px;color:#374151;line-height:1.7;">
+      <strong>Before this was built,</strong> homeowners got a permit package with electrical drawings and structural calcs — and nothing about what happens next. 
+      They'd call the office asking "when can we turn it on?" and reps had to walk them through it manually.<br><br>
+      <strong>Now,</strong> every permit package automatically includes this page — tailored to the specific utility for that job. 
+      The homeowner has the exact URL to apply, knows the timeline (6–8 weeks for Ameren, different for every other utility), 
+      has a checklist they can actually check off, and knows not to flip the switch until the PTO letter arrives.
+    </p>
+  </div>
+</div>
+</div>
+
+<script>
+function showView(name) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+function showUtil(name) {
+  document.querySelectorAll('.util-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.util-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('util-' + name).style.display = 'block';
+  event.target.classList.add('active');
+}
+</script>
+</body>
+</html>

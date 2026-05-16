@@ -1,9 +1,10 @@
 // BUILD v47.48 — Layout pipeline debug + roofPlanes restore fix
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
 import { UserProvider } from '@/contexts/UserContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 import SolarDogWithTour from '@/components/support/SolarDogWithTour';
 import { Suspense } from 'react';
 import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
@@ -12,8 +13,26 @@ import { BUILD_VERSION } from '@/lib/version';
 
 export const metadata: Metadata = {
   title: 'SolarPro Design Platform',
-  description: 'Professional solar design and proposal platform for roof, ground mount, and vertical fence systems',
+  description: 'Professional solar design and proposal platform for roof, ground mount, and vertical fence systems. NEC-compliant SLDs, 3D design studio, homeowner portal, and e-signing — built for solar installers.',
   icons: { icon: '/favicon.ico' },
+  openGraph: {
+    type: 'website',
+    siteName: 'SolarPro',
+    title: 'SolarPro — Solar Design & Proposal Platform',
+    description: 'NEC-compliant electrical engineering, 3D design studio, instant proposals, and a homeowner portal — all in one platform built for solar installers.',
+    url: 'https://www.solarpro.solutions',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'SolarPro — Solar Design & Proposal Platform',
+    description: 'NEC-compliant electrical engineering, 3D design studio, instant proposals, and a homeowner portal — all in one platform built for solar installers.',
+  },
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -42,12 +61,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         {/* PERF v61: Preconnect to Google tile API to reduce DNS/TLS handshake delay */}
         <link rel="preconnect" href="https://tile.googleapis.com" />
+        {/* PWA manifest — enables "Add to Home Screen" on mobile */}
+        <link rel="manifest" href="/manifest.json" />
       </head>
       <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
         <ToastProvider>
           <StoreProvider>
             {/* UserProvider wraps entire app — single source of truth for user state */}
             <UserProvider>
+              <ThemeProvider>
               {/* Impersonation banner — only visible when admin is impersonating a user */}
               <Suspense fallback={null}>
                 <ImpersonationBanner />
@@ -68,6 +90,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               }}>
                 {BUILD_VERSION}
               </div>
+              </ThemeProvider>
             </UserProvider>
           </StoreProvider>
         </ToastProvider>

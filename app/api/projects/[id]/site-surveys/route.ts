@@ -3,6 +3,8 @@
 // POST /api/projects/[id]/site-surveys  — create a survey linked to a project
 // ============================================================================
 
+export const maxDuration = 30;
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserFromRequest } from '@/lib/auth';
 import {

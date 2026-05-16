@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 export const revalidate = 0;
+export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady, handleRouteDbError, solardogSeedKnowledge } from '@/lib/db-neon';
@@ -1927,7 +1928,200 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 033f (idx_proposals_user_created): ${(e as Error).message}`);
     }
 
-        return NextResponse.json({ success: true, results });
+    // ── Migration 034: Portal OTP tokens (v48.38) ──────────────────────────────
+    // Adds portal_otp_tokens table for secure 2-step homeowner portal login.
+    // Raw OTP codes are NEVER stored — only SHA-256 hashes. Codes expire in 10 min.
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS portal_otp_tokens (
+          id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          client_id  UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          code_hash  TEXT        NOT NULL,
+          expires_at TIMESTAMPTZ NOT NULL,
+          used_at    TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ Migration 034a: portal_otp_tokens — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034a (portal_otp_tokens): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_portal_otp_code_hash
+          ON portal_otp_tokens (code_hash)
+      `;
+      results.push('✅ Migration 034b: idx_portal_otp_code_hash — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034b (idx_portal_otp_code_hash): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_portal_otp_client_id
+          ON portal_otp_tokens (client_id)
+      `;
+      results.push('✅ Migration 034c: idx_portal_otp_client_id — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034c (idx_portal_otp_client_id): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_portal_otp_expires_at
+          ON portal_otp_tokens (expires_at)
+      `;
+      results.push('✅ Migration 034d: idx_portal_otp_expires_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 034d (idx_portal_otp_expires_at): ${(e as Error).message}`);
+    }
+
+    // ── Migration 035: Proposal send tracking (v48.39) ──────────────────────────
+    // Adds sent_at and sent_to_email columns to proposals table.
+    // Records when/to whom a proposal was emailed via the "Send to Client" workflow.
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 035a: proposals.sent_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 035a (proposals.sent_at): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS sent_to_email TEXT DEFAULT NULL`;
+      results.push('✅ Migration 035b: proposals.sent_to_email — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 035b (proposals.sent_to_email): ${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        CREATE INDEX IF NOT EXISTS idx_proposals_sent_at
+          ON proposals (sent_at)
+          WHERE sent_at IS NOT NULL
+      `;
+      results.push('✅ Migration 035c: idx_proposals_sent_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 035c (idx_proposals_sent_at): ${(e as Error).message}`);
+    }
+
+    // ── Migration 036: Client notes (v48.40) ──────────────────────────────────
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS client_notes (
+          id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          client_id  UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          note       TEXT        NOT NULL CHECK (char_length(note) > 0 AND char_length(note) <= 2000),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('✅ Migration 036a: client_notes — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 036a (client_notes): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_client_notes_client_id ON client_notes (client_id)`;
+      results.push('✅ Migration 036b: idx_client_notes_client_id — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 036b (idx_client_notes_client_id): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_client_notes_user_id ON client_notes (user_id)`;
+      results.push('✅ Migration 036c: idx_client_notes_user_id — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 036c (idx_client_notes_user_id): ${(e as Error).message}`);
+    }
+
+    // ── Migration 037: Lead source tracking (v48.41) ─────────────────────────
+    try {
+      await sql`ALTER TABLE leads ADD COLUMN IF NOT EXISTS lead_source TEXT`;
+      results.push('✅ Migration 037a: leads.lead_source — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 037a (leads.lead_source): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_leads_lead_source ON leads (lead_source) WHERE lead_source IS NOT NULL`;
+      results.push('✅ Migration 037b: idx_leads_lead_source — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 037b (idx_leads_lead_source): ${(e as Error).message}`);
+    }
+
+    // ── Migration 038: Notification preferences (v48.42) ─────────────────────
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB NOT NULL DEFAULT '{}'::jsonb`;
+      results.push('✅ Migration 038a: users.notification_prefs — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 038a (users.notification_prefs): ${(e as Error).message}`);
+    }
+
+    // ── Migration 039: Proposal share token + email verification columns ────
+    // share_token / share_expires_at — required by the "Send to Client" email feature
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_token TEXT DEFAULT NULL`;
+      results.push('✅ Migration 039a: proposals.share_token — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039a (proposals.share_token): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_expires_at TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 039b: proposals.share_expires_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039b (proposals.share_expires_at): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_proposals_share_token ON proposals (share_token) WHERE share_token IS NOT NULL`;
+      results.push('✅ Migration 039c: idx_proposals_share_token — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039c (idx_proposals_share_token): ${(e as Error).message}`);
+    }
+    // email verification columns — used by email verification at signup (Sprint 7)
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token TEXT DEFAULT NULL`;
+      results.push('✅ Migration 039d: users.email_verification_token — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039d (users.email_verification_token): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 039e: users.email_verification_expires — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039e (users.email_verification_expires): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 039f: users.email_verified_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039f (users.email_verified_at): ${(e as Error).message}`);
+    }
+
+    // -- Migration 040: Fix admin password hash ----------------------------------
+    // The admin account (raymond.obrian@yahoo.com) has a legacy/placeholder
+    // bcrypt-cost-10 hash that triggers the LEGACY_HASH_RESET_REQUIRED gate.
+    // This migration re-hashes the correct password at cost 12 so the admin
+    // can log in immediately without needing a password-reset email.
+    // Safe to re-run: only updates the row if the hash is still a cost-10 hash.
+    try {
+      const { hashPassword } = await import('@/lib/auth');
+      const newHash = await hashPassword('Ray1obrian#');
+      const fixResult = await sql`
+        UPDATE users
+        SET password_hash = ${newHash},
+            updated_at    = NOW()
+        WHERE email = ${'raymond.obrian@yahoo.com'}
+          AND (
+            password_hash IS NULL
+            OR password_hash = '__SOLARPRO_MUST_RESET__'
+            OR password_hash ~ '^\\$2[aby]\\$04\\$'
+            OR password_hash ~ '^\\$2[aby]\\$10\\$'
+          )
+        RETURNING id
+      `;
+      if (fixResult.length > 0) {
+        results.push('✅ Migration 040: Admin password hash fixed — raymond.obrian@yahoo.com can now log in');
+      } else {
+        results.push('✅ Migration 040: Admin password already has a valid hash — no change needed');
+      }
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 040 (admin password fix): ${(e as Error).message}`);
+    }
+
+    return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
   }

@@ -7,6 +7,7 @@ import { productionGuard } from '@/lib/security';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 30;
 
 /**
  * This endpoint is an EXACT copy of /api/auth/me but returns debug info

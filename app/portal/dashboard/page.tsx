@@ -715,8 +715,8 @@ export default function PortalDashboard() {
                   </div>
                 )}
 
-                {/* ── Proposal CTA — shown when stage is 'proposal' and a shared proposal exists ── */}
-                {p.homeowner_stage === 'proposal' && projectProposals.length > 0 && (() => {
+                {/* ── Proposal CTA — shown when stage is 'proposal' OR a signed proposal exists (signed proposals always stay visible) ── */}
+                {(p.homeowner_stage === 'proposal' || projectProposals.some(pr => !!pr.signed_at)) && projectProposals.length > 0 && (() => {
                   const prop = projectProposals[0];
                   const propUrl = `/proposals/view/${prop.id}?token=${prop.share_token}`;
                   const isSigned = !!prop.signed_at;
