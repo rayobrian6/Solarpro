@@ -2049,6 +2049,46 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 038a (users.notification_prefs): ${(e as Error).message}`);
     }
 
+    // ── Migration 039: Proposal share token + email verification columns ────
+    // share_token / share_expires_at — required by the "Send to Client" email feature
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_token TEXT DEFAULT NULL`;
+      results.push('✅ Migration 039a: proposals.share_token — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039a (proposals.share_token): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE proposals ADD COLUMN IF NOT EXISTS share_expires_at TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 039b: proposals.share_expires_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039b (proposals.share_expires_at): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_proposals_share_token ON proposals (share_token) WHERE share_token IS NOT NULL`;
+      results.push('✅ Migration 039c: idx_proposals_share_token — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039c (idx_proposals_share_token): ${(e as Error).message}`);
+    }
+    // email verification columns — used by email verification at signup (Sprint 7)
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_token TEXT DEFAULT NULL`;
+      results.push('✅ Migration 039d: users.email_verification_token — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039d (users.email_verification_token): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verification_expires TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 039e: users.email_verification_expires — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039e (users.email_verification_expires): ${(e as Error).message}`);
+    }
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ DEFAULT NULL`;
+      results.push('✅ Migration 039f: users.email_verified_at — ensured');
+    } catch (e: unknown) {
+      results.push(`⚠️ Migration 039f (users.email_verified_at): ${(e as Error).message}`);
+    }
+
         return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

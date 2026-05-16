@@ -77,7 +77,7 @@ function ProposalsSection({ clientId }: { clientId: string }) {
       const res = await fetch(`/api/clients/${clientId}/proposals`);
       const json = await res.json();
       if (!json.success) { setError(json.error ?? 'Failed to load'); return; }
-      setProposals(json.proposals ?? []);
+      setProposals(json.data ?? json.proposals ?? []);
     } catch { setError('Network error'); }
     finally { setLoading(false); }
   }, [clientId]);
@@ -173,7 +173,7 @@ function NotesSection({ clientId }: { clientId: string }) {
       const res = await fetch(`/api/clients/${clientId}/notes`);
       const json = await res.json();
       if (!json.success) { setError(json.error ?? 'Failed to load'); return; }
-      setNotes(json.notes ?? []);
+      setNotes(json.data ?? json.notes ?? []);
     } catch { setError('Network error'); }
     finally { setLoading(false); }
   }, [clientId]);
