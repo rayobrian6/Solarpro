@@ -27,6 +27,10 @@ import {
   getFailsafeMessage,
   calculateRemainingUtility,
 } from '@/lib/proposalTruthEngine';
+import {
+  getInterconnectionProfile,
+  getStateIcaFallback,
+} from '@/lib/utilityInterconnection';
 import { buildCanonicalProposal } from '@/lib/proposal/buildCanonicalProposal';
 import { deriveEcosystemSummary } from '@/lib/proposal/deriveEcosystemSummary';
 import {
@@ -392,6 +396,49 @@ function PublicProposalView({
     // Policy
     isCommercial,
   });
+
+  // ── ICA / PTO Profile Lookup (Tier 1 → Tier 2 → null) ────────────────────
+  // Derive real utility_id from buildUtilityProfile (same inputs as canonical pipeline).
+  // This gives us the authoritative `utility_id` (e.g. 'pge_ca', 'fpl_fl') used by
+  // getInterconnectionProfile(), rather than the naive lowercased-name slug.
+  const icaBuiltProfile = buildUtilityProfile({
+    utilityName:              (proj as any)?.utilityName || '',
+    stateCode:                projectStateCode,
+    address:                  (proj as any)?.address || client?.address || '',
+    zip:                      (proj as any)?.zip || '',
+    clientUtilityRateFallback: client?.utilityRate,
+    client:                   { state: client?.state },
+  });
+  const icaUtilityId = icaBuiltProfile.profile.utility_id;
+  // Tier 1: exact utility profile (full steps, timeline, portal URL)
+  const icaTier1Profile = getInterconnectionProfile(icaUtilityId);
+  // Tier 2: state-level fallback (generic steps for co-ops/munis/unmatched utilities)
+  const icaTier2Fallback = !icaTier1Profile && projectStateCode
+    ? getStateIcaFallback(projectStateCode)
+    : null;
+  // The active ICA data source — Tier 1 takes priority
+  const icaSteps: string[] = icaTier1Profile
+    ? icaTier1Profile.pto_steps           // PTO steps are the homeowner-facing checklist
+    : (icaTier2Fallback?.generic_steps ?? []);
+  const icaTimeline = icaTier1Profile
+    ? `${icaTier1Profile.ica_approval_days_min}–${icaTier1Profile.ica_approval_days_max} business days`
+    : icaTier2Fallback
+      ? `${icaTier2Fallback.typical_ica_days_min}–${icaTier2Fallback.typical_ica_days_max} business days`
+      : null;
+  const ptoTimeline = icaTier1Profile
+    ? `${icaTier1Profile.pto_days_min}–${icaTier1Profile.pto_days_max} business days`
+    : icaTier2Fallback
+      ? `${icaTier2Fallback.typical_pto_days_min}–${icaTier2Fallback.typical_pto_days_max} business days`
+      : null;
+  const icaPortalUrl = icaTier1Profile?.application_url ?? null;
+  const icaRulesUrl  = icaTier2Fallback?.rules_url ?? null;
+  const icaTierLabel = icaTier1Profile
+    ? icaTier1Profile.utility_name
+    : icaTier2Fallback
+      ? `${icaTier2Fallback.state_name} (${icaTier2Fallback.regulatory_body})`
+      : null;
+
+  // ── End ICA Lookup ────────────────────────────────────────────────────────
 
   // ── Destructure canonical values — UI reads ONLY from these ───────────────
   // Panel
@@ -1792,6 +1839,99 @@ function PublicProposalView({
             ))}
           </div>
         </div>
+
+        {/* ── ICA / PTO Roadmap section (Tier 1 or Tier 2) ─────────────────── */}
+        {(icaSteps.length > 0 || icaTimeline || ptoTimeline) && (
+          <div className="proposal-sec card p-4" data-block-id="ica-pto-roadmap">
+            <h3 className="font-semibold text-white text-sm mb-1 flex items-center gap-2">
+              <Zap size={15} style={{ color: primaryColor }} /> Utility Interconnection &amp; Permission to Operate
+            </h3>
+            {icaTierLabel && (
+              <p className="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
+                <Info size={11} className="text-slate-500 flex-shrink-0" />
+                <span>
+                  {icaTier1Profile
+                    ? `Specific process for ${icaTierLabel}`
+                    : `General process — ${icaTierLabel}`
+                  }
+                </span>
+              </p>
+            )}
+            {/* Timeline badges */}
+            {(icaTimeline || ptoTimeline) && (
+              <div className="flex flex-wrap gap-2 mb-4">
+                {icaTimeline && (
+                  <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-violet-500/10 border border-violet-500/20">
+                    <Clock size={11} className="text-violet-400" />
+                    <span className="text-xs text-violet-300 font-medium">ICA approval: {icaTimeline}</span>
+                  </div>
+                )}
+                {ptoTimeline && (
+                  <div className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-emerald-500/10 border border-emerald-500/20">
+                    <CheckCircle size={11} className="text-emerald-400" />
+                    <span className="text-xs text-emerald-300 font-medium">PTO: {ptoTimeline}</span>
+                  </div>
+                )}
+                {icaPortalUrl && (
+                  <a
+                    href={icaPortalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors"
+                  >
+                    <ExternalLink size={11} className="text-sky-400" />
+                    <span className="text-xs text-sky-300 font-medium">Utility portal</span>
+                  </a>
+                )}
+                {!icaPortalUrl && icaRulesUrl && (
+                  <a
+                    href={icaRulesUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1 bg-sky-500/10 border border-sky-500/20 hover:bg-sky-500/20 transition-colors"
+                  >
+                    <ExternalLink size={11} className="text-sky-400" />
+                    <span className="text-xs text-sky-300 font-medium">State rules</span>
+                  </a>
+                )}
+              </div>
+            )}
+            {/* Steps */}
+            {icaSteps.length > 0 && (
+              <div className="space-y-0">
+                {icaSteps.map((step, idx) => (
+                  <div key={idx} className="flex gap-3">
+                    <div className="flex flex-col items-center flex-shrink-0">
+                      <div
+                        className="w-6 h-6 rounded-full border-2 border-slate-700 flex items-center justify-center text-xs font-black"
+                        style={{ color: primaryColor }}
+                      >
+                        {idx + 1}
+                      </div>
+                      {idx < icaSteps.length - 1 && (
+                        <div className="w-px flex-1 bg-slate-700/50 my-1" />
+                      )}
+                    </div>
+                    <div className={`pb-${idx < icaSteps.length - 1 ? '3' : '0'} flex-1 min-w-0`}>
+                      <p className="text-xs text-slate-300 leading-relaxed">{step}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Data source note */}
+            <div className="mt-3 rounded-lg px-3 py-2 bg-slate-800/40 border border-slate-700/30">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                {icaTier1Profile
+                  ? `Timelines and steps are specific to ${icaTier1Profile.utility_name}. Actual timeline may vary based on application completeness and grid capacity.`
+                  : icaTier2Fallback
+                    ? `These are typical steps for utilities regulated by the ${icaTier2Fallback.regulatory_body}. Your specific utility may have additional requirements.`
+                    : 'Timeline and process steps are estimates. Your installer will coordinate the interconnection and PTO process.'
+                }
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Why Solar / Trust section */}
         <div className="proposal-sec grid grid-cols-1 md:grid-cols-3 gap-2" data-block-id="trust-performance">

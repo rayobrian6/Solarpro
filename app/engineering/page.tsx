@@ -95,6 +95,9 @@ import { lookupAhj } from '@/lib/jurisdictions/ahj';
 import { getAhjsByState } from '@/lib/computed-plan';
 import { searchAhj } from '@/lib/jurisdictions/ahj-national';
 import { useEngineeringStore, simplifyPanelCountSource } from '@/store/engineeringStore';
+import { getUtilityPrograms, getPacePrograms, getLowIncomeProgramsByState, type TouRatePlan, type BatteryIncentiveProgram, type SolarRebateProgram, type NemSpecialProgram, type UtilityProgramBundle, type EvChargerIncentive, type PaceFinancingProgram, type LowIncomeSolarProgram } from '@/lib/utilityPrograms';
+import { getInterconnectionProfile, getTypicalTotalTimeline, type InterconnectionProfile } from '@/lib/utilityInterconnection';
+import { PROPOSAL_UTILITY_PROFILES } from '@/lib/proposalTruthEngine';
 
 // ── Auto-detect state + utility from address string ──────────────────────────
 /**
@@ -563,6 +566,421 @@ function IssueRow({ issue, expanded: defaultExpanded = false }: { issue: any; ex
   );
 }
 
+
+// ── Utility Programs Panel (v48.29) ──────────────────────────────────────────────────────────────
+// Status badge for program lifecycle state
+function ProgramStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    active:   { label: 'Active',   cls: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+    pilot:    { label: 'Pilot',    cls: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' },
+    limited:  { label: 'Limited',  cls: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
+    waitlist: { label: 'Waitlist', cls: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
+    expired:  { label: 'Expired',  cls: 'bg-slate-500/20 text-slate-400 border-slate-500/30' },
+  };
+  const cfg = map[status] ?? map.active;
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${cfg.cls}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+// Individual expandable program row — shows name, status, value, enroll link, and collapsible Pro Tip
+function ProgramRow({
+  icon, title, subtitle, value, status, enrollUrl, note, lastVerified, accent,
+}: {
+  icon: string; title: string; subtitle?: string; value?: string;
+  status?: string; enrollUrl?: string; note: string; lastVerified?: string; accent: string;
+}) {
+  const [tipOpen, setTipOpen] = React.useState(false);
+  return (
+    <div className={`rounded-lg border ${accent} bg-white/[0.02] overflow-hidden`}>
+      <div className="flex items-start gap-2 px-2.5 pt-2 pb-1.5">
+        <span className="text-sm flex-shrink-0 mt-0.5">{icon}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+            <span className="text-xs font-semibold text-white leading-tight">{title}</span>
+            {status && <ProgramStatusBadge status={status} />}
+          </div>
+          {subtitle && <p className="text-[11px] text-slate-400 leading-snug">{subtitle}</p>}
+          {value && (
+            <p className="text-[11px] text-emerald-300 font-medium mt-0.5 leading-snug">{value}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0 ml-1">
+          {enrollUrl && (
+            <a
+              href={enrollUrl} target="_blank" rel="noopener noreferrer"
+              className="text-[10px] text-violet-400 hover:text-violet-300 underline whitespace-nowrap transition-colors"
+            >
+              Enroll →
+            </a>
+          )}
+          <button
+            onClick={() => setTipOpen(o => !o)}
+            title="Toggle Pro Tip"
+            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
+              tipOpen
+                ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                : 'bg-white/5 border-white/10 text-slate-400 hover:text-amber-300 hover:border-amber-500/30'
+            }`}
+          >
+            💡 {tipOpen ? 'Hide' : 'Pro Tip'}
+          </button>
+        </div>
+      </div>
+      {tipOpen && (
+        <div className="mx-2.5 mb-2 px-2.5 py-2 bg-amber-500/[0.08] border border-amber-500/20 rounded-lg">
+          <div className="flex gap-1.5">
+            <span className="text-amber-400 text-xs flex-shrink-0 mt-0.5">💡</span>
+            <div>
+              <p className="text-[11px] text-amber-100/90 leading-relaxed">{note}</p>
+              {lastVerified && (
+                <p className="text-[10px] text-slate-500 mt-1">Last verified: {lastVerified}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Collapsible section wrapper (TOU / Battery / Solar / NEM)
+function ProgramSection({
+  sectionIcon, title, count, children, defaultOpen = true,
+}: {
+  sectionIcon: string; title: string; count: number; children: React.ReactNode; defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = React.useState(defaultOpen);
+  return (
+    <div className="rounded-lg border border-white/[0.08] bg-white/[0.015] overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-2.5 py-1.5 hover:bg-white/5 transition-colors text-left"
+      >
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm">{sectionIcon}</span>
+          <span className="text-[11px] font-semibold text-slate-200">{title}</span>
+          <span className="text-[10px] text-slate-500 bg-white/5 border border-white/10 rounded px-1">{count}</span>
+        </div>
+        <span className="text-slate-500 text-xs">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <div className="px-2 pb-2 space-y-1.5 border-t border-white/5 pt-1.5">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Top-level panel — takes a resolved UtilityProgramBundle + utility display name
+function UtilityProgramsPanel({
+  programs,
+  utilityName,
+  interconnection,
+  stateCode,
+}: {
+  programs: UtilityProgramBundle;
+  utilityName: string;
+  interconnection: InterconnectionProfile | null;
+  stateCode: string;
+}) {
+  const [panelOpen, setPanelOpen] = React.useState(true);
+  const [icaOpen, setIcaOpen] = React.useState(false);
+
+  const touCount = programs.tou_plans.length;
+  const batteryCount = programs.battery_incentives.length;
+  const solarCount = programs.solar_rebates.length;
+  const nemCount = programs.nem_programs.length;
+  const evCount = programs.ev_charger_incentives?.length ?? 0;
+  const liCount = programs.low_income_programs?.length ?? 0;
+  const paceProgs = getPacePrograms(stateCode);
+  const liStateProgs = getLowIncomeProgramsByState(stateCode).filter(p =>
+    !programs.low_income_programs?.some(lp => lp.program_id === p.program_id)
+  );
+  const paceCount = paceProgs.length;
+  const liTotalCount = liCount + liStateProgs.length;
+
+  const totalCount = touCount + batteryCount + solarCount + nemCount + evCount + paceCount + liTotalCount;
+  if (totalCount === 0 && !interconnection) return null;
+
+  return (
+    <div className="mt-2 rounded-xl border border-violet-500/25 bg-violet-500/[0.04] overflow-hidden">
+      <button
+        onClick={() => setPanelOpen(o => !o)}
+        className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors text-left"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm">⚡</span>
+          <span className="text-xs font-bold text-violet-300">{utilityName} — Programs & Rate Plans</span>
+          <span className="text-[10px] text-violet-400/70 bg-violet-500/10 border border-violet-500/20 rounded px-1.5 py-0.5">
+            {totalCount} program{totalCount !== 1 ? 's' : ''}
+          </span>
+          {interconnection && (
+            <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5">
+              ICA data ✓
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-500">tap 💡 for rep guidance</span>
+          <span className="text-slate-500 text-xs">{panelOpen ? '▾' : '▸'}</span>
+        </div>
+      </button>
+
+      {panelOpen && (
+        <div className="px-2.5 pb-3 pt-1 space-y-2 border-t border-violet-500/15">
+
+          {touCount > 0 && (
+            <ProgramSection sectionIcon="🕐" title="TOU Rate Plans" count={touCount}>
+              {programs.tou_plans.map((p: TouRatePlan) => (
+                <ProgramRow
+                  key={p.plan_id}
+                  icon={p.type === 'hourly_pricing' ? '📊' : p.solar_friendly ? '☀️' : p.battery_optimized ? '🔋' : '🕐'}
+                  title={p.plan_name}
+                  subtitle={p.plan_description}
+                  value={undefined}
+                  status={undefined}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent={
+                    p.type === 'hourly_pricing'
+                      ? 'border-amber-500/25'
+                      : p.solar_friendly
+                      ? 'border-emerald-500/25'
+                      : p.battery_optimized
+                      ? 'border-blue-500/25'
+                      : 'border-slate-500/20'
+                  }
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {batteryCount > 0 && (
+            <ProgramSection sectionIcon="🔋" title="Battery Incentives" count={batteryCount}>
+              {programs.battery_incentives.map((p: BatteryIncentiveProgram) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon={p.type === 'vpp' ? '🌐' : p.type === 'demand_response' ? '⚡' : '💰'}
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.value_description}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-green-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {solarCount > 0 && (
+            <ProgramSection sectionIcon="🌞" title="Solar Rebates & Incentives" count={solarCount}>
+              {programs.solar_rebates.map((p: SolarRebateProgram) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon="🌞"
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.value_description}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-yellow-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {nemCount > 0 && (
+            <ProgramSection sectionIcon="📋" title="Net Metering Policy" count={nemCount}>
+              {programs.nem_programs.map((p: NemSpecialProgram) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon={p.type === 'community_solar' ? '🏘️' : '📋'}
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.export_rate_per_kwh != null ? `Export credit: $${p.export_rate_per_kwh.toFixed(3)}/kWh` : undefined}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-cyan-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {evCount > 0 && (
+            <ProgramSection sectionIcon="🚗" title="EV Charger Incentives" count={evCount}>
+              {programs.ev_charger_incentives!.map((p: EvChargerIncentive) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon="🚗"
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.max_rebate != null ? `Up to $${p.max_rebate.toLocaleString()} rebate` : p.incentive_delivery.replace(/_/g, ' ')}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-teal-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {paceCount > 0 && (
+            <ProgramSection sectionIcon="🏠" title="PACE Financing" count={paceCount}>
+              {paceProgs.map((p: PaceFinancingProgram) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon="🏠"
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.apr_range_description}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-indigo-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {liTotalCount > 0 && (
+            <ProgramSection sectionIcon="🤝" title="Low-Income / DAC Programs" count={liTotalCount}>
+              {[...(programs.low_income_programs ?? []), ...liStateProgs].map((p: LowIncomeSolarProgram) => (
+                <ProgramRow
+                  key={p.program_id}
+                  icon="🤝"
+                  title={p.program_name}
+                  subtitle={p.program_description}
+                  value={p.value_description}
+                  status={p.status}
+                  enrollUrl={p.enrollment_url}
+                  note={p.solar_pro_note}
+                  lastVerified={p.last_verified}
+                  accent="border-rose-500/25"
+                />
+              ))}
+            </ProgramSection>
+          )}
+
+          {/* ── Interconnection & PTO Roadmap (v48.33) ── */}
+          {interconnection && (
+            <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/[0.04] overflow-hidden">
+              <button
+                onClick={() => setIcaOpen(o => !o)}
+                className="w-full flex items-center justify-between px-3 py-2 hover:bg-white/5 transition-colors text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm">🔌</span>
+                  <span className="text-xs font-bold text-emerald-300">Interconnection & PTO Roadmap</span>
+                  <span className="text-[10px] text-emerald-400/70 bg-emerald-500/10 border border-emerald-500/20 rounded px-1.5 py-0.5">
+                    {interconnection.ica_approval_days_min}–{interconnection.ica_approval_days_max} day ICA
+                  </span>
+                  <span className="text-[10px] text-blue-400/70 bg-blue-500/10 border border-blue-500/20 rounded px-1.5 py-0.5">
+                    PTO {interconnection.pto_days_min}–{interconnection.pto_days_max}d after inspection
+                  </span>
+                </div>
+                <span className="text-slate-500 text-xs">{icaOpen ? '▾' : '▸'}</span>
+              </button>
+              {icaOpen && (
+                <div className="px-3 pb-3 pt-1 space-y-3 border-t border-emerald-500/15 text-xs">
+                  {/* ICA Info */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wide">Interconnection Application</div>
+                    <div className="flex gap-2 text-slate-300">
+                      <span className="text-slate-500 min-w-[90px]">Form:</span>
+                      <span>{interconnection.application_form_name}</span>
+                    </div>
+                    <div className="flex gap-2 text-slate-300">
+                      <span className="text-slate-500 min-w-[90px]">Portal:</span>
+                      <a href={interconnection.application_url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline truncate">
+                        {interconnection.application_url}
+                      </a>
+                    </div>
+                    {interconnection.interconnection_phone && (
+                      <div className="flex gap-2 text-slate-300">
+                        <span className="text-slate-500 min-w-[90px]">Phone:</span>
+                        <span>{interconnection.interconnection_phone}</span>
+                      </div>
+                    )}
+                    <div className="flex gap-2 text-slate-300">
+                      <span className="text-slate-500 min-w-[90px]">Timeline:</span>
+                      <span className="text-amber-300">{interconnection.ica_approval_days_min}–{interconnection.ica_approval_days_max} business days</span>
+                    </div>
+                    <div className="text-slate-400 text-[10px] italic">{interconnection.timeline_note}</div>
+                  </div>
+
+                  {/* PTO Steps */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wide">PTO Process</div>
+                    <div className="space-y-1">
+                      {interconnection.pto_steps.map((step, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <span className="flex-shrink-0 w-4 h-4 rounded-full bg-blue-500/20 text-blue-400 text-[9px] font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                          <span className="text-slate-300 text-[10px] leading-relaxed">{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Homeowner Checklist */}
+                  <div className="space-y-1.5">
+                    <div className="text-[10px] font-bold text-orange-400 uppercase tracking-wide">Homeowner PTO Checklist</div>
+                    <div className="space-y-1">
+                      {interconnection.homeowner_pto_checklist.map((item, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <span className="flex-shrink-0 w-3 h-3 mt-0.5 border border-orange-400/50 rounded-sm"></span>
+                          <span className="text-slate-300 text-[10px] leading-relaxed">{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Total Timeline */}
+                  <div className="p-2 bg-emerald-500/10 rounded border border-emerald-500/20 text-[10px] text-emerald-300">
+                    <span className="font-bold">Total estimated timeline (ICA → PTO):</span>{' '}
+                    {getTypicalTotalTimeline(interconnection.utility_id) ?? `${interconnection.ica_approval_days_min + interconnection.pto_days_min}–${interconnection.ica_approval_days_max + interconnection.pto_days_max} business days`}
+                  </div>
+
+                  {/* Solar Pro Coaching Note */}
+                  <div className="p-2 bg-amber-500/10 rounded border border-amber-500/20">
+                    <div className="text-[9px] font-bold text-amber-400 mb-1 uppercase tracking-wide">💡 Solar Pro Coaching Note</div>
+                    <div className="text-[10px] text-slate-300 leading-relaxed">{interconnection.solar_pro_note}</div>
+                  </div>
+
+                  {/* Common Rejections */}
+                  {interconnection.common_rejections.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold text-red-400 uppercase tracking-wide">⚠️ Common Rejection Reasons</div>
+                      {interconnection.common_rejections.map((r, i) => (
+                        <div key={i} className="p-2 bg-red-500/[0.06] rounded border border-red-500/20 space-y-1">
+                          <div className="text-[10px] text-red-300 font-medium">{r.reason}</div>
+                          <div className="text-[10px] text-emerald-400">→ {r.how_to_avoid}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Main Component ─────────────────────────────────────────────────────────
 function EngineeringPageInner() {
@@ -7472,17 +7890,53 @@ function EngineeringPageInner() {
                             ))}
                           </select>
                           {config.utilityId && config.state && (() => {
-                            const stateData = STATE_UTILITY_FALLBACK[config.state];
-                            if (!stateData) return null;
+                            // ✅ v48.24 fix: use per-utility rate from UtilityOption, not state fallback
+                            const utils = getUtilitiesByStateNational(config.state);
+                            const selectedUtil = utils.find(u => u.id === config.utilityId);
+                            if (!selectedUtil) return null;
                             return (
                               <div className="text-xs text-slate-400 mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                                <span><span className="text-slate-500">Rate:</span> <span className="text-amber-400 font-medium">${stateData.avgRate.toFixed(3)}/kWh</span></span>
-                                <span><span className="text-slate-500">NEM:</span> <span className={stateData.netMetering ? 'text-emerald-400' : 'text-red-400'}>{stateData.netMetering ? '✓ Eligible' : '✗ N/A'}</span></span>
-                                <span className="text-slate-500">Max: {stateData.interconnectionMaxKw}kW</span>
+                                <span><span className="text-slate-500">Rate:</span> <span className="text-amber-400 font-medium">${selectedUtil.avgRatePerKwh.toFixed(3)}/kWh</span></span>
+                                <span><span className="text-slate-500">NEM:</span> <span className={selectedUtil.netMeteringEligible ? 'text-emerald-400' : 'text-red-400'}>{selectedUtil.netMeteringEligible ? '✓ Eligible' : '✗ N/A'}</span></span>
+                                <span className="text-slate-500">Max: {selectedUtil.interconnectionMaxKw}kW</span>
                               </div>
                             );
                           })()}
                         </div>
+
+                        {/* v48.29: Utility Programs Panel — full programs with Pro Tips */}
+                        {config.utilityId && (() => {
+                          const utils = getUtilitiesByStateNational(config.state || '');
+                          const selectedUtil = utils.find(u => u.id === config.utilityId);
+                          if (!selectedUtil) return null;
+                          // Bridge slug -> underscore ID via PROPOSAL_UTILITY_PROFILES regex (v48.27 fix)
+                          const nameLower = selectedUtil.name.toLowerCase();
+                          const stateCode = (config.state || '').toUpperCase();
+                          const stateProfiles = PROPOSAL_UTILITY_PROFILES.filter(p => p.state === stateCode);
+                          const matchedProfile = stateProfiles.find(p => {
+                            try { return new RegExp(p.utility_name_pattern, 'i').test(nameLower); } catch { return false; }
+                          });
+                          const programs = matchedProfile ? getUtilityPrograms(matchedProfile.utility_id) : null;
+                          // v48.33: Also resolve interconnection profile
+                          const interconnection = matchedProfile ? getInterconnectionProfile(matchedProfile.utility_id) : null;
+                          if (!programs && !interconnection) return null;
+                          // Create empty bundle if no programs but we have interconnection data
+                          const programBundle = programs ?? {
+                            utility_id: matchedProfile?.utility_id ?? '',
+                            utility_name: selectedUtil.name,
+                            tou_plans: [], battery_incentives: [], solar_rebates: [], nem_programs: [],
+                            pace_financing: [], ev_charger_incentives: [], low_income_programs: [],
+                            summary: '',
+                          };
+                          return (
+                            <UtilityProgramsPanel
+                              programs={programBundle}
+                              utilityName={selectedUtil.name}
+                              interconnection={interconnection}
+                              stateCode={stateCode}
+                            />
+                          );
+                        })()}
                         <div>
                           <label className="eng-label">Authority Having Jurisdiction (AHJ)</label>
                           <select value={config.ahjId} onChange={e => updateConfig({ ahjId: e.target.value })} className="eng-select">
@@ -12535,6 +12989,183 @@ function EngineeringPageInner() {
                     </div>
 
                   </div>
+
+                  {/* ── ICA & PTO ROADMAP (v48.35) ── */}
+                  {(() => {
+                    // Resolve interconnection profile same way as Engineering panel
+                    const _utils = config.state ? getUtilitiesByStateNational(config.state) : [];
+                    const _selUtil = _utils.find((u: any) => u.id === config.utilityId);
+                    const _utilName = _selUtil?.name ?? compliance?.utilityName ?? compliance?.jurisdiction?.utilityName ?? (config as any).utilityName ?? '';
+                    const _stateCode = (config.state || compliance?.jurisdiction?.state || '').toUpperCase();
+                    const _nameLower = _utilName.toLowerCase();
+                    const _stateProfiles = _stateCode
+                      ? PROPOSAL_UTILITY_PROFILES.filter(p => p.state === _stateCode)
+                      : PROPOSAL_UTILITY_PROFILES;
+                    const _matched = _stateProfiles.find(p => {
+                      try { return new RegExp(p.utility_name_pattern, 'i').test(_nameLower); } catch { return false; }
+                    }) ?? PROPOSAL_UTILITY_PROFILES.find(p => {
+                      try { return new RegExp(p.utility_name_pattern, 'i').test(_nameLower); } catch { return false; }
+                    });
+                    const _icaProfile = _matched ? getInterconnectionProfile(_matched.utility_id) : null;
+                    const _totalTimeline = _icaProfile ? (getTypicalTotalTimeline(_icaProfile.utility_id) ?? `${_icaProfile.ica_approval_days_min + _icaProfile.pto_days_min}–${_icaProfile.ica_approval_days_max + _icaProfile.pto_days_max} business days`) : null;
+
+                    return (
+                      <div className="rounded-2xl border border-slate-700/60 bg-slate-800/50 overflow-hidden">
+                        {/* Header */}
+                        <div className="flex items-center justify-between px-5 py-3 bg-slate-700/40 border-b border-slate-700/50">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base">⚡</span>
+                            <span className="text-sm font-black text-white">ICA &amp; PTO Roadmap</span>
+                            {_icaProfile ? (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
+                                {_icaProfile.utility_name}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-600/40 text-slate-400 border border-slate-600/50">
+                                Generic
+                              </span>
+                            )}
+                          </div>
+                          {_icaProfile && (
+                            <span className="text-[10px] text-slate-400">
+                              Total ICA → PTO: <span className="text-amber-400 font-bold">{_totalTimeline}</span>
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="p-5 space-y-4">
+
+                          {_icaProfile ? (<>
+
+                            {/* Timeline bar */}
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {[
+                                { label: 'ICA Approval', value: `${_icaProfile.ica_approval_days_min}–${_icaProfile.ica_approval_days_max} bus. days`, color: 'bg-blue-500/15 border-blue-500/30 text-blue-300' },
+                                { label: 'Construction', value: '1–3 weeks', color: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' },
+                                { label: 'AHJ Inspection', value: '1–2 weeks', color: 'bg-amber-500/15 border-amber-500/30 text-amber-300' },
+                                { label: 'PTO Approval', value: `${_icaProfile.pto_days_min}–${_icaProfile.pto_days_max} bus. days`, color: 'bg-purple-500/15 border-purple-500/30 text-purple-300' },
+                              ].map(seg => (
+                                <div key={seg.label} className={`rounded-lg border px-3 py-2 text-center ${seg.color}`}>
+                                  <div className="text-[9px] font-bold uppercase tracking-wide opacity-70">{seg.label}</div>
+                                  <div className="text-xs font-black mt-0.5">{seg.value}</div>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Two-col: PTO steps + Checklist */}
+                            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+
+                              {/* PTO Steps */}
+                              <div className="rounded-xl bg-slate-900/40 border border-slate-700/40 p-4">
+                                <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider mb-3">PTO Steps</div>
+                                <ol className="space-y-2">
+                                  {_icaProfile.pto_steps.map((step, i) => (
+                                    <li key={i} className="flex gap-2.5 items-start">
+                                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-700 border border-slate-600 text-[10px] font-black text-amber-400 flex items-center justify-center mt-0.5">{i + 1}</span>
+                                      <span className="text-xs text-slate-300 leading-snug">{step.replace(/^Step \d+:\s*/i, '')}</span>
+                                    </li>
+                                  ))}
+                                </ol>
+                              </div>
+
+                              {/* Homeowner Checklist */}
+                              <div className="rounded-xl bg-slate-900/40 border border-slate-700/40 p-4">
+                                <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-3">Homeowner Checklist</div>
+                                <ul className="space-y-2">
+                                  {_icaProfile.homeowner_pto_checklist.map((item, i) => (
+                                    <li key={i} className="flex gap-2.5 items-start">
+                                      <span className="flex-shrink-0 text-slate-600 text-xs mt-0.5">☐</span>
+                                      <span className="text-xs text-slate-300 leading-snug">{item}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                                {/* Apply link */}
+                                <a
+                                  href={_icaProfile.application_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-4 flex items-center gap-2 text-xs font-bold text-blue-400 hover:text-blue-300 transition-colors"
+                                >
+                                  <span>🔗</span>
+                                  <span className="truncate">{_icaProfile.utility_name} Portal ↗</span>
+                                </a>
+                                {_icaProfile.interconnection_phone && (
+                                  <div className="mt-1.5 text-[10px] text-slate-500">
+                                    📞 {_icaProfile.interconnection_phone}
+                                  </div>
+                                )}
+                              </div>
+
+                            </div>
+
+                            {/* Common rejections */}
+                            {_icaProfile.common_rejections.length > 0 && (
+                              <div className="rounded-xl bg-red-950/20 border border-red-900/30 p-4">
+                                <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider mb-3">Common Rejection Reasons</div>
+                                <div className="space-y-2">
+                                  {_icaProfile.common_rejections.map((r, i) => (
+                                    <div key={i} className="text-xs">
+                                      <span className="font-bold text-red-300">{r.reason}</span>
+                                      {r.how_to_avoid && <span className="text-slate-400"> — {r.how_to_avoid}</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Solar Pro Note */}
+                            {_icaProfile.solar_pro_note && (
+                              <div className="rounded-xl bg-amber-950/20 border border-amber-800/30 p-4">
+                                <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1.5">⚡ Solar Pro Note</div>
+                                <div className="text-xs text-amber-100/80 leading-relaxed">{_icaProfile.solar_pro_note}</div>
+                              </div>
+                            )}
+
+                          </>) : (
+                            /* Generic fallback — no utility matched */
+                            <div className="space-y-3">
+                              <div className="text-xs text-slate-400 leading-relaxed">
+                                {_utilName
+                                  ? <>Utility-specific ICA data not yet available for <span className="text-white font-semibold">{_utilName}</span>. Generic roadmap below.</>
+                                  : <>No utility detected for this project. Set the utility on the Config tab to see specific ICA &amp; PTO data.</>
+                                }
+                              </div>
+                              <div className="rounded-xl bg-slate-900/40 border border-slate-700/40 overflow-hidden">
+                                <div className="px-4 py-2.5 bg-slate-700/30 border-b border-slate-700/40">
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Generic PTO Roadmap — Verify With Your Utility</span>
+                                </div>
+                                <div className="p-4">
+                                  <ol className="space-y-2">
+                                    {[
+                                      ['Submit ICA application with SLD + equipment specs + installer license', 'Before construction', 'Contractor'],
+                                      ['Sign Interconnection Agreement — utility sends after technical review', '10–30 bus. days', 'Homeowner'],
+                                      ['Pull building permit from AHJ. Construction begins.', 'After ICA approval', 'Contractor'],
+                                      ['Install solar system. Schedule AHJ final inspection.', 'During install', 'Contractor'],
+                                      ['Pass AHJ final electrical inspection. Inspector signs permit card.', 'After install', 'AHJ Inspector'],
+                                      ['Submit PTO request to utility with signed inspection card.', 'After inspection', 'Contractor'],
+                                      ['Utility issues PTO letter. May swap meter to bidirectional.', '5–20 bus. days', 'Utility'],
+                                      ['Receive PTO letter. DO NOT energize before this step.', 'After PTO', 'Homeowner'],
+                                    ].map(([action, timeline, who], i) => (
+                                      <li key={i} className="grid grid-cols-[20px_1fr_100px_70px] gap-2 items-start text-xs">
+                                        <span className="flex-shrink-0 w-5 h-5 rounded-full bg-slate-700 border border-slate-600 text-[10px] font-black text-amber-400 flex items-center justify-center">{i + 1}</span>
+                                        <span className="text-slate-300 leading-snug">{action}</span>
+                                        <span className="text-slate-500 text-[10px] leading-snug">{timeline}</span>
+                                        <span className="text-slate-500 text-[10px] leading-snug">{who}</span>
+                                      </li>
+                                    ))}
+                                  </ol>
+                                </div>
+                              </div>
+                              <div className="rounded-lg bg-amber-950/20 border border-amber-800/30 px-3 py-2.5 text-xs text-amber-200/70">
+                                ⚠️ <span className="font-bold">Do not energize</span> the solar system until the PTO letter is received from the utility. Energizing without PTO is a tariff violation.
+                              </div>
+                            </div>
+                          )}
+
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                 </div>
               );

@@ -758,6 +758,9 @@ export function buildCanonicalProposal(
     srecSummary,
     failsafeMessage,
     isSpecificUtilityMatch: builtProfile.is_specific_match,
+    // v48.27: Per-utility program intelligence (TOU, battery incentives, rebates, special NEM)
+    utilityPrograms:        builtProfile.utility_programs ?? null,
+    utilityProgramsNote:    builtProfile.utility_programs_note ?? null,
   };
 
   // ─── STEP 8: RETURN ─────────────────────────────────────────────────────────

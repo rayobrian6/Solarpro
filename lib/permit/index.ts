@@ -15,3 +15,5 @@ export { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from 
 export { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
 export { pageEngineerCert, pagePELetter } from './sections/certPages';
 export { pageValidationSummary } from './sections/validationPage';
+// v48.33: Utility Interconnection & PTO Roadmap page
+export { pageInterconnection } from './sections/interconnectionPage';

@@ -451,6 +451,11 @@ export interface CanonicalPolicy {
   failsafeMessage: string | null;
   /** True if matched to a specific utility profile (vs. state fallback) */
   isSpecificUtilityMatch: boolean;
+  // v48.27: Per-utility programs (TOU plans, battery incentives, rebates, special NEM)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  utilityPrograms: any | null;
+  /** Human-readable Solar Pro note summarizing available utility programs (null if none) */
+  utilityProgramsNote: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -265,6 +265,214 @@ export const CANONICAL_UTILITIES: Record<string, CanonicalUtility> = {
     id: 'TVA_TN', name: 'Tennessee Valley Authority (TVA)', state: 'TN',
     avgRate: 0.118, netMetering: true, tou: false,
   },
+  // ── Vermont ────────────────────────────────────────────────────────────────
+  GREEN_MOUNTAIN_VT: {
+    id: 'GREEN_MOUNTAIN_VT', name: 'Green Mountain Power', state: 'VT',
+    avgRate: 0.249, netMetering: true, tou: false,
+  },
+  // ── Maine ──────────────────────────────────────────────────────────────────
+  CMP_ME: {
+    id: 'CMP_ME', name: 'Central Maine Power', state: 'ME',
+    avgRate: 0.296, netMetering: true, tou: false,
+  },
+  // ── New Hampshire ──────────────────────────────────────────────────────────
+  EVERSOURCE_NH: {
+    id: 'EVERSOURCE_NH', name: 'Eversource Energy (NH)', state: 'NH',
+    avgRate: 0.235, netMetering: true, tou: false,
+  },
+  // ── Rhode Island ───────────────────────────────────────────────────────────
+  NATGRID_RI: {
+    id: 'NATGRID_RI', name: 'National Grid Rhode Island', state: 'RI',
+    avgRate: 0.313, netMetering: true, tou: false,
+  },
+  // ── New York (additional) ──────────────────────────────────────────────────
+  NYSEG_NY: {
+    id: 'NYSEG_NY', name: 'New York State Electric & Gas (NYSEG)', state: 'NY',
+    avgRate: 0.196, netMetering: true, tou: false,
+  },
+  NIAGARA_MOHAWK_NY: {
+    id: 'NIAGARA_MOHAWK_NY', name: 'Niagara Mohawk (National Grid NY)', state: 'NY',
+    avgRate: 0.195, netMetering: true, tou: false,
+  },
+  CENTRAL_HUDSON_NY: {
+    id: 'CENTRAL_HUDSON_NY', name: 'Central Hudson Gas & Electric', state: 'NY',
+    avgRate: 0.214, netMetering: true, tou: false,
+  },
+  ORANGE_ROCKLAND_NY: {
+    id: 'ORANGE_ROCKLAND_NY', name: 'Orange & Rockland Utilities', state: 'NY',
+    avgRate: 0.222, netMetering: true, tou: false,
+  },
+  // ── Pennsylvania (additional) ──────────────────────────────────────────────
+  PENELEC_PA: {
+    id: 'PENELEC_PA', name: 'FirstEnergy / Penelec (Penn Power)', state: 'PA',
+    avgRate: 0.158, netMetering: true, tou: false,
+  },
+  // ── West Virginia ──────────────────────────────────────────────────────────
+  MON_POWER_WV: {
+    id: 'MON_POWER_WV', name: 'Monongahela Power (FirstEnergy WV)', state: 'WV',
+    avgRate: 0.124, netMetering: true, tou: false,
+  },
+  POTOMAC_EDISON_WV: {
+    id: 'POTOMAC_EDISON_WV', name: 'Potomac Edison (FirstEnergy)', state: 'WV',
+    avgRate: 0.130, netMetering: true, tou: false,
+  },
+  // ── Delaware / Maryland (additional) ──────────────────────────────────────
+  DELMARVA_DE: {
+    id: 'DELMARVA_DE', name: 'Delmarva Power (Pepco Holdings)', state: 'DE',
+    avgRate: 0.155, netMetering: true, tou: false,
+  },
+  DELMARVA_MD: {
+    id: 'DELMARVA_MD', name: 'Delmarva Power Maryland', state: 'MD',
+    avgRate: 0.155, netMetering: true, tou: false,
+  },
+  CHOPTANK_MD: {
+    id: 'CHOPTANK_MD', name: 'Choptank Electric Cooperative', state: 'MD',
+    avgRate: 0.148, netMetering: true, tou: false,
+  },
+  // ── South Carolina ─────────────────────────────────────────────────────────
+  DUKE_SC: {
+    id: 'DUKE_SC', name: 'Duke Energy Carolinas (South Carolina)', state: 'SC',
+    avgRate: 0.148, netMetering: true, tou: false,
+  },
+  // ── Illinois (co-ops + municipal) ─────────────────────────────────────────
+  COLES_MOULTRIE_IL: {
+    id: 'COLES_MOULTRIE_IL', name: 'Coles-Moultrie Electric Cooperative', state: 'IL',
+    avgRate: 0.143, netMetering: true, tou: false,
+  },
+  NORRIS_ELECTRIC_IL: {
+    id: 'NORRIS_ELECTRIC_IL', name: 'Norris Electric Cooperative', state: 'IL',
+    avgRate: 0.143, netMetering: true, tou: false,
+  },
+  SHELBY_ELECTRIC_IL: {
+    id: 'SHELBY_ELECTRIC_IL', name: 'Shelby Electric Cooperative', state: 'IL',
+    avgRate: 0.143, netMetering: true, tou: false,
+  },
+  CORN_BELT_IL: {
+    id: 'CORN_BELT_IL', name: 'Corn Belt Energy', state: 'IL',
+    avgRate: 0.143, netMetering: true, tou: false,
+  },
+  SPOON_RIVER_IL: {
+    id: 'SPOON_RIVER_IL', name: 'Spoon River Electric Cooperative', state: 'IL',
+    avgRate: 0.143, netMetering: true, tou: false,
+  },
+  CWLP_IL: {
+    id: 'CWLP_IL', name: 'City Water Light & Power (Springfield IL)', state: 'IL',
+    avgRate: 0.152, netMetering: true, tou: false,
+  },
+  // ── Arkansas ────────────────────────────────────────────────────────────────
+  ENTERGY_AR: {
+    id: 'ENTERGY_AR', name: 'Entergy Arkansas', state: 'AR',
+    avgRate: 0.133, netMetering: true, tou: false,
+  },
+  // ── Louisiana ───────────────────────────────────────────────────────────────
+  ENTERGY_LA: {
+    id: 'ENTERGY_LA', name: 'Entergy Louisiana', state: 'LA',
+    avgRate: 0.124, netMetering: true, tou: false,
+  },
+  // ── Mississippi ─────────────────────────────────────────────────────────────
+  ENTERGY_MS: {
+    id: 'ENTERGY_MS', name: 'Entergy Mississippi', state: 'MS',
+    avgRate: 0.128, netMetering: true, tou: false,
+  },
+  MISSISSIPPI_POWER: {
+    id: 'MISSISSIPPI_POWER', name: 'Mississippi Power (Southern Company)', state: 'MS',
+    avgRate: 0.135, netMetering: true, tou: false,
+  },
+  // ── Texas (additional) ──────────────────────────────────────────────────────
+  ENTERGY_TX: {
+    id: 'ENTERGY_TX', name: 'Entergy Texas', state: 'TX',
+    avgRate: 0.142, netMetering: false, tou: false,
+  },
+  // ── Alabama ─────────────────────────────────────────────────────────────────
+  ALABAMA_POWER: {
+    id: 'ALABAMA_POWER', name: 'Alabama Power', state: 'AL',
+    avgRate: 0.168, netMetering: true, tou: false,
+  },
+  // ── Kentucky ────────────────────────────────────────────────────────────────
+  KENTUCKY_UTILITIES: {
+    id: 'KENTUCKY_UTILITIES', name: 'Kentucky Utilities / LG&E', state: 'KY',
+    avgRate: 0.137, netMetering: true, tou: false,
+  },
+  // ── Missouri ────────────────────────────────────────────────────────────────
+  EVERGY_MO: {
+    id: 'EVERGY_MO', name: 'Evergy (formerly KCP&L / Westar)', state: 'MO',
+    avgRate: 0.133, netMetering: true, tou: false,
+  },
+  AMEREN_MO: {
+    id: 'AMEREN_MO', name: 'Ameren Missouri (Union Electric)', state: 'MO',
+    avgRate: 0.125, netMetering: true, tou: false,
+  },
+  // ── Indiana ─────────────────────────────────────────────────────────────────
+  AEP_INDIANA: {
+    id: 'AEP_INDIANA', name: 'Indiana Michigan Power (AEP)', state: 'IN',
+    avgRate: 0.140, netMetering: true, tou: false,
+  },
+  // ── Wisconsin ───────────────────────────────────────────────────────────────
+  WE_ENERGIES_WI: {
+    id: 'WE_ENERGIES_WI', name: 'We Energies / WPS Wisconsin', state: 'WI',
+    avgRate: 0.185, netMetering: true, tou: false,
+  },
+  ALLIANT_WI: {
+    id: 'ALLIANT_WI', name: 'Alliant Energy (Wisconsin Power & Light)', state: 'WI',
+    avgRate: 0.175, netMetering: true, tou: false,
+  },
+  // ── Oklahoma ────────────────────────────────────────────────────────────────
+  OGE_OK: {
+    id: 'OGE_OK', name: 'Oklahoma Gas & Electric (OG&E)', state: 'OK',
+    avgRate: 0.121, netMetering: true, tou: false,
+  },
+  PSO_OK: {
+    id: 'PSO_OK', name: 'Public Service Company of Oklahoma (AEP PSO)', state: 'OK',
+    avgRate: 0.118, netMetering: true, tou: false,
+  },
+  // ── Nebraska ────────────────────────────────────────────────────────────────
+  NPPD_NE: {
+    id: 'NPPD_NE', name: 'Nebraska Public Power District (NPPD)', state: 'NE',
+    avgRate: 0.108, netMetering: true, tou: false,
+  },
+  OPPD_NE: {
+    id: 'OPPD_NE', name: 'Omaha Public Power District (OPPD)', state: 'NE',
+    avgRate: 0.114, netMetering: true, tou: false,
+  },
+  // ── Idaho ───────────────────────────────────────────────────────────────────
+  IDAHO_POWER: {
+    id: 'IDAHO_POWER', name: 'Idaho Power', state: 'ID',
+    avgRate: 0.125, netMetering: true, tou: false,
+  },
+  // ── Montana ─────────────────────────────────────────────────────────────────
+  NORTHWESTERN_MT: {
+    id: 'NORTHWESTERN_MT', name: 'NorthWestern Energy (Montana)', state: 'MT',
+    avgRate: 0.118, netMetering: true, tou: false,
+  },
+  MDU_MT: {
+    id: 'MDU_MT', name: 'Montana-Dakota Utilities (MDU)', state: 'MT',
+    avgRate: 0.114, netMetering: true, tou: false,
+  },
+  // ── North Dakota ────────────────────────────────────────────────────────────
+  OTTER_TAIL_ND: {
+    id: 'OTTER_TAIL_ND', name: 'Otter Tail Power Company', state: 'ND',
+    avgRate: 0.121, netMetering: true, tou: false,
+  },
+  // ── New Mexico ──────────────────────────────────────────────────────────────
+  PNM_NM: {
+    id: 'PNM_NM', name: 'Public Service Company of New Mexico (PNM)', state: 'NM',
+    avgRate: 0.145, netMetering: true, tou: false,
+  },
+  // ── Utah ────────────────────────────────────────────────────────────────────
+  ROCKMTN_POWER_UT: {
+    id: 'ROCKMTN_POWER_UT', name: 'Rocky Mountain Power (PacifiCorp Utah)', state: 'UT',
+    avgRate: 0.113, netMetering: true, tou: false,
+  },
+  // ── Wyoming ─────────────────────────────────────────────────────────────────
+  PACIFICORP_WY: {
+    id: 'PACIFICORP_WY', name: 'Rocky Mountain Power (Wyoming)', state: 'WY',
+    avgRate: 0.104, netMetering: true, tou: false,
+  },
+  // ── Alaska ──────────────────────────────────────────────────────────────────
+  CHUGACH_AK: {
+    id: 'CHUGACH_AK', name: 'Chugach Electric Association (Alaska)', state: 'AK',
+    avgRate: 0.228, netMetering: true, tou: false,
+  },
 };
 
 // ─── Alias Map — all known name variants → canonical ID ───────────────────────
@@ -391,7 +599,7 @@ const ALIAS_MAP: Record<string, string> = {
   'national grid ny': 'NATIONALGRID_NY',
   'national grid new york': 'NATIONALGRID_NY',
   'national grid (ny)': 'NATIONALGRID_NY',
-  'niagara mohawk': 'NATIONALGRID_NY',
+  'niagara mohawk': 'NIAGARA_MOHAWK_NY',
   'keyspan energy': 'NATIONALGRID_NY',
 
   // PSEG Long Island
@@ -494,7 +702,7 @@ const ALIAS_MAP: Record<string, string> = {
   'western massachusetts electric': 'EVERSOURCE_MA',
   'eversource (ct)': 'EVERSOURCE_CT',
   'eversource connecticut': 'EVERSOURCE_CT',
-  'eversource nh': 'EVERSOURCE_MA',
+  'eversource nh': 'EVERSOURCE_NH',
 
   // National Grid MA
   'national grid': 'NATIONALGRID_MA',
@@ -590,6 +798,277 @@ const ALIAS_MAP: Record<string, string> = {
   // TVA
   'tva': 'TVA_TN',
   'tennessee valley authority': 'TVA_TN',
+
+  // Green Mountain Power (VT)
+  'green mountain power': 'GREEN_MOUNTAIN_VT',
+  'gmp': 'GREEN_MOUNTAIN_VT',
+  'green mountain power vt': 'GREEN_MOUNTAIN_VT',
+  'green mountain power vermont': 'GREEN_MOUNTAIN_VT',
+
+  // Central Maine Power (ME)
+  'central maine power': 'CMP_ME',
+  'cmp': 'CMP_ME',
+  'central maine power (cmp)': 'CMP_ME',
+  'versant power': 'CMP_ME',
+
+  // Eversource NH
+  'eversource new hampshire': 'EVERSOURCE_NH',
+  'eversource energy nh': 'EVERSOURCE_NH',
+  'eversource energy new hampshire': 'EVERSOURCE_NH',
+  'psnh': 'EVERSOURCE_NH',
+  'public service of new hampshire': 'EVERSOURCE_NH',
+
+  // National Grid RI
+  'national grid ri': 'NATGRID_RI',
+  'national grid rhode island': 'NATGRID_RI',
+  'national grid (ri)': 'NATGRID_RI',
+  'narragansett electric': 'NATGRID_RI',
+
+  // NYSEG (NY)
+  'nyseg': 'NYSEG_NY',
+  'new york state electric and gas': 'NYSEG_NY',
+  'new york state electric & gas': 'NYSEG_NY',
+  'new york state electric gas': 'NYSEG_NY',
+  'nyseg (ny)': 'NYSEG_NY',
+
+  // Niagara Mohawk (NY)
+  'niagara mohawk power': 'NIAGARA_MOHAWK_NY',
+  'national grid upstate ny': 'NIAGARA_MOHAWK_NY',
+  'niagara mohawk (national grid)': 'NIAGARA_MOHAWK_NY',
+
+  // Central Hudson (NY)
+  'central hudson': 'CENTRAL_HUDSON_NY',
+  'central hudson gas and electric': 'CENTRAL_HUDSON_NY',
+  'central hudson gas & electric': 'CENTRAL_HUDSON_NY',
+  'central hudson gas electric': 'CENTRAL_HUDSON_NY',
+
+  // Orange & Rockland (NY)
+  'orange & rockland': 'ORANGE_ROCKLAND_NY',
+  'orange and rockland': 'ORANGE_ROCKLAND_NY',
+  'o&r': 'ORANGE_ROCKLAND_NY',
+  'orange rockland utilities': 'ORANGE_ROCKLAND_NY',
+  'orange & rockland utilities': 'ORANGE_ROCKLAND_NY',
+
+  // Penelec / Penn Power (PA)
+  'penelec': 'PENELEC_PA',
+  'penn power': 'PENELEC_PA',
+  'penelec (firstenergy)': 'PENELEC_PA',
+  'west penn power': 'PENELEC_PA',
+  'met-ed': 'PENELEC_PA',
+  'metropolitan edison': 'PENELEC_PA',
+
+  // Mon Power (WV)
+  'mon power': 'MON_POWER_WV',
+  'monongahela power': 'MON_POWER_WV',
+  'monongahela power (firstenergy)': 'MON_POWER_WV',
+  'allegheny power wv': 'MON_POWER_WV',
+
+  // Potomac Edison (WV/MD)
+  'potomac edison': 'POTOMAC_EDISON_WV',
+  'potomac edison (firstenergy)': 'POTOMAC_EDISON_WV',
+  'allegheny power': 'POTOMAC_EDISON_WV',
+
+  // Delmarva Power (DE)
+  'delmarva power': 'DELMARVA_DE',
+  'delmarva power (pepco)': 'DELMARVA_DE',
+  'pepco holdings delmarva': 'DELMARVA_DE',
+  'delmarva power & light': 'DELMARVA_DE',
+
+  // Delmarva Power MD
+  'delmarva power maryland': 'DELMARVA_MD',
+  'delmarva power md': 'DELMARVA_MD',
+  'delmarva md': 'DELMARVA_MD',
+
+  // Choptank Electric (MD)
+  'choptank electric': 'CHOPTANK_MD',
+  'choptank electric cooperative': 'CHOPTANK_MD',
+  'choptank': 'CHOPTANK_MD',
+
+  // Duke Energy SC
+  'duke energy south carolina': 'DUKE_SC',
+  'duke energy sc': 'DUKE_SC',
+  'duke sc': 'DUKE_SC',
+  'duke energy carolinas sc': 'DUKE_SC',
+
+  // Coles-Moultrie (IL)
+  'coles-moultrie electric': 'COLES_MOULTRIE_IL',
+  'coles moultrie electric': 'COLES_MOULTRIE_IL',
+  'coles-moultrie electric cooperative': 'COLES_MOULTRIE_IL',
+
+  // Norris Electric (IL)
+  'norris electric': 'NORRIS_ELECTRIC_IL',
+  'norris electric cooperative': 'NORRIS_ELECTRIC_IL',
+  'norris electric coop': 'NORRIS_ELECTRIC_IL',
+
+  // Shelby Electric (IL)
+  'shelby electric': 'SHELBY_ELECTRIC_IL',
+  'shelby electric cooperative': 'SHELBY_ELECTRIC_IL',
+  'shelby electric coop': 'SHELBY_ELECTRIC_IL',
+
+  // Corn Belt Energy (IL)
+  'corn belt energy': 'CORN_BELT_IL',
+  'corn belt energy corporation': 'CORN_BELT_IL',
+  'corn belt electric': 'CORN_BELT_IL',
+
+  // Spoon River Electric (IL)
+  'spoon river electric': 'SPOON_RIVER_IL',
+  'spoon river electric cooperative': 'SPOON_RIVER_IL',
+
+  // CWLP (IL)
+  'cwlp': 'CWLP_IL',
+  'city water light and power': 'CWLP_IL',
+  'city water light & power': 'CWLP_IL',
+  'springfield city light': 'CWLP_IL',
+  'city of springfield electric': 'CWLP_IL',
+
+  // Entergy Arkansas
+  'entergy arkansas': 'ENTERGY_AR',
+  'entergy ar': 'ENTERGY_AR',
+  'entergy (ar)': 'ENTERGY_AR',
+
+  // Entergy Louisiana
+  'entergy louisiana': 'ENTERGY_LA',
+  'entergy la': 'ENTERGY_LA',
+  'entergy (la)': 'ENTERGY_LA',
+  'cleco': 'ENTERGY_LA',
+
+  // Entergy Mississippi
+  'entergy mississippi': 'ENTERGY_MS',
+  'entergy ms': 'ENTERGY_MS',
+  'entergy (ms)': 'ENTERGY_MS',
+
+  // Mississippi Power
+  'mississippi power': 'MISSISSIPPI_POWER',
+  'mississippi power company': 'MISSISSIPPI_POWER',
+  'southern company mississippi': 'MISSISSIPPI_POWER',
+
+  // Entergy Texas
+  'entergy texas': 'ENTERGY_TX',
+  'entergy tx': 'ENTERGY_TX',
+  'entergy (tx)': 'ENTERGY_TX',
+
+  // Alabama Power
+  'alabama power': 'ALABAMA_POWER',
+  'alabama power company': 'ALABAMA_POWER',
+  'southern company alabama': 'ALABAMA_POWER',
+
+  // Kentucky Utilities / LG&E
+  'kentucky utilities': 'KENTUCKY_UTILITIES',
+  'lge': 'KENTUCKY_UTILITIES',
+  "lg&e": 'KENTUCKY_UTILITIES',
+  'louisville gas and electric': 'KENTUCKY_UTILITIES',
+  'louisville gas & electric': 'KENTUCKY_UTILITIES',
+  'kentucky utilities (ku)': 'KENTUCKY_UTILITIES',
+  'ku energy': 'KENTUCKY_UTILITIES',
+  'ppl kentucky': 'KENTUCKY_UTILITIES',
+
+  // Evergy (MO/KS)
+  'evergy': 'EVERGY_MO',
+  'kcpl': 'EVERGY_MO',
+  'kansas city power and light': 'EVERGY_MO',
+  'kansas city power & light': 'EVERGY_MO',
+  'westar energy': 'EVERGY_MO',
+  'evergy metro': 'EVERGY_MO',
+  'evergy missouri west': 'EVERGY_MO',
+  'evergy kansas central': 'EVERGY_MO',
+
+  // Ameren Missouri
+  'ameren missouri': 'AMEREN_MO',
+  'ameren mo': 'AMEREN_MO',
+  'union electric': 'AMEREN_MO',
+  'ameren missouri (union electric)': 'AMEREN_MO',
+
+  // AEP Indiana (Indiana Michigan Power)
+  'indiana michigan power': 'AEP_INDIANA',
+  'imp': 'AEP_INDIANA',
+  'aep indiana': 'AEP_INDIANA',
+  'aep (in)': 'AEP_INDIANA',
+  'indiana michigan power (aep)': 'AEP_INDIANA',
+
+  // We Energies / WPS (WI)
+  'we energies': 'WE_ENERGIES_WI',
+  'wisconsin electric': 'WE_ENERGIES_WI',
+  'wisconsin electric power': 'WE_ENERGIES_WI',
+  'wps': 'WE_ENERGIES_WI',
+  'wisconsin public service': 'WE_ENERGIES_WI',
+  'we energies (wi)': 'WE_ENERGIES_WI',
+
+  // Alliant Energy WI
+  'alliant energy wi': 'ALLIANT_WI',
+  'alliant energy wisconsin': 'ALLIANT_WI',
+  'wisconsin power and light': 'ALLIANT_WI',
+  'wisconsin power & light': 'ALLIANT_WI',
+  'wpl': 'ALLIANT_WI',
+  'alliant wi': 'ALLIANT_WI',
+
+  // OG&E (OK)
+  'og&e': 'OGE_OK',
+  'oge': 'OGE_OK',
+  'oklahoma gas and electric': 'OGE_OK',
+  'oklahoma gas & electric': 'OGE_OK',
+  'oklahoma gas electric': 'OGE_OK',
+
+  // PSO (OK)
+  'pso': 'PSO_OK',
+  'public service oklahoma': 'PSO_OK',
+  'public service company of oklahoma': 'PSO_OK',
+  'aep pso': 'PSO_OK',
+
+  // NPPD (NE)
+  'nppd': 'NPPD_NE',
+  'nebraska public power district': 'NPPD_NE',
+  'nppd (ne)': 'NPPD_NE',
+
+  // OPPD (NE)
+  'oppd': 'OPPD_NE',
+  'omaha public power district': 'OPPD_NE',
+  'oppd (ne)': 'OPPD_NE',
+
+  // Idaho Power
+  'idaho power': 'IDAHO_POWER',
+  'idaho power company': 'IDAHO_POWER',
+  'idaho power (id)': 'IDAHO_POWER',
+
+  // NorthWestern Energy (MT)
+  'northwestern energy': 'NORTHWESTERN_MT',
+  'northwestern energy (mt)': 'NORTHWESTERN_MT',
+  'northwestern energy montana': 'NORTHWESTERN_MT',
+  'northwestern corporation': 'NORTHWESTERN_MT',
+
+  // MDU (MT/ND)
+  'montana-dakota utilities': 'MDU_MT',
+  'montana dakota utilities': 'MDU_MT',
+  'mdu': 'MDU_MT',
+  'mdu resources': 'MDU_MT',
+
+  // Otter Tail Power (ND/MN)
+  'otter tail power': 'OTTER_TAIL_ND',
+  'otter tail power company': 'OTTER_TAIL_ND',
+  'otter tail': 'OTTER_TAIL_ND',
+
+  // PNM (NM)
+  'pnm': 'PNM_NM',
+  'public service company of new mexico': 'PNM_NM',
+  'pnm resources': 'PNM_NM',
+  'pnm (nm)': 'PNM_NM',
+
+  // Rocky Mountain Power (UT)
+  'rocky mountain power ut': 'ROCKMTN_POWER_UT',
+  'rocky mountain power utah': 'ROCKMTN_POWER_UT',
+  'pacificorp utah': 'ROCKMTN_POWER_UT',
+  'pacificorp (ut)': 'ROCKMTN_POWER_UT',
+
+  // Rocky Mountain Power (WY)
+  'rocky mountain power wy': 'PACIFICORP_WY',
+  'rocky mountain power wyoming': 'PACIFICORP_WY',
+  'pacificorp wyoming': 'PACIFICORP_WY',
+  'pacificorp (wy)': 'PACIFICORP_WY',
+
+  // Chugach Electric (AK)
+  'chugach electric': 'CHUGACH_AK',
+  'chugach electric association': 'CHUGACH_AK',
+  'cea': 'CHUGACH_AK',
+  'chugach': 'CHUGACH_AK',
 };
 
 // ─── Core normalizer function ──────────────────────────────────────────────────

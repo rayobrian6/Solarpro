@@ -20,6 +20,7 @@ import { pageNECCompliance, pageConductorSchedule, pageSingleLineDiagram } from 
 import { pageWarningLabels, pageSpecSheetReference } from './sections/compliancePages';
 import { pageEngineerCert, pagePELetter } from './sections/certPages';
 import { pageValidationSummary } from './sections/validationPage';
+// pageInterconnection removed from planset (v48.35) — ICA/PTO Roadmap moved to Permit tab UI in engineering page
 import { generateBOMForPermit } from './utils/bomForPermit';
 
 export function generatePermitHTML(input: PermitInput, storedSldSvg?: string): string {
