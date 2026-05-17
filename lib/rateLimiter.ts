@@ -42,6 +42,7 @@ function makeLimiter(requests: number, window: `${number} s` | `${number} m`): R
 // Auth / identity — tight limits, brute-force sensitive
 const _loginLimiter          = makeLimiter(5,  '60 s');  // brute-force protection
 const _publicLeadLimiter     = makeLimiter(5,  '15 m');  // public lead form — 5 per 15 min per IP
+const _proposalSignLimiter   = makeLimiter(5,  '15 m');  // public e-signature — prevent replay/spam
 const _registerLimiter       = makeLimiter(3,  '10 m');  // prevent mass account creation — 3 per 10 min per IP
 const _passwordResetLimiter  = makeLimiter(3,  '60 s');  // prevent reset abuse
 const _deleteAccountLimiter  = makeLimiter(3,  '60 m');  // destructive — very tight
@@ -127,7 +128,8 @@ export type LimiterKey =
   | 'portal_verify_otp'
   | 'portal_read'
   // Public forms (no auth)
-  | 'public_lead';
+  | 'public_lead'
+  | 'proposal-sign';
 
 const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   // Auth
@@ -174,6 +176,7 @@ const LIMITERS: Record<LimiterKey, Ratelimit | null> = {
   'portal_read':            _standardLimiter,
   // Public forms
   'public_lead':            _publicLeadLimiter,
+  'proposal-sign':          _proposalSignLimiter,
 };
 
 // ── Public check function ─────────────────────────────────────────────────────

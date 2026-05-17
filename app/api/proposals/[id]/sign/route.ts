@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady } from '@/lib/db-neon';
 import { sendProposalSignedEmail } from '@/lib/email';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 
 export const dynamic     = 'force-dynamic';
 export const runtime     = 'nodejs';
@@ -40,12 +41,6 @@ interface SignBody {
   token?:        string;
 }
 
-function getClientIp(req: NextRequest): string {
-  const forwarded = req.headers.get('x-forwarded-for');
-  if (forwarded) return forwarded.split(',')[0].trim();
-  return req.headers.get('x-real-ip') ?? 'unknown';
-}
-
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
@@ -54,6 +49,18 @@ export async function POST(
 
   if (!id || typeof id !== 'string') {
     return NextResponse.json({ success: false, error: 'Missing proposal ID' }, { status: 400 });
+  }
+
+  // ── Rate limit ─────────────────────────────────────────────────────────────
+  // Public endpoint — no auth. 5 signature attempts per IP per 15 min prevents
+  // replay spam and enumeration attacks without blocking legitimate homeowners.
+  const ip = getClientIp(req);
+  const allowed = await checkRateLimit('proposal-sign', ip);
+  if (!allowed) {
+    return NextResponse.json(
+      { success: false, error: 'Too many requests. Please wait a moment and try again.' },
+      { status: 429 },
+    );
   }
 
   // ── Parse body ────────────────────────────────────────────────────────
@@ -134,7 +141,7 @@ export async function POST(
     );
   }
 
-  const signerIp  = getClientIp(req);
+  const signerIp  = ip;
   const signedAt  = new Date().toISOString();
 
   // ── Build updated data_json ───────────────────────────────────────────
