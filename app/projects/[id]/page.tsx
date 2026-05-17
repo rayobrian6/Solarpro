@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState, useCallback, Component } from 'react';
+import React, { useEffect, useState, useCallback, Component, Suspense} from 'react';
 
 // ── Error boundary for bill upload modal ──────────────────────────────────────
 // Catches render errors inside BillUploadFlow / BillTab so they don't
@@ -268,7 +268,7 @@ interface QuickAction {
 }
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
-export default function ProjectDetailPage() {
+function ProjectDetailInner() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
 
@@ -288,7 +288,7 @@ export default function ProjectDetailPage() {
 
   // Auto-open change-type modal when navigated here with ?changeType=1
   useEffect(() => {
-    if (searchParams.get('changeType') === '1') {
+    if (searchParams?.get('changeType') === '1') {
       setShowChangeTypeModal(true);
     }
   }, [searchParams]);
@@ -1009,5 +1009,17 @@ export default function ProjectDetailPage() {
       
 
     </AppShell>
+  );
+}
+
+// ─── Suspense wrapper ─────────────────────────────────────────────────────────
+// useSearchParams() requires a Suspense boundary in Next.js 14 App Router.
+// Without it, the hook returns null during SSR/streaming and causes
+// "Cannot read properties of null (reading 'get')" at runtime.
+export default function ProjectDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProjectDetailInner />
+    </Suspense>
   );
 }
