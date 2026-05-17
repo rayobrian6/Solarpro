@@ -5,11 +5,18 @@ import { ToastProvider } from '@/components/ui/Toast';
 import { StoreProvider } from '@/store/StoreProvider';
 import { UserProvider } from '@/contexts/UserContext';
 import { ThemeProvider } from '@/contexts/ThemeContext';
-import SolarDogWithTour from '@/components/support/SolarDogWithTour';
+import dynamic from 'next/dynamic';
 import { Suspense } from 'react';
 import ImpersonationBanner from '@/components/ui/ImpersonationBanner';
 import ClientMonitoringInit from '@/components/ClientMonitoringInit';
 import { BUILD_VERSION } from '@/lib/version';
+
+// SolarDogWithTour uses inline <style> tags and localStorage — must be client-only
+// to prevent React hydration mismatch (#418 / #425)
+const SolarDogWithTour = dynamic(
+  () => import('@/components/support/SolarDogWithTour'),
+  { ssr: false }
+);
 
 export const metadata: Metadata = {
   title: 'SolarPro Design Platform',
@@ -37,7 +44,9 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    // suppressHydrationWarning: prevents false-positive hydration errors from
+    // browser extensions (Grammarly, DarkReader, etc.) that modify the DOM
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -64,7 +73,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* PWA manifest — enables "Add to Home Screen" on mobile */}
         <link rel="manifest" href="/manifest.json" />
       </head>
-      <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
+      <body className="bg-slate-950 text-slate-100 min-h-screen antialiased" suppressHydrationWarning>
         <ToastProvider>
           <StoreProvider>
             {/* UserProvider wraps entire app — single source of truth for user state */}

@@ -20,6 +20,8 @@ import { resolveEquipment, getSystemTypeLabel, getSystemDescription } from '@/li
 import { calculateIncentives } from '@/lib/incentives/stateIncentives';
 import { buildArraysFromLayout, buildSystemConfig, getArrayProposalText } from '@/lib/multiArrayEngine';
 import { resolveProposalSystemType, getPanelTypeCounts } from '@/lib/proposalSystemType';
+import { UtilityRateGraph } from '@/components/proposal/UtilityRateGraph';
+import { UtilityCostProjectionChart } from '@/components/proposal/UtilityCostProjectionChart';
 import {
   buildUtilityProfile,
   validateProposalTruth,
@@ -38,6 +40,9 @@ import {
   getIncentivesComplianceMessage,
   getIncentivesNotIncludedNotice,
   getIncentivesDebugLabel,
+  isSection48eEnabled,
+  getSection48eRate,
+  getSection48eSafeHarborDeadline,
 } from '@/lib/incentivesConfig';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -348,6 +353,24 @@ function PublicProposalView({
   ).toUpperCase().trim().slice(0, 2);
   const isCommercial = pricingCfg?.isCommercial ?? false;
 
+  // v1.shade: Compute system-level shade derate from per-panel annualShadeFactor values.
+  // Stored in layout.panels[].annualShadeFactor by the shade analysis engine.
+  // TSRF = 1 - shadeDeratePct/100. The kWh impact was already applied by PVWatts effectiveLosses.
+  const panelsShadeDerateComputedPct = (() => {
+    const panels = layout?.panels ?? [];
+    const shadedPanels = panels.filter(
+      (p: any) => typeof p.annualShadeFactor === 'number' &&
+                  p.annualShadeFactor >= 0 &&
+                  p.annualShadeFactor <= 1
+    );
+    if (shadedPanels.length === 0) return undefined;
+    const avgFactor = shadedPanels.reduce(
+      (sum: number, p: any) => sum + (p.annualShadeFactor as number), 0
+    ) / shadedPanels.length;
+    const derate = (1 - avgFactor) * 100;
+    return derate > 0.01 ? Math.round(derate * 10) / 10 : undefined;
+  })();
+
   const cp = buildCanonicalProposal({
     // Panel
     panelSpec: selectedPanel ? {
@@ -397,6 +420,9 @@ function PublicProposalView({
 
     // Policy
     isCommercial,
+
+    // Shade analysis (v1.shade)
+    panelsShadeDerateComputedPct,
   });
 
   // ── ICA / PTO Profile Lookup (Tier 1 → Tier 2 → null) ────────────────────
@@ -534,13 +560,20 @@ function PublicProposalView({
   const incentiveCalc = projectStateCode && (systemSizeKw > 0 || annualKwhForIncentives > 0)
     ? calculateIncentives(projectStateCode, effectiveFinal, systemSizeKw, annualKwhForIncentives, !isCommercial, systemType)
     : null;
-  const DISPLAY_INCENTIVE_TYPES = ['state_tax_credit', 'state_rebate', 'utility_rebate', 'performance_payment'];
+  // Cash incentives — reduce net system cost (tax credits, rebates)
+  const CASH_INCENTIVE_TYPES = ['state_tax_credit', 'state_rebate', 'utility_rebate', 'performance_payment'];
+  // Non-cash benefits — shown as "additional benefits" (property/sales tax, SRECs)
+  const NON_CASH_BENEFIT_TYPES = ['property_tax_exemption', 'sales_tax_exemption', 'srec', 'trec', 'net_metering'];
   const stateIncentives = incentiveCalc ? {
     stateIncentives: incentiveCalc.state
-      .filter((s: any) => DISPLAY_INCENTIVE_TYPES.includes(s.type))
+      .filter((s: any) => CASH_INCENTIVE_TYPES.includes(s.type))
       .map((s: any) => ({ ...s, name: s.incentiveName, isCash: true })),
+    nonCashBenefits: incentiveCalc.state
+      .filter((s: any) => NON_CASH_BENEFIT_TYPES.includes(s.type))
+      .map((s: any) => ({ ...s, name: s.incentiveName, isCash: false })),
     cashTotal: incentiveCalc.cashTotal,
     netSystemCost: incentiveCalc.netSystemCost,
+    nonCashStateTotal: incentiveCalc.nonCashStateTotal,
   } : null;
 
   // ── Canonical validation (dev assertion lock) ─────────────────────────────
@@ -1043,6 +1076,35 @@ function PublicProposalView({
           </div>
         )}
 
+        {/* Utility Rate Graph + 25-Year Cost Projection — v47.260 */}
+        {cp.truth25yr.yearlyFlow && cp.truth25yr.yearlyFlow.length > 0 && (
+          <>
+            <div className="proposal-sec card p-4" data-block-id="utility-rate-graph">
+              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
+                <Zap size={15} style={{ color: primaryColor }} /> Utility Rate Trajectory
+              </h3>
+              <p className="text-xs text-slate-400 mb-3">
+                Your utility rate has been rising ~{(cp.utility.escalationRate * 100).toFixed(1)}%/year.
+                Solar locks in your energy cost today.
+              </p>
+              <UtilityRateGraph utility={cp.utility} financial={cp.financial} />
+            </div>
+            <div className="proposal-sec card p-4" data-block-id="cost-projection-chart">
+              <h3 className="font-semibold text-white text-sm mb-3 flex items-center gap-2">
+                <Zap size={15} style={{ color: primaryColor }} /> 25-Year Cost Comparison
+              </h3>
+              <p className="text-xs text-slate-400 mb-3">
+                The green line shows your total cost with solar. The red line shows what you&apos;d pay staying on grid power.
+              </p>
+              <UtilityCostProjectionChart
+                utility={cp.utility}
+                financial={cp.financial}
+                truth25yr={cp.truth25yr}
+              />
+            </div>
+          </>
+        )}
+
         {/* v47.251: Incentives compliance notice — content driven by GLOBAL_INCENTIVES_CONFIG */}
         <div className="proposal-sec card p-3 border border-slate-700/30" data-block-id="incentives-notice">
           <div className="flex items-start gap-2">
@@ -1064,7 +1126,7 @@ function PublicProposalView({
         {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.stateIncentives.length > 0 && (
           <div className="proposal-sec card p-4" data-block-id="incentives-srec">
             <h2 className="text-base font-black text-white mb-3 flex items-center gap-2">
-              <Award size={18} style={{ color: primaryColor }} /> Available Incentives
+              <Award size={18} style={{ color: primaryColor }} /> Available State Incentives
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {stateIncentives.stateIncentives.map((inc: any, i: number) => (
@@ -1080,6 +1142,88 @@ function PublicProposalView({
                   </div>
                 </div>
               ))}
+            </div>
+            {stateIncentives.cashTotal > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center justify-between">
+                <span className="text-xs text-slate-400 font-medium">Estimated Cash Incentives Total</span>
+                <span className="text-sm font-black text-emerald-400">${stateIncentives.cashTotal.toLocaleString()}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Non-Cash State Benefits — property/sales tax exemptions, SRECs (v47.260) */}
+        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.nonCashBenefits && stateIncentives.nonCashBenefits.length > 0 && (
+          <div className="proposal-sec card p-4" data-block-id="incentives-noncash">
+            <h2 className="text-base font-black text-white mb-1 flex items-center gap-2">
+              <Award size={18} style={{ color: primaryColor }} /> Additional State Benefits
+            </h2>
+            <p className="text-xs text-slate-400 mb-3">These benefits reduce your long-term costs but are not subtracted from the system price above.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {stateIncentives.nonCashBenefits.map((inc: any, i: number) => (
+                <div key={i} className="rounded-xl p-4 border bg-blue-500/5 border-blue-500/20">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-white">{inc.name}</div>
+                      {inc.notes && <div className="text-xs text-slate-400 mt-1">{inc.notes}</div>}
+                    </div>
+                    <div className="text-xs font-bold flex-shrink-0 text-blue-400 text-right">
+                      {inc.type === 'property_tax_exemption' || inc.type === 'sales_tax_exemption'
+                        ? 'Exempt'
+                        : inc.calculatedValue > 0
+                          ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
+                          : 'Eligible'}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* §48E Lease/PPA Banner — v47.260 */}
+        {isSection48eEnabled() && (
+          <div className="proposal-sec card p-5 border border-amber-500/30 bg-amber-500/5" data-block-id="section48e-banner">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex-shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                  <Zap size={16} className="text-amber-400" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-black text-white mb-1">
+                  $0-Down Lease &amp; PPA Options Available — Act Before July 4, 2026
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed mb-3">
+                  Under federal §48E, solar companies that own the system can still claim
+                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit</span> and
+                  pass those savings directly to you through a lease or power purchase agreement (PPA).
+                  This means lower monthly payments — sometimes $0 upfront.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div className="rounded-lg p-3 bg-slate-800/60 border border-slate-700/40">
+                    <div className="text-xs font-bold text-amber-400 mb-1">Solar Lease</div>
+                    <div className="text-xs text-slate-300">
+                      Fixed monthly payment. You use the solar energy and the installer maintains the system.
+                      Predictable costs for 20–25 years.
+                    </div>
+                  </div>
+                  <div className="rounded-lg p-3 bg-slate-800/60 border border-slate-700/40">
+                    <div className="text-xs font-bold text-amber-400 mb-1">Power Purchase Agreement (PPA)</div>
+                    <div className="text-xs text-slate-300">
+                      Pay only for the electricity the panels produce at a fixed rate below your utility&apos;s price.
+                      No equipment cost — just lower energy bills.
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <span className="text-xs font-black text-red-400">⚡ Deadline:</span>
+                  <span className="text-xs text-slate-300">
+                    Construction must begin by <span className="font-bold text-white">July 4, 2026</span> for the
+                    full {getSection48eRate()}% §48E credit — ask your installer to lock in your savings now.
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1313,6 +1457,24 @@ function PublicProposalView({
               <div className="text-center text-xs text-slate-400 mt-1">
                 {annualProduction.toLocaleString()} kWh / year total
               </div>
+              {/* v1.shade: TSRF badge — shown only when shade analysis has been run */}
+              {cp.production.tsrf !== undefined && (
+                <div className="mt-2 flex items-center justify-center gap-1.5">
+                  <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold border ${
+                    cp.production.tsrf >= 0.95
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : cp.production.tsrf >= 0.85
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      : 'bg-red-500/10 border-red-500/30 text-red-400'
+                  }`}>
+                    <Sun size={11} />
+                    TSRF {(cp.production.tsrf * 100).toFixed(1)}%
+                  </div>
+                  <span className="text-slate-500 text-xs">
+                    shade analysis applied
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Monthly Bill Before/After */}
@@ -1953,7 +2115,7 @@ function PublicProposalView({
         </div>
 
 
-        {/* Testimonial / Company Intro block */}
+        {/* Company Intro block */}
         <div className="proposal-sec card p-5" data-block-id="testimonial">
           <div className="text-center mb-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/30 mb-3">
@@ -1970,24 +2132,36 @@ function PublicProposalView({
             </p>
           </div>
 
-          {/* Testimonial quote */}
-          <div className="relative rounded-xl p-4 border border-slate-700/40" style={{ background: `${primaryColor}08` }}>
-            <div className="text-3xl leading-none mb-2" style={{ color: primaryColor, opacity: 0.4 }}>&ldquo;</div>
-            <p className="text-slate-300 text-sm leading-relaxed italic">
-              Going solar was the best decision we made. Our electric bill dropped from $280/month to under $40, and the install crew was professional from start to finish. We&apos;ve already recommended {branding.companyName} to three of our neighbors.
-            </p>
-            <div className="flex items-center gap-3 mt-3">
-              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-slate-400 text-sm font-bold flex-shrink-0">M</div>
-              <div>
-                <div className="text-white text-xs font-semibold">Michael R. — Verified Customer</div>
-                <div className="flex items-center gap-0.5 mt-0.5">
-                  {[1,2,3,4,5].map(s => (
-                    <Star key={s} size={10} className="text-amber-400 fill-amber-400" />
-                  ))}
-                </div>
+          {/* Company footer text (configured in Settings) or professional close */}
+          {branding.proposalFooterText ? (
+            <div className="relative rounded-xl p-4 border border-slate-700/40" style={{ background: `${primaryColor}08` }}>
+              <div className="text-3xl leading-none mb-2" style={{ color: primaryColor, opacity: 0.4 }}>&ldquo;</div>
+              <p className="text-slate-300 text-sm leading-relaxed italic">
+                {branding.proposalFooterText}
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                {branding.companyLogoUrl ? (
+                  <img src={branding.companyLogoUrl} alt={branding.companyName} className="h-6 object-contain" />
+                ) : (
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-slate-400 text-xs font-bold flex-shrink-0" style={{ background: `${primaryColor}20` }}>
+                    {branding.companyName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="text-white text-xs font-semibold">{branding.companyName}</span>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-xl p-4 border border-slate-700/40 text-center" style={{ background: `${primaryColor}08` }}>
+              <div className="flex items-center justify-center gap-2 mb-2">
+                {[1,2,3,4,5].map(s => (
+                  <Star key={s} size={14} className="text-amber-400 fill-amber-400" />
+                ))}
+              </div>
+              <p className="text-slate-400 text-xs">
+                Licensed solar professionals committed to quality installation and long-term customer support.
+              </p>
+            </div>
+          )}
 
           {/* Company details */}
           {(branding.companyAddress || branding.companyPhone || branding.companyWebsite) && (

@@ -38,6 +38,8 @@ import {
   GLOBAL_INCENTIVES_CONFIG,
   getIncentivesComplianceMessage,
   getIncentivesDebugLabel,
+  isSection48eEnabled,
+  getSection48eRate,
 } from '@/lib/incentivesConfig';
 import { UtilityRateGraph } from '@/components/proposal/UtilityRateGraph';
 import { UtilityCostProjectionChart } from '@/components/proposal/UtilityCostProjectionChart';
@@ -1298,6 +1300,22 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
     purchaseMode,
     isCommercial:          pricingCfg?.isCommercial ?? false,
     noItc:                 noItc,   // v47.245: from toolbar toggle state (live, no re-render needed)
+
+    // Shade analysis (v1.shade): compute derate from per-panel annualShadeFactor values
+    panelsShadeDerateComputedPct: (() => {
+      const panels = (layout as any)?.panels ?? [];
+      const shadedPanels = (panels as any[]).filter(
+        (p: any) => typeof p.annualShadeFactor === 'number' &&
+                    p.annualShadeFactor >= 0 &&
+                    p.annualShadeFactor <= 1
+      );
+      if (shadedPanels.length === 0) return undefined;
+      const avgFactor = shadedPanels.reduce(
+        (sum: number, p: any) => sum + (p.annualShadeFactor as number), 0
+      ) / shadedPanels.length;
+      const derate = (1 - avgFactor) * 100;
+      return derate > 0.01 ? Math.round(derate * 10) / 10 : undefined;
+    })(),
   });
 
   // ─── Rule 1: systemSizeKw LOCKED to canonical (panel.count × panel.wattage / 1000) ───
@@ -1953,13 +1971,13 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
         </div>
 
         {/* State Incentives — gated by GLOBAL_INCENTIVES_CONFIG.allow_state_incentives (v47.251) */}
-        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.stateIncentives.length > 0 && (
+        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.stateIncentives.filter((i: any) => i.isCash).length > 0 && (
           <div className="proposal-sec card p-4" data-block-id="incentives-srec">
             <h2 className="text-base font-black text-white mb-3 flex items-center gap-2">
-              <Award size={18} style={{ color: primaryColor }} /> Available Incentives
+              <Award size={18} style={{ color: primaryColor }} /> Available State Incentives
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {stateIncentives.stateIncentives.map((inc: any, i: number) => (
+              {stateIncentives.stateIncentives.filter((i: any) => i.isCash).map((inc: any, i: number) => (
                 <div key={i} className="rounded-xl p-4 border bg-emerald-500/5 border-emerald-500/20">
                   <div className="flex items-start justify-between gap-2">
                     <div>
@@ -1972,6 +1990,80 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
                   </div>
                 </div>
               ))}
+            </div>
+            {stateIncentives.cashStateValue > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-700/40 flex items-center justify-between">
+                <span className="text-xs text-slate-400 font-medium">Estimated Cash Incentives Total</span>
+                <span className="text-sm font-black text-emerald-400">${stateIncentives.cashStateValue.toLocaleString()}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Non-Cash State Benefits — property/sales tax exemptions, SRECs (v47.260) */}
+        {GLOBAL_INCENTIVES_CONFIG.allow_state_incentives && stateIncentives && stateIncentives.stateIncentives.filter((i: any) => i.isNonCash).length > 0 && (
+          <div className="proposal-sec card p-4" data-block-id="incentives-noncash">
+            <h2 className="text-base font-black text-white mb-1 flex items-center gap-2">
+              <Award size={18} style={{ color: primaryColor }} /> Additional State Benefits
+            </h2>
+            <p className="text-xs text-slate-400 mb-3">These benefits reduce your long-term costs but are not subtracted from the system price above.</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {stateIncentives.stateIncentives.filter((i: any) => i.isNonCash).map((inc: any, i: number) => (
+                <div key={i} className="rounded-xl p-4 border bg-blue-500/5 border-blue-500/20">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="text-sm font-semibold text-white">{inc.name}</div>
+                      {inc.description && <div className="text-xs text-slate-400 mt-1">{inc.description}</div>}
+                    </div>
+                    <div className="text-xs font-bold flex-shrink-0 text-blue-400 text-right">
+                      {inc.type === 'property_tax_exemption' || inc.type === 'sales_tax_exemption'
+                        ? 'Exempt'
+                        : inc.calculatedValue > 0
+                          ? `~$${Math.round(inc.calculatedValue).toLocaleString()}`
+                          : 'Eligible'}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* §48E Lease/PPA Banner — v47.260 */}
+        {isSection48eEnabled() && (
+          <div className="proposal-sec card p-5 border border-amber-500/30 bg-amber-500/5" data-block-id="section48e-banner">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex-shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center">
+                  <Zap size={16} className="text-amber-400" />
+                </div>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-black text-white mb-1">
+                  $0-Down Lease &amp; PPA Options Available — Act Before July 4, 2026
+                </h3>
+                <p className="text-xs text-slate-300 leading-relaxed mb-3">
+                  Under federal §48E, solar companies that own the system can still claim
+                  a <span className="text-amber-400 font-bold">{getSection48eRate()}% federal tax credit</span> and
+                  pass those savings directly to homeowners through a lease or power purchase agreement (PPA).
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                  <div className="rounded-lg p-3 bg-slate-800/60 border border-slate-700/40">
+                    <div className="text-xs font-bold text-amber-400 mb-1">Solar Lease</div>
+                    <div className="text-xs text-slate-300">Fixed monthly payment. Installer owns &amp; maintains system.</div>
+                  </div>
+                  <div className="rounded-lg p-3 bg-slate-800/60 border border-slate-700/40">
+                    <div className="text-xs font-bold text-amber-400 mb-1">Power Purchase Agreement (PPA)</div>
+                    <div className="text-xs text-slate-300">Pay only for electricity produced at a rate below utility price.</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <span className="text-xs font-black text-red-400">⚡ Deadline:</span>
+                  <span className="text-xs text-slate-300">
+                    Construction must begin by <span className="font-bold text-white">July 4, 2026</span> for full {getSection48eRate()}% §48E credit.
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -2205,6 +2297,24 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
               <div className="text-center text-xs text-slate-400 mt-1">
                 {annualProduction.toLocaleString()} kWh / year total
               </div>
+              {/* v1.shade: TSRF badge — shown only when shade analysis has been run */}
+              {cp.production.tsrf !== undefined && (
+                <div className="mt-2 flex items-center justify-center gap-1.5">
+                  <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold border ${
+                    cp.production.tsrf >= 0.95
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : cp.production.tsrf >= 0.85
+                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      : 'bg-red-500/10 border-red-500/30 text-red-400'
+                  }`}>
+                    <Sun size={11} />
+                    TSRF {(cp.production.tsrf * 100).toFixed(1)}%
+                  </div>
+                  <span className="text-slate-500 text-xs">
+                    shade analysis applied
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Monthly Bill Before/After */}
@@ -2752,7 +2862,7 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
         </div>
 
 
-        {/* Testimonial / Company Intro block */}
+        {/* Company Intro block */}
         <div className="proposal-sec card p-5" data-block-id="testimonial">
           <div className="text-center mb-4">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/60 border border-slate-700/30 mb-3">
@@ -2769,24 +2879,36 @@ function ProposalPreview({ proposal, onBack, onDownload, isPreviewOnly = false, 
             </p>
           </div>
 
-          {/* Testimonial quote */}
-          <div className="relative rounded-xl p-4 border border-slate-700/40" style={{ background: `${primaryColor}08` }}>
-            <div className="text-3xl leading-none mb-2" style={{ color: primaryColor, opacity: 0.4 }}>&ldquo;</div>
-            <p className="text-slate-300 text-sm leading-relaxed italic">
-              Going solar was the best decision we made. Our electric bill dropped from $280/month to under $40, and the install crew was professional from start to finish. We&apos;ve already recommended {branding.companyName} to three of our neighbors.
-            </p>
-            <div className="flex items-center gap-3 mt-3">
-              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-slate-400 text-sm font-bold flex-shrink-0">M</div>
-              <div>
-                <div className="text-white text-xs font-semibold">Michael R. — Verified Customer</div>
-                <div className="flex items-center gap-0.5 mt-0.5">
-                  {[1,2,3,4,5].map(s => (
-                    <Star key={s} size={10} className="text-amber-400 fill-amber-400" />
-                  ))}
-                </div>
+          {/* Company footer text (configured in Settings) or professional close */}
+          {branding.proposalFooterText ? (
+            <div className="relative rounded-xl p-4 border border-slate-700/40" style={{ background: `${primaryColor}08` }}>
+              <div className="text-3xl leading-none mb-2" style={{ color: primaryColor, opacity: 0.4 }}>&ldquo;</div>
+              <p className="text-slate-300 text-sm leading-relaxed italic">
+                {branding.proposalFooterText}
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                {branding.companyLogoUrl ? (
+                  <img src={branding.companyLogoUrl} alt={branding.companyName} className="h-6 object-contain" />
+                ) : (
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-slate-400 text-xs font-bold flex-shrink-0" style={{ background: `${primaryColor}20` }}>
+                    {branding.companyName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="text-white text-xs font-semibold">{branding.companyName}</span>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-xl p-4 border border-slate-700/40 text-center" style={{ background: `${primaryColor}08` }}>
+              <div className="flex items-center justify-center gap-2 mb-2">
+                {[1,2,3,4,5].map(s => (
+                  <Star key={s} size={14} className="text-amber-400 fill-amber-400" />
+                ))}
+              </div>
+              <p className="text-slate-400 text-xs">
+                Licensed solar professionals committed to quality installation and long-term customer support.
+              </p>
+            </div>
+          )}
 
           {/* Company details */}
           {(branding.companyAddress || branding.companyPhone || branding.companyWebsite) && (

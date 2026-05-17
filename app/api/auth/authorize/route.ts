@@ -60,11 +60,27 @@ const SSO_TOKEN_TTL_SECONDS = 10 * 60; // 10 minutes
 // getAllowedRedirectPrefixes
 //
 // Reads AUTHORIZE_ALLOWED_REDIRECTS (comma-separated) and returns a trimmed
-// list. Falls back to a safe default that only allows the mobile app's
-// sitesurvey:// scheme.
+// list. Falls back to a safe default that allows ALL known mobile app schemes:
+//
+//   sitesurvey://          — production custom scheme (site survey app)
+//   exp://                 — Expo Go development client (any host)
+//   com.underthesun://     — production bundle-id scheme (if used)
+//
+// To override: set AUTHORIZE_ALLOWED_REDIRECTS=sitesurvey://,exp://
+// in Vercel → Project → Settings → Environment Variables.
 // ---------------------------------------------------------------------------
+const DEFAULT_ALLOWED_PREFIXES = [
+  'sitesurvey://',
+  'exp://',
+  'com.underthesun.',
+];
+
 function getAllowedRedirectPrefixes(): string[] {
-  const raw = (process.env.AUTHORIZE_ALLOWED_REDIRECTS ?? 'sitesurvey://').trim();
+  const raw = (process.env.AUTHORIZE_ALLOWED_REDIRECTS ?? '').trim();
+  if (!raw) {
+    // No override set — use the built-in defaults for all known mobile schemes
+    return DEFAULT_ALLOWED_PREFIXES;
+  }
   return raw
     .split(',')
     .map((s) => s.trim())
@@ -117,6 +133,37 @@ export async function GET(req: NextRequest) {
       `[authorize] rejected redirect_uri="${redirectUri}" — not in allowlist ` +
       `(${allowedPrefixes.join(', ')})`,
     );
+    // Return a human-readable error page when the request comes from a browser
+    // (identified by Accept: text/html) rather than a raw JSON blob.
+    const acceptsHtml = req.headers.get('accept')?.includes('text/html') ?? false;
+    if (acceptsHtml) {
+      const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<title>SSO Error — SolarPro</title>
+<style>
+  body{background:#0f172a;color:#e2e8f0;font-family:Inter,system-ui,sans-serif;
+       display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:32px;}
+  .card{text-align:center;max-width:480px;}
+  h1{font-size:22px;font-weight:700;color:#f87171;margin-bottom:12px;}
+  p{color:#94a3b8;font-size:14px;margin-bottom:8px;line-height:1.6;}
+  code{background:#1e293b;border:1px solid #334155;border-radius:4px;
+       padding:2px 6px;font-size:12px;color:#fbbf24;word-break:break-all;}
+  a{color:#60a5fa;text-decoration:none;}a:hover{text-decoration:underline;}
+</style></head><body><div class="card">
+  <div style="font-size:48px;margin-bottom:16px">🔒</div>
+  <h1>SSO Configuration Error</h1>
+  <p>The mobile app sent a <code>redirect_uri</code> that is not in the server's allowlist.</p>
+  <p>Received: <code>${redirectUri.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</code></p>
+  <p>Allowed prefixes: ${allowedPrefixes.map(p => `<code>${p.replace(/</g,'&lt;')}</code>`).join(', ')}</p>
+  <p style="margin-top:24px;font-size:12px;color:#64748b;">
+    To fix: set <code>AUTHORIZE_ALLOWED_REDIRECTS</code> in Vercel environment variables to include your app's scheme,
+    or contact <a href="mailto:support@solarpro.solutions">support@solarpro.solutions</a>.
+  </p>
+</div></body></html>`;
+      return new Response(html, {
+        status: 400,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+    }
     return NextResponse.json(
       {
         error: 'redirect_uri is not in the allowlist',

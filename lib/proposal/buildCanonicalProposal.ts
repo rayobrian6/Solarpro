@@ -34,7 +34,7 @@
  *   In production, violations are logged as console.error but never throw.
  */
 
-import type { CanonicalProposal, CanonicalEnergyFlowYear, CanonicalIncentives } from './canonicalProposal';
+import type { CanonicalProposal, CanonicalProduction, CanonicalEnergyFlowYear, CanonicalIncentives } from './canonicalProposal';
 import {
   isItcEnabled,
   areStateIncentivesEnabled,
@@ -110,6 +110,21 @@ export interface BuildCanonicalProposalInput {
   // Policy / incentives
   isCommercial?: boolean;
   noItc?: boolean;              // suppress ITC display for clients who don't qualify (e.g. non-tax-liability residential)
+
+  // Shade analysis (v1.shade)
+  /**
+   * System-level shade derate percentage computed from per-panel annualShadeFactor
+   * values in the design layout.  Range 0–100.  0 means no shade data or no shade.
+   *
+   * Computed by:
+   *   shadedPanels = panels.filter(p => typeof p.annualShadeFactor === 'number')
+   *   avgFactor = mean(shadedPanels.map(p => p.annualShadeFactor))
+   *   panelsShadeDerateComputedPct = (1 - avgFactor) * 100
+   *
+   * When provided, TSRF and shadeDerateApplied are set on CanonicalProduction.
+   * The actual kWh impact was already applied by PVWatts via effectiveLosses.
+   */
+  panelsShadeDerateComputedPct?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,7 +375,19 @@ export function buildCanonicalProposal(
     warnings
   );
 
-  const production = { annualKwh, monthlyKwh };
+  const production: CanonicalProduction = { annualKwh, monthlyKwh };
+
+  // v1.shade: Attach TSRF + shade derate to production when shade analysis was run
+  // TSRF = Total Solar Resource Fraction = 1 - (shadeDeratePct / 100)
+  // The kWh impact was already applied by PVWatts effective losses; this is display metadata.
+  if (
+    typeof input.panelsShadeDerateComputedPct === 'number' &&
+    input.panelsShadeDerateComputedPct > 0
+  ) {
+    const clampedDerate = Math.min(100, Math.max(0, input.panelsShadeDerateComputedPct));
+    production.shadeDerateApplied = Math.round(clampedDerate * 10) / 10; // 1 decimal place
+    production.tsrf               = Math.round((1 - clampedDerate / 100) * 1000) / 1000; // 3 decimal places
+  }
 
   // ─── STEP 3: UTILITY ────────────────────────────────────────────────────────
   // buildUtilityProfile resolves rate, NEM type, export rate, escalation,

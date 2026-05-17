@@ -70,6 +70,31 @@ export interface CanonicalProduction {
    * 12-element array. Sourced from PVWatts or layout engine.
    */
   monthlyKwh: number[];
+  /**
+   * Total Solar Resource Fraction (TSRF) — the fraction of full-sun production
+   * after accounting for shade from obstructions, trees, and inter-row shading.
+   * Range: 0.0 (fully shaded) to 1.0 (no shade).
+   *
+   * TSRF = 1 - (shadeDeratePct / 100)
+   *
+   * Example: systemShadeDeratePct=8 → TSRF=0.92 (92% of full-sun output).
+   *
+   * Set only when shade analysis has been run on the design layout.
+   * undefined when no shade data is available.
+   */
+  tsrf?: number;
+  /**
+   * Shade derate percentage applied to this proposal's production.
+   * Computed from the weighted average of per-panel annualShadeFactor values
+   * from the design studio layout.
+   *
+   * 0 = no shade loss, 100 = fully shaded.
+   * Typically 2–15% for well-designed rooftop systems.
+   *
+   * Note: This is informational — the actual kWh impact is already baked into
+   * annualKwh via the PVWatts effective losses calculation.
+   */
+  shadeDerateApplied?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
