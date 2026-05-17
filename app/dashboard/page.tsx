@@ -41,6 +41,10 @@ import {
   type ActionItem,
 } from '@/lib/operations/getNextStep';
 import { getPipelineMetrics } from '@/lib/data/getPipelineMetrics';
+import dynamic from 'next/dynamic';
+
+// CrewCalendar is client-only (uses Date APIs) — load without SSR
+const CrewCalendar = dynamic(() => import('@/components/crew/CrewCalendar'), { ssr: false });
 
 // ══════════════════════════════════════════════════════════════════
 // SECTION A: Dashboard Data Maps & Helpers (preserved exactly)
@@ -1458,6 +1462,11 @@ export default function CommandCenter() {
               <ArrowRight size={13} className="ml-auto opacity-40 text-white" />
             </Link>
           ))}
+        </div>
+
+        {/* ═══ CREW CALENDAR ═══ */}
+        <div className="card p-4">
+          <CrewCalendar />
         </div>
 
         {/* ═══ OPERATIONS BOARD TOGGLE ═══ */}
