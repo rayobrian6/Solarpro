@@ -61,6 +61,7 @@ import ProposalTab from '@/components/project/ProposalTab';
 import OperationsTab from '@/components/project/OperationsTab';
 import FieldSurveyPanel from '@/components/project/FieldSurveyPanel';
 import FieldSurveyCard from '@/components/project/FieldSurveyCard';
+import TutorialPanel from '@/components/project/TutorialPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type TabId = 'bill' | 'system' | 'design' | 'engineering' | 'proposal' | 'operations' | 'survey';
@@ -177,6 +178,52 @@ const TABS: TabConfig[] = [
 ];
 
 // ─── Missing Data Warnings ─────────────────────────────────────────────────────
+// ─── Tutorial Panel Config ─────────────────────────────────────────────────────────
+// Placeholder YouTube video IDs — replace with real unlisted IDs once recorded.
+const TUTORIAL_CONFIG: Partial<Record<TabId, {
+  title:       string;
+  description: string;
+  videoId:     string;
+  duration:    string;
+}>> = {
+  bill: {
+    title:       'How to upload a utility bill',
+    description: 'Upload a PDF or photo of the homeowner\'s electric bill. SolarPro automatically extracts annual kWh, monthly usage, and utility rate \u2014 no manual entry required.',
+    videoId:     'PLACEHOLDER_BILL',
+    duration:    '1:15',
+  },
+  system: {
+    title:       'How to read and adjust the auto-sized system',
+    description: 'After bill upload, SolarPro sizes the system from annual usage and local irradiance. Review the recommended size and override it if needed.',
+    videoId:     'PLACEHOLDER_SYSTEM',
+    duration:    '1:30',
+  },
+  design: {
+    title:       'How to use the Design Studio',
+    description: 'Draw roof zones on the 3D map and place panels with one click. The studio respects setbacks, obstructions, and equipment constraints automatically.',
+    videoId:     'PLACEHOLDER_DESIGN',
+    duration:    '1:45',
+  },
+  engineering: {
+    title:       'How SLD and BOM are generated',
+    description: 'SolarPro auto-generates a NEC-compliant single-line diagram and full bill of materials from your design. Review, customize, and export these documents.',
+    videoId:     'PLACEHOLDER_ENGINEERING',
+    duration:    '1:20',
+  },
+  proposal: {
+    title:       'How to customize and send a proposal',
+    description: 'Generate a branded proposal, customize pricing and incentives, then send for digital signature \u2014 no DocuSign required.',
+    videoId:     'PLACEHOLDER_PROPOSAL',
+    duration:    '1:30',
+  },
+  operations: {
+    title:       'How to track a project to completion',
+    description: 'The Operations tab gives a live pipeline view: permit status, inspection dates, installation milestones, and final sign-off in one place.',
+    videoId:     'PLACEHOLDER_OPERATIONS',
+    duration:    '1:10',
+  },
+};
+
 function getMissingWarnings(project: Project): { label: string; action: string; tab: TabId }[] {
   const warnings: { label: string; action: string; tab: TabId }[] = [];
   if (!project.billAnalysis) {
@@ -876,37 +923,67 @@ export default function ProjectDetailPage() {
         {/* ── Tab Content ─────────────────────────────────────────────────── */}
         <div className="min-h-[400px]">
           {activeTab === 'bill' && (
-            <BillErrorBoundary>
-              <BillTab
-                project={project}
-                onUploadBill={handleUploadBill}
-                onBillUpdate={(updates) => setProject(prev => prev ? { ...prev, ...updates } : prev)}
-              />
-            </BillErrorBoundary>
+            <div className="space-y-0">
+              {TUTORIAL_CONFIG.bill && (
+                <TutorialPanel tabId="bill" {...TUTORIAL_CONFIG.bill} />
+              )}
+              <BillErrorBoundary>
+                <BillTab
+                  project={project}
+                  onUploadBill={handleUploadBill}
+                  onBillUpdate={(updates) => setProject(prev => prev ? { ...prev, ...updates } : prev)}
+                />
+              </BillErrorBoundary>
+            </div>
           )}
           {activeTab === 'system' && (
-            <SystemSizeTab
-              project={project}
-              onRunAutoSize={handleRunAutoSize}
-              onSizeOverride={newKw => setProject(prev => prev ? { ...prev, systemSizeKw: newKw } : prev)}
-            />
+            <div className="space-y-0">
+              {TUTORIAL_CONFIG.system && (
+                <TutorialPanel tabId="system" {...TUTORIAL_CONFIG.system} />
+              )}
+              <SystemSizeTab
+                project={project}
+                onRunAutoSize={handleRunAutoSize}
+                onSizeOverride={newKw => setProject(prev => prev ? { ...prev, systemSizeKw: newKw } : prev)}
+              />
+            </div>
           )}
           {activeTab === 'design' && (
-            <DesignTab
+            <div className="space-y-0">
+              {TUTORIAL_CONFIG.design && (
+                <TutorialPanel tabId="design" {...TUTORIAL_CONFIG.design} />
+              )}
+              <DesignTab
                 project={project}
                 onEquipmentUpdate={(updates) => setProject(prev => prev ? { ...prev, ...updates } : prev)}
               />
+            </div>
           )}
           {activeTab === 'engineering' && (
-            <div className="card p-0 overflow-hidden">
-              <EngineeringTab projectId={id} projectName={project.name} />
+            <div className="space-y-0">
+              {TUTORIAL_CONFIG.engineering && (
+                <TutorialPanel tabId="engineering" {...TUTORIAL_CONFIG.engineering} />
+              )}
+              <div className="card p-0 overflow-hidden">
+                <EngineeringTab projectId={id} projectName={project.name} />
+              </div>
             </div>
           )}
           {activeTab === 'proposal' && (
-            <ProposalTab project={project} />
+            <div className="space-y-0">
+              {TUTORIAL_CONFIG.proposal && (
+                <TutorialPanel tabId="proposal" {...TUTORIAL_CONFIG.proposal} />
+              )}
+              <ProposalTab project={project} />
+            </div>
           )}
           {activeTab === 'operations' && (
-            <OperationsTab projectId={id} />
+            <div className="space-y-0">
+              {TUTORIAL_CONFIG.operations && (
+                <TutorialPanel tabId="operations" {...TUTORIAL_CONFIG.operations} />
+              )}
+              <OperationsTab projectId={id} />
+            </div>
           )}
           {activeTab === 'survey' && (
             <FieldSurveyPanel projectId={id} />
