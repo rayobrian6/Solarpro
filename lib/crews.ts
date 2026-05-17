@@ -191,7 +191,7 @@ export function validateCreateMember(body: unknown): string | null {
   if (b.phone !== undefined && b.phone !== null) {
     if (typeof b.phone !== 'string') return 'phone must be a string or null.';
     const res = normalisePhone(b.phone);
-    if (!res.ok) return res.error;
+    if (!res.ok) return (res as { ok: false; error: string }).error;
   }
 
   // email — optional, validated when present

@@ -154,9 +154,15 @@ export async function GET(req: NextRequest) {
   <p>The mobile app sent a <code>redirect_uri</code> that is not in the server's allowlist.</p>
   <p>Received: <code>${redirectUri.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</code></p>
   <p>Allowed prefixes: ${allowedPrefixes.map(p => `<code>${p.replace(/</g,'&lt;')}</code>`).join(', ')}</p>
-  <p style="margin-top:24px;font-size:12px;color:#64748b;">
-    To fix: set <code>AUTHORIZE_ALLOWED_REDIRECTS</code> in Vercel environment variables to include your app's scheme,
-    or contact <a href="mailto:support@solarpro.solutions">support@solarpro.solutions</a>.
+  <p style="margin-top:20px;padding:12px 16px;background:#1e293b;border:1px solid #f59e0b33;border-radius:8px;text-align:left;">
+    <strong style="color:#fbbf24;">⚠ To fix (Vercel):</strong><br/>
+    Go to <strong>Vercel → Project → Settings → Environment Variables</strong><br/>
+    Set <code>AUTHORIZE_ALLOWED_REDIRECTS</code> to:<br/>
+    <code style="color:#4ade80;">sitesurvey://,exp://,com.underthesun.</code><br/>
+    <span style="color:#64748b;font-size:11px;">(All three schemes are required. Setting this var overrides the built-in defaults entirely.)</span>
+  </p>
+  <p style="margin-top:16px;font-size:12px;color:#64748b;">
+    Contact <a href="mailto:support@solarpro.solutions">support@solarpro.solutions</a> if the issue persists.
   </p>
 </div></body></html>`;
       return new Response(html, {
@@ -168,6 +174,7 @@ export async function GET(req: NextRequest) {
       {
         error: 'redirect_uri is not in the allowlist',
         allowedPrefixes,
+        fix: 'Set AUTHORIZE_ALLOWED_REDIRECTS=sitesurvey://,exp://,com.underthesun. in Vercel → Project → Settings → Environment Variables',
       },
       { status: 400 },
     );

@@ -6,14 +6,15 @@ import {
   Settings, Upload, Save, CheckCircle, AlertCircle,
   Building2, Phone, Mail, Globe, Palette, Image,
   User, Lock, Bell, CreditCard, Trash2, Eye, EyeOff,
-  Sun, RefreshCw, X
+  Sun, RefreshCw, X, Users
 } from 'lucide-react';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import OrganizationPanel from '@/components/settings/OrganizationPanel';
+import CrewMembersPanel from '@/components/settings/CrewMembersPanel';
 import { useTheme, THEME_CONFIG, type Theme } from '@/contexts/ThemeContext';
 
-type Tab = 'profile' | 'branding' | 'subscription' | 'organization' | 'notifications';
+type Tab = 'profile' | 'branding' | 'subscription' | 'organization' | 'teams' | 'notifications';
 
 interface BrandingSettings {
   companyName: string;
@@ -241,6 +242,7 @@ export default function SettingsPage() {
     { id: 'branding',      label: 'Branding',       icon: <Palette size={16} /> },
     { id: 'subscription',  label: 'Subscription',   icon: <CreditCard size={16} /> },
     { id: 'organization',  label: 'Organization',   icon: <Building2 size={16} /> },
+    { id: 'teams',         label: 'Teams',          icon: <Users size={16} /> },
     { id: 'notifications', label: 'Notifications',  icon: <Bell size={16} /> },
   ];
 
@@ -721,6 +723,11 @@ export default function SettingsPage() {
         {/* ── ORGANIZATION TAB ── */}
         {activeTab === 'organization' && user && (
           <OrganizationPanel userId={user.id} />
+        )}
+
+        {/* ── TEAMS TAB ── */}
+        {activeTab === 'teams' && (
+          <CrewMembersPanel />
         )}
 
         {/* ── NOTIFICATIONS TAB ── */}
