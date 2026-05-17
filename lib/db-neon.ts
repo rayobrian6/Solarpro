@@ -228,9 +228,27 @@ export function rowToProject(row: Record<string, unknown>): Project {
     // bill_data may have been saved with billAnalysis nested or flat
     if (rawBillData._billAnalysis) {
       // New format: bill_data._billAnalysis = BillAnalysis object
-      billAnalysis = rawBillData._billAnalysis as import('@/types').BillAnalysis;
+      // FIX: JSONB can return numeric fields as strings — coerce all numeric fields
+      // to Number() so .toFixed() and arithmetic never crash at runtime.
+      const raw = rawBillData._billAnalysis as Record<string, unknown>;
+      billAnalysis = {
+        ...raw,
+        annualKwh:           Number(raw.annualKwh)           || 0,
+        averageMonthlyKwh:   Number(raw.averageMonthlyKwh)   || 0,
+        averageMonthlyBill:  Number(raw.averageMonthlyBill)  || 0,
+        annualBill:          Number(raw.annualBill)          || 0,
+        utilityRate:         Number(raw.utilityRate)         || 0,
+        peakMonthKwh:        Number(raw.peakMonthKwh)        || 0,
+        peakMonth:           Number(raw.peakMonth)           || 0,
+        recommendedSystemKw: Number(raw.recommendedSystemKw) || 0,
+        recommendedPanelCount: Number(raw.recommendedPanelCount) || 0,
+        offsetTarget:        Number(raw.offsetTarget)        || 100,
+        monthlyKwh: Array.isArray(raw.monthlyKwh)
+          ? (raw.monthlyKwh as unknown[]).map(v => Number(v) || 0)
+          : [],
+      } as import('@/types').BillAnalysis;
       utilityName = (rawBillData._utilityName as string) || undefined;
-      utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
+      utilityRatePerKwh = Number(rawBillData._utilityRatePerKwh) || undefined;
       stateCode = (rawBillData._stateCode as string) || undefined;
       // FIX v47.8: hydrate city from bill_data._city (stored by handleBillComplete)
       city = (rawBillData._city as string) || undefined;
@@ -1395,9 +1413,26 @@ export async function getProjectWithDetails(
 
   if (rawBillData) {
     if (rawBillData._billAnalysis) {
-      billAnalysis = rawBillData._billAnalysis as import('@/types').BillAnalysis;
+      // FIX: coerce all numeric fields — JSONB can return numbers as strings
+      const raw = rawBillData._billAnalysis as Record<string, unknown>;
+      billAnalysis = {
+        ...raw,
+        annualKwh:             Number(raw.annualKwh)             || 0,
+        averageMonthlyKwh:     Number(raw.averageMonthlyKwh)     || 0,
+        averageMonthlyBill:    Number(raw.averageMonthlyBill)    || 0,
+        annualBill:            Number(raw.annualBill)            || 0,
+        utilityRate:           Number(raw.utilityRate)           || 0,
+        peakMonthKwh:          Number(raw.peakMonthKwh)          || 0,
+        peakMonth:             Number(raw.peakMonth)             || 0,
+        recommendedSystemKw:   Number(raw.recommendedSystemKw)   || 0,
+        recommendedPanelCount: Number(raw.recommendedPanelCount) || 0,
+        offsetTarget:          Number(raw.offsetTarget)          || 100,
+        monthlyKwh: Array.isArray(raw.monthlyKwh)
+          ? (raw.monthlyKwh as unknown[]).map(v => Number(v) || 0)
+          : [],
+      } as import('@/types').BillAnalysis;
       utilityName = (rawBillData._utilityName as string) || undefined;
-      utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
+      utilityRatePerKwh = Number(rawBillData._utilityRatePerKwh) || undefined;
       stateCode = (rawBillData._stateCode as string) || undefined;
       // FIX v47.8: hydrate city from bill_data._city
       cityDetail = (rawBillData._city as string) || undefined;

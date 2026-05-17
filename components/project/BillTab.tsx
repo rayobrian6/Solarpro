@@ -133,18 +133,20 @@ export default function BillTab({ project, onUploadBill, onBillUpdate }: BillTab
   }
 
   // Bill data present
-  const effectiveRate = (bill.utilityRate && bill.utilityRate > 0)
-    ? bill.utilityRate
-    : (project.utilityRatePerKwh && project.utilityRatePerKwh > 0)
-      ? project.utilityRatePerKwh
+  // FIX: coerce to Number — JSONB can return numeric fields as strings,
+  // causing .toFixed() to crash with "toFixed is not a function".
+  const effectiveRate = (Number(bill.utilityRate) > 0)
+    ? Number(bill.utilityRate)
+    : (Number(project.utilityRatePerKwh) > 0)
+      ? Number(project.utilityRatePerKwh)
       : 0;
-  const effectiveAnnualBill = (bill.annualBill && bill.annualBill > 0)
-    ? bill.annualBill
-    : (effectiveRate > 0 && bill.annualKwh && bill.annualKwh > 0)
-      ? Math.round(bill.annualKwh * effectiveRate)
+  const effectiveAnnualBill = (Number(bill.annualBill) > 0)
+    ? Number(bill.annualBill)
+    : (effectiveRate > 0 && Number(bill.annualKwh) > 0)
+      ? Math.round(Number(bill.annualKwh) * effectiveRate)
       : 0;
-  const effectiveMonthlyBill = (bill.averageMonthlyBill && bill.averageMonthlyBill > 0)
-    ? bill.averageMonthlyBill
+  const effectiveMonthlyBill = (Number(bill.averageMonthlyBill) > 0)
+    ? Number(bill.averageMonthlyBill)
     : Math.round(effectiveAnnualBill / 12);
 
   const monthlyKwh = Array.isArray(bill.monthlyKwh) && bill.monthlyKwh.length > 0
