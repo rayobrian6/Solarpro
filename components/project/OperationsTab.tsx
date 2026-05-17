@@ -9,6 +9,7 @@ import {
   ChevronRight, AlertTriangle, Flag, Loader2
 } from 'lucide-react';
 import InstallPhotosSection from '@/components/project/InstallPhotosSection';
+import MonitoringLinkEditor from '@/components/project/MonitoringLinkEditor';
 import {
   PROJECT_PIPELINE,
   STAGE_LABELS,
@@ -607,6 +608,11 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
 
       {/* ——— F. Install Photos ————————————————————————————————— */}
       <InstallPhotosSection projectId={projectId} />
+
+      {/* ——— G. Monitoring Link ——————————————————————————————————————————— */}
+      <Section title="Monitoring">
+        <MonitoringLinkEditor projectId={projectId} />
+      </Section>
 
       {/* ——— Save indicator ———————————————————————————————————— */}
       {saving && (

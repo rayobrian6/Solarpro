@@ -35,6 +35,10 @@ interface Project {
   homeowner_stage: HomeownerStage | null;
   updated_at: string;
   created_at: string;
+  /** v62: Monitoring provider platform set by installer */
+  monitoringPlatform?: string | null;
+  /** v62: Full URL to homeowner monitoring dashboard */
+  monitoringUrl?: string | null;
 }
 
 interface StageHistory {
@@ -738,8 +742,25 @@ function ReferralSection({
 // ─── Phase 6: Monitoring Foundation (completed stage only) ───────────────────
 // Architecture ready — populated by live monitoring integration in a future release.
 
-function MonitoringFoundation({ stage }: { stage: HomeownerStage | null }) {
+function MonitoringFoundation({ stage, project }: { stage: HomeownerStage | null; project: Project | null }) {
   if (stage !== 'completed') return null;
+
+  const hasMonitoring = !!(project?.monitoringUrl);
+  const platformLabel: Record<string, string> = {
+    enphase:   'Enphase Enlighten',
+    solaredge: 'SolarEdge Monitoring',
+    apsystems: 'APsystems EMA',
+    hoymiles:  'Hoymiles HMS',
+    generac:   'Generac PWRview',
+    sma:       'SMA Sunny Portal',
+    fronius:   'Fronius Solar.web',
+    solis:     'Solis Cloud',
+    other:     'Monitoring Dashboard',
+  };
+  const label = project?.monitoringPlatform
+    ? (platformLabel[project.monitoringPlatform] ?? 'Monitoring Dashboard')
+    : 'Monitoring Dashboard';
+
   return (
     <div className="rounded-2xl border border-emerald-500/[0.12] bg-emerald-500/[0.02] px-6 sm:px-8 py-6">
       <div className="flex items-center gap-2 mb-1">
@@ -747,25 +768,67 @@ function MonitoringFoundation({ stage }: { stage: HomeownerStage | null }) {
         <span className="text-[10px] font-black uppercase tracking-widest text-emerald-500/60">Live System</span>
       </div>
       <h3 className="text-lg font-black text-white mb-2">Your system is generating power.</h3>
-      <p className="text-sm text-slate-400 leading-relaxed mb-5">
-        Real-time energy production data, battery status, and savings tracking will appear here as your monitoring activates.
-      </p>
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { icon: Zap,        label: 'Production',  value: '— kW',  sub: 'Live output' },
-          { icon: Battery,    label: 'Battery',     value: '—%',    sub: 'Charge level' },
-          { icon: TrendingUp, label: 'Savings',     value: '$—',    sub: 'This month' },
-        ].map((item, i) => (
-          <div key={i} className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
-            <item.icon size={14} className="text-slate-600 mx-auto mb-2" />
-            <p className="text-sm font-black text-slate-500">{item.value}</p>
-            <p className="text-[9px] text-slate-700 uppercase tracking-wide mt-0.5">{item.sub}</p>
+
+      {hasMonitoring ? (
+        <>
+          <p className="text-sm text-slate-400 leading-relaxed mb-5">
+            View your real-time energy production, battery status, and savings on your monitoring dashboard.
+          </p>
+
+          {/* Monitoring dashboard CTA */}
+          <a
+            href={project!.monitoringUrl!}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all hover:opacity-90 mb-5"
+            style={{ background: 'rgba(52,211,153,0.12)', color: 'rgb(52,211,153)', border: '1px solid rgba(52,211,153,0.2)' }}
+          >
+            <Zap size={14} />
+            View {label}
+            <ExternalLink size={12} className="ml-1 opacity-60" />
+          </a>
+
+          {/* Quick stats placeholders — will be populated if monitoring API integration is added */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { icon: Zap,        label: 'Production',  value: '— kW',  sub: 'Live output' },
+              { icon: Battery,    label: 'Battery',     value: '—%',    sub: 'Charge level' },
+              { icon: TrendingUp, label: 'Savings',     value: '$—',    sub: 'This month' },
+            ].map((item, i) => (
+              <div key={i} className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
+                <item.icon size={14} className="text-slate-600 mx-auto mb-2" />
+                <p className="text-sm font-black text-slate-500">{item.value}</p>
+                <p className="text-[9px] text-slate-700 uppercase tracking-wide mt-0.5">{item.sub}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <p className="text-[10px] text-slate-700 mt-4 leading-relaxed">
-        Monitoring data typically activates within 24–48 hours of your system going live.
-      </p>
+          <p className="text-[10px] text-slate-600 mt-3 leading-relaxed">
+            Click the button above to view live data on your {label} dashboard.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-slate-400 leading-relaxed mb-5">
+            Real-time energy production data, battery status, and savings tracking will appear here as your monitoring activates.
+          </p>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { icon: Zap,        label: 'Production',  value: '— kW',  sub: 'Live output' },
+              { icon: Battery,    label: 'Battery',     value: '—%',    sub: 'Charge level' },
+              { icon: TrendingUp, label: 'Savings',     value: '$—',    sub: 'This month' },
+            ].map((item, i) => (
+              <div key={i} className="rounded-xl bg-white/[0.02] border border-white/[0.05] px-3 py-3 text-center">
+                <item.icon size={14} className="text-slate-600 mx-auto mb-2" />
+                <p className="text-sm font-black text-slate-500">{item.value}</p>
+                <p className="text-[9px] text-slate-700 uppercase tracking-wide mt-0.5">{item.sub}</p>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-700 mt-4 leading-relaxed">
+            Monitoring data typically activates within 24–48 hours of your system going live.
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -1203,7 +1266,7 @@ export default function PortalDashboard() {
             />
 
             {/* ══ PHASE 6: MONITORING FOUNDATION (completed) ══════════════ */}
-            <MonitoringFoundation stage={stage} />
+            <MonitoringFoundation stage={stage} project={activeProject} />
 
             {/* ══ PHASE 3: PROJECT TEAM ════════════════════════════════════ */}
             {owner && <ProjectTeam owner={owner} />}

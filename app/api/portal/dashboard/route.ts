@@ -57,6 +57,8 @@ export async function GET(req: NextRequest) {
         p.address,
         p.system_size_kw,
         p.homeowner_stage,
+        p.monitoring_platform AS "monitoringPlatform",
+        p.monitoring_url      AS "monitoringUrl",
         p.updated_at,
         p.created_at,
         u.name           AS owner_name,
