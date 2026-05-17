@@ -6,8 +6,9 @@ import { Card } from '@/components/ui/Card';
 import { Grid } from '@/components/ui/Grid';
 import {
   CheckCircle, Circle, Clock, Calendar, Users, DollarSign,
-  ChevronRight, AlertTriangle, Zap, Flag, Loader2
+  ChevronRight, AlertTriangle, Flag, Loader2
 } from 'lucide-react';
+import InstallPhotosSection from '@/components/project/InstallPhotosSection';
 import {
   PROJECT_PIPELINE,
   STAGE_LABELS,
@@ -603,6 +604,9 @@ export default function OperationsTab({ projectId, onStatusChange }: OperationsT
           </Card>
         )}
       </Section>
+
+      {/* ——— F. Install Photos ————————————————————————————————— */}
+      <InstallPhotosSection projectId={projectId} />
 
       {/* ——— Save indicator ———————————————————————————————————— */}
       {saving && (
