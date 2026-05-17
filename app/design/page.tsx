@@ -85,7 +85,7 @@ function QuickLaunch({ onLaunch }: { onLaunch: (project: Project) => void }) {
           <Zap size={16} className="text-amber-400" />
         </div>
         <div>
-          <h3 className="font-semibold text-white text-sm">Quick Launch — No Project Needed</h3>
+          <h3 className="font-semibold text-white text-sm">Quick Design Session — No Project Needed</h3>
           <p className="text-slate-400 text-xs">Type an address — suggestions appear as you type</p>
         </div>
       </div>

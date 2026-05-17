@@ -229,8 +229,8 @@ export default function SettingsPage() {
   };
 
   const PLAN_LABELS: Record<string, { label: string; color: string; price: string }> = {
-    starter:      { label: 'Starter',      color: 'text-slate-300 bg-slate-700',          price: '$79/mo' },
-    professional: { label: 'Professional', color: 'text-amber-300 bg-amber-500/20',        price: '$149/mo' },
+    starter:      { label: 'Starter',      color: 'text-slate-300 bg-slate-700',          price: '$75/mo' },
+    professional: { label: 'Professional', color: 'text-amber-300 bg-amber-500/20',        price: '$150/mo' },
     contractor:   { label: 'Contractor',   color: 'text-blue-300 bg-blue-500/20',          price: '$249/mo' },
     free_pass:    { label: 'Free Pass',    color: 'text-emerald-300 bg-emerald-500/20',    price: 'Free' },
   };
@@ -630,26 +630,26 @@ export default function SettingsPage() {
                   <thead>
                     <tr className="border-b border-slate-700">
                       <th className="text-left text-slate-400 font-semibold pb-3 pr-4">Feature</th>
-                      <th className="text-center text-slate-400 font-semibold pb-3 px-3">Starter<br/><span className="text-xs font-normal">$79/mo</span></th>
-                      <th className="text-center text-amber-400 font-semibold pb-3 px-3">Professional<br/><span className="text-xs font-normal">$149/mo</span></th>
+                      <th className="text-center text-slate-400 font-semibold pb-3 px-3">Starter<br/><span className="text-xs font-normal">$75/mo</span></th>
+                      <th className="text-center text-amber-400 font-semibold pb-3 px-3">Professional<br/><span className="text-xs font-normal">$150/mo</span></th>
                       <th className="text-center text-blue-400 font-semibold pb-3 px-3">Contractor<br/><span className="text-xs font-normal">$249/mo</span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
                     {[
-                      ['3D Design Studio', true, true, true],
-                      ['Projects', '10', 'Unlimited', 'Unlimited'],
-                      ['Clients', '25', 'Unlimited', 'Unlimited'],
-                      ['Electrical Engineering (SLD)', false, true, true],
-                      ['Sol Fence Design', false, true, true],
-                      ['BOM + Structural Calcs', false, true, true],
-                      ['Permit Packages', false, true, true],
-                      ['Proposal E-Signing', false, true, true],
-                      ['White-Label Branding', false, true, true],
-                      ['Team Members', false, 'Up to 3', 'Unlimited'],
-                      ['Priority Support', false, true, true],
-                      ['Dedicated Onboarding', false, false, true],
-                      ['SLA Support', false, false, true],
+                      ['3D Design Studio',             true,      true,          true       ],
+                      ['Projects',                     '10',      'Unlimited',   'Unlimited'],
+                      ['Clients',                      '25',      'Unlimited',   'Unlimited'],
+                      ['Electrical Engineering (SLD)', false,     true,          true       ],
+                      ['Sol Fence Design',             false,     true,          true       ],
+                      ['BOM + Structural Calcs',       false,     true,          true       ],
+                      ['Permit Packages',              false,     true,          true       ],
+                      ['Proposal E-Signing',           false,     true,          true       ],
+                      ['White-Label Branding',         false,     true,          true       ],
+                      ['Team Members',                 false,     'Up to 3',     'Unlimited'],
+                      ['Priority Support',             false,     true,          true       ],
+                      ['Dedicated Onboarding',         false,     false,         true       ],
+                      ['SLA Support',                  false,     false,         true       ],
                     ].map(([feature, starter, pro, contractor], i) => (
                       <tr key={i} className="hover:bg-slate-800/30 transition-colors">
                         <td className="py-2.5 pr-4 text-slate-300">{feature as string}</td>

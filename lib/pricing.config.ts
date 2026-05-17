@@ -26,18 +26,18 @@ export interface PlanPricingConfig {
 
 export const PRICING_PLANS: Record<Exclude<PlanId, 'free_pass'>, PlanPricingConfig> = {
   starter: {
-    price: 79,
+    price: 75,
     usersIncluded: 1,
     extraSeatPrice: null,
   },
   professional: {
-    price: 149,
-    usersIncluded: 2,
+    price: 150,
+    usersIncluded: 3,
     extraSeatPrice: 29,
   },
   contractor: {
     price: 249,
-    usersIncluded: 2,
+    usersIncluded: null,
     extraSeatPrice: 29,
   },
   enterprise: {
@@ -50,14 +50,14 @@ export const PRICING_PLANS: Record<Exclude<PlanId, 'free_pass'>, PlanPricingConf
 
 // ─── Display helpers ──────────────────────────────────────────────────────────
 
-/** Returns "$79/mo", "Custom pricing", etc. */
+/** Returns "$75/mo", "Custom pricing", etc. */
 export function formatPlanPrice(planId: Exclude<PlanId, 'free_pass'>): string {
   const cfg = PRICING_PLANS[planId];
   if (!cfg.price) return 'Custom pricing';
   return `$${cfg.price}/mo`;
 }
 
-/** Returns "$79/month", "Custom", etc. — for longer displays */
+/** Returns "$75/month", "Custom", etc. — for longer displays */
 export function formatPlanPriceLong(planId: Exclude<PlanId, 'free_pass'>): string {
   const cfg = PRICING_PLANS[planId];
   if (!cfg.price) return 'Custom';
@@ -69,7 +69,7 @@ export function formatSeatLimit(planId: Exclude<PlanId, 'free_pass'>): string {
   const cfg = PRICING_PLANS[planId];
   if (cfg.usersIncluded === null) return 'Unlimited users';
   if (cfg.usersIncluded === 1)    return '1 user included';
-  return `${cfg.usersIncluded} users included`;
+  return `Up to ${cfg.usersIncluded} users included`;
 }
 
 /** Returns extra seat messaging or null if not applicable */
@@ -91,21 +91,19 @@ export interface ComparisonFeature {
 }
 
 export const COMPARISON_TABLE: ComparisonFeature[] = [
-  { label: 'System Design Engine',       starter: 'yes',       professional: 'yes',     contractor: 'yes'     },
-  { label: 'Proposal Generation',        starter: 'Preview',   professional: 'yes',     contractor: 'yes'     },
-  { label: 'Permit Plan Sets',           starter: 'no',        professional: 'partial', contractor: 'yes'     },
-  { label: 'Single-Line Diagram (SLD)',  starter: 'no',        professional: 'partial', contractor: 'yes'     },
-  { label: 'Bill of Materials (BOM)',    starter: 'no',        professional: 'partial', contractor: 'yes'     },
-  { label: 'CRM & Pipeline',            starter: 'no',        professional: 'partial', contractor: 'yes'     },
-  { label: 'Team Collaboration',         starter: 'no',        professional: 'yes',     contractor: 'yes'     },
-  { label: 'Engineering Automation',     starter: 'no',        professional: 'partial', contractor: 'yes'     },
-  { label: 'Site Survey Integration',    starter: 'no',        professional: 'yes',     contractor: 'yes'     },
-  { label: 'Homeowner Portal',           starter: 'no',        professional: 'yes',     contractor: 'yes'     },
-  { label: 'Sol Fence Design',           starter: 'no',        professional: 'no',      contractor: 'yes'     },
-  { label: 'API Access',                 starter: 'no',        professional: 'no',      contractor: 'yes'     },
-  { label: 'Team Members',              starter: '1 user',    professional: 'Up to 2', contractor: '2 + add-ons' },
-  { label: 'Active Projects',            starter: 'Limited',   professional: 'Unlimited', contractor: 'Unlimited' },
-  { label: 'Support',                    starter: 'Email',     professional: 'Priority', contractor: 'Dedicated' },
+  { label: '3D Design Studio',          starter: 'yes',       professional: 'yes',       contractor: 'yes'       },
+  { label: 'Projects',                  starter: '10',        professional: 'Unlimited', contractor: 'Unlimited' },
+  { label: 'Clients',                   starter: '25',        professional: 'Unlimited', contractor: 'Unlimited' },
+  { label: 'Electrical Engineering (SLD)', starter: 'no',     professional: 'yes',       contractor: 'yes'       },
+  { label: 'Sol Fence Design',          starter: 'no',        professional: 'yes',       contractor: 'yes'       },
+  { label: 'BOM + Structural Calcs',    starter: 'no',        professional: 'yes',       contractor: 'yes'       },
+  { label: 'Permit Packages',           starter: 'no',        professional: 'yes',       contractor: 'yes'       },
+  { label: 'Proposal E-Signing',        starter: 'no',        professional: 'yes',       contractor: 'yes'       },
+  { label: 'White-Label Branding',      starter: 'no',        professional: 'yes',       contractor: 'yes'       },
+  { label: 'Team Members',             starter: 'no',        professional: 'Up to 3',   contractor: 'Unlimited' },
+  { label: 'Priority Support',          starter: 'no',        professional: 'yes',       contractor: 'yes'       },
+  { label: 'Dedicated Onboarding',      starter: 'no',        professional: 'no',        contractor: 'yes'       },
+  { label: 'SLA Support',               starter: 'no',        professional: 'no',        contractor: 'yes'       },
 ];
 
 // ─── Plan display metadata (UI-only, not billing) ────────────────────────────
@@ -169,21 +167,24 @@ export const PLAN_DISPLAY: PlanDisplayMeta[] = [
 export const PLAN_FEATURES: Record<Exclude<PlanId, 'free_pass'>, { included: string[]; notIncluded: string[] }> = {
   starter: {
     included: [
-      'Basic system design',
-      'Proposal generation (preview)',
-      'Limited project management',
+      '3D design studio',
+      'Up to 10 projects',
+      'Up to 25 clients',
       'Production analysis (NREL PVWatts)',
       'Google Solar API integration',
       'Utility rate calculators',
+      'Proposal generation (preview)',
       'Email support',
     ],
     notIncluded: [
-      'Full engineering / permit automation',
-      'SLD & BOM generation',
-      'Proposal e-signing',
-      'CRM & pipeline tracking',
-      'Team collaboration',
+      'Electrical engineering (SLD)',
+      'BOM + structural calcs',
+      'Permit packages',
       'Sol Fence design',
+      'Proposal e-signing',
+      'White-label branding',
+      'Team members',
+      'Priority support',
     ],
   },
   professional: {
@@ -191,11 +192,15 @@ export const PLAN_FEATURES: Record<Exclude<PlanId, 'free_pass'>, { included: str
       'Everything in Starter',
       'Advanced design tools',
       'Full proposal engine with e-signing',
-      'Expanded project tracking',
+      'Unlimited projects & clients',
+      'Electrical engineering (SLD)',
+      'BOM + structural calcs',
+      'Permit packages',
+      'Sol Fence design',
       'Site survey integration',
       'Homeowner portal',
       'White-label branding',
-      'Battery system design',
+      'Up to 3 team members',
       'Priority support',
     ],
     notIncluded: [],
@@ -203,12 +208,7 @@ export const PLAN_FEATURES: Record<Exclude<PlanId, 'free_pass'>, { included: str
   contractor: {
     included: [
       'Everything in Professional',
-      'Full engineering automation',
-      'Permit-ready plan sets',
-      'Single-line diagrams (SLD)',
-      'Bill of materials (BOM)',
-      'CRM + pipeline tracking',
-      'Sol Fence design',
+      'Unlimited team members',
       'Operations dashboard',
       'API access',
       'Dedicated onboarding',
