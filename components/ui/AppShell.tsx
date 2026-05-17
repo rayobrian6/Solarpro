@@ -15,6 +15,7 @@ import {
 import SubscriptionBanner from './SubscriptionBanner';
 import { hasPlatformAccess } from '@/lib/permissions';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
+import GuidedTourController from '@/components/onboarding/GuidedTourController';
 import { useUser, getAccountBadge, isAdminRole } from '@/contexts/UserContext';
 import { logClick, logNavigation } from '@/lib/debug/clickAudit';
 import { useAppStore } from '@/store/appStore';
@@ -656,11 +657,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {navItems.map((item) => {
           const active = isActive(item.href);
           const href = navHref(item.href);
+          // Extract tour key from href: '/clients' -> 'clients', '/design' -> 'design'
+          const tourKey = item.href.replace(/^\//, '') || 'dashboard';
           return (
             <Link
               key={item.href}
               href={href}
               onClick={() => logNavigation(item.href)}
+              data-tour={tourKey}
               className={`
                 flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
                 ${collapsed ? 'justify-center px-2' : ''}
@@ -944,6 +948,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* Guided tour overlay — fires once for new users */}
+      <GuidedTourController />
 
       {/* Mini toast for header actions */}
       {toast.Toast}

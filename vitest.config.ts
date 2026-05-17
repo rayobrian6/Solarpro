@@ -1,13 +1,25 @@
 import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
+  plugins: [react()],
   test: {
     environment: 'node',
     globals: true,
     testTimeout: 10000,
     hookTimeout: 10000,
-    include: ['tests/**/*.test.ts', 'lib/**/*.test.ts', 'components/**/*.test.ts'],
+    include: [
+      'tests/**/*.test.ts',
+      'tests/**/*.test.tsx',
+      'lib/**/*.test.ts',
+      'lib/**/*.test.tsx',
+      'components/**/*.test.ts',
+      'components/**/*.test.tsx',
+    ],
+    // Per-file environment overrides: use the @vitest-environment docblock
+    // comment at the top of each .test.tsx file that needs jsdom.
+    // e.g.: /** @vitest-environment jsdom */
     // These are custom-runner golden test scripts (use their own test() fn,
     // not vitest's describe/it). Run manually: `npx tsx lib/<file>.test.ts`.
     exclude: [
@@ -20,8 +32,13 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],
-      include: ['lib/**/*.ts', 'app/api/**/*.ts'],
-      exclude: ['node_modules', '.next'],
+      include: [
+        'lib/**/*.ts',
+        'app/api/**/*.ts',
+        'components/onboarding/**/*.ts',
+        'components/onboarding/**/*.tsx',
+      ],
+      exclude: ['node_modules', '.next', '**/*.test.*', '**/*.spec.*'],
     },
   },
   resolve: {
