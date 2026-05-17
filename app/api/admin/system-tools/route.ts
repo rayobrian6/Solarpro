@@ -789,65 +789,70 @@ export async function POST(req: NextRequest) {
           { name: 'El Paso Electric',            state: 'NM', nm: true,  limit_kw: 80,    buyback: 0.118, structure: 'Flat',            notes: 'NM NEM retail; RS flat; NM/TX border 2024' },
         ];
 
-        // PERF FIX: Replaced ~240 serial DB queries with batched parallel upserts.
-        // Process utilities in batches of 20 concurrent upserts to stay within
-        // Neon connection limits while still being much faster than sequential.
-        let seedCount = 0;
-        const seedLog: string[] = [];
-        const BATCH_SIZE = 20;
+        // PERF FIX (v2): Single-round-trip bulk upsert.
+        // Migration 042 added UNIQUE(utility_name, state) which enables true
+        // ON CONFLICT (utility_name, state) DO UPDATE in one query instead of
+        // ~120 batched UPDATE+INSERT pairs (~240 serial round-trips → 1).
+        //
+        // The Neon NeonQueryFunction supports calling as sql(queryString, params[])
+        // in addition to the tagged-template form, which lets us pass a
+        // dynamically-built VALUES clause with $N parameters.
+        const seedTotal = utilitySeeds.length;
 
-        for (let i = 0; i < utilitySeeds.length; i += BATCH_SIZE) {
-          const batch = utilitySeeds.slice(i, i + BATCH_SIZE);
-          const results = await Promise.allSettled(
-            batch.map(async (u) => {
-              const updated = await sql`
-                UPDATE utility_policies SET
-                  net_metering             = ${u.nm},
-                  interconnection_limit_kw = ${u.limit_kw},
-                  buyback_rate             = ${u.buyback},
-                  rate_structure           = ${u.structure},
-                  notes                    = ${u.notes},
-                  updated_at               = NOW()
-                WHERE LOWER(TRIM(utility_name)) = LOWER(TRIM(${u.name}))
-                  AND state = ${u.state}
-                RETURNING id
-              `;
-              if (updated.length > 0) {
-                return { action: 'updated', name: u.name, state: u.state };
-              }
-              await sql`
-                INSERT INTO utility_policies
-                  (utility_name, state, country, net_metering,
-                   interconnection_limit_kw, buyback_rate, rate_structure, notes, source)
-                VALUES
-                  (${u.name}, ${u.state}, 'US', ${u.nm},
-                   ${u.limit_kw}, ${u.buyback}, ${u.structure}, ${u.notes}, 'seeded')
-                ON CONFLICT DO NOTHING
-              `;
-              return { action: 'inserted', name: u.name, state: u.state };
-            })
+        // Build VALUES placeholders and flat params array
+        const valuePlaceholders: string[] = [];
+        const params: (string | boolean | number | null)[] = [];
+        let p = 1;
+        for (const u of utilitySeeds) {
+          valuePlaceholders.push(
+            `($${p++},$${p++},'US',$${p++},$${p++},$${p++},$${p++},$${p++},'seeded')`
           );
-
-          for (const result of results) {
-            if (result.status === 'fulfilled') {
-              seedCount++;
-              seedLog.push(`${result.value.action}: ${result.value.name} (${result.value.state})`);
-            } else {
-              seedLog.push(`FAILED: ${(result.reason as Error).message}`);
-            }
-          }
+          params.push(u.name, u.state, u.nm, u.limit_kw, u.buyback, u.structure, u.notes);
         }
+
+        const queryText = `
+          INSERT INTO utility_policies
+            (utility_name, state, country,
+             net_metering, interconnection_limit_kw, buyback_rate,
+             rate_structure, notes, source)
+          VALUES ${valuePlaceholders.join(',')}
+          ON CONFLICT (utility_name, state)
+          DO UPDATE SET
+            net_metering             = EXCLUDED.net_metering,
+            interconnection_limit_kw = EXCLUDED.interconnection_limit_kw,
+            buyback_rate             = EXCLUDED.buyback_rate,
+            rate_structure           = EXCLUDED.rate_structure,
+            notes                    = EXCLUDED.notes,
+            updated_at               = NOW()
+          RETURNING utility_name, state,
+            (xmax = 0) AS inserted
+        `;
+
+        // sql() called as ordinary function with (queryString, params[])
+        // — documented Neon API alongside the tagged-template form
+        const upserted = await sql(queryText, params) as
+          { utility_name: string; state: string; inserted: boolean }[];
+
+        const seedCount  = upserted.length;
+        const insertedN  = upserted.filter(r => r.inserted).length;
+        const updatedN   = seedCount - insertedN;
+        const seedLog    = upserted.map(
+          r => `${r.inserted ? 'inserted' : 'updated'}: ${r.utility_name} (${r.state})`
+        );
+
         await logAdminAction({
           adminId: admin.id,
           action: 'seed_utility_policies',
-          metadata: { seeded: seedCount, total: utilitySeeds.length },
+          metadata: { seeded: seedCount, inserted: insertedN, updated: updatedN, total: seedTotal },
         });
         return NextResponse.json({
           success: true,
-          message: `✅ Utility policies seeded: ${seedCount}/${utilitySeeds.length} utilities upserted`,
+          message: `✅ Utility policies seeded: ${seedCount}/${seedTotal} upserted (${insertedN} new, ${updatedN} updated)`,
           details: seedLog,
           seeded: seedCount,
-          total: utilitySeeds.length,
+          inserted: insertedN,
+          updated: updatedN,
+          total: seedTotal,
         });
       }
 

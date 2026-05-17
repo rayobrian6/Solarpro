@@ -8,7 +8,7 @@
 
 export const dynamic     = 'force-dynamic';
 export const runtime     = 'nodejs';
-export const maxDuration = 20;
+export const maxDuration = 30; // bumped from 20 — getDbReady cold-start headroom
 
 import { NextRequest, NextResponse }                    from 'next/server';
 import { requireAdminApi }                              from '@/lib/adminAuth';

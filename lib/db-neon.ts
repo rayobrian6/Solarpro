@@ -1952,7 +1952,7 @@ export interface SiteAlias {
 
 /**
  * Save a learned alias.
- * Creates the site_aliases table if it doesn't exist (auto-migration).
+ * Table is created by migration 018_site_aliases.sql.
  * Upserts on (user_id, phrase) — same phrase from same user updates the route.
  */
 export async function solardogSaveAlias(

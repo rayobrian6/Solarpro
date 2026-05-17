@@ -3,7 +3,7 @@ import { getDbReady } from '@/lib/db-neon';
 
 export const dynamic     = 'force-dynamic';
 export const runtime     = 'nodejs';
-export const maxDuration = 15;
+export const maxDuration = 30; // bumped from 15 — getDbReady cold-start headroom
 
 /**
  * GET /api/proposals/[id]/signature
