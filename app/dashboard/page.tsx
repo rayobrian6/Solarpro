@@ -705,15 +705,27 @@ export default function CommandCenter() {
     } catch { return new Set<string>(); }
   });
 
-  // Workflow banner — dismissible, stored in localStorage
+  // Workflow banner — snoozable for 7 days, NOT permanently dismissed
+  // Reads a timestamp; if it's older than 7 days (or absent), shows the banner
   const [showWorkflowBanner, setShowWorkflowBanner] = useState(() => {
     if (typeof window === 'undefined') return true;
-    try { return localStorage.getItem('solarpro:workflowBannerDismissed') !== '1'; }
-    catch { return true; }
+    try {
+      const snoozedUntil = localStorage.getItem('solarpro:workflowBannerSnoozedUntil');
+      if (!snoozedUntil) return true;
+      return Date.now() > Number(snoozedUntil);
+    } catch { return true; }
   });
   const dismissWorkflowBanner = () => {
     setShowWorkflowBanner(false);
-    try { localStorage.setItem('solarpro:workflowBannerDismissed', '1'); } catch { /* ignore */ }
+    try {
+      // Snooze for 7 days from now
+      const until = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      localStorage.setItem('solarpro:workflowBannerSnoozedUntil', String(until));
+    } catch { /* ignore */ }
+  };
+  const restoreWorkflowBanner = () => {
+    setShowWorkflowBanner(true);
+    try { localStorage.removeItem('solarpro:workflowBannerSnoozedUntil'); } catch { /* ignore */ }
   };
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
@@ -1012,6 +1024,17 @@ export default function CommandCenter() {
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Workflow guide restore — only visible when banner is hidden */}
+                {!showWorkflowBanner && (
+                  <button
+                    onClick={restoreWorkflowBanner}
+                    title="Show workflow guide"
+                    className="w-7 h-7 rounded-lg border border-amber-500/20 bg-amber-500/5 text-amber-600 hover:text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center justify-center flex-shrink-0"
+                    aria-label="Show workflow guide"
+                  >
+                    <Play size={10} className="fill-current ml-0.5" />
+                  </button>
+                )}
                 <button onClick={() => setShowBillUpload(true)}
                   data-tour="bill"
                   className="btn-secondary btn-sm flex items-center gap-1.5">
@@ -1028,11 +1051,12 @@ export default function CommandCenter() {
           {showWorkflowBanner && (
             <div className="relative rounded-xl border border-amber-500/20 bg-gradient-to-r from-slate-800/60 via-slate-800/40 to-slate-800/60 px-4 py-3 overflow-hidden">
               <div className="absolute inset-0 bg-amber-500/3 pointer-events-none" />
-              {/* Dismiss button */}
+              {/* Dismiss button — snoozes for 7 days */}
               <button
                 onClick={dismissWorkflowBanner}
+                title="Hide for 7 days"
                 className="absolute top-2.5 right-2.5 text-slate-500 hover:text-slate-300 transition-colors p-0.5 rounded"
-                aria-label="Dismiss workflow guide"
+                aria-label="Hide workflow guide for 7 days"
               >
                 <X size={13} />
               </button>
