@@ -704,6 +704,17 @@ export default function CommandCenter() {
       return raw ? new Set<string>(JSON.parse(raw) as string[]) : new Set<string>();
     } catch { return new Set<string>(); }
   });
+
+  // Workflow banner — dismissible, stored in localStorage
+  const [showWorkflowBanner, setShowWorkflowBanner] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try { return localStorage.getItem('solarpro:workflowBannerDismissed') !== '1'; }
+    catch { return true; }
+  });
+  const dismissWorkflowBanner = () => {
+    setShowWorkflowBanner(false);
+    try { localStorage.setItem('solarpro:workflowBannerDismissed', '1'); } catch { /* ignore */ }
+  };
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
     commandId?: string;
@@ -1012,6 +1023,69 @@ export default function CommandCenter() {
               </div>
             </div>
           </div>
+
+          {/* ══════════ WORKFLOW PROCESS BANNER ══════════ */}
+          {showWorkflowBanner && (
+            <div className="relative rounded-xl border border-amber-500/20 bg-gradient-to-r from-slate-800/60 via-slate-800/40 to-slate-800/60 px-4 py-3 overflow-hidden">
+              <div className="absolute inset-0 bg-amber-500/3 pointer-events-none" />
+              {/* Dismiss button */}
+              <button
+                onClick={dismissWorkflowBanner}
+                className="absolute top-2.5 right-2.5 text-slate-500 hover:text-slate-300 transition-colors p-0.5 rounded"
+                aria-label="Dismiss workflow guide"
+              >
+                <X size={13} />
+              </button>
+              {/* Header */}
+              <div className="flex items-center gap-2 mb-2.5">
+                <Play size={11} className="text-amber-400 fill-amber-400" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-500">SolarPro Workflow</span>
+                <span className="text-[10px] text-slate-500">— follow these steps for every project</span>
+              </div>
+              {/* Steps */}
+              <div className="flex items-center gap-0 flex-wrap">
+                {[
+                  { step: 1, label: 'Bill',        sub: 'Upload & analyze',  href: null,         color: 'amber'  },
+                  { step: 2, label: 'System',      sub: 'Size the system',   href: null,         color: 'blue'   },
+                  { step: 3, label: 'Design',      sub: 'Layout & 3D',       href: '/design',    color: 'violet' },
+                  { step: 4, label: 'Engineering', sub: 'Stamp & permits',   href: null,         color: 'teal'   },
+                  { step: 5, label: 'Proposal',    sub: 'Generate & share',  href: null,         color: 'emerald'},
+                  { step: 6, label: 'Send',        sub: 'E-sign & close',    href: null,         color: 'green'  },
+                ].map(({ step, label, sub, href, color }, i, arr) => {
+                  const colorMap: Record<string, { dot: string; text: string; badge: string }> = {
+                    amber:   { dot: 'bg-amber-400',   text: 'text-amber-300',   badge: 'bg-amber-500/15 border-amber-500/30'   },
+                    blue:    { dot: 'bg-blue-400',    text: 'text-blue-300',    badge: 'bg-blue-500/15 border-blue-500/30'    },
+                    violet:  { dot: 'bg-violet-400',  text: 'text-violet-300',  badge: 'bg-violet-500/15 border-violet-500/30' },
+                    teal:    { dot: 'bg-teal-400',    text: 'text-teal-300',    badge: 'bg-teal-500/15 border-teal-500/30'    },
+                    emerald: { dot: 'bg-emerald-400', text: 'text-emerald-300', badge: 'bg-emerald-500/15 border-emerald-500/30'},
+                    green:   { dot: 'bg-green-400',   text: 'text-green-300',   badge: 'bg-green-500/15 border-green-500/30'  },
+                  };
+                  const c = colorMap[color];
+                  const inner = (
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${c.badge} ${href ? 'cursor-pointer hover:brightness-125' : ''}`}>
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black text-slate-900 flex-shrink-0 ${c.dot}`}>
+                        {step}
+                      </div>
+                      <div>
+                        <div className={`text-xs font-bold leading-none ${c.text}`}>{label}</div>
+                        <div className="text-[9px] text-slate-500 mt-0.5 leading-none">{sub}</div>
+                      </div>
+                    </div>
+                  );
+                  return (
+                    <React.Fragment key={label}>
+                      {href ? (
+                        <Link href={href}>{inner}</Link>
+                      ) : inner}
+                      {i < arr.length - 1 && (
+                        <ChevronRight size={12} className="text-slate-600 flex-shrink-0 mx-0.5" />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
           {!dashLoading && (
