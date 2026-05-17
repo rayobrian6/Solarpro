@@ -73,28 +73,37 @@ export default function TutorialPanel({
   videoId,
   duration,
 }: TutorialPanelProps) {
-  // Start expanded on first render; SSR-safe (never read localStorage server-side)
+  // Start collapsed by default — user opens it when they want it
   const [expanded, setExpanded] = useState(false);
   const [mounted, setMounted]   = useState(false);
 
   // Hydrate from localStorage after mount (client-only)
+  // Only expand if user has explicitly opened it before (key set to '0')
   useEffect(() => {
-    setExpanded(!isCollapsedInStorage(tabId));
+    const stored = localStorage.getItem(storageKey(tabId));
+    // null  = never touched → stay collapsed
+    // '1'   = explicitly dismissed → stay collapsed
+    // '0'   = user opened it → expand
+    setExpanded(stored === '0');
     setMounted(true);
   }, [tabId]);
 
   const toggle = () => {
     const next = !expanded;
     setExpanded(next);
-    // Persist collapse (not expand — collapse is the "don't show again" action)
-    if (!next) setCollapsedInStorage(tabId, true);
-    else setCollapsedInStorage(tabId, false);
+    if (next) {
+      // User opened it — remember so it stays open on revisit
+      localStorage.setItem(storageKey(tabId), '0');
+    } else {
+      // User closed it — mark dismissed
+      localStorage.setItem(storageKey(tabId), '1');
+    }
   };
 
   const dismiss = (e: React.MouseEvent) => {
     e.stopPropagation();
     setExpanded(false);
-    setCollapsedInStorage(tabId, true);
+    localStorage.setItem(storageKey(tabId), '1');
   };
 
   // Don't render until hydrated to avoid SSR mismatch
