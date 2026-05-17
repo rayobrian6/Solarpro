@@ -9,6 +9,7 @@ import {
   TrendingUp, Home, ExternalLink, PenLine,
   Info, CheckCircle, ChevronRight, Star,
   Activity, Leaf, Battery, BarChart3, User, Sparkles,
+  FileText, Download, Gift, Copy, Link2,
 } from 'lucide-react';
 import {
   getInterconnectionProfile,
@@ -627,6 +628,113 @@ function ProjectedBenefits({ systemSizeKw, stage }: { systemSizeKw: number | nul
   );
 }
 
+// ─── Document Vault ───────────────────────────────────────────────
+// Shows files the homeowner uploaded (utility bills + portal uploads).
+
+function DocumentVault({ documents }: { documents: PortalDocument[] }) {
+  if (documents.length === 0) return null;
+
+  function fmtDate(iso: string): string {
+    try { return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+    catch { return ''; }
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/[0.06] bg-white/[0.01] px-6 sm:px-8 py-6">
+      <div className="flex items-center gap-2 mb-4">
+        <FileText size={14} className="text-blue-400/60" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Your Documents</span>
+      </div>
+      <div className="space-y-2">
+        {documents.map((doc, i) => (
+          <div key={i} className="flex items-center gap-3 rounded-xl bg-white/[0.02] border border-white/[0.04] px-4 py-3">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/[0.08] border border-blue-500/[0.12] flex items-center justify-center flex-shrink-0">
+              <FileText size={13} className="text-blue-400/50" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-white truncate">{doc.label}</p>
+              <p className="text-[10px] text-slate-600">{fmtDate(doc.uploaded_at)}</p>
+            </div>
+            <Download size={13} className="text-slate-600 flex-shrink-0" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Referral Link Generator ────────────────────────────────────────────
+// Only shown after install_scheduled or completed.
+
+const REFERRAL_ELIGIBLE_STAGES: string[] = ['install_scheduled', 'completed'];
+
+function ReferralSection({
+  stage, ownerCompany, clientName,
+}: {
+  stage: HomeownerStage | null;
+  ownerCompany: string | null;
+  clientName: string;
+}) {
+  if (!stage || !REFERRAL_ELIGIBLE_STAGES.includes(stage)) return null;
+
+  const [copied, setCopied] = useState(false);
+
+  const base = typeof window !== 'undefined'
+    ? window.location.origin
+    : (process.env.NEXT_PUBLIC_BASE_URL ?? '');
+  const safeRef = encodeURIComponent(clientName.split(' ')[0] ?? 'friend');
+  const referralUrl = `${base}/portal?ref=${safeRef}`;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(referralUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      const input = document.createElement('input');
+      input.value = referralUrl;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-amber-500/[0.15] bg-amber-500/[0.02] px-6 sm:px-8 py-6">
+      <div className="flex items-center gap-2 mb-1">
+        <Gift size={13} className="text-amber-400/60" />
+        <span className="text-[10px] font-black uppercase tracking-widest text-amber-500/60">Refer a Neighbor</span>
+      </div>
+      <h3 className="text-base font-black text-white mb-1">Love your solar? Share it.</h3>
+      <p className="text-sm text-slate-400 leading-relaxed mb-4">
+        Share your referral link with friends and neighbors.
+        {ownerCompany ? ` ${ownerCompany} would love to help your community go solar.` : ''}
+      </p>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 flex items-center gap-2 rounded-xl bg-white/[0.03] border border-white/[0.06] px-3 py-2 min-w-0">
+          <Link2 size={11} className="text-slate-600 flex-shrink-0" />
+          <span className="text-[11px] text-slate-500 truncate font-mono">{referralUrl}</span>
+        </div>
+        <button
+          onClick={copyLink}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-xs transition-all flex-shrink-0"
+          style={{
+            background: copied ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.12)',
+            color: copied ? '#4ade80' : '#fbbf24',
+            border: copied ? '1px solid rgba(34,197,94,0.2)' : '1px solid rgba(245,158,11,0.2)',
+          }}
+        >
+          {copied ? <CheckCircle size={11} /> : <Copy size={11} />}
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Phase 6: Monitoring Foundation (completed stage only) ───────────────────
 // Architecture ready — populated by live monitoring integration in a future release.
 
@@ -681,7 +789,6 @@ export default function PortalDashboard() {
   const [error,         setError]         = useState('');
   const [mounted,       setMounted]       = useState(false);
 
-  void documents;
 
   const load = async () => {
     setLoading(true); setError('');
@@ -1084,6 +1191,16 @@ export default function PortalDashboard() {
                 </div>
               );
             })()}
+
+            {/* ══ DOCUMENT VAULT ════════════════════════════════════════════ */}
+            <DocumentVault documents={documents} />
+
+            {/* ══ REFERRAL LINK GENERATOR ═════════════════════════════════ */}
+            <ReferralSection
+              stage={stage}
+              ownerCompany={owner?.company ?? null}
+              clientName={client?.name ?? ''}
+            />
 
             {/* ══ PHASE 6: MONITORING FOUNDATION (completed) ══════════════ */}
             <MonitoringFoundation stage={stage} />
