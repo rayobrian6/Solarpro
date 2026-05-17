@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Sun, LayoutDashboard, Users, FolderOpen, Zap,
-  FileText, Settings, ChevronLeft, ChevronRight,
+  FileText, Settings, ChevronLeft, ChevronRight, DollarSign,
   Bell, Search, Menu, X,
   Cpu, BarChart3, Map, Home, Sprout, Fence,
   LogOut, HelpCircle, ExternalLink, Wrench,
@@ -34,7 +34,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Command Center', href: '/dashboard',  icon: <LayoutDashboard size={17} /> },
+  { label: 'Dashboard',      href: '/dashboard',  icon: <LayoutDashboard size={17} /> },
   { label: 'Clients',       href: '/clients',    icon: <Users size={17} /> },
   { label: 'Projects',      href: '/projects',   icon: <FolderOpen size={17} />, color: 'text-amber-400' },
   { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
@@ -43,7 +43,7 @@ const navItems: NavItem[] = [
   { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
   { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
   { label: 'Equipment Library', href: '/hardware', icon: <Cpu size={17} /> },
-  { label: 'Pricing',           href: '/pricing',  icon: <Settings size={17} /> },
+  { label: 'Pricing',           href: '/pricing',  icon: <DollarSign size={17} /> },
 ];
 
 const systemTypes = [

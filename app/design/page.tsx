@@ -257,12 +257,19 @@ function DesignContent({ onQuickLaunch }: { onQuickLaunch?: (p: Project) => void
           <p className="text-slate-400 text-sm">Loading projects...</p>
         </div>
       ) : projects.length === 0 ? (
-        <div className="card p-8 text-center">
-          <Map size={36} className="text-slate-600 mx-auto mb-3" />
-          <p className="text-slate-400 font-medium text-sm">No saved projects yet</p>
-          <p className="text-slate-500 text-xs mt-1 mb-4">Use Quick Launch above to open 3D design, or create a project to save your work.</p>
+        <div className="card p-10 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
+            <Map size={28} className="text-amber-400" />
+          </div>
+          <p className="text-white font-semibold text-base mb-1">Create your first project to get started</p>
+          <p className="text-slate-400 text-sm mb-2 max-w-xs mx-auto">
+            Projects save your roof layout, system design, and proposals in one place.
+          </p>
+          <p className="text-slate-500 text-xs mb-5">
+            Tip: use the <span className="text-amber-400 font-medium">Quick Design Session</span> panel above to explore the tool without saving.
+          </p>
           <Link href="/projects/new" className="btn-primary inline-flex text-sm">
-            <Plus size={14} /> Create Project
+            <Plus size={14} /> Create Your First Project
           </Link>
         </div>
       ) : (
@@ -317,7 +324,7 @@ function DesignPageInner() {
           <span className="text-xs text-slate-400">Design Studio</span>
           <span className="text-xs text-amber-400 ml-1">— {activeProject.name}</span>
           <span className="ml-auto text-xs text-slate-500 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-            Quick Launch (unsaved)
+            Quick Design Session
           </span>
         </div>
         <div className="flex-1 min-h-0">

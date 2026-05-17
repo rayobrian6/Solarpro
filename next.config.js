@@ -91,6 +91,10 @@ const BUILD_VERSION = versionMatch ? versionMatch[1] : 'unknown';
 
 const nextConfig = {
   reactStrictMode: true,
+  // Strip console.log calls in production builds (console.warn/error are preserved)
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false,
+  },
   typescript: {
     // Pre-existing TS errors across codebase (missing @types/node, lucide-react, etc.)
     // Runtime behavior is correct; type errors are environment/tooling issues.
