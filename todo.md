@@ -34,4 +34,4 @@
 ## 7. QA + Commit
 - [x] Run targeted tests
 - [x] Run TypeScript check / lint as feasible
-- [ ] Commit and push dev only
+- [x] Commit and push dev only
