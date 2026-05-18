@@ -9,6 +9,7 @@ import {
   XCircle, Play, Eye, Star, Target, Layers,
   Inbox, Cpu, Webhook, RotateCcw, StopCircle,
   CheckCheck, Loader2, Ban, FlaskConical,
+  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink,
 } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -690,6 +691,7 @@ const TABS = [
   { id: 'intake',      label: 'Intake Feed',        icon: Inbox },
   { id: 'enrichment',  label: 'Enrichment Queue',   icon: Cpu },
   { id: 'webhooks',    label: 'Webhook Log',        icon: Webhook },
+  { id: 'campaigns',   label: 'Campaigns',          icon: Megaphone },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -830,6 +832,7 @@ export default function NetworkControlCenter() {
         {activeTab === 'intake' && <IntakeFeedSection />}
         {activeTab === 'enrichment' && <EnrichmentQueueSection />}
         {activeTab === 'webhooks' && <WebhookLogSection />}
+        {activeTab === 'campaigns' && <CampaignsSection />}
       </div>
     </div>
   );
@@ -1536,6 +1539,532 @@ function ContractorMatchPanel() {
       {result?.error && (
         <div className="p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-sm text-red-400">
           {String(result.error)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CampaignsSection
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Campaign {
+  id: string;
+  name: string;
+  description: string | null;
+  campaign_type: string;
+  status: string;
+  platform: string | null;
+  funnel_name: string | null;
+  funnel_slug: string | null;
+  daily_budget_cents: number | null;
+  monthly_budget_cents: number | null;
+  total_budget_cents: number | null;
+  cost_per_lead_target_cents: number | null;
+  leads_target: number | null;
+  leads_received: number;
+  leads_qualified: number;
+  leads_converted: number;
+  total_spend_cents: number;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  actual_cpl_cents: number | null;
+  conversion_rate_pct: number;
+  qualification_rate_pct: number;
+  start_date: string | null;
+  end_date: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+interface CampaignSummary {
+  active_count: number;
+  active_daily_budget_cents: number;
+  total_leads: number;
+  total_conversions: number;
+  total_spend_cents: number;
+}
+
+const CAMPAIGN_STATUS_COLORS: Record<string, string> = {
+  draft:     'bg-zinc-700 text-zinc-300',
+  active:    'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+  paused:    'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30',
+  completed: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+  archived:  'bg-zinc-800 text-zinc-500',
+};
+
+const PLATFORM_COLORS: Record<string, string> = {
+  google_ads: 'text-blue-400',
+  meta:       'text-indigo-400',
+  tiktok:     'text-pink-400',
+  organic:    'text-emerald-400',
+  email:      'text-amber-400',
+};
+
+const PLATFORM_ICONS: Record<string, string> = {
+  google_ads: '🔵',
+  meta:       '📘',
+  tiktok:     '🎵',
+  organic:    '🌿',
+  email:      '📧',
+};
+
+function fmtCents(cents: number | null): string {
+  if (!cents && cents !== 0) return '—';
+  if (cents >= 100000) return `$${(cents / 100000).toFixed(1)}k`;
+  return `$${(cents / 100).toFixed(0)}`;
+}
+
+function CampaignsSection() {
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [summary, setSummary] = useState<CampaignSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [platformFilter, setPlatformFilter] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [editCampaign, setEditCampaign] = useState<Campaign | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Form state
+  const [form, setForm] = useState({
+    name: '', description: '', campaign_type: 'paid_search', status: 'draft',
+    platform: '', funnel_id: '', daily_budget_cents: '', monthly_budget_cents: '',
+    cost_per_lead_target_cents: '', leads_target: '',
+    utm_source: '', utm_medium: '', utm_campaign: '', utm_content: '', utm_term: '',
+    start_date: '', end_date: '', notes: '',
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ limit: '50' });
+      if (statusFilter)   params.set('status', statusFilter);
+      if (platformFilter) params.set('platform', platformFilter);
+      const res = await fetch(`/api/admin/network/campaigns?${params}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load campaigns');
+      setCampaigns(data.campaigns || []);
+      setSummary(data.summary || null);
+    } catch (e: unknown) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [statusFilter, platformFilter]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  function resetForm() {
+    setForm({ name: '', description: '', campaign_type: 'paid_search', status: 'draft',
+      platform: '', funnel_id: '', daily_budget_cents: '', monthly_budget_cents: '',
+      cost_per_lead_target_cents: '', leads_target: '',
+      utm_source: '', utm_medium: '', utm_campaign: '', utm_content: '', utm_term: '',
+      start_date: '', end_date: '', notes: '' });
+  }
+
+  function openCreate() { resetForm(); setEditCampaign(null); setShowCreate(true); setSaveError(null); }
+  function openEdit(c: Campaign) {
+    setForm({
+      name: c.name || '', description: c.description || '',
+      campaign_type: c.campaign_type || 'paid_search', status: c.status || 'draft',
+      platform: c.platform || '', funnel_id: '',
+      daily_budget_cents: c.daily_budget_cents ? String(c.daily_budget_cents) : '',
+      monthly_budget_cents: c.monthly_budget_cents ? String(c.monthly_budget_cents) : '',
+      cost_per_lead_target_cents: c.cost_per_lead_target_cents ? String(c.cost_per_lead_target_cents) : '',
+      leads_target: c.leads_target ? String(c.leads_target) : '',
+      utm_source: c.utm_source || '', utm_medium: c.utm_medium || '',
+      utm_campaign: c.utm_campaign || '', utm_content: '', utm_term: '',
+      start_date: c.start_date ? c.start_date.slice(0,10) : '',
+      end_date: c.end_date ? c.end_date.slice(0,10) : '',
+      notes: c.notes || '',
+    });
+    setEditCampaign(c); setShowCreate(true); setSaveError(null);
+  }
+
+  async function handleSave() {
+    setSaving(true); setSaveError(null);
+    try {
+      const payload: Record<string, unknown> = {
+        name: form.name, description: form.description || null,
+        campaign_type: form.campaign_type, status: form.status,
+        platform: form.platform || null,
+        daily_budget_cents:         form.daily_budget_cents ? parseInt(form.daily_budget_cents) : null,
+        monthly_budget_cents:       form.monthly_budget_cents ? parseInt(form.monthly_budget_cents) : null,
+        cost_per_lead_target_cents: form.cost_per_lead_target_cents ? parseInt(form.cost_per_lead_target_cents) : null,
+        leads_target:               form.leads_target ? parseInt(form.leads_target) : null,
+        utm_source: form.utm_source || null, utm_medium: form.utm_medium || null,
+        utm_campaign: form.utm_campaign || null, utm_content: form.utm_content || null,
+        utm_term: form.utm_term || null,
+        start_date: form.start_date || null, end_date: form.end_date || null,
+        notes: form.notes || null,
+      };
+      if (editCampaign) payload.id = editCampaign.id;
+      const res = await fetch('/api/admin/network/campaigns', {
+        method: editCampaign ? 'PATCH' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed');
+      setShowCreate(false); resetForm(); void load();
+    } catch (e: unknown) {
+      setSaveError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleStatusChange(id: string, newStatus: string) {
+    try {
+      await fetch('/api/admin/network/campaigns', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, status: newStatus }),
+      });
+      void load();
+    } catch { /* ignore */ }
+  }
+
+  async function handleArchive(id: string) {
+    if (!confirm('Archive this campaign? It will be hidden from the active list.')) return;
+    await fetch('/api/admin/network/campaigns', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    void load();
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+            <Megaphone className="w-5 h-5 text-violet-400" />
+            Acquisition Campaigns
+          </h2>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            Track ad campaigns across Google, Meta, TikTok and organic. Every campaign links to an intake funnel.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => void load()}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors">
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
+          <button onClick={openCreate}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium transition-colors">
+            <PlusCircle className="w-3.5 h-3.5" /> New Campaign
+          </button>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          {[
+            { label: 'Active Campaigns', value: String(summary.active_count), icon: Zap, color: 'text-emerald-400' },
+            { label: 'Daily Budget', value: fmtCents(summary.active_daily_budget_cents), icon: DollarSign, color: 'text-blue-400' },
+            { label: 'Total Leads', value: summary.total_leads.toLocaleString(), icon: Users, color: 'text-violet-400' },
+            { label: 'Conversions', value: summary.total_conversions.toLocaleString(), icon: CheckCheck, color: 'text-emerald-400' },
+            { label: 'Total Spend', value: fmtCents(summary.total_spend_cents), icon: TrendingDown, color: 'text-amber-400' },
+          ].map(card => (
+            <div key={card.label} className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1">
+                <card.icon className={`w-4 h-4 ${card.color}`} />
+                <span className="text-xs text-zinc-500">{card.label}</span>
+              </div>
+              <div className="text-xl font-bold text-white">{card.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:ring-1 focus:ring-violet-500">
+          <option value="">All Statuses</option>
+          {['draft','active','paused','completed','archived'].map(s => (
+            <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>
+          ))}
+        </select>
+        <select value={platformFilter} onChange={e => setPlatformFilter(e.target.value)}
+          className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:ring-1 focus:ring-violet-500">
+          <option value="">All Platforms</option>
+          {['google_ads','meta','tiktok','organic','email'].map(p => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-sm text-red-400">
+          {error}
+        </div>
+      )}
+
+      {/* Campaigns Table */}
+      {loading ? (
+        <div className="flex items-center justify-center h-32 text-zinc-500">
+          <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading campaigns…
+        </div>
+      ) : campaigns.length === 0 ? (
+        <div className="flex flex-col items-center justify-center h-40 text-zinc-500 gap-2">
+          <Megaphone className="w-8 h-8 opacity-30" />
+          <p className="text-sm">No campaigns yet. Create one to start tracking ad performance.</p>
+          <button onClick={openCreate}
+            className="mt-2 px-4 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-lg text-xs text-white font-medium transition-colors">
+            Create First Campaign
+          </button>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-zinc-800 bg-zinc-900/50">
+                {['Campaign','Platform','Status','Funnel','Budget/mo','Leads','CPL (actual vs target)','Conv %','Actions'].map(h => (
+                  <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-zinc-500 whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/50">
+              {campaigns.map(c => (
+                <tr key={c.id} className="hover:bg-zinc-900/40 transition-colors group">
+                  {/* Campaign name */}
+                  <td className="px-4 py-3 max-w-[180px]">
+                    <div className="font-medium text-white text-xs truncate">{c.name}</div>
+                    {c.utm_campaign && (
+                      <div className="text-zinc-600 text-[10px] truncate mt-0.5">utm: {c.utm_campaign}</div>
+                    )}
+                  </td>
+                  {/* Platform */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className={`text-xs font-medium ${PLATFORM_COLORS[c.platform ?? ''] ?? 'text-zinc-400'}`}>
+                      {PLATFORM_ICONS[c.platform ?? ''] ?? '⚪'} {c.platform ?? '—'}
+                    </span>
+                  </td>
+                  {/* Status */}
+                  <td className="px-4 py-3">
+                    <select
+                      value={c.status}
+                      onChange={e => handleStatusChange(c.id, e.target.value)}
+                      className={`text-[10px] font-medium px-2 py-0.5 rounded-full cursor-pointer border-0 outline-none ${CAMPAIGN_STATUS_COLORS[c.status] ?? 'bg-zinc-700 text-zinc-300'} bg-transparent`}
+                    >
+                      {['draft','active','paused','completed','archived'].map(s => (
+                        <option key={s} value={s} className="bg-zinc-900 text-zinc-200">{s}</option>
+                      ))}
+                    </select>
+                  </td>
+                  {/* Funnel */}
+                  <td className="px-4 py-3">
+                    <span className="text-xs text-zinc-400">{c.funnel_name ?? '—'}</span>
+                  </td>
+                  {/* Budget */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className="text-xs text-zinc-300">{fmtCents(c.monthly_budget_cents)}</span>
+                    {c.daily_budget_cents != null && (
+                      <div className="text-[10px] text-zinc-600">{fmtCents(c.daily_budget_cents)}/day</div>
+                    )}
+                  </td>
+                  {/* Leads */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="text-xs text-zinc-300">
+                      <span className="text-white font-medium">{c.leads_received}</span>
+                      {c.leads_target != null && (
+                        <span className="text-zinc-600"> / {c.leads_target}</span>
+                      )}
+                    </div>
+                    {c.leads_target != null && c.leads_target > 0 && (
+                      <div className="mt-1 w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-violet-500 rounded-full"
+                          style={{ width: `${Math.min(100, Math.round((c.leads_received / c.leads_target) * 100))}%` }}
+                        />
+                      </div>
+                    )}
+                  </td>
+                  {/* CPL */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <div className="text-xs">
+                      <span className="text-white font-medium">{fmtCents(c.actual_cpl_cents)}</span>
+                      {c.cost_per_lead_target_cents != null && (
+                        <span className="text-zinc-600"> / {fmtCents(c.cost_per_lead_target_cents)}</span>
+                      )}
+                    </div>
+                    {c.actual_cpl_cents != null && c.cost_per_lead_target_cents != null && (
+                      <div className={`text-[10px] mt-0.5 ${c.actual_cpl_cents <= c.cost_per_lead_target_cents ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {c.actual_cpl_cents <= c.cost_per_lead_target_cents ? '↓ under target' : '↑ over target'}
+                      </div>
+                    )}
+                  </td>
+                  {/* Conv % */}
+                  <td className="px-4 py-3 whitespace-nowrap">
+                    <span className="text-xs text-zinc-300">{c.conversion_rate_pct}%</span>
+                  </td>
+                  {/* Actions */}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={() => openEdit(c)}
+                        className="p-1 text-zinc-400 hover:text-white transition-colors" title="Edit">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => handleArchive(c.id)}
+                        className="p-1 text-zinc-400 hover:text-red-400 transition-colors" title="Archive">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* UTM Builder helper */}
+      {campaigns.some(c => c.utm_campaign) && (
+        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+          <h3 className="text-xs font-semibold text-zinc-400 mb-2 flex items-center gap-1.5">
+            <ExternalLink className="w-3.5 h-3.5" /> UTM Tracking Active
+          </h3>
+          <p className="text-xs text-zinc-500">
+            Campaigns with UTM parameters will automatically tag incoming leads when they arrive via webhook.
+            Match <code className="bg-zinc-800 px-1 rounded text-zinc-300">utm_campaign</code> in your intake payloads
+            to link leads to the correct campaign and track CPL in real time.
+          </p>
+        </div>
+      )}
+
+      {/* Create / Edit Modal */}
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between p-6 border-b border-zinc-800">
+              <h3 className="text-base font-semibold text-white">
+                {editCampaign ? 'Edit Campaign' : 'New Campaign'}
+              </h3>
+              <button onClick={() => setShowCreate(false)} className="text-zinc-500 hover:text-white">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Name */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">Campaign Name *</label>
+                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Google — Solar Savings Q1 2025"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500" />
+              </div>
+              {/* Type + Platform row */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Type</label>
+                  <select value={form.campaign_type} onChange={e => setForm(f => ({ ...f, campaign_type: e.target.value }))}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
+                    {['paid_search','paid_social','seo','email','referral','partner','content'].map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Platform</label>
+                  <select value={form.platform} onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
+                    <option value="">— select —</option>
+                    {['google_ads','meta','tiktok','organic','email','linkedin','youtube'].map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              {/* Status */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">Status</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-violet-500">
+                  {['draft','active','paused','completed'].map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              {/* Budgets row */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Daily Budget (cents)</label>
+                  <input type="number" value={form.daily_budget_cents} onChange={e => setForm(f => ({ ...f, daily_budget_cents: e.target.value }))}
+                    placeholder="5000 = $50"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Monthly Budget (cents)</label>
+                  <input type="number" value={form.monthly_budget_cents} onChange={e => setForm(f => ({ ...f, monthly_budget_cents: e.target.value }))}
+                    placeholder="150000 = $1500"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">CPL Target (cents)</label>
+                  <input type="number" value={form.cost_per_lead_target_cents} onChange={e => setForm(f => ({ ...f, cost_per_lead_target_cents: e.target.value }))}
+                    placeholder="2500 = $25"
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                </div>
+              </div>
+              {/* UTMs */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">UTM Parameters</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['utm_source','utm_medium','utm_campaign'] as const).map(field => (
+                    <input key={field} value={form[field] as string}
+                      onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
+                      placeholder={field.replace('utm_', '')}
+                      className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                  ))}
+                </div>
+              </div>
+              {/* Dates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Start Date</label>
+                  <input type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">End Date</label>
+                  <input type="date" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-violet-500" />
+                </div>
+              </div>
+              {/* Notes */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">Notes / Strategy</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={3} placeholder="Campaign strategy, creative notes, targeting details…"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-violet-500 resize-none" />
+              </div>
+              {saveError && (
+                <div className="p-2 bg-red-900/20 border border-red-800/30 rounded-lg text-xs text-red-400">
+                  {saveError}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 p-6 border-t border-zinc-800">
+              <button onClick={() => setShowCreate(false)}
+                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-xs text-zinc-300 transition-colors">
+                Cancel
+              </button>
+              <button onClick={() => void handleSave()} disabled={saving || !form.name}
+                className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 rounded-lg text-xs text-white font-medium transition-colors flex items-center gap-1.5">
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCheck className="w-3.5 h-3.5" />}
+                {editCampaign ? 'Save Changes' : 'Create Campaign'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
