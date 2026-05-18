@@ -133,10 +133,12 @@ describe('Migration 042: utility_policies UNIQUE constraint', () => {
     expect(migSrc).toContain('LOWER(TRIM(a.utility_name)) = LOWER(TRIM(b.utility_name))');
   });
 
-  it('adds unique constraint idempotently via DO block', () => {
-    expect(migSrc).toContain('DO $$');
-    expect(migSrc).toContain("conname = 'utility_policies_utility_name_state_key'");
-    expect(migSrc).toContain('ADD CONSTRAINT utility_policies_utility_name_state_key');
+  it('adds unique constraint idempotently via IF NOT EXISTS (no DO block)', () => {
+    // DO $$ blocks are not supported by the Neon serverless HTTP driver.
+    // Migration 042 was rewritten to use ADD CONSTRAINT IF NOT EXISTS instead.
+    expect(migSrc).not.toContain('DO $$');
+    expect(migSrc).not.toContain("conname = 'utility_policies_utility_name_state_key'");
+    expect(migSrc).toContain('ADD CONSTRAINT IF NOT EXISTS utility_policies_utility_name_state_key');
     expect(migSrc).toContain('UNIQUE (utility_name, state)');
   });
 
