@@ -49,7 +49,7 @@ import {
   ArrowLeft, Upload, Map, FileText, Zap, DollarSign,
   User, Calendar, AlertTriangle, CheckCircle, ChevronRight,
   Settings, BarChart2, Shield, Sun, Wrench, Send, Package, Camera,
-  Pencil, X
+  Pencil, X, Network, Loader2
 } from 'lucide-react';
 import Link from 'next/link';
 import EngineeringTab from '@/components/engineering/EngineeringTab';
@@ -261,7 +261,7 @@ interface QuickAction {
   label: string;
   icon: React.ReactNode;
   color: string;
-  action: 'tab' | 'link';
+  action: 'tab' | 'link' | 'custom';
   target: string;
   enabled: (p: Project) => boolean;
   disabledReason?: string;
@@ -285,6 +285,11 @@ function ProjectDetailInner() {
   const [savingBill, setSavingBill] = useState(false);
   const [showChangeTypeModal, setShowChangeTypeModal] = useState(false);
   const [changingType, setChangingType] = useState(false);
+  const [showShareNetworkModal, setShowShareNetworkModal] = useState(false);
+  const [shareNetworkLoading, setShareNetworkLoading] = useState(false);
+  const [shareNetworkNotes, setShareNetworkNotes] = useState('');
+  const [shareNetworkPrice, setShareNetworkPrice] = useState('');
+  const [shareNetworkSuccess, setShareNetworkSuccess] = useState(false);
 
   // Auto-open change-type modal when navigated here with ?changeType=1
   useEffect(() => {
@@ -651,7 +656,14 @@ function ProjectDetailInner() {
       enabled: p => p.status === 'proposal' || p.status === 'approved' || p.status === 'installed',
       disabledReason: 'Complete engineering first',
     },
-    
+    {
+      label: 'Share to Network',
+      icon: <Network size={14} />,
+      color: 'text-emerald-400',
+      action: 'custom',
+      target: 'share-network',
+      enabled: () => true,
+    },
   ];
 
   return (
@@ -817,6 +829,20 @@ function ProjectDetailInner() {
         <div className="flex gap-2 overflow-x-auto pb-1">
           {quickActions.map(qa => {
             const enabled = qa.enabled(project);
+            if (qa.action === 'custom' && enabled) {
+              return (
+                <button
+                  key={qa.label}
+                  onClick={() => {
+                    if (qa.target === 'share-network') setShowShareNetworkModal(true);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 hover:border-emerald-500/60 text-xs font-medium text-emerald-400 hover:text-emerald-300 transition-all whitespace-nowrap flex-shrink-0"
+                >
+                  <span className={qa.color}>{qa.icon}</span>
+                  {qa.label}
+                </button>
+              );
+            }
             if (qa.action === 'link' && enabled) {
               return (
                 <Link
@@ -1006,7 +1032,143 @@ function ProjectDetailInner() {
         </div>
       )}
 
-      
+      {/* ── Share to Network Modal ──────────────────────────────────────── */}
+      {showShareNetworkModal && project && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Network size={18} className="text-emerald-400" />
+                  <h2 className="text-white font-bold text-lg">Share to Network</h2>
+                </div>
+                <button onClick={() => { setShowShareNetworkModal(false); setShareNetworkSuccess(false); }} className="text-slate-400 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              {shareNetworkSuccess ? (
+                <div className="text-center py-6">
+                  <CheckCircle size={40} className="mx-auto text-emerald-400 mb-3" />
+                  <h3 className="text-white font-semibold mb-1">Opportunity Listed</h3>
+                  <p className="text-slate-400 text-sm mb-4">
+                    This project is now visible to contractors in the SolarPro Network. You'll be notified when it's claimed.
+                  </p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => { setShowShareNetworkModal(false); setShareNetworkSuccess(false); }}
+                      className="flex-1 py-2.5 text-sm font-medium text-slate-300 bg-slate-700/60 hover:bg-slate-700 rounded-xl transition-colors"
+                    >
+                      Close
+                    </button>
+                    <a
+                      href="/network?tab=my-shared"
+                      className="flex-1 py-2.5 text-sm font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-colors text-center"
+                    >
+                      View in Network
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-slate-400 text-sm mb-5">
+                    Share this project as a verified opportunity. Another SolarPro contractor can exclusively claim it.
+                    The full address is only revealed after they claim.
+                  </p>
+
+                  <div className="bg-slate-900/40 rounded-xl p-4 mb-5 border border-slate-700/40">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-slate-500 text-xs mb-1">Project</div>
+                        <div className="text-white font-medium text-sm truncate">{project.name}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 text-xs mb-1">System Size</div>
+                        <div className="text-amber-400 font-bold">
+                          {project.systemSizeKw ? `${project.systemSizeKw.toFixed(1)} kW` : '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 text-xs mb-1">Utility</div>
+                        <div className="text-white text-sm">{project.utilityName || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500 text-xs mb-1">Location</div>
+                        <div className="text-white text-sm">{project.city || project.stateCode || '—'}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 mb-5">
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">Asking Price (optional)</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                        <input
+                          type="number"
+                          value={shareNetworkPrice}
+                          onChange={e => setShareNetworkPrice(e.target.value)}
+                          className="w-full bg-slate-700/60 border border-slate-600 rounded-lg pl-7 pr-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500"
+                          placeholder="Leave blank for platform pricing"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1.5">Notes for claimer (optional)</label>
+                      <textarea
+                        value={shareNetworkNotes}
+                        onChange={e => setShareNetworkNotes(e.target.value)}
+                        rows={3}
+                        className="w-full bg-slate-700/60 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-500 resize-none"
+                        placeholder="e.g. HOA approval in progress, homeowner prefers Enphase, out of my service area..."
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowShareNetworkModal(false)}
+                      className="flex-1 py-2.5 text-sm font-medium text-slate-300 bg-slate-700/60 hover:bg-slate-700 rounded-xl transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={shareNetworkLoading}
+                      onClick={async () => {
+                        setShareNetworkLoading(true);
+                        try {
+                          const res = await fetch('/api/network/opportunities', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              project_id: id,
+                              asking_price: shareNetworkPrice ? parseFloat(shareNetworkPrice) : null,
+                              listing_notes: shareNetworkNotes || null,
+                            }),
+                          });
+                          if (res.ok) {
+                            setShareNetworkSuccess(true);
+                          } else {
+                            const data = await res.json();
+                            alert(data.error || 'Failed to share opportunity.');
+                          }
+                        } finally {
+                          setShareNetworkLoading(false);
+                        }
+                      }}
+                      className="flex-1 py-2.5 text-sm font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-60"
+                    >
+                      {shareNetworkLoading ? <Loader2 size={16} className="animate-spin" /> : <Network size={16} />}
+                      {shareNetworkLoading ? 'Sharing…' : 'Share to Network'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
 
     </AppShell>
   );

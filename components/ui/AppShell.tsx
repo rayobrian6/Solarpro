@@ -10,7 +10,7 @@ import {
   Cpu, BarChart3, Map, Home, Sprout, Fence,
   LogOut, HelpCircle, ExternalLink, Wrench,
   CreditCard, ArrowRight, AlertTriangle, Star, ChevronDown,
-  Shield, MessageCircle, Bug
+  Shield, MessageCircle, Bug, Network
 } from 'lucide-react';
 import SubscriptionBanner from './SubscriptionBanner';
 import { hasPlatformAccess } from '@/lib/permissions';
@@ -41,6 +41,7 @@ const navItems: NavItem[] = [
   { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
   { label: 'Engineering',   href: '/engineering',icon: <Wrench size={17} />, color: 'text-blue-400' },
   { label: 'Proposals',     href: '/proposals',  icon: <FileText size={17} /> },
+  { label: 'Network',       href: '/network',    icon: <Network size={17} />, color: 'text-emerald-400' },
   { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
   { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
   { label: 'Equipment Library', href: '/hardware', icon: <Cpu size={17} /> },
