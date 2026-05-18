@@ -1,30 +1,25 @@
-# Intelligence Producer Orchestration Foundation
+# Intelligence Orchestration Foundation Audit — Audit Only
 
-## 1. Foundation Types
-- [x] Add deterministic execution context helpers
-- [x] Add scoped replay boundary helpers
-- [x] Add producer registry metadata and lookup
+## 1. Inspect Orchestration Foundation
+- [x] Inspect executionContext.ts for deterministic context behavior
+- [x] Inspect replay.ts for replay boundary stability
+- [x] Inspect registry.ts for producer registry safety
+- [x] Inspect runner.ts for dry-run, writer, failure, summary behavior
+- [x] Inspect runner.test.ts and related tests for coverage quality
 
-## 2. Runner Infrastructure
-- [x] Add lib/intelligence/runner.ts
-- [x] Support dry-run execution with zero writes
-- [x] Support single and multi-producer execution
-- [x] Support entity scope and replay-window context
-- [x] Add idempotent observation writer integration
-- [x] Add structured execution summaries
-- [x] Isolate producer failures
+## 2. Verify Audit Checks
+- [x] Verify dry-run safety
+- [x] Verify writer idempotency behavior
+- [x] Verify replay stability
+- [x] Verify registry safety
+- [x] Verify failure isolation
+- [x] Verify observation validation
+- [x] Verify source-of-truth protection
+- [x] Verify event-system protection
+- [x] Verify execution summary completeness
+- [x] Verify test quality
+- [x] Verify documentation/code mismatch
 
-## 3. Tests
-- [x] Dry-run performs zero writes
-- [x] Replay produces stable idempotency
-- [x] Duplicate observations are skipped
-- [x] Producer failures do not halt unrelated producers
-- [x] Deterministic execution context works
-- [x] No canonical lifecycle mutation / duplicate event system
-- [x] Observation writes remain append-only
-
-## 4. QA + Commit
-- [x] Run targeted orchestration tests
-- [x] Run targeted TypeScript check
-- [x] Run targeted ESLint check
-- [x] Commit and push dev only
+## 3. Deliver Audit Report
+- [x] Produce audit report with findings and recommendation
+- [x] Do not implement fixes
