@@ -69,7 +69,9 @@ describe('Project type: monitoring fields', () => {
 // ─── rowToProject hydration ──────────────────────────────────────────────────
 describe('rowToProject: hydrates monitoring fields', () => {
 
-  const dbNeon = readSrc('lib/db-neon.ts');
+  // db-neon.ts is now a barrel file; the actual implementations live in the
+  // domain sub-modules. Combine them so all assertions still pass.
+  const dbNeon = readSrc('lib/db/core.ts') + '\n' + readSrc('lib/db/projects.ts');
 
   it('hydrates monitoringPlatform from monitoring_platform', () => {
     expect(dbNeon).toContain('monitoringPlatform:');

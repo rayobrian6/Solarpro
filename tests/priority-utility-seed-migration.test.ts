@@ -157,7 +157,8 @@ describe('Migration 042: utility_policies UNIQUE constraint', () => {
 // ─── D: site_aliases runtime DDL removal ────────────────────────────────────
 describe('D: site_aliases — runtime DDL removed', () => {
 
-  const dbNeon = readSrc('lib/db-neon.ts');
+  // db-neon.ts is now a barrel file; actual solardogSaveAlias impl is in lib/db/solardog.ts
+  const dbNeon = readSrc('lib/db/solardog.ts');
   const mig018 = readSrc('lib/migrations/018_site_aliases.sql');
 
   it('lib/db-neon.ts does not contain CREATE TABLE site_aliases', () => {
