@@ -2956,6 +2956,401 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 053g: \${(e as Error).message}`);
     }
 
+
+
+    // -- Migration 054_alter: Add intake columns to network_opportunities ------
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS first_name TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS last_name TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS email TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS phone TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS address_line1 TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS address_line2 TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS county TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS latitude NUMERIC(10,7)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS longitude NUMERIC(10,7)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS monthly_bill_amount NUMERIC(10,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS current_electricity_rate NUMERIC(8,4)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS home_ownership TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS roof_type TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS roof_shade TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS square_feet_living NUMERIC(10,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS source_system TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS source_channel TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS source_name TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS funnel_id UUID`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS campaign_id UUID`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS utm_source TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS utm_medium TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS utm_campaign TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS utm_content TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS utm_term TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS gclid TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS fbclid TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS ttclid TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS fips_code TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS census_tract TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS parcel_id TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS year_built INTEGER`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS square_feet_lot NUMERIC(10,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS bedrooms INTEGER`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS bathrooms NUMERIC(4,1)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS owner_name TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS owner_occupied BOOLEAN`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS assessed_value NUMERIC(12,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS market_value NUMERIC(12,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS last_sale_date DATE`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS last_sale_price NUMERIC(12,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS property_enriched_at TIMESTAMPTZ`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS peak_sun_hours_daily NUMERIC(5,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS recommended_system_kw NUMERIC(6,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS annual_kwh_production NUMERIC(10,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS annual_savings_year1 NUMERIC(10,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS savings_25_year NUMERIC(12,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS estimated_system_cost_gross NUMERIC(12,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS federal_itc_amount NUMERIC(12,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS estimated_system_cost_net NUMERIC(12,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS payback_period_years NUMERIC(5,1)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS offset_percentage INTEGER`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS co2_offset_lbs_year NUMERIC(10,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS solar_enriched_at TIMESTAMPTZ`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS utility_eiaid TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS electricity_rate_kwh NUMERIC(8,4)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS net_metering_available BOOLEAN`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS net_metering_policy TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS ahj_name TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS interconnection_complexity INTEGER`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS state_incentives_available BOOLEAN`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS srec_market_active BOOLEAN`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS utility_enriched_at TIMESTAMPTZ`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS is_duplicate_flagged BOOLEAN DEFAULT false`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS duplicate_score NUMERIC(4,2)`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS duplicate_of_id UUID`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS consent_given BOOLEAN DEFAULT false`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    try { await sql`ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS notes TEXT`; } catch(e:unknown){if(!(e as Error).message.includes('already exists')) throw e;}
+    results.push('\u2705 Migration 054_alter: network_opportunities intake columns \u2014 ready');
+
+    // -- Migration 054: intake_events (immutable lifecycle event log) ----------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS intake_events (
+          id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          event_id              TEXT UNIQUE NOT NULL,
+          opportunity_id        UUID REFERENCES network_opportunities(id) ON DELETE CASCADE,
+          event_type            TEXT NOT NULL,
+          event_source          TEXT NOT NULL DEFAULT 'system',
+          source_system         TEXT,
+          source_channel        TEXT,
+          funnel_id             UUID,
+          campaign_id           UUID,
+          idempotency_key       TEXT,
+          payload               JSONB NOT NULL DEFAULT '{}',
+          validation_result     JSONB DEFAULT '{}',
+          duplicate_result      JSONB DEFAULT '{}',
+          pipeline_result       JSONB DEFAULT '{}',
+          action                TEXT NOT NULL DEFAULT 'unknown',
+          error_code            TEXT,
+          error_message         TEXT,
+          processing_duration_ms INTEGER,
+          ip_address            INET,
+          user_agent            TEXT,
+          referer               TEXT,
+          utm_source            TEXT,
+          utm_medium            TEXT,
+          utm_campaign          TEXT,
+          utm_content           TEXT,
+          utm_term              TEXT,
+          gclid                 TEXT,
+          fbclid                TEXT,
+          is_replay             BOOLEAN DEFAULT false,
+          original_event_id     TEXT,
+          occurred_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          created_at            TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 054a: intake_events table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054a (intake_events): \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_intake_events_opportunity_id ON intake_events(opportunity_id) WHERE opportunity_id IS NOT NULL`;
+      results.push('\u2705 Migration 054b: idx_intake_events_opportunity_id \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054b: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_intake_events_event_type ON intake_events(event_type)`;
+      results.push('\u2705 Migration 054c: idx_intake_events_event_type \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054c: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_intake_events_idempotency_key ON intake_events(idempotency_key) WHERE idempotency_key IS NOT NULL`;
+      results.push('\u2705 Migration 054d: idx_intake_events_idempotency_key \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054d: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_intake_events_source_system ON intake_events(source_system) WHERE source_system IS NOT NULL`;
+      results.push('\u2705 Migration 054e: idx_intake_events_source_system \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054e: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_intake_events_action ON intake_events(action)`;
+      results.push('\u2705 Migration 054f: idx_intake_events_action \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054f: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_intake_events_occurred_at ON intake_events(occurred_at DESC)`;
+      results.push('\u2705 Migration 054g: idx_intake_events_occurred_at \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054g: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_intake_events_funnel_id ON intake_events(funnel_id) WHERE funnel_id IS NOT NULL`;
+      results.push('\u2705 Migration 054h: idx_intake_events_funnel_id \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 054h: \${(e as Error).message}`);
+    }
+
+    // -- Migration 055: enrichment_queue (job queue with per-provider status) -
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS enrichment_queue (
+          id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          opportunity_id            UUID UNIQUE NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+          status                    TEXT NOT NULL DEFAULT 'pending',
+          priority                  INTEGER NOT NULL DEFAULT 5,
+          attempt_count             INTEGER NOT NULL DEFAULT 0,
+          max_attempts              INTEGER NOT NULL DEFAULT 3,
+          providers_requested       TEXT[] DEFAULT ARRAY['property','solar','utility'],
+          providers_completed       TEXT[] DEFAULT ARRAY[]::TEXT[],
+          providers_failed          TEXT[] DEFAULT ARRAY[]::TEXT[],
+          providers_skipped         TEXT[] DEFAULT ARRAY[]::TEXT[],
+          property_status           TEXT DEFAULT 'pending',
+          property_provider_used    TEXT,
+          property_enriched_at      TIMESTAMPTZ,
+          property_error            TEXT,
+          solar_status              TEXT DEFAULT 'pending',
+          solar_provider_used       TEXT,
+          solar_enriched_at         TIMESTAMPTZ,
+          solar_error               TEXT,
+          utility_status            TEXT DEFAULT 'pending',
+          utility_provider_used     TEXT,
+          utility_enriched_at       TIMESTAMPTZ,
+          utility_error             TEXT,
+          ahj_status                TEXT DEFAULT 'pending',
+          ahj_provider_used         TEXT,
+          ahj_enriched_at           TIMESTAMPTZ,
+          ahj_error                 TEXT,
+          demographics_status       TEXT DEFAULT 'pending',
+          demographics_provider_used TEXT,
+          demographics_enriched_at  TIMESTAMPTZ,
+          demographics_error        TEXT,
+          satellite_status          TEXT DEFAULT 'pending',
+          satellite_provider_used   TEXT,
+          satellite_enriched_at     TIMESTAMPTZ,
+          satellite_error           TEXT,
+          started_at                TIMESTAMPTZ,
+          completed_at              TIMESTAMPTZ,
+          failed_at                 TIMESTAMPTZ,
+          next_retry_at             TIMESTAMPTZ,
+          last_error                TEXT,
+          error_details             JSONB DEFAULT '{}',
+          duration_ms               INTEGER,
+          force_refresh             BOOLEAN DEFAULT false,
+          dry_run                   BOOLEAN DEFAULT false,
+          triggered_by              TEXT NOT NULL DEFAULT 'system',
+          created_at                TIMESTAMPTZ DEFAULT NOW(),
+          updated_at                TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 055a: enrichment_queue table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 055a (enrichment_queue): \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_enrichment_queue_status ON enrichment_queue(status)`;
+      results.push('\u2705 Migration 055b: idx_enrichment_queue_status \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 055b: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_enrichment_queue_next_retry ON enrichment_queue(next_retry_at) WHERE status = 'retry'`;
+      results.push('\u2705 Migration 055c: idx_enrichment_queue_next_retry \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 055c: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_enrichment_queue_priority ON enrichment_queue(priority DESC, created_at ASC) WHERE status = 'pending'`;
+      results.push('\u2705 Migration 055d: idx_enrichment_queue_priority \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 055d: \${(e as Error).message}`);
+    }
+
+    // -- Migration 056: webhook_ingestion_log (immutable audit log) -----------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS webhook_ingestion_log (
+          id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          idempotency_key       TEXT UNIQUE NOT NULL,
+          platform              TEXT NOT NULL,
+          partner_id            TEXT,
+          opportunity_id        UUID REFERENCES network_opportunities(id) ON DELETE SET NULL,
+          http_method           TEXT NOT NULL DEFAULT 'POST',
+          request_headers       JSONB DEFAULT '{}',
+          raw_body              TEXT,
+          parsed_payload        JSONB DEFAULT '{}',
+          signature_header      TEXT,
+          signature_verified    BOOLEAN DEFAULT false,
+          verification_method   TEXT,
+          status                TEXT NOT NULL DEFAULT 'received',
+          action                TEXT,
+          processing_error      TEXT,
+          retry_count           INTEGER DEFAULT 0,
+          is_replay             BOOLEAN DEFAULT false,
+          original_log_id       UUID REFERENCES webhook_ingestion_log(id) ON DELETE SET NULL,
+          leads_received        INTEGER DEFAULT 0,
+          leads_created         INTEGER DEFAULT 0,
+          leads_duplicate       INTEGER DEFAULT 0,
+          leads_errored         INTEGER DEFAULT 0,
+          processing_duration_ms INTEGER,
+          ip_address            INET,
+          user_agent            TEXT,
+          received_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          processed_at          TIMESTAMPTZ,
+          created_at            TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 056a: webhook_ingestion_log table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 056a (webhook_ingestion_log): \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_webhook_log_platform ON webhook_ingestion_log(platform)`;
+      results.push('\u2705 Migration 056b: idx_webhook_log_platform \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 056b: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_webhook_log_status ON webhook_ingestion_log(status)`;
+      results.push('\u2705 Migration 056c: idx_webhook_log_status \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 056c: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_webhook_log_received_at ON webhook_ingestion_log(received_at DESC)`;
+      results.push('\u2705 Migration 056d: idx_webhook_log_received_at \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 056d: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_webhook_log_opportunity_id ON webhook_ingestion_log(opportunity_id) WHERE opportunity_id IS NOT NULL`;
+      results.push('\u2705 Migration 056e: idx_webhook_log_opportunity_id \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 056e: \${(e as Error).message}`);
+    }
+
+    // -- Migration 057: intake_funnels (config + 4 seed funnels) --------------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS intake_funnels (
+          id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          slug                  TEXT UNIQUE NOT NULL,
+          name                  TEXT NOT NULL,
+          description           TEXT,
+          funnel_type           TEXT NOT NULL DEFAULT 'lead_gen',
+          source_channel        TEXT NOT NULL DEFAULT 'web',
+          is_active             BOOLEAN DEFAULT true,
+          require_phone         BOOLEAN DEFAULT false,
+          require_address       BOOLEAN DEFAULT false,
+          require_monthly_bill  BOOLEAN DEFAULT false,
+          require_roof_type     BOOLEAN DEFAULT false,
+          campaign_id           UUID,
+          thank_you_url         TEXT,
+          webhook_notify_url    TEXT,
+          custom_fields         JSONB DEFAULT '{}',
+          validation_rules      JSONB DEFAULT '{}',
+          intake_key            TEXT UNIQUE,
+          rate_limit_per_hour   INTEGER DEFAULT 100,
+          created_at            TIMESTAMPTZ DEFAULT NOW(),
+          updated_at            TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 057a: intake_funnels table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 057a (intake_funnels): \${(e as Error).message}`);
+    }
+    try {
+      await sql`
+        INSERT INTO intake_funnels (slug, name, description, funnel_type, source_channel, require_monthly_bill)
+        VALUES
+          ('solar-estimate',   'Solar Savings Estimate',  'Homeowner solar estimate request form',       'lead_gen',    'web',    false),
+          ('bill-upload',      'Bill Upload Flow',        'Upload utility bill to get savings estimate', 'bill_upload', 'web',    true),
+          ('battery-savings',  'Battery + Solar Savings', 'Battery storage + solar combo inquiry',       'lead_gen',    'web',    false),
+          ('instant-quote',    'Instant Quote Tool',      'Instant price estimate based on address',     'instant_quote','web',   false)
+        ON CONFLICT (slug) DO NOTHING
+      `;
+      results.push('\u2705 Migration 057b: intake_funnels seed data \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 057b (intake_funnels seed): \${(e as Error).message}`);
+    }
+
+    // -- Migration 058: acquisition_campaigns --------------------------------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS acquisition_campaigns (
+          id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          name                    TEXT NOT NULL,
+          description             TEXT,
+          campaign_type           TEXT NOT NULL DEFAULT 'paid_search',
+          status                  TEXT NOT NULL DEFAULT 'draft',
+          platform                TEXT,
+          funnel_id               UUID REFERENCES intake_funnels(id) ON DELETE SET NULL,
+          daily_budget_cents      INTEGER,
+          monthly_budget_cents    INTEGER,
+          total_budget_cents      INTEGER,
+          cost_per_lead_target_cents INTEGER,
+          leads_target            INTEGER,
+          leads_received          INTEGER DEFAULT 0,
+          leads_qualified         INTEGER DEFAULT 0,
+          leads_converted         INTEGER DEFAULT 0,
+          total_spend_cents       INTEGER DEFAULT 0,
+          utm_source              TEXT,
+          utm_medium              TEXT,
+          utm_campaign            TEXT,
+          utm_content             TEXT,
+          utm_term                TEXT,
+          geo_targeting           JSONB DEFAULT '{}',
+          audience_targeting      JSONB DEFAULT '{}',
+          ad_creative_ids         TEXT[] DEFAULT ARRAY[]::TEXT[],
+          start_date              DATE,
+          end_date                DATE,
+          created_by              UUID REFERENCES users(id) ON DELETE SET NULL,
+          notes                   TEXT,
+          metadata                JSONB DEFAULT '{}',
+          created_at              TIMESTAMPTZ DEFAULT NOW(),
+          updated_at              TIMESTAMPTZ DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 058a: acquisition_campaigns table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 058a (acquisition_campaigns): \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_acquisition_campaigns_status ON acquisition_campaigns(status)`;
+      results.push('\u2705 Migration 058b: idx_acquisition_campaigns_status \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 058b: \${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_acquisition_campaigns_funnel_id ON acquisition_campaigns(funnel_id) WHERE funnel_id IS NOT NULL`;
+      results.push('\u2705 Migration 058c: idx_acquisition_campaigns_funnel_id \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 058c: \${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
