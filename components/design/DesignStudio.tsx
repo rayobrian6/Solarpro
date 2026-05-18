@@ -713,11 +713,17 @@ export default function DesignStudio({ project, onSave }: Props) {
   // ── Geocode address for initial fly-to (does NOT clear panels or fetch Solar data) ───────
   // Used on project load to fly the camera to the correct street-level address without
   // destroying the saved panel layout or triggering Solar API auto-fetch.
-  const geocodeAddressForFlyTo = async (address: string) => {
+  // FIX v52.2: AbortController ref cancels in-flight geocode when project changes.
+  // Without this, switching Project A → Braidon causes A's geocode (still in flight)
+  // to land AFTER Braidon's fires, overwriting mapCenter with A's coordinates.
+  const flyToAbortRef = useRef<AbortController | null>(null);
+
+  const geocodeAddressForFlyTo = async (address: string, signal?: AbortSignal) => {
     if (!address.trim()) return;
     try {
-      const res = await fetch(`/api/geocode?q=${encodeURIComponent(address)}&mode=search`);
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(address)}&mode=search`, { signal });
       const data = await res.json();
+      if (signal?.aborted) return; // double-check after await
       if (data.success && data.data) {
         const newLat = data.data.lat;
         const newLng = data.data.lng;
@@ -733,9 +739,11 @@ export default function DesignStudio({ project, onSave }: Props) {
           }).catch(() => {}); // non-fatal
         }
       } else {
-        setLocationStatus('failed');
+        if (!signal?.aborted) setLocationStatus('failed');
       }
-    } catch {
+    } catch (err) {
+      // AbortError is expected on project switch — not a real error
+      if (err instanceof Error && err.name === 'AbortError') return;
       setLocationStatus('failed');
     }
   };
@@ -942,6 +950,13 @@ export default function DesignStudio({ project, onSave }: Props) {
       : null;
     const addrToGeocode = projectAddr || fullClientAddr;
 
+    // Cancel any in-flight geocode from a previous project before starting a new one.
+    // This prevents the previous project's geocode response landing after we've already
+    // switched projects and overwriting mapCenter with the wrong coordinates.
+    if (flyToAbortRef.current) flyToAbortRef.current.abort();
+    const abortCtrl = new AbortController();
+    flyToAbortRef.current = abortCtrl;
+
     // If we have a street-level address (house number present), geocode it for precise coords.
     // Pre-position camera at stored coords so the 3D scene isn't blank during geocoding.
     if (addrToGeocode && isStreetLevelAddress(addrToGeocode)) {
@@ -952,7 +967,7 @@ export default function DesignStudio({ project, onSave }: Props) {
       }
       setLocationStatus('locating');
       setAddressSearch(addrToGeocode);
-      geocodeAddressForFlyTo(addrToGeocode); // will call setMapCenter with precise street coords
+      geocodeAddressForFlyTo(addrToGeocode, abortCtrl.signal); // pass signal so it can be cancelled
       return;
     }
 
@@ -975,13 +990,16 @@ export default function DesignStudio({ project, onSave }: Props) {
     if (addrToGeocode) {
       setLocationStatus('locating');
       setAddressSearch(addrToGeocode);
-      geocodeAddressForFlyTo(addrToGeocode);
+      geocodeAddressForFlyTo(addrToGeocode, abortCtrl.signal);
       return;
     }
 
     // No address at all — stay at default, let user search manually
     setLocationStatus('failed');
-  }, [project.id]); // Only run once when project loads
+
+    // Cleanup: abort the geocode if the component unmounts or project changes again
+    return () => { abortCtrl.abort(); };
+  }, [project.id]); // Only run when project changes
 
 
   // ── Load map tiles ──────────────────────────────────────────────────────────

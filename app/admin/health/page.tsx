@@ -111,7 +111,7 @@ export default function SystemHealthPage() {
   useEffect(() => { fetchHealth(); }, [fetchHealth]);
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(fetchHealth, 30000);
+    const interval = setInterval(fetchHealth, 60000);
     return () => clearInterval(interval);
   }, [autoRefresh, fetchHealth]);
 
@@ -143,7 +143,7 @@ export default function SystemHealthPage() {
             <div onClick={() => setAutoRefresh(v => !v)} className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${autoRefresh ? 'bg-amber-500' : 'bg-slate-700'}`}>
               <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${autoRefresh ? 'translate-x-5' : 'translate-x-0.5'}`} />
             </div>
-            Auto-refresh (30s)
+            Auto-refresh (60s)
           </label>
           <button onClick={fetchHealth} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black font-semibold rounded-lg text-sm transition-colors">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -303,7 +303,7 @@ export default function SystemHealthPage() {
         </div>
       </div>
 
-      {lastRefresh && <div className="text-center text-slate-600 text-xs pt-2">Health data collected at {lastRefresh.toLocaleString()}{autoRefresh && ' - Auto-refreshing every 30 seconds'}</div>}
+      {lastRefresh && <div className="text-center text-slate-600 text-xs pt-2">Health data collected at {lastRefresh.toLocaleString()}{autoRefresh && ' - Auto-refreshing every 60 seconds'}</div>}
     </div>
   );
 }

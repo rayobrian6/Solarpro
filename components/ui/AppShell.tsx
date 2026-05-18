@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Sun, LayoutDashboard, Users, FolderOpen, Zap,
-  FileText, Settings, ChevronLeft, ChevronRight,
+  FileText, Settings, ChevronLeft, ChevronRight, DollarSign,
   Bell, Search, Menu, X,
   Cpu, BarChart3, Map, Home, Sprout, Fence,
   LogOut, HelpCircle, ExternalLink, Wrench,
@@ -15,6 +15,7 @@ import {
 import SubscriptionBanner from './SubscriptionBanner';
 import { hasPlatformAccess } from '@/lib/permissions';
 import { useVersionCheck } from '@/hooks/useVersionCheck';
+import GuidedTourController from '@/components/onboarding/GuidedTourController';
 import { useUser, getAccountBadge, isAdminRole } from '@/contexts/UserContext';
 import { logClick, logNavigation } from '@/lib/debug/clickAudit';
 import { useAppStore } from '@/store/appStore';
@@ -34,7 +35,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Command Center', href: '/dashboard',  icon: <LayoutDashboard size={17} /> },
+  { label: 'Dashboard',      href: '/dashboard',  icon: <LayoutDashboard size={17} /> },
   { label: 'Clients',       href: '/clients',    icon: <Users size={17} /> },
   { label: 'Projects',      href: '/projects',   icon: <FolderOpen size={17} />, color: 'text-amber-400' },
   { label: 'Design Studio', href: '/design',     icon: <Map size={17} />,    color: 'text-amber-400' },
@@ -43,7 +44,7 @@ const navItems: NavItem[] = [
   { label: 'Analytics',     href: '/analytics',  icon: <BarChart3 size={17} /> },
   { label: 'Settings',      href: '/settings',   icon: <Settings size={17} /> },
   { label: 'Equipment Library', href: '/hardware', icon: <Cpu size={17} /> },
-  { label: 'Pricing',           href: '/pricing',  icon: <Settings size={17} /> },
+  { label: 'Pricing',           href: '/pricing',  icon: <DollarSign size={17} /> },
 ];
 
 const systemTypes = [
@@ -656,11 +657,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         {navItems.map((item) => {
           const active = isActive(item.href);
           const href = navHref(item.href);
+          // Extract tour key from href: '/clients' -> 'clients', '/design' -> 'design'
+          const tourKey = item.href.replace(/^\//, '') || 'dashboard';
           return (
             <Link
               key={item.href}
               href={href}
               onClick={() => logNavigation(item.href)}
+              data-tour={tourKey}
               className={`
                 flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
                 ${collapsed ? 'justify-center px-2' : ''}
@@ -944,6 +948,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* Guided tour overlay — fires once for new users */}
+      <GuidedTourController />
 
       {/* Mini toast for header actions */}
       {toast.Toast}

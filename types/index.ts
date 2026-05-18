@@ -683,6 +683,10 @@ export interface Project {
   controlMode?: ControlMode;
   /** v61: Per-field lock map — fields locked by user cannot be overridden by auto-config. */
   systemConfigLocks?: SystemConfigLocks;
+  /** v62: Monitoring provider platform for this project (set by installer). */
+  monitoringPlatform?: 'enphase' | 'solaredge' | 'apsystems' | 'hoymiles' | 'generac' | 'sma' | 'fronius' | 'solis' | 'other' | null;
+  /** v62: Full URL to the homeowner-facing monitoring dashboard. */
+  monitoringUrl?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -6,14 +6,15 @@ import {
   Settings, Upload, Save, CheckCircle, AlertCircle,
   Building2, Phone, Mail, Globe, Palette, Image,
   User, Lock, Bell, CreditCard, Trash2, Eye, EyeOff,
-  Sun, RefreshCw, X
+  Sun, RefreshCw, X, Users
 } from 'lucide-react';
 import { useUser, isAdminRole } from '@/contexts/UserContext';
 import { hasPlatformAccess } from '@/lib/permissions';
 import OrganizationPanel from '@/components/settings/OrganizationPanel';
+import CrewMembersPanel from '@/components/settings/CrewMembersPanel';
 import { useTheme, THEME_CONFIG, type Theme } from '@/contexts/ThemeContext';
 
-type Tab = 'profile' | 'branding' | 'subscription' | 'organization' | 'notifications';
+type Tab = 'profile' | 'branding' | 'subscription' | 'organization' | 'teams' | 'notifications';
 
 interface BrandingSettings {
   companyName: string;
@@ -241,6 +242,7 @@ export default function SettingsPage() {
     { id: 'branding',      label: 'Branding',       icon: <Palette size={16} /> },
     { id: 'subscription',  label: 'Subscription',   icon: <CreditCard size={16} /> },
     { id: 'organization',  label: 'Organization',   icon: <Building2 size={16} /> },
+    { id: 'teams',         label: 'Teams',          icon: <Users size={16} /> },
     { id: 'notifications', label: 'Notifications',  icon: <Bell size={16} /> },
   ];
 
@@ -635,19 +637,19 @@ export default function SettingsPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-800">
                     {[
-                      ['3D Design Studio', true, true, true],
-                      ['Projects', '10', 'Unlimited', 'Unlimited'],
-                      ['Clients', '25', 'Unlimited', 'Unlimited'],
-                      ['Electrical Engineering (SLD)', false, true, true],
-                      ['Sol Fence Design', false, true, true],
-                      ['BOM + Structural Calcs', false, true, true],
-                      ['Permit Packages', false, true, true],
-                      ['Proposal E-Signing', false, true, true],
-                      ['White-Label Branding', false, true, true],
-                      ['Team Members', false, 'Up to 3', 'Unlimited'],
-                      ['Priority Support', false, true, true],
-                      ['Dedicated Onboarding', false, false, true],
-                      ['SLA Support', false, false, true],
+                      ['3D Design Studio',             true,      true,          true       ],
+                      ['Projects',                     '10',      'Unlimited',   'Unlimited'],
+                      ['Clients',                      '25',      'Unlimited',   'Unlimited'],
+                      ['Electrical Engineering (SLD)', false,     true,          true       ],
+                      ['Sol Fence Design',             false,     true,          true       ],
+                      ['BOM + Structural Calcs',       false,     true,          true       ],
+                      ['Permit Packages',              false,     true,          true       ],
+                      ['Proposal E-Signing',           false,     true,          true       ],
+                      ['White-Label Branding',         false,     true,          true       ],
+                      ['Team Members', false, 'Up to 2', '2 + add-ons'],
+                      ['Priority Support',             false,     true,          true       ],
+                      ['Dedicated Onboarding',         false,     false,         true       ],
+                      ['SLA Support',                  false,     false,         true       ],
                     ].map(([feature, starter, pro, contractor], i) => (
                       <tr key={i} className="hover:bg-slate-800/30 transition-colors">
                         <td className="py-2.5 pr-4 text-slate-300">{feature as string}</td>
@@ -721,6 +723,11 @@ export default function SettingsPage() {
         {/* ── ORGANIZATION TAB ── */}
         {activeTab === 'organization' && user && (
           <OrganizationPanel userId={user.id} />
+        )}
+
+        {/* ── TEAMS TAB ── */}
+        {activeTab === 'teams' && (
+          <CrewMembersPanel />
         )}
 
         {/* ── NOTIFICATIONS TAB ── */}

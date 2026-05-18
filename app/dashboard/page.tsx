@@ -41,6 +41,10 @@ import {
   type ActionItem,
 } from '@/lib/operations/getNextStep';
 import { getPipelineMetrics } from '@/lib/data/getPipelineMetrics';
+import dynamic from 'next/dynamic';
+
+// CrewCalendar is client-only (uses Date APIs) — load without SSR
+const CrewCalendar = dynamic(() => import('@/components/crew/CrewCalendar'), { ssr: false });
 
 // ══════════════════════════════════════════════════════════════════
 // SECTION A: Dashboard Data Maps & Helpers (preserved exactly)
@@ -704,6 +708,29 @@ export default function CommandCenter() {
       return raw ? new Set<string>(JSON.parse(raw) as string[]) : new Set<string>();
     } catch { return new Set<string>(); }
   });
+
+  // Workflow banner — snoozable for 7 days, NOT permanently dismissed
+  // Reads a timestamp; if it's older than 7 days (or absent), shows the banner
+  const [showWorkflowBanner, setShowWorkflowBanner] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      const snoozedUntil = localStorage.getItem('solarpro:workflowBannerSnoozedUntil');
+      if (!snoozedUntil) return true;
+      return Date.now() > Number(snoozedUntil);
+    } catch { return true; }
+  });
+  const dismissWorkflowBanner = () => {
+    setShowWorkflowBanner(false);
+    try {
+      // Snooze for 7 days from now
+      const until = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      localStorage.setItem('solarpro:workflowBannerSnoozedUntil', String(until));
+    } catch { /* ignore */ }
+  };
+  const restoreWorkflowBanner = () => {
+    setShowWorkflowBanner(true);
+    try { localStorage.removeItem('solarpro:workflowBannerSnoozedUntil'); } catch { /* ignore */ }
+  };
   const [activeModal, setActiveModal] = useState<{
     type: 'follow_up' | 'schedule_install' | 'engineering_review';
     commandId?: string;
@@ -1001,7 +1028,19 @@ export default function CommandCenter() {
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Workflow guide restore — only visible when banner is hidden */}
+                {!showWorkflowBanner && (
+                  <button
+                    onClick={restoreWorkflowBanner}
+                    title="Show workflow guide"
+                    className="w-7 h-7 rounded-lg border border-amber-500/20 bg-amber-500/5 text-amber-600 hover:text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center justify-center flex-shrink-0"
+                    aria-label="Show workflow guide"
+                  >
+                    <Play size={10} className="fill-current ml-0.5" />
+                  </button>
+                )}
                 <button onClick={() => setShowBillUpload(true)}
+                  data-tour="bill"
                   className="btn-secondary btn-sm flex items-center gap-1.5">
                   <Flame size={14} className="text-amber-400" /> Upload Bill
                 </button>
@@ -1011,6 +1050,70 @@ export default function CommandCenter() {
               </div>
             </div>
           </div>
+
+          {/* ══════════ WORKFLOW PROCESS BANNER ══════════ */}
+          {showWorkflowBanner && (
+            <div className="relative rounded-xl border border-amber-500/20 bg-gradient-to-r from-slate-800/60 via-slate-800/40 to-slate-800/60 px-4 py-3 overflow-hidden">
+              <div className="absolute inset-0 bg-amber-500/3 pointer-events-none" />
+              {/* Dismiss button — snoozes for 7 days */}
+              <button
+                onClick={dismissWorkflowBanner}
+                title="Hide for 7 days"
+                className="absolute top-2.5 right-2.5 text-slate-500 hover:text-slate-300 transition-colors p-0.5 rounded"
+                aria-label="Hide workflow guide for 7 days"
+              >
+                <X size={13} />
+              </button>
+              {/* Header */}
+              <div className="flex items-center gap-2 mb-2.5">
+                <Play size={11} className="text-amber-400 fill-amber-400" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-amber-500">SolarPro Workflow</span>
+                <span className="text-[10px] text-slate-500">— follow these steps for every project</span>
+              </div>
+              {/* Steps */}
+              <div className="flex items-center gap-0 flex-wrap">
+                {[
+                  { step: 1, label: 'Bill',        sub: 'Upload & analyze',  href: null,         color: 'amber'  },
+                  { step: 2, label: 'System',      sub: 'Size the system',   href: null,         color: 'blue'   },
+                  { step: 3, label: 'Design',      sub: 'Layout & 3D',       href: '/design',    color: 'violet' },
+                  { step: 4, label: 'Engineering', sub: 'Stamp & permits',   href: null,         color: 'teal'   },
+                  { step: 5, label: 'Proposal',    sub: 'Generate & share',  href: null,         color: 'emerald'},
+                  { step: 6, label: 'Send',        sub: 'E-sign & close',    href: null,         color: 'green'  },
+                ].map(({ step, label, sub, href, color }, i, arr) => {
+                  const colorMap: Record<string, { dot: string; text: string; badge: string }> = {
+                    amber:   { dot: 'bg-amber-400',   text: 'text-amber-300',   badge: 'bg-amber-500/15 border-amber-500/30'   },
+                    blue:    { dot: 'bg-blue-400',    text: 'text-blue-300',    badge: 'bg-blue-500/15 border-blue-500/30'    },
+                    violet:  { dot: 'bg-violet-400',  text: 'text-violet-300',  badge: 'bg-violet-500/15 border-violet-500/30' },
+                    teal:    { dot: 'bg-teal-400',    text: 'text-teal-300',    badge: 'bg-teal-500/15 border-teal-500/30'    },
+                    emerald: { dot: 'bg-emerald-400', text: 'text-emerald-300', badge: 'bg-emerald-500/15 border-emerald-500/30'},
+                    green:   { dot: 'bg-green-400',   text: 'text-green-300',   badge: 'bg-green-500/15 border-green-500/30'  },
+                  };
+                  const c = colorMap[color];
+                  const inner = (
+                    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all ${c.badge} ${href ? 'cursor-pointer hover:brightness-125' : ''}`}>
+                      <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black text-slate-900 flex-shrink-0 ${c.dot}`}>
+                        {step}
+                      </div>
+                      <div>
+                        <div className={`text-xs font-bold leading-none ${c.text}`}>{label}</div>
+                        <div className="text-[9px] text-slate-500 mt-0.5 leading-none">{sub}</div>
+                      </div>
+                    </div>
+                  );
+                  return (
+                    <React.Fragment key={label}>
+                      {href ? (
+                        <Link href={href}>{inner}</Link>
+                      ) : inner}
+                      {i < arr.length - 1 && (
+                        <ChevronRight size={12} className="text-slate-600 flex-shrink-0 mx-0.5" />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ══════════ FINANCIAL PRESSURE BAR ══════════ */}
           {!dashLoading && (
@@ -1359,6 +1462,11 @@ export default function CommandCenter() {
               <ArrowRight size={13} className="ml-auto opacity-40 text-white" />
             </Link>
           ))}
+        </div>
+
+        {/* ═══ CREW CALENDAR ═══ */}
+        <div className="card p-4">
+          <CrewCalendar />
         </div>
 
         {/* ═══ OPERATIONS BOARD TOGGLE ═══ */}

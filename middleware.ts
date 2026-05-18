@@ -27,6 +27,12 @@ const PUBLIC_PATHS = [
   '/api/auth/request-password-reset',
   '/api/auth/reset-password',
 
+  // ── SSO authorize (OAuth-style entry point for mobile/external apps) ──
+  // This endpoint is intentionally public: unauthenticated users get
+  // redirected to /auth/login?next=<this-url> by the route handler itself.
+  // Blocking it here with 401 would break the entire SSO flow.
+  '/api/auth/authorize',
+
   // ── Safe public endpoints ──
   '/api/tos-accept',
   '/api/pricing',
@@ -132,7 +138,8 @@ export function middleware(req: NextRequest) {
 
   // ── Trusted external API origins ──────────────────────────────────────────
   // These hosts are allowed to make cross-origin requests to /api/mobile/*
-  // They use Bearer JWT auth (not session cookies) so CSRF doesn't apply.
+  // and /api/auth/authorize. They use Bearer JWT auth (not session cookies)
+  // so CSRF doesn't apply.
   const TRUSTED_API_ORIGINS = [
     'site-survey-api-bpyz.onrender.com',  // Mobile field app backend (Render)
   ];
@@ -212,7 +219,40 @@ export function middleware(req: NextRequest) {
     }
     return res;
   }
-  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── CORS headers for /api/auth/authorize (SSO entry point) ────────────────
+  // The survey app backend on Render opens this endpoint cross-origin to
+  // initiate the SSO flow. Allow OPTIONS preflight and attach CORS headers
+  // for trusted origins. The route handler itself validates redirect_uri.
+  const isAuthorize = pathname === '/api/auth/authorize';
+  if (isAuthorize) {
+    const origin = req.headers.get('origin') ?? '';
+    let originHost = '';
+    try { originHost = new URL(origin).host; } catch { /* no origin header */ }
+
+    const isTrustedOrigin = TRUSTED_API_ORIGINS.includes(originHost)
+      || originHost === 'localhost:3000'
+      || originHost === 'localhost:3008';
+
+    if (req.method === 'OPTIONS') {
+      return new NextResponse(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin':  isTrustedOrigin ? origin : '*',
+          'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Max-Age':       '86400',
+        },
+      });
+    }
+
+    const res = NextResponse.next();
+    if (isTrustedOrigin) {
+      res.headers.set('Access-Control-Allow-Origin',  origin);
+      res.headers.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    }
+    return res;
+  }
 
   // ── Dev auth bypass (non-production only) ──────────────────────────────────
   // Active when: VERCEL_ENV !== 'production' AND DEV_AUTH_BYPASS=true in env

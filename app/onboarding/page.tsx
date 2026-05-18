@@ -242,7 +242,7 @@ export default function OnboardingPage() {
                 We&apos;ll help you configure your company branding so your proposals look professional from day one.
               </p>
 
-              <div className="space-y-3 mb-8">
+              <div className="space-y-3 mb-6">
                 {[
                   { icon: <Building2 size={16} />, label: 'Add your company name & contact info' },
                   { icon: <Palette size={16} />,   label: 'Set your brand colours and logo' },
@@ -256,6 +256,34 @@ export default function OnboardingPage() {
                     {item.label}
                   </div>
                 ))}
+              </div>
+
+              {/* ── Workflow explainer ── */}
+              <div className="mb-8">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Your SolarPro Workflow</p>
+                <div className="flex items-center gap-1 flex-wrap">
+                  {[
+                    { step: '1', label: 'Bill',       color: 'text-sky-400 bg-sky-500/10 border-sky-500/20' },
+                    { step: '2', label: 'System',     color: 'text-teal-400 bg-teal-500/10 border-teal-500/20' },
+                    { step: '3', label: 'Design',     color: 'text-amber-400 bg-amber-500/10 border-amber-500/20' },
+                    { step: '4', label: 'Engineering',color: 'text-blue-400 bg-blue-500/10 border-blue-500/20' },
+                    { step: '5', label: 'Proposal',   color: 'text-purple-400 bg-purple-500/10 border-purple-500/20' },
+                    { step: '6', label: 'Install',    color: 'text-green-400 bg-green-500/10 border-green-500/20' },
+                  ].map((w, i, arr) => (
+                    <React.Fragment key={w.step}>
+                      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium ${w.color}`}>
+                        <span className="opacity-60">{w.step}</span>
+                        {w.label}
+                      </div>
+                      {i < arr.length - 1 && (
+                        <svg className="text-slate-600 flex-shrink-0" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                          <path d="M4.5 2L9 6l-4.5 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500 mt-2">Upload a utility bill → auto-size the system → draw the design → generate engineering docs → send a signed proposal → track the install.</p>
               </div>
 
               <button

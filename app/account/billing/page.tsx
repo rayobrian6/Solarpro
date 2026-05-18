@@ -14,7 +14,7 @@ import {
 const PLAN_INFO: Record<string, { label: string; price: string; color: string; bgColor: string; borderColor: string }> = {
   starter:      { label: 'Starter',      price: '$79/mo',   color: 'text-slate-300',  bgColor: 'bg-slate-700',    borderColor: 'border-slate-600' },
   professional: { label: 'Professional', price: '$149/mo',  color: 'text-amber-400',  bgColor: 'bg-amber-500/20', borderColor: 'border-amber-500' },
-  contractor:   { label: 'Contractor',   price: '$250/mo',  color: 'text-blue-400',   bgColor: 'bg-blue-500/20',  borderColor: 'border-blue-500' },
+  contractor:   { label: 'Contractor',   price: '$249/mo',  color: 'text-blue-400',   bgColor: 'bg-blue-500/20',  borderColor: 'border-blue-500' },
   enterprise:   { label: 'Enterprise',   price: 'Custom',   color: 'text-purple-400', bgColor: 'bg-purple-500/20', borderColor: 'border-purple-500' },
   free_pass:    { label: 'Free Pass',    price: 'Free',     color: 'text-emerald-400', bgColor: 'bg-emerald-500/20', borderColor: 'border-emerald-500' },
 };
@@ -301,7 +301,7 @@ export default function BillingPage() {
               {[
                 { id: 'starter',      label: 'Starter',      price: '$79/mo',  features: ['2 projects', '5 clients', 'Basic design'] },
                 { id: 'professional', label: 'Professional', price: '$149/mo', features: ['Unlimited projects', 'Engineering (SLD)', 'Permit packets'] },
-                { id: 'contractor',   label: 'Contractor',   price: '$250/mo', features: ['Team members', 'Sol Fence', 'API access'] },
+                { id: 'contractor',   label: 'Contractor',   price: '$249/mo', features: ['Sol Fence', 'API access', 'Dedicated onboarding'] },
                 { id: 'enterprise',   label: 'Enterprise',   price: 'Custom',  features: ['Multi-company', 'Custom SLA', 'White-glove'] },
               ].map((p) => {
                 const info = PLAN_INFO[p.id];

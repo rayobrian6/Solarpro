@@ -2121,6 +2121,44 @@ export async function POST(req: NextRequest) {
       results.push(`⚠️ Migration 040 (admin password fix): ${(e as Error).message}`);
     }
 
+    // -- Migration 041: crew_members table (Priority 7) ----------------------
+    // Individual crew member records — each crew can have N named members
+    // with role, phone, email, and certifications.
+    // crew_members.crew_id → crews.id (ON DELETE CASCADE)
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS crew_members (
+          id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          crew_id          UUID        NOT NULL REFERENCES crews(id) ON DELETE CASCADE,
+          user_id          UUID        NOT NULL,
+          name             TEXT        NOT NULL,
+          role             TEXT        NOT NULL DEFAULT 'installer',
+          phone            TEXT,
+          email            TEXT,
+          certifications   TEXT[],
+          is_lead          BOOLEAN     NOT NULL DEFAULT FALSE,
+          notes            TEXT,
+          created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 041a: crew_members table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 041a (crew_members table): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_crew_members_crew ON crew_members(crew_id)`;
+      results.push('\u2705 Migration 041b: idx_crew_members_crew \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 041b (idx_crew_members_crew): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_crew_members_user ON crew_members(user_id)`;
+      results.push('\u2705 Migration 041c: idx_crew_members_user \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 041c (idx_crew_members_user): ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);

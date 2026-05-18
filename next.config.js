@@ -91,6 +91,10 @@ const BUILD_VERSION = versionMatch ? versionMatch[1] : 'unknown';
 
 const nextConfig = {
   reactStrictMode: true,
+  // NOTE: removeConsole was removed — the SWC transform was eating multi-line
+  // console.log calls (e.g. the PARSED_DATA_OBJECT log in handleBillComplete)
+  // and corrupting the surrounding bill-save logic in production builds.
+  // console.log calls are left as-is; strip them manually if needed.
   typescript: {
     // Pre-existing TS errors across codebase (missing @types/node, lucide-react, etc.)
     // Runtime behavior is correct; type errors are environment/tooling issues.

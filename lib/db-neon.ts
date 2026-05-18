@@ -338,6 +338,8 @@ export function rowToProject(row: Record<string, unknown>): Project {
           ? JSON.parse(row.system_config_locks)
           : row.system_config_locks) as import('@/types').SystemConfigLocks
       : undefined,
+    monitoringPlatform: (row.monitoring_platform as import('@/types').Project['monitoringPlatform']) ?? null,
+    monitoringUrl: (row.monitoring_url as string) ?? null,
     createdAt: row.created_at as string,
     updatedAt: row.updated_at as string,
   };
@@ -864,6 +866,8 @@ export async function updateProject(
         control_mode  = ${(merged.controlMode ?? current.controlMode ?? 'guided')},
         system_config_locks = ${merged.systemConfigLocks ? JSON.stringify(merged.systemConfigLocks) : (current.systemConfigLocks ? JSON.stringify(current.systemConfigLocks) : null)}::jsonb,
         bill_data     = ${billDataJson}::jsonb,
+        monitoring_platform = ${merged.monitoringPlatform ?? current.monitoringPlatform ?? null},
+        monitoring_url      = ${merged.monitoringUrl ?? current.monitoringUrl ?? null},
         updated_at    = NOW()
       WHERE id = ${id}
         AND user_id = ${userId}
@@ -885,6 +889,8 @@ export async function updateProject(
         no_itc        = ${merged.noItc ?? false},
         control_mode  = ${(merged.controlMode ?? current.controlMode ?? 'guided')},
         system_config_locks = ${merged.systemConfigLocks ? JSON.stringify(merged.systemConfigLocks) : (current.systemConfigLocks ? JSON.stringify(current.systemConfigLocks) : null)}::jsonb,
+        monitoring_platform = ${merged.monitoringPlatform ?? current.monitoringPlatform ?? null},
+        monitoring_url      = ${merged.monitoringUrl ?? current.monitoringUrl ?? null},
         updated_at    = NOW()
       WHERE id = ${id}
         AND user_id = ${userId}
@@ -1952,7 +1958,7 @@ export interface SiteAlias {
 
 /**
  * Save a learned alias.
- * Creates the site_aliases table if it doesn't exist (auto-migration).
+ * Table is created by migration 018_site_aliases.sql.
  * Upserts on (user_id, phrase) — same phrase from same user updates the route.
  */
 export async function solardogSaveAlias(
