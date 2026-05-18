@@ -1,37 +1,36 @@
-# SolarPro Canonical Intelligence Orchestration Foundation
+# SolarPro Intelligence Producers + Self-Learning Pipelines
 
-## 1. Intelligence Event Adapters
-- [x] Create lib/intelligence/events.ts with typed canonical event envelope
-- [x] Add adapter helpers for network_events, intake_events, webhook_ingestion_log, project_activity, admin_activity_log
-- [x] Ensure adapters do not write logs or own lifecycle state
+## 1. Pre-Implementation Producer Audit
+- [x] Audit event/log/data sources for Contractor Performance producer
+- [x] Audit event/log/data sources for Homeowner Engagement producer
+- [x] Audit event/log/data sources for AHJ Correction producer
+- [x] Audit event/log/data sources for Utility Behavioral producer
+- [x] Audit event/log/data sources for Opportunity Lifecycle producer
+- [x] Audit event/log/data sources for Inspection / Failure producer
+- [x] Identify canonical attachment points for all producers
+- [x] Identify replay boundaries, confidence strategy, and idempotency strategy
+- [x] Write producer audit document
 
-## 2. Intelligence Observations
-- [x] Create lib/intelligence/observations.ts with typed observation model
-- [x] Add validation helpers enforcing entity/source/confidence/timestamp/derivation/schema_version
-- [x] Add writer interface for DB-backed append-friendly observations
+## 2. Producer Foundation
+- [x] Create producer shared types and helpers
+- [x] Create replay-safe observation generation utilities
+- [x] Ensure all producers output IntelligenceObservationDraft only
 
-## 3. Migration
-- [x] Add lib/migrations/061_intelligence_observations.sql
-- [x] Ensure table is append-friendly and not lifecycle authority
-- [x] Add required indexes: entity_type/entity_id, observation_type, source_system, observed_at
+## 3. Required Producers
+- [x] Contractor Performance Intelligence producer
+- [x] Homeowner Engagement Intelligence producer
+- [x] AHJ Correction Intelligence producer
+- [x] Utility Behavioral Intelligence producer
+- [x] Opportunity Lifecycle Intelligence producer
+- [x] Inspection / Failure Intelligence producer
 
-## 4. Event-to-Observation Bridge
-- [x] Create bridge handlers for existing intake/network events to observation drafts
-- [x] Ensure bridge attaches observations to canonical entities only
+## 4. Tests
+- [x] Tests for canonical attachments
+- [x] Tests for replay-safe idempotency
+- [x] Tests for explainability and confidence derivation
+- [x] Tests proving producers do not mutate lifecycle/source-of-truth systems
 
-## 5. Opportunity Scoring Explainability
-- [x] Audit opportunityScorer current output/write path
-- [x] Add observation-compatible score derivation helpers or writer integration
-- [x] Preserve opportunity_intelligence as projection, not duplicate lifecycle
-
-## 6. Tests
-- [x] Add tests proving no duplicate utility source of truth introduced
-- [x] Add tests proving no duplicate opportunity lifecycle introduced
-- [x] Add tests proving observations attach to existing canonical entities
-- [x] Add tests proving event adapters do not replace existing logs
-- [x] Add tests proving scoring remains explainable
-
-## 7. QA + Commit
-- [x] Run targeted tests
-- [x] Run TypeScript check / lint as feasible
+## 5. QA + Commit
+- [x] Run targeted producer tests
+- [x] Run TypeScript/lint targeted checks
 - [x] Commit and push dev only
