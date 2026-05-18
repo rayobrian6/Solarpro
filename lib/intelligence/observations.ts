@@ -93,9 +93,17 @@ export interface ObservationValidationResult {
   errors: string[]
 }
 
+export type ObservationWriteStatus = 'inserted' | 'skipped_existing' | 'failed'
+
+export interface ObservationWriteResult {
+  status: ObservationWriteStatus
+  observation?: IntelligenceObservation
+  error?: string
+}
+
 export interface ObservationWriter {
-  writeObservation(observation: IntelligenceObservationDraft): Promise<IntelligenceObservation>
-  writeObservations(observations: IntelligenceObservationDraft[]): Promise<IntelligenceObservation[]>
+  writeObservation(observation: IntelligenceObservationDraft): Promise<ObservationWriteResult>
+  writeObservations(observations: IntelligenceObservationDraft[]): Promise<ObservationWriteResult[]>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -158,54 +166,76 @@ export function createObservationDraft<Payload extends Record<string, unknown>>(
 export class NeonObservationWriter implements ObservationWriter {
   private sql = neon(process.env.DATABASE_URL!)
 
-  async writeObservation(observation: IntelligenceObservationDraft): Promise<IntelligenceObservation> {
+  async writeObservation(observation: IntelligenceObservationDraft): Promise<ObservationWriteResult> {
     assertValidObservationDraft(observation)
 
-    const rows = await this.sql`
-      INSERT INTO intelligence_observations (
-        entity_type,
-        entity_id,
-        observation_type,
-        source_system,
-        confidence,
-        observed_at,
-        derivation,
-        payload,
-        schema_version,
-        correlation_id,
-        causation_id,
-        idempotency_key
-      ) VALUES (
-        ${observation.entity_type},
-        ${observation.entity_id},
-        ${observation.observation_type},
-        ${observation.source_system},
-        ${observation.confidence},
-        ${observation.observed_at},
-        ${JSON.stringify(observation.derivation)},
-        ${JSON.stringify(observation.payload)},
-        ${observation.schema_version},
-        ${observation.correlation_id ?? null},
-        ${observation.causation_id ?? null},
-        ${observation.idempotency_key ?? null}
-      )
-      ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO UPDATE
-      SET idempotency_key = EXCLUDED.idempotency_key
-      RETURNING
-        id, entity_type, entity_id, observation_type, source_system, confidence,
-        observed_at, derivation, payload, schema_version, correlation_id,
-        causation_id, idempotency_key, created_at
-    `
+    try {
+      const rows = await this.sql`
+        WITH inserted AS (
+          INSERT INTO intelligence_observations (
+            entity_type,
+            entity_id,
+            observation_type,
+            source_system,
+            confidence,
+            observed_at,
+            derivation,
+            payload,
+            schema_version,
+            correlation_id,
+            causation_id,
+            idempotency_key
+          ) VALUES (
+            ${observation.entity_type},
+            ${observation.entity_id},
+            ${observation.observation_type},
+            ${observation.source_system},
+            ${observation.confidence},
+            ${observation.observed_at},
+            ${JSON.stringify(observation.derivation)},
+            ${JSON.stringify(observation.payload)},
+            ${observation.schema_version},
+            ${observation.correlation_id ?? null},
+            ${observation.causation_id ?? null},
+            ${observation.idempotency_key ?? null}
+          )
+          ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+          RETURNING
+            id, entity_type, entity_id, observation_type, source_system, confidence,
+            observed_at, derivation, payload, schema_version, correlation_id,
+            causation_id, idempotency_key, created_at, true AS inserted
+        ), existing AS (
+          SELECT
+            id, entity_type, entity_id, observation_type, source_system, confidence,
+            observed_at, derivation, payload, schema_version, correlation_id,
+            causation_id, idempotency_key, created_at, false AS inserted
+          FROM intelligence_observations
+          WHERE idempotency_key = ${observation.idempotency_key ?? null}
+            AND ${observation.idempotency_key ?? null} IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM inserted)
+          LIMIT 1
+        )
+        SELECT * FROM inserted
+        UNION ALL
+        SELECT * FROM existing
+        LIMIT 1
+      `
 
-    return rows[0] as IntelligenceObservation
+      const row = rows[0] as (IntelligenceObservation & { inserted?: boolean }) | undefined
+      if (!row) return { status: 'failed', error: 'observation_write_returned_no_row' }
+      const { inserted: wasInserted, ...obs } = row
+      return { status: wasInserted ? 'inserted' : 'skipped_existing', observation: obs as IntelligenceObservation }
+    } catch (err: unknown) {
+      return { status: 'failed', error: (err as Error).message }
+    }
   }
 
-  async writeObservations(observations: IntelligenceObservationDraft[]): Promise<IntelligenceObservation[]> {
-    const written: IntelligenceObservation[] = []
+  async writeObservations(observations: IntelligenceObservationDraft[]): Promise<ObservationWriteResult[]> {
+    const results: ObservationWriteResult[] = []
     for (const observation of observations) {
-      written.push(await this.writeObservation(observation))
+      results.push(await this.writeObservation(observation))
     }
-    return written
+    return results
   }
 }
 

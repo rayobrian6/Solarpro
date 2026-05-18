@@ -172,3 +172,19 @@ Comments and tests do not overstate scheduled execution, automatic learning, pro
 **APPROVE WITH FIXES.**
 
 Do not expose an admin trigger endpoint yet. The foundation is strong and canonical, but endpoint exposure should wait until the runner enforces orchestration-level idempotency, reports replay collisions more accurately, validates registry entity compatibility, and has the missing failure-path tests.
+
+---
+
+## Post-Hardening Status
+
+The endpoint-blocking audit findings were addressed in the orchestration hardening pass:
+
+1. Runner-level idempotency is now mandatory. Observations missing `idempotency_key` are rejected as validation failures and are never written.
+2. The observation writer contract now returns write status: `inserted`, `skipped_existing`, or `failed`.
+3. `NeonObservationWriter` uses `ON CONFLICT DO NOTHING` and returns `skipped_existing` for existing idempotency keys without mutating existing observations.
+4. Runner summaries now count DB-level idempotent collisions as skipped observations and idempotent collisions.
+5. Runner validates generated observation entity types against each producer's registry metadata.
+6. Non-dry-run execution without a writer now returns a structured `writer_required_for_non_dry_run` write failure instead of throwing.
+7. Tests were added for unknown producer safety, missing idempotency rejection, registry entity enforcement, writer failure isolation, DB-level idempotent collision reporting, and structured missing-writer behavior.
+
+Updated recommendation after hardening: ready for a manual admin-safe trigger endpoint, provided the endpoint defaults to dry-run, requires admin auth, enforces bounded scopes, and does not add dashboards, schedulers, projections, or lifecycle mutation.

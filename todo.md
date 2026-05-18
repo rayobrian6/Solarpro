@@ -1,25 +1,36 @@
-# Intelligence Orchestration Foundation Audit — Audit Only
+# Intelligence Orchestration Audit Fixes — Hardening Only
 
-## 1. Inspect Orchestration Foundation
-- [x] Inspect executionContext.ts for deterministic context behavior
-- [x] Inspect replay.ts for replay boundary stability
-- [x] Inspect registry.ts for producer registry safety
-- [x] Inspect runner.ts for dry-run, writer, failure, summary behavior
-- [x] Inspect runner.test.ts and related tests for coverage quality
+## 1. Runner Idempotency Enforcement
+- [x] Require idempotency_key in runner validation path
+- [x] Count missing idempotency as validation failure
+- [x] Ensure missing idempotency is never written
 
-## 2. Verify Audit Checks
-- [x] Verify dry-run safety
-- [x] Verify writer idempotency behavior
-- [x] Verify replay stability
-- [x] Verify registry safety
-- [x] Verify failure isolation
-- [x] Verify observation validation
-- [x] Verify source-of-truth protection
-- [x] Verify event-system protection
-- [x] Verify execution summary completeness
-- [x] Verify test quality
-- [x] Verify documentation/code mismatch
+## 2. Writer Collision Reporting
+- [x] Update observation writer contract to report inserted/skipped_existing/failed
+- [x] Update NeonObservationWriter behavior without mutating existing observations
+- [x] Update runner summary counts for DB-level collisions
 
-## 3. Deliver Audit Report
-- [x] Produce audit report with findings and recommendation
-- [x] Do not implement fixes
+## 3. Registry Entity Enforcement
+- [x] Validate producer observations against registry supported_entity_types
+- [x] Reject mismatches as validation failures
+- [x] Add summary detail for mismatch
+
+## 4. Structured Missing Writer Failure
+- [x] Return structured write failure when dry_run=false and writer missing
+- [x] Do not throw uncontrolled error
+
+## 5. Tests
+- [x] Unknown producer safety
+- [x] Invalid observation validation through runner
+- [x] Missing idempotency rejection dry-run and non-dry-run
+- [x] Writer failure isolation
+- [x] Registry entity enforcement
+- [x] Non-dry-run without writer structured failure
+- [x] DB-level idempotent collision reporting
+- [x] Dry-run still zero writes
+
+## 6. QA + Commit
+- [x] Run targeted vitest command
+- [x] Run targeted TypeScript check
+- [x] Run targeted ESLint check
+- [x] Commit and push dev only

@@ -41,8 +41,8 @@ export async function writeObservationsForExistingLogRow(
 ): Promise<number> {
   const observations = bridgeExistingLogRowToObservations(sourceLog, row, opts)
   if (observations.length === 0) return 0
-  await writer.writeObservations(observations)
-  return observations.length
+  const results = await writer.writeObservations(observations)
+  return results.filter(r => r.status === 'inserted').length
 }
 
 export function bridgeExistingLogRowsToObservations(

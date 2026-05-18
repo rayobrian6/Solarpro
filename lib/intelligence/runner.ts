@@ -26,6 +26,9 @@ export interface ProducerExecutionFailure {
 
 export interface ObservationValidationFailure {
   producer_name: ProducerName
+  entity_type: string | null
+  entity_id: string | null
+  observation_type: string | null
   idempotency_key: string | null
   errors: string[]
 }
@@ -63,13 +66,13 @@ export interface RunIntelligenceProducersOptions extends NormalizeExecutionConte
   replay_scope?: ReplayScope
 }
 
-function monotonicStartedAt(ctx: IntelligenceExecutionContext): string {
-  return ctx.observed_at
+interface GeneratedObservation {
+  producer_name: ProducerName
+  observation: IntelligenceObservationDraft
 }
 
-function finishTimestamp(ctx: IntelligenceExecutionContext): string {
-  return ctx.observed_at
-}
+function monotonicStartedAt(ctx: IntelligenceExecutionContext): string { return ctx.observed_at }
+function finishTimestamp(ctx: IntelligenceExecutionContext): string { return ctx.observed_at }
 
 function uniqueEntityList(observations: IntelligenceObservationDraft[]): Array<{ entity_type: string; entity_id: string }> {
   const m = new Map<string, { entity_type: string; entity_id: string }>()
@@ -77,19 +80,35 @@ function uniqueEntityList(observations: IntelligenceObservationDraft[]): Array<{
   return [...m.values()]
 }
 
-function dedupeByIdempotency(observations: IntelligenceObservationDraft[]): { unique: IntelligenceObservationDraft[]; collisions: number } {
+function validationFailure(producerName: ProducerName, obs: Partial<IntelligenceObservationDraft>, errors: string[]): ObservationValidationFailure {
+  return {
+    producer_name: producerName,
+    entity_type: typeof obs.entity_type === 'string' ? obs.entity_type : null,
+    entity_id: typeof obs.entity_id === 'string' ? obs.entity_id : null,
+    observation_type: typeof obs.observation_type === 'string' ? obs.observation_type : null,
+    idempotency_key: obs.idempotency_key ?? null,
+    errors,
+  }
+}
+
+function dedupeByIdempotency(items: GeneratedObservation[]): { unique: GeneratedObservation[]; collisions: number } {
   const seen = new Set<string>()
-  const unique: IntelligenceObservationDraft[] = []
+  const unique: GeneratedObservation[] = []
   let collisions = 0
 
-  for (const obs of observations) {
-    const key = obs.idempotency_key ?? `${obs.entity_type}:${obs.entity_id}:${obs.observation_type}:${obs.observed_at}`
+  for (const item of items) {
+    const key = item.observation.idempotency_key
+    // Missing keys are rejected before dedupe; keep this guard defensive.
+    if (!key) {
+      collisions++
+      continue
+    }
     if (seen.has(key)) {
       collisions++
       continue
     }
     seen.add(key)
-    unique.push(obs)
+    unique.push(item)
   }
 
   return { unique, collisions }
@@ -107,45 +126,74 @@ export async function runIntelligenceProducers(options: RunIntelligenceProducers
   const validationFailures: ObservationValidationFailure[] = []
   const writeFailures: string[] = []
   const producersExecuted: ProducerName[] = []
-  const generated: IntelligenceObservationDraft[] = []
+  const generated: GeneratedObservation[] = []
 
   for (const job of options.jobs) {
     try {
       const producer = getProducer(job.producer_name)
       const drafts = producer.run(job.input, toProducerContext(context))
       producersExecuted.push(job.producer_name)
-      generated.push(...drafts)
+      generated.push(...drafts.map(observation => ({ producer_name: job.producer_name, observation })))
     } catch (err: unknown) {
       producerFailures.push({ producer_name: job.producer_name, message: (err as Error).message })
     }
   }
 
-  const valid: IntelligenceObservationDraft[] = []
-  for (const obs of generated) {
-    const validation = validateObservationDraft(obs)
-    if (!validation.valid) {
-      validationFailures.push({ producer_name: options.jobs.find(j => j.producer_name === obs.source_system.replace('_producer', '') as ProducerName)?.producer_name ?? 'opportunity_lifecycle', idempotency_key: obs.idempotency_key ?? null, errors: validation.errors })
+  const validItems: GeneratedObservation[] = []
+  for (const item of generated) {
+    const { producer_name, observation } = item
+    const producer = getProducer(producer_name)
+    const validation = validateObservationDraft(observation)
+    const errors = [...validation.errors]
+
+    if (!observation.idempotency_key) errors.push('idempotency_key is required for orchestration writes')
+    if (!producer.supported_entity_types.includes(observation.entity_type)) {
+      errors.push(`entity_type ${observation.entity_type} is not supported by producer ${producer_name}`)
+    }
+
+    if (errors.length > 0) {
+      validationFailures.push(validationFailure(producer_name, observation, errors))
       continue
     }
-    valid.push(obs)
+    validItems.push(item)
   }
 
-  const { unique, collisions } = dedupeByIdempotency(valid)
+  const { unique, collisions: inRunCollisions } = dedupeByIdempotency(validItems)
   const written: IntelligenceObservation[] = []
+  let dbCollisions = 0
+  let skipped = inRunCollisions + validationFailures.length
 
   if (!context.dry_run) {
-    if (!options.writer) throw new Error('Observation writer is required when dry_run=false')
-    for (const obs of unique) {
-      try {
-        assertValidObservationDraft(obs)
-        written.push(await options.writer.writeObservation(obs))
-      } catch (err: unknown) {
-        writeFailures.push((err as Error).message)
+    if (!options.writer) {
+      writeFailures.push('writer_required_for_non_dry_run')
+      skipped += unique.length
+    } else {
+      for (const item of unique) {
+        const obs = item.observation
+        try {
+          assertValidObservationDraft(obs)
+          const result = await options.writer.writeObservation(obs)
+          if (result.status === 'inserted' && result.observation) {
+            written.push(result.observation)
+          } else if (result.status === 'skipped_existing') {
+            dbCollisions++
+            skipped++
+          } else {
+            writeFailures.push(result.error ?? 'observation_write_failed')
+            skipped++
+          }
+        } catch (err: unknown) {
+          writeFailures.push((err as Error).message)
+          skipped++
+        }
       }
     }
+  } else {
+    skipped += unique.length
   }
 
   const durationMs = Math.max(0, Date.now() - startedMs)
+  const uniqueObservations = unique.map(i => i.observation)
   const summary: IntelligenceRunSummary = {
     run_id: context.run_id,
     dry_run: context.dry_run,
@@ -155,16 +203,16 @@ export async function runIntelligenceProducers(options: RunIntelligenceProducers
     replay_boundary: replayBoundary,
     producers_requested: options.jobs.map(j => j.producer_name),
     producers_executed: producersExecuted,
-    entities_processed: uniqueEntityList(unique),
+    entities_processed: uniqueEntityList(uniqueObservations),
     observations_generated: generated.length,
-    observations_validated: valid.length,
+    observations_validated: validItems.length,
     observations_written: written.length,
-    observations_skipped: context.dry_run ? unique.length + collisions : collisions,
-    idempotent_collisions: collisions,
+    observations_skipped: skipped,
+    idempotent_collisions: inRunCollisions + dbCollisions,
     validation_failures: validationFailures,
     producer_failures: producerFailures,
     write_failures: writeFailures,
   }
 
-  return { context, summary, observations: unique, written }
+  return { context, summary, observations: uniqueObservations, written }
 }
