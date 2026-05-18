@@ -4,6 +4,7 @@
  */
 
 import { getDbReady, isValidUUID, assertUUID, rowToLayout, parseDbFloat } from './core';
+import { hydrateBillData } from '@/lib/bill/hydrateBillData';
 
 // ============================================================
 // PRODUCTION — save/load calculated production results
@@ -224,79 +225,15 @@ export async function getProjectWithDetails(
     }
   }
 
-  // Hydrate bill_data JSONB into typed BillAnalysis + utility fields
+  // Delegate all bill_data hydration to shared helper (see lib/bill/hydrateBillData.ts)
   const rawBillData = row.bill_data as Record<string, unknown> | undefined;
-  let billAnalysis: import('@/types').BillAnalysis | undefined;
-  let utilityName: string | undefined;
-  let utilityRatePerKwh: number | undefined;
-  let stateCode: string | undefined;
-  // FIX v47.8: city hydration from bill_data._city (matches rowToProject fix)
-  let cityDetail: string | undefined;
-
-  if (rawBillData) {
-    if (rawBillData._billAnalysis) {
-      billAnalysis = rawBillData._billAnalysis as import('@/types').BillAnalysis;
-      utilityName = (rawBillData._utilityName as string) || undefined;
-      utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
-      stateCode = (rawBillData._stateCode as string) || undefined;
-      // FIX v47.8: hydrate city from bill_data._city
-      cityDetail = (rawBillData._city as string) || undefined;
-    } else if (rawBillData.monthlyKwh || rawBillData.annualKwh || rawBillData.estimatedAnnualKwh
-               || rawBillData.monthlyUsageHistory || rawBillData.utilityProvider
-               || rawBillData.electricityRate) {
-      // Flat format: synthesize BillAnalysis from raw OCR/provision fields
-      // Also triggered on utilityProvider/electricityRate alone so rate lookup works
-      // even when kWh fields were not extracted.
-      // Priority for monthly array: monthlyUsageHistory[] > monthlyKwh[] > fill from annual
-      const rawHistory2 = rawBillData.monthlyUsageHistory;
-      const rawMonthly2 = rawBillData.monthlyKwh;
-      const monthlyKwhArray2: number[] = Array.isArray(rawHistory2) && (rawHistory2 as number[]).length >= 3
-        ? (rawHistory2 as number[]).slice(0, 12)
-        : Array.isArray(rawMonthly2)
-          ? (rawMonthly2 as number[])
-          : (() => {
-              const annKwh2 = ((rawBillData.annualKwh as number) || 0)
-                || ((rawBillData.estimatedAnnualKwh as number) || 0)
-                || (typeof rawBillData.monthlyKwh === 'number' ? (rawBillData.monthlyKwh as number) * 12 : 0);
-              const avg2 = Math.round(annKwh2 / 12);
-              return Array(12).fill(avg2 > 0 ? avg2 : 0);
-            })();
-      const annualKwh2 = ((rawBillData.annualKwh as number) || 0)
-        || ((rawBillData.estimatedAnnualKwh as number) || 0)
-        || monthlyKwhArray2.reduce((a: number, b: number) => a + b, 0);
-      const avgMonthlyKwh2 = Math.round(annualKwh2 / 12);
-      // Rate: validate against utility DB to always get retail rate, not supply-only component
-      const _utilityNameForRate2 = (rawBillData.utilityProvider as string) || (row.utility_name as string) || null;
-      const _rawRate2 = ((rawBillData.electricityRate as number) > 0 ? (rawBillData.electricityRate as number) : null)
-        ?? ((row.utility_rate_per_kwh as number) > 0 ? (row.utility_rate_per_kwh as number) : null);
-      const _rateValidation2 = validateAndCorrectUtilityRate(_rawRate2, _utilityNameForRate2);
-      const utilityRate2 = _rateValidation2.rate;
-      const avgMonthlyBill2 = ((rawBillData.estimatedMonthlyBill as number) || 0)
-        || ((rawBillData.totalAmount as number) || 0)
-        || Math.round(avgMonthlyKwh2 * utilityRate2 * 100) / 100;
-      const monthlyKwhSafe2 = monthlyKwhArray2.length > 0 ? monthlyKwhArray2 : [0];
-      const peakKwh2 = Math.max(...monthlyKwhSafe2);
-      const peakMonth2 = monthlyKwhSafe2.indexOf(peakKwh2);
-      // Also hydrate top-level utility fields from flat data
-      utilityName = _utilityNameForRate2 || undefined;
-      utilityRatePerKwh = utilityRate2;
-      stateCode = (rawBillData.stateCode as string) || (row.state_code as string) || undefined;
-      cityDetail = (rawBillData.city as string) || (row.city as string) || undefined;
-      billAnalysis = {
-        monthlyKwh: monthlyKwhArray2,
-        annualKwh: annualKwh2,
-        averageMonthlyKwh: avgMonthlyKwh2,
-        averageMonthlyBill: avgMonthlyBill2,
-        annualBill: avgMonthlyBill2 * 12,
-        utilityRate: utilityRate2,
-        peakMonthKwh: peakKwh2,
-        peakMonth: peakMonth2 >= 0 ? peakMonth2 : 0,
-        recommendedSystemKw: (rawBillData.systemSizeKw as number) || 0,
-        recommendedPanelCount: 0,
-        offsetTarget: 100,
-      } as import('@/types').BillAnalysis;
-    }
-  }
+  const {
+    billAnalysis,
+    utilityName,
+    utilityRatePerKwh,
+    stateCode,
+    city: cityDetail,
+  } = hydrateBillData(rawBillData, row);
 
   return {
     id: row.id as string,

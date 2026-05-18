@@ -16,7 +16,7 @@
 import { neon } from '@neondatabase/serverless';
 import { DbConfigError, getDbWithRetry as _getDbWithRetry } from '@/lib/db-ready';
 import { Client, Project, Layout } from '@/types';
-import { validateAndCorrectUtilityRate } from '@/lib/utility-rules';
+import { hydrateBillData } from '@/lib/bill/hydrateBillData';
 
 // v47.9: Module-level startup log — appears once per Vercel function instance cold start.
 // Searchable in Vercel function logs to trace deployment startup sequence.
@@ -215,82 +215,15 @@ export function rowToClient(row: Record<string, unknown>): Client {
 }
 
 export function rowToProject(row: Record<string, unknown>): Project {
-  // Hydrate bill_data JSONB into typed BillAnalysis + utility fields
   const rawBillData = row.bill_data as Record<string, unknown> | undefined;
-  let billAnalysis: import('@/types').BillAnalysis | undefined;
-  let utilityName: string | undefined;
-  let utilityRatePerKwh: number | undefined;
-  let stateCode: string | undefined;
-  // FIX v47.8: city was never hydrated from bill_data -- added _city hydration
-  let city: string | undefined;
-
-  if (rawBillData) {
-    // bill_data may have been saved with billAnalysis nested or flat
-    if (rawBillData._billAnalysis) {
-      // New format: bill_data._billAnalysis = BillAnalysis object
-      billAnalysis = rawBillData._billAnalysis as import('@/types').BillAnalysis;
-      utilityName = (rawBillData._utilityName as string) || undefined;
-      utilityRatePerKwh = (rawBillData._utilityRatePerKwh as number) || undefined;
-      stateCode = (rawBillData._stateCode as string) || undefined;
-      // FIX v47.8: hydrate city from bill_data._city (stored by handleBillComplete)
-      city = (rawBillData._city as string) || undefined;
-    } else if (rawBillData.monthlyKwh || rawBillData.annualKwh || rawBillData.estimatedAnnualKwh
-               || rawBillData.monthlyUsageHistory || rawBillData.utilityProvider
-               || rawBillData.electricityRate) {
-      // Flat format: bill_data contains raw OCR fields (from provision or legacy save).
-      // Synthesize a BillAnalysis so BillTab can render without crashing.
-      // Also triggered on utilityProvider/electricityRate alone so rate lookup works
-      // even when kWh fields were not extracted.
-      // Priority for monthly array: monthlyUsageHistory[] > monthlyKwh[] > fill from annual
-      const rawHistory = rawBillData.monthlyUsageHistory;
-      const rawMonthly = rawBillData.monthlyKwh;
-      const monthlyKwhArray: number[] = Array.isArray(rawHistory) && (rawHistory as number[]).length >= 3
-        ? (rawHistory as number[]).slice(0, 12)
-        : Array.isArray(rawMonthly)
-          ? (rawMonthly as number[])
-          : (() => {
-              const annKwh = ((rawBillData.annualKwh as number) || 0)
-                || ((rawBillData.estimatedAnnualKwh as number) || 0)
-                || (typeof rawBillData.monthlyKwh === 'number' ? (rawBillData.monthlyKwh as number) * 12 : 0);
-              const avg = Math.round(annKwh / 12);
-              return Array(12).fill(avg > 0 ? avg : 0);
-            })();
-      const annualKwh = ((rawBillData.annualKwh as number) || 0)
-        || ((rawBillData.estimatedAnnualKwh as number) || 0)
-        || monthlyKwhArray.reduce((a: number, b: number) => a + b, 0);
-      const avgMonthlyKwh = Math.round(annualKwh / 12);
-      // Rate: validate against utility DB to always get retail rate, not supply-only component
-      const _utilityNameForRate = (rawBillData.utilityProvider as string) || (row.utility_name as string) || null;
-      const _rawRate = ((rawBillData.electricityRate as number) > 0 ? (rawBillData.electricityRate as number) : null)
-        ?? ((row.utility_rate_per_kwh as number) > 0 ? (row.utility_rate_per_kwh as number) : null);
-      const _rateValidation = validateAndCorrectUtilityRate(_rawRate, _utilityNameForRate);
-      const utilityRate = _rateValidation.rate;
-      const avgMonthlyBill = ((rawBillData.estimatedMonthlyBill as number) || 0)
-        || ((rawBillData.totalAmount as number) || 0)
-        || Math.round(avgMonthlyKwh * utilityRate * 100) / 100;
-      const monthlyKwhSafe = monthlyKwhArray.length > 0 ? monthlyKwhArray : [0];
-      const peakKwh = Math.max(...monthlyKwhSafe);
-      const peakMonth = monthlyKwhSafe.indexOf(peakKwh);
-      // Also hydrate top-level utility fields from flat data
-      utilityName = _utilityNameForRate || undefined;
-      utilityRatePerKwh = utilityRate;
-      stateCode = (rawBillData.stateCode as string) || (row.state_code as string) || undefined;
-      city = (rawBillData.city as string) || (row.city as string) || undefined;
-      billAnalysis = {
-        monthlyKwh: monthlyKwhArray,
-        annualKwh,
-        averageMonthlyKwh: avgMonthlyKwh,
-        averageMonthlyBill: avgMonthlyBill,
-        annualBill: avgMonthlyBill * 12,
-        utilityRate,
-        peakMonthKwh: peakKwh,
-        peakMonth: peakMonth >= 0 ? peakMonth : 0,
-        recommendedSystemKw: (rawBillData.systemSizeKw as number) || 0,
-        recommendedPanelCount: 0,
-        offsetTarget: 100,
-      } as import('@/types').BillAnalysis;
-    }
-  }
+  // Delegate all bill_data hydration to shared helper (see lib/bill/hydrateBillData.ts)
+  const {
+    billAnalysis,
+    utilityName,
+    utilityRatePerKwh,
+    stateCode,
+    city,
+  } = hydrateBillData(rawBillData, row);
 
   return {
     id: row.id as string,
