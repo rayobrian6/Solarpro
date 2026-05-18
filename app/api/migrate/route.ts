@@ -2159,6 +2159,158 @@ export async function POST(req: NextRequest) {
       results.push(`\u26a0\ufe0f Migration 041c (idx_crew_members_user): ${(e as Error).message}`);
     }
 
+
+    // -- Migration 044: contractor_profiles (Network Phase 1) -----------------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS contractor_profiles (
+          id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id               UUID        NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+          battery_certified     BOOLEAN     NOT NULL DEFAULT FALSE,
+          commercial_capable    BOOLEAN     NOT NULL DEFAULT FALSE,
+          roofing_capable       BOOLEAN     NOT NULL DEFAULT FALSE,
+          steep_roof_capable    BOOLEAN     NOT NULL DEFAULT FALSE,
+          ev_charger_capable    BOOLEAN     NOT NULL DEFAULT FALSE,
+          generator_capable     BOOLEAN     NOT NULL DEFAULT FALSE,
+          service_states        TEXT[]      NOT NULL DEFAULT '{}',
+          service_zips          TEXT[]      NOT NULL DEFAULT '{}',
+          travel_radius_miles   INTEGER     NOT NULL DEFAULT 50,
+          equipment_ecosystems  TEXT[]      NOT NULL DEFAULT '{}',
+          min_project_kw        NUMERIC(6,2),
+          max_project_kw        NUMERIC(6,2),
+          total_installs        INTEGER     NOT NULL DEFAULT 0,
+          avg_close_rate_pct    NUMERIC(5,2),
+          avg_response_hours    NUMERIC(6,2),
+          inspection_pass_rate  NUMERIC(5,2),
+          known_ahjs            TEXT[]      NOT NULL DEFAULT '{}',
+          known_utilities       TEXT[]      NOT NULL DEFAULT '{}',
+          profile_complete      BOOLEAN     NOT NULL DEFAULT FALSE,
+          network_active        BOOLEAN     NOT NULL DEFAULT TRUE,
+          created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 044a: contractor_profiles table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 044a (contractor_profiles): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_contractor_profiles_user ON contractor_profiles(user_id)`;
+      results.push('\u2705 Migration 044b: idx_contractor_profiles_user \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 044b: ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_contractor_profiles_active ON contractor_profiles(network_active) WHERE network_active = TRUE`;
+      results.push('\u2705 Migration 044c: idx_contractor_profiles_active \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 044c: ${(e as Error).message}`);
+    }
+
+    // -- Migration 045: opportunities ------------------------------------------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS opportunities (
+          id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          created_by_user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          project_id            UUID        REFERENCES projects(id) ON DELETE SET NULL,
+          source                TEXT        NOT NULL DEFAULT 'contractor_shared'
+                                  CHECK (source IN ('contractor_shared', 'solarpro_generated')),
+          status                TEXT        NOT NULL DEFAULT 'open'
+                                  CHECK (status IN ('open', 'claimed', 'closed', 'expired', 'withdrawn')),
+          site_name             TEXT,
+          address               TEXT,
+          city                  TEXT,
+          state_code            CHAR(2),
+          zip                   TEXT,
+          lat                   NUMERIC(9,6),
+          lng                   NUMERIC(9,6),
+          system_size_kw        NUMERIC(6,2),
+          annual_kwh            NUMERIC(10,2),
+          monthly_kwh_avg       NUMERIC(8,2),
+          utility_name          TEXT,
+          utility_rate_per_kwh  NUMERIC(6,4),
+          estimated_system_cost NUMERIC(12,2),
+          estimated_payback_yrs NUMERIC(5,2),
+          roof_material         TEXT,
+          roof_pitch            TEXT,
+          roof_condition        TEXT,
+          roof_age_years        INTEGER,
+          stories               TEXT,
+          structure_type        TEXT,
+          usable_roof_pct       NUMERIC(5,2),
+          battery_candidate     BOOLEAN     NOT NULL DEFAULT FALSE,
+          steep_roof            BOOLEAN     NOT NULL DEFAULT FALSE,
+          complex_ahj           BOOLEAN     NOT NULL DEFAULT FALSE,
+          ahj_name              TEXT,
+          equipment_ecosystem   TEXT,
+          asking_price          NUMERIC(10,2),
+          listing_notes         TEXT,
+          expires_at            TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
+          created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 045a: opportunities table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 045a (opportunities): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_opportunities_open_state ON opportunities(state_code, created_at DESC) WHERE status = 'open'`;
+      results.push('\u2705 Migration 045b: idx_opportunities_open_state \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 045b: ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_opportunities_creator ON opportunities(created_by_user_id, created_at DESC)`;
+      results.push('\u2705 Migration 045c: idx_opportunities_creator \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 045c: ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_opportunities_project ON opportunities(project_id) WHERE project_id IS NOT NULL`;
+      results.push('\u2705 Migration 045d: idx_opportunities_project \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 045d: ${(e as Error).message}`);
+    }
+
+    // -- Migration 046: opportunity_claims ------------------------------------
+    try {
+      await sql`
+        CREATE TABLE IF NOT EXISTS opportunity_claims (
+          id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+          opportunity_id        UUID        NOT NULL REFERENCES opportunities(id) ON DELETE CASCADE,
+          claimed_by_user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          status                TEXT        NOT NULL DEFAULT 'pending'
+                                  CHECK (status IN ('pending', 'active', 'closed', 'released', 'expired')),
+          price_paid            NUMERIC(10,2),
+          contractor_notes      TEXT,
+          outcome               TEXT        CHECK (outcome IN ('installed', 'sold_to_another', 'homeowner_declined', 'not_viable', 'other')),
+          outcome_notes         TEXT,
+          outcome_at            TIMESTAMPTZ,
+          first_contact_at      TIMESTAMPTZ,
+          claim_expires_at      TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
+          created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `;
+      results.push('\u2705 Migration 046a: opportunity_claims table \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 046a (opportunity_claims): ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_opportunity_claims_exclusive ON opportunity_claims(opportunity_id) WHERE status NOT IN ('released', 'expired')`;
+      results.push('\u2705 Migration 046b: idx_opportunity_claims_exclusive (exclusivity) \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 046b: ${(e as Error).message}`);
+    }
+    try {
+      await sql`CREATE INDEX IF NOT EXISTS idx_opportunity_claims_user ON opportunity_claims(claimed_by_user_id, created_at DESC)`;
+      results.push('\u2705 Migration 046c: idx_opportunity_claims_user \u2014 ready');
+    } catch (e: unknown) {
+      results.push(`\u26a0\ufe0f Migration 046c: ${(e as Error).message}`);
+    }
+
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
     return handleRouteDbError('[POST /api/migrate]', error);
