@@ -9,7 +9,7 @@
 // Also accepts an optional Bearer token and reports exactly why it
 // passes or fails verification — useful for diagnosing mobile auth issues.
 //
-// ⚠️  REMOVE OR GATE BEHIND ADMIN AUTH before going to production.
+// SECURITY: Blocked in production (productionGuard). Requires admin role.
 // ============================================================================
 
 export const dynamic    = 'force-dynamic';
@@ -20,8 +20,16 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyHandoffToken } from '@/lib/survey/handoff/tokenMinter';
 import { getDbReady } from '@/lib/db-neon';
+import { requireAdminApi } from '@/lib/adminAuth';
+import { productionGuard } from '@/lib/security';
 
 export async function GET(req: NextRequest) {
+  // SECURITY: Block this diagnostic endpoint in production entirely
+  const _blocked = productionGuard(); if (_blocked) return _blocked;
+
+  // SECURITY: Require admin role — this endpoint probes auth internals
+  const adminCheck = await requireAdminApi(req);
+  if (!adminCheck) return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
   const secret    = process.env.SOLARPRO_HANDOFF_SECRET ?? null;
   const secretOk  = !!secret && secret.length >= 32;
 
