@@ -51,4 +51,4 @@ CREATE TABLE IF NOT EXISTS enrichment_queue (
 
 CREATE INDEX IF NOT EXISTS idx_enrichment_queue_status ON enrichment_queue(status);
 CREATE INDEX IF NOT EXISTS idx_enrichment_queue_next_retry ON enrichment_queue(next_retry_at) WHERE status = 'retry';
-CREATE INDEX IF NOT EXISTS idx_enrichment_queue_priority ON enrichment_queue(priority DESC, created_at ASC) WHERE status = 'pending'
+CREATE INDEX IF NOT EXISTS idx_enrichment_queue_priority ON enrichment_queue(priority DESC, created_at ASC) WHERE status = 'pending';

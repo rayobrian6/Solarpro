@@ -35,4 +35,4 @@ CREATE INDEX IF NOT EXISTS idx_webhook_log_platform ON webhook_ingestion_log(pla
 CREATE INDEX IF NOT EXISTS idx_webhook_log_status ON webhook_ingestion_log(status);
 CREATE INDEX IF NOT EXISTS idx_webhook_log_received_at ON webhook_ingestion_log(received_at DESC);
 CREATE INDEX IF NOT EXISTS idx_webhook_log_opportunity_id ON webhook_ingestion_log(opportunity_id) WHERE opportunity_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_webhook_log_partner_id ON webhook_ingestion_log(partner_id) WHERE partner_id IS NOT NULL
+CREATE INDEX IF NOT EXISTS idx_webhook_log_partner_id ON webhook_ingestion_log(partner_id) WHERE partner_id IS NOT NULL;

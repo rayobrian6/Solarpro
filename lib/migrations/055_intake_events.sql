@@ -41,4 +41,4 @@ CREATE INDEX IF NOT EXISTS idx_intake_events_idempotency_key ON intake_events(id
 CREATE INDEX IF NOT EXISTS idx_intake_events_source_system ON intake_events(source_system) WHERE source_system IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_intake_events_action ON intake_events(action);
 CREATE INDEX IF NOT EXISTS idx_intake_events_occurred_at ON intake_events(occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_intake_events_funnel_id ON intake_events(funnel_id) WHERE funnel_id IS NOT NULL
+CREATE INDEX IF NOT EXISTS idx_intake_events_funnel_id ON intake_events(funnel_id) WHERE funnel_id IS NOT NULL;
