@@ -315,15 +315,15 @@ function SubscribePageInner() {
                     <th className="text-left p-4 text-slate-400 font-medium w-2/5">Feature</th>
                     <th className="text-center p-4 text-slate-300 font-medium">
                       <div>Starter</div>
-                      <div className="text-slate-400 text-sm font-normal">$75/mo · 1 user</div>
+                      <div className="text-slate-400 text-sm font-normal">$79/mo · 1 user</div>
                     </th>
                     <th className="text-center p-4 text-slate-300 font-medium">
                       <div>Professional</div>
-                      <div className="text-slate-400 text-sm font-normal">$150/mo · up to 3 users</div>
+                      <div className="text-slate-400 text-sm font-normal">$149/mo · 2 users</div>
                     </th>
                     <th className="text-center p-4 text-amber-400 font-medium">
                       <div>Contractor</div>
-                      <div className="text-amber-400/70 text-sm font-normal">$249/mo · unlimited users</div>
+                      <div className="text-amber-400/70 text-sm font-normal">$249/mo · 2 users</div>
                     </th>
                   </tr>
                 </thead>

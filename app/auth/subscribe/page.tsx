@@ -83,7 +83,7 @@ const FAQS = [
   { q: 'Can I cancel anytime?', a: 'Yes. Cancel anytime from your account settings. No cancellation fees.' },
   { q: 'What is proposal e-signing?', a: 'Professional and Contractor plans include a unique shareable link for each proposal. Clients can review and digitally sign online — no DocuSign needed.' },
   { q: 'Is there a free trial?', a: 'Yes — the Starter plan includes a 3-day free trial. No credit card required to start.' },
-  { q: 'How do additional users work?', a: 'Professional includes up to 3 users. Contractor includes unlimited users. You can add extra seats on Professional for $29/month each.' },
+  { q: 'How do additional users work?', a: 'Professional and Contractor plans include 2 users. You can add more team members for $29/month each as your team grows.' },
   { q: 'Do you offer annual billing?', a: 'Yes — pay annually and save 20%. Contact us for annual pricing.' },
   { q: 'What is Sol Fence design?', a: 'Sol Fence is a vertical bifacial solar fence system. SolarPro is the only platform that supports fence-mounted solar design with specialized layout algorithms.' },
 ];
