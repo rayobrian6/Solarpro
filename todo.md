@@ -1,34 +1,30 @@
-# Intelligence Producer Audit Fixes — Hardening Only
+# Intelligence Producer Orchestration Foundation
 
-## 1. Stable Idempotency
-- [x] Add stable replay boundary / snapshot hash helpers
-- [x] Remove wall-clock observedAt as primary lifecycle idempotency component
-- [x] Add tests proving repeated runs produce identical keys
+## 1. Foundation Types
+- [x] Add deterministic execution context helpers
+- [x] Add scoped replay boundary helpers
+- [x] Add producer registry metadata and lookup
 
-## 2. Centralized Confidence
-- [x] Add shared confidence helper utilities
-- [x] Apply confidence helpers across producers
-- [x] Add confidence bounds tests for all producers
+## 2. Runner Infrastructure
+- [x] Add lib/intelligence/runner.ts
+- [x] Support dry-run execution with zero writes
+- [x] Support single and multi-producer execution
+- [x] Support entity scope and replay-window context
+- [x] Add idempotent observation writer integration
+- [x] Add structured execution summaries
+- [x] Isolate producer failures
 
-## 3. Classifier Secondary Matches
-- [x] Replace single-match classifier internals with primary + secondary match metadata
-- [x] Preserve primary observation types
-- [x] Add secondary_matches / matched_patterns / classification_notes to payload/derivation
-- [x] Add ambiguous multi-signal tests
+## 3. Tests
+- [x] Dry-run performs zero writes
+- [x] Replay produces stable idempotency
+- [x] Duplicate observations are skipped
+- [x] Producer failures do not halt unrelated producers
+- [x] Deterministic execution context works
+- [x] No canonical lifecycle mutation / duplicate event system
+- [x] Observation writes remain append-only
 
-## 4. Test Hardening
-- [x] Repeated-run idempotency stability
-- [x] Lifecycle replay with omitted observed_at
-- [x] Invalid client/homeowner attachment input
-- [x] Producer module has no DB writer/import side effects
-- [x] No homeowner entity type leakage
-- [x] Producers remain observation-only / no lifecycle mutation
-
-## 5. Documentation Alignment
-- [x] Update docs to state repeated-pattern aggregation is future work
-
-## 6. QA + Commit
-- [x] Run targeted vitest command
+## 4. QA + Commit
+- [x] Run targeted orchestration tests
 - [x] Run targeted TypeScript check
 - [x] Run targeted ESLint check
 - [x] Commit and push dev only
