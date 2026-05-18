@@ -119,3 +119,17 @@ Fix before orchestration:
 **APPROVE WITH FIXES.**
 
 Do not block the architecture. The implementation respects canonical boundaries and is observation-only. However, I recommend applying the fixes above before building the orchestration foundation, especially lifecycle idempotency and confidence consistency, because orchestration will multiply any replay/idempotency weakness.
+
+---
+
+## Post-Audit Hardening Status
+
+The audit findings above were addressed in the producer hardening pass:
+
+1. Opportunity lifecycle idempotency no longer uses wall-clock `observed_at` as the primary replay component. The producer now uses the preferred stability order: source event ID, replay window, canonical `updated_at`, assignment source IDs, then deterministic snapshot hash.
+2. Confidence now flows through shared helper utilities using sample size, source reliability, explicitness, metadata richness, recency, classification strength, and corroborating signals.
+3. Classifiers remain primary-label for v1 but now include `secondary_matches`, `matched_patterns`, and `classification_notes` in payload and derivation.
+4. Tests were hardened for repeated-run idempotency, omitted observed_at lifecycle replay, invalid client attachment input, confidence bounds, ambiguous classifier behavior, no DB writer/import side effects, no homeowner entity leakage, and no lifecycle mutation.
+5. Documentation now states repeated-pattern aggregation is future orchestration/aggregation work, not a per-event producer responsibility.
+
+Updated recommendation after hardening: ready for orchestration foundation, provided the future runner preserves dry-run mode, scoped replay, idempotent writes, and no projection mutation.
