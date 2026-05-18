@@ -21,6 +21,8 @@
  *   F   < 35
  */
 
+import { observationFromOpportunityScore, type IntelligenceObservationDraft } from '@/lib/intelligence/observations'
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────────────────────────────────
@@ -605,6 +607,39 @@ export function scoreOpportunity(input: OpportunityInput): ScoringResult {
     executive_summary,
     score_version: SCORE_VERSION,
   }
+}
+
+/**
+ * createOpportunityScoreObservation
+ *
+ * Converts a ScoringResult into a canonical intelligence observation draft.
+ * This does not replace opportunity_intelligence; that table remains the
+ * canonical score projection. The observation is append-friendly derivation
+ * evidence for replay/audit/explainability.
+ */
+export function createOpportunityScoreObservation(
+  opportunityId: string,
+  result: ScoringResult,
+  opts: { confidence?: number; scored_at?: string } = {},
+): IntelligenceObservationDraft {
+  return observationFromOpportunityScore({
+    opportunity_id: opportunityId,
+    score_version: result.score_version,
+    confidence: opts.confidence ?? 0.9,
+    scored_at: opts.scored_at,
+    result: {
+      overall_score: result.overall_score,
+      overall_grade: result.overall_grade,
+      property: result.property as unknown as Record<string, unknown>,
+      solar: result.solar as unknown as Record<string, unknown>,
+      financial: result.financial as unknown as Record<string, unknown>,
+      market: result.market as unknown as Record<string, unknown>,
+      intent: result.intent as unknown as Record<string, unknown>,
+      risk_flags: result.risk_flags,
+      opportunity_highlights: result.opportunity_highlights,
+      executive_summary: result.executive_summary,
+    },
+  })
 }
 
 /**
