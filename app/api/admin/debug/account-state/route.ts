@@ -7,6 +7,9 @@
 // Returns exact DB state: hash algo, cost, length, is_free_pass, updated_at
 // Runs the exact same logic as login route to diagnose which branch fires.
 // Does NOT return the hash itself.
+//
+// SECURITY: productionGuard() blocks this entirely in production.
+//           ADMIN_SECRET gate provides secondary validation in dev/preview.
 // ============================================================================
 
 export const dynamic   = 'force-dynamic';
@@ -16,8 +19,12 @@ export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady } from '@/lib/db-neon';
+import { productionGuard } from '@/lib/security';
 
 export async function GET(req: NextRequest) {
+  // SECURITY: Block in production — this returns sensitive account metadata
+  const _blocked = productionGuard(); if (_blocked) return _blocked;
+
   // Gate: require ADMIN_SECRET
   const secret       = req.nextUrl.searchParams.get('secret') || '';
   const adminSecret  = process.env.ADMIN_SECRET || '';

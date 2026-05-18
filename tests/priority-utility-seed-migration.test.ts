@@ -133,10 +133,12 @@ describe('Migration 042: utility_policies UNIQUE constraint', () => {
     expect(migSrc).toContain('LOWER(TRIM(a.utility_name)) = LOWER(TRIM(b.utility_name))');
   });
 
-  it('adds unique constraint idempotently via DO block', () => {
-    expect(migSrc).toContain('DO $$');
-    expect(migSrc).toContain("conname = 'utility_policies_utility_name_state_key'");
-    expect(migSrc).toContain('ADD CONSTRAINT utility_policies_utility_name_state_key');
+  it('adds unique constraint idempotently via IF NOT EXISTS (no DO block)', () => {
+    // DO $$ blocks are not supported by the Neon serverless HTTP driver.
+    // Migration 042 was rewritten to use ADD CONSTRAINT IF NOT EXISTS instead.
+    expect(migSrc).not.toContain('DO $$');
+    expect(migSrc).not.toContain("conname = 'utility_policies_utility_name_state_key'");
+    expect(migSrc).toContain('ADD CONSTRAINT IF NOT EXISTS utility_policies_utility_name_state_key');
     expect(migSrc).toContain('UNIQUE (utility_name, state)');
   });
 
@@ -157,7 +159,8 @@ describe('Migration 042: utility_policies UNIQUE constraint', () => {
 // ─── D: site_aliases runtime DDL removal ────────────────────────────────────
 describe('D: site_aliases — runtime DDL removed', () => {
 
-  const dbNeon = readSrc('lib/db-neon.ts');
+  // db-neon.ts is now a barrel file; actual solardogSaveAlias impl is in lib/db/solardog.ts
+  const dbNeon = readSrc('lib/db/solardog.ts');
   const mig018 = readSrc('lib/migrations/018_site_aliases.sql');
 
   it('lib/db-neon.ts does not contain CREATE TABLE site_aliases', () => {

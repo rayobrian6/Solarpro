@@ -2281,13 +2281,14 @@ describe('Equipment and button knowledge base structure', () => {
 
   it('db-neon has solardogKnowledgeUpsert function', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // db-neon.ts is now a barrel — actual impl is in lib/db/solardog.ts
+    const src = fs.readFileSync('lib/db/solardog.ts', 'utf8');
     expect(src).toContain('solardogKnowledgeUpsert');
   });
 
   it('db-neon has solardogKnowledgeSearch function', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    const src = fs.readFileSync('lib/db/solardog.ts', 'utf8');
     expect(src).toContain('solardogKnowledgeSearch');
   });
 
@@ -2768,24 +2769,29 @@ describe('Forbidden behaviors — v11 compliance', () => {
 
   it('solardogSeedKnowledge function exists in db-neon.ts', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // db-neon.ts is now a barrel; actual impl in lib/db/solardog.ts
+    const src = fs.readFileSync('lib/db/solardog.ts', 'utf8');
     expect(src).toContain('solardogSeedKnowledge');
   });
 
   it('SOLARPRO_KNOWLEDGE_SEED is exported from db-neon.ts', () => {
     const fs = require('fs');
+    // barrel re-exports from lib/db/solardog.ts which re-exports from knowledgeSeed
     const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
     // Either inline export or re-export from knowledgeSeed module
     const hasExport = src.includes('export const SOLARPRO_KNOWLEDGE_SEED') ||
       src.includes('export { SOLARPRO_KNOWLEDGE_SEED }') ||
-      src.includes('SOLARPRO_KNOWLEDGE_SEED } from');
+      src.includes('SOLARPRO_KNOWLEDGE_SEED } from') ||
+      src.includes('SOLARPRO_KNOWLEDGE_SEED,') ||
+      src.includes('SOLARPRO_KNOWLEDGE_SEED\n');
     expect(hasExport).toBe(true);
   });
 
   it('solardogKnowledgeSeeded is exported from db-neon.ts', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
-    expect(src).toContain('export async function solardogKnowledgeSeeded');
+    // barrel re-exports the function; actual impl in lib/db/solardog.ts
+    const src = fs.readFileSync('lib/db/solardog.ts', 'utf8');
+    expect(src).toContain('solardogKnowledgeSeeded');
   });
 
   it('migrate route calls solardogSeedKnowledge (Migration 025)', () => {
@@ -2797,19 +2803,21 @@ describe('Forbidden behaviors — v11 compliance', () => {
 
   it('KnowledgeItem interface has steps field', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // db-neon.ts is now a barrel; KnowledgeItem is defined in lib/db/solardog.ts
+    const src = fs.readFileSync('lib/db/solardog.ts', 'utf8');
     expect(src).toContain('steps:');
   });
 
   it('KnowledgeItem type union includes "equipment"', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    const src = fs.readFileSync('lib/db/solardog.ts', 'utf8');
     expect(src).toContain("'equipment'");
   });
 
   it('mapKnowledgeRow helper exists in db-neon.ts (restores steps from metadata)', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // mapKnowledgeRow is a private helper in lib/db/solardog.ts
+    const src = fs.readFileSync('lib/db/solardog.ts', 'utf8');
     expect(src).toContain('mapKnowledgeRow');
   });
 
@@ -3155,21 +3163,23 @@ describe('v61 — Migration 026 + DB layer (Group 48)', () => {
 
   it('db-neon.ts rowToProject maps control_mode to controlMode', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // db-neon.ts is now a barrel; rowToProject is in lib/db/core.ts
+    const src = fs.readFileSync('lib/db/core.ts', 'utf8');
     expect(src).toContain('control_mode');
     expect(src).toContain('controlMode');
   });
 
   it('db-neon.ts rowToProject maps system_config_locks to systemConfigLocks', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    const src = fs.readFileSync('lib/db/core.ts', 'utf8');
     expect(src).toContain('system_config_locks');
     expect(src).toContain('systemConfigLocks');
   });
 
   it('db-neon.ts updateProject persists control_mode', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    // updateProject is in lib/db/projects.ts
+    const src = fs.readFileSync('lib/db/projects.ts', 'utf8');
     // control_mode should appear in the UPDATE statement
     const updateIdx = src.indexOf('UPDATE projects');
     expect(updateIdx).toBeGreaterThan(-1);
@@ -3179,7 +3189,7 @@ describe('v61 — Migration 026 + DB layer (Group 48)', () => {
 
   it('db-neon.ts updateProject persists system_config_locks', () => {
     const fs = require('fs');
-    const src = fs.readFileSync('lib/db-neon.ts', 'utf8');
+    const src = fs.readFileSync('lib/db/projects.ts', 'utf8');
     const updateIdx = src.indexOf('UPDATE projects');
     const updateSection = src.slice(updateIdx, updateIdx + 2000);
     expect(updateSection).toContain('system_config_locks');

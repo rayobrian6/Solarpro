@@ -65,6 +65,9 @@ const PUBLIC_PATHS = [
 
   // ── Lockout-safe account diagnostic (validated internally via ADMIN_SECRET) ──
   // Allows diagnosing a locked-out account without needing to be logged in.
+  // NOTE: productionGuard() inside the route blocks this entirely in production.
+  // The PUBLIC_PATHS entry is kept so middleware doesn't redirect before the
+  // route handler can return its own 404 — avoiding a confusing redirect loop.
   '/api/admin/debug/account-state',
 
   // ── Emergency account repair (validated internally via ADMIN_SECRET) ──

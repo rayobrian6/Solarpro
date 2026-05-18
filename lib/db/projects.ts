@@ -1,0 +1,561 @@
+/**
+ * lib/db/projects.ts
+ * Project and Layout DB operations — extracted from lib/db-neon.ts.
+ *
+ * Do not import directly. Import from '@/lib/db-neon' which re-exports
+ * everything here, preserving all existing import paths.
+ */
+
+import { Project, Layout } from '@/types';
+import { getDbReady, isValidUUID, assertUUID, rowToProject, rowToLayout } from './core';
+
+// ============================================================
+// PROJECTS
+// ============================================================
+
+// ── Enrichment helper: hydrate costEstimate + layout from JOINed rows ──────
+// Priority chain for costEstimate:
+//   1. productions.data_json.costEstimate  (design-time calculation)
+//   2. proposals.data_json.project.costEstimate  (proposal snapshot)
+// This ensures projects that skipped the production flow but have proposals
+// still show real $ values on the dashboard.
+function enrichProjectRow(row: Record<string, unknown>): Project {
+  const base = rowToProject(row);
+
+  // ─── Source 1: productions.data_json ─────────────────────────────────
+  let prodDj = row._prod_data_json as Record<string, unknown> | null;
+  if (typeof prodDj === 'string') {
+    try { prodDj = JSON.parse(prodDj); } catch { prodDj = null; }
+  }
+  if (prodDj && typeof prodDj === 'object') {
+    if (!base.costEstimate && prodDj.costEstimate) {
+      base.costEstimate = prodDj.costEstimate as import('@/types').CostEstimate;
+    }
+    if (!base.production && prodDj.production) {
+      base.production = prodDj.production as import('@/types').ProductionResult;
+    }
+    if (!base.selectedPanel && prodDj.selectedPanel) {
+      base.selectedPanel = prodDj.selectedPanel as import('@/types').SolarPanel;
+    }
+    if (!base.selectedInverter && prodDj.selectedInverter) {
+      base.selectedInverter = prodDj.selectedInverter as import('@/types').Inverter;
+    }
+  }
+
+  // ─── Source 2: proposals.data_json.project (snapshot fallback) ───────
+  // Only used when productions didn't provide costEstimate / production / layout
+  let propDj = row._prop_data_json as Record<string, unknown> | null;
+  if (typeof propDj === 'string') {
+    try { propDj = JSON.parse(propDj); } catch { propDj = null; }
+  }
+  if (propDj && typeof propDj === 'object') {
+    // The proposal snapshot stores the full project under propDj.project
+    let snapshotProject = propDj.project as Record<string, unknown> | null;
+    if (typeof snapshotProject === 'string') {
+      try { snapshotProject = JSON.parse(snapshotProject); } catch { snapshotProject = null; }
+    }
+    if (snapshotProject && typeof snapshotProject === 'object') {
+      if (!base.costEstimate && snapshotProject.costEstimate) {
+        base.costEstimate = snapshotProject.costEstimate as import('@/types').CostEstimate;
+      }
+      if (!base.production && snapshotProject.production) {
+        base.production = snapshotProject.production as import('@/types').ProductionResult;
+      }
+      if (!base.selectedPanel && snapshotProject.selectedPanel) {
+        base.selectedPanel = snapshotProject.selectedPanel as import('@/types').SolarPanel;
+      }
+      if (!base.selectedInverter && snapshotProject.selectedInverter) {
+        base.selectedInverter = snapshotProject.selectedInverter as import('@/types').Inverter;
+      }
+      // Also recover layout from snapshot if not already set and no layout from layouts table
+      if (!base.layout && snapshotProject.layout) {
+        base.layout = snapshotProject.layout as import('@/types').Layout;
+      }
+    }
+  }
+
+  // ─── Source 3: layouts table (direct JOIN) ───────────────────────────
+  if (!base.layout && row._lo_id) {
+    try {
+      base.layout = rowToLayout({
+        id: row._lo_id,
+        project_id: row._lo_project_id,
+        system_type: row._lo_system_type,
+        panels: row._lo_panels,
+        roof_planes: row._lo_roof_planes,
+        ground_tilt: row._lo_ground_tilt,
+        ground_azimuth: row._lo_ground_azimuth,
+        row_spacing: row._lo_row_spacing,
+        ground_height: row._lo_ground_height,
+        fence_azimuth: row._lo_fence_azimuth,
+        fence_height: row._lo_fence_height,
+        fence_line: row._lo_fence_line,
+        bifacial_optimized: row._lo_bifacial_optimized,
+        total_panels: row._lo_total_panels,
+        system_size_kw: row._lo_system_size_kw,
+        map_center: row._lo_map_center,
+        map_zoom: row._lo_map_zoom,
+        created_at: row._lo_created_at,
+        updated_at: row._lo_updated_at,
+      });
+    } catch {
+      // Layout enrichment failed — non-fatal
+    }
+  }
+
+  return base;
+}
+
+export async function getProjectsByUser(userId: string): Promise<Project[]> {
+  assertUUID(userId, 'userId');
+  const sql = await getDbReady();
+
+  // FIX: LEFT JOIN productions + layouts + proposals so list API returns costEstimate + layout.
+  // Without this, dashboard pipeline metrics are always $0 and system kW is always 0.
+  // The proposals JOIN is critical: projects can reach proposal/approved status WITHOUT
+  // going through the production calculation flow (via direct PATCH), so productions may
+  // have NO rows — but the proposal snapshot always contains the full project with costEstimate.
+  let rows: Record<string, unknown>[];
+  try {
+    rows = await sql`
+      SELECT p.*,
+             prod.data_json AS _prod_data_json,
+             prop.data_json AS _prop_data_json,
+             lo.id AS _lo_id, lo.project_id AS _lo_project_id,
+             lo.system_type AS _lo_system_type,
+             NULL::jsonb AS _lo_panels, NULL::jsonb AS _lo_roof_planes,
+             lo.ground_tilt AS _lo_ground_tilt, lo.ground_azimuth AS _lo_ground_azimuth,
+             lo.row_spacing AS _lo_row_spacing, lo.ground_height AS _lo_ground_height,
+             lo.fence_azimuth AS _lo_fence_azimuth, lo.fence_height AS _lo_fence_height,
+             lo.fence_line AS _lo_fence_line, lo.bifacial_optimized AS _lo_bifacial_optimized,
+             lo.total_panels AS _lo_total_panels, lo.system_size_kw AS _lo_system_size_kw,
+             lo.map_center AS _lo_map_center, lo.map_zoom AS _lo_map_zoom,
+             lo.created_at AS _lo_created_at, lo.updated_at AS _lo_updated_at
+      FROM projects p
+      LEFT JOIN LATERAL (
+        SELECT data_json FROM productions pr
+        WHERE pr.project_id = p.id
+        ORDER BY pr.calculated_at DESC LIMIT 1
+      ) prod ON true
+      LEFT JOIN LATERAL (
+        SELECT * FROM proposals pr2
+        WHERE pr2.project_id = p.id AND pr2.user_id = ${userId}
+        ORDER BY pr2.created_at DESC LIMIT 1
+      ) prop ON true
+      LEFT JOIN LATERAL (
+        SELECT * FROM layouts l2
+        WHERE l2.project_id = p.id AND l2.user_id = ${userId}
+        ORDER BY l2.updated_at DESC LIMIT 1
+      ) lo ON true
+      WHERE p.user_id = ${userId}
+        AND p.deleted_at IS NULL
+      ORDER BY p.updated_at DESC
+    `;
+  } catch (joinErr) {
+    // Fallback: if JOIN fails (e.g. tables/columns missing), use simple query
+    console.warn('[getProjectsByUser] Enriched query failed, falling back:', (joinErr as Error)?.message);
+    rows = await sql`
+      SELECT * FROM projects
+      WHERE user_id = ${userId}
+        AND deleted_at IS NULL
+      ORDER BY updated_at DESC
+    `;
+    return rows.map(rowToProject);
+  }
+
+  return rows.map(enrichProjectRow);
+}
+
+export async function getProjectsByClient(clientId: string, userId: string): Promise<Project[]> {
+  if (!isValidUUID(clientId) || !isValidUUID(userId)) return [];
+  const sql = await getDbReady();
+
+  // FIX: Same enrichment as getProjectsByUser (productions + proposals + layouts)
+  let rows: Record<string, unknown>[];
+  try {
+    rows = await sql`
+      SELECT p.*,
+             prod.data_json AS _prod_data_json,
+             prop.data_json AS _prop_data_json,
+             lo.id AS _lo_id, lo.project_id AS _lo_project_id,
+             lo.system_type AS _lo_system_type,
+             NULL::jsonb AS _lo_panels, NULL::jsonb AS _lo_roof_planes,
+             lo.ground_tilt AS _lo_ground_tilt, lo.ground_azimuth AS _lo_ground_azimuth,
+             lo.row_spacing AS _lo_row_spacing, lo.ground_height AS _lo_ground_height,
+             lo.fence_azimuth AS _lo_fence_azimuth, lo.fence_height AS _lo_fence_height,
+             lo.fence_line AS _lo_fence_line, lo.bifacial_optimized AS _lo_bifacial_optimized,
+             lo.total_panels AS _lo_total_panels, lo.system_size_kw AS _lo_system_size_kw,
+             lo.map_center AS _lo_map_center, lo.map_zoom AS _lo_map_zoom,
+             lo.created_at AS _lo_created_at, lo.updated_at AS _lo_updated_at
+      FROM projects p
+      LEFT JOIN LATERAL (
+        SELECT data_json FROM productions pr
+        WHERE pr.project_id = p.id
+        ORDER BY pr.calculated_at DESC LIMIT 1
+      ) prod ON true
+      LEFT JOIN LATERAL (
+        SELECT * FROM proposals pr2
+        WHERE pr2.project_id = p.id AND pr2.user_id = ${userId}
+        ORDER BY pr2.created_at DESC LIMIT 1
+      ) prop ON true
+      LEFT JOIN LATERAL (
+        SELECT * FROM layouts l2
+        WHERE l2.project_id = p.id AND l2.user_id = ${userId}
+        ORDER BY l2.updated_at DESC LIMIT 1
+      ) lo ON true
+      WHERE p.client_id = ${clientId}
+        AND p.user_id = ${userId}
+        AND p.deleted_at IS NULL
+      ORDER BY p.updated_at DESC
+    `;
+  } catch {
+    rows = await sql`
+      SELECT * FROM projects
+      WHERE client_id = ${clientId}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      ORDER BY updated_at DESC
+    `;
+    return rows.map(rowToProject);
+  }
+
+  return rows.map(enrichProjectRow);
+}
+
+export async function getProjectById(id: string, userId: string): Promise<Project | null> {
+  if (!isValidUUID(id) || !isValidUUID(userId)) return null;
+  const sql = await getDbReady();
+  const rows = await sql`
+    SELECT * FROM projects
+    WHERE id = ${id}
+      AND user_id = ${userId}
+      AND deleted_at IS NULL
+    LIMIT 1
+  `;
+  return rows.length > 0 ? rowToProject(rows[0]) : null;
+}
+
+export async function createProject(data: {
+  userId: string;
+  clientId?: string;
+  name: string;
+  status?: Project['status'];
+  systemType?: Project['systemType'];
+  notes?: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  stateCode?: string;
+  city?: string;
+  county?: string;
+  zip?: string;
+  utilityName?: string;
+  utilityRatePerKwh?: number;
+  systemSizeKw?: number;
+  billData?: Record<string, unknown>;
+}): Promise<Project> {
+  assertUUID(data.userId, 'userId');
+  // clientId must be a valid UUID or null — never pass a non-UUID string
+  const clientId = isValidUUID(data.clientId) ? data.clientId : null;
+  // Sanitize billData to remove null bytes / invalid Unicode that breaks PostgreSQL JSONB
+  const sanitizeBillData = (obj: unknown): unknown => {
+    if (obj === null || obj === undefined) return obj;
+    if (typeof obj === 'string') return obj.replace(/\u0000/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+    if (typeof obj === 'number' || typeof obj === 'boolean') return obj;
+    if (Array.isArray(obj)) return obj.map(sanitizeBillData);
+    if (typeof obj === 'object') {
+      const r: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) r[k] = sanitizeBillData(v);
+      return r;
+    }
+    return obj;
+  };
+  const billDataJson = data.billData ? JSON.stringify(sanitizeBillData(data.billData)) : null;
+  const sql = await getDbReady();
+
+  // Try INSERT with bill_data + system_size_kw columns first.
+  // If those columns don't exist yet (migration not run on live DB), fall back to base INSERT.
+  let rows: any[];
+  try {
+    rows = await sql`
+      INSERT INTO projects (
+        user_id, client_id, name, status, system_type, notes, address, lat, lng, system_size_kw, bill_data
+      ) VALUES (
+        ${data.userId},
+        ${clientId},
+        ${data.name},
+        ${data.status || 'lead'},
+        ${data.systemType || 'roof'},
+        ${data.notes || ''},
+        ${data.address || ''},
+        ${data.lat ?? null},
+        ${data.lng ?? null},
+        ${data.systemSizeKw ?? null},
+        ${billDataJson}::jsonb
+      )
+      RETURNING *
+    `;
+  } catch (insertErr: unknown) {
+    // If the error is about missing columns, fall back to base INSERT without them
+    const msg = ((insertErr as Error)?.message || '').toLowerCase();
+    if (msg.includes('column') && (msg.includes('bill_data') || msg.includes('system_size_kw'))) {
+      console.warn('[createProject] bill_data/system_size_kw columns missing — using base INSERT. Run /api/migrate to add them.');
+      rows = await sql`
+        INSERT INTO projects (
+          user_id, client_id, name, status, system_type, notes, address, lat, lng
+        ) VALUES (
+          ${data.userId},
+          ${clientId},
+          ${data.name},
+          ${data.status || 'lead'},
+          ${data.systemType || 'roof'},
+          ${data.notes || ''},
+          ${data.address || ''},
+          ${data.lat ?? null},
+          ${data.lng ?? null}
+        )
+        RETURNING *
+      `;
+    } else {
+      throw insertErr;
+    }
+  }
+
+  const project = rowToProject(rows[0]);
+  // Store extended location fields in notes metadata (JSON suffix) if DB columns not yet migrated
+  // These are passed through to the returned project object for immediate use
+  if (data.stateCode) (project as any).stateCode = data.stateCode;
+  if (data.city) (project as any).city = data.city;
+  if (data.county) (project as any).county = data.county;
+  if (data.zip) (project as any).zip = data.zip;
+  if (data.utilityName) (project as any).utilityName = data.utilityName;
+  if (data.utilityRatePerKwh) (project as any).utilityRatePerKwh = data.utilityRatePerKwh;
+  return project;
+}
+
+export async function updateProject(
+  id: string,
+  userId: string,
+  data: Partial<Omit<Project, 'id' | 'userId' | 'createdAt' | 'updatedAt'>>
+): Promise<Project | null> {
+  if (!isValidUUID(id) || !isValidUUID(userId)) return null;
+  const sql = await getDbReady();
+  const current = await getProjectById(id, userId);
+  if (!current) return null;
+
+  const merged = { ...current, ...data };
+  // clientId must be a valid UUID or null
+  const clientId = isValidUUID(merged.clientId) ? merged.clientId : null;
+
+  // Serialize bill_data JSONB — preserve existing if not provided in update
+  const billDataJson: string | null = ('billData' in data && data.billData !== undefined)
+    ? JSON.stringify(data.billData)
+    : (current.billData ? JSON.stringify(current.billData) : null);
+
+  // postgres.js does not support conditional fragment expressions inside a template literal.
+  // Use two separate queries: one with bill_data update, one without.
+  let rows: Record<string, unknown>[];
+  if (billDataJson !== null) {
+    rows = await sql`
+      UPDATE projects SET
+        name          = ${merged.name},
+        client_id     = ${clientId},
+        status        = ${merged.status || 'lead'},
+        system_type   = ${merged.systemType || current.systemType || 'roof'},
+        notes         = ${merged.notes || ''},
+        address       = ${merged.address || ''},
+        lat           = ${merged.lat ?? null},
+        lng           = ${merged.lng ?? null},
+        system_size_kw= ${merged.systemSizeKw ?? null},
+        no_itc        = ${merged.noItc ?? false},
+        control_mode  = ${(merged.controlMode ?? current.controlMode ?? 'guided')},
+        system_config_locks = ${merged.systemConfigLocks ? JSON.stringify(merged.systemConfigLocks) : (current.systemConfigLocks ? JSON.stringify(current.systemConfigLocks) : null)}::jsonb,
+        bill_data     = ${billDataJson}::jsonb,
+        monitoring_platform = ${merged.monitoringPlatform ?? current.monitoringPlatform ?? null},
+        monitoring_url      = ${merged.monitoringUrl ?? current.monitoringUrl ?? null},
+        updated_at    = NOW()
+      WHERE id = ${id}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      RETURNING *
+    `;
+  } else {
+    rows = await sql`
+      UPDATE projects SET
+        name          = ${merged.name},
+        client_id     = ${clientId},
+        status        = ${merged.status || 'lead'},
+        system_type   = ${merged.systemType || current.systemType || 'roof'},
+        notes         = ${merged.notes || ''},
+        address       = ${merged.address || ''},
+        lat           = ${merged.lat ?? null},
+        lng           = ${merged.lng ?? null},
+        system_size_kw= ${merged.systemSizeKw ?? null},
+        no_itc        = ${merged.noItc ?? false},
+        control_mode  = ${(merged.controlMode ?? current.controlMode ?? 'guided')},
+        system_config_locks = ${merged.systemConfigLocks ? JSON.stringify(merged.systemConfigLocks) : (current.systemConfigLocks ? JSON.stringify(current.systemConfigLocks) : null)}::jsonb,
+        monitoring_platform = ${merged.monitoringPlatform ?? current.monitoringPlatform ?? null},
+        monitoring_url      = ${merged.monitoringUrl ?? current.monitoringUrl ?? null},
+        updated_at    = NOW()
+      WHERE id = ${id}
+        AND user_id = ${userId}
+        AND deleted_at IS NULL
+      RETURNING *
+    `;
+  }
+  return rows.length > 0 ? rowToProject(rows[0]) : null;
+}
+
+export async function softDeleteProject(id: string, userId: string): Promise<boolean> {
+  if (!isValidUUID(id) || !isValidUUID(userId)) return false;
+  const sql = await getDbReady();
+  const rows = await sql`
+    UPDATE projects
+    SET deleted_at = NOW(), updated_at = NOW()
+    WHERE id = ${id}
+      AND user_id = ${userId}
+      AND deleted_at IS NULL
+    RETURNING id
+  `;
+  return rows.length > 0;
+}
+
+export async function bulkSoftDeleteProjects(ids: string[], userId: string): Promise<string[]> {
+  if (!isValidUUID(userId)) return [];
+  const validIds = ids.filter(isValidUUID);
+  if (validIds.length === 0) return [];
+  const sql = await getDbReady();
+  // Use ordinary function call syntax so we can pass the array param directly.
+  // Neon serializes a JS string[] as a Postgres text array for ANY().
+  const rows = await sql(
+    `UPDATE projects
+     SET deleted_at = NOW(), updated_at = NOW()
+     WHERE id = ANY($1::uuid[])
+       AND user_id = $2
+       AND deleted_at IS NULL
+     RETURNING id`,
+    [validIds, userId]
+  );
+  return rows.map((r: Record<string, unknown>) => r.id as string);
+}
+
+// ============================================================
+// LAYOUTS
+// ============================================================
+
+export async function getLayoutByProject(projectId: string, userId: string): Promise<Layout | null> {
+  if (!isValidUUID(projectId) || !isValidUUID(userId)) return null;
+  const sql = await getDbReady();
+  // FIX v47.318: JOIN with projects to get authoritative system_type fallback.
+  // If layouts.system_type is NULL, use projects.system_type so that
+  // rowToLayout never incorrectly defaults to 'roof' for fence/ground projects.
+  const rows = await sql`
+    SELECT l.*,
+           COALESCE(l.system_type, p.system_type) AS system_type
+    FROM layouts l
+    JOIN projects p ON p.id = l.project_id AND p.user_id = l.user_id
+    WHERE l.project_id = ${projectId}
+      AND l.user_id = ${userId}
+    ORDER BY l.updated_at DESC
+    LIMIT 1
+  `;
+  return rows.length > 0 ? rowToLayout(rows[0]) : null;
+}
+
+export interface UpsertLayoutData {
+  projectId: string;
+  userId: string;
+  systemType?: Layout['systemType'];
+  panels: Layout['panels'];
+  roofPlanes?: Layout['roofPlanes'];
+  groundTilt?: number;
+  groundAzimuth?: number;
+  rowSpacing?: number;
+  groundHeight?: number;
+  fenceAzimuth?: number;
+  fenceHeight?: number;
+  fenceLine?: Layout['fenceLine'];
+  bifacialOptimized?: boolean;
+  totalPanels?: number;
+  systemSizeKw?: number;
+  mapCenter?: Layout['mapCenter'];
+  mapZoom?: number;
+}
+
+export async function upsertLayout(data: UpsertLayoutData): Promise<Layout> {
+  assertUUID(data.projectId, 'projectId');
+  assertUUID(data.userId, 'userId');
+  const sql = await getDbReady();
+  const panelsJson = JSON.stringify(data.panels || []);
+  const roofPlanesJson = data.roofPlanes ? JSON.stringify(data.roofPlanes) : null;
+  const fenceLineJson = data.fenceLine ? JSON.stringify(data.fenceLine) : null;
+  const mapCenterJson = data.mapCenter ? JSON.stringify(data.mapCenter) : null;
+
+  // Check if layout exists for this project
+  const existing = await sql`
+    SELECT id FROM layouts
+    WHERE project_id = ${data.projectId}
+      AND user_id = ${data.userId}
+    LIMIT 1
+  `;
+
+  if (existing.length > 0) {
+    // UPDATE existing layout
+    const rows = await sql`
+      UPDATE layouts SET
+        system_type         = ${data.systemType || 'roof'},
+        panels              = ${panelsJson}::jsonb,
+        roof_planes         = ${roofPlanesJson}::jsonb,
+        ground_tilt         = ${data.groundTilt ?? 20},
+        ground_azimuth      = ${data.groundAzimuth ?? 180},
+        row_spacing         = ${data.rowSpacing ?? 1.5},
+        ground_height       = ${data.groundHeight ?? 0.6},
+        fence_azimuth       = ${data.fenceAzimuth ?? null},
+        fence_height        = ${data.fenceHeight ?? null},
+        fence_line          = ${fenceLineJson}::jsonb,
+        bifacial_optimized  = ${data.bifacialOptimized ?? false},
+        total_panels        = ${data.totalPanels ?? 0},
+        system_size_kw      = ${data.systemSizeKw ?? 0},
+        map_center          = ${mapCenterJson}::jsonb,
+        map_zoom            = ${data.mapZoom ?? null},
+        updated_at          = NOW()
+      WHERE project_id = ${data.projectId}
+        AND user_id = ${data.userId}
+      RETURNING *
+    `;
+    return rowToLayout(rows[0]);
+  } else {
+    // INSERT new layout
+    const rows = await sql`
+      INSERT INTO layouts (
+        project_id, user_id, system_type, panels, roof_planes,
+        ground_tilt, ground_azimuth, row_spacing, ground_height,
+        fence_azimuth, fence_height, fence_line,
+        bifacial_optimized, total_panels, system_size_kw,
+        map_center, map_zoom
+      ) VALUES (
+        ${data.projectId},
+        ${data.userId},
+        ${data.systemType || 'roof'},
+        ${panelsJson}::jsonb,
+        ${roofPlanesJson}::jsonb,
+        ${data.groundTilt ?? 20},
+        ${data.groundAzimuth ?? 180},
+        ${data.rowSpacing ?? 1.5},
+        ${data.groundHeight ?? 0.6},
+        ${data.fenceAzimuth ?? null},
+        ${data.fenceHeight ?? null},
+        ${fenceLineJson}::jsonb,
+        ${data.bifacialOptimized ?? false},
+        ${data.totalPanels ?? 0},
+        ${data.systemSizeKw ?? 0},
+        ${mapCenterJson}::jsonb,
+        ${data.mapZoom ?? null}
+      )
+      RETURNING *
+    `;
+    return rowToLayout(rows[0]);
+  }
+}
+
+// ============================================================
