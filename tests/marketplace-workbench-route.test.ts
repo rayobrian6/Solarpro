@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 
 const mockRequireAdminApi = vi.fn()
 const mockGetDbReady = vi.fn()
@@ -22,11 +24,12 @@ function req(body?: unknown, method = 'POST'): any {
   })
 }
 
-function makeSql(opts: { gate?: Record<string, unknown> | null; existingAssignments?: any[]; listRows?: any[]; insertRows?: any[] } = {}) {
+function makeSql(opts: { gate?: Record<string, unknown> | null; existingAssignments?: any[]; listRows?: any[]; insertRows?: any[]; failOn?: string; failError?: Error & { code?: string; column?: string; detail?: string } } = {}) {
   const calls: string[] = []
   const sql = vi.fn(async (strings: TemplateStringsArray) => {
     const q = strings.join(' ')
     calls.push(q)
+    if (opts.failOn && q.includes(opts.failOn)) throw opts.failError ?? new Error('mock db failure')
     if (q.includes('WITH assignment_summary')) return opts.listRows ?? [{ id: 'live-1', status: 'live', screening_status: 'approved', overall_score: 88 }]
     if (q.includes('SELECT COUNT(*)::int AS total')) return [{ total: (opts.listRows ?? [1]).length }]
     if (q.includes('SELECT no.id, no.status, no.screening_status')) return opts.gate === undefined ? [{ id: 'live-1', status: 'live', screening_status: 'approved', auto_decision: 'pass' }] : (opts.gate ? [opts.gate] : [])
@@ -70,6 +73,8 @@ describe('/api/admin/network/marketplace', () => {
     const listQuery = sql.calls.find((q: string) => q.includes('WITH assignment_summary')) ?? ''
     expect(listQuery).toContain("WHERE no.status = 'live'")
     expect(listQuery).toContain("no.screening_status = 'approved'")
+    expect(listQuery).toContain("osq.auto_decision = 'pass'")
+    expect(listQuery).toContain("osq.override_decision = 'pass'")
     expect(listQuery).toContain('no.location_city AS city')
     expect(listQuery).toContain('no.location_state AS state')
     expect(listQuery).toContain('no.asking_price AS listing_price')
@@ -80,6 +85,35 @@ describe('/api/admin/network/marketplace', () => {
     expect(listQuery).not.toContain('no.state')
     expect(listQuery).not.toContain('no.listing_price')
     expect(listQuery).not.toContain('homeowner_first_name')
+  })
+
+  it('keeps the Marketplace Workbench gate aligned with simulator marketplace_ready logic', () => {
+    const marketplaceSource = fs.readFileSync(path.join(process.cwd(), 'app/api/admin/network/marketplace/route.ts'), 'utf8')
+    const simulatorSource = fs.readFileSync(path.join(process.cwd(), 'app/api/admin/network/simulator/route.ts'), 'utf8')
+    const readyGate = "no.status = 'live' AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')"
+    expect(simulatorSource).toContain(readyGate)
+    expect(marketplaceSource).toContain("WHERE no.status = 'live'")
+    expect(marketplaceSource).toContain("AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')")
+  })
+
+  it('returns stage-aware Workbench list failures for deployed schema diagnostics', async () => {
+    const err = new Error('column oi.enrichment_payload does not exist') as Error & { code?: string; column?: string }
+    err.code = '42703'
+    err.column = 'enrichment_payload'
+    mockGetDbReady.mockResolvedValueOnce(makeSql({ failOn: 'WITH assignment_summary', failError: err }))
+    const { GET } = await importRoute()
+    const res = await GET(req(undefined, 'GET'))
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      success: false,
+      error: 'Marketplace Workbench failed',
+      stage: 'list_query',
+      code: '42703',
+      message: 'column oi.enrichment_payload does not exist',
+      details: { column: 'enrichment_payload' },
+    })
+    expect(JSON.stringify(json)).not.toMatch(/DATABASE_URL|JWT_SECRET|ghp_/)
   })
 
   it('blocks assignment actions for non-live or unapproved opportunities', async () => {

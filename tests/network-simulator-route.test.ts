@@ -175,6 +175,14 @@ describe('/api/admin/network/simulator', () => {
     expect(adminPageSource).toContain('await loadSimulated();')
   })
 
+  it('shows the canonical public homeowner intake link in the Seed / Simulate Intake tab', () => {
+    const adminPageSource = fs.readFileSync(path.join(process.cwd(), 'app/admin/network/page.tsx'), 'utf8')
+    expect(adminPageSource).toContain('Seed / Simulate Intake')
+    expect(adminPageSource).toContain('https://018hr.app.super.myninja.ai/free-solar-estimate')
+    expect(adminPageSource).toContain('Real intake test form')
+    expect(adminPageSource).toContain('rel="noopener noreferrer"')
+  })
+
   it('returns stage-aware simulator create failure details without leaking secrets', async () => {
     const sql = vi.fn(async (strings: TemplateStringsArray) => {
       const q = strings.join(' ')

@@ -13,6 +13,20 @@ function jsonError(error: string, status = 400, details?: unknown) {
   return NextResponse.json({ success: false, error, details }, { status })
 }
 
+type MarketplaceStage = 'auth' | 'db_connect' | 'request_parse' | 'list_query' | 'count_query' | 'gate_query' | 'assignment_query' | 'matching_call' | 'assignment_insert' | 'intelligence_update' | 'event_log'
+
+function marketplaceError(stage: MarketplaceStage, error: unknown) {
+  const err = error as { message?: string; code?: string; detail?: string; constraint?: string; column?: string }
+  return NextResponse.json({
+    success: false,
+    error: 'Marketplace Workbench failed',
+    stage,
+    message: err?.message ?? String(error),
+    code: err?.code,
+    details: { detail: err?.detail, constraint: err?.constraint, column: err?.column },
+  }, { status: 500 })
+}
+
 async function assertLiveApprovedOpportunity(sql: Awaited<ReturnType<typeof getDbReady>>, opportunityId: string) {
   const rows = await sql`
     SELECT no.id, no.status, no.screening_status, osq.auto_decision, osq.override_decision
@@ -30,16 +44,20 @@ async function assertLiveApprovedOpportunity(sql: Awaited<ReturnType<typeof getD
 }
 
 export async function GET(req: NextRequest) {
+  let stage: MarketplaceStage = 'auth'
   try {
     const admin = await requireAdminApi(req)
     if (!admin) return jsonError('Forbidden', 403)
 
+    stage = 'db_connect'
     const sql = await getDbReady()
+    stage = 'request_parse'
     const { searchParams } = new URL(req.url)
     const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
     const limit = Math.min(Math.max(1, parseInt(searchParams.get('limit') ?? '25')), 100)
     const offset = (page - 1) * limit
 
+    stage = 'list_query'
     const rows = await sql`
       WITH assignment_summary AS (
         SELECT
@@ -76,6 +94,7 @@ export async function GET(req: NextRequest) {
       LIMIT ${limit} OFFSET ${offset}
     `
 
+    stage = 'count_query'
     const countRows = await sql`
       SELECT COUNT(*)::int AS total
       FROM network_opportunities no
@@ -87,17 +106,20 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, opportunities: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
   } catch (error) {
-    console.error('[GET /api/admin/network/marketplace]', error)
-    return jsonError('Internal server error', 500)
+    console.error('[GET /api/admin/network/marketplace]', { stage, error })
+    return marketplaceError(stage, error)
   }
 }
 
 export async function POST(req: NextRequest) {
+  let stage: MarketplaceStage = 'auth'
   try {
     const admin = await requireAdminApi(req)
     if (!admin) return jsonError('Forbidden', 403)
 
+    stage = 'db_connect'
     const sql = await getDbReady()
+    stage = 'request_parse'
     const body = await req.json()
     const { action, opportunity_id, limit = 10, min_score = 30 } = body as {
       action: 'match_contractors' | 'create_assignments' | 'pause'
@@ -107,6 +129,7 @@ export async function POST(req: NextRequest) {
     }
     if (!action || !opportunity_id) return jsonError('action and opportunity_id are required', 400)
 
+    stage = 'gate_query'
     const gate = await assertLiveApprovedOpportunity(sql, opportunity_id)
     if (!gate.ok) return jsonError(gate.error, gate.status)
 
@@ -116,6 +139,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, action, opportunity_id, new_status: 'scored' })
     }
 
+    stage = 'assignment_query'
     const existingAssignments = await sql`
       SELECT id, status, contractor_id
       FROM opportunity_assignments
@@ -124,6 +148,7 @@ export async function POST(req: NextRequest) {
       ORDER BY offered_at DESC NULLS LAST
     `
 
+    stage = 'matching_call'
     const result = await matchContractors(opportunity_id, { limit, minScore: min_score })
 
     if (action === 'match_contractors') {
@@ -141,6 +166,7 @@ export async function POST(req: NextRequest) {
     let created = 0
     for (let i = 0; i < Math.min(result.matches.length, 5); i++) {
       const match = result.matches[i]
+      stage = 'assignment_insert'
       const inserted = await sql`
         INSERT INTO opportunity_assignments (opportunity_id, contractor_id, status, assignment_rank, match_score, match_factors, offered_at, offer_expires_at)
         VALUES (${opportunity_id}, ${match.contractor_id}, 'offered', ${i + 1}, ${match.overall_score}, ${JSON.stringify({ source: 'marketplace_workbench', geo_score: match.geo_score, size_fit_score: match.size_fit_score, service_score: match.service_score, performance_score: match.performance_score, capacity_score: match.capacity_score, reasons: match.match_reasons, concerns: match.match_concerns })}, NOW(), NOW() + INTERVAL '72 hours')
@@ -150,6 +176,7 @@ export async function POST(req: NextRequest) {
       if (inserted.length) created++
     }
 
+    stage = 'intelligence_update'
     await sql`
       UPDATE opportunity_intelligence
       SET total_eligible_contractors = ${result.total_eligible},
@@ -165,11 +192,12 @@ export async function POST(req: NextRequest) {
       return jsonError('Matched contractors were found, but no assignment offers were created', 409, { total_eligible: result.total_eligible, matches_returned: result.matches.length, assignments_created: created })
     }
 
+    stage = 'event_log'
     await logNetworkEvent({ event_type: 'assignment.offered', event_category: 'assignment', opportunity_id, admin_user_id: admin.id, data: { source: 'marketplace_workbench', total_eligible: result.total_eligible, assignments_created: created }, triggered_by: 'admin' })
 
     return NextResponse.json({ success: true, action, opportunity_id, total_eligible: result.total_eligible, assignments_created: created, top_match: result.top_match, matches: result.matches })
   } catch (error) {
-    console.error('[POST /api/admin/network/marketplace]', error)
-    return jsonError('Internal server error', 500)
+    console.error('[POST /api/admin/network/marketplace]', { stage, error })
+    return marketplaceError(stage, error)
   }
 }

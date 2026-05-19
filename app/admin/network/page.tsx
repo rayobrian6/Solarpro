@@ -1810,9 +1810,20 @@ function SimulatorSection() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-sm font-semibold text-white">Seed / Simulate Intake</h2>
-        <p className="mt-1 text-xs text-zinc-500">Super-admin operational simulator. Seeds canonical network opportunities with simulator metadata and runs real screening/scoring/release/matching actions.</p>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Seed / Simulate Intake</h2>
+          <p className="mt-1 text-xs text-zinc-500">Super-admin operational simulator. Seeds canonical network opportunities with simulator metadata and runs real screening/scoring/release/matching actions.</p>
+        </div>
+        <a
+          href="https://018hr.app.super.myninja.ai/free-solar-estimate"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs font-semibold text-orange-200 hover:bg-orange-500/20"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Real intake test form
+        </a>
       </div>
 
       <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/40 p-4">
