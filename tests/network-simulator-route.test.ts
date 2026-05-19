@@ -53,11 +53,32 @@ describe('/api/admin/network/simulator', () => {
   it('creates a simulated opportunity with canonical marker and intake event', async () => {
     const sql = makeSql(); mockGetDbReady.mockResolvedValueOnce(sql)
     const { POST } = await importRoute()
-    const res = await POST(req({ action: 'create', opportunity_type: 'solar', lead_quality: 'high', run_screening: false }))
+    const res = await POST(req({
+      action: 'create',
+      opportunity_type: 'solar',
+      lead_kind: 'homeowner',
+      lead_quality: 'medium',
+      urgency: '30_days',
+      city: 'Austin',
+      state: 'TX',
+      source_type: 'facebook_ads',
+      estimated_value: 48000,
+      run_screening: true,
+      run_scoring: true,
+      release_to_marketplace: false,
+      generate_matches: false,
+    }))
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ success: true, opportunity_id: 'sim-opp-1' })
-    expect(sql.queries.some((q: string) => q.includes('INSERT INTO network_opportunities'))).toBe(true)
-    expect(sql.queries.some((q: string) => q.includes('raw_payload'))).toBe(true)
+    const insertQuery = sql.queries.find((q: string) => q.includes('INSERT INTO network_opportunities')) ?? ''
+    expect(insertQuery).toContain('homeowner_name')
+    expect(insertQuery).toContain('location_city')
+    expect(insertQuery).toContain('monthly_usage_avg_kwh')
+    expect(insertQuery).toContain('utility_provider')
+    expect(insertQuery).toContain('raw_payload')
+    expect(insertQuery).not.toContain('homeowner_first_name')
+    expect(insertQuery).not.toContain('monthly_bill,')
+    expect(insertQuery).not.toContain('battery_interest')
     expect(sql.queries.some((q: string) => q.includes('INSERT INTO intake_events'))).toBe(true)
     expect(mockLogNetworkEvent).toHaveBeenCalledWith(expect.objectContaining({ event_type: 'opportunity.created', data: expect.objectContaining({ simulated: true }) }))
   })
@@ -84,4 +105,24 @@ describe('/api/admin/network/simulator', () => {
     expect(query).toContain("raw_payload->>'simulated' = 'true'")
     expect(query).toContain("source_channel = 'simulator'")
   })
+
+  it('returns stage-aware simulator create failure details without leaking secrets', async () => {
+    const sql = vi.fn(async (strings: TemplateStringsArray) => {
+      const q = strings.join(' ')
+      if (q.includes('INSERT INTO network_opportunities')) {
+        const err = new Error('column "homeowner_first_name" of relation "network_opportunities" does not exist') as Error & { code?: string }
+        err.code = '42703'
+        throw err
+      }
+      return []
+    })
+    mockGetDbReady.mockResolvedValueOnce(sql)
+    const { POST } = await importRoute()
+    const res = await POST(req({ action: 'create', opportunity_type: 'solar', lead_quality: 'medium' }))
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json).toMatchObject({ success: false, error: 'Simulator create failed', stage: 'opportunity_insert', code: '42703' })
+    expect(JSON.stringify(json)).not.toMatch(/DATABASE_URL|JWT_SECRET|ghp_/)
+  })
+
 })
