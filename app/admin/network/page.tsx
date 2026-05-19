@@ -1610,9 +1610,15 @@ function SimulatorSection() {
       const res = await fetch('/api/admin/network/simulator', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const text = await res.text();
+      let data: Record<string, unknown>;
+      try {
+        data = text ? JSON.parse(text) as Record<string, unknown> : {};
+      } catch {
+        data = { success: false, error: 'Simulator returned non-JSON response', stage: 'response_parse', message: text.slice(0, 500) };
+      }
       setResult(data);
-      setItems(data.opportunities ?? []);
+      setItems((data.opportunities as SimulatedOpportunity[] | undefined) ?? []);
     } catch (e) { setResult({ error: String(e) }); }
     finally { setBusy(null); }
   }
@@ -1641,7 +1647,16 @@ function SimulatorSection() {
         </div>
       </div>
 
-      {result && <div className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>{result.error ? String(result.error) : `Action ${String(result.action ?? 'complete')} · opportunity ${String(result.opportunity_id ?? '')}`}</div>}
+      {result && (
+        <div className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
+          <div className="font-semibold">{result.error ? String(result.error) : `Action ${String(result.action ?? 'complete')} · opportunity ${String(result.opportunity_id ?? '')}`}</div>
+          {(result.stage || result.code || result.message) && (
+            <div className="mt-1 font-mono text-[11px] text-zinc-300">
+              {result.stage ? `stage=${String(result.stage)} ` : ''}{result.code ? `code=${String(result.code)} ` : ''}{result.message ? `message=${String(result.message)}` : ''}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-xl border border-zinc-700/50">
         <table className="w-full text-sm"><thead><tr className="bg-zinc-800/80 border-b border-zinc-700/50"><th className="px-4 py-3 text-left text-xs text-zinc-400">Opportunity</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Status</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Screening</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Score</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Assignments / Events</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Actions</th></tr></thead>
