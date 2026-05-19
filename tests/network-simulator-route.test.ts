@@ -120,6 +120,23 @@ describe('/api/admin/network/simulator', () => {
     const query = sql.queries.find((q: string) => q.includes('FROM network_opportunities no')) ?? ''
     expect(query).toContain("raw_payload->>'simulated' = 'true'")
     expect(query).toContain("source_channel = 'simulator'")
+    expect(query).toContain("no.status <> 'withdrawn'")
+    expect(query).toContain('auto_decision_reason')
+    expect(query).toContain('step10_fail_reasons')
+  })
+
+  it('deletes only simulator-marked opportunities and refreshes the list', async () => {
+    const sql = makeSql(); mockGetDbReady.mockResolvedValueOnce(sql)
+    const { POST } = await importRoute()
+    const res = await POST(req({ action: 'delete', opportunity_id: 'sim-opp-1' }))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ success: true, action: 'delete' })
+    const deleteOpportunity = sql.queries.find((q: string) => q.includes('DELETE FROM network_opportunities')) ?? ''
+    expect(deleteOpportunity).toContain("raw_payload->>'simulated' = 'true'")
+    expect(deleteOpportunity).toContain('RETURNING id')
+    const deleteEvents = sql.queries.find((q: string) => q.includes('DELETE FROM network_events')) ?? ''
+    expect(deleteEvents).toContain('USING network_opportunities')
+    expect(deleteEvents).toContain("source_channel = 'simulator'")
   })
 
   it('returns stage-aware simulator create failure details without leaking secrets', async () => {

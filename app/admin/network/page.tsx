@@ -90,8 +90,11 @@ interface MarketplaceOpportunity {
   total_eligible_contractors?: number | null;
   top_match_score?: number | null;
   auto_decision?: string | null;
+  auto_decision_reason?: string | null;
   override_decision?: string | null;
+  override_reason?: string | null;
   confidence_score?: number | null;
+  step10_fail_reasons?: string[] | null;
   assignment_count?: number | null;
   active_offer_count?: number | null;
   claimed_or_active_count?: number | null;
@@ -107,6 +110,7 @@ interface SimulatedOpportunity {
   source_channel?: string | null;
   city?: string | null;
   state?: string | null;
+  homeowner_name?: string | null;
   homeowner_first_name?: string | null;
   homeowner_last_name?: string | null;
   created_at: string;
@@ -118,8 +122,11 @@ interface SimulatedOpportunity {
   overall_grade?: string | null;
   executive_summary?: string | null;
   auto_decision?: string | null;
+  auto_decision_reason?: string | null;
   override_decision?: string | null;
+  override_reason?: string | null;
   confidence_score?: number | null;
+  step10_fail_reasons?: string[] | null;
   assignment_count?: number | null;
   event_count?: number | null;
   last_event_at?: string | null;
@@ -1600,7 +1607,8 @@ function SimulatorSection() {
   useEffect(() => { loadSimulated(); }, [loadSimulated]);
 
   async function simulatorAction(action: string, opportunity_id?: string) {
-    if (action === 'archive' && !confirm('Archive this simulated opportunity?')) return;
+    if (action === 'archive' && !confirm('Archive this simulated opportunity? This hides it from the simulator list but keeps the record withdrawn.')) return;
+    if (action === 'delete' && !confirm('Permanently delete this simulated opportunity and its simulator pipeline records? This only works for simulator-created rows.')) return;
     setBusy(opportunity_id ? `${opportunity_id}:${action}` : action);
     setResult(null);
     try {
@@ -1662,7 +1670,10 @@ function SimulatorSection() {
         <table className="w-full text-sm"><thead><tr className="bg-zinc-800/80 border-b border-zinc-700/50"><th className="px-4 py-3 text-left text-xs text-zinc-400">Opportunity</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Status</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Screening</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Score</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Assignments / Events</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Actions</th></tr></thead>
         <tbody>{loading ? <tr><td colSpan={6} className="py-10 text-center text-zinc-500">Loading simulated opportunities…</td></tr> : items.length === 0 ? <tr><td colSpan={6} className="py-10 text-center text-zinc-500">No simulated opportunities yet.</td></tr> : items.map(opp => {
           const marker = (opp.raw_payload ?? opp.intake_metadata ?? {}) as Record<string, unknown>;
-          return <tr key={opp.id} className="border-b border-zinc-800 align-top hover:bg-zinc-800/40"><td className="px-4 py-3"><div className="font-medium text-white">{`${opp.homeowner_first_name ?? 'Sim'} ${opp.homeowner_last_name ?? ''}`}</div><div className="text-xs text-zinc-500">{String(marker.opportunity_type ?? 'simulated')} · {opp.city}, {opp.state}</div></td><td className="px-4 py-3"><StatusPill status={opp.status} /><div className="mt-1 text-xs text-zinc-500">{new Date(opp.created_at).toLocaleDateString()}</div></td><td className="px-4 py-3 text-xs text-zinc-300">{opp.screening_status ?? opp.auto_decision ?? '—'}<div className="text-zinc-500">Confidence {opp.confidence_score ? `${Math.round(Number(opp.confidence_score))}%` : '—'}</div></td><td className="px-4 py-3"><div className="flex items-center gap-2"><GradeBadge grade={opp.overall_grade ?? undefined} /><span className="text-xs text-zinc-400">{opp.overall_score != null ? Math.round(Number(opp.overall_score)) : 'No score'}</span></div><div className="mt-1 max-w-xs truncate text-xs text-zinc-500">{opp.executive_summary ?? 'No explainability summary yet'}</div></td><td className="px-4 py-3 text-xs text-zinc-300">Assignments {opp.assignment_count ?? 0}<div className="text-zinc-500">Events {opp.event_count ?? 0}</div></td><td className="px-4 py-3"><div className="flex flex-wrap gap-1.5">{(['screen','score','release','match','archive'] as const).map(action => <button key={action} onClick={() => simulatorAction(action, opp.id)} disabled={!!busy} className="rounded border border-zinc-700 px-2 py-1 text-[10px] font-semibold text-zinc-300 hover:border-orange-500/40 hover:text-orange-300 disabled:opacity-40">{busy === `${opp.id}:${action}` ? '…' : action}</button>)}</div></td></tr>;
+          const failReasons = Array.isArray(opp.step10_fail_reasons) ? opp.step10_fail_reasons.filter(Boolean) : [];
+          const decisionReason = opp.override_reason ?? opp.auto_decision_reason ?? (failReasons.length ? `Failed: ${failReasons.join(', ')}` : null);
+          const displayName = opp.homeowner_name || `${opp.homeowner_first_name ?? 'Sim'} ${opp.homeowner_last_name ?? ''}`.trim() || 'Sim';
+          return <tr key={opp.id} className="border-b border-zinc-800 align-top hover:bg-zinc-800/40"><td className="px-4 py-3"><div className="font-medium text-white">{displayName}</div><div className="text-xs text-zinc-500">{String(marker.opportunity_type ?? 'simulated')} · {opp.city}, {opp.state}</div></td><td className="px-4 py-3"><StatusPill status={opp.status} /><div className="mt-1 text-xs text-zinc-500">{new Date(opp.created_at).toLocaleDateString()}</div></td><td className="px-4 py-3 text-xs text-zinc-300"><div>{opp.screening_status ?? opp.override_decision ?? opp.auto_decision ?? '—'}</div><div className="text-zinc-500">Confidence {opp.confidence_score ? `${Math.round(Number(opp.confidence_score))}%` : '—'}</div>{decisionReason && <div className="mt-1 max-w-xs text-[11px] leading-snug text-amber-300">{decisionReason}</div>}</td><td className="px-4 py-3"><div className="flex items-center gap-2"><GradeBadge grade={opp.overall_grade ?? undefined} /><span className="text-xs text-zinc-400">{opp.overall_score != null ? Math.round(Number(opp.overall_score)) : 'No score'}</span></div><div className="mt-1 max-w-xs truncate text-xs text-zinc-500">{opp.executive_summary ?? 'No explainability summary yet'}</div></td><td className="px-4 py-3 text-xs text-zinc-300">Assignments {opp.assignment_count ?? 0}<div className="text-zinc-500">Events {opp.event_count ?? 0}</div></td><td className="px-4 py-3"><div className="flex flex-wrap gap-1.5">{(['screen','score','release','match','archive','delete'] as const).map(action => <button key={action} onClick={() => simulatorAction(action, opp.id)} disabled={!!busy} className={`rounded border px-2 py-1 text-[10px] font-semibold disabled:opacity-40 ${action === 'delete' ? 'border-red-500/40 text-red-300 hover:bg-red-500/10' : 'border-zinc-700 text-zinc-300 hover:border-orange-500/40 hover:text-orange-300'}`}>{busy === `${opp.id}:${action}` ? '…' : action}</button>)}</div></td></tr>;
         })}</tbody></table>
       </div>
     </div>

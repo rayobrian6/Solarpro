@@ -12,7 +12,7 @@ import { logNetworkEvent } from '@/lib/network/attributionTracker'
 
 type OpportunityType = 'solar' | 'roofing' | 'battery' | 'service_call'
 type LeadQuality = 'high' | 'medium' | 'low' | 'bad'
-type SimulatorStage = 'auth' | 'request_parse' | 'db_connect' | 'opportunity_insert' | 'intake_events_insert' | 'network_events_insert' | 'screening_call' | 'scoring_call' | 'release_update' | 'matching_call' | 'archive_update' | 'response_build'
+type SimulatorStage = 'auth' | 'request_parse' | 'db_connect' | 'opportunity_insert' | 'intake_events_insert' | 'network_events_insert' | 'screening_call' | 'scoring_call' | 'release_update' | 'matching_call' | 'archive_update' | 'delete_update' | 'response_build'
 
 function jsonError(error: string, status = 400, details?: unknown) { return NextResponse.json({ success: false, error, details }, { status }) }
 function eventId(prefix = 'sim') { return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}` }
@@ -78,7 +78,7 @@ async function scoreAndPersist(sql: Awaited<ReturnType<typeof getDbReady>>, oppo
 }
 
 async function loadSimulated(sql: Awaited<ReturnType<typeof getDbReady>>) {
-  return sql`WITH assignment_summary AS (SELECT opportunity_id, COUNT(*)::int AS assignment_count FROM opportunity_assignments GROUP BY opportunity_id), event_summary AS (SELECT opportunity_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS last_event_at FROM network_events GROUP BY opportunity_id) SELECT no.id, no.status, no.source_type, no.source_channel, no.location_city AS city, no.location_state AS state, no.homeowner_name, no.created_at, no.live_at, no.screening_status, no.raw_payload, no.intake_metadata, oi.overall_score, oi.overall_grade, oi.executive_summary, osq.auto_decision, osq.override_decision, osq.confidence_score, COALESCE(asg.assignment_count, 0) AS assignment_count, COALESCE(evt.event_count, 0) AS event_count, evt.last_event_at FROM network_opportunities no LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id LEFT JOIN assignment_summary asg ON asg.opportunity_id = no.id LEFT JOIN event_summary evt ON evt.opportunity_id = no.id WHERE no.raw_payload->>'simulated' = 'true' OR no.intake_metadata->>'simulated' = 'true' OR no.source_channel = 'simulator' ORDER BY no.created_at DESC LIMIT 100`
+  return sql`WITH assignment_summary AS (SELECT opportunity_id, COUNT(*)::int AS assignment_count FROM opportunity_assignments GROUP BY opportunity_id), event_summary AS (SELECT opportunity_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS last_event_at FROM network_events GROUP BY opportunity_id) SELECT no.id, no.status, no.source_type, no.source_channel, no.location_city AS city, no.location_state AS state, no.homeowner_name, no.created_at, no.live_at, no.screening_status, no.raw_payload, no.intake_metadata, oi.overall_score, oi.overall_grade, oi.executive_summary, osq.auto_decision, osq.auto_decision_reason, osq.override_decision, osq.override_reason, osq.confidence_score, osq.step10_fail_reasons, COALESCE(asg.assignment_count, 0) AS assignment_count, COALESCE(evt.event_count, 0) AS event_count, evt.last_event_at FROM network_opportunities no LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id LEFT JOIN assignment_summary asg ON asg.opportunity_id = no.id LEFT JOIN event_summary evt ON evt.opportunity_id = no.id WHERE (no.raw_payload->>'simulated' = 'true' OR no.intake_metadata->>'simulated' = 'true' OR no.source_channel = 'simulator') AND no.status <> 'withdrawn' ORDER BY no.created_at DESC LIMIT 100`
 }
 
 export async function GET(req: NextRequest) {
@@ -115,6 +115,16 @@ export async function POST(req: NextRequest) {
       await logNetworkEvent({ event_type: 'simulation.archived', event_category: 'admin', opportunity_id: opportunityId, admin_user_id: admin.id, data: { simulated: true }, triggered_by: 'admin' })
       stage = 'response_build'
       return NextResponse.json({ success: true, action, opportunities: await loadSimulated(sql) })
+    }
+
+    if (action === 'delete') {
+      if (!opportunityId) return jsonError('opportunity_id is required', 400)
+      stage = 'delete_update'
+      logStage(stage, { opportunityId })
+      await sql`DELETE FROM network_events ne USING network_opportunities no WHERE ne.opportunity_id = no.id AND no.id = ${opportunityId} AND (no.raw_payload->>'simulated' = 'true' OR no.intake_metadata->>'simulated' = 'true' OR no.source_channel = 'simulator')`
+      const deleted = await sql`DELETE FROM network_opportunities WHERE id = ${opportunityId} AND (raw_payload->>'simulated' = 'true' OR intake_metadata->>'simulated' = 'true' OR source_channel = 'simulator') RETURNING id`
+      stage = 'response_build'
+      return NextResponse.json({ success: true, action, deleted: deleted.length, opportunities: await loadSimulated(sql) })
     }
 
     if (['screen', 'score', 'release', 'match'].includes(action)) {
