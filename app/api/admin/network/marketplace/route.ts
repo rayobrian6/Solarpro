@@ -159,6 +159,11 @@ export async function POST(req: NextRequest) {
       WHERE opportunity_id = ${opportunity_id}
     `
 
+    if (created === 0) {
+      await logNetworkEvent({ event_type: 'assignment.offer_insert_skipped', event_category: 'assignment', opportunity_id, admin_user_id: admin.id, data: { source: 'marketplace_workbench', total_eligible: result.total_eligible, matches_returned: result.matches.length }, triggered_by: 'admin' })
+      return jsonError('Matched contractors were found, but no assignment offers were created', 409, { total_eligible: result.total_eligible, matches_returned: result.matches.length, assignments_created: created })
+    }
+
     await logNetworkEvent({ event_type: 'assignment.offered', event_category: 'assignment', opportunity_id, admin_user_id: admin.id, data: { source: 'marketplace_workbench', total_eligible: result.total_eligible, assignments_created: created }, triggered_by: 'admin' })
 
     return NextResponse.json({ success: true, action, opportunity_id, total_eligible: result.total_eligible, assignments_created: created, top_match: result.top_match, matches: result.matches })

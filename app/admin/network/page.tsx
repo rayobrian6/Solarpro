@@ -1613,6 +1613,36 @@ function marketplaceReadySummary(value: unknown) {
   return `${gate} · status=${String(ready.status ?? '—')} · screening=${String(ready.screening_status ?? '—')} · ${location} · ${score} · ${grade}`;
 }
 
+function workbenchResultSummary(result: Record<string, unknown>) {
+  const action = String(result.action ?? 'action');
+  if (result.error || result.success === false) {
+    const parts = [
+      action,
+      String(result.error ?? 'failed'),
+      result.http_status ? `http=${String(result.http_status)}` : null,
+      result.stage ? `stage=${String(result.stage)}` : null,
+      result.message ? `message=${String(result.message)}` : null,
+    ].filter(Boolean);
+    if (result.details && typeof result.details === 'object') {
+      const details = result.details as Record<string, unknown>;
+      if (Array.isArray(details.existing_assignments)) parts.push(`existing_assignments=${details.existing_assignments.length}`);
+      if (details.matches_returned != null) parts.push(`matches_returned=${String(details.matches_returned)}`);
+      if (details.assignments_created != null) parts.push(`assignments_created=${String(details.assignments_created)}`);
+    }
+    return parts.join(' · ');
+  }
+
+  const eligible = result.total_eligible ?? '—';
+  const created = Number(result.assignments_created ?? 0);
+  const returned = Array.isArray(result.matches) ? result.matches.length : null;
+  if (action === 'match_contractors') return `match_contractors · eligible ${String(eligible)} · returned ${returned ?? '—'}${result.already_assigned ? ' · already has active assignment offers' : ''}`;
+  if (action === 'create_assignments') {
+    if (created > 0) return `create_assignments · created ${created} assignment offer${created === 1 ? '' : 's'} · eligible ${String(eligible)} · returned ${returned ?? '—'}`;
+    return `create_assignments · no offers created · eligible ${String(eligible)} · returned ${returned ?? '—'}`;
+  }
+  return `${action} · eligible ${String(eligible)} · assignments ${String(result.assignments_created ?? '—')}`;
+}
+
 
 function SimulatorSection() {
   const [items, setItems] = useState<SimulatedOpportunity[]>([]);
@@ -1719,7 +1749,7 @@ function MarketplaceWorkbenchSection() {
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const loadMarketplace = useCallback(async () => {
+  const loadMarketplace = useCallback(async (options?: { preserveResult?: boolean }) => {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/network/marketplace?limit=50', { cache: 'no-store' });
@@ -1728,7 +1758,7 @@ function MarketplaceWorkbenchSection() {
         setResult({ ...data, action: 'load_marketplace' });
         return;
       }
-      setResult(null);
+      if (!options?.preserveResult) setResult(null);
       setItems((data.opportunities as MarketplaceOpportunity[] | undefined) ?? []);
     } catch (e) {
       setResult({ error: String(e), action: 'load_marketplace' });
@@ -1752,7 +1782,7 @@ function MarketplaceWorkbenchSection() {
       });
       const data = await parseAdminJsonResponse(res, 'Workbench action failed');
       setResult(data);
-      if (data.success !== false) await loadMarketplace();
+      if (data.success !== false) await loadMarketplace({ preserveResult: true });
     } catch (e) {
       setResult({ error: String(e) });
     } finally {
@@ -1767,7 +1797,7 @@ function MarketplaceWorkbenchSection() {
           <h2 className="text-sm font-semibold text-white">Marketplace Workbench</h2>
           <p className="mt-1 text-xs text-zinc-500">Live, screening-approved network opportunities only. Assignment actions use the canonical contractor matcher.</p>
         </div>
-        <button onClick={loadMarketplace} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:text-white disabled:opacity-50">
+        <button onClick={() => loadMarketplace()} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:text-white disabled:opacity-50">
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
         </button>
       </div>
@@ -1776,9 +1806,7 @@ function MarketplaceWorkbenchSection() {
         <div className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
           <div className="font-semibold">{result.error || result.success === false ? 'Marketplace Workbench failed' : 'Workbench action complete'}</div>
           <div className="mt-1 font-mono text-[11px] text-zinc-300">
-            {result.error
-              ? `${String(result.action ?? 'action')} · ${String(result.error)}${result.http_status ? ` · http=${String(result.http_status)}` : ''}${result.stage ? ` · stage=${String(result.stage)}` : ''}${result.message ? ` · message=${String(result.message)}` : ''}`
-              : `${String(result.action ?? 'action')} · eligible ${String(result.total_eligible ?? '—')} · assignments ${String(result.assignments_created ?? '—')}`}
+            {workbenchResultSummary(result)}
           </div>
         </div>
       )}
@@ -1806,7 +1834,10 @@ function MarketplaceWorkbenchSection() {
               const score = opp.overall_score ?? opp.opportunity_score;
               const grade = opp.overall_grade ?? opp.opportunity_grade;
               const price = opp.market_price ?? opp.asking_price ?? opp.listing_price;
-              const assigned = Number(opp.active_offer_count ?? 0) > 0 || Number(opp.claimed_or_active_count ?? 0) > 0;
+              const activeOffers = Number(opp.active_offer_count ?? 0);
+              const claimedOrActive = Number(opp.claimed_or_active_count ?? 0);
+              const assigned = activeOffers > 0 || claimedOrActive > 0;
+              const assignmentLabel = claimedOrActive > 0 ? (opp.current_assignment_status ?? 'claimed/active') : activeOffers > 0 ? 'Offers pending' : 'Unassigned';
               return (
                 <tr key={opp.id} className="border-b border-zinc-800 align-top hover:bg-zinc-800/40">
                   <td className="px-4 py-3">
@@ -1826,7 +1857,7 @@ function MarketplaceWorkbenchSection() {
                   <td className="px-4 py-3 text-zinc-300"><div>{city}, {state}</div><div className="mt-1 text-xs text-zinc-500">{opp.address ? 'Address on file' : 'No address shown'}</div></td>
                   <td className="px-4 py-3"><div className="flex items-center gap-2"><GradeBadge grade={grade ?? undefined} /><span className="text-xs text-zinc-400">{score != null ? Math.round(Number(score)) : 'No score'}</span></div><div className="mt-1 text-xs text-zinc-500">Value {formatCurrency(opp.estimated_project_value)} · Price {formatCurrency(price)}</div>{score == null && <div className="mt-1 text-[11px] text-amber-300">No score available</div>}</td>
                   <td className="px-4 py-3"><span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">{opp.screening_status ?? opp.auto_decision ?? 'approved'}</span><div className="mt-1 text-xs text-zinc-500">Confidence {opp.confidence_score ? `${Math.round(Number(opp.confidence_score))}%` : '—'}</div></td>
-                  <td className="px-4 py-3"><div className={`text-xs ${assigned ? 'text-emerald-300' : 'text-zinc-400'}`}>{assigned ? (opp.current_assignment_status ?? 'offered') : 'Unassigned'}</div><div className="mt-1 text-xs text-zinc-500">Offers {opp.active_offer_count ?? 0} · Total {opp.assignment_count ?? 0}</div>{assigned && <div className="mt-1 text-[11px] text-amber-300">Already assigned</div>}</td>
+                  <td className="px-4 py-3"><div className={`text-xs ${assigned ? 'text-emerald-300' : 'text-zinc-400'}`}>{assignmentLabel}</div><div className="mt-1 text-xs text-zinc-500">Offers {activeOffers} · Total {opp.assignment_count ?? 0}</div>{assigned && <div className="mt-1 text-[11px] text-amber-300">Assignment offers already exist</div>}</td>
                   <td className="px-4 py-3 text-xs text-zinc-500">{opp.live_at ? new Date(opp.live_at).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3"><div className="flex flex-col gap-1.5"><button onClick={() => runWorkbenchAction(opp.id, 'match_contractors')} disabled={!!busy} className="rounded border border-blue-500/30 px-2 py-1 text-[11px] font-semibold text-blue-300 hover:bg-blue-500/10 disabled:opacity-40">{busy === `${opp.id}:match_contractors` ? '…' : 'Match contractors'}</button><button onClick={() => runWorkbenchAction(opp.id, 'create_assignments')} disabled={!!busy || assigned} className="rounded border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40">{busy === `${opp.id}:create_assignments` ? '…' : 'Assign top matches'}</button><button onClick={() => runWorkbenchAction(opp.id, 'pause')} disabled={!!busy} className="rounded border border-amber-500/30 px-2 py-1 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">{busy === `${opp.id}:pause` ? '…' : 'Pause live'}</button></div></td>
                 </tr>

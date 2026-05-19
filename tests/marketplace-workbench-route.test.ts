@@ -22,7 +22,7 @@ function req(body?: unknown, method = 'POST'): any {
   })
 }
 
-function makeSql(opts: { gate?: Record<string, unknown> | null; existingAssignments?: any[]; listRows?: any[] } = {}) {
+function makeSql(opts: { gate?: Record<string, unknown> | null; existingAssignments?: any[]; listRows?: any[]; insertRows?: any[] } = {}) {
   const calls: string[] = []
   const sql = vi.fn(async (strings: TemplateStringsArray) => {
     const q = strings.join(' ')
@@ -31,7 +31,7 @@ function makeSql(opts: { gate?: Record<string, unknown> | null; existingAssignme
     if (q.includes('SELECT COUNT(*)::int AS total')) return [{ total: (opts.listRows ?? [1]).length }]
     if (q.includes('SELECT no.id, no.status, no.screening_status')) return opts.gate === undefined ? [{ id: 'live-1', status: 'live', screening_status: 'approved', auto_decision: 'pass' }] : (opts.gate ? [opts.gate] : [])
     if (q.includes('FROM opportunity_assignments') && q.includes("status IN ('offered'")) return opts.existingAssignments ?? []
-    if (q.includes('INSERT INTO opportunity_assignments')) return [{ id: 'assignment-1' }]
+    if (q.includes('INSERT INTO opportunity_assignments')) return opts.insertRows ?? [{ id: 'assignment-1' }]
     return []
   }) as any
   sql.calls = calls
@@ -103,6 +103,19 @@ describe('/api/admin/network/marketplace', () => {
     expect(await res.json()).toMatchObject({ success: true, assignments_created: 1, total_eligible: 1 })
     expect(mockMatchContractors).toHaveBeenCalledWith('live-1', { limit: 10, minScore: 30 })
     expect(mockLogNetworkEvent).toHaveBeenCalledWith(expect.objectContaining({ event_type: 'assignment.offered', event_category: 'assignment', opportunity_id: 'live-1' }))
+  })
+
+  it('returns a visible conflict when matched contractors do not create assignment rows', async () => {
+    mockGetDbReady.mockResolvedValueOnce(makeSql({ insertRows: [] }))
+    const { POST } = await importRoute()
+    const res = await POST(req({ action: 'create_assignments', opportunity_id: 'live-1' }))
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({
+      success: false,
+      error: 'Matched contractors were found, but no assignment offers were created',
+      details: { total_eligible: 1, matches_returned: 1, assignments_created: 0 },
+    })
+    expect(mockLogNetworkEvent).toHaveBeenCalledWith(expect.objectContaining({ event_type: 'assignment.offer_insert_skipped' }))
   })
 
   it('logs no eligible contractors when matcher returns no matches', async () => {
