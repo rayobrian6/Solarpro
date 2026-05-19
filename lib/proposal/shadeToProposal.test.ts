@@ -124,7 +124,7 @@ describe('panelsShadeDerateComputedPct computation from PlacedPanel array', () =
    *   const avgFactor = mean(shadedPanels.map(p => p.annualShadeFactor))
    *   derate = (1 - avgFactor) * 100
    */
-  function computeShadeDeratePct(panels: { annualShadeFactor?: number }[]): number | undefined {
+  function computeShadeDeratePct(panels: Array<{ annualShadeFactor?: number; id?: string }>): number | undefined {
     const shadedPanels = panels.filter(
       (p) => typeof p.annualShadeFactor === 'number' &&
              p.annualShadeFactor >= 0 &&

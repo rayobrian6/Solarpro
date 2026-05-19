@@ -14,11 +14,14 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { getDbReady } from '@/lib/db-neon';
 import { verifyMetaWebhook, generatePayloadIdempotencyKey } from '@/lib/intake/webhookVerifier';
 import { runIntakePipeline } from '@/lib/intake/intakePipeline';
 
-const sql = neon(process.env.DATABASE_URL!);
+async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  const db = await getDbReady();
+  return (db as any)(strings, ...values);
+}
 
 // ── GET: Hub challenge
 export async function GET(req: NextRequest): Promise<NextResponse> {

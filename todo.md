@@ -1,18 +1,18 @@
-# Admin Intake Funnels Management
+# Git Push, Regression Verification, and Accurate Recap
 
-## Verify current state
-- [x] Inspect existing Admin Network page and current local diffs before editing.
-- [x] Confirm previously created funnel helper/API/migration files are present and aligned with canonical intake infrastructure.
+## Inspect state
+- [x] Confirm current branch, remotes, dev/master graph, and dirty files.
+- [x] Identify source/test changes to commit and exclude temp/log artifacts.
 
-## Implement operational UI
-- [x] Add reusable funnel URL/UTM helpers without creating duplicate intake systems.
-- [x] Add an Intake Funnels section/tab/card in Admin Network Control Center.
-- [x] Show canonical funnel name, type, status, URL, timestamps, and campaign/source metadata where available.
-- [x] Add Open Funnel, Copy Link, Copy Embed URL, Copy UTM-ready URL, and campaign metadata actions.
+## Regression/deploy verification
+- [x] Run lint, type-check, full regression tests, and production build from the current working tree.
+- [x] Capture exact pass/fail results and logs.
 
-## Tests and QA
-- [x] Add tests for admin guard/static route integrity, canonical listing, URL integrity, copy/open action wiring, and UTM generation.
-- [x] Run focused tests, targeted lint, and practical type checks for touched files.
+## Commit and push
+- [x] Commit the deployment recovery and homeowner intake changes with a clear message.
+- [ ] Push the current branch to origin.
+- [ ] Verify remote branch contains the pushed commit.
+- [ ] Check master/origin master relationship and report whether master is accurate or needs a merge/PR.
 
-## Report
-- [x] Report files changed, reused systems, surfaced funnel infrastructure, attribution support, QA results, and unrelated failures.
+## Final operational recap
+- [ ] Report exactly what changed, what was tested, what was pushed, and what remains.

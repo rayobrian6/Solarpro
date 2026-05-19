@@ -8,9 +8,7 @@
  * and funnel stage progression.
  */
 
-import { neon } from '@neondatabase/serverless'
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDbReady } from '@/lib/db-neon'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -108,6 +106,7 @@ export async function createAttribution(
   opportunityId: string,
   data: AttributionData
 ): Promise<string> {
+  const sql = await getDbReady()
   const platform = data.platform ?? inferPlatform(data)
   const campaign_id = inferCampaignId(data)
   const device_type = data.device_type ?? parseDeviceType(data.user_agent)
@@ -193,6 +192,7 @@ export async function createAttribution(
  * Updates the funnel stage timestamp when an opportunity progresses.
  */
 export async function advanceFunnelStage(event: FunnelEvent): Promise<void> {
+  const sql = await getDbReady()
   const ts = event.occurred_at ?? new Date()
 
   const stageToColumn: Record<FunnelEvent['stage'], string> = {
@@ -259,6 +259,8 @@ export async function logNetworkEvent(event: {
   error_message?: string
 }): Promise<void> {
   try {
+    const sql = await getDbReady()
+
     await sql`
       INSERT INTO network_events (
         event_type,
@@ -309,6 +311,8 @@ export async function logNetworkEvent(event: {
  * Returns attribution data for a specific opportunity.
  */
 export async function getAttributionSummary(opportunityId: string) {
+  const sql = await getDbReady()
+
   const [source] = await sql`
     SELECT * FROM opportunity_sources WHERE opportunity_id = ${opportunityId} LIMIT 1
   `
@@ -328,6 +332,7 @@ export async function getCampaignPerformance(
   } = {}
 ) {
   const { source_type, platform, campaign_id, days = 30 } = filters
+  const sql = await getDbReady()
 
   const rows = await sql`
     SELECT
@@ -367,6 +372,8 @@ export async function markDuplicate(
   duplicateOfId: string,
   detectionData: Record<string, unknown>
 ): Promise<void> {
+  const sql = await getDbReady()
+
   await sql`
     UPDATE opportunity_sources SET
       is_duplicate = true,

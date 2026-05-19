@@ -14,9 +14,7 @@
  *   Capacity / Bandwidth   15%  — how busy are they right now?
  */
 
-import { neon } from '@neondatabase/serverless'
-
-const sql = neon(process.env.DATABASE_URL!)
+import { getDbReady } from '@/lib/db-neon'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -242,6 +240,7 @@ export async function matchContractors(
   opportunityId: string,
   options: { limit?: number; minScore?: number } = {}
 ): Promise<MatchingResult> {
+  const sql = await getDbReady()
   const { limit = 10, minScore = 30 } = options
 
   // Fetch opportunity
@@ -417,6 +416,8 @@ export async function isContractorEligible(
   contractorId: string,
   opportunityId: string
 ): Promise<{ eligible: boolean; reason?: string }> {
+  const sql = await getDbReady()
+
   const contractorRows2 = await sql`
     SELECT service_states, network_active AS is_active FROM contractor_profiles WHERE user_id = ${contractorId} LIMIT 1
   `

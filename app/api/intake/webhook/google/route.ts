@@ -15,11 +15,14 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { getDbReady } from '@/lib/db-neon';
 import { verifyGoogleWebhook, generatePayloadIdempotencyKey } from '@/lib/intake/webhookVerifier';
 import { runIntakePipeline } from '@/lib/intake/intakePipeline';
 
-const sql = neon(process.env.DATABASE_URL!);
+async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  const db = await getDbReady();
+  return (db as any)(strings, ...values);
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;

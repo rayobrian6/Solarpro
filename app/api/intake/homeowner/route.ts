@@ -5,6 +5,10 @@
  * Rate-limited: 3 submissions per 15 minutes per IP.
  * Looks up funnel config from intake_funnels table.
  *
+ * Canonical review-first flow for /free-solar-estimate:
+ *   /free-solar-estimate → this route → intake_events → Admin Intake Feed
+ *   → operator review → later conversion into marketplace opportunity.
+ *
  * POST /api/intake/homeowner
  *   Body: RawIntakePayload + optional funnel_slug
  */
@@ -13,10 +17,16 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
-import { runIntakePipeline } from '@/lib/intake/intakePipeline';
+import { getDbReady } from '@/lib/db-neon';
+import {
+  logMalformedHomeownerIntake,
+  submitHomeownerIntakeEvent,
+} from '@/lib/intake/homeownerEventIntake';
 
-const sql = neon(process.env.DATABASE_URL!);
+async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  const db = await getDbReady();
+  return (db as any)(strings, ...values);
+}
 
 // ── In-memory rate limiter (3 per 15 min per IP)
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
@@ -84,12 +94,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let body: Record<string, unknown>;
   try {
     body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  } catch (err) {
+    const eventId = await logMalformedHomeownerIntake((err as Error).message || 'Invalid JSON body', {
+      source_system: 'homeowner_form',
+      source_channel: 'web',
+      funnel_slug: 'free-solar-estimate',
+      ip_address: ip,
+      user_agent: userAgent,
+      referer,
+    });
+    return NextResponse.json({ error: 'Invalid JSON body', event_id: eventId }, { status: 400 });
   }
 
   // ── Look up funnel config
-  const funnelSlug = (body.funnel_slug as string) || null;
+  const funnelSlug = (body.funnel_slug as string) || 'free-solar-estimate';
   let funnelId: string | null = null;
   let campaignId: string | null = null;
   let requirePhone = false;
@@ -118,11 +136,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  // ── Run pipeline
-  const result = await runIntakePipeline(body, {
+  // ── Persist a canonical review-first intake_events row. This deliberately
+  // does not create network_opportunities or marketplace inventory.
+  const result = await submitHomeownerIntakeEvent(body, {
     source_system: 'homeowner_form',
     source_channel: (body.source_channel as string) || 'web',
     funnel_id: funnelId,
+    funnel_slug: funnelSlug,
     campaign_id: campaignId,
     ip_address: ip,
     user_agent: userAgent,
@@ -134,14 +154,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Public responses are intentionally vague on duplicates
   if (result.action === 'validation_failed') {
     return NextResponse.json(
-      { error: 'Please check your information and try again.', details: result.validation_errors },
+      { error: 'Please check your information and try again.', details: result.validation_errors, event_id: result.event_id },
       { status: 422 }
     );
   }
 
   if (result.action === 'error') {
     return NextResponse.json(
-      { error: 'Something went wrong. Please try again.' },
+      { error: 'Something went wrong. Please try again.', event_id: result.event_id },
       { status: 500 }
     );
   }
@@ -151,7 +171,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     {
       success: true,
       message: 'Thank you! A solar advisor will be in touch shortly.',
-      opportunity_id: result.opportunity_id,
+      event_id: result.event_id,
+      opportunity_id: null,
+      review_status: 'pending_operator_review',
     },
     {
       status: 200,

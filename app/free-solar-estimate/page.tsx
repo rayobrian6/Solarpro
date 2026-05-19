@@ -123,7 +123,7 @@ export default function FreeSolarEstimatePage() {
   const [billFile, setBillFile] = useState<File | null>(null);
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [error, setError] = useState('');
-  const [opportunityId, setOpportunityId] = useState<string | null>(null);
+  const [intakeReference, setIntakeReference] = useState<string | null>(null);
 
   const completedRequired = useMemo(() => {
     return REQUIRED_FIELDS.filter(field => String(form[field]).trim().length > 0).length;
@@ -173,20 +173,42 @@ export default function FreeSolarEstimatePage() {
       return;
     }
 
+    const attributionParams = typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+
     const payload = {
       first_name: form.first_name.trim(),
       last_name: form.last_name.trim(),
       phone: form.phone.trim(),
       email: form.email.trim().toLowerCase(),
       address_line1: form.property_address.trim(),
+      property_address: form.property_address.trim(),
       city: form.city.trim() || undefined,
       state: form.state || undefined,
       zip: form.zip.trim() || undefined,
       monthly_bill_amount: normalizeMoney(form.average_monthly_bill),
+      average_monthly_bill: normalizeMoney(form.average_monthly_bill),
+      utility_provider: form.utility_provider.trim(),
+      battery_interest: form.battery_interest,
+      homeowner_status: form.homeowner_status,
       home_ownership: form.homeowner_status,
+      preferred_contact_method: form.preferred_contact_method || undefined,
+      timeline: form.timeline || undefined,
+      roof_age: form.roof_age.trim() || undefined,
       roof_age_years: form.roof_age.trim() || undefined,
+      uploaded_bill_filename: billFile?.name || undefined,
+      uploaded_bill_size_bytes: billFile?.size || undefined,
+      uploaded_bill_content_type: billFile?.type || undefined,
       source_channel: 'web',
       funnel_slug: 'free-solar-estimate',
+      utm_source: attributionParams.get('utm_source') || undefined,
+      utm_medium: attributionParams.get('utm_medium') || undefined,
+      utm_campaign: attributionParams.get('utm_campaign') || undefined,
+      utm_content: attributionParams.get('utm_content') || undefined,
+      utm_term: attributionParams.get('utm_term') || undefined,
+      gclid: attributionParams.get('gclid') || undefined,
+      fbclid: attributionParams.get('fbclid') || undefined,
       consent_given: form.consent_given,
       consent_text: 'Homeowner consented to be contacted by SolarPro about a free solar estimate.',
       consent_timestamp: new Date().toISOString(),
@@ -210,7 +232,7 @@ export default function FreeSolarEstimatePage() {
         return;
       }
 
-      setOpportunityId(typeof data.opportunity_id === 'string' ? data.opportunity_id : null);
+      setIntakeReference(typeof data.event_id === 'string' ? data.event_id : null);
       setSubmitState('success');
     } catch {
       setError('Connection error. Please check your internet connection and try again.');
@@ -228,11 +250,11 @@ export default function FreeSolarEstimatePage() {
           <p className="mb-3 text-xs font-black uppercase tracking-[0.25em] text-emerald-300/80">Request received</p>
           <h1 className="mb-4 text-3xl font-black">Your free solar estimate is in motion.</h1>
           <p className="text-sm leading-6 text-slate-300">
-            Thanks, {form.first_name.trim() || 'there'}. Your information was submitted through SolarPro’s canonical homeowner intake pipeline. A solar advisor will review the details and follow up shortly.
+            Thanks, {form.first_name.trim() || 'there'}. Your information was submitted through SolarPro’s canonical homeowner intake event flow. A solar advisor will review the details and follow up shortly.
           </p>
-          {opportunityId && (
+          {intakeReference && (
             <p className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-xs text-slate-400">
-              Internal intake reference: <span className="font-mono text-slate-200">{opportunityId}</span>
+              Internal intake event reference: <span className="font-mono text-slate-200">{intakeReference}</span>
             </p>
           )}
           <a href="/" className="mt-8 inline-flex items-center gap-2 rounded-xl bg-amber-400 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-amber-300">
@@ -269,7 +291,7 @@ export default function FreeSolarEstimatePage() {
             Get a realistic solar estimate for your home.
           </h1>
           <p className="mb-8 max-w-xl text-base leading-7 text-slate-400">
-            Share your utility, bill, homeowner, battery, roof, and timeline details. This form submits directly into SolarPro’s canonical marketplace intake pipeline for enrichment, screening, and operational review.
+            Share your utility, bill, homeowner, battery, roof, and timeline details. This form submits directly into SolarPro’s canonical intake event log for operator review before any marketplace opportunity is created.
           </p>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
