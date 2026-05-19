@@ -99,6 +99,32 @@ interface MarketplaceOpportunity {
   last_offered_at?: string | null;
 }
 
+
+interface SimulatedOpportunity {
+  id: string;
+  status: string;
+  source_type?: string | null;
+  source_channel?: string | null;
+  city?: string | null;
+  state?: string | null;
+  homeowner_first_name?: string | null;
+  homeowner_last_name?: string | null;
+  created_at: string;
+  live_at?: string | null;
+  screening_status?: string | null;
+  raw_payload?: Record<string, unknown> | null;
+  intake_metadata?: Record<string, unknown> | null;
+  overall_score?: number | null;
+  overall_grade?: string | null;
+  executive_summary?: string | null;
+  auto_decision?: string | null;
+  override_decision?: string | null;
+  confidence_score?: number | null;
+  assignment_count?: number | null;
+  event_count?: number | null;
+  last_event_at?: string | null;
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Sub-components
 // ──────────────────────────────────────────────────────────────────────────────
@@ -782,6 +808,7 @@ function HealthSection({ health }: { health: HealthData | null }) {
 const TABS = [
   { id: 'live',        label: 'Live Feed',          icon: Zap },
   { id: 'marketplace', label: 'Marketplace Workbench', icon: ClipboardList },
+  { id: 'simulator',   label: 'Seed / Simulate Intake', icon: FlaskConical },
   { id: 'screening',   label: 'Screening Queue',    icon: Shield },
   { id: 'analytics',   label: 'Campaign Intel',     icon: BarChart3 },
   { id: 'matching',    label: 'Contractor Match',   icon: Users },
@@ -938,6 +965,7 @@ export default function NetworkControlCenter() {
           />
         )}
         {activeTab === 'marketplace' && <MarketplaceWorkbenchSection />}
+        {activeTab === 'simulator' && <SimulatorSection />}
         {activeTab === 'screening' && <ScreeningSection />}
         {activeTab === 'analytics' && <AnalyticsSection data={analytics} />}
         {activeTab === 'matching' && (
@@ -1544,6 +1572,86 @@ function WebhookLogSection() {
 function formatCurrency(value?: number | null) {
   if (value == null || Number.isNaN(Number(value))) return '—';
   return `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+
+function SimulatorSection() {
+  const [items, setItems] = useState<SimulatedOpportunity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [form, setForm] = useState({
+    opportunity_type: 'solar', lead_kind: 'homeowner', lead_quality: 'medium', urgency: '30_days',
+    state: 'TX', city: 'Austin', source_type: 'homeowner_direct', estimated_value: '',
+    run_screening: true, run_scoring: true, release_to_marketplace: false, generate_matches: false,
+  });
+
+  const loadSimulated = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/network/simulator', { cache: 'no-store' });
+      const data = await res.json();
+      setItems(data.opportunities ?? []);
+      if (!data.success && data.error) setResult(data);
+    } catch (e) { setResult({ error: String(e) }); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { loadSimulated(); }, [loadSimulated]);
+
+  async function simulatorAction(action: string, opportunity_id?: string) {
+    if (action === 'archive' && !confirm('Archive this simulated opportunity?')) return;
+    setBusy(opportunity_id ? `${opportunity_id}:${action}` : action);
+    setResult(null);
+    try {
+      const payload = action === 'create'
+        ? { action, ...form, estimated_value: form.estimated_value ? Number(form.estimated_value) : undefined }
+        : { action, opportunity_id };
+      const res = await fetch('/api/admin/network/simulator', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      setResult(data);
+      setItems(data.opportunities ?? []);
+    } catch (e) { setResult({ error: String(e) }); }
+    finally { setBusy(null); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-sm font-semibold text-white">Seed / Simulate Intake</h2>
+        <p className="mt-1 text-xs text-zinc-500">Super-admin operational simulator. Seeds canonical network opportunities with simulator metadata and runs real screening/scoring/release/matching actions.</p>
+      </div>
+
+      <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/40 p-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <select value={form.opportunity_type} onChange={e => setForm(f => ({ ...f, opportunity_type: e.target.value }))} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white"><option value="solar">Solar</option><option value="roofing">Roofing</option><option value="battery">Battery</option><option value="service_call">Service Call</option></select>
+          <select value={form.lead_kind} onChange={e => setForm(f => ({ ...f, lead_kind: e.target.value }))} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white"><option value="homeowner">Homeowner</option><option value="commercial">Commercial</option></select>
+          <select value={form.lead_quality} onChange={e => setForm(f => ({ ...f, lead_quality: e.target.value }))} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white"><option value="high">High Quality</option><option value="medium">Medium Quality</option><option value="low">Low Quality</option><option value="bad">Bad / Low Quality</option></select>
+          <select value={form.urgency} onChange={e => setForm(f => ({ ...f, urgency: e.target.value }))} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white"><option value="asap">ASAP</option><option value="30_days">30 Days</option><option value="90_days">90 Days</option><option value="researching">Researching</option></select>
+          <input value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))} placeholder="City" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white" />
+          <input value={form.state} onChange={e => setForm(f => ({ ...f, state: e.target.value.toUpperCase().slice(0, 2) }))} placeholder="State" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white" />
+          <select value={form.source_type} onChange={e => setForm(f => ({ ...f, source_type: e.target.value }))} className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white"><option value="homeowner_direct">Homeowner Direct</option><option value="google_ads">Google Ads</option><option value="facebook_ads">Meta Ads</option><option value="seo">SEO</option><option value="partner">Partner</option><option value="referral">Referral</option></select>
+          <input value={form.estimated_value} onChange={e => setForm(f => ({ ...f, estimated_value: e.target.value }))} placeholder="Estimated value optional" className="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white" />
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+          {(['run_screening','run_scoring','release_to_marketplace','generate_matches'] as const).map(key => <label key={key} className="flex items-center gap-2"><input type="checkbox" checked={Boolean(form[key])} onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))} className="accent-orange-500" />{key.replace(/_/g, ' ')}</label>)}
+          <button onClick={() => simulatorAction('create')} disabled={!!busy} className="ml-auto rounded-lg bg-orange-500 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50">{busy === 'create' ? 'Creating…' : 'Create Simulated Opportunity'}</button>
+        </div>
+      </div>
+
+      {result && <div className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>{result.error ? String(result.error) : `Action ${String(result.action ?? 'complete')} · opportunity ${String(result.opportunity_id ?? '')}`}</div>}
+
+      <div className="overflow-x-auto rounded-xl border border-zinc-700/50">
+        <table className="w-full text-sm"><thead><tr className="bg-zinc-800/80 border-b border-zinc-700/50"><th className="px-4 py-3 text-left text-xs text-zinc-400">Opportunity</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Status</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Screening</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Score</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Assignments / Events</th><th className="px-4 py-3 text-left text-xs text-zinc-400">Actions</th></tr></thead>
+        <tbody>{loading ? <tr><td colSpan={6} className="py-10 text-center text-zinc-500">Loading simulated opportunities…</td></tr> : items.length === 0 ? <tr><td colSpan={6} className="py-10 text-center text-zinc-500">No simulated opportunities yet.</td></tr> : items.map(opp => {
+          const marker = (opp.raw_payload ?? opp.intake_metadata ?? {}) as Record<string, unknown>;
+          return <tr key={opp.id} className="border-b border-zinc-800 align-top hover:bg-zinc-800/40"><td className="px-4 py-3"><div className="font-medium text-white">{`${opp.homeowner_first_name ?? 'Sim'} ${opp.homeowner_last_name ?? ''}`}</div><div className="text-xs text-zinc-500">{String(marker.opportunity_type ?? 'simulated')} · {opp.city}, {opp.state}</div></td><td className="px-4 py-3"><StatusPill status={opp.status} /><div className="mt-1 text-xs text-zinc-500">{new Date(opp.created_at).toLocaleDateString()}</div></td><td className="px-4 py-3 text-xs text-zinc-300">{opp.screening_status ?? opp.auto_decision ?? '—'}<div className="text-zinc-500">Confidence {opp.confidence_score ? `${Math.round(Number(opp.confidence_score))}%` : '—'}</div></td><td className="px-4 py-3"><div className="flex items-center gap-2"><GradeBadge grade={opp.overall_grade ?? undefined} /><span className="text-xs text-zinc-400">{opp.overall_score != null ? Math.round(Number(opp.overall_score)) : 'No score'}</span></div><div className="mt-1 max-w-xs truncate text-xs text-zinc-500">{opp.executive_summary ?? 'No explainability summary yet'}</div></td><td className="px-4 py-3 text-xs text-zinc-300">Assignments {opp.assignment_count ?? 0}<div className="text-zinc-500">Events {opp.event_count ?? 0}</div></td><td className="px-4 py-3"><div className="flex flex-wrap gap-1.5">{(['screen','score','release','match','archive'] as const).map(action => <button key={action} onClick={() => simulatorAction(action, opp.id)} disabled={!!busy} className="rounded border border-zinc-700 px-2 py-1 text-[10px] font-semibold text-zinc-300 hover:border-orange-500/40 hover:text-orange-300 disabled:opacity-40">{busy === `${opp.id}:${action}` ? '…' : action}</button>)}</div></td></tr>;
+        })}</tbody></table>
+      </div>
+    </div>
+  );
 }
 
 function MarketplaceWorkbenchSection() {
