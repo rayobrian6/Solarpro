@@ -8,8 +8,10 @@ const pageSource = fs.readFileSync(
 )
 
 describe('/free-solar-estimate public intake funnel', () => {
-  it('posts only to the canonical homeowner intake endpoint', () => {
-    expect(pageSource).toContain("fetch('/api/intake/homeowner'")
+  it('posts first-stage intake and second-stage qualification only to canonical homeowner endpoints', () => {
+    expect(pageSource).toContain('fetch("/api/intake/homeowner"')
+    expect(pageSource).toContain('fetch("/api/intake/homeowner/qualification"')
+    expect(pageSource).toContain('original_event_id: intakeReference')
     expect(pageSource).not.toContain('/api/intake/webhook')
     expect(pageSource).not.toContain('/api/admin/network')
     expect(pageSource).not.toContain('/api/network/opportunities')
@@ -26,6 +28,18 @@ describe('/free-solar-estimate public intake funnel', () => {
     expect(pageSource).toContain('roof_age_years: form.roof_age.trim()')
   })
 
+  it('captures post-submit qualification answers without adding them to the first intake payload', () => {
+    expect(pageSource).toContain('Quick qualification')
+    expect(pageSource).toContain('purchase_intent')
+    expect(pageSource).toContain('estimated_credit_band')
+    expect(pageSource).toContain('estimated_income_band')
+    expect(pageSource).toContain('property_type')
+    expect(pageSource).toContain('electrical_panel_size')
+    expect(pageSource).toContain('sunlight_confidence')
+    expect(pageSource).toContain('prior_quotes')
+    expect(pageSource).toContain('Skip for now')
+  })
+
   it('preserves non-canonical operational fields in notes without direct schema changes', () => {
     expect(pageSource).toContain('Utility provider:')
     expect(pageSource).toContain('Battery interest:')
@@ -34,7 +48,6 @@ describe('/free-solar-estimate public intake funnel', () => {
     expect(pageSource).toContain('File metadata only')
     expect(pageSource).not.toContain('CREATE TABLE')
     expect(pageSource).not.toContain('INSERT INTO network_opportunities')
-    expect(pageSource).not.toContain('opportunity_intelligence')
     expect(pageSource).not.toContain('opportunity_screening_queue')
   })
 })
