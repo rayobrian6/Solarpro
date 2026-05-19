@@ -249,10 +249,11 @@ export async function PATCH(req: NextRequest) {
             source_type: opp.source_type as string,
           });
           const pricing = scoreToListingPrice(scored.overall_score, scored.overall_grade);
+          const networkScore = Math.round(scored.overall_score);
 
           await sql`
             UPDATE network_opportunities SET
-              opportunity_score = ${scored.overall_score},
+              opportunity_score = ${networkScore},
               listing_price = ${pricing.price},
               scoring_data = ${JSON.stringify(scored)},
               updated_at = NOW()

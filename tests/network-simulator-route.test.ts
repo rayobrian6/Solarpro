@@ -12,7 +12,7 @@ vi.mock('@/lib/network/screeningPipeline', () => ({ runScreeningPipeline: mockRu
 vi.mock('@/lib/network/contractorMatcher', () => ({ matchContractors: mockMatchContractors }))
 vi.mock('@/lib/network/attributionTracker', () => ({ logNetworkEvent: mockLogNetworkEvent }))
 vi.mock('@/lib/network/opportunityScorer', () => ({
-  scoreOpportunity: () => ({ overall_score: 88, overall_grade: 'A', property: { score: 80 }, solar: { score: 90 }, financial: { score: 80 }, market: { score: 85 }, intent: { score: 90 }, risk_flags: [], opportunity_highlights: ['high_bill'], executive_summary: 'Strong simulated opportunity.' }),
+  scoreOpportunity: () => ({ overall_score: 88.33, overall_grade: 'A', property: { score: 80.25 }, solar: { score: 90.75 }, financial: { score: 80 }, market: { score: 85 }, intent: { score: 90 }, risk_flags: [], opportunity_highlights: ['high_bill'], executive_summary: 'Strong simulated opportunity.' }),
   scoreToListingPrice: () => ({ price: 500, min: 350, max: 700, rationale: 'test pricing' }),
 }))
 
@@ -21,15 +21,18 @@ function req(body?: unknown, method = 'POST'): any { return new Request('https:/
 
 function makeSql() {
   const queries: string[] = []
+  const queryValues: any[][] = []
   const sql = vi.fn(async (strings: TemplateStringsArray, ...values: any[]) => {
     const q = strings.join(' ')
     queries.push(q)
+    queryValues.push(values)
     if (q.includes('INSERT INTO network_opportunities')) return [{ id: 'sim-opp-1' }]
     if (q.includes('SELECT * FROM network_opportunities')) return [{ id: 'sim-opp-1', state: 'TX', monthly_bill: 300, source_type: 'homeowner_direct' }]
     if (q.includes('SELECT no.id, no.status')) return [{ id: 'sim-opp-1', status: 'intake', raw_payload: { simulated: true } }]
     return []
   }) as any
   sql.queries = queries
+  sql.queryValues = queryValues
   return sql
 }
 
@@ -79,6 +82,13 @@ describe('/api/admin/network/simulator', () => {
     expect(insertQuery).not.toContain('homeowner_first_name')
     expect(insertQuery).not.toContain('monthly_bill,')
     expect(insertQuery).not.toContain('battery_interest')
+    const scoreUpdateIndex = sql.queries.findIndex((q: string) => q.includes('UPDATE network_opportunities SET') && q.includes('opportunity_score'))
+    expect(scoreUpdateIndex).toBeGreaterThanOrEqual(0)
+    expect(sql.queryValues[scoreUpdateIndex]).toContain(88)
+    expect(sql.queryValues[scoreUpdateIndex]).not.toContain(88.33)
+    const intelligenceInsertIndex = sql.queries.findIndex((q: string) => q.includes('INSERT INTO opportunity_intelligence'))
+    expect(intelligenceInsertIndex).toBeGreaterThanOrEqual(0)
+    expect(sql.queryValues[intelligenceInsertIndex]).toContain(88.33)
     expect(sql.queries.some((q: string) => q.includes('INSERT INTO intake_events'))).toBe(true)
     expect(mockLogNetworkEvent).toHaveBeenCalledWith(expect.objectContaining({ event_type: 'opportunity.created', data: expect.objectContaining({ simulated: true }) }))
   })

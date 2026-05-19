@@ -161,10 +161,11 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
   })
   const pricing = scoreToListingPrice(scored.overall_score, scored.overall_grade)
   const networkOpportunityGrade = ['A+', 'A', 'B', 'C'].includes(scored.overall_grade) ? scored.overall_grade : null
+  const networkScore = Math.round(scored.overall_score)
 
   await sql`
     UPDATE network_opportunities SET
-      opportunity_score = ${scored.overall_score},
+      opportunity_score = ${networkScore},
       opportunity_grade = ${networkOpportunityGrade},
       listing_price = ${pricing.price},
       asking_price = COALESCE(asking_price, ${pricing.price}),
