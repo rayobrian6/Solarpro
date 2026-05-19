@@ -1,13 +1,14 @@
 -- Migration 062: network_opportunities canonical column harmonization
 --
 -- Purpose:
---   Existing production/dev shared DBs may have network_opportunities from the older
---   inline migration shape. Migration 054 creates the canonical shape only on fresh
---   DBs and adds intake columns, but it does not backfill every canonical marketplace
---   column onto pre-existing tables.
+--   Existing shared DBs may have network_opportunities from an older inline
+--   migration shape. This additive migration guarantees the canonical columns
+--   required by the simulator / marketplace workbench.
 --
--- This migration is intentionally idempotent and additive. It does not create a
--- duplicate opportunity system and does not mutate lifecycle state.
+-- IMPORTANT RUNNER COMPATIBILITY:
+--   Keep this file as plain semicolon-delimited SQL only. Do not use DO $$
+--   blocks because the current System Tools runner splits statements by
+--   semicolon and cannot safely execute PL/pgSQL blocks.
 
 ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS intake_at TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS screened_at TIMESTAMPTZ;
@@ -77,98 +78,9 @@ ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS routed_to_user_id UUI
 ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS routing_score INTEGER;
 ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS routing_notes TEXT;
 
--- Intake/simulator marker fields; repeated here to make this migration sufficient
--- even when 054 was skipped or partially applied.
 ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS source_channel TEXT;
 ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS raw_payload JSONB DEFAULT '{}';
 ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS intake_metadata JSONB DEFAULT '{}';
-
--- Preserve existing legacy values into canonical display columns where possible.
--- Use guarded dynamic SQL so this migration also succeeds on fresh canonical DBs
--- where legacy inline-migration columns do not exist.
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'homeowner_first_name'
-  ) OR EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'homeowner_last_name'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE network_opportunities
-      SET homeowner_name = COALESCE(homeowner_name, NULLIF(TRIM(CONCAT(COALESCE(homeowner_first_name, ''), ' ', COALESCE(homeowner_last_name, ''))), ''))
-      WHERE homeowner_name IS NULL
-        AND (homeowner_first_name IS NOT NULL OR homeowner_last_name IS NOT NULL)
-    $sql$;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'city'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE network_opportunities
-      SET location_city = COALESCE(location_city, city)
-      WHERE location_city IS NULL AND city IS NOT NULL
-    $sql$;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'state'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE network_opportunities
-      SET location_state = COALESCE(location_state, state)
-      WHERE location_state IS NULL AND state IS NOT NULL
-    $sql$;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'zip'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE network_opportunities
-      SET location_zip = COALESCE(location_zip, zip)
-      WHERE location_zip IS NULL AND zip IS NOT NULL
-    $sql$;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'monthly_bill'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE network_opportunities
-      SET monthly_usage_avg_kwh = COALESCE(monthly_usage_avg_kwh, monthly_bill)
-      WHERE monthly_usage_avg_kwh IS NULL AND monthly_bill IS NOT NULL
-    $sql$;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'utility_name'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE network_opportunities
-      SET utility_provider = COALESCE(utility_provider, utility_name)
-      WHERE utility_provider IS NULL AND utility_name IS NOT NULL
-    $sql$;
-  END IF;
-
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_name = 'network_opportunities' AND column_name = 'battery_interest'
-  ) THEN
-    EXECUTE $sql$
-      UPDATE network_opportunities
-      SET battery_candidate = COALESCE(battery_candidate, battery_interest, false)
-      WHERE battery_candidate IS NULL
-    $sql$;
-  END IF;
-END $$;
 
 CREATE INDEX IF NOT EXISTS idx_net_opps_simulator_marker
   ON network_opportunities (source_channel, created_at DESC)
