@@ -72,8 +72,10 @@ describe('/api/admin/network/marketplace', () => {
     expect(listQuery).toContain("no.screening_status = 'approved'")
     expect(listQuery).toContain('no.location_city AS city')
     expect(listQuery).toContain('no.location_state AS state')
+    expect(listQuery).toContain('no.asking_price AS listing_price')
     expect(listQuery).not.toContain('no.city')
     expect(listQuery).not.toContain('no.state')
+    expect(listQuery).not.toContain('no.listing_price')
     expect(listQuery).not.toContain('homeowner_first_name')
   })
 

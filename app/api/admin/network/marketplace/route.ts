@@ -56,7 +56,7 @@ export async function GET(req: NextRequest) {
         no.id, no.homeowner_name,
         no.address, no.location_city AS city, no.location_state AS state, no.location_city, no.location_state, no.location_zip,
         no.source_type, no.status, no.screening_status, no.live_at, no.created_at,
-        no.estimated_project_value, no.asking_price, no.listing_price,
+        no.estimated_project_value, no.asking_price, no.asking_price AS listing_price,
         no.opportunity_score, no.opportunity_grade,
         oi.overall_score, oi.overall_grade, oi.market_price, oi.executive_summary,
         oi.risk_flags, oi.opportunity_highlights, oi.total_eligible_contractors, oi.top_match_score,
