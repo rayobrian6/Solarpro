@@ -1816,7 +1816,7 @@ function SimulatorSection() {
           <p className="mt-1 text-xs text-zinc-500">Super-admin operational simulator. Seeds canonical network opportunities with simulator metadata and runs real screening/scoring/release/matching actions.</p>
         </div>
         <a
-          href="https://018hr.app.super.myninja.ai/free-solar-estimate"
+          href="/free-solar-estimate"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs font-semibold text-orange-200 hover:bg-orange-500/20"

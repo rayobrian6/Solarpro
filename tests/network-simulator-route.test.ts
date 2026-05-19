@@ -164,7 +164,8 @@ describe('/api/admin/network/simulator', () => {
     const enrichmentSource = fs.readFileSync(path.join(process.cwd(), 'lib/network/opportunityEnrichment.ts'), 'utf8')
     expect(pipelineSource).toContain('step10_fail_reasons   = ${failReasons}')
     expect(pipelineSource).not.toMatch(/UPDATE opportunity_screening_queue SET[\s\S]*\bfail_reasons\s*=/)
-    expect(enrichmentSource).toContain('step10_fail_reasons, review_flags FROM opportunity_screening_queue')
+    expect(enrichmentSource).toContain('step10_fail_reasons, step10_review_flags AS review_flags FROM opportunity_screening_queue')
+    expect(enrichmentSource).not.toContain('step10_fail_reasons, review_flags FROM opportunity_screening_queue')
     expect(enrichmentSource).not.toContain('step10_fail_reasons, fail_reasons')
   })
 
@@ -178,7 +179,7 @@ describe('/api/admin/network/simulator', () => {
   it('shows the canonical public homeowner intake link in the Seed / Simulate Intake tab', () => {
     const adminPageSource = fs.readFileSync(path.join(process.cwd(), 'app/admin/network/page.tsx'), 'utf8')
     expect(adminPageSource).toContain('Seed / Simulate Intake')
-    expect(adminPageSource).toContain('https://018hr.app.super.myninja.ai/free-solar-estimate')
+    expect(adminPageSource).toContain('href="/free-solar-estimate"')
     expect(adminPageSource).toContain('Real intake test form')
     expect(adminPageSource).toContain('rel="noopener noreferrer"')
   })
