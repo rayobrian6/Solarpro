@@ -679,9 +679,9 @@ function ReferralSection({
   ownerCompany: string | null;
   clientName: string;
 }) {
-  if (!stage || !REFERRAL_ELIGIBLE_STAGES.includes(stage)) return null;
-
   const [copied, setCopied] = useState(false);
+
+  if (!stage || !REFERRAL_ELIGIBLE_STAGES.includes(stage)) return null;
 
   const base = typeof window !== 'undefined'
     ? window.location.origin

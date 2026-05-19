@@ -41,7 +41,6 @@ async function generateWithPuppeteer(html: string, opts: PdfOptions): Promise<Ui
   try {
     // Dynamically import so the module is tree-shaken in environments that don't need it
     const puppeteer = await import('puppeteer-core');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const chromium  = require('@sparticuz/chromium-min');
 
     // chromium.executablePath() returns a remote URL on Lambda/Vercel pointing to

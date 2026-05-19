@@ -22,13 +22,16 @@
  * Uses neon() directly.
  */
 
-import { neon } from '@neondatabase/serverless'
+import { getDbReady } from '@/lib/db-neon'
 import { validateIntakePayload, type RawIntakePayload } from './intakeValidator'
 import { checkForDuplicates } from './duplicateDetector'
 import { enqueueEnrichment, type EnqueueOptions } from './enrichmentQueue'
 import { generateIdempotencyKey } from './webhookVerifier'
 
-const sql = neon(process.env.DATABASE_URL!)
+async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  const db = await getDbReady()
+  return (db as any)(strings, ...values)
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types

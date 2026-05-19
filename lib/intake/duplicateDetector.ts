@@ -17,10 +17,13 @@
  * A score >= FLAG_THRESHOLD flags it for review but allows entry.
  */
 
-import { neon } from '@neondatabase/serverless'
+import { getDbReady } from '@/lib/db-neon'
 import type { ValidatedIntakePayload } from './intakeValidator'
 
-const sql = neon(process.env.DATABASE_URL!)
+async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  const db = await getDbReady()
+  return (db as any)(strings, ...values)
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Constants

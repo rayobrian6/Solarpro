@@ -8,7 +8,7 @@ import { getUserFromRequest } from '@/lib/auth';
 import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
 
 // ── Default notification preferences ─────────────────────────────────────────
-export const DEFAULT_NOTIFICATION_PREFS = {
+const DEFAULT_NOTIFICATION_PREFS = {
   // Email notifications
   email_proposal_signed:    true,  // When a client signs a proposal
   email_proposal_expiry:    true,  // 3 days before proposal expires
@@ -25,7 +25,7 @@ export const DEFAULT_NOTIFICATION_PREFS = {
   inapp_system_alerts:      true,
 } as const;
 
-export type NotificationPrefs = Partial<typeof DEFAULT_NOTIFICATION_PREFS>;
+type NotificationPrefs = Partial<typeof DEFAULT_NOTIFICATION_PREFS>;
 
 // ── GET /api/settings/notifications ──────────────────────────────────────────
 export async function GET(req: NextRequest) {

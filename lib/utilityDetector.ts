@@ -244,7 +244,6 @@ export interface UtilityOption {
  */
 export function getUtilitiesByStateNational(stateCode: string): UtilityOption[] {
   // Lazy require to avoid circular dependency — resolved at runtime in Next.js
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { PROPOSAL_UTILITY_PROFILES } = require('./proposalTruthEngine') as {
     PROPOSAL_UTILITY_PROFILES: Array<{
       utility_id: string;

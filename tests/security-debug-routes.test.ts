@@ -122,7 +122,7 @@ describe('app/api/admin/debug/account-state — productionGuard added', () => {
 
   it('SECURITY comment explains why productionGuard is present', () => {
     const src = readRoute(FILE);
-    expect(src).toMatch(/SECURITY.*productionGuard|productionGuard.*SECURITY/s);
+    expect(src).toMatch(/SECURITY[\s\S]*productionGuard|productionGuard[\s\S]*SECURITY/);
   });
 
   it('guard line is inside the GET handler body', () => {
