@@ -37,6 +37,29 @@ describe('admin intake funnels infrastructure', () => {
     expect(migrationSource).not.toMatch(/CREATE\s+TABLE/i)
   })
 
+
+
+  it('returns camelCase URL fields for the canonical homeowner funnel API contract', () => {
+    expect(routeSource).toContain('canonicalPath')
+    expect(routeSource).toContain('canonicalUrl: urls.canonicalUrl || null')
+    expect(routeSource).toContain('embedUrl: urls.embedUrl')
+    expect(routeSource).toContain('utmReadyUrl: urls.utmReadyUrl || null')
+    expect(routeSource).toContain('canonical_url: urls.canonicalUrl || null')
+    expect(routeSource).toContain('utm_ready_url: urls.utmReadyUrl || null')
+  })
+
+  it('enables Open/Copy/UTM funnel actions from canonicalUrl without requiring campaigns or events', () => {
+    expect(adminPageSource).toContain('const canonicalUrl = funnel.canonicalUrl || funnel.canonical_url || null')
+    expect(adminPageSource).toContain('const generatedUtmUrl = canonicalUrl ? appendClientUtm(canonicalUrl, utm) : null')
+    expect(adminPageSource).toContain('const hasPublicUrl = Boolean(canonicalUrl)')
+    expect(adminPageSource).toContain("href={canonicalUrl || '#'}")
+    expect(adminPageSource).toContain('disabled={!canonicalUrl}')
+    expect(adminPageSource).not.toContain('disabled={!funnel.source_campaign_support')
+    expect(adminPageSource).not.toContain('disabled={!funnel.campaign_id')
+    expect(adminPageSource).not.toContain('disabled={!funnel.recent_intake_count')
+    expect(adminPageSource).not.toContain('disabled={funnel.recent_intake_count')
+  })
+
   it('surfaces an operational Intake Funnels tab with required copy/open actions', () => {
     expect(adminPageSource).toContain("{ id: 'funnels'")
     expect(adminPageSource).toContain("{activeTab === 'funnels' && <IntakeFunnelsSection />}")

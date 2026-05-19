@@ -14,8 +14,24 @@ describe('funnel URL helpers', () => {
 
   it('returns the canonical public path for the homeowner estimate funnel', () => {
     expect(canonicalFunnelPath('free-solar-estimate')).toBe('/free-solar-estimate')
+    expect(canonicalFunnelPath(' free-solar-estimate ')).toBe('/free-solar-estimate')
     expect(canonicalFunnelPath('free-solar-estimate', '/free-solar-estimate')).toBe('/free-solar-estimate')
+    expect(canonicalFunnelPath('free-solar-estimate', '  /free-solar-estimate  ')).toBe('/free-solar-estimate')
     expect(canonicalFunnelPath('unknown-funnel')).toBeNull()
+  })
+
+  it('keeps the homeowner fallback mapped even when row metadata is missing', () => {
+    expect(buildFunnelUrls({
+      slug: 'free-solar-estimate',
+      canonical_path: null,
+      utm_source: null,
+      utm_medium: null,
+      utm_campaign: null,
+    }, 'https://018hr.app.super.myninja.ai')).toEqual({
+      canonicalUrl: 'https://018hr.app.super.myninja.ai/free-solar-estimate',
+      embedUrl: 'https://018hr.app.super.myninja.ai/free-solar-estimate',
+      utmReadyUrl: 'https://018hr.app.super.myninja.ai/free-solar-estimate',
+    })
   })
 
   it('builds only populated UTM attribution params', () => {
@@ -42,7 +58,7 @@ describe('funnel URL helpers', () => {
     })).toBe('https://solar.example.com/free-solar-estimate?ref=partner&utm_source=google&utm_campaign=brand')
   })
 
-  it('builds canonical, embed, and UTM-ready URLs for mapped funnels', () => {
+  it('builds canonicalUrl, embedUrl, and utmReadyUrl from the canonical homeowner URL', () => {
     expect(buildFunnelUrls({
       slug: 'free-solar-estimate',
       utm_source: 'facebook',

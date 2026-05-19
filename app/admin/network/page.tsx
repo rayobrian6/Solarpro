@@ -2149,10 +2149,14 @@ interface IntakeFunnel {
   source_channel: string;
   status: 'active' | 'inactive' | string;
   is_active: boolean;
-  canonical_path: string | null;
-  canonical_url: string | null;
-  embed_url: string | null;
-  utm_ready_url: string | null;
+  canonical_path?: string | null;
+  canonicalPath?: string | null;
+  canonical_url?: string | null;
+  canonicalUrl?: string | null;
+  embed_url?: string | null;
+  embedUrl?: string | null;
+  utm_ready_url?: string | null;
+  utmReadyUrl?: string | null;
   require_phone: boolean;
   require_address: boolean;
   require_monthly_bill: boolean;
@@ -2343,8 +2347,11 @@ function IntakeFunnelsSection() {
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
           {funnels.map(funnel => {
-            const generatedUtmUrl = funnel.canonical_url ? appendClientUtm(funnel.canonical_url, utm) : null;
-            const hasPublicUrl = Boolean(funnel.canonical_url);
+            const canonicalUrl = funnel.canonicalUrl || funnel.canonical_url || null;
+            const embedUrl = funnel.embedUrl || funnel.embed_url || null;
+            const serverUtmReadyUrl = funnel.utmReadyUrl || funnel.utm_ready_url || null;
+            const generatedUtmUrl = canonicalUrl ? appendClientUtm(canonicalUrl, utm) : null;
+            const hasPublicUrl = Boolean(canonicalUrl);
             return (
               <div key={funnel.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 shadow-lg shadow-black/10">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -2361,7 +2368,7 @@ function IntakeFunnelsSection() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <a
-                      href={funnel.canonical_url || '#'}
+                      href={canonicalUrl || '#'}
                       target="_blank"
                       rel="noreferrer"
                       aria-disabled={!hasPublicUrl}
@@ -2375,24 +2382,24 @@ function IntakeFunnelsSection() {
                       Open Funnel
                     </a>
                     <button
-                      onClick={() => void copyValue(`${funnel.slug} link`, funnel.canonical_url)}
-                      disabled={!funnel.canonical_url}
+                      onClick={() => void copyValue(`${funnel.slug} link`, canonicalUrl)}
+                      disabled={!canonicalUrl}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-blue-500/40 hover:text-blue-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       Copy Link
                     </button>
                     <button
-                      onClick={() => void copyValue(`${funnel.slug} embed URL`, funnel.embed_url)}
-                      disabled={!funnel.embed_url}
+                      onClick={() => void copyValue(`${funnel.slug} embed URL`, embedUrl)}
+                      disabled={!embedUrl}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-violet-500/40 hover:text-violet-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       Copy Embed URL
                     </button>
                     <button
-                      onClick={() => void copyValue(`${funnel.slug} UTM URL`, generatedUtmUrl || funnel.utm_ready_url)}
-                      disabled={!generatedUtmUrl && !funnel.utm_ready_url}
+                      onClick={() => void copyValue(`${funnel.slug} UTM URL`, generatedUtmUrl || serverUtmReadyUrl)}
+                      disabled={!canonicalUrl}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-emerald-500/40 hover:text-emerald-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
                     >
                       <Copy className="h-3.5 w-3.5" />
@@ -2409,7 +2416,7 @@ function IntakeFunnelsSection() {
                 )}
 
                 <div className="mt-5 grid gap-4 md:grid-cols-3">
-                  <FunnelInfoRow label="Canonical URL" value={funnel.canonical_url ? <span className="break-all font-mono text-[11px] text-zinc-300">{funnel.canonical_url}</span> : <span className="text-zinc-500">No public page mapped</span>} />
+                  <FunnelInfoRow label="Canonical URL" value={canonicalUrl ? <span className="break-all font-mono text-[11px] text-zinc-300">{canonicalUrl}</span> : <span className="text-zinc-500">No public page mapped</span>} />
                   <FunnelInfoRow label="Source Channel" value={funnel.source_channel || '—'} />
                   <FunnelInfoRow label="Recent Intake Events" value={`${funnel.recent_intake_count} in 30 days`} />
                   <FunnelInfoRow label="Created" value={funnelDate(funnel.created_at)} />
