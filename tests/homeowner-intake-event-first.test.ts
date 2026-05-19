@@ -61,7 +61,17 @@ function makeSql(opts: { failOn?: string; failError?: Error & { code?: string; c
       homeowner_status: 'own',
       preferred_contact_method: 'text',
       timeline: '1_3_months',
+      roof_age: '8',
       bill_metadata: { filename: 'bill.pdf', size_bytes: 1234, content_type: 'application/pdf' },
+      intake_metadata: {
+        utility_provider: 'Austin Energy',
+        battery_interest: 'yes',
+        homeowner_status: 'own',
+        preferred_contact_method: 'text',
+        timeline: '1_3_months',
+        roof_age: '8',
+        notes: 'Homeowner notes: wants backup power',
+      },
       created_at: '2025-01-01T00:00:00Z',
       __total: 1,
     }]
@@ -177,7 +187,17 @@ describe('homeowner intake event-first flow', () => {
       status: 'pending_review',
       utility_provider: 'Austin Energy',
       battery_interest: 'yes',
+      homeowner_status: 'own',
+      preferred_contact_method: 'text',
+      timeline: '1_3_months',
+      roof_age: '8',
+      bill_metadata: { filename: 'bill.pdf' },
     })
+    expect(json.opportunities[0].intake_metadata).toMatchObject({
+      utility_provider: 'Austin Energy',
+      battery_interest: 'yes',
+    })
+    expect(json.opportunities[0].intake_metadata.notes).toContain('Homeowner notes')
 
     const feedQuery = sql.queries.find((q: string) => q.includes('WITH opportunity_rows AS')) ?? ''
     expect(feedQuery).toContain('FROM network_opportunities no')
@@ -243,5 +263,21 @@ describe('homeowner intake event-first flow', () => {
     expect(section).toContain('Intake Feed API error')
     expect(section).toContain('Unable to load Intake Feed. See the API error above.')
     expect(section).toContain('!loading && !error && leads.length === 0')
+  })
+
+  it('admin Intake Feed UI renders submitted form payload details instead of only sparse summary columns', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'app/admin/network/page.tsx'), 'utf8')
+    const section = source.slice(source.indexOf('function IntakeFeedSection()'), source.indexOf('// ── Enrichment Queue Section'))
+    expect(section).toContain('Submitted form payload')
+    expect(section).toContain('formDetailsFor')
+    expect(section).toContain("['Utility', lead.utility_provider")
+    expect(section).toContain("['Battery', lead.battery_interest")
+    expect(section).toContain("['Homeowner', lead.homeowner_status")
+    expect(section).toContain("['Contact Pref', lead.preferred_contact_method")
+    expect(section).toContain("['Timeline', lead.timeline")
+    expect(section).toContain("['Roof Age', lead.roof_age")
+    expect(section).toContain('Operational Notes')
+    expect(section).toContain("metadataText(lead, 'notes')")
+    expect(section).toContain('bill_metadata')
   })
 })

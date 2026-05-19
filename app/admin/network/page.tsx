@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useCallback, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, useCallback, type ReactNode } from 'react';
 import {
   Activity, AlertCircle, AlertTriangle, ArrowRight,
   BarChart3, CheckCircle2, ChevronDown, ChevronUp,
@@ -1116,6 +1116,9 @@ export default function NetworkControlCenter() {
 
 interface IntakeLead {
   id: string;
+  intake_record_type?: string | null;
+  opportunity_id?: string | null;
+  event_id?: string | null;
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
@@ -1131,6 +1134,14 @@ interface IntakeLead {
   enrichment_status?: string | null;
   is_duplicate?: boolean | null;
   duplicate_score?: number | null;
+  utility_provider?: string | null;
+  battery_interest?: string | null;
+  homeowner_status?: string | null;
+  preferred_contact_method?: string | null;
+  timeline?: string | null;
+  roof_age?: string | null;
+  intake_metadata?: Record<string, unknown> | null;
+  bill_metadata?: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -1209,6 +1220,44 @@ function IntakeFeedSection() {
 
   const totalPages = Math.ceil(total / 25);
 
+  const metadataText = (lead: IntakeLead, key: string) => {
+    const value = lead.intake_metadata?.[key];
+    return typeof value === 'string' && value.trim() ? value : null;
+  };
+
+  const metadataNumber = (lead: IntakeLead, key: string) => {
+    const value = lead.intake_metadata?.[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  };
+
+  const payloadDisplay = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value;
+    return JSON.stringify(value);
+  };
+
+  const formDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => {
+    const billFile = lead.bill_metadata ?? (typeof lead.intake_metadata?.bill_metadata === 'object' && lead.intake_metadata.bill_metadata !== null ? lead.intake_metadata.bill_metadata as Record<string, unknown> : null);
+    const details: Array<[string, unknown]> = [
+      ['Utility', lead.utility_provider ?? metadataText(lead, 'utility_provider')],
+      ['Battery', lead.battery_interest ?? metadataText(lead, 'battery_interest')],
+      ['Homeowner', lead.homeowner_status ?? metadataText(lead, 'homeowner_status') ?? metadataText(lead, 'home_ownership')],
+      ['Contact Pref', lead.preferred_contact_method ?? metadataText(lead, 'preferred_contact_method')],
+      ['Timeline', lead.timeline ?? metadataText(lead, 'timeline')],
+      ['Roof Age', lead.roof_age ?? metadataText(lead, 'roof_age') ?? metadataText(lead, 'roof_age_years')],
+      ['Address', [lead.address_line1, lead.city, lead.state, lead.zip].filter(Boolean).join(', ')],
+      ['Bill File', billFile?.filename ?? metadataText(lead, 'uploaded_bill_filename')],
+      ['Bill Size', billFile?.size_bytes ?? metadataNumber(lead, 'uploaded_bill_size_bytes')],
+      ['Consent', lead.intake_metadata?.consent_given],
+      ['Event', lead.event_id ?? lead.id],
+    ];
+    return details.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  };
+
+  const notesFor = (lead: IntakeLead) => metadataText(lead, 'notes') ?? metadataText(lead, 'optional_notes');
+
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1267,20 +1316,55 @@ function IntakeFeedSection() {
               {loading && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Loading…</td></tr>}
               {!loading && !error && leads.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Inbox className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>No intake leads found for the current filters. Public homeowner submissions save as pending-review intake events and should appear here after a successful form submit.</p></td></tr>}
               {!loading && error && <tr><td colSpan={7} className="px-4 py-12 text-center text-red-300"><AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-60" /><p>Unable to load Intake Feed. See the API error above.</p></td></tr>}
-              {!loading && leads.map(lead => (
-                <tr key={lead.id} className="hover:bg-zinc-800/30 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-white">{[lead.first_name, lead.last_name].filter(Boolean).join(' ') || <span className="text-zinc-600 italic">Anonymous</span>}</div>
-                    {lead.is_duplicate && <span className="text-xs text-amber-400">⚠ dup {lead.duplicate_score ? `(${(lead.duplicate_score * 100).toFixed(0)}%)` : ''}</span>}
-                  </td>
-                  <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.email ?? '—'}</div><div className="text-zinc-500 text-xs">{lead.phone ?? ''}</div></td>
-                  <td className="px-4 py-3 text-zinc-400 text-xs">{[lead.city, lead.state, lead.zip].filter(Boolean).join(', ') || lead.address_line1 || '—'}</td>
-                  <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.source_system ?? '—'}</div><div className={`text-xs ${sourceChannelColor(lead.source_channel)}`}>{lead.source_channel ?? ''}</div></td>
-                  <td className="px-4 py-3 text-zinc-300 text-xs">{lead.monthly_bill_amount ? `$${lead.monthly_bill_amount}/mo` : '—'}</td>
-                  <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${enrichBadge(lead.enrichment_status)}`}>{lead.enrichment_status ?? 'pending'}</span></td>
-                  <td className="px-4 py-3 text-zinc-500 text-xs">{new Date(lead.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
+              {!loading && leads.map(lead => {
+                const details = formDetailsFor(lead);
+                const notes = notesFor(lead);
+                return (
+                  <Fragment key={lead.id}>
+                    <tr className="hover:bg-zinc-800/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-white">{[lead.first_name, lead.last_name].filter(Boolean).join(' ') || <span className="text-zinc-600 italic">Anonymous</span>}</div>
+                        <div className="mt-1 text-[11px] text-zinc-500">{lead.status ?? 'pending_review'} · {lead.intake_record_type ?? 'intake'}</div>
+                        {lead.is_duplicate && <span className="text-xs text-amber-400">⚠ dup {lead.duplicate_score ? `(${(lead.duplicate_score * 100).toFixed(0)}%)` : ''}</span>}
+                      </td>
+                      <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.email ?? '—'}</div><div className="text-zinc-500 text-xs">{lead.phone ?? ''}</div></td>
+                      <td className="px-4 py-3 text-zinc-400 text-xs">{[lead.city, lead.state, lead.zip].filter(Boolean).join(', ') || lead.address_line1 || '—'}</td>
+                      <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.source_system ?? '—'}</div><div className={`text-xs ${sourceChannelColor(lead.source_channel)}`}>{lead.source_channel ?? ''}</div></td>
+                      <td className="px-4 py-3 text-zinc-300 text-xs">{lead.monthly_bill_amount ? `$${lead.monthly_bill_amount}/mo` : '—'}</td>
+                      <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${enrichBadge(lead.enrichment_status)}`}>{lead.enrichment_status ?? 'pending'}</span></td>
+                      <td className="px-4 py-3 text-zinc-500 text-xs">{new Date(lead.created_at).toLocaleString()}</td>
+                    </tr>
+                    <tr className="bg-zinc-950/30">
+                      <td colSpan={7} className="px-4 pb-4 pt-0">
+                        <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <div className="text-[11px] font-semibold uppercase tracking-wider text-orange-300">Submitted form payload</div>
+                            <div className="text-[10px] font-mono text-zinc-600">{lead.event_id ?? lead.id}</div>
+                          </div>
+                          {details.length > 0 ? (
+                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                              {details.map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+                                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+                                  <div className="mt-1 break-words text-xs text-zinc-200">{payloadDisplay(value)}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-zinc-500">No payload details were returned for this intake row.</div>
+                          )}
+                          {notes && (
+                            <div className="mt-3 rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Operational Notes</div>
+                              <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">{notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
