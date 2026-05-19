@@ -176,12 +176,12 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
 
   await sql`
     INSERT INTO opportunity_intelligence (
-      opportunity_id, overall_score, overall_grade, scored_by,
+      opportunity_id, overall_score, overall_grade,
       property_score, solar_score, financial_score, market_score, intent_score,
       market_price, price_min, price_max, pricing_rationale,
       risk_flags, opportunity_highlights, executive_summary
     ) VALUES (
-      ${opportunity_id}, ${scored.overall_score}, ${scored.overall_grade}, ${adminId},
+      ${opportunity_id}, ${scored.overall_score}, ${scored.overall_grade},
       ${scored.property.score}, ${scored.solar.score},
       ${scored.financial.score}, ${scored.market.score}, ${scored.intent.score},
       ${pricing.price}, ${pricing.min}, ${pricing.max}, ${pricing.rationale},
@@ -191,7 +191,6 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
     ON CONFLICT (opportunity_id) DO UPDATE SET
       overall_score = EXCLUDED.overall_score,
       overall_grade = EXCLUDED.overall_grade,
-      scored_by = EXCLUDED.scored_by,
       property_score = EXCLUDED.property_score,
       solar_score = EXCLUDED.solar_score,
       financial_score = EXCLUDED.financial_score,
