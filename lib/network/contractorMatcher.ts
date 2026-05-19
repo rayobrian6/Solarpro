@@ -264,23 +264,39 @@ export async function matchContractors(
   const contractorRows = await sql`
     SELECT
       cp.user_id,
-      cp.company_name,
+      COALESCE(NULLIF(u.company, ''), NULLIF(u.name, ''), NULLIF(u.email, ''), 'Unknown Contractor') AS company_name,
       cp.service_states,
-      cp.min_system_size_kw,
-      cp.max_system_size_kw,
-      cp.services_offered,
-      cp.avg_close_rate,
+      cp.min_project_kw AS min_system_size_kw,
+      cp.max_project_kw AS max_system_size_kw,
+      ARRAY_REMOVE(ARRAY[
+        'residential_solar',
+        CASE WHEN cp.battery_certified THEN 'battery_storage' END,
+        CASE WHEN cp.commercial_capable THEN 'commercial_solar' END,
+        CASE WHEN cp.roofing_capable THEN 'roofing' END,
+        CASE WHEN cp.ev_charger_capable THEN 'ev_charger' END,
+        CASE WHEN cp.generator_capable THEN 'generator' END
+      ], NULL) AS services_offered,
+      CASE WHEN cp.avg_close_rate_pct IS NULL THEN NULL ELSE cp.avg_close_rate_pct / 100.0 END AS avg_close_rate,
       cp.avg_response_hours,
-      cp.avg_rating,
-      cp.total_claims,
-      cp.active_claims,
-      cp.max_active_claims,
-      cp.is_active,
-      cp.is_verified,
-      cp.tier
+      NULL::numeric AS avg_rating,
+      COALESCE(claim_counts.total_claims, 0) AS total_claims,
+      COALESCE(claim_counts.active_claims, 0) AS active_claims,
+      10 AS max_active_claims,
+      cp.network_active AS is_active,
+      cp.profile_complete AS is_verified,
+      CASE WHEN cp.profile_complete THEN 'preferred' ELSE 'standard' END AS tier
     FROM contractor_profiles cp
-    WHERE cp.is_active = true
-    ORDER BY cp.avg_rating DESC NULLS LAST
+    JOIN users u ON u.id = cp.user_id
+    LEFT JOIN (
+      SELECT
+        contractor_id,
+        COUNT(*)::int AS total_claims,
+        COUNT(*) FILTER (WHERE status IN ('offered','viewed','claimed','contacted','appointment','proposal'))::int AS active_claims
+      FROM opportunity_assignments
+      GROUP BY contractor_id
+    ) claim_counts ON claim_counts.contractor_id = cp.user_id
+    WHERE cp.network_active = true
+    ORDER BY cp.profile_complete DESC, cp.inspection_pass_rate DESC NULLS LAST, cp.avg_response_hours ASC NULLS LAST
   `
   const contractors = contractorRows as ContractorProfile[]
 
@@ -402,7 +418,7 @@ export async function isContractorEligible(
   opportunityId: string
 ): Promise<{ eligible: boolean; reason?: string }> {
   const contractorRows2 = await sql`
-    SELECT service_states, is_active FROM contractor_profiles WHERE user_id = ${contractorId} LIMIT 1
+    SELECT service_states, network_active AS is_active FROM contractor_profiles WHERE user_id = ${contractorId} LIMIT 1
   `
   const contractor = contractorRows2[0] as ContractorProfile | undefined
   if (!contractor) return { eligible: false, reason: 'no_contractor_profile' }

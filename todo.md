@@ -1,23 +1,24 @@
-# Marketplace Workbench Assignment Action
+# Deep Audit: Marketplace Assignment Still Not Working
 
-## Capture current failure
-- [x] Inspect screenshot and confirm Workbench row now appears.
-- [x] Verify repo branch/status and latest dev commit.
-- [x] Identify what UI state changed or did not change after Assign top matches.
+## Capture actual failure
+- [x] Inspect uploaded screenshot for exact UI labels, state, and error/result text.
+- [x] Compare screenshot UI against current dev source to identify stale/different code paths.
+- [x] Verify current branch, remote commit, and local working tree.
 
-## Audit assignment pipeline
-- [x] Check Workbench action button wiring and result display for create_assignments.
-- [x] Check Marketplace POST create_assignments SQL against assignment table schema.
-- [x] Check matcher output and assignment insert dependencies.
-- [x] Patch verified assignment action failure or silent-state gap.
-- [x] Add/update regression tests for assignment creation path.
+## Trace exact action path
+- [x] Locate every source path containing the screenshot action labels.
+- [x] Identify the exact frontend handler and API endpoint used by the visible button.
+- [x] Audit the API route for that action against canonical schema and expected DB state.
+- [x] Audit whether the button can be disabled, no-op, swallowed by confirm, or hidden behind stale bundle behavior.
 
-## Verify and ship
-- [x] Run targeted tests/lint.
-- [x] Run full regression suite.
-- [x] Run TypeScript type-check.
-- [ ] Run full lint / CLS-equivalent check.
-- [ ] Commit and push to dev.
+## Verify with tests or local reproduction
+- [x] Add instrumentation or focused tests only after identifying the real failing path.
+- [x] Run targeted reproduction/tests for the verified path.
+
+## Patch only verified cause
+- [x] Patch the confirmed failure only.
+- [x] Run targeted and broad checks appropriate to touched files.
+- [ ] Commit and push to dev only after verification.
 
 ## Report
-- [ ] Explain exact cause, patch, QA, and retest steps.
+- [ ] Explain the verified root cause, evidence, patch, QA, and retest steps.

@@ -42,6 +42,18 @@ describe('contractorMatcher canonical opportunity fields', () => {
     expect(opportunityQuery).toContain('battery_candidate AS battery_interest')
     expect(opportunityQuery).toContain('estimated_system_size_kw')
     expect(opportunityQuery).not.toContain('scoring_data')
+
+    const contractorQuery = queries.find(q => q.includes('FROM contractor_profiles')) ?? ''
+    expect(contractorQuery).toContain('cp.min_project_kw AS min_system_size_kw')
+    expect(contractorQuery).toContain('cp.max_project_kw AS max_system_size_kw')
+    expect(contractorQuery).toContain('cp.network_active AS is_active')
+    expect(contractorQuery).toContain('WHERE cp.network_active = true')
+    expect(contractorQuery).toContain('cp.avg_close_rate_pct / 100.0')
+    expect(contractorQuery).not.toContain('cp.min_system_size_kw')
+    expect(contractorQuery).not.toContain('cp.max_system_size_kw')
+    expect(contractorQuery).not.toContain('cp.services_offered')
+    expect(contractorQuery).not.toContain('cp.is_active')
+    expect(contractorQuery).not.toContain('cp.avg_rating')
   })
 
   it('eligibility checks use canonical location_state', async () => {
@@ -56,7 +68,10 @@ describe('contractorMatcher canonical opportunity fields', () => {
 
     const { isContractorEligible } = await importMatcher()
     await expect(isContractorEligible('contractor-1', 'opp-1')).resolves.toEqual({ eligible: true })
+    const contractorQuery = queries.find(q => q.includes('FROM contractor_profiles')) ?? ''
     const opportunityQuery = queries.find(q => q.includes('FROM network_opportunities')) ?? ''
+    expect(contractorQuery).toContain('network_active AS is_active')
+    expect(contractorQuery).not.toContain('SELECT service_states, is_active FROM contractor_profiles')
     expect(opportunityQuery).toContain('UPPER(location_state) AS state')
   })
 })
