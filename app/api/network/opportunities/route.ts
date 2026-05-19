@@ -121,9 +121,14 @@ export async function GET(req: NextRequest) {
         'SolarPro'::text AS creator_company,
         oa.id AS claim_id,
         oa.status AS claim_status,
-        oa.contractor_id AS claimed_by_user_id
+        oa.contractor_id AS claimed_by_user_id,
+        oi.enrichment_payload,
+        oi.enrichment_completeness,
+        oi.enrichment_warnings,
+        oi.enriched_at
       FROM opportunity_assignments oa
       JOIN network_opportunities no ON no.id = oa.opportunity_id
+      LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
       WHERE oa.contractor_id = ${user.id}
         AND oa.status IN ('offered','viewed')
         AND no.status IN ('live','claimed')

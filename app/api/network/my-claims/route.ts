@@ -86,9 +86,14 @@ export async function GET(req: NextRequest) {
         oa.closed_at AS outcome_at,
         oa.first_contact_at,
         oa.offer_expires_at AS claim_expires_at,
-        oa.claimed_at AS claimed_at
+        oa.claimed_at AS claimed_at,
+        oi.enrichment_payload,
+        oi.enrichment_completeness,
+        oi.enrichment_warnings,
+        oi.enriched_at
       FROM opportunity_assignments oa
       JOIN network_opportunities no ON no.id = oa.opportunity_id
+      LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
       WHERE oa.contractor_id = ${user.id}
         AND oa.status IN ('claimed','contacted','appointment','proposal','won')
       ORDER BY oa.claimed_at DESC NULLS LAST, oa.created_at DESC

@@ -40,6 +40,15 @@ describe('canonical intelligence architecture guardrails', () => {
     expect(migration).not.toMatch(/CREATE TABLE IF NOT EXISTS\s+intake_lifecycle/i)
   })
 
+  it('adds opportunity enrichment as an opportunity_intelligence projection, not a duplicate table', () => {
+    const migration = readIfExists('lib/migrations/070_opportunity_intelligence_enrichment.sql')
+    expect(migration).toContain('ALTER TABLE opportunity_intelligence')
+    expect(migration).toContain('ADD COLUMN IF NOT EXISTS enrichment_payload JSONB')
+    expect(migration).toContain('ADD COLUMN IF NOT EXISTS enrichment_completeness')
+    expect(migration).not.toMatch(/CREATE TABLE IF NOT EXISTS\s+.*opportunit.*enrichment/i)
+    expect(migration).not.toMatch(/CREATE TABLE IF NOT EXISTS\s+.*opportunit.*intelligence/i)
+  })
+
   it('observations attach only to approved canonical entity types', () => {
     expect(APPROVED_OBSERVATION_ENTITY_TYPES).toEqual([
       'opportunity',

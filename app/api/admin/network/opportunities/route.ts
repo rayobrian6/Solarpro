@@ -20,6 +20,7 @@ import { getDbReady } from '@/lib/db-neon';
 import { requireAdminApi } from '@/lib/adminAuth';
 import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunityScorer';
 import { logNetworkEvent } from '@/lib/network/attributionTracker';
+import { enrichAndPersistOpportunity } from '@/lib/network/opportunityEnrichment';
 
 // ── GET: List opportunities ───────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -53,6 +54,10 @@ export async function GET(req: NextRequest) {
         oi.risk_flags,
         oi.opportunity_highlights,
         oi.executive_summary,
+        oi.enrichment_payload,
+        oi.enrichment_completeness,
+        oi.enrichment_warnings,
+        oi.enriched_at,
         oi.total_eligible_contractors,
         osq.pipeline_status,
         osq.auto_decision,
@@ -292,6 +297,7 @@ export async function PATCH(req: NextRequest) {
               executive_summary = EXCLUDED.executive_summary,
               updated_at = NOW()
           `;
+          await enrichAndPersistOpportunity(sql, id, { adminUserId: admin.id, triggeredBy: 'admin' });
           results.push(`Scored ${id}: ${scored.overall_grade} (${scored.overall_score})`);
         }
 

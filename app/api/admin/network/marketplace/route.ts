@@ -59,6 +59,7 @@ export async function GET(req: NextRequest) {
         no.estimated_project_value, no.asking_price, no.asking_price AS listing_price,
         no.opportunity_score, no.opportunity_grade,
         oi.overall_score, oi.overall_grade, oi.market_price, oi.executive_summary,
+        oi.enrichment_payload, oi.enrichment_completeness, oi.enrichment_warnings, oi.enriched_at,
         oi.risk_flags, oi.opportunity_highlights, oi.total_eligible_contractors, oi.top_match_score,
         osq.auto_decision, osq.override_decision, osq.confidence_score,
         COALESCE(asg.assignment_count, 0) AS assignment_count,

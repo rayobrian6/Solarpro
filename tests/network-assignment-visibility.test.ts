@@ -151,6 +151,8 @@ describe('contractor network assignment visibility', () => {
   })
 
   it('includes direct network assignments in the Discover feed and total count', async () => {
+    const sql = makeSql()
+    mockGetDbReady.mockResolvedValueOnce(sql)
     const { GET } = await import('@/app/api/network/opportunities/route')
 
     const res = await GET(req('https://solarpro.test/api/network/opportunities'))
@@ -161,6 +163,10 @@ describe('contractor network assignment visibility', () => {
     expect(json.opportunities).toEqual([
       expect.objectContaining({ id: OPP_ID, city: 'Austin', state_code: 'TX', claim_status: 'offered' }),
     ])
+    const assignedQuery = sql.calls.find((q: string) => q.includes('FROM opportunity_assignments oa') && q.includes("oa.status IN ('offered','viewed')")) ?? ''
+    expect(assignedQuery).toContain('oi.enrichment_payload')
+    expect(assignedQuery).toContain('oi.enrichment_completeness')
+    expect(assignedQuery).toContain('LEFT JOIN opportunity_intelligence oi')
   })
 
   it('claims an assigned network opportunity through the existing contractor claim endpoint', async () => {
@@ -175,6 +181,8 @@ describe('contractor network assignment visibility', () => {
   })
 
   it('includes claimed network assignments in My Claims and total count', async () => {
+    const sql = makeSql()
+    mockGetDbReady.mockResolvedValueOnce(sql)
     const { GET } = await import('@/app/api/network/my-claims/route')
 
     const res = await GET(req('https://solarpro.test/api/network/my-claims'))
@@ -185,5 +193,9 @@ describe('contractor network assignment visibility', () => {
     expect(json.claims).toEqual([
       expect.objectContaining({ id: OPP_ID, address: '123 Solar Way', claim_status: 'claimed', price_paid: 500 }),
     ])
+    const claimsQuery = sql.calls.find((q: string) => q.includes('FROM opportunity_assignments oa') && q.includes("oa.status IN ('claimed','contacted','appointment','proposal','won')")) ?? ''
+    expect(claimsQuery).toContain('oi.enrichment_payload')
+    expect(claimsQuery).toContain('oi.enrichment_completeness')
+    expect(claimsQuery).toContain('LEFT JOIN opportunity_intelligence oi')
   })
 })

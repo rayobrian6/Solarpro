@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type ReactNode } from 'react';
 import {
   Activity, AlertCircle, AlertTriangle, ArrowRight,
   BarChart3, CheckCircle2, ChevronDown, ChevronUp,
@@ -10,8 +10,25 @@ import {
   XCircle, Play, Eye, Star, Target, Layers,
   Inbox, Cpu, Webhook, RotateCcw, StopCircle,
   CheckCheck, Loader2, Ban, FlaskConical,
-  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink, ClipboardList,
+  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink, ClipboardList, Copy,
 } from 'lucide-react';
+import {
+  buildEnrichmentChips,
+  buildEnrichmentDetailGroups,
+  deriveEnrichmentState,
+  enrichmentWarnings,
+  fieldValue,
+  formatConfidence,
+  formatDisplayValue,
+  getEnrichmentPayload,
+  getEnrichedField,
+  percentFromCompleteness,
+  stateTone,
+  topEnrichmentFactors,
+  type EnrichmentCarrier,
+  type EnrichmentChip,
+  type EnrichmentState,
+} from '@/lib/network/opportunityEnrichmentDisplay';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -27,7 +44,7 @@ interface HealthData {
   recent_events: Array<Record<string, unknown>>;
 }
 
-interface Opportunity {
+interface Opportunity extends EnrichmentCarrier {
   id: string;
   status: string;
   source_type: string;
@@ -60,7 +77,7 @@ interface AnalyticsData {
   trend?: Array<Record<string, unknown>>;
 }
 
-interface MarketplaceOpportunity {
+interface MarketplaceOpportunity extends EnrichmentCarrier {
   id: string;
   homeowner_name?: string | null;
   homeowner_first_name?: string | null;
@@ -168,6 +185,71 @@ function StatusPill({ status }: { status: string }) {
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${colors[status] ?? 'bg-zinc-700 text-zinc-400'}`}>
       {status.replace(/_/g, ' ')}
     </span>
+  );
+}
+
+function toneClasses(tone: EnrichmentChip['tone'] | ReturnType<typeof stateTone>) {
+  const tones: Record<string, string> = {
+    emerald: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    amber: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
+    blue: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
+    rose: 'border-rose-500/30 bg-rose-500/10 text-rose-300',
+    orange: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+    violet: 'border-violet-500/30 bg-violet-500/10 text-violet-300',
+    slate: 'border-zinc-700 bg-zinc-800/70 text-zinc-400',
+  };
+  return tones[tone] ?? tones.slate;
+}
+
+function EnrichmentStateBadge({ state }: { state: EnrichmentState }) {
+  return <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${toneClasses(stateTone(state))}`}>{state}</span>;
+}
+
+function EnrichmentChipList({ chips }: { chips: EnrichmentChip[] }) {
+  if (!chips.length) return <span className="text-[11px] text-zinc-600">No operational chips yet</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {chips.map(chip => <span key={chip.label} className={`rounded border px-2 py-0.5 text-[11px] font-medium ${toneClasses(chip.tone)}`}>{chip.label}</span>)}
+    </div>
+  );
+}
+
+function EnrichmentCompleteness({ percent }: { percent: number }) {
+  const color = percent >= 70 ? 'bg-emerald-500' : percent >= 45 ? 'bg-amber-500' : 'bg-rose-500';
+  return (
+    <div className="min-w-[120px]">
+      <div className="mb-1 flex items-center justify-between text-[11px]"><span className="text-zinc-500">Completeness</span><span className="font-semibold text-zinc-300">{percent}%</span></div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800"><div className={`h-full ${color}`} style={{ width: `${percent}%` }} /></div>
+    </div>
+  );
+}
+
+function EnrichmentDetailGroups({ row }: { row: EnrichmentCarrier }) {
+  const groups = buildEnrichmentDetailGroups(row);
+  const warnings = enrichmentWarnings(row).slice(0, 4);
+  const factors = topEnrichmentFactors(row, 5);
+  if (!groups.length && !warnings.length && !factors.length) return <p>No enrichment projection available yet.</p>;
+  return (
+    <div className="space-y-3">
+      {groups.map(group => (
+        <div key={group.title}>
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{group.title}</div>
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {group.items.map(item => (
+              <div key={`${group.title}-${item.label}`} className="rounded border border-zinc-800 bg-zinc-900/70 p-2">
+                <div className="flex items-center justify-between gap-2"><span className="text-zinc-500">{item.label}</span><span className="font-semibold text-zinc-200">{item.value}</span></div>
+                <div className="mt-1 text-[10px] text-zinc-600">Confidence {formatConfidence(item.confidence)}</div>
+                {item.factors.length ? <div className="mt-1 text-[10px] text-blue-300">Factors: {item.factors.join(', ')}</div> : null}
+                {item.warnings.length ? <div className="mt-1 text-[10px] text-amber-300">Warnings: {item.warnings.join(', ')}</div> : null}
+                {item.missing.length ? <div className="mt-1 text-[10px] text-rose-300">Missing: {item.missing.join(', ')}</div> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {warnings.length ? <div className="rounded border border-amber-500/20 bg-amber-500/10 p-2 text-[11px] text-amber-200">Warnings: {warnings.join(', ')}</div> : null}
+      {factors.length ? <div className="text-[11px] text-zinc-500">Top operational factors: {factors.join(', ')}</div> : null}
+    </div>
   );
 }
 
@@ -502,6 +584,7 @@ function ScreeningSection() {
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Pipeline</th>
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Decision</th>
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Confidence</th>
+              <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Intelligence</th>
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Duration</th>
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Date</th>
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Actions</th>
@@ -509,11 +592,24 @@ function ScreeningSection() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="text-center py-8 text-zinc-500">Loading…</td></tr>
+              <tr><td colSpan={9} className="text-center py-8 text-zinc-500">Loading…</td></tr>
             ) : queue.length === 0 ? (
-              <tr><td colSpan={8} className="text-center py-8 text-zinc-500">Queue is empty</td></tr>
-            ) : queue.map((row, i) => (
-              <tr key={i} className="border-b border-zinc-800 hover:bg-zinc-800/40 transition-colors">
+              <tr><td colSpan={9} className="text-center py-8 text-zinc-500">Queue is empty</td></tr>
+            ) : queue.map((row, i) => {
+              const carrier = row as EnrichmentCarrier;
+              const payload = getEnrichmentPayload(carrier);
+              const state = deriveEnrichmentState(carrier);
+              const completeness = percentFromCompleteness(carrier.enrichment_completeness);
+              const chips = buildEnrichmentChips(carrier, 'admin').slice(0, 4);
+              const warnings = enrichmentWarnings(carrier).slice(0, 2);
+              const homeownerIntent = getEnrichedField<number>(payload, 'homeowner_sales', 'homeowner_intent_score');
+              const utilityScore = getEnrichedField<number>(payload, 'territory_utility', 'utility_score');
+              const permitComplexity = getEnrichedField<string>(payload, 'territory_utility', 'permit_complexity');
+              const batteryReadiness = getEnrichedField<string>(payload, 'roof_install', 'battery_readiness');
+              const contractorFit = getEnrichedField<number>(payload, 'marketplace', 'contractor_fit_score');
+              const fraudRisk = getEnrichedField<number>(payload, 'risk', 'fraud_risk');
+              return (
+              <tr key={i} className="border-b border-zinc-800 hover:bg-zinc-800/40 transition-colors align-top">
                 <td className="px-4 py-3">
                   <div className="font-medium text-white">
                     {row.homeowner_first_name as string} {row.homeowner_last_name as string}
@@ -547,6 +643,22 @@ function ScreeningSection() {
                 <td className="px-4 py-3 text-zinc-300 text-xs">
                   {row.confidence_score ? `${Math.round(row.confidence_score as number)}%` : '—'}
                 </td>
+                <td className="px-4 py-3">
+                  <div className="min-w-[260px] space-y-2">
+                    <div className="flex flex-wrap items-center gap-2"><EnrichmentStateBadge state={state} /><EnrichmentCompleteness percent={completeness} /></div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+                      <span>Intent <b className="text-zinc-300">{formatDisplayValue(homeownerIntent?.value)}</b></span>
+                      <span>Utility <b className="text-zinc-300">{formatDisplayValue(utilityScore?.value)}</b></span>
+                      <span>Permit <b className="text-zinc-300 capitalize">{formatDisplayValue(permitComplexity?.value)}</b></span>
+                      <span>Battery <b className="text-zinc-300 capitalize">{formatDisplayValue(batteryReadiness?.value)}</b></span>
+                      <span>Fit <b className="text-zinc-300">{formatDisplayValue(contractorFit?.value)}</b></span>
+                      <span>Fraud <b className="text-zinc-300">{formatDisplayValue(fraudRisk?.value)}</b></span>
+                    </div>
+                    <EnrichmentChipList chips={chips} />
+                    {warnings.length ? <div className="text-[11px] text-amber-300">Warnings: {warnings.join(', ')}</div> : null}
+                    {row.low_quality_reason ? <div className="text-[11px] text-rose-300">Low quality: {row.low_quality_reason as string}</div> : null}
+                  </div>
+                </td>
                 <td className="px-4 py-3 text-zinc-500 text-xs">
                   {row.duration_ms ? `${Math.round((row.duration_ms as number) / 1000)}s` : '—'}
                 </td>
@@ -577,7 +689,8 @@ function ScreeningSection() {
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -823,6 +936,7 @@ const TABS = [
   { id: 'intake',      label: 'Intake Feed',        icon: Inbox },
   { id: 'enrichment',  label: 'Enrichment Queue',   icon: Cpu },
   { id: 'webhooks',    label: 'Webhook Log',        icon: Webhook },
+  { id: 'funnels',     label: 'Intake Funnels',     icon: Globe },
   { id: 'campaigns',   label: 'Campaigns',          icon: Megaphone },
 ] as const;
 
@@ -990,6 +1104,7 @@ export default function NetworkControlCenter() {
         {activeTab === 'intake' && <IntakeFeedSection />}
         {activeTab === 'enrichment' && <EnrichmentQueueSection />}
         {activeTab === 'webhooks' && <WebhookLogSection />}
+        {activeTab === 'funnels' && <IntakeFunnelsSection />}
         {activeTab === 'campaigns' && <CampaignsSection />}
       </div>
     </div>
@@ -1838,6 +1953,13 @@ function MarketplaceWorkbenchSection() {
               const claimedOrActive = Number(opp.claimed_or_active_count ?? 0);
               const assigned = activeOffers > 0 || claimedOrActive > 0;
               const assignmentLabel = claimedOrActive > 0 ? (opp.current_assignment_status ?? 'claimed/active') : activeOffers > 0 ? 'Offers pending' : 'Unassigned';
+              const payload = getEnrichmentPayload(opp);
+              const readiness = deriveEnrichmentState(opp);
+              const completeness = percentFromCompleteness(opp.enrichment_completeness);
+              const chips = buildEnrichmentChips(opp, 'admin');
+              const warnings = enrichmentWarnings(opp).slice(0, 3);
+              const marketplacePriority = fieldValue<string>(payload, 'marketplace', 'marketplace_priority');
+              const assignmentPriority = fieldValue<string>(payload, 'marketplace', 'assignment_priority');
               return (
                 <tr key={opp.id} className="border-b border-zinc-800 align-top hover:bg-zinc-800/40">
                   <td className="px-4 py-3">
@@ -1847,16 +1969,30 @@ function MarketplaceWorkbenchSection() {
                       <Eye className="h-3 w-3" /> {expanded === opp.id ? 'Hide details' : 'View details'}
                     </button>
                     {expanded === opp.id && (
-                      <div className="mt-3 max-w-md rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
+                      <div className="mt-3 max-w-2xl rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
                         {opp.executive_summary ? <p>{opp.executive_summary}</p> : <p>No explainability summary available yet.</p>}
                         {opp.opportunity_highlights?.length ? <div className="mt-2 text-emerald-300">Highlights: {opp.opportunity_highlights.join(', ')}</div> : null}
                         {opp.risk_flags?.length ? <div className="mt-1 text-amber-300">Risks: {opp.risk_flags.join(', ')}</div> : null}
+                        <div className="mt-3 border-t border-zinc-800 pt-3">
+                          <EnrichmentDetailGroups row={opp} />
+                        </div>
                       </div>
                     )}
                   </td>
                   <td className="px-4 py-3 text-zinc-300"><div>{city}, {state}</div><div className="mt-1 text-xs text-zinc-500">{opp.address ? 'Address on file' : 'No address shown'}</div></td>
-                  <td className="px-4 py-3"><div className="flex items-center gap-2"><GradeBadge grade={grade ?? undefined} /><span className="text-xs text-zinc-400">{score != null ? Math.round(Number(score)) : 'No score'}</span></div><div className="mt-1 text-xs text-zinc-500">Value {formatCurrency(opp.estimated_project_value)} · Price {formatCurrency(price)}</div>{score == null && <div className="mt-1 text-[11px] text-amber-300">No score available</div>}</td>
-                  <td className="px-4 py-3"><span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">{opp.screening_status ?? opp.auto_decision ?? 'approved'}</span><div className="mt-1 text-xs text-zinc-500">Confidence {opp.confidence_score ? `${Math.round(Number(opp.confidence_score))}%` : '—'}</div></td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2"><GradeBadge grade={grade ?? undefined} /><span className="text-xs text-zinc-400">{score != null ? Math.round(Number(score)) : 'No score'}</span></div>
+                    <div className="mt-1 text-xs text-zinc-500">Value {formatCurrency(opp.estimated_project_value)} · Price {formatCurrency(price)}</div>
+                    <div className="mt-1 text-[11px] text-zinc-500">Marketplace {formatDisplayValue(marketplacePriority)} · Assignment {formatDisplayValue(assignmentPriority)}</div>
+                    {score == null && <div className="mt-1 text-[11px] text-amber-300">No score available</div>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">{opp.screening_status ?? opp.auto_decision ?? 'approved'}</span><EnrichmentStateBadge state={readiness} /></div>
+                    <div className="mt-2"><EnrichmentCompleteness percent={completeness} /></div>
+                    <div className="mt-2"><EnrichmentChipList chips={chips.slice(0, 5)} /></div>
+                    {warnings.length ? <div className="mt-1 text-[11px] text-amber-300">Warnings: {warnings.join(', ')}</div> : null}
+                    <div className="mt-1 text-xs text-zinc-500">Confidence {opp.confidence_score ? `${Math.round(Number(opp.confidence_score))}%` : '—'}</div>
+                  </td>
                   <td className="px-4 py-3"><div className={`text-xs ${assigned ? 'text-emerald-300' : 'text-zinc-400'}`}>{assignmentLabel}</div><div className="mt-1 text-xs text-zinc-500">Offers {activeOffers} · Total {opp.assignment_count ?? 0}</div>{assigned && <div className="mt-1 text-[11px] text-amber-300">Assignment offers already exist</div>}</td>
                   <td className="px-4 py-3 text-xs text-zinc-500">{opp.live_at ? new Date(opp.live_at).toLocaleDateString() : '—'}</td>
                   <td className="px-4 py-3"><div className="flex flex-col gap-1.5"><button onClick={() => runWorkbenchAction(opp.id, 'match_contractors')} disabled={!!busy} className="rounded border border-blue-500/30 px-2 py-1 text-[11px] font-semibold text-blue-300 hover:bg-blue-500/10 disabled:opacity-40">{busy === `${opp.id}:match_contractors` ? '…' : 'Match contractors'}</button><button onClick={() => runWorkbenchAction(opp.id, 'create_assignments')} disabled={!!busy || assigned} className="rounded border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40">{busy === `${opp.id}:create_assignments` ? '…' : 'Assign top matches'}</button><button onClick={() => runWorkbenchAction(opp.id, 'pause')} disabled={!!busy} className="rounded border border-amber-500/30 px-2 py-1 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">{busy === `${opp.id}:pause` ? '…' : 'Pause live'}</button></div></td>
@@ -1999,6 +2135,329 @@ function ContractorMatchPanel() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────────────────────────
+// IntakeFunnelsSection
+// ────────────────────────────────────────────────────────────────────────────────
+
+interface IntakeFunnel {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  funnel_type: string;
+  source_channel: string;
+  status: 'active' | 'inactive' | string;
+  is_active: boolean;
+  canonical_path: string | null;
+  canonical_url: string | null;
+  embed_url: string | null;
+  utm_ready_url: string | null;
+  require_phone: boolean;
+  require_address: boolean;
+  require_monthly_bill: boolean;
+  require_roof_type: boolean;
+  campaign_id: string | null;
+  campaign_count: number;
+  active_campaign_count: number;
+  campaign_names: string[];
+  default_utm: {
+    utm_source: string;
+    utm_medium: string;
+    utm_campaign: string;
+  };
+  source_campaign_support: boolean;
+  recent_intake_count: number;
+  rate_limit_per_hour: number | null;
+  thank_you_url: string | null;
+  webhook_notify_url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+function appendClientUtm(url: string, utm: { source: string; medium: string; campaign: string }): string {
+  const params = new URLSearchParams();
+  if (utm.source.trim()) params.set('utm_source', utm.source.trim());
+  if (utm.medium.trim()) params.set('utm_medium', utm.medium.trim());
+  if (utm.campaign.trim()) params.set('utm_campaign', utm.campaign.trim());
+  const query = params.toString();
+  if (!query) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}${query}`;
+}
+
+function funnelDate(value: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function FunnelStatusPill({ status }: { status: string }) {
+  const active = status === 'active';
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+      active
+        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+        : 'border-zinc-700 bg-zinc-800 text-zinc-400'
+    }`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-emerald-400' : 'bg-zinc-500'}`} />
+      {status}
+    </span>
+  );
+}
+
+function FunnelInfoRow({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-zinc-500">{label}</div>
+      <div className="mt-1 text-xs text-zinc-300">{value}</div>
+    </div>
+  );
+}
+
+function FunnelRequirementChip({ enabled, label }: { enabled: boolean; label: string }) {
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${
+      enabled
+        ? 'border-blue-500/30 bg-blue-500/10 text-blue-300'
+        : 'border-zinc-800 bg-zinc-900 text-zinc-500'
+    }`}>
+      {label}
+    </span>
+  );
+}
+
+function IntakeFunnelsSection() {
+  const [funnels, setFunnels] = useState<IntakeFunnel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [utm, setUtm] = useState({ source: 'facebook', medium: 'cpc', campaign: 'austin_solar_q3' });
+
+  const loadFunnels = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/admin/network/funnels?include_inactive=true', { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to load intake funnels');
+      setFunnels(data.funnels ?? []);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadFunnels();
+  }, [loadFunnels]);
+
+  const copyValue = async (label: string, value?: string | null) => {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopied(label);
+    window.setTimeout(() => setCopied(current => (current === label ? null : current)), 1600);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10">
+              <Globe className="h-5 w-5 text-orange-400" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">Operational Funnel Infrastructure</div>
+              <h2 className="mt-1 text-lg font-semibold text-white">Intake Funnels</h2>
+              <p className="mt-1 max-w-3xl text-sm text-zinc-400">
+                Canonical public and campaign-linked intake entry points backed by intake_funnels, acquisition_campaigns,
+                intake_events, and the existing attribution fields. This section surfaces infrastructure only; it does not
+                create duplicate intake flows or analytics dashboards.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => void loadFunnels()}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-orange-500/40 hover:text-orange-300"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="mb-3 flex items-center gap-2">
+          <Target className="h-4 w-4 text-blue-400" />
+          <h3 className="text-sm font-semibold text-white">UTM-ready URL builder</h3>
+          <span className="text-xs text-zinc-500">Uses canonical utm_source, utm_medium, and utm_campaign attribution fields.</span>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="text-xs text-zinc-400">
+            utm_source
+            <input
+              value={utm.source}
+              onChange={e => setUtm(prev => ({ ...prev, source: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
+              placeholder="facebook"
+            />
+          </label>
+          <label className="text-xs text-zinc-400">
+            utm_medium
+            <input
+              value={utm.medium}
+              onChange={e => setUtm(prev => ({ ...prev, medium: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
+              placeholder="cpc"
+            />
+          </label>
+          <label className="text-xs text-zinc-400">
+            utm_campaign
+            <input
+              value={utm.campaign}
+              onChange={e => setUtm(prev => ({ ...prev, campaign: e.target.value }))}
+              className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white outline-none focus:border-orange-500/50"
+              placeholder="austin_solar_q3"
+            />
+          </label>
+        </div>
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-xl border border-red-800/40 bg-red-950/30 p-3 text-sm text-red-300">
+          <AlertCircle className="h-4 w-4" />
+          {error}
+        </div>
+      )}
+
+      {loading && !funnels.length ? (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-10 text-center text-sm text-zinc-400">
+          Loading canonical intake funnels…
+        </div>
+      ) : funnels.length === 0 ? (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/60 p-10 text-center text-sm text-zinc-400">
+          No intake funnels were returned by the canonical intake_funnels table.
+        </div>
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-2">
+          {funnels.map(funnel => {
+            const generatedUtmUrl = funnel.canonical_url ? appendClientUtm(funnel.canonical_url, utm) : null;
+            const hasPublicUrl = Boolean(funnel.canonical_url);
+            return (
+              <div key={funnel.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 shadow-lg shadow-black/10">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-base font-semibold text-white">{funnel.name}</h3>
+                      <FunnelStatusPill status={funnel.status} />
+                      <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300">
+                        {funnel.funnel_type}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-zinc-500">/{funnel.slug}</p>
+                    {funnel.description && <p className="mt-2 text-sm text-zinc-400">{funnel.description}</p>}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <a
+                      href={funnel.canonical_url || '#'}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-disabled={!hasPublicUrl}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium ${
+                        hasPublicUrl
+                          ? 'border border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20'
+                          : 'pointer-events-none border border-zinc-800 bg-zinc-900 text-zinc-600'
+                      }`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open Funnel
+                    </a>
+                    <button
+                      onClick={() => void copyValue(`${funnel.slug} link`, funnel.canonical_url)}
+                      disabled={!funnel.canonical_url}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-blue-500/40 hover:text-blue-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy Link
+                    </button>
+                    <button
+                      onClick={() => void copyValue(`${funnel.slug} embed URL`, funnel.embed_url)}
+                      disabled={!funnel.embed_url}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-violet-500/40 hover:text-violet-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy Embed URL
+                    </button>
+                    <button
+                      onClick={() => void copyValue(`${funnel.slug} UTM URL`, generatedUtmUrl || funnel.utm_ready_url)}
+                      disabled={!generatedUtmUrl && !funnel.utm_ready_url}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-emerald-500/40 hover:text-emerald-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy UTM-ready URL
+                    </button>
+                  </div>
+                </div>
+
+                {copied?.startsWith(funnel.slug) && (
+                  <div className="mt-3 inline-flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    Copied {copied.replace(`${funnel.slug} `, '')}
+                  </div>
+                )}
+
+                <div className="mt-5 grid gap-4 md:grid-cols-3">
+                  <FunnelInfoRow label="Canonical URL" value={funnel.canonical_url ? <span className="break-all font-mono text-[11px] text-zinc-300">{funnel.canonical_url}</span> : <span className="text-zinc-500">No public page mapped</span>} />
+                  <FunnelInfoRow label="Source Channel" value={funnel.source_channel || '—'} />
+                  <FunnelInfoRow label="Recent Intake Events" value={`${funnel.recent_intake_count} in 30 days`} />
+                  <FunnelInfoRow label="Created" value={funnelDate(funnel.created_at)} />
+                  <FunnelInfoRow label="Updated" value={funnelDate(funnel.updated_at)} />
+                  <FunnelInfoRow label="Rate Limit" value={funnel.rate_limit_per_hour ? `${funnel.rate_limit_per_hour}/hr` : '—'} />
+                </div>
+
+                <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Megaphone className="h-4 w-4 text-orange-300" />
+                    <div className="text-sm font-medium text-white">Campaign metadata</div>
+                    <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-400">
+                      {funnel.active_campaign_count} active / {funnel.campaign_count} linked
+                    </span>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <FunnelInfoRow label="Default utm_source" value={funnel.default_utm?.utm_source || '—'} />
+                    <FunnelInfoRow label="Default utm_medium" value={funnel.default_utm?.utm_medium || '—'} />
+                    <FunnelInfoRow label="Default utm_campaign" value={funnel.default_utm?.utm_campaign || '—'} />
+                  </div>
+                  {funnel.campaign_names?.length > 0 ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {funnel.campaign_names.slice(0, 6).map(name => (
+                        <span key={name} className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300">
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs text-zinc-500">No acquisition campaigns are linked yet.</p>
+                  )}
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <FunnelRequirementChip enabled={funnel.require_phone} label="Phone required" />
+                  <FunnelRequirementChip enabled={funnel.require_address} label="Address required" />
+                  <FunnelRequirementChip enabled={funnel.require_monthly_bill} label="Monthly bill required" />
+                  <FunnelRequirementChip enabled={funnel.require_roof_type} label="Roof type required" />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // CampaignsSection
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -17,6 +17,7 @@ import { requireAdminApi } from '@/lib/adminAuth'
 import { runScreeningPipeline } from '@/lib/network/screeningPipeline'
 import { logNetworkEvent } from '@/lib/network/attributionTracker'
 import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunityScorer'
+import { enrichAndPersistOpportunity } from '@/lib/network/opportunityEnrichment'
 
 function toPostgresTextArray(values: string[]) {
   return `{${values.map((value) => `\"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}\"`).join(',')}}`
@@ -48,9 +49,14 @@ export async function GET(req: NextRequest) {
         no.state,
         no.source_type,
         no.status AS opportunity_status,
-        no.created_at AS opportunity_created_at
+        no.created_at AS opportunity_created_at,
+        oi.enrichment_payload,
+        oi.enrichment_completeness,
+        oi.enrichment_warnings,
+        oi.enriched_at
       FROM opportunity_screening_queue osq
       JOIN network_opportunities no ON no.id = osq.opportunity_id
+      LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = osq.opportunity_id
       WHERE
         (${pipelineStatus ?? null} IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ''})
         AND (${autoDecision ?? null} IS NULL OR osq.auto_decision = ${autoDecision ?? ''})
@@ -211,7 +217,9 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
       updated_at = NOW()
   `
 
-  return { scored, pricing }
+  const enrichment = await enrichAndPersistOpportunity(sql, opportunity_id, { adminUserId: adminId, triggeredBy: 'admin' })
+
+  return { scored, pricing, enrichment }
 }
 
 // ── PATCH: Override screening decision ─────────────────────────────────────
@@ -281,7 +289,7 @@ export async function PATCH(req: NextRequest) {
       if (!approved) {
         return NextResponse.json({ error: 'Opportunity must be approved by screening before marketplace release' }, { status: 409 })
       }
-      const { scored, pricing } = await scoreAndPersistOpportunity(sql, opportunity_id, admin.id)
+      const { scored, pricing, enrichment } = await scoreAndPersistOpportunity(sql, opportunity_id, admin.id)
       overrideDecision = 'pass'
       screeningStatus = 'approved'
       newStatus = 'live'
@@ -293,6 +301,8 @@ export async function PATCH(req: NextRequest) {
         score: scored.overall_score,
         grade: scored.overall_grade,
         market_price: pricing.price,
+        enrichment_completeness: enrichment.completeness,
+        enrichment_warnings: enrichment.warnings,
       }
     }
 

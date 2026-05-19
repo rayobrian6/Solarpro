@@ -7,6 +7,7 @@ import { getDbReady } from '@/lib/db-neon'
 import { requireAdminApi } from '@/lib/adminAuth'
 import { runScreeningPipeline } from '@/lib/network/screeningPipeline'
 import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunityScorer'
+import { enrichAndPersistOpportunity } from '@/lib/network/opportunityEnrichment'
 import { matchContractors } from '@/lib/network/contractorMatcher'
 import { logNetworkEvent } from '@/lib/network/attributionTracker'
 
@@ -74,11 +75,12 @@ async function scoreAndPersist(sql: Awaited<ReturnType<typeof getDbReady>>, oppo
   const networkScore = Math.round(scored.overall_score)
   await sql`UPDATE network_opportunities SET opportunity_score = ${networkScore}, opportunity_grade = ${networkGrade}, asking_price = COALESCE(asking_price, ${pricing.price}), scored_at = COALESCE(scored_at, NOW()), updated_at = NOW() WHERE id = ${opportunityId}`
   await sql`INSERT INTO opportunity_intelligence (opportunity_id, overall_score, overall_grade, property_score, solar_score, financial_score, market_score, intent_score, market_price, price_min, price_max, pricing_rationale, risk_flags, opportunity_highlights, executive_summary) VALUES (${opportunityId}, ${scored.overall_score}, ${scored.overall_grade}, ${scored.property.score}, ${scored.solar.score}, ${scored.financial.score}, ${scored.market.score}, ${scored.intent.score}, ${pricing.price}, ${pricing.min}, ${pricing.max}, ${pricing.rationale}, CAST(${toPostgresTextArray(scored.risk_flags)} AS text[]), CAST(${toPostgresTextArray(scored.opportunity_highlights)} AS text[]), ${scored.executive_summary}) ON CONFLICT (opportunity_id) DO UPDATE SET overall_score = EXCLUDED.overall_score, overall_grade = EXCLUDED.overall_grade, property_score = EXCLUDED.property_score, solar_score = EXCLUDED.solar_score, financial_score = EXCLUDED.financial_score, market_score = EXCLUDED.market_score, intent_score = EXCLUDED.intent_score, market_price = EXCLUDED.market_price, price_min = EXCLUDED.price_min, price_max = EXCLUDED.price_max, pricing_rationale = EXCLUDED.pricing_rationale, risk_flags = EXCLUDED.risk_flags, opportunity_highlights = EXCLUDED.opportunity_highlights, executive_summary = EXCLUDED.executive_summary, updated_at = NOW()`
-  return { scored, pricing }
+  const enrichment = await enrichAndPersistOpportunity(sql, opportunityId, { adminUserId: adminId, triggeredBy: 'admin' })
+  return { scored, pricing, enrichment }
 }
 
 async function loadSimulated(sql: Awaited<ReturnType<typeof getDbReady>>) {
-  return sql`WITH assignment_summary AS (SELECT opportunity_id, COUNT(*)::int AS assignment_count FROM opportunity_assignments GROUP BY opportunity_id), event_summary AS (SELECT opportunity_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS last_event_at FROM network_events GROUP BY opportunity_id) SELECT no.id, no.status, no.source_type, no.source_channel, no.location_city AS city, no.location_state AS state, no.homeowner_name, no.created_at, no.live_at, no.screening_status, no.raw_payload, no.intake_metadata, oi.overall_score, oi.overall_grade, oi.executive_summary, osq.auto_decision, osq.auto_decision_reason, osq.override_decision, osq.override_reason, osq.confidence_score, osq.step10_fail_reasons, COALESCE(asg.assignment_count, 0) AS assignment_count, COALESCE(evt.event_count, 0) AS event_count, evt.last_event_at FROM network_opportunities no LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id LEFT JOIN assignment_summary asg ON asg.opportunity_id = no.id LEFT JOIN event_summary evt ON evt.opportunity_id = no.id WHERE (no.raw_payload->>'simulated' = 'true' OR no.intake_metadata->>'simulated' = 'true' OR no.source_channel = 'simulator') AND no.status <> 'withdrawn' ORDER BY no.created_at DESC LIMIT 100`
+  return sql`WITH assignment_summary AS (SELECT opportunity_id, COUNT(*)::int AS assignment_count FROM opportunity_assignments GROUP BY opportunity_id), event_summary AS (SELECT opportunity_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS last_event_at FROM network_events GROUP BY opportunity_id) SELECT no.id, no.status, no.source_type, no.source_channel, no.location_city AS city, no.location_state AS state, no.homeowner_name, no.created_at, no.live_at, no.screening_status, no.raw_payload, no.intake_metadata, oi.overall_score, oi.overall_grade, oi.executive_summary, oi.enrichment_payload, oi.enrichment_completeness, oi.enrichment_warnings, oi.enriched_at, osq.auto_decision, osq.auto_decision_reason, osq.override_decision, osq.override_reason, osq.confidence_score, osq.step10_fail_reasons, COALESCE(asg.assignment_count, 0) AS assignment_count, COALESCE(evt.event_count, 0) AS event_count, evt.last_event_at FROM network_opportunities no LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id LEFT JOIN assignment_summary asg ON asg.opportunity_id = no.id LEFT JOIN event_summary evt ON evt.opportunity_id = no.id WHERE (no.raw_payload->>'simulated' = 'true' OR no.intake_metadata->>'simulated' = 'true' OR no.source_channel = 'simulator') AND no.status <> 'withdrawn' ORDER BY no.created_at DESC LIMIT 100`
 }
 
 async function releaseToMarketplace(sql: Awaited<ReturnType<typeof getDbReady>>, opportunityId: string, adminId: string) {
@@ -94,7 +96,7 @@ async function releaseToMarketplace(sql: Awaited<ReturnType<typeof getDbReady>>,
 
   const rows = await sql`
     SELECT no.id, no.status, no.screening_status, no.live_at, no.location_city AS city, no.location_state AS state,
-           oi.overall_score, oi.overall_grade, oi.market_price,
+           oi.overall_score, oi.overall_grade, oi.market_price, oi.enrichment_payload, oi.enrichment_completeness,
            (no.status = 'live' AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')) AS marketplace_ready
     FROM network_opportunities no
     LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id

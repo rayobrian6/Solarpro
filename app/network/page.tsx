@@ -7,10 +7,21 @@ import {
   ArrowRight, Loader2, RefreshCw, X,
   Settings2, Shield, Star, Sparkles,
 } from 'lucide-react';
+import {
+  buildEnrichmentChips,
+  buildEnrichmentDetailGroups,
+  fieldValue,
+  formatConfidence,
+  formatDisplayValue,
+  getEnrichmentPayload,
+  stateTone,
+  type EnrichmentCarrier,
+  type EnrichmentChip,
+} from '@/lib/network/opportunityEnrichmentDisplay';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface Opportunity {
+interface Opportunity extends EnrichmentCarrier {
   id: string;
   source: 'contractor_shared' | 'solarpro_generated';
   status: string;
@@ -96,6 +107,57 @@ function daysLeft(expires: string) {
   const d = Math.ceil((new Date(expires).getTime() - Date.now()) / 86400000);
   return d <= 0 ? 'Expired' : d === 1 ? '1 day left' : `${d} days left`;
 }
+function contractorToneClasses(tone: EnrichmentChip['tone'] | ReturnType<typeof stateTone>) {
+  const tones: Record<string, string> = {
+    emerald: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    amber: 'border-amber-500/40 bg-amber-500/15 text-amber-400',
+    blue: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
+    rose: 'border-rose-500/30 bg-rose-500/10 text-rose-300',
+    orange: 'border-orange-500/30 bg-orange-500/10 text-orange-300',
+    violet: 'border-violet-500/30 bg-violet-500/10 text-violet-300',
+    slate: 'border-slate-700 bg-slate-800/70 text-slate-400',
+  };
+  return tones[tone] ?? tones.slate;
+}
+function ContractorEnrichmentChips({ chips }: { chips: EnrichmentChip[] }) {
+  if (!chips.length) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 mb-4">
+      {chips.map(chip => (
+        <span key={chip.label} className={`px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wide ${contractorToneClasses(chip.tone)}`}>
+          {chip.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+function ContractorEnrichmentDetails({ opp }: { opp: Opportunity }) {
+  const groups = buildEnrichmentDetailGroups(opp);
+  if (!groups.length) return null;
+  return (
+    <section className="mb-5">
+      <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-3">Enriched Opportunity Factors</p>
+      <div className="space-y-3">
+        {groups.map(group => (
+          <div key={group.title} className="rounded-xl border border-slate-700/50 bg-slate-900/35 p-3">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">{group.title}</p>
+            <div className="grid grid-cols-2 gap-2">
+              {group.items.slice(0, 4).map(item => (
+                <div key={`${group.title}-${item.label}`} className="rounded-lg bg-slate-800/50 p-2">
+                  <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
+                  <div className="font-semibold text-sm text-white">{item.value}</div>
+                  <div className="mt-1 text-[10px] text-slate-500">Confidence {formatConfidence(item.confidence)}</div>
+                  {item.warnings.length ? <div className="mt-1 text-[10px] text-amber-300">{item.warnings.join(', ')}</div> : null}
+                  {item.missing.length ? <div className="mt-1 text-[10px] text-rose-300">Missing: {item.missing.join(', ')}</div> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
 
 // ─── Opportunity Card ────────────────────────────────────────────────────────
 
@@ -114,6 +176,12 @@ function OpportunityCard({
   const isUrgent = expiry.includes('day') && parseInt(expiry) <= 3;
   const pitchNum = opp.roof_pitch ? parseInt(opp.roof_pitch) : 0;
   const isSteep = !isNaN(pitchNum) && pitchNum >= 6;
+  const payload = getEnrichmentPayload(opp);
+  const chips = buildEnrichmentChips(opp, 'contractor');
+  const enrichedSystemSize = fieldValue<number>(payload, 'core', 'estimated_system_size_kw') ?? opp.system_size_kw;
+  const enrichedProjectValue = fieldValue<number>(payload, 'core', 'estimated_project_value') ?? opp.estimated_system_cost;
+  const roofComplexity = fieldValue<string>(payload, 'roof_install', 'install_difficulty');
+  const ahjComplexity = fieldValue<string>(payload, 'territory_utility', 'ahj_complexity');
 
   return (
     <div className="group relative flex flex-col bg-[#0f1623] border border-slate-700/50 rounded-2xl overflow-hidden hover:border-slate-500/70 hover:shadow-lg hover:shadow-black/40 transition-all duration-200 cursor-pointer" onClick={() => onViewDetail(opp)}>
@@ -159,10 +227,12 @@ function OpportunityCard({
           </div>
         </div>
 
+        <ContractorEnrichmentChips chips={chips} />
+
         {/* System intel — 3 columns */}
         <div className="grid grid-cols-3 gap-px bg-slate-700/30 rounded-xl overflow-hidden mb-4">
           <div className="bg-[#0f1623] px-3 py-2.5 text-center">
-            <div className="text-amber-400 font-bold text-xl tabular-nums">{fmtKw(opp.system_size_kw)}</div>
+            <div className="text-amber-400 font-bold text-xl tabular-nums">{fmtKw(enrichedSystemSize)}</div>
             <div className="text-slate-500 text-[10px] uppercase tracking-widest mt-0.5">System</div>
           </div>
           <div className="bg-[#0f1623] px-3 py-2.5 text-center">
@@ -179,6 +249,21 @@ function OpportunityCard({
 
         {/* Roof + utility details */}
         <div className="flex flex-wrap gap-1.5 mb-4">
+          {enrichedProjectValue && (
+            <span className="flex items-center gap-1 text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/30">
+              <DollarSign size={9} />Value {fmtCurrency(enrichedProjectValue)}
+            </span>
+          )}
+          {roofComplexity && (
+            <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800/70 px-2 py-0.5 rounded-md border border-slate-700/50">
+              <Home size={9} />Roof {formatDisplayValue(roofComplexity)}
+            </span>
+          )}
+          {ahjComplexity && (
+            <span className="flex items-center gap-1 text-xs text-orange-300 bg-orange-500/10 px-2 py-0.5 rounded-md border border-orange-500/30">
+              <AlertTriangle size={9} />AHJ {formatDisplayValue(ahjComplexity)}
+            </span>
+          )}
           {opp.utility_name && (
             <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800/70 px-2 py-0.5 rounded-md border border-slate-700/50">
               <Zap size={9} className="text-slate-500" />{opp.utility_name}
@@ -399,6 +484,8 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
               )}
             </div>
           </section>
+
+          <ContractorEnrichmentDetails opp={opp} />
 
           {opp.address && (
             <section className="mb-5">

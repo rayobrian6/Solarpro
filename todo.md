@@ -1,24 +1,18 @@
-# Deep Audit: Marketplace Assignment Still Not Working
+# Admin Intake Funnels Management
 
-## Capture actual failure
-- [x] Inspect uploaded screenshot for exact UI labels, state, and error/result text.
-- [x] Compare screenshot UI against current dev source to identify stale/different code paths.
-- [x] Verify current branch, remote commit, and local working tree.
+## Verify current state
+- [x] Inspect existing Admin Network page and current local diffs before editing.
+- [x] Confirm previously created funnel helper/API/migration files are present and aligned with canonical intake infrastructure.
 
-## Trace exact action path
-- [x] Locate every source path containing the screenshot action labels.
-- [x] Identify the exact frontend handler and API endpoint used by the visible button.
-- [x] Audit the API route for that action against canonical schema and expected DB state.
-- [x] Audit whether the button can be disabled, no-op, swallowed by confirm, or hidden behind stale bundle behavior.
+## Implement operational UI
+- [x] Add reusable funnel URL/UTM helpers without creating duplicate intake systems.
+- [x] Add an Intake Funnels section/tab/card in Admin Network Control Center.
+- [x] Show canonical funnel name, type, status, URL, timestamps, and campaign/source metadata where available.
+- [x] Add Open Funnel, Copy Link, Copy Embed URL, Copy UTM-ready URL, and campaign metadata actions.
 
-## Verify with tests or local reproduction
-- [x] Add instrumentation or focused tests only after identifying the real failing path.
-- [x] Run targeted reproduction/tests for the verified path.
-
-## Patch only verified cause
-- [x] Patch the confirmed failure only.
-- [x] Run targeted and broad checks appropriate to touched files.
-- [ ] Commit and push to dev only after verification.
+## Tests and QA
+- [x] Add tests for admin guard/static route integrity, canonical listing, URL integrity, copy/open action wiring, and UTM generation.
+- [x] Run focused tests, targeted lint, and practical type checks for touched files.
 
 ## Report
-- [ ] Explain the verified root cause, evidence, patch, QA, and retest steps.
+- [x] Report files changed, reused systems, surfaced funnel infrastructure, attribution support, QA results, and unrelated failures.

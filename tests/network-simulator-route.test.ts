@@ -113,6 +113,9 @@ describe('/api/admin/network/simulator', () => {
     const release = await POST(req({ action: 'release', opportunity_id: 'sim-opp-1' }))
     expect(release.status).toBe(200)
     expect(await release.json()).toMatchObject({ success: true, action: 'release', marketplace_ready: { marketplace_ready: true, status: 'live', screening_status: 'approved' } })
+    const releaseRead = sql.queries.find((q: string) => q.includes('AS marketplace_ready')) ?? ''
+    expect(releaseRead).toContain('oi.enrichment_payload')
+    expect(releaseRead).toContain('oi.enrichment_completeness')
     const releaseUpdate = sql.queries.find((q: string) => q.includes('UPDATE network_opportunities') && q.includes("status = 'live'")) ?? ''
     expect(releaseUpdate).toContain("screening_status = 'approved'")
     expect(releaseUpdate).toContain('screened_at = COALESCE(screened_at, NOW())')
@@ -134,6 +137,9 @@ describe('/api/admin/network/simulator', () => {
     expect(query).toContain("no.status <> 'withdrawn'")
     expect(query).toContain('auto_decision_reason')
     expect(query).toContain('step10_fail_reasons')
+    expect(query).toContain('oi.enrichment_payload')
+    expect(query).toContain('oi.enrichment_completeness')
+    expect(query).toContain('oi.enrichment_warnings')
   })
 
   it('deletes only simulator-marked opportunities and refreshes the list', async () => {
