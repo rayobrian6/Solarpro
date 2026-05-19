@@ -56,6 +56,29 @@ function makeSql(opts: { failOn?: string; failError?: Error & { code?: string; c
       source_channel: 'web',
       monthly_bill_amount: 240,
       enrichment_status: 'pending_review',
+      qualification_event_id: 'qual_evt_homeowner_test',
+      qualification_status: 'high_intent',
+      lead_grade: 'A',
+      finance_readiness: true,
+      battery_readiness: true,
+      estimated_income_band: '100k_150k',
+      estimated_credit_band: '680_719',
+      sunlight_confidence: 'full_sun',
+      property_type: 'single_family',
+      qualification_intelligence: {
+        qualification_status: 'high_intent',
+        lead_grade: 'A',
+        finance_readiness: true,
+        battery_readiness: true,
+        contractor_summary: 'A-Grade Opportunity\n\n• $240 utility bill',
+        normalized: {
+          estimated_income_band: '100k_150k',
+          estimated_credit_band: '680_719',
+          sunlight_confidence: 'full_sun',
+          property_type: 'single_family',
+        },
+      },
+      qualification_payload: { original_event_id: 'evt_homeowner_test' },
       utility_provider: 'Austin Energy',
       battery_interest: 'yes',
       homeowner_status: 'own',
@@ -191,6 +214,14 @@ describe('homeowner intake event-first flow', () => {
       preferred_contact_method: 'text',
       timeline: '1_3_months',
       roof_age: '8',
+      qualification_status: 'high_intent',
+      lead_grade: 'A',
+      finance_readiness: true,
+      battery_readiness: true,
+      estimated_income_band: '100k_150k',
+      estimated_credit_band: '680_719',
+      sunlight_confidence: 'full_sun',
+      property_type: 'single_family',
       bill_metadata: { filename: 'bill.pdf' },
     })
     expect(json.opportunities[0].intake_metadata).toMatchObject({
@@ -198,12 +229,21 @@ describe('homeowner intake event-first flow', () => {
       battery_interest: 'yes',
     })
     expect(json.opportunities[0].intake_metadata.notes).toContain('Homeowner notes')
+    expect(json.opportunities[0].qualification_intelligence).toMatchObject({
+      qualification_status: 'high_intent',
+      lead_grade: 'A',
+      finance_readiness: true,
+      battery_readiness: true,
+    })
 
     const feedQuery = sql.queries.find((q: string) => q.includes('WITH opportunity_rows AS')) ?? ''
     expect(feedQuery).toContain('FROM network_opportunities no')
     expect(feedQuery).toContain('FROM intake_events ie')
     expect(feedQuery).toContain("ie.opportunity_id IS NULL")
     expect(feedQuery).toContain("ie.event_type = 'homeowner_intake'")
+    expect(feedQuery).toContain("qie.event_type = 'homeowner_qualification'")
+    expect(feedQuery).toContain('qie.original_event_id = ie.event_id')
+    expect(feedQuery).toContain('qualification_intelligence')
     expect(feedQuery).toContain('debug_visible')
   })
 

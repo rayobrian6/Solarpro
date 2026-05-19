@@ -1134,6 +1134,17 @@ interface IntakeLead {
   enrichment_status?: string | null;
   is_duplicate?: boolean | null;
   duplicate_score?: number | null;
+  qualification_payload?: Record<string, unknown> | null;
+  qualification_intelligence?: Record<string, unknown> | null;
+  qualification_event_id?: string | null;
+  qualification_status?: string | null;
+  lead_grade?: string | null;
+  finance_readiness?: boolean | null;
+  battery_readiness?: boolean | null;
+  estimated_income_band?: string | null;
+  estimated_credit_band?: string | null;
+  sunlight_confidence?: string | null;
+  property_type?: string | null;
   utility_provider?: string | null;
   battery_interest?: string | null;
   homeowner_status?: string | null;
@@ -1258,6 +1269,29 @@ function IntakeFeedSection() {
 
   const notesFor = (lead: IntakeLead) => metadataText(lead, 'notes') ?? metadataText(lead, 'optional_notes');
 
+  const qualificationDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => {
+    const intelligence = lead.qualification_intelligence ?? {};
+    const normalized = typeof intelligence.normalized === 'object' && intelligence.normalized !== null
+      ? intelligence.normalized as Record<string, unknown>
+      : {};
+    const details: Array<[string, unknown]> = [
+      ['Qualification Status', lead.qualification_status ?? intelligence.qualification_status],
+      ['Lead Grade', lead.lead_grade ?? intelligence.lead_grade],
+      ['Finance Ready', lead.finance_readiness ?? intelligence.finance_readiness],
+      ['Battery Ready', lead.battery_readiness ?? intelligence.battery_readiness],
+      ['Income Band', lead.estimated_income_band ?? normalized.estimated_income_band],
+      ['Estimated Credit', lead.estimated_credit_band ?? normalized.estimated_credit_band],
+      ['Sunlight', lead.sunlight_confidence ?? normalized.sunlight_confidence],
+      ['Property Type', lead.property_type ?? normalized.property_type],
+    ];
+    return details.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  };
+
+  const contractorSummaryFor = (lead: IntakeLead) => {
+    const value = lead.qualification_intelligence?.contractor_summary;
+    return typeof value === 'string' && value.trim() ? value : null;
+  };
+
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1318,6 +1352,8 @@ function IntakeFeedSection() {
               {!loading && error && <tr><td colSpan={7} className="px-4 py-12 text-center text-red-300"><AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-60" /><p>Unable to load Intake Feed. See the API error above.</p></td></tr>}
               {!loading && leads.map(lead => {
                 const details = formDetailsFor(lead);
+                const qualificationDetails = qualificationDetailsFor(lead);
+                const contractorSummary = contractorSummaryFor(lead);
                 const notes = notesFor(lead);
                 return (
                   <Fragment key={lead.id}>
@@ -1352,6 +1388,28 @@ function IntakeFeedSection() {
                             </div>
                           ) : (
                             <div className="text-xs text-zinc-500">No payload details were returned for this intake row.</div>
+                          )}
+                          {qualificationDetails.length > 0 && (
+                            <div className="mt-3 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">Qualification intelligence</div>
+                                {lead.qualification_event_id && <div className="text-[10px] font-mono text-emerald-700">{lead.qualification_event_id}</div>}
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                {qualificationDetails.map(([label, value]) => (
+                                  <div key={label} className="rounded-md border border-emerald-900/40 bg-zinc-900/70 px-3 py-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+                                    <div className="mt-1 break-words text-xs text-emerald-100">{payloadDisplay(value)}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              {contractorSummary && (
+                                <div className="mt-3 rounded-md border border-emerald-900/40 bg-zinc-950/70 px-3 py-2">
+                                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">Contractor Summary</div>
+                                  <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-emerald-100">{contractorSummary}</p>
+                                </div>
+                              )}
+                            </div>
                           )}
                           {notes && (
                             <div className="mt-3 rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">

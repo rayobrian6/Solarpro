@@ -38,8 +38,9 @@ describe('contractorMatcher canonical opportunity fields', () => {
     expect(result.total_eligible).toBe(1)
     expect(result.matches[0]).toMatchObject({ contractor_id: 'contractor-1', geo_score: 100 })
     const opportunityQuery = queries.find(q => q.includes('FROM network_opportunities')) ?? ''
-    expect(opportunityQuery).toContain('UPPER(location_state) AS state')
-    expect(opportunityQuery).toContain('battery_candidate AS battery_interest')
+    expect(opportunityQuery).toContain('UPPER(no.location_state) AS state')
+    expect(opportunityQuery).toContain('no.battery_candidate')
+    expect(opportunityQuery).toContain("oi.enrichment_payload->'qualification'")
     expect(opportunityQuery).toContain('estimated_system_size_kw')
     expect(opportunityQuery).not.toContain('scoring_data')
 

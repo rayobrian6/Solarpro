@@ -22,6 +22,7 @@
  */
 
 import { observationFromOpportunityScore, type IntelligenceObservationDraft } from '@/lib/intelligence/observations'
+import type { HomeownerQualificationIntelligence } from '@/lib/intake/homeownerQualification'
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -62,6 +63,10 @@ export interface OpportunityInput {
   intent_score?: number | null       // 0-100 from screening step 9
   battery_interest?: boolean | null
   financing_preference?: string | null
+
+  // Optional second-stage qualification intelligence. This is merged into the
+  // existing canonical scorer dimensions instead of creating a parallel score.
+  qualification_intelligence?: HomeownerQualificationIntelligence | Record<string, unknown> | null
 }
 
 export interface DimensionScore {
@@ -88,7 +93,7 @@ export interface ScoringResult {
 // Constants
 // ──────────────────────────────────────────────────────────────────────────────
 
-const SCORE_VERSION = 'v1.0'
+const SCORE_VERSION = 'v1.1-qualification'
 
 // Grade thresholds
 const GRADES: Array<{ min: number; grade: string }> = [
@@ -142,6 +147,42 @@ function weightedAverage(scores: Array<[number, number]>): number {
 // ──────────────────────────────────────────────────────────────────────────────
 // Dimension 1: Property Quality (weight 25%)
 // ──────────────────────────────────────────────────────────────────────────────
+
+
+function qualificationScoringInput(input: OpportunityInput): Partial<OpportunityInput> {
+  const intelligence = input.qualification_intelligence
+  if (!intelligence || typeof intelligence !== 'object') return {}
+  const scoring = (intelligence as { scoring_input?: unknown }).scoring_input
+  if (!scoring || typeof scoring !== 'object') return {}
+  const q = scoring as Partial<OpportunityInput>
+  return {
+    credit_tier: q.credit_tier ?? undefined,
+    median_income: q.median_income ?? undefined,
+    finance_eligible: q.finance_eligible ?? undefined,
+    financing_preference: q.financing_preference ?? undefined,
+    structure_type: q.structure_type ?? undefined,
+    usable_roof_pct: q.usable_roof_pct ?? undefined,
+    intent_score: q.intent_score ?? undefined,
+    form_completeness: q.form_completeness ?? undefined,
+    battery_interest: q.battery_interest ?? undefined,
+  }
+}
+
+export function mergeQualificationIntoOpportunityInput(input: OpportunityInput): OpportunityInput {
+  const q = qualificationScoringInput(input)
+  return {
+    ...input,
+    credit_tier: input.credit_tier ?? q.credit_tier,
+    median_income: input.median_income ?? q.median_income,
+    finance_eligible: input.finance_eligible ?? q.finance_eligible,
+    financing_preference: input.financing_preference ?? q.financing_preference,
+    structure_type: input.structure_type ?? q.structure_type,
+    usable_roof_pct: input.usable_roof_pct ?? q.usable_roof_pct,
+    intent_score: input.intent_score ?? q.intent_score,
+    form_completeness: input.form_completeness ?? q.form_completeness,
+    battery_interest: input.battery_interest ?? q.battery_interest,
+  }
+}
 
 function scoreProperty(input: OpportunityInput): DimensionScore {
   const factors: Record<string, unknown> = {}
@@ -573,6 +614,7 @@ function buildSummary(
 // ──────────────────────────────────────────────────────────────────────────────
 
 export function scoreOpportunity(input: OpportunityInput): ScoringResult {
+  input = mergeQualificationIntoOpportunityInput(input)
   const property  = scoreProperty(input)
   const solar     = scoreSolar(input)
   const financial = scoreFinancial(input)

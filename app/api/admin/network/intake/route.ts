@@ -126,6 +126,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           '{}'::jsonb AS duplicate_result,
           '{}'::jsonb AS pipeline_result,
           '{}'::jsonb AS intake_metadata,
+          '{}'::jsonb AS qualification_payload,
+          '{}'::jsonb AS qualification_intelligence,
+          NULL::text AS qualification_event_id,
+          NULL::text AS qualification_status,
+          NULL::text AS lead_grade,
+          NULL::boolean AS finance_readiness,
+          NULL::boolean AS battery_readiness,
+          NULL::text AS estimated_income_band,
+          NULL::text AS estimated_credit_band,
+          NULL::text AS sunlight_confidence,
+          NULL::text AS property_type,
           NULL::text AS utility_provider,
           NULL::text AS battery_interest,
           no.home_ownership::text AS homeowner_status,
@@ -206,6 +217,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.duplicate_result,
           ie.pipeline_result,
           ie.payload AS intake_metadata,
+          COALESCE(q.payload, '{}'::jsonb) AS qualification_payload,
+          COALESCE(q.payload->'intelligence', '{}'::jsonb) AS qualification_intelligence,
+          q.event_id AS qualification_event_id,
+          q.payload->'intelligence'->>'qualification_status' AS qualification_status,
+          q.payload->'intelligence'->>'lead_grade' AS lead_grade,
+          CASE
+            WHEN q.payload->'intelligence' ? 'finance_readiness'
+              THEN (q.payload->'intelligence'->>'finance_readiness')::boolean
+            ELSE NULL
+          END AS finance_readiness,
+          CASE
+            WHEN q.payload->'intelligence' ? 'battery_readiness'
+              THEN (q.payload->'intelligence'->>'battery_readiness')::boolean
+            ELSE NULL
+          END AS battery_readiness,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_income_band', q.payload->'qualification'->>'estimated_income_band') AS estimated_income_band,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_credit_band', q.payload->'qualification'->>'estimated_credit_band') AS estimated_credit_band,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'sunlight_confidence', q.payload->'qualification'->>'sunlight_confidence') AS sunlight_confidence,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'property_type', q.payload->'qualification'->>'property_type') AS property_type,
           ie.payload->>'utility_provider' AS utility_provider,
           ie.payload->>'battery_interest' AS battery_interest,
           COALESCE(ie.payload->>'homeowner_status', ie.payload->>'home_ownership') AS homeowner_status,
@@ -215,6 +245,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           COALESCE(ie.payload->'bill_metadata', '{}'::jsonb) AS bill_metadata,
           ie.action IN ('validation_failed', 'malformed', 'error') AS debug_visible
         FROM intake_events ie
+        LEFT JOIN LATERAL (
+          SELECT qie.event_id, qie.payload, qie.occurred_at
+          FROM intake_events qie
+          WHERE qie.event_type = 'homeowner_qualification'
+            AND (
+              qie.original_event_id = ie.event_id OR
+              qie.payload->>'original_event_id' = ie.event_id
+            )
+          ORDER BY qie.occurred_at DESC
+          LIMIT 1
+        ) q ON true
         WHERE ie.opportunity_id IS NULL
           AND ie.event_type = 'homeowner_intake'
       ),

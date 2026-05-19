@@ -45,6 +45,9 @@ export interface OpportunityForMatching {
   battery_interest?: boolean | null
   structure_type?: string | null
   opportunity_score?: number | null
+  qualification_status?: string | null
+  lead_grade?: string | null
+  contractor_summary?: string | null
 }
 
 export interface ContractorMatchScore {
@@ -243,17 +246,29 @@ export async function matchContractors(
   const sql = await getDbReady()
   const { limit = 10, minScore = 30 } = options
 
-  // Fetch opportunity
+  // Fetch opportunity plus canonical qualification intelligence projection when available.
   const oppRows = await sql`
     SELECT
-      id,
-      UPPER(location_state) AS state,
-      battery_candidate AS battery_interest,
-      structure_type,
-      opportunity_score,
-      estimated_system_size_kw
-    FROM network_opportunities
-    WHERE id = ${opportunityId}
+      no.id,
+      UPPER(no.location_state) AS state,
+      COALESCE(
+        (oi.enrichment_payload->'qualification'->>'battery_readiness')::boolean,
+        (oi.enrichment_payload->'qualification'->'matcher_input'->>'battery_interest')::boolean,
+        no.battery_candidate
+      ) AS battery_interest,
+      COALESCE(
+        oi.enrichment_payload->'qualification'->'matcher_input'->>'structure_type',
+        oi.enrichment_payload->'qualification'->>'property_type',
+        no.structure_type
+      ) AS structure_type,
+      no.opportunity_score,
+      no.estimated_system_size_kw,
+      oi.enrichment_payload->'qualification'->>'qualification_status' AS qualification_status,
+      oi.enrichment_payload->'qualification'->>'lead_grade' AS lead_grade,
+      oi.enrichment_payload->'qualification'->>'contractor_summary' AS contractor_summary
+    FROM network_opportunities no
+    LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
+    WHERE no.id = ${opportunityId}
     LIMIT 1
   `
   const opp = (oppRows[0] as OpportunityForMatching | undefined)
@@ -333,7 +348,9 @@ export async function matchContractors(
       ...services.reasons,
       ...performance.reasons,
       ...capacity.reasons,
-    ].filter(r => !r.includes('no_') && !r.includes('does_not') && !r.includes('below') && !r.includes('above'))
+      opp.qualification_status ? `qualification_${opp.qualification_status}` : null,
+      opp.lead_grade ? `lead_grade_${opp.lead_grade}` : null,
+    ].filter((r): r is string => !!r && !r.includes('no_') && !r.includes('does_not') && !r.includes('below') && !r.includes('above'))
 
     const match_concerns = [
       ...sizeFit.reasons.filter(r => r.includes('below') || r.includes('above')),
