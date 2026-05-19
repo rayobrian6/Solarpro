@@ -81,6 +81,43 @@ async function loadSimulated(sql: Awaited<ReturnType<typeof getDbReady>>) {
   return sql`WITH assignment_summary AS (SELECT opportunity_id, COUNT(*)::int AS assignment_count FROM opportunity_assignments GROUP BY opportunity_id), event_summary AS (SELECT opportunity_id, COUNT(*)::int AS event_count, MAX(occurred_at) AS last_event_at FROM network_events GROUP BY opportunity_id) SELECT no.id, no.status, no.source_type, no.source_channel, no.location_city AS city, no.location_state AS state, no.homeowner_name, no.created_at, no.live_at, no.screening_status, no.raw_payload, no.intake_metadata, oi.overall_score, oi.overall_grade, oi.executive_summary, osq.auto_decision, osq.auto_decision_reason, osq.override_decision, osq.override_reason, osq.confidence_score, osq.step10_fail_reasons, COALESCE(asg.assignment_count, 0) AS assignment_count, COALESCE(evt.event_count, 0) AS event_count, evt.last_event_at FROM network_opportunities no LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id LEFT JOIN assignment_summary asg ON asg.opportunity_id = no.id LEFT JOIN event_summary evt ON evt.opportunity_id = no.id WHERE (no.raw_payload->>'simulated' = 'true' OR no.intake_metadata->>'simulated' = 'true' OR no.source_channel = 'simulator') AND no.status <> 'withdrawn' ORDER BY no.created_at DESC LIMIT 100`
 }
 
+async function releaseToMarketplace(sql: Awaited<ReturnType<typeof getDbReady>>, opportunityId: string, adminId: string) {
+  await sql`
+    UPDATE network_opportunities
+    SET status = 'live',
+        screening_status = 'approved',
+        screened_at = COALESCE(screened_at, NOW()),
+        live_at = COALESCE(live_at, NOW()),
+        updated_at = NOW()
+    WHERE id = ${opportunityId}
+  `
+
+  const rows = await sql`
+    SELECT no.id, no.status, no.screening_status, no.live_at, no.location_city AS city, no.location_state AS state,
+           oi.overall_score, oi.overall_grade, oi.market_price,
+           (no.status = 'live' AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')) AS marketplace_ready
+    FROM network_opportunities no
+    LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
+    LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+    WHERE no.id = ${opportunityId}
+    LIMIT 1
+  `
+  const marketplaceReady = rows[0] as Record<string, unknown> | undefined
+
+  await logNetworkEvent({
+    event_type: 'opportunity.released_to_marketplace',
+    event_category: 'opportunity',
+    opportunity_id: opportunityId,
+    admin_user_id: adminId,
+    from_status: 'scored',
+    to_status: 'live',
+    data: { source: 'admin_simulator', simulated: true, marketplace_ready: marketplaceReady?.marketplace_ready === true },
+    triggered_by: 'admin',
+  })
+
+  return marketplaceReady
+}
+
 export async function GET(req: NextRequest) {
   const auth = await requireSuperAdmin(req)
   if (!auth.ok) return auth.response
@@ -131,7 +168,7 @@ export async function POST(req: NextRequest) {
       if (!opportunityId) return jsonError('opportunity_id is required', 400)
       if (action === 'screen') { stage = 'screening_call'; logStage(stage, { opportunityId }); await runScreeningPipeline(opportunityId) }
       if (action === 'score') { stage = 'scoring_call'; logStage(stage, { opportunityId }); await scoreAndPersist(sql, opportunityId, admin.id); await sql`UPDATE network_opportunities SET status = 'scored', screening_status = CASE WHEN screening_status = 'pending' THEN 'approved' ELSE screening_status END, updated_at = NOW() WHERE id = ${opportunityId}` }
-      if (action === 'release') { stage = 'scoring_call'; logStage(stage, { opportunityId }); await scoreAndPersist(sql, opportunityId, admin.id); stage = 'release_update'; await sql`UPDATE network_opportunities SET status = 'live', screening_status = 'approved', live_at = COALESCE(live_at, NOW()), updated_at = NOW() WHERE id = ${opportunityId}` }
+      if (action === 'release') { stage = 'scoring_call'; logStage(stage, { opportunityId }); await scoreAndPersist(sql, opportunityId, admin.id); stage = 'release_update'; const marketplaceReady = await releaseToMarketplace(sql, opportunityId, admin.id); stage = 'response_build'; return NextResponse.json({ success: true, action, marketplace_ready: marketplaceReady, opportunities: await loadSimulated(sql) }) }
       if (action === 'match') { stage = 'matching_call'; logStage(stage, { opportunityId }); const matchResult = await matchContractors(opportunityId, { limit: 10, minScore: 30 }); stage = 'network_events_insert'; await logNetworkEvent({ event_type: 'simulation.match_generated', event_category: 'assignment', opportunity_id: opportunityId, admin_user_id: admin.id, data: { simulated: true, total_eligible: matchResult.total_eligible, returned: matchResult.matches.length }, triggered_by: 'admin' }); stage = 'response_build'; return NextResponse.json({ success: true, action, match_result: matchResult, opportunities: await loadSimulated(sql) }) }
       stage = 'network_events_insert'
       await logNetworkEvent({ event_type: `simulation.${action}`, event_category: 'admin', opportunity_id: opportunityId, admin_user_id: admin.id, data: { simulated: true }, triggered_by: 'admin' })
@@ -163,13 +200,14 @@ export async function POST(req: NextRequest) {
 
     if (body.run_screening) { stage = 'screening_call'; logStage(stage, { opportunityId: id }); await runScreeningPipeline(id) }
     if (body.run_scoring) { stage = 'scoring_call'; logStage(stage, { opportunityId: id }); await scoreAndPersist(sql, id, admin.id) }
-    if (body.release_to_marketplace) { stage = 'scoring_call'; await scoreAndPersist(sql, id, admin.id); stage = 'release_update'; await sql`UPDATE network_opportunities SET status = 'live', screening_status = 'approved', live_at = COALESCE(live_at, NOW()), updated_at = NOW() WHERE id = ${id}` }
+    let marketplaceReady = null
+    if (body.release_to_marketplace) { stage = 'scoring_call'; await scoreAndPersist(sql, id, admin.id); stage = 'release_update'; marketplaceReady = await releaseToMarketplace(sql, id, admin.id) }
     let matchResult = null
     if (body.generate_matches) { stage = 'matching_call'; logStage(stage, { opportunityId: id }); matchResult = await matchContractors(id, { limit: 10, minScore: 30 }) }
 
     stage = 'response_build'
     logStage(stage, { opportunityId: id })
-    return NextResponse.json({ success: true, action, opportunity_id: id, match_result: matchResult, opportunities: await loadSimulated(sql) })
+    return NextResponse.json({ success: true, action, opportunity_id: id, marketplace_ready: marketplaceReady, match_result: matchResult, opportunities: await loadSimulated(sql) })
   } catch (error) {
     console.error('[POST /api/admin/network/simulator]', { stage, error })
     return simulatorError(stage, error)

@@ -246,8 +246,13 @@ export async function matchContractors(
 
   // Fetch opportunity
   const oppRows = await sql`
-    SELECT id, state, battery_interest, structure_type, opportunity_score,
-           scoring_data->>'estimated_system_size_kw' as estimated_system_size_kw
+    SELECT
+      id,
+      UPPER(location_state) AS state,
+      battery_candidate AS battery_interest,
+      structure_type,
+      opportunity_score,
+      estimated_system_size_kw
     FROM network_opportunities
     WHERE id = ${opportunityId}
     LIMIT 1
@@ -404,9 +409,9 @@ export async function isContractorEligible(
   if (!contractor.is_active) return { eligible: false, reason: 'contractor_inactive' }
 
   const oppRows2 = await sql`
-    SELECT state FROM network_opportunities WHERE id = ${opportunityId} LIMIT 1
+    SELECT UPPER(location_state) AS state FROM network_opportunities WHERE id = ${opportunityId} LIMIT 1
   `
-  const opp = oppRows2[0] as { state: string } | undefined
+  const opp = oppRows2[0] as { state: string | null } | undefined
   if (!opp) return { eligible: false, reason: 'opportunity_not_found' }
 
   const served = contractor.service_states ?? []

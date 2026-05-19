@@ -27,7 +27,8 @@ function makeSql() {
     queries.push(q)
     queryValues.push(values)
     if (q.includes('INSERT INTO network_opportunities')) return [{ id: 'sim-opp-1' }]
-    if (q.includes('SELECT * FROM network_opportunities')) return [{ id: 'sim-opp-1', state: 'TX', monthly_bill: 300, source_type: 'homeowner_direct' }]
+    if (q.includes('SELECT * FROM network_opportunities')) return [{ id: 'sim-opp-1', location_state: 'TX', monthly_usage_avg_kwh: 300, source_type: 'homeowner_direct', battery_candidate: true }]
+    if (q.includes('AS marketplace_ready')) return [{ id: 'sim-opp-1', status: 'live', screening_status: 'approved', marketplace_ready: true, city: 'Austin', state: 'TX', overall_score: 88.33, overall_grade: 'A', market_price: 500 }]
     if (q.includes('SELECT no.id, no.status')) return [{ id: 'sim-opp-1', status: 'intake', raw_payload: { simulated: true } }]
     return []
   }) as any
@@ -91,6 +92,9 @@ describe('/api/admin/network/simulator', () => {
     expect(sql.queryValues[intelligenceInsertIndex]).toContain(88.33)
     expect(sql.queries[intelligenceInsertIndex]).toContain('CAST(')
     expect(sql.queries[intelligenceInsertIndex]).toContain('AS text[]')
+    const releaseCreate = await POST(req({ action: 'create', release_to_marketplace: true }))
+    expect(releaseCreate.status).toBe(200)
+    expect(await releaseCreate.json()).toMatchObject({ marketplace_ready: { marketplace_ready: true } })
     expect(sql.queryValues[intelligenceInsertIndex]).toContain('{}')
     expect(sql.queryValues[intelligenceInsertIndex]).toContain('{"high_bill"}')
     expect(sql.queryValues[intelligenceInsertIndex]).not.toContain('[]')
@@ -103,10 +107,17 @@ describe('/api/admin/network/simulator', () => {
     const { POST } = await importRoute()
     await POST(req({ action: 'screen', opportunity_id: 'sim-opp-1' }))
     expect(mockRunScreening).toHaveBeenCalledWith('sim-opp-1')
+    const sql = makeSql(); mockGetDbReady.mockResolvedValue(sql)
     const score = await POST(req({ action: 'score', opportunity_id: 'sim-opp-1' }))
     expect(score.status).toBe(200)
     const release = await POST(req({ action: 'release', opportunity_id: 'sim-opp-1' }))
     expect(release.status).toBe(200)
+    expect(await release.json()).toMatchObject({ success: true, action: 'release', marketplace_ready: { marketplace_ready: true, status: 'live', screening_status: 'approved' } })
+    const releaseUpdate = sql.queries.find((q: string) => q.includes('UPDATE network_opportunities') && q.includes("status = 'live'")) ?? ''
+    expect(releaseUpdate).toContain("screening_status = 'approved'")
+    expect(releaseUpdate).toContain('screened_at = COALESCE(screened_at, NOW())')
+    expect(releaseUpdate).toContain('live_at = COALESCE(live_at, NOW())')
+    expect(mockLogNetworkEvent).toHaveBeenCalledWith(expect.objectContaining({ event_type: 'opportunity.released_to_marketplace', to_status: 'live' }))
     const match = await POST(req({ action: 'match', opportunity_id: 'sim-opp-1' }))
     expect(match.status).toBe(200)
     expect(mockMatchContractors).toHaveBeenCalledWith('sim-opp-1', { limit: 10, minScore: 30 })

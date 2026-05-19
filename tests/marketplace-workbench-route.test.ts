@@ -70,6 +70,11 @@ describe('/api/admin/network/marketplace', () => {
     const listQuery = sql.calls.find((q: string) => q.includes('WITH assignment_summary')) ?? ''
     expect(listQuery).toContain("WHERE no.status = 'live'")
     expect(listQuery).toContain("no.screening_status = 'approved'")
+    expect(listQuery).toContain('no.location_city AS city')
+    expect(listQuery).toContain('no.location_state AS state')
+    expect(listQuery).not.toContain('no.city')
+    expect(listQuery).not.toContain('no.state')
+    expect(listQuery).not.toContain('homeowner_first_name')
   })
 
   it('blocks assignment actions for non-live or unapproved opportunities', async () => {

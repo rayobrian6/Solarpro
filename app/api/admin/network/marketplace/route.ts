@@ -53,8 +53,8 @@ export async function GET(req: NextRequest) {
         GROUP BY opportunity_id
       )
       SELECT
-        no.id, no.homeowner_name, no.homeowner_first_name, no.homeowner_last_name,
-        no.address, no.city, no.state, no.location_city, no.location_state, no.location_zip,
+        no.id, no.homeowner_name,
+        no.address, no.location_city AS city, no.location_state AS state, no.location_city, no.location_state, no.location_zip,
         no.source_type, no.status, no.screening_status, no.live_at, no.created_at,
         no.estimated_project_value, no.asking_price, no.listing_price,
         no.opportunity_score, no.opportunity_grade,
