@@ -21,7 +21,7 @@
 - [x] Run targeted lint/tests for touched files.
 - [x] Run relevant marketplace/simulator regression tests.
 - [x] Run type-check/full regression as appropriate and document known unrelated failures.
-- [ ] Commit and push to dev only.
+- [x] Commit and push to dev only.
 
 ## Report
-- [ ] Provide exact causes, files changed, QA results, and how to test the whole pipeline.
+- [x] Provide exact causes, files changed, QA results, and how to test the whole pipeline.
