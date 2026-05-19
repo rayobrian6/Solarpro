@@ -1,3 +1,5 @@
+import fs from 'fs'
+import path from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockGetDbReady = vi.fn()
@@ -26,13 +28,14 @@ function adminReq(url = 'https://solarpro.test/api/admin/network/intake?page=1&l
   return new Request(url, { method: 'GET', headers: { cookie: 'solarpro_session=test' } })
 }
 
-function makeSql() {
+function makeSql(opts: { failOn?: string; failError?: Error & { code?: string; column?: string; detail?: string } } = {}) {
   const queries: string[] = []
   const values: any[][] = []
   const sql = vi.fn(async (strings: TemplateStringsArray, ...vals: any[]) => {
     const q = strings.join(' ')
     queries.push(q)
     values.push(vals)
+    if (opts.failOn && q.includes(opts.failOn)) throw opts.failError ?? new Error('mock db failure')
     if (q.includes('FROM intake_funnels')) return [{ id: 'funnel-1', campaign_id: 'campaign-1', require_phone: true, require_address: true, is_active: true }]
     if (q.includes('INSERT INTO intake_events')) return []
     if (q.includes('SELECT *, COUNT(*) OVER() AS __total')) return [{
@@ -182,5 +185,63 @@ describe('homeowner intake event-first flow', () => {
     expect(feedQuery).toContain("ie.opportunity_id IS NULL")
     expect(feedQuery).toContain("ie.event_type = 'homeowner_intake'")
     expect(feedQuery).toContain('debug_visible')
+  })
+
+  it('admin intake feed query uses canonical opportunity columns so event-first rows are not blocked by legacy schema names', async () => {
+    const sql = makeSql()
+    mockGetDbReady.mockResolvedValue(sql)
+    const { GET } = await importAdminFeedRoute()
+
+    const res = await GET(adminReq('https://solarpro.test/api/admin/network/intake?page=1&limit=25'))
+    expect(res.status).toBe(200)
+
+    const feedQuery = sql.queries.find((q: string) => q.includes('WITH opportunity_rows AS')) ?? ''
+    const statsQuery = sql.queries.find((q: string) => q.includes('COUNT(*) FILTER')) ?? ''
+
+    expect(feedQuery).toContain('no.location_city AS city')
+    expect(feedQuery).toContain('no.location_state AS state')
+    expect(feedQuery).toContain('COALESCE(no.location_zip, no.zip) AS zip')
+    expect(feedQuery).toContain('no.duplicate_flag AS is_duplicate')
+    expect(feedQuery).toContain('no.duplicate_flag AS is_duplicate_flagged')
+    expect(feedQuery).toContain('no.utility_provider AS utility_name')
+    expect(feedQuery).toContain('no.utility_rate_per_kwh AS electricity_rate_kwh')
+    expect(feedQuery).not.toContain('no.city,')
+    expect(feedQuery).not.toContain('no.state,')
+    expect(feedQuery).not.toContain('no.is_duplicate_flagged')
+    expect(feedQuery).not.toContain('no.utility_name')
+    expect(statsQuery).toContain('no.duplicate_flag AS is_duplicate_flagged')
+    expect(statsQuery).not.toContain('no.is_duplicate_flagged')
+  })
+
+  it('returns stage-aware admin intake feed diagnostics for deployed schema errors', async () => {
+    const err = new Error('column no.city does not exist') as Error & { code?: string; column?: string; detail?: string }
+    err.code = '42703'
+    err.column = 'city'
+    err.detail = 'Missing deployed column'
+    mockGetDbReady.mockResolvedValue(makeSql({ failOn: 'WITH opportunity_rows AS', failError: err }))
+
+    const { GET } = await importAdminFeedRoute()
+    const res = await GET(adminReq('https://solarpro.test/api/admin/network/intake?page=1&limit=25'))
+    expect(res.status).toBe(500)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      success: false,
+      error: 'Intake Feed failed',
+      stage: 'feed_query',
+      code: '42703',
+      message: 'column no.city does not exist',
+      details: { column: 'city', detail: 'Missing deployed column' },
+    })
+    expect(JSON.stringify(json)).not.toMatch(/DATABASE_URL|JWT_SECRET|ghp_/)
+  })
+
+  it('admin Intake Feed UI surfaces API errors instead of silently rendering an empty feed', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'app/admin/network/page.tsx'), 'utf8')
+    const section = source.slice(source.indexOf('function IntakeFeedSection()'), source.indexOf('// ── Enrichment Queue Section'))
+    expect(section).toContain('const [error, setError] = useState<string | null>(null)')
+    expect(section).toContain('if (!res.ok || !data.success)')
+    expect(section).toContain('Intake Feed API error')
+    expect(section).toContain('Unable to load Intake Feed. See the API error above.')
+    expect(section).toContain('!loading && !error && leads.length === 0')
   })
 })

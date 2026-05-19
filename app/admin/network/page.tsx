@@ -1146,6 +1146,7 @@ function IntakeFeedSection() {
   const [leads, setLeads] = useState<IntakeLead[]>([]);
   const [stats, setStats] = useState<IntakeStats>({});
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [channelFilter, setChannelFilter] = useState('');
@@ -1154,19 +1155,30 @@ function IntakeFeedSection() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '25' });
       if (search) params.set('search', search);
       if (sourceFilter) params.set('source_system', sourceFilter);
       if (channelFilter) params.set('source_channel', channelFilter);
       const res = await fetch(`/api/admin/network/intake?${params}`);
-      const data = await res.json();
-      if (data.success) {
-        setLeads(data.opportunities ?? []);
-        setStats(data.stats ?? {});
-        setTotal(data.total ?? 0);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        const stage = data.stage ? ` stage=${data.stage}` : '';
+        const code = data.code ? ` code=${data.code}` : '';
+        const message = data.message || data.error || `HTTP ${res.status}`;
+        throw new Error(`Intake Feed load failed${stage}${code}: ${message}`);
       }
-    } catch (e) { console.error(e); }
+      setLeads(data.opportunities ?? []);
+      setStats(data.stats ?? {});
+      setTotal(data.total ?? 0);
+    } catch (e) {
+      console.error(e);
+      setLeads([]);
+      setStats({});
+      setTotal(0);
+      setError(e instanceof Error ? e.message : 'Intake Feed load failed');
+    }
     finally { setLoading(false); }
   }, [page, search, sourceFilter, channelFilter]);
 
@@ -1205,6 +1217,13 @@ function IntakeFeedSection() {
         <StatCard label="Conversion Rate" value={`${((stats.conversion_rate ?? 0) * 100).toFixed(1)}%`} color="text-green-400" icon={TrendingUp} />
         <StatCard label="Validation Failures" value={`${((stats.validation_failure_rate ?? 0) * 100).toFixed(1)}%`} color={((stats.validation_failure_rate ?? 0) > 0.2) ? 'text-red-400' : 'text-zinc-300'} icon={AlertCircle} />
       </div>
+      {error && (
+        <div className="rounded-xl border border-red-800/50 bg-red-950/30 p-4 text-sm text-red-200">
+          <div className="flex items-center gap-2 font-semibold"><AlertCircle className="h-4 w-4" /> Intake Feed API error</div>
+          <p className="mt-1 font-mono text-xs text-red-300">{error}</p>
+          <p className="mt-2 text-xs text-red-200/70">The public form may still be saving into intake_events; this panel is showing the admin read-path failure instead of silently rendering zero leads.</p>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
@@ -1246,7 +1265,8 @@ function IntakeFeedSection() {
             </tr></thead>
             <tbody className="divide-y divide-zinc-800/50">
               {loading && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Loading…</td></tr>}
-              {!loading && leads.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Inbox className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>No intake leads. Run <code className="text-orange-400 text-xs">POST /api/migrate</code> first.</p></td></tr>}
+              {!loading && !error && leads.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Inbox className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>No intake leads found for the current filters. Public homeowner submissions save as pending-review intake events and should appear here after a successful form submit.</p></td></tr>}
+              {!loading && error && <tr><td colSpan={7} className="px-4 py-12 text-center text-red-300"><AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-60" /><p>Unable to load Intake Feed. See the API error above.</p></td></tr>}
               {!loading && leads.map(lead => (
                 <tr key={lead.id} className="hover:bg-zinc-800/30 transition-colors">
                   <td className="px-4 py-3">

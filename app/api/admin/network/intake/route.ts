@@ -26,25 +26,49 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady } from '@/lib/db-neon';
 import { requireAdminApi } from '@/lib/adminAuth';
 
+type IntakeFeedStage = 'auth' | 'db_connect' | 'request_parse' | 'feed_query' | 'stats_query' | 'today_events_query' | 'top_sources_query' | 'validation_stats_query';
+
+function intakeFeedError(stage: IntakeFeedStage, error: unknown) {
+  const err = error as { message?: string; code?: string; detail?: string; constraint?: string; column?: string };
+  return NextResponse.json({
+    success: false,
+    error: 'Intake Feed failed',
+    stage,
+    message: err?.message ?? String(error),
+    code: err?.code,
+    details: {
+      detail: err?.detail,
+      constraint: err?.constraint,
+      column: err?.column,
+    },
+  }, { status: 500 });
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const admin = await requireAdminApi(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const sql = await getDbReady();
-  const { searchParams } = new URL(req.url);
-
-  const status = searchParams.get('status') || null;
-  const source_system = searchParams.get('source_system') || null;
-  const source_channel = searchParams.get('source_channel') || null;
-  const from = searchParams.get('from') || null;
-  const to = searchParams.get('to') || null;
-  const search = searchParams.get('search') || null;
-  const includeDebug = ['1', 'true', 'yes'].includes((searchParams.get('debug') || '').toLowerCase());
-  const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25')));
-  const offset = (page - 1) * limit;
+  let stage: IntakeFeedStage = 'auth';
 
   try {
+    const admin = await requireAdminApi(req);
+    if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    stage = 'db_connect';
+    const sql = await getDbReady();
+
+    stage = 'request_parse';
+    const { searchParams } = new URL(req.url);
+
+    const status = searchParams.get('status') || null;
+    const source_system = searchParams.get('source_system') || null;
+    const source_channel = searchParams.get('source_channel') || null;
+    const from = searchParams.get('from') || null;
+    const to = searchParams.get('to') || null;
+    const search = searchParams.get('search') || null;
+    const includeDebug = ['1', 'true', 'yes'].includes((searchParams.get('debug') || '').toLowerCase());
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25')));
+    const offset = (page - 1) * limit;
+
+    stage = 'feed_query';
     const feedRows = await sql`
       WITH opportunity_rows AS (
         SELECT
@@ -58,9 +82,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           no.email,
           no.phone,
           no.address_line1,
-          no.city,
-          no.state,
-          no.zip,
+          no.location_city AS city,
+          no.location_state AS state,
+          COALESCE(no.location_zip, no.zip) AS zip,
           no.source_system,
           no.source_channel,
           no.monthly_bill_amount,
@@ -71,13 +95,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           no.utm_term,
           no.gclid,
           no.fbclid,
-          no.is_duplicate_flagged AS is_duplicate,
-          no.is_duplicate_flagged,
+          no.duplicate_flag AS is_duplicate,
+          no.duplicate_flag AS is_duplicate_flagged,
           no.duplicate_score,
           no.duplicate_of_id::text AS duplicate_of_id,
           no.opportunity_score,
           no.opportunity_grade,
-          no.consent_given,
+          false AS consent_given,
           no.created_at,
           no.updated_at,
           eq.status AS enrichment_status,
@@ -86,14 +110,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           eq.utility_status,
           eq.completed_at AS enrichment_completed_at,
           eq.duration_ms AS enrichment_duration_ms,
-          no.peak_sun_hours_daily,
-          no.recommended_system_kw,
-          no.annual_savings_year1,
-          no.estimated_system_cost_net,
-          no.payback_period_years,
-          no.utility_name,
-          no.electricity_rate_kwh,
-          no.net_metering_available,
+          CASE WHEN no.peak_sun_hours_annual IS NOT NULL THEN ROUND((no.peak_sun_hours_annual / 365.0)::numeric, 2) ELSE NULL::numeric END AS peak_sun_hours_daily,
+          no.estimated_system_size_kw AS recommended_system_kw,
+          no.estimated_annual_savings AS annual_savings_year1,
+          no.estimated_project_value AS estimated_system_cost_net,
+          no.estimated_payback_yrs AS payback_period_years,
+          no.utility_provider AS utility_name,
+          no.utility_rate_per_kwh AS electricity_rate_kwh,
+          NULL::boolean AS net_metering_available,
           (SELECT action FROM intake_events WHERE opportunity_id = no.id ORDER BY occurred_at DESC LIMIT 1) AS last_event_action,
           (SELECT occurred_at FROM intake_events WHERE opportunity_id = no.id ORDER BY occurred_at DESC LIMIT 1) AS last_event_at,
           NULL::text AS error_code,
@@ -231,13 +255,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return rest;
     });
 
+    stage = 'stats_query';
     const statsResult = await sql`
       WITH combined AS (
         SELECT
           no.source_system,
           no.source_channel,
           no.created_at,
-          no.is_duplicate_flagged,
+          no.duplicate_flag AS is_duplicate_flagged,
           no.duplicate_score,
           'created'::text AS action,
           false AS debug_visible
@@ -272,6 +297,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       FROM combined
     `;
 
+    stage = 'today_events_query';
     const todayEvents = await sql`
       SELECT action, COUNT(*) AS count
       FROM intake_events
@@ -280,6 +306,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ORDER BY count DESC
     `;
 
+    stage = 'top_sources_query';
     const topSources = await sql`
       WITH combined AS (
         SELECT source_system, source_channel, created_at, false AS debug_visible
@@ -305,6 +332,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       LIMIT 10
     `;
 
+    stage = 'validation_stats_query';
     const validationStats = await sql`
       SELECT
         COUNT(*) AS total_events,
@@ -348,7 +376,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       },
     });
   } catch (err) {
-    console.error('[GET /api/admin/network/intake] Error:', err);
-    return NextResponse.json({ success: false, error: (err as Error).message }, { status: 500 });
+    console.error(`[GET /api/admin/network/intake] stage=${stage} Error:`, err);
+    return intakeFeedError(stage, err);
   }
 }
