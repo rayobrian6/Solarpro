@@ -1,18 +1,18 @@
-# DECOUPLE PRODUCTION CALCULATION FROM PROJECT DEPENDENCY
+# Admin Intake Funnels Management
 
-## Completed
-- [x] Add `SystemDefinition` and `LocationInput` types to `types/index.ts`
-- [x] Add `calculateProductionFromDefinition()` to `lib/pvwatts.ts`
-- [x] Rewrite `app/api/production/route.ts` with two-shape API (ephemeral + project-backed)
-- [x] Modify `components/design/DesignStudio.tsx`
-  - [x] Add `buildSystemDefinition()` — builds SystemDefinition from current UI state
-  - [x] Add `buildLocationInput()` — builds LocationInput from mapCenter + project context
-  - [x] Update `calculateProduction()` to send ephemeral shape (`systemDefinition + location`)
-  - [x] Refactor `buildLayout()` to reuse `buildSystemDefinition()` (no duplication)
-  - [x] Add "Unsaved Design" amber badge in toolbar
-- [x] Modify `components/design/DesignSidebar.tsx`
-  - [x] Make `project` prop optional
-  - [x] Remove `panels.length === 0` from Calculate button disabled condition
-  - [x] Conditionally render Generate Proposal link only when `project?.id` exists
-- [x] TypeScript check — 0 errors
-- [x] Commit + push to master
+## Verify current state
+- [x] Inspect existing Admin Network page and current local diffs before editing.
+- [x] Confirm previously created funnel helper/API/migration files are present and aligned with canonical intake infrastructure.
+
+## Implement operational UI
+- [x] Add reusable funnel URL/UTM helpers without creating duplicate intake systems.
+- [x] Add an Intake Funnels section/tab/card in Admin Network Control Center.
+- [x] Show canonical funnel name, type, status, URL, timestamps, and campaign/source metadata where available.
+- [x] Add Open Funnel, Copy Link, Copy Embed URL, Copy UTM-ready URL, and campaign metadata actions.
+
+## Tests and QA
+- [x] Add tests for admin guard/static route integrity, canonical listing, URL integrity, copy/open action wiring, and UTM generation.
+- [x] Run focused tests, targeted lint, and practical type checks for touched files.
+
+## Report
+- [x] Report files changed, reused systems, surfaced funnel infrastructure, attribution support, QA results, and unrelated failures.

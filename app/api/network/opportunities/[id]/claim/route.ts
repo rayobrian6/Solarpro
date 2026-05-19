@@ -38,7 +38,102 @@ export async function POST(req: NextRequest, { params }: Params) {
     `;
 
     if (!oppRows.length) {
-      return NextResponse.json({ error: 'Opportunity not found' }, { status: 404 });
+      const assignmentRows = await sql`
+        SELECT
+          oa.id AS assignment_id,
+          oa.status AS assignment_status,
+          no.id AS opportunity_id,
+          no.status AS opportunity_status,
+          no.asking_price
+        FROM opportunity_assignments oa
+        JOIN network_opportunities no ON no.id = oa.opportunity_id
+        WHERE no.id = ${id}
+          AND oa.contractor_id = ${user.id}
+          AND oa.status IN ('offered','viewed')
+          AND no.status IN ('live','claimed')
+          AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
+        LIMIT 1
+      `;
+
+      if (!assignmentRows.length) {
+        return NextResponse.json({ error: 'Opportunity not found' }, { status: 404 });
+      }
+
+      const assignment = assignmentRows[0] as Record<string, unknown>;
+      const updated = await sql`
+        UPDATE opportunity_assignments
+           SET status = 'claimed',
+               claimed_at = NOW(),
+               claim_amount = ${assignment.asking_price as number | null},
+               updated_at = NOW()
+         WHERE id = ${assignment.assignment_id as string}
+           AND contractor_id = ${user.id}
+           AND status IN ('offered','viewed')
+        RETURNING *
+      `;
+
+      if (!updated.length) {
+        return NextResponse.json({ error: 'This opportunity is no longer available.' }, { status: 409 });
+      }
+
+      await sql`
+        UPDATE network_opportunities
+           SET status = 'claimed', claimed_at = NOW()
+         WHERE id = ${id}
+           AND status = 'live'
+      `;
+
+      const fullOpp = await sql`
+        SELECT
+          no.id,
+          no.source_type AS source,
+          no.status,
+          NULL::text AS site_name,
+          no.address,
+          no.location_city AS city,
+          no.location_state AS state_code,
+          no.location_zip AS zip,
+          no.estimated_system_size_kw AS system_size_kw,
+          no.annual_usage_kwh AS annual_kwh,
+          no.monthly_usage_avg_kwh AS monthly_kwh_avg,
+          no.utility_provider AS utility_name,
+          no.utility_rate_per_kwh,
+          no.estimated_project_value AS estimated_system_cost,
+          no.estimated_payback_yrs,
+          no.roof_material,
+          no.roof_pitch,
+          no.roof_condition,
+          no.roof_age_years,
+          no.stories,
+          no.structure_type,
+          no.roof_usable_pct AS usable_roof_pct,
+          no.battery_candidate,
+          no.steep_roof_flag AS steep_roof,
+          (COALESCE(no.ahj_complexity_score, 0) >= 70) AS complex_ahj,
+          no.ahj_name,
+          NULL::text AS equipment_ecosystem,
+          no.asking_price,
+          no.screening_notes AS listing_notes,
+          no.expires_at,
+          no.created_at,
+          'SolarPro'::text AS creator_company,
+          oa.id AS claim_id,
+          oa.status AS claim_status,
+          oa.contractor_id AS claimed_by_user_id
+        FROM network_opportunities no
+        JOIN opportunity_assignments oa
+          ON oa.opportunity_id = no.id
+         AND oa.contractor_id = ${user.id}
+        WHERE no.id = ${id}
+        LIMIT 1
+      `;
+
+      return NextResponse.json({
+        success: true,
+        claim: updated[0],
+        opportunity: fullOpp[0],
+        message: "You have exclusively claimed this assigned SolarPro Network opportunity. The homeowner's full address is now visible.",
+      }, { status: 201 });
     }
 
     const opp = oppRows[0] as Record<string, unknown>;
