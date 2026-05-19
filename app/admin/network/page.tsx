@@ -10,7 +10,7 @@ import {
   XCircle, Play, Eye, Star, Target, Layers,
   Inbox, Cpu, Webhook, RotateCcw, StopCircle,
   CheckCheck, Loader2, Ban, FlaskConical,
-  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink,
+  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink, ClipboardList,
 } from 'lucide-react';
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -58,6 +58,45 @@ interface AnalyticsData {
   geography?: Array<Record<string, unknown>>;
   quality?: Record<string, unknown>;
   trend?: Array<Record<string, unknown>>;
+}
+
+interface MarketplaceOpportunity {
+  id: string;
+  homeowner_name?: string | null;
+  homeowner_first_name?: string | null;
+  homeowner_last_name?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  location_city?: string | null;
+  location_state?: string | null;
+  location_zip?: string | null;
+  source_type?: string | null;
+  status: string;
+  screening_status?: string | null;
+  live_at?: string | null;
+  created_at: string;
+  estimated_project_value?: number | null;
+  asking_price?: number | null;
+  listing_price?: number | null;
+  opportunity_score?: number | null;
+  opportunity_grade?: string | null;
+  overall_score?: number | null;
+  overall_grade?: string | null;
+  market_price?: number | null;
+  executive_summary?: string | null;
+  risk_flags?: string[] | null;
+  opportunity_highlights?: string[] | null;
+  total_eligible_contractors?: number | null;
+  top_match_score?: number | null;
+  auto_decision?: string | null;
+  override_decision?: string | null;
+  confidence_score?: number | null;
+  assignment_count?: number | null;
+  active_offer_count?: number | null;
+  claimed_or_active_count?: number | null;
+  current_assignment_status?: string | null;
+  last_offered_at?: string | null;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -742,6 +781,7 @@ function HealthSection({ health }: { health: HealthData | null }) {
 
 const TABS = [
   { id: 'live',        label: 'Live Feed',          icon: Zap },
+  { id: 'marketplace', label: 'Marketplace Workbench', icon: ClipboardList },
   { id: 'screening',   label: 'Screening Queue',    icon: Shield },
   { id: 'analytics',   label: 'Campaign Intel',     icon: BarChart3 },
   { id: 'matching',    label: 'Contractor Match',   icon: Users },
@@ -897,6 +937,7 @@ export default function NetworkControlCenter() {
             loading={loading}
           />
         )}
+        {activeTab === 'marketplace' && <MarketplaceWorkbenchSection />}
         {activeTab === 'screening' && <ScreeningSection />}
         {activeTab === 'analytics' && <AnalyticsSection data={analytics} />}
         {activeTab === 'matching' && (
@@ -1494,6 +1535,132 @@ function WebhookLogSection() {
             </tbody>
           </table>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+function formatCurrency(value?: number | null) {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function MarketplaceWorkbenchSection() {
+  const [items, setItems] = useState<MarketplaceOpportunity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const loadMarketplace = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/network/marketplace?limit=50', { cache: 'no-store' });
+      const data = await res.json();
+      setItems(data.opportunities ?? []);
+    } catch (e) {
+      setResult({ error: String(e) });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadMarketplace(); }, [loadMarketplace]);
+
+  async function runWorkbenchAction(opportunityId: string, action: 'match_contractors' | 'create_assignments' | 'pause') {
+    if (action === 'pause' && !confirm('Pause/remove this opportunity from the live marketplace?')) return;
+    if (action === 'create_assignments' && !confirm('Create assignment offers for the top matched contractors?')) return;
+    setBusy(`${opportunityId}:${action}`);
+    setResult(null);
+    try {
+      const res = await fetch('/api/admin/network/marketplace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunity_id: opportunityId, action, limit: 10, min_score: 30 }),
+      });
+      const data = await res.json();
+      setResult(data);
+      await loadMarketplace();
+    } catch (e) {
+      setResult({ error: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Marketplace Workbench</h2>
+          <p className="mt-1 text-xs text-zinc-500">Live, screening-approved network opportunities only. Assignment actions use the canonical contractor matcher.</p>
+        </div>
+        <button onClick={loadMarketplace} disabled={loading} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 hover:text-white disabled:opacity-50">
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+        </button>
+      </div>
+
+      {result && (
+        <div className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
+          <div className="font-semibold">{result.error || result.success === false ? 'Workbench action failed' : 'Workbench action complete'}</div>
+          <div className="mt-1 font-mono text-[11px] text-zinc-300">
+            {result.error ? String(result.error) : `${String(result.action ?? 'action')} · eligible ${String(result.total_eligible ?? '—')} · assignments ${String(result.assignments_created ?? '—')}`}
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-xl border border-zinc-700/50">
+        <table className="w-full text-sm">
+          <thead><tr className="bg-zinc-800/80 border-b border-zinc-700/50">
+            <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400">Opportunity</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400">Location</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400">Score / Price</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400">Screening</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400">Assignment</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400">Live</th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-zinc-400">Actions</th>
+          </tr></thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={7} className="py-12 text-center text-zinc-500">Loading marketplace workbench…</td></tr>
+            ) : items.length === 0 ? (
+              <tr><td colSpan={7} className="py-12 text-center text-zinc-500">No live screening-approved marketplace opportunities.</td></tr>
+            ) : items.map(opp => {
+              const name = opp.homeowner_name || `${opp.homeowner_first_name ?? ''} ${opp.homeowner_last_name ?? ''}`.trim() || `Opportunity ${opp.id.slice(0, 8)}`;
+              const city = opp.city || opp.location_city || 'Unknown city';
+              const state = opp.state || opp.location_state || '—';
+              const score = opp.overall_score ?? opp.opportunity_score;
+              const grade = opp.overall_grade ?? opp.opportunity_grade;
+              const price = opp.market_price ?? opp.asking_price ?? opp.listing_price;
+              const assigned = Number(opp.active_offer_count ?? 0) > 0 || Number(opp.claimed_or_active_count ?? 0) > 0;
+              return (
+                <tr key={opp.id} className="border-b border-zinc-800 align-top hover:bg-zinc-800/40">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-white">{name}</div>
+                    <div className="mt-1 text-xs text-zinc-500">{opp.source_type?.replace(/_/g, ' ') ?? 'unknown source'}</div>
+                    <button onClick={() => setExpanded(expanded === opp.id ? null : opp.id)} className="mt-2 inline-flex items-center gap-1 text-[11px] text-blue-300 hover:text-blue-200">
+                      <Eye className="h-3 w-3" /> {expanded === opp.id ? 'Hide details' : 'View details'}
+                    </button>
+                    {expanded === opp.id && (
+                      <div className="mt-3 max-w-md rounded-lg border border-zinc-800 bg-zinc-950 p-3 text-xs text-zinc-400">
+                        {opp.executive_summary ? <p>{opp.executive_summary}</p> : <p>No explainability summary available yet.</p>}
+                        {opp.opportunity_highlights?.length ? <div className="mt-2 text-emerald-300">Highlights: {opp.opportunity_highlights.join(', ')}</div> : null}
+                        {opp.risk_flags?.length ? <div className="mt-1 text-amber-300">Risks: {opp.risk_flags.join(', ')}</div> : null}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-300"><div>{city}, {state}</div><div className="mt-1 text-xs text-zinc-500">{opp.address ? 'Address on file' : 'No address shown'}</div></td>
+                  <td className="px-4 py-3"><div className="flex items-center gap-2"><GradeBadge grade={grade ?? undefined} /><span className="text-xs text-zinc-400">{score != null ? Math.round(Number(score)) : 'No score'}</span></div><div className="mt-1 text-xs text-zinc-500">Value {formatCurrency(opp.estimated_project_value)} · Price {formatCurrency(price)}</div>{score == null && <div className="mt-1 text-[11px] text-amber-300">No score available</div>}</td>
+                  <td className="px-4 py-3"><span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300">{opp.screening_status ?? opp.auto_decision ?? 'approved'}</span><div className="mt-1 text-xs text-zinc-500">Confidence {opp.confidence_score ? `${Math.round(Number(opp.confidence_score))}%` : '—'}</div></td>
+                  <td className="px-4 py-3"><div className={`text-xs ${assigned ? 'text-emerald-300' : 'text-zinc-400'}`}>{assigned ? (opp.current_assignment_status ?? 'offered') : 'Unassigned'}</div><div className="mt-1 text-xs text-zinc-500">Offers {opp.active_offer_count ?? 0} · Total {opp.assignment_count ?? 0}</div>{assigned && <div className="mt-1 text-[11px] text-amber-300">Already assigned</div>}</td>
+                  <td className="px-4 py-3 text-xs text-zinc-500">{opp.live_at ? new Date(opp.live_at).toLocaleDateString() : '—'}</td>
+                  <td className="px-4 py-3"><div className="flex flex-col gap-1.5"><button onClick={() => runWorkbenchAction(opp.id, 'match_contractors')} disabled={!!busy} className="rounded border border-blue-500/30 px-2 py-1 text-[11px] font-semibold text-blue-300 hover:bg-blue-500/10 disabled:opacity-40">{busy === `${opp.id}:match_contractors` ? '…' : 'Match contractors'}</button><button onClick={() => runWorkbenchAction(opp.id, 'create_assignments')} disabled={!!busy || assigned} className="rounded border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-40">{busy === `${opp.id}:create_assignments` ? '…' : 'Assign top matches'}</button><button onClick={() => runWorkbenchAction(opp.id, 'pause')} disabled={!!busy} className="rounded border border-amber-500/30 px-2 py-1 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/10 disabled:opacity-40">{busy === `${opp.id}:pause` ? '…' : 'Pause live'}</button></div></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );

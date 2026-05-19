@@ -85,6 +85,21 @@ export async function POST(req: NextRequest, { params }: Params) {
     const body = await req.json().catch(() => ({}))
     const { limit = 10, min_score = 30, create_assignments = false } = body
 
+    if (create_assignments) {
+      const gateRows = await sql`
+        SELECT no.status, no.screening_status, osq.auto_decision, osq.override_decision
+        FROM network_opportunities no
+        LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+        WHERE no.id = ${id}
+        LIMIT 1
+      `
+      const gate = gateRows[0] as Record<string, unknown> | undefined
+      const approved = gate?.screening_status === 'approved' || gate?.auto_decision === 'pass' || gate?.override_decision === 'pass'
+      if (!gate || gate.status !== 'live' || !approved) {
+        return NextResponse.json({ error: 'Assignments require a live opportunity with approved/passed screening' }, { status: 409 })
+      }
+    }
+
     // Run matching engine
     const result = await matchContractors(id, { limit, minScore: min_score })
 
