@@ -18,6 +18,10 @@ import { runScreeningPipeline } from '@/lib/network/screeningPipeline'
 import { logNetworkEvent } from '@/lib/network/attributionTracker'
 import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunityScorer'
 
+function toPostgresTextArray(values: string[]) {
+  return `{${values.map((value) => `\"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}\"`).join(',')}}`
+}
+
 // ── GET: Screening queue ────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   try {
@@ -186,7 +190,7 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
       ${scored.property.score}, ${scored.solar.score},
       ${scored.financial.score}, ${scored.market.score}, ${scored.intent.score},
       ${pricing.price}, ${pricing.min}, ${pricing.max}, ${pricing.rationale},
-      ${JSON.stringify(scored.risk_flags)}, ${JSON.stringify(scored.opportunity_highlights)},
+      CAST(${toPostgresTextArray(scored.risk_flags)} AS text[]), CAST(${toPostgresTextArray(scored.opportunity_highlights)} AS text[]),
       ${scored.executive_summary}
     )
     ON CONFLICT (opportunity_id) DO UPDATE SET
