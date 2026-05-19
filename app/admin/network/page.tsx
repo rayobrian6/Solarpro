@@ -1581,6 +1581,38 @@ function formatCurrency(value?: number | null) {
   return `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
+async function parseAdminJsonResponse(res: Response, fallbackError: string): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  let data: Record<string, unknown>;
+  try {
+    data = text ? JSON.parse(text) as Record<string, unknown> : {};
+  } catch {
+    data = { success: false, error: 'Admin API returned non-JSON response', stage: 'response_parse', message: text.slice(0, 500) };
+  }
+
+  if (!res.ok || data.success === false) {
+    return {
+      ...data,
+      success: false,
+      error: String(data.error ?? fallbackError),
+      http_status: res.status,
+      http_status_text: res.statusText,
+    };
+  }
+
+  return data;
+}
+
+function marketplaceReadySummary(value: unknown) {
+  if (!value || typeof value !== 'object') return null;
+  const ready = value as Record<string, unknown>;
+  const gate = ready.marketplace_ready === true ? 'ready for Marketplace Workbench' : 'NOT ready for Marketplace Workbench';
+  const location = [ready.city, ready.state].filter(Boolean).join(', ') || 'unknown location';
+  const score = ready.overall_score != null ? `score=${Math.round(Number(ready.overall_score))}` : 'score=—';
+  const grade = ready.overall_grade ? `grade=${String(ready.overall_grade)}` : 'grade=—';
+  return `${gate} · status=${String(ready.status ?? '—')} · screening=${String(ready.screening_status ?? '—')} · ${location} · ${score} · ${grade}`;
+}
+
 
 function SimulatorSection() {
   const [items, setItems] = useState<SimulatedOpportunity[]>([]);
@@ -1597,9 +1629,12 @@ function SimulatorSection() {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/network/simulator', { cache: 'no-store' });
-      const data = await res.json();
-      setItems(data.opportunities ?? []);
-      if (!data.success && data.error) setResult(data);
+      const data = await parseAdminJsonResponse(res, 'Failed to load simulated opportunities');
+      if (data.success === false) {
+        setResult(data);
+        return;
+      }
+      setItems((data.opportunities as SimulatedOpportunity[] | undefined) ?? []);
     } catch (e) { setResult({ error: String(e) }); }
     finally { setLoading(false); }
   }, []);
@@ -1618,15 +1653,9 @@ function SimulatorSection() {
       const res = await fetch('/api/admin/network/simulator', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       });
-      const text = await res.text();
-      let data: Record<string, unknown>;
-      try {
-        data = text ? JSON.parse(text) as Record<string, unknown> : {};
-      } catch {
-        data = { success: false, error: 'Simulator returned non-JSON response', stage: 'response_parse', message: text.slice(0, 500) };
-      }
+      const data = await parseAdminJsonResponse(res, 'Simulator action failed');
       setResult(data);
-      setItems((data.opportunities as SimulatedOpportunity[] | undefined) ?? []);
+      if (data.success !== false) setItems((data.opportunities as SimulatedOpportunity[] | undefined) ?? []);
     } catch (e) { setResult({ error: String(e) }); }
     finally { setBusy(null); }
   }
@@ -1658,9 +1687,12 @@ function SimulatorSection() {
       {result && (
         <div className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
           <div className="font-semibold">{result.error ? String(result.error) : `Action ${String(result.action ?? 'complete')} · opportunity ${String(result.opportunity_id ?? '')}`}</div>
-          {(result.stage || result.code || result.message) && (
+          {marketplaceReadySummary(result.marketplace_ready) && (
+            <div className="mt-1 font-mono text-[11px] text-zinc-200">marketplace_ready={marketplaceReadySummary(result.marketplace_ready)}</div>
+          )}
+          {(result.stage || result.code || result.message || result.http_status) && (
             <div className="mt-1 font-mono text-[11px] text-zinc-300">
-              {result.stage ? `stage=${String(result.stage)} ` : ''}{result.code ? `code=${String(result.code)} ` : ''}{result.message ? `message=${String(result.message)}` : ''}
+              {result.http_status ? `http=${String(result.http_status)} ` : ''}{result.stage ? `stage=${String(result.stage)} ` : ''}{result.code ? `code=${String(result.code)} ` : ''}{result.message ? `message=${String(result.message)}` : ''}
             </div>
           )}
         </div>
@@ -1691,10 +1723,15 @@ function MarketplaceWorkbenchSection() {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/network/marketplace?limit=50', { cache: 'no-store' });
-      const data = await res.json();
-      setItems(data.opportunities ?? []);
+      const data = await parseAdminJsonResponse(res, 'Failed to load Marketplace Workbench');
+      if (data.success === false) {
+        setResult({ ...data, action: 'load_marketplace' });
+        return;
+      }
+      setResult(null);
+      setItems((data.opportunities as MarketplaceOpportunity[] | undefined) ?? []);
     } catch (e) {
-      setResult({ error: String(e) });
+      setResult({ error: String(e), action: 'load_marketplace' });
     } finally {
       setLoading(false);
     }
@@ -1713,9 +1750,9 @@ function MarketplaceWorkbenchSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ opportunity_id: opportunityId, action, limit: 10, min_score: 30 }),
       });
-      const data = await res.json();
+      const data = await parseAdminJsonResponse(res, 'Workbench action failed');
       setResult(data);
-      await loadMarketplace();
+      if (data.success !== false) await loadMarketplace();
     } catch (e) {
       setResult({ error: String(e) });
     } finally {
@@ -1737,9 +1774,11 @@ function MarketplaceWorkbenchSection() {
 
       {result && (
         <div className={`rounded-xl border p-3 text-xs ${result.error || result.success === false ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'}`}>
-          <div className="font-semibold">{result.error || result.success === false ? 'Workbench action failed' : 'Workbench action complete'}</div>
+          <div className="font-semibold">{result.error || result.success === false ? 'Marketplace Workbench failed' : 'Workbench action complete'}</div>
           <div className="mt-1 font-mono text-[11px] text-zinc-300">
-            {result.error ? String(result.error) : `${String(result.action ?? 'action')} · eligible ${String(result.total_eligible ?? '—')} · assignments ${String(result.assignments_created ?? '—')}`}
+            {result.error
+              ? `${String(result.action ?? 'action')} · ${String(result.error)}${result.http_status ? ` · http=${String(result.http_status)}` : ''}${result.stage ? ` · stage=${String(result.stage)}` : ''}${result.message ? ` · message=${String(result.message)}` : ''}`
+              : `${String(result.action ?? 'action')} · eligible ${String(result.total_eligible ?? '—')} · assignments ${String(result.assignments_created ?? '—')}`}
           </div>
         </div>
       )}
