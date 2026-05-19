@@ -16,6 +16,7 @@ import { getDbReady } from '@/lib/db-neon'
 import { requireAdminApi } from '@/lib/adminAuth'
 import { runScreeningPipeline } from '@/lib/network/screeningPipeline'
 import { logNetworkEvent } from '@/lib/network/attributionTracker'
+import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunityScorer'
 
 // ── GET: Screening queue ────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
@@ -137,6 +138,78 @@ export async function POST(req: NextRequest) {
   }
 }
 
+
+async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbReady>>, opportunity_id: string, adminId: string) {
+  const rows = await sql`SELECT * FROM network_opportunities WHERE id = ${opportunity_id} LIMIT 1`
+  const opp = rows[0] as Record<string, unknown> | undefined
+  if (!opp) throw new Error('Opportunity not found')
+
+  const scored = scoreOpportunity({
+    monthly_bill: opp.monthly_bill as number,
+    state: (opp.state ?? opp.location_state) as string,
+    roof_age_years: opp.roof_age_years as number,
+    structure_type: opp.structure_type as string,
+    usable_roof_pct: (opp.usable_roof_pct ?? opp.roof_usable_pct) as number,
+    stories: opp.stories as number,
+    source_type: opp.source_type as string,
+    peak_sun_hours: opp.peak_sun_hours_annual as number,
+    estimated_system_size_kw: opp.estimated_system_size_kw as number,
+    annual_usage_kwh: opp.annual_usage_kwh as number,
+    battery_interest: (opp.battery_interest ?? opp.battery_candidate) as boolean,
+    avg_rate_kwh: opp.utility_rate_per_kwh as number,
+    net_metering: opp.net_metering_type ? true : null,
+  })
+  const pricing = scoreToListingPrice(scored.overall_score, scored.overall_grade)
+  const networkOpportunityGrade = ['A+', 'A', 'B', 'C'].includes(scored.overall_grade) ? scored.overall_grade : null
+
+  await sql`
+    UPDATE network_opportunities SET
+      opportunity_score = ${scored.overall_score},
+      opportunity_grade = ${networkOpportunityGrade},
+      listing_price = ${pricing.price},
+      asking_price = COALESCE(asking_price, ${pricing.price}),
+      scoring_data = ${JSON.stringify(scored)},
+      scored_at = COALESCE(scored_at, NOW()),
+      updated_at = NOW()
+    WHERE id = ${opportunity_id}
+  `
+
+  await sql`
+    INSERT INTO opportunity_intelligence (
+      opportunity_id, overall_score, overall_grade, scored_by,
+      property_score, solar_score, financial_score, market_score, intent_score,
+      market_price, price_min, price_max, pricing_rationale,
+      risk_flags, opportunity_highlights, executive_summary
+    ) VALUES (
+      ${opportunity_id}, ${scored.overall_score}, ${scored.overall_grade}, ${adminId},
+      ${scored.property.score}, ${scored.solar.score},
+      ${scored.financial.score}, ${scored.market.score}, ${scored.intent.score},
+      ${pricing.price}, ${pricing.min}, ${pricing.max}, ${pricing.rationale},
+      ${JSON.stringify(scored.risk_flags)}, ${JSON.stringify(scored.opportunity_highlights)},
+      ${scored.executive_summary}
+    )
+    ON CONFLICT (opportunity_id) DO UPDATE SET
+      overall_score = EXCLUDED.overall_score,
+      overall_grade = EXCLUDED.overall_grade,
+      scored_by = EXCLUDED.scored_by,
+      property_score = EXCLUDED.property_score,
+      solar_score = EXCLUDED.solar_score,
+      financial_score = EXCLUDED.financial_score,
+      market_score = EXCLUDED.market_score,
+      intent_score = EXCLUDED.intent_score,
+      market_price = EXCLUDED.market_price,
+      price_min = EXCLUDED.price_min,
+      price_max = EXCLUDED.price_max,
+      pricing_rationale = EXCLUDED.pricing_rationale,
+      risk_flags = EXCLUDED.risk_flags,
+      opportunity_highlights = EXCLUDED.opportunity_highlights,
+      executive_summary = EXCLUDED.executive_summary,
+      updated_at = NOW()
+  `
+
+  return { scored, pricing }
+}
+
 // ── PATCH: Override screening decision ─────────────────────────────────────
 export async function PATCH(req: NextRequest) {
   try {
@@ -146,20 +219,82 @@ export async function PATCH(req: NextRequest) {
     const sql = await getDbReady()
 
     const body = await req.json()
-    const { opportunity_id, decision, reason } = body as {
+    const { opportunity_id, action, decision, reason } = body as {
       opportunity_id: string
-      decision: 'pass' | 'fail' | 'hold'
-      reason: string
+      action?: 'approve' | 'reject' | 'request_more_info' | 'release_to_marketplace'
+      decision?: 'pass' | 'fail' | 'hold'
+      reason?: string
     }
 
-    if (!opportunity_id || !decision) {
-      return NextResponse.json({ error: 'opportunity_id and decision are required' }, { status: 400 })
+    if (!opportunity_id) {
+      return NextResponse.json({ error: 'opportunity_id is required' }, { status: 400 })
     }
 
-    // Update screening queue
+    const normalizedAction = action ?? (
+      decision === 'pass' ? 'approve' :
+      decision === 'fail' ? 'reject' :
+      decision === 'hold' ? 'request_more_info' : undefined
+    )
+
+    if (!normalizedAction) {
+      return NextResponse.json({ error: 'action is required' }, { status: 400 })
+    }
+
+    const oppRows = await sql`
+      SELECT no.id, no.status, no.screening_status, osq.auto_decision, osq.override_decision
+      FROM network_opportunities no
+      LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+      WHERE no.id = ${opportunity_id}
+      LIMIT 1
+    `
+    const opp = oppRows[0] as Record<string, unknown> | undefined
+    if (!opp) return NextResponse.json({ error: 'Opportunity not found' }, { status: 404 })
+
+    let newStatus = String(opp.status ?? 'screening')
+    let screeningStatus = String(opp.screening_status ?? 'pending')
+    let overrideDecision: 'pass' | 'fail' | 'hold' | null = null
+    let eventType = 'screening.override'
+    let responsePayload: Record<string, unknown> = {}
+
+    if (normalizedAction === 'approve') {
+      overrideDecision = 'pass'
+      screeningStatus = 'approved'
+      newStatus = 'scored'
+      await scoreAndPersistOpportunity(sql, opportunity_id, admin.id)
+      responsePayload = { action: normalizedAction, screening_status: screeningStatus, new_status: newStatus }
+    } else if (normalizedAction === 'reject') {
+      overrideDecision = 'fail'
+      screeningStatus = 'rejected'
+      newStatus = 'rejected'
+      responsePayload = { action: normalizedAction, screening_status: screeningStatus, new_status: newStatus }
+    } else if (normalizedAction === 'request_more_info') {
+      overrideDecision = 'hold'
+      screeningStatus = 'escalated'
+      newStatus = 'screening'
+      responsePayload = { action: normalizedAction, screening_status: 'needs_more_info', stored_screening_status: screeningStatus, new_status: newStatus }
+    } else if (normalizedAction === 'release_to_marketplace') {
+      const approved = opp.screening_status === 'approved' || opp.override_decision === 'pass' || opp.auto_decision === 'pass'
+      if (!approved) {
+        return NextResponse.json({ error: 'Opportunity must be approved by screening before marketplace release' }, { status: 409 })
+      }
+      const { scored, pricing } = await scoreAndPersistOpportunity(sql, opportunity_id, admin.id)
+      overrideDecision = 'pass'
+      screeningStatus = 'approved'
+      newStatus = 'live'
+      eventType = 'opportunity.published'
+      responsePayload = {
+        action: normalizedAction,
+        screening_status: screeningStatus,
+        new_status: newStatus,
+        score: scored.overall_score,
+        grade: scored.overall_grade,
+        market_price: pricing.price,
+      }
+    }
+
     await sql`
       UPDATE opportunity_screening_queue SET
-        override_decision = ${decision},
+        override_decision = ${overrideDecision},
         override_by       = ${admin.id},
         override_reason   = ${reason ?? null},
         override_at       = NOW(),
@@ -167,26 +302,31 @@ export async function PATCH(req: NextRequest) {
       WHERE opportunity_id = ${opportunity_id}
     `
 
-    // Update opportunity status based on override
-    const newStatus = decision === 'pass' ? 'scored' :
-                      decision === 'fail' ? 'rejected' : 'screening'
-
     await sql`
-      UPDATE network_opportunities SET status = ${newStatus}, updated_at = NOW()
+      UPDATE network_opportunities SET
+        status = ${newStatus},
+        screening_status = ${screeningStatus},
+        screened_by_admin_id = ${admin.id},
+        screening_notes = ${reason ?? null},
+        screened_at = COALESCE(screened_at, NOW()),
+        live_at = CASE WHEN ${newStatus} = 'live' THEN COALESCE(live_at, NOW()) ELSE live_at END,
+        expires_at = CASE WHEN ${newStatus} = 'live' THEN GREATEST(expires_at, NOW() + INTERVAL '30 days') ELSE expires_at END,
+        updated_at = NOW()
       WHERE id = ${opportunity_id}
     `
 
     await logNetworkEvent({
-      event_type: 'screening.override',
-      event_category: 'screening',
+      event_type: eventType,
+      event_category: normalizedAction === 'release_to_marketplace' ? 'opportunity' : 'screening',
       opportunity_id,
       admin_user_id: admin.id,
-      data: { decision, reason, new_status: newStatus },
+      data: { action: normalizedAction, reason, ...responsePayload },
+      from_status: String(opp.status ?? ''),
       to_status: newStatus,
       triggered_by: 'admin',
     })
 
-    return NextResponse.json({ success: true, decision, new_status: newStatus })
+    return NextResponse.json({ success: true, ...responsePayload })
   } catch (error) {
     console.error('[PATCH /api/admin/network/screening]', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

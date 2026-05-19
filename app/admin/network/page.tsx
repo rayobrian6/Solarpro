@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState, useCallback } from 'react';
 import {
   Activity, AlertCircle, AlertTriangle, ArrowRight,
@@ -310,13 +311,23 @@ function ScreeningSection() {
   const [triggerOppId, setTriggerOppId] = useState('');
   const [triggering, setTriggering] = useState(false);
   const [triggerResult, setTriggerResult] = useState<Record<string, unknown> | null>(null);
+  const [actionBusy, setActionBusy] = useState<string | null>(null);
+
+  const loadQueue = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/network/screening?limit=15');
+      const data = await res.json();
+      setQueue(data.queue ?? []);
+      setStats(data.stats ?? {});
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    fetch('/api/admin/network/screening?limit=15')
-      .then(r => r.json())
-      .then(d => { setQueue(d.queue ?? []); setStats(d.stats ?? {}); })
-      .finally(() => setLoading(false));
-  }, []);
+    loadQueue();
+  }, [loadQueue]);
 
   async function triggerScreening() {
     if (!triggerOppId.trim()) return;
@@ -330,10 +341,33 @@ function ScreeningSection() {
       });
       const data = await res.json();
       setTriggerResult(data);
+      if (data.success) await loadQueue();
     } catch (e) {
       setTriggerResult({ error: String(e) });
     } finally {
       setTriggering(false);
+    }
+  }
+
+  async function runScreeningAction(opportunityId: string, action: 'approve' | 'reject' | 'request_more_info' | 'release_to_marketplace') {
+    if (action === 'release_to_marketplace' && !confirm('Release this approved opportunity to the contractor marketplace?')) return;
+    if (action === 'reject' && !confirm('Reject this opportunity from the marketplace pipeline?')) return;
+
+    setActionBusy(`${opportunityId}:${action}`);
+    setTriggerResult(null);
+    try {
+      const res = await fetch('/api/admin/network/screening', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ opportunity_id: opportunityId, action }),
+      });
+      const data = await res.json();
+      setTriggerResult(data);
+      await loadQueue();
+    } catch (e) {
+      setTriggerResult({ error: String(e) });
+    } finally {
+      setActionBusy(null);
     }
   }
 
@@ -398,13 +432,14 @@ function ScreeningSection() {
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Confidence</th>
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Duration</th>
               <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Date</th>
+              <th className="text-left px-4 py-3 text-xs text-zinc-400 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="text-center py-8 text-zinc-500">Loading…</td></tr>
+              <tr><td colSpan={8} className="text-center py-8 text-zinc-500">Loading…</td></tr>
             ) : queue.length === 0 ? (
-              <tr><td colSpan={7} className="text-center py-8 text-zinc-500">Queue is empty</td></tr>
+              <tr><td colSpan={8} className="text-center py-8 text-zinc-500">Queue is empty</td></tr>
             ) : queue.map((row, i) => (
               <tr key={i} className="border-b border-zinc-800 hover:bg-zinc-800/40 transition-colors">
                 <td className="px-4 py-3">
@@ -445,6 +480,29 @@ function ScreeningSection() {
                 </td>
                 <td className="px-4 py-3 text-zinc-500 text-xs">
                   {new Date(row.created_at as string).toLocaleDateString()}
+                </td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {([
+                      ['approve', 'Approve', 'text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/10'],
+                      ['reject', 'Reject', 'text-red-300 border-red-500/30 hover:bg-red-500/10'],
+                      ['request_more_info', 'More Info', 'text-amber-300 border-amber-500/30 hover:bg-amber-500/10'],
+                      ['release_to_marketplace', 'Release', 'text-blue-300 border-blue-500/30 hover:bg-blue-500/10'],
+                    ] as const).map(([action, label, className]) => {
+                      const id = row.opportunity_id as string;
+                      const busy = actionBusy === `${id}:${action}`;
+                      return (
+                        <button
+                          key={action}
+                          onClick={() => runScreeningAction(id, action)}
+                          disabled={!!actionBusy}
+                          className={`rounded border px-2 py-1 text-[10px] font-semibold transition disabled:opacity-40 ${className}`}
+                        >
+                          {busy ? '…' : label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -703,6 +761,17 @@ export default function NetworkControlCenter() {
   const [healthData, setHealthData] = useState<HealthData | null>(null);
   const [loading, setLoading] = useState(false);
   const [pipelineStats, setPipelineStats] = useState<Record<string, unknown>>({});
+  const [adminRole, setAdminRole] = useState<string | null>(null);
+
+  const loadAdminRole = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/me', { cache: 'no-store' });
+      const data = await res.json();
+      setAdminRole(data?.data?.role ?? null);
+    } catch {
+      setAdminRole(null);
+    }
+  }, []);
 
   const loadOpportunities = useCallback(async () => {
     setLoading(true);
@@ -734,10 +803,11 @@ export default function NetworkControlCenter() {
   }, []);
 
   useEffect(() => {
+    loadAdminRole();
     loadOpportunities();
     loadAnalytics();
     loadHealth();
-  }, [loadOpportunities, loadAnalytics, loadHealth]);
+  }, [loadAdminRole, loadOpportunities, loadAnalytics, loadHealth]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white">
@@ -769,6 +839,17 @@ export default function NetworkControlCenter() {
             ))}
           </div>
 
+          <div className="flex items-center gap-3">
+            {adminRole === 'super_admin' && (
+              <Link
+                href="/admin/network/intelligence"
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900/70 px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:border-blue-500/40 hover:text-blue-300"
+              >
+                <ExternalLink className="h-3 w-3" />
+                Intelligence Runner
+              </Link>
+            )}
+
           {healthData && (
             <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${
@@ -780,6 +861,7 @@ export default function NetworkControlCenter() {
               <span className="text-xs text-zinc-600">· Score {healthData.health.score}</span>
             </div>
           )}
+          </div>
         </div>
       </div>
 

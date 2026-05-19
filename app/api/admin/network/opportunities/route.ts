@@ -201,10 +201,27 @@ export async function PATCH(req: NextRequest) {
 
     for (const id of opportunity_ids) {
       if (action === 'publish') {
+        const gateRows = await sql`
+          SELECT no.status, no.screening_status, osq.auto_decision, osq.override_decision, oi.overall_score
+          FROM network_opportunities no
+          LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+          LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
+          WHERE no.id = ${id}
+          LIMIT 1
+        `;
+        const gate = gateRows[0] as Record<string, unknown> | undefined;
+        const screeningApproved = gate?.screening_status === 'approved' || gate?.override_decision === 'pass' || gate?.auto_decision === 'pass';
+        const scored = gate?.overall_score != null || gate?.status === 'scored' || gate?.status === 'routed' || gate?.status === 'live';
+        if (!screeningApproved || !scored) {
+          results.push(`Blocked publish: ${id} requires approved screening and scoring`);
+          continue;
+        }
+
         await sql`
           UPDATE network_opportunities SET
             status = 'live',
             published_at = NOW(),
+            live_at = COALESCE(live_at, NOW()),
             expires_at = NOW() + INTERVAL '30 days',
             updated_at = NOW()
           WHERE id = ${id}
