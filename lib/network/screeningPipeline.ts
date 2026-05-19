@@ -652,6 +652,7 @@ export async function runScreeningPipeline(opportunityId: string): Promise<Pipel
   const s8 = step8.data
   const s9 = step9.data
   const s10 = step10.data
+  const failReasons = pipelineResult.fail_reasons
 
   await sql`
     UPDATE opportunity_screening_queue SET
@@ -731,6 +732,7 @@ export async function runScreeningPipeline(opportunityId: string): Promise<Pipel
       step10_decision       = ${(s10.decision as string) ?? null},
       step10_score          = ${(s10.score as number) ?? null},
       step10_grade          = ${(s10.grade as string) ?? null},
+      step10_fail_reasons   = ${failReasons},
       step10_data           = ${JSON.stringify(s10)},
       step10_completed_at   = ${step10.completed_at},
       step10_error          = ${step10.error ?? null},

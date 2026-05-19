@@ -39,6 +39,19 @@ describe('admin intake funnels infrastructure', () => {
 
 
 
+
+  it('keeps migration 071 compatible with the admin SQL splitter', () => {
+    const statements = migrationSource
+      .split(';')
+      .map((statement) => statement.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n').trim())
+      .filter(Boolean)
+
+    expect(statements.some((statement) => /^does\b/i.test(statement))).toBe(false)
+    expect(statements).toHaveLength(1)
+    expect(statements[0]).toContain('INSERT INTO intake_funnels')
+    expect(statements[0]).toContain('ON CONFLICT (slug) DO UPDATE')
+  })
+
   it('returns camelCase URL fields for the canonical homeowner funnel API contract', () => {
     expect(routeSource).toContain('canonicalPath')
     expect(routeSource).toContain('canonicalUrl: urls.canonicalUrl || null')

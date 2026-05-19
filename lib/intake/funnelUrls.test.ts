@@ -34,6 +34,18 @@ describe('funnel URL helpers', () => {
     })
   })
 
+
+  it('leaves placeholder funnels unmapped unless an explicit public path exists', () => {
+    for (const slug of ['tiktok-homeowner', 'meta-homeowner', 'google-homeowner', 'referral-homeowner', 'seo-homeowner', 'battery-homeowner']) {
+      expect(canonicalFunnelPath(slug)).toBeNull()
+      expect(buildFunnelUrls({ slug }, 'https://solar.example.com')).toEqual({
+        canonicalUrl: '',
+        embedUrl: null,
+        utmReadyUrl: '',
+      })
+    }
+  })
+
   it('builds only populated UTM attribution params', () => {
     const params = buildUtmParams({
       utm_source: ' facebook ',

@@ -1800,7 +1800,10 @@ function SimulatorSection() {
       });
       const data = await parseAdminJsonResponse(res, 'Simulator action failed');
       setResult(data);
-      if (data.success !== false) setItems((data.opportunities as SimulatedOpportunity[] | undefined) ?? []);
+      if (data.success !== false) {
+        if (Array.isArray(data.opportunities)) setItems(data.opportunities as SimulatedOpportunity[]);
+        await loadSimulated();
+      }
     } catch (e) { setResult({ error: String(e) }); }
     finally { setBusy(null); }
   }

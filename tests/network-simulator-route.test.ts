@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'node:fs'
+import path from 'node:path'
 
 const mockRequireAdminApi = vi.fn()
 const mockGetDbReady = vi.fn()
@@ -154,6 +156,23 @@ describe('/api/admin/network/simulator', () => {
     const deleteEvents = sql.queries.find((q: string) => q.includes('DELETE FROM network_events')) ?? ''
     expect(deleteEvents).toContain('USING network_opportunities')
     expect(deleteEvents).toContain("source_channel = 'simulator'")
+  })
+
+
+  it('persists screening failures to the canonical step10_fail_reasons column and never queries fail_reasons', () => {
+    const pipelineSource = fs.readFileSync(path.join(process.cwd(), 'lib/network/screeningPipeline.ts'), 'utf8')
+    const enrichmentSource = fs.readFileSync(path.join(process.cwd(), 'lib/network/opportunityEnrichment.ts'), 'utf8')
+    expect(pipelineSource).toContain('step10_fail_reasons   = ${failReasons}')
+    expect(pipelineSource).not.toMatch(/UPDATE opportunity_screening_queue SET[\s\S]*\bfail_reasons\s*=/)
+    expect(enrichmentSource).toContain('step10_fail_reasons, review_flags FROM opportunity_screening_queue')
+    expect(enrichmentSource).not.toContain('step10_fail_reasons, fail_reasons')
+  })
+
+  it('refreshes simulator UI state after successful create/actions instead of waiting for manual reload', () => {
+    const adminPageSource = fs.readFileSync(path.join(process.cwd(), 'app/admin/network/page.tsx'), 'utf8')
+    expect(adminPageSource).toContain('if (data.success !== false) {')
+    expect(adminPageSource).toContain('if (Array.isArray(data.opportunities)) setItems(data.opportunities as SimulatedOpportunity[]);')
+    expect(adminPageSource).toContain('await loadSimulated();')
   })
 
   it('returns stage-aware simulator create failure details without leaking secrets', async () => {

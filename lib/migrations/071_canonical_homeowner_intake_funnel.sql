@@ -1,5 +1,5 @@
 -- Migration 071: canonical homeowner intake funnel metadata
--- Reuses intake_funnels; does not create a duplicate intake system.
+-- Reuses intake_funnels and does not create a duplicate intake system.
 
 INSERT INTO intake_funnels (
   slug,

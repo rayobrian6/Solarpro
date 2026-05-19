@@ -176,7 +176,7 @@ export function buildOpportunityEnrichment(input: OpportunityEnrichmentInput): O
   const invalidUtility = bool(opp.invalid_utility_flag) === true
   const topMatchScore = num(intel.top_match_score)
   const eligibleContractors = num(intel.total_eligible_contractors)
-  const screeningFailures = arr(screening.step10_fail_reasons ?? screening.fail_reasons).map(String)
+  const screeningFailures = arr(screening.step10_fail_reasons).map(String)
 
   const productionMissing: string[] = []
   pushMissing(missing, productionMissing, 'estimated_system_size_kw', systemSizeKw)
@@ -356,7 +356,7 @@ export async function enrichAndPersistOpportunity(
 
   const intelligenceRows = await sql`SELECT * FROM opportunity_intelligence WHERE opportunity_id = ${opportunityId} LIMIT 1`
   const assignmentRows = await sql`SELECT id, status, match_score, match_factors, offered_at, claimed_at, proposal_at, closed_at, close_status FROM opportunity_assignments WHERE opportunity_id = ${opportunityId}`
-  const screeningRows = await sql`SELECT auto_decision, override_decision, confidence_score, step10_fail_reasons, fail_reasons, review_flags FROM opportunity_screening_queue WHERE opportunity_id = ${opportunityId} LIMIT 1`
+  const screeningRows = await sql`SELECT auto_decision, override_decision, confidence_score, step10_fail_reasons, review_flags FROM opportunity_screening_queue WHERE opportunity_id = ${opportunityId} LIMIT 1`
 
   const payload = buildOpportunityEnrichment({
     opportunity,
