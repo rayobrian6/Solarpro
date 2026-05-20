@@ -312,7 +312,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.payload->>'timeline' AS timeline,
           COALESCE(ie.payload->>'roof_age', ie.payload->>'roof_age_years') AS roof_age,
           COALESCE(ie.payload->'bill_metadata', '{}'::jsonb) AS bill_metadata,
-          ie.action IN ('validation_failed', 'malformed', 'error') AS debug_visible
+          (
+            ie.action IN ('validation_failed', 'malformed', 'error', 'archived', 'rejected', 'bad_lead')
+            OR COALESCE((ie.pipeline_result->'operational'->>'archived')::boolean, false) = true
+            OR COALESCE((ie.pipeline_result->'operational'->>'rejected')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_test')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_simulated')::boolean, false) = true
+          ) AS debug_visible
         FROM intake_events ie
         LEFT JOIN LATERAL (
           SELECT qie.event_id, qie.payload, qie.occurred_at
@@ -370,6 +376,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         validation: rest.validation_result,
         receivedAt: rest.received_at ?? rest.created_at,
       });
+      const billMetadata = rest.bill_metadata && typeof rest.bill_metadata === "object" ? rest.bill_metadata as Record<string, unknown> : {};
+      const qualificationPayload = rest.qualification_payload && typeof rest.qualification_payload === "object" ? rest.qualification_payload as Record<string, unknown> : {};
       return {
         ...rest,
         operational_lifecycle_status: operational.lifecycle_status,
@@ -383,6 +391,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         operator_notes: intelligence.operator_notes,
         last_contact_timestamp: intelligence.last_contact_timestamp,
         release_readiness: intelligence.release_readiness,
+        attachment_completeness: billMetadata.storage_status === "stored" ? "complete" : (billMetadata.filename ? "metadata_only" : "missing"),
+        qualification_completeness: Object.keys(qualificationPayload).length > 0 ? "complete" : "missing",
+        contact_attempts: operational.no_answer_count ?? 0,
+        operator_action_history: operational.action_history ?? [],
+        last_updated_timestamp: operational.last_reviewed_at ?? rest.updated_at ?? rest.created_at,
       };
     });
 
@@ -426,7 +439,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             ELSE NULL
           END AS duplicate_score,
           ie.action,
-          ie.action IN ('validation_failed', 'malformed', 'error') AS debug_visible
+          (
+            ie.action IN ('validation_failed', 'malformed', 'error', 'archived', 'rejected', 'bad_lead')
+            OR COALESCE((ie.pipeline_result->'operational'->>'archived')::boolean, false) = true
+            OR COALESCE((ie.pipeline_result->'operational'->>'rejected')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_test')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_simulated')::boolean, false) = true
+          ) AS debug_visible
         FROM intake_events ie
         WHERE ie.opportunity_id IS NULL
           AND ie.event_type = 'homeowner_intake'
@@ -662,6 +681,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           END
       WHERE event_id = ${eventId}
     `;
+
+    console.info(
+      "[OPERATOR ACTION]",
+      safeOperationalLog({
+        eventId,
+        action,
+        fromStatus: currentState.review_status,
+        toStatus: nextState.review_status,
+        releaseReadiness,
+      }),
+    );
 
     console.info(
       "[REVIEW STATUS TRANSITION]",

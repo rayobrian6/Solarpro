@@ -61,6 +61,9 @@ export function evaluateMarketplaceReleaseGate(row: MarketplaceGateRow): {
     row.screening_status === "approved" ||
     row.auto_decision === "pass" ||
     row.override_decision === "pass";
+  const operational = metadata.operational;
+  const archivedOrRejected = !!(operational.archived || operational.rejected || row.status === "archived" || row.status === "rejected");
+  const testOrSimulated = !!(metadata.intakeMetadata.is_test || metadata.intakeMetadata.is_simulated || metadata.rawPayload.is_test || metadata.rawPayload.is_simulated);
   const releaseReadiness = deriveReleaseReadiness({
     operational: metadata.operational,
     intake: metadata.intakeMetadata,
@@ -73,10 +76,12 @@ export function evaluateMarketplaceReleaseGate(row: MarketplaceGateRow): {
   });
   const missing = [...releaseReadiness.missing];
   if (!approvedScreening) missing.push("screening_approved");
+  if (archivedOrRejected) missing.push("active_not_archived_or_rejected");
+  if (testOrSimulated) missing.push("not_test_or_simulated");
   return {
     approvedScreening,
     releaseReadiness,
-    ok: approvedScreening && releaseReadiness.ready,
+    ok: approvedScreening && releaseReadiness.ready && !archivedOrRejected && !testOrSimulated,
     missing,
   };
 }
@@ -88,7 +93,13 @@ export function marketplaceGateError(row: MarketplaceGateRow): string {
 }
 
 export function marketplaceVisibilitySqlCondition(alias = "no"): string {
-  return `${alias}.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'`;
+  return `
+    ${alias}.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
+    AND COALESCE((${alias}.intake_metadata->'operational'->>'archived')::boolean, false) = false
+    AND COALESCE((${alias}.intake_metadata->'operational'->>'rejected')::boolean, false) = false
+    AND COALESCE((${alias}.intake_metadata->>'is_test')::boolean, false) = false
+    AND COALESCE((${alias}.intake_metadata->>'is_simulated')::boolean, false) = false
+  `;
 }
 
 export function logMarketplaceGate(

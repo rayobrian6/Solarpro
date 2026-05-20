@@ -350,9 +350,27 @@ describe('homeowner intake event-first flow', () => {
     expect(section).toContain('Average Monthly Bill')
     expect(section).toContain('Utility Bill Evidence')
     expect(section).toContain('Metadata only — file was not uploaded/stored')
+    expect(section).toContain('Stored attachment available')
+    expect(section).toContain('Open Bill')
+    expect(section).toContain('Download Bill')
+    expect(section).toContain('Missing stored file — metadata only')
     expect(section).toContain('Utility Bill File Size Bytes')
     expect(section).not.toContain("['Bill Size'")
-    expect(section).not.toContain('href={bill')
+  })
+
+  it('admin Intake Feed UI exposes operator workflow controls without bypassing immutable review events', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'app/admin/network/page.tsx'), 'utf8')
+    const section = source.slice(source.indexOf('function IntakeFeedSection()'), source.indexOf('// ── Enrichment Queue Section'))
+    expect(section).toContain('Operator workflow controls')
+    expect(section).toContain('mark_contacted')
+    expect(section).toContain('mark_no_answer')
+    expect(section).toContain('mark_needs_follow_up')
+    expect(section).toContain('mark_financing_ready')
+    expect(section).toContain('mark_qualified')
+    expect(section).toContain('approve_for_marketplace')
+    expect(section).toContain('reject_lead')
+    expect(section).toContain('archive_lead')
+    expect(section).toContain("fetch('/api/admin/network/intake'")
   })
 
   it('admin Intake Feed UI labels event review relationship and readiness signals', () => {

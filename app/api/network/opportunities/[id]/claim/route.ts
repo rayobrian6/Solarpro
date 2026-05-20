@@ -86,7 +86,7 @@ export async function POST(req: NextRequest, { params }: Params) {
         },
         "contractor_claim",
       );
-      if (!claimGate.approvedScreening || !claimGate.releaseReadiness.ready) {
+      if (!claimGate.ok) {
         return NextResponse.json(
           {
             error: "Opportunity is not approved for marketplace claim.",

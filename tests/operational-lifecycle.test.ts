@@ -58,6 +58,12 @@ describe("operational lifecycle and marketplace release gate", () => {
       review_status: "approved_for_marketplace",
       approved_for_marketplace: true,
     });
+    expect(approved.action_history).toHaveLength(3);
+    expect(approved.action_history?.map((entry) => entry.action)).toEqual([
+      "mark_contacted",
+      "mark_qualified",
+      "approve_for_marketplace",
+    ]);
   });
 
   it("requires operator review, qualification, validation, financing, intent, and explicit approval before release", () => {
@@ -100,6 +106,24 @@ describe("operational lifecycle and marketplace release gate", () => {
     });
     expect(blocked.ok).toBe(false);
     expect(blocked.missing).toContain("approved_for_marketplace");
+
+    const archived = evaluateMarketplaceReleaseGate({
+      id: "opp-3",
+      status: "live",
+      screening_status: "approved",
+      intake_metadata: { operational: { ...readyOperational, archived: true }, qualification },
+    });
+    expect(archived.ok).toBe(false);
+    expect(archived.missing).toContain("active_not_archived_or_rejected");
+
+    const simulated = evaluateMarketplaceReleaseGate({
+      id: "opp-4",
+      status: "live",
+      screening_status: "approved",
+      intake_metadata: { operational: readyOperational, qualification, is_simulated: true },
+    });
+    expect(simulated.ok).toBe(false);
+    expect(simulated.missing).toContain("not_test_or_simulated");
   });
 
   it("derives admin operational intelligence fields without a parallel CRM table", () => {

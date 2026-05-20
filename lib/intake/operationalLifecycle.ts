@@ -46,6 +46,7 @@ export interface OperationalState {
   last_reviewed_by?: string | null;
   last_reviewed_at?: string | null;
   release_readiness?: ReleaseReadiness;
+  action_history?: Array<Record<string, unknown>>;
 }
 
 export interface ReleaseReadiness {
@@ -127,6 +128,9 @@ export function stateFromPipelineResult(
     release_readiness: isRecord(operational.release_readiness)
       ? (operational.release_readiness as unknown as ReleaseReadiness)
       : undefined,
+    action_history: Array.isArray(operational.action_history)
+      ? (operational.action_history as Array<Record<string, unknown>>)
+      : [],
   };
 }
 
@@ -142,6 +146,15 @@ export function applyOperatorReviewAction(
     last_review_action: action,
     last_reviewed_by: options.adminId,
     last_reviewed_at: occurredAt,
+    action_history: [
+      ...(Array.isArray(current.action_history) ? current.action_history : []),
+      {
+        action,
+        reviewed_by: options.adminId,
+        reviewed_at: occurredAt,
+        notes: options.notes?.trim() || null,
+      },
+    ].slice(-50),
   };
 
   if (action === "mark_contacted") {

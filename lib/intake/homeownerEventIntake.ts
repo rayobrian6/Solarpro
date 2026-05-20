@@ -75,7 +75,7 @@ interface HomeownerEventData {
   fbclid?: string | null;
 }
 
-function makeEventId(): string {
+export function makeHomeownerIntakeEventId(): string {
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
   return `evt_homeowner_${ts}_${rand}`;
@@ -161,6 +161,31 @@ function operationalPayload(
   normalized: ValidatedIntakePayload | null,
   opts: HomeownerIntakeOptions,
 ): Record<string, unknown> {
+  const providedBillMetadata =
+    raw.bill_metadata && typeof raw.bill_metadata === "object" && !Array.isArray(raw.bill_metadata)
+      ? (raw.bill_metadata as Record<string, unknown>)
+      : null;
+  const storedBillUrl = cleanString(providedBillMetadata?.accessible_url) ?? cleanString(providedBillMetadata?.download_url);
+  const billFilename = cleanString(providedBillMetadata?.filename) ?? cleanString(raw.uploaded_bill_filename);
+  const billMetadata = providedBillMetadata
+    ? {
+        ...providedBillMetadata,
+        filename: billFilename,
+        size_bytes: numberOrNull(providedBillMetadata.size_bytes) ?? numberOrNull(raw.uploaded_bill_size_bytes),
+        content_type: cleanString(providedBillMetadata.content_type) ?? cleanString(raw.uploaded_bill_content_type),
+        storage_status: storedBillUrl ? "stored" : (cleanString(providedBillMetadata.storage_status) ?? "metadata_only_not_uploaded"),
+        accessible_url: storedBillUrl,
+        download_url: cleanString(providedBillMetadata.download_url) ?? storedBillUrl,
+      }
+    : {
+        filename: billFilename,
+        size_bytes: numberOrNull(raw.uploaded_bill_size_bytes),
+        content_type: cleanString(raw.uploaded_bill_content_type),
+        storage_status: billFilename ? "metadata_only_not_uploaded" : "not_provided",
+        accessible_url: null,
+        download_url: null,
+      };
+
   return {
     ...raw,
     canonical_review_flow: "event_first_operator_review",
@@ -208,16 +233,8 @@ function operationalPayload(
       normalized?.roof_age_years ??
       numberOrNull(raw.roof_age_years) ??
       numberOrNull(raw.roof_age),
-    bill_metadata: {
-      filename: cleanString(raw.uploaded_bill_filename),
-      size_bytes: numberOrNull(raw.uploaded_bill_size_bytes),
-      content_type: cleanString(raw.uploaded_bill_content_type),
-      storage_status: cleanString(raw.uploaded_bill_filename)
-        ? "metadata_only_not_uploaded"
-        : "not_provided",
-      accessible_url: null,
-    },
-    bill_attachment_metadata_only: !!cleanString(raw.uploaded_bill_filename),
+    bill_metadata: billMetadata,
+    bill_attachment_metadata_only: !!billFilename && !storedBillUrl,
     attribution: {
       utm_source: normalized?.utm_source ?? cleanString(raw.utm_source),
       utm_medium: normalized?.utm_medium ?? cleanString(raw.utm_medium),
@@ -290,7 +307,7 @@ export async function submitHomeownerIntakeEvent(
     "homeowner_form";
   const sourceChannel =
     options.source_channel || cleanString(rawPayload.source_channel) || "web";
-  const eventId = makeEventId();
+  const eventId = cleanString(rawPayload.event_id) ?? makeHomeownerIntakeEventId();
   const idempotencyKey = deriveIdempotencyKey(rawPayload);
 
   const validation = validateIntakePayload(rawPayload as RawIntakePayload, {
@@ -333,8 +350,21 @@ export async function submitHomeownerIntakeEvent(
   console.info("[UTILITY BILL METADATA]", {
     event_id: eventId,
     bill_metadata: payload.bill_metadata,
-    upload_transport: "json_metadata_only_no_file_bytes",
+    upload_transport:
+      (payload.bill_metadata as Record<string, unknown> | undefined)?.storage_status === "stored"
+        ? "stored_attachment_reference"
+        : "json_metadata_only_no_file_bytes",
   });
+  if ((payload.bill_metadata as Record<string, unknown> | undefined)?.storage_status === "stored") {
+    console.info("[INTAKE ATTACHMENT LINKED]", {
+      event_id: eventId,
+      storage_provider: (payload.bill_metadata as Record<string, unknown>).storage_provider,
+      storage_key: (payload.bill_metadata as Record<string, unknown>).storage_key,
+      filename: (payload.bill_metadata as Record<string, unknown>).filename,
+      size_bytes: (payload.bill_metadata as Record<string, unknown>).size_bytes,
+      content_type: (payload.bill_metadata as Record<string, unknown>).content_type,
+    });
+  }
   const validationResult = {
     errors: validation.errors,
     warnings: validation.warnings,
@@ -467,7 +497,7 @@ export async function logMalformedHomeownerIntake(
   message: string,
   options: HomeownerIntakeOptions = {},
 ): Promise<string | null> {
-  const eventId = makeEventId();
+  const eventId = makeHomeownerIntakeEventId();
   try {
     await insertHomeownerEvent({
       event_id: eventId,

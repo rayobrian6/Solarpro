@@ -51,12 +51,27 @@ describe("/free-solar-estimate public intake funnel", () => {
     expect(pageSource).not.toContain("lead_grade");
   });
 
-  it("preserves non-canonical operational fields in notes without direct schema changes", () => {
+  it("preserves non-canonical operational fields and submits utility bills through canonical multipart intake", () => {
     expect(pageSource).toContain("Utility provider:");
     expect(pageSource).toContain("Battery interest:");
     expect(pageSource).toContain("Preferred contact method:");
     expect(pageSource).toContain("Timeline:");
-    expect(pageSource).toContain("File metadata only");
+    expect(pageSource).toContain("The intake endpoint stores supported PDF/image utility bills and links the attachment metadata to the canonical intake event.");
+    expect(pageSource).toContain("const requestBody = new FormData()");
+    expect(pageSource).toContain('requestBody.append("payload", JSON.stringify(payload))');
+    expect(pageSource).toContain('requestBody.append("utility_bill", billFile)');
+
+    const homeownerFetchStart = pageSource.indexOf('fetch("/api/intake/homeowner",');
+    expect(homeownerFetchStart).toBeGreaterThan(-1);
+    const requestBodyLine = pageSource.indexOf("body: requestBody", homeownerFetchStart);
+    expect(requestBodyLine).toBeGreaterThan(homeownerFetchStart);
+    const homeownerFetchBlock = pageSource.slice(
+      homeownerFetchStart,
+      requestBodyLine + "body: requestBody".length,
+    );
+    expect(homeownerFetchBlock).toContain("body: requestBody");
+    expect(homeownerFetchBlock).not.toContain("Content-Type");
+
     expect(pageSource).not.toContain("CREATE TABLE");
     expect(pageSource).not.toContain("INSERT INTO network_opportunities");
     expect(pageSource).not.toContain("opportunity_screening_queue");
