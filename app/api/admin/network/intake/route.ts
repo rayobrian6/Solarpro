@@ -18,57 +18,80 @@
  *   - network_opportunities that already came through canonical intake, and
  *   - review-first intake_events rows with opportunity_id IS NULL.
  */
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const maxDuration = 30;
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getDbReady } from '@/lib/db-neon';
-import { requireAdminApi } from '@/lib/adminAuth';
+import { NextRequest, NextResponse } from "next/server";
+import { getDbReady } from "@/lib/db-neon";
+import { requireAdminApi } from "@/lib/adminAuth";
 
-type IntakeFeedStage = 'auth' | 'db_connect' | 'request_parse' | 'feed_query' | 'stats_query' | 'today_events_query' | 'top_sources_query' | 'validation_stats_query';
+type IntakeFeedStage =
+  | "auth"
+  | "db_connect"
+  | "request_parse"
+  | "feed_query"
+  | "stats_query"
+  | "today_events_query"
+  | "top_sources_query"
+  | "validation_stats_query";
 
 function intakeFeedError(stage: IntakeFeedStage, error: unknown) {
-  const err = error as { message?: string; code?: string; detail?: string; constraint?: string; column?: string };
-  return NextResponse.json({
-    success: false,
-    error: 'Intake Feed failed',
-    stage,
-    message: err?.message ?? String(error),
-    code: err?.code,
-    details: {
-      detail: err?.detail,
-      constraint: err?.constraint,
-      column: err?.column,
+  const err = error as {
+    message?: string;
+    code?: string;
+    detail?: string;
+    constraint?: string;
+    column?: string;
+  };
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Intake Feed failed",
+      stage,
+      message: err?.message ?? String(error),
+      code: err?.code,
+      details: {
+        detail: err?.detail,
+        constraint: err?.constraint,
+        column: err?.column,
+      },
     },
-  }, { status: 500 });
+    { status: 500 },
+  );
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  let stage: IntakeFeedStage = 'auth';
+  let stage: IntakeFeedStage = "auth";
 
   try {
     const admin = await requireAdminApi(req);
-    if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!admin)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    stage = 'db_connect';
+    stage = "db_connect";
     const sql = await getDbReady();
 
-    stage = 'request_parse';
+    stage = "request_parse";
     const { searchParams } = new URL(req.url);
 
-    const status = searchParams.get('status') || null;
-    const source_system = searchParams.get('source_system') || null;
-    const source_channel = searchParams.get('source_channel') || null;
-    const from = searchParams.get('from') || null;
-    const to = searchParams.get('to') || null;
-    const search = searchParams.get('search') || null;
-    const includeDebug = ['1', 'true', 'yes'].includes((searchParams.get('debug') || '').toLowerCase());
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25')));
+    const status = searchParams.get("status") || null;
+    const source_system = searchParams.get("source_system") || null;
+    const source_channel = searchParams.get("source_channel") || null;
+    const from = searchParams.get("from") || null;
+    const to = searchParams.get("to") || null;
+    const search = searchParams.get("search") || null;
+    const includeDebug = ["1", "true", "yes"].includes(
+      (searchParams.get("debug") || "").toLowerCase(),
+    );
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(searchParams.get("limit") || "25")),
+    );
     const offset = (page - 1) * limit;
 
-    stage = 'feed_query';
+    stage = "feed_query";
     const feedRows = await sql`
       WITH opportunity_rows AS (
         SELECT
@@ -220,22 +243,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           COALESCE(q.payload, '{}'::jsonb) AS qualification_payload,
           COALESCE(q.payload->'intelligence', '{}'::jsonb) AS qualification_intelligence,
           q.event_id AS qualification_event_id,
-          q.payload->'intelligence'->>'qualification_status' AS qualification_status,
-          q.payload->'intelligence'->>'lead_grade' AS lead_grade,
+          COALESCE(q.payload->'intelligence'->>'qualification_status', q.payload->>'qualification_status') AS qualification_status,
+          COALESCE(q.payload->'intelligence'->>'lead_grade', q.payload->>'lead_grade') AS lead_grade,
           CASE
             WHEN q.payload->'intelligence' ? 'finance_readiness'
               THEN (q.payload->'intelligence'->>'finance_readiness')::boolean
+            WHEN q.payload ? 'finance_readiness'
+              THEN (q.payload->>'finance_readiness')::boolean
             ELSE NULL
           END AS finance_readiness,
           CASE
             WHEN q.payload->'intelligence' ? 'battery_readiness'
               THEN (q.payload->'intelligence'->>'battery_readiness')::boolean
+            WHEN q.payload ? 'battery_readiness'
+              THEN (q.payload->>'battery_readiness')::boolean
             ELSE NULL
           END AS battery_readiness,
-          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_income_band', q.payload->'qualification'->>'estimated_income_band') AS estimated_income_band,
-          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_credit_band', q.payload->'qualification'->>'estimated_credit_band') AS estimated_credit_band,
-          COALESCE(q.payload->'intelligence'->'normalized'->>'sunlight_confidence', q.payload->'qualification'->>'sunlight_confidence') AS sunlight_confidence,
-          COALESCE(q.payload->'intelligence'->'normalized'->>'property_type', q.payload->'qualification'->>'property_type') AS property_type,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_income_band', q.payload->>'estimated_income_band', q.payload->'qualification'->>'estimated_income_band') AS estimated_income_band,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_credit_band', q.payload->>'estimated_credit_band', q.payload->'qualification'->>'estimated_credit_band') AS estimated_credit_band,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'sunlight_confidence', q.payload->>'sunlight_confidence', q.payload->'qualification'->>'sunlight_confidence') AS sunlight_confidence,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'property_type', q.payload->>'property_type', q.payload->'qualification'->>'property_type') AS property_type,
           ie.payload->>'utility_provider' AS utility_provider,
           ie.payload->>'battery_interest' AS battery_interest,
           COALESCE(ie.payload->>'homeowner_status', ie.payload->>'home_ownership') AS homeowner_status,
@@ -296,7 +323,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       return rest;
     });
 
-    stage = 'stats_query';
+    stage = "stats_query";
     const statsResult = await sql`
       WITH combined AS (
         SELECT
@@ -338,7 +365,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       FROM combined
     `;
 
-    stage = 'today_events_query';
+    stage = "today_events_query";
     const todayEvents = await sql`
       SELECT action, COUNT(*) AS count
       FROM intake_events
@@ -347,7 +374,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ORDER BY count DESC
     `;
 
-    stage = 'top_sources_query';
+    stage = "top_sources_query";
     const topSources = await sql`
       WITH combined AS (
         SELECT source_system, source_channel, created_at, false AS debug_visible
@@ -373,7 +400,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       LIMIT 10
     `;
 
-    stage = 'validation_stats_query';
+    stage = "validation_stats_query";
     const validationStats = await sql`
       SELECT
         COUNT(*) AS total_events,
@@ -407,12 +434,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         total,
         today_events: todayEvents,
         top_sources: topSources,
-        validation_failure_rate: totalEvents > 0
-          ? Math.round((Number(vs.validation_failures) / totalEvents) * 100) / 100
-          : 0,
-        conversion_rate: totalEvents > 0
-          ? Math.round((Number(vs.created) / totalEvents) * 100) / 100
-          : 0,
+        validation_failure_rate:
+          totalEvents > 0
+            ? Math.round((Number(vs.validation_failures) / totalEvents) * 100) /
+              100
+            : 0,
+        conversion_rate:
+          totalEvents > 0
+            ? Math.round((Number(vs.created) / totalEvents) * 100) / 100
+            : 0,
         ...vs,
       },
     });

@@ -203,7 +203,6 @@ export default function FreeSolarEstimatePage() {
   const [qualificationState, setQualificationState] =
     useState<QualificationSubmitState>("idle");
   const [qualificationError, setQualificationError] = useState("");
-  const [qualificationSummary, setQualificationSummary] = useState("");
 
   const completedRequired = useMemo(() => {
     return REQUIRED_FIELDS.filter(
@@ -311,12 +310,6 @@ export default function FreeSolarEstimatePage() {
         return;
       }
 
-      const summary = data?.intelligence?.contractor_summary;
-      setQualificationSummary(
-        typeof summary === "string"
-          ? summary
-          : "Your qualification details were added to the SolarPro intake review.",
-      );
       setQualificationState("success");
     } catch {
       setQualificationError(
@@ -447,9 +440,10 @@ export default function FreeSolarEstimatePage() {
                 Optional next step
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-300">
-                Answer seven quick questions so SolarPro can grade financing
-                readiness, battery readiness, shade risk, and contractor fit
-                before review. This does not change your original request.
+                Answer seven quick questions so SolarPro can better understand
+                financing preferences, battery readiness, shade risk, and
+                property fit before review. This does not change your original
+                request.
               </p>
             </div>
             <a
@@ -476,11 +470,11 @@ export default function FreeSolarEstimatePage() {
                   These details were added as a second-stage qualification event
                   for SolarPro review.
                 </p>
-                {qualificationSummary && (
-                  <pre className="mt-5 whitespace-pre-wrap rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4 text-left text-xs leading-6 text-emerald-100">
-                    {qualificationSummary}
-                  </pre>
-                )}
+                <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.05] p-4 text-sm leading-6 text-emerald-100">
+                  Thanks — your additional details were saved for SolarPro
+                  review. A solar advisor will use them to prepare a more
+                  accurate follow-up.
+                </div>
               </div>
             ) : qualificationState === "skipped" ? (
               <div>
