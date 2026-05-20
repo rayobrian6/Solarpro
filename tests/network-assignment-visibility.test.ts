@@ -29,6 +29,7 @@ vi.mock("@/lib/network/attributionTracker", () => ({
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const OPP_ID = "22222222-2222-4222-8222-222222222222";
+const INELIGIBLE_OPP_ID = "44444444-4444-4444-8444-444444444444";
 const ASSIGNMENT_ID = "33333333-3333-4333-8333-333333333333";
 
 function req(url: string, body?: unknown, method = "GET"): any {
@@ -97,6 +98,19 @@ const assignedOpportunity = {
     },
   },
   marketplace_raw_payload: null,
+  claim_mode: "exclusive",
+  claim_count: 0,
+  max_claims: 1,
+};
+
+const ineligibleOpportunity = {
+  ...assignedOpportunity,
+  id: INELIGIBLE_OPP_ID,
+  claim_id: null,
+  claim_status: null,
+  claimed_by_user_id: null,
+  city: "Dallas",
+  state_code: "TX",
 };
 
 const claimedOpportunity = {
@@ -114,7 +128,7 @@ const claimedOpportunity = {
   claimed_at: "2026-01-01T01:00:00Z",
 };
 
-function makeSql() {
+function makeSql(opts: { canonicalRows?: Record<string, unknown>[]; assignmentRows?: Record<string, unknown>[] } = {}) {
   const calls: string[] = [];
   const sql = vi.fn(async (strings: TemplateStringsArray) => {
     const q = strings.join(" ");
@@ -146,7 +160,7 @@ function makeSql() {
       q.includes("FROM opportunity_assignments oa") &&
       q.includes("oa.status IN ('offered','viewed')")
     ) {
-      return [{ total: 1 }];
+      return [{ total: 0 }];
     }
 
     if (
@@ -185,10 +199,17 @@ function makeSql() {
     }
 
     if (
+      q.includes("FROM network_opportunities no") &&
+      q.includes("COALESCE(no.marketplace_status, 'not_released') = 'live'")
+    ) {
+      return opts.canonicalRows ?? [assignedOpportunity];
+    }
+
+    if (
       q.includes("FROM opportunity_assignments oa") &&
       q.includes("oa.status IN ('offered','viewed')")
     ) {
-      return [assignedOpportunity];
+      return opts.assignmentRows ?? [];
     }
 
     if (q.includes("FROM opportunities") && q.includes("WHERE id =")) return [];
@@ -264,31 +285,33 @@ describe("contractor network assignment visibility", () => {
     mockGetDbReady.mockReset().mockResolvedValue(makeSql());
     mockCheckRateLimit.mockReset().mockResolvedValue({ allowed: true });
     mockGetClientIp.mockReset().mockReturnValue("127.0.0.1");
-    mockEvaluateContractorEligibility.mockReset().mockResolvedValue({
-      eligible: true,
-      reasons: [
-        "release_gate_passed",
-        "contractor_active",
-        "territory_state_TX",
-        "claim_capacity_available_exclusive",
-      ],
-      denials: [],
+    mockEvaluateContractorEligibility.mockReset().mockImplementation(async ({ opportunityId }) => ({
+      eligible: opportunityId !== INELIGIBLE_OPP_ID,
+      reasons: opportunityId === INELIGIBLE_OPP_ID
+        ? []
+        : [
+            "release_gate_passed",
+            "contractor_active",
+            "territory_state_TX",
+            "claim_capacity_available_exclusive",
+          ],
+      denials: opportunityId === INELIGIBLE_OPP_ID ? ["battery_certification_required"] : [],
       warnings: [],
       contractor_id: USER_ID,
-      opportunity_id: OPP_ID,
-      release_gate_result: { ok: true, missing: [] },
+      opportunity_id: opportunityId,
+      release_gate_result: { ok: opportunityId !== INELIGIBLE_OPP_ID, missing: [] },
       claim_state: {
         mode: "exclusive",
         max_claims: 1,
         current_claims: 0,
         contractor_has_active_claim: false,
-        contractor_has_claimable_offer: true,
+        contractor_has_claimable_offer: opportunityId === OPP_ID,
       },
-    });
+    }));
     mockLogNetworkEvent.mockReset().mockResolvedValue(undefined);
   });
 
-  it("includes direct network assignments in the Discover feed and total count", async () => {
+  it("shows released eligible canonical marketplace inventory in Discover and canonical count", async () => {
     const sql = makeSql();
     mockGetDbReady.mockResolvedValueOnce(sql);
     const { GET } = await import("@/app/api/network/opportunities/route");
@@ -305,20 +328,44 @@ describe("contractor network assignment visibility", () => {
         id: OPP_ID,
         city: "Austin",
         state_code: "TX",
-        claim_status: "offered",
+        marketplace_status: "live",
+        claim_mode: expect.anything(),
       }),
     ]);
-    const assignedQuery =
+    expect(mockEvaluateContractorEligibility).toHaveBeenCalledWith({
+      sql,
+      contractorId: USER_ID,
+      opportunityId: OPP_ID,
+    });
+    const canonicalQuery =
       sql.calls.find(
         (q: string) =>
-          q.includes("FROM opportunity_assignments oa") &&
-          q.includes("oa.status IN ('offered','viewed')"),
+          q.includes("FROM network_opportunities no") &&
+          q.includes("COALESCE(no.marketplace_status, 'not_released') = 'live"),
       ) ?? "";
-    expect(assignedQuery).toContain("oi.enrichment_payload");
-    expect(assignedQuery).toContain("oi.enrichment_completeness");
-    expect(assignedQuery).toContain("LEFT JOIN opportunity_intelligence oi");
-    expect(assignedQuery).toContain("approved_for_marketplace");
-    expect(assignedQuery).toContain("opportunity_screening_queue");
+    expect(canonicalQuery).toContain("no.status = 'live'");
+    expect(canonicalQuery).toContain("COALESCE(no.claim_count, 0) < GREATEST");
+    expect(canonicalQuery).toContain("NOT EXISTS");
+    expect(canonicalQuery).toContain("approved_for_marketplace");
+    expect(canonicalQuery).toContain("opportunity_screening_queue");
+  });
+
+  it("filters ineligible canonical marketplace inventory out of Discover", async () => {
+    const sql = makeSql({ canonicalRows: [assignedOpportunity, ineligibleOpportunity] });
+    mockGetDbReady.mockResolvedValueOnce(sql);
+    const { GET } = await import("@/app/api/network/opportunities/route");
+
+    const res = await GET(req("https://solarpro.test/api/network/opportunities"));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.total).toBe(1);
+    expect(json.opportunities.map((opp: { id: string }) => opp.id)).toEqual([OPP_ID]);
+    expect(mockEvaluateContractorEligibility).toHaveBeenCalledWith({
+      sql,
+      contractorId: USER_ID,
+      opportunityId: INELIGIBLE_OPP_ID,
+    });
   });
 
   it("claims an assigned network opportunity through the existing contractor claim endpoint", async () => {
@@ -342,6 +389,18 @@ describe("contractor network assignment visibility", () => {
       address: "123 Solar Way",
       claim_status: "claimed",
     });
+    expect(mockEvaluateContractorEligibility).toHaveBeenCalledWith({
+      sql: expect.any(Function),
+      contractorId: USER_ID,
+      opportunityId: OPP_ID,
+    });
+    expect(mockLogNetworkEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event_type: "assignment.claimed",
+        opportunity_id: OPP_ID,
+        contractor_id: USER_ID,
+      }),
+    );
   });
 
   it("includes claimed network assignments in My Claims and total count", async () => {
@@ -373,5 +432,8 @@ describe("contractor network assignment visibility", () => {
     expect(claimsQuery).toContain("oi.enrichment_payload");
     expect(claimsQuery).toContain("oi.enrichment_completeness");
     expect(claimsQuery).toContain("LEFT JOIN opportunity_intelligence oi");
+    expect(claimsQuery).toContain("JOIN network_opportunities no");
+    expect(claimsQuery).toContain("oa.contractor_id");
+    expect(claimsQuery).not.toContain("opportunity_claims");
   });
 });

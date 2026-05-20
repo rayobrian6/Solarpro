@@ -58,6 +58,10 @@ interface Opportunity extends EnrichmentCarrier {
   claim_id?: string;
   claim_status?: string;
   claimed_by_user_id?: string;
+  marketplace_status?: string;
+  claim_mode?: 'exclusive' | 'shared' | string;
+  claim_count?: number;
+  max_claims?: number;
 }
 
 interface ContractorProfile {
@@ -371,7 +375,9 @@ function ClaimModal({
           <div className="flex items-start gap-2.5 bg-emerald-500/8 border border-emerald-500/25 rounded-xl p-3.5 mb-5">
             <Shield size={15} className="text-emerald-400 flex-shrink-0 mt-0.5" />
             <p className="text-emerald-300 text-xs leading-relaxed">
-              <strong>Exclusive claim.</strong> Once claimed, this opportunity is removed from the discovery feed. Only you will see the homeowner's full address and contact details.
+              <strong>{opp.claim_mode === 'shared' ? 'Shared claim.' : 'Exclusive claim.'}</strong> {opp.claim_mode === 'shared'
+                ? 'Once claimed, this opportunity moves to My Claims for you while remaining available until shared capacity is full.'
+                : "Once claimed, this opportunity is removed from the discovery feed. Only you will see the homeowner's full address and contact details."}
             </p>
           </div>
 
@@ -510,11 +516,11 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
                 onClick={() => { onClose(); onClaim(opp.id); }}
                 className="flex-1 py-2.5 text-sm font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-colors flex items-center justify-center gap-2"
               >
-                <CheckCircle size={15} /> Claim Exclusively
+                <CheckCircle size={15} /> {opp.claim_mode === 'shared' ? 'Claim Shared Lead' : 'Claim Exclusively'}
               </button>
             ) : (
               <span className="flex-1 py-2.5 text-sm font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-2">
-                <CheckCircle size={15} /> You Own This
+                <CheckCircle size={15} /> {opp.claim_mode === 'shared' ? 'Claimed by You' : 'You Own This'}
               </span>
             )}
           </div>
@@ -742,7 +748,9 @@ export default function NetworkPage() {
       if (res.ok) {
         setClaimedIds(prev => new Set([...prev, claimTarget]));
         setOpportunities(prev => prev.filter(o => o.id !== claimTarget));
-        setMyClaims(prev => [data.opportunity, ...prev]);
+        setTotal(prev => Math.max(0, prev - 1));
+        if (data.opportunity) setMyClaims(prev => [data.opportunity, ...prev.filter(o => o.id !== claimTarget)]);
+        await Promise.all([loadDiscover(), loadMyClaims()]);
         showToast('Opportunity claimed! Full address is now visible in My Claims.');
       } else {
         showToast(data.error || 'Failed to claim opportunity.', 'error');
@@ -983,7 +991,7 @@ export default function NetworkPage() {
                       </div>
                       <h3 className="text-white font-semibold text-lg mb-2">No claimed opportunities yet</h3>
                       <p className="text-slate-500 text-sm max-w-sm leading-relaxed">
-                        Browse the Discover tab to find and exclusively claim opportunities in your territory.
+                        Browse the Discover tab to find eligible marketplace opportunities in your territory.
                       </p>
                       <button
                         onClick={() => setTab('discover')}

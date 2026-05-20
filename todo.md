@@ -1,26 +1,24 @@
-# SolarPro Event-First Operational Workflow Engine
+# SolarPro Contractor Network Canonical Marketplace Audit
 
-## Guardrails
-- [x] Stay on `dev` and do not create a feature branch for this project-specific delivery
-- [x] Preserve immutable `intake_events` history and append-only `operator_review` events
-- [x] Do not create duplicate lead records, disconnected queue tables, or a separate CRM system
-- [x] Keep current operational state projected through existing event-first architecture
+## Audit
+- [x] Verify repo state and branch before changes.
+- [x] Inspect contractor Network UI components/tabs and claim button wiring.
+- [x] Inspect Discover, My Claims, and claim APIs against canonical inventory/assignment model.
+- [x] Identify specific visibility/status/count/profile mapping mismatches.
 
-## Implementation
-- [x] Centralize Lead Operations queue definitions and routing in `lib/intake/operationalQueues.ts`
-- [x] Refactor lifecycle summary projection to call the centralized operational queue resolver
-- [x] Add regression-safe workflow actions for qualification, financing, callbacks, documents, dormancy, reactivation, and return-to-queue
-- [x] Add callback intelligence with `callback_at`, urgency buckets, countdowns, overdue routing, and callback history
-- [x] Add dormant/reactivation intelligence with dormant metadata, dormant history, and reactivation history
-- [x] Expose workflow memory through projected summary fields and admin API response shape
-- [x] Update Admin Lead Operations UI labels, queue definitions, action modal metadata, and timeline memory rendering
+## Fixes
+- [x] Align Discover API/UI with released eligible canonical marketplace inventory.
+- [x] Align My Claims API/UI with canonical opportunity_assignments claims.
+- [x] Ensure claim route/status behavior keeps claimed records visible after refresh.
+- [x] Add or update targeted tests for canonical Discover, claims, claim creation, legacy isolation, and counts.
 
 ## QA
-- [x] Run TypeScript type-check after reconstruction
-- [x] Run focused workflow-engine and event-first tests
-- [x] Verify changed files are limited to intended workflow-engine source/test/todo files
+- [x] Run targeted contractor/network tests.
+- [x] Run TypeScript type-check.
+- [x] Run ESLint.
+- [x] Run broader regression if practical.
 
 ## Delivery
-- [x] Commit reconstructed workflow-engine changes locally
-- [x] Push `dev` to GitHub
-- [x] Verify latest commit and branch status
+- [x] Review final diff and summarize exact mismatch found.
+- [x] Commit and push changes on an audit branch or dev as appropriate.
+- [x] Provide post-audit report with files changed, canonical claim source, and remaining UI limitations.

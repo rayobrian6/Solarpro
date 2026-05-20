@@ -8,6 +8,7 @@ import { getUserFromRequest } from "@/lib/auth";
 import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import { evaluateContractorEligibility } from "@/lib/network/contractorEligibility";
 
 // ---------------------------------------------------------------------------
 // GET /api/network/opportunities
@@ -88,11 +89,11 @@ export async function GET(req: NextRequest) {
       LIMIT ${limit} OFFSET ${offset}
     `;
 
-    const assignedRows = await sql`
+    const canonicalCandidateRows = await sql`
       SELECT
         no.id,
         no.source_type AS source,
-        CASE WHEN oa.status IN ('offered','viewed') THEN 'open' ELSE no.status END AS status,
+        'open'::text AS status,
         NULL::text AS site_name,
         no.location_city AS city,
         no.location_state AS state_code,
@@ -121,14 +122,18 @@ export async function GET(req: NextRequest) {
         no.expires_at,
         no.created_at,
         'SolarPro'::text AS creator_company,
-        oa.id AS claim_id,
-        oa.status AS claim_status,
-        oa.contractor_id AS claimed_by_user_id,
+        offer.id AS claim_id,
+        offer.status AS claim_status,
+        offer.contractor_id AS claimed_by_user_id,
         oi.enrichment_payload,
         oi.enrichment_completeness,
         oi.enrichment_warnings,
         oi.enriched_at,
-        no.status AS marketplace_status,
+        no.status AS marketplace_lifecycle_status,
+        COALESCE(no.marketplace_status, no.status) AS marketplace_status,
+        no.claim_mode,
+        no.claim_count,
+        no.max_claims,
         no.screening_status AS marketplace_screening_status,
         no.intake_metadata AS marketplace_intake_metadata,
         no.raw_payload AS marketplace_raw_payload,
@@ -144,25 +149,34 @@ export async function GET(req: NextRequest) {
           WHERE osq.opportunity_id = no.id
           LIMIT 1
         ) AS marketplace_override_decision
-      FROM opportunity_assignments oa
-      JOIN network_opportunities no ON no.id = oa.opportunity_id
+      FROM network_opportunities no
       LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
-      WHERE oa.contractor_id = ${user.id}
-        AND oa.status IN ('offered','viewed')
-        AND no.status IN ('live','claimed')
+      LEFT JOIN opportunity_assignments offer
+        ON offer.opportunity_id = no.id
+       AND offer.contractor_id = ${user.id}
+       AND offer.status IN ('offered','viewed')
+       AND (offer.offer_expires_at IS NULL OR offer.offer_expires_at > NOW())
+      WHERE no.status = 'live'
+        AND COALESCE(no.marketplace_status, 'not_released') = 'live'
+        AND COALESCE(no.claim_count, 0) < GREATEST(COALESCE(no.max_claims, 1), 1)
         AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
         AND EXISTS (
           SELECT 1 FROM opportunity_screening_queue osq
           WHERE osq.opportunity_id = no.id
             AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
         )
-        AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
+        AND NOT EXISTS (
+          SELECT 1 FROM opportunity_assignments claimed
+          WHERE claimed.opportunity_id = no.id
+            AND claimed.contractor_id = ${user.id}
+            AND claimed.status IN ('claimed','contacted','appointment','proposal','won')
+        )
         AND (${filterState}::text IS NULL OR no.location_state = ${filterState})
         AND (${filterBattery} = FALSE OR no.battery_candidate = TRUE)
         AND (${filterMinKw}::numeric IS NULL OR no.estimated_system_size_kw >= ${filterMinKw})
         AND (${filterMaxKw}::numeric IS NULL OR no.estimated_system_size_kw <= ${filterMaxKw})
-      ORDER BY oa.offered_at DESC NULLS LAST
-      LIMIT ${limit} OFFSET ${offset}
+      ORDER BY no.released_at DESC NULLS LAST, no.created_at DESC
+      LIMIT ${Math.max(limit + offset, limit)}
     `;
 
     const countRows = await sql`
@@ -177,36 +191,33 @@ export async function GET(req: NextRequest) {
          AND (${filterMaxKw}::numeric IS NULL OR o.system_size_kw <= ${filterMaxKw})
     `;
 
-    const assignedCountRows = await sql`
-      SELECT COUNT(*) AS total
-      FROM opportunity_assignments oa
-      JOIN network_opportunities no ON no.id = oa.opportunity_id
-      WHERE oa.contractor_id = ${user.id}
-        AND oa.status IN ('offered','viewed')
-        AND no.status IN ('live','claimed')
-        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
-        AND EXISTS (
-          SELECT 1 FROM opportunity_screening_queue osq
-          WHERE osq.opportunity_id = no.id
-            AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
-        )
-        AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
-        AND (${filterState}::text IS NULL OR no.location_state = ${filterState})
-        AND (${filterBattery} = FALSE OR no.battery_candidate = TRUE)
-        AND (${filterMinKw}::numeric IS NULL OR no.estimated_system_size_kw >= ${filterMinKw})
-        AND (${filterMaxKw}::numeric IS NULL OR no.estimated_system_size_kw <= ${filterMaxKw})
-    `;
-
     const legacyTotal = parseInt(String(countRows[0]?.total ?? "0"));
-    const assignedTotal = parseInt(String(assignedCountRows[0]?.total ?? "0"));
 
-    const assignedOpportunityRows = assignedRows as Array<Record<string, unknown>>;
-    assignedOpportunityRows.slice(0, 5).forEach((row) => {
+    const canonicalCandidateOpportunityRows = canonicalCandidateRows as Array<Record<string, unknown>>;
+    const eligibleCanonicalRows: Array<Record<string, unknown>> = [];
+    for (const row of canonicalCandidateOpportunityRows) {
+      const eligibility = await evaluateContractorEligibility({
+        sql,
+        contractorId: user.id,
+        opportunityId: String(row.id),
+      });
+      if (!eligibility.eligible) continue;
+      eligibleCanonicalRows.push({
+        ...row,
+        eligibility_summary: {
+          reasons: eligibility.reasons,
+          warnings: eligibility.warnings,
+          claim_state: eligibility.claim_state,
+        },
+      });
+    }
+
+    eligibleCanonicalRows.slice(0, 5).forEach((row) => {
       logMarketplaceGate(
         "[MARKETPLACE VISIBILITY]",
         {
           id: row.id,
-          status: row.marketplace_status,
+          status: row.marketplace_lifecycle_status,
           screening_status: row.marketplace_screening_status,
           auto_decision: row.marketplace_auto_decision,
           override_decision: row.marketplace_override_decision,
@@ -216,22 +227,24 @@ export async function GET(req: NextRequest) {
         "contractor_discovery_feed",
       );
     });
-    const visibleAssignedRows = assignedOpportunityRows.map(
-      ({
-        marketplace_status,
-        marketplace_screening_status,
-        marketplace_intake_metadata,
-        marketplace_raw_payload,
-        marketplace_auto_decision,
-        marketplace_override_decision,
-        ...row
-      }) => row,
-    );
+    const visibleCanonicalRows = eligibleCanonicalRows
+      .slice(offset, offset + limit)
+      .map(
+        ({
+          marketplace_lifecycle_status,
+          marketplace_screening_status,
+          marketplace_intake_metadata,
+          marketplace_raw_payload,
+          marketplace_auto_decision,
+          marketplace_override_decision,
+          ...row
+        }) => row,
+      );
 
     return NextResponse.json({
       success: true,
-      opportunities: [...visibleAssignedRows, ...rows],
-      total: legacyTotal + assignedTotal,
+      opportunities: [...visibleCanonicalRows, ...rows],
+      total: legacyTotal + eligibleCanonicalRows.length,
       page,
       limit,
       profile_states: (profile?.service_states as string[] | undefined) ?? [],
