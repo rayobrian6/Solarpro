@@ -130,7 +130,8 @@ export async function releaseMarketplaceInventoryFromIntake({
   const intakeRows = await sql`
     SELECT *
     FROM intake_events
-    WHERE id = ${intakeEventId}
+    WHERE id::text = ${intakeEventId}
+       OR event_id = ${intakeEventId}
     LIMIT 1
   `;
   const intake = intakeRows[0] as Record<string, unknown> | undefined;
@@ -311,7 +312,8 @@ export async function releaseMarketplaceInventoryFromIntake({
   await sql`
     UPDATE intake_events
     SET opportunity_id = ${opportunity.id as string}
-    WHERE id = ${intakeEventId}
+    WHERE id::text = ${intakeEventId}
+       OR event_id = ${intakeEventId}
   `;
 
   await logNetworkEvent({

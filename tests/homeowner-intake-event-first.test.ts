@@ -750,6 +750,20 @@ describe("homeowner intake event-first flow", () => {
     expect(section).not.toContain("/api/admin/network/release");
   });
 
+  it("canonical intake release accepts Lead Operations event_id identifiers", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "lib/network/marketplaceInventory.ts"),
+      "utf8",
+    );
+    const releaseSection = source.slice(
+      source.indexOf("export async function releaseMarketplaceInventoryFromIntake"),
+      source.indexOf("export async function transitionMarketplaceInventory"),
+    );
+    expect(releaseSection).toContain("WHERE id::text = ${intakeEventId}");
+    expect(releaseSection).toContain("OR event_id = ${intakeEventId}");
+    expect(releaseSection).toContain("SET opportunity_id = ${opportunity.id as string}");
+  });
+
   it("admin Intake Feed UI labels event review relationship and readiness signals", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "app/admin/network/page.tsx"),
