@@ -1,18 +1,17 @@
-# Git Push, Regression Verification, and Accurate Recap
+# SolarPro Utility Bill Upload Functional Fix
 
-## Inspect state
-- [x] Confirm current branch, remotes, dev/master graph, and dirty files.
-- [x] Identify source/test changes to commit and exclude temp/log artifacts.
+## Implement
+- [x] Update storage helper to store arbitrary utility bill files safely.
+- [x] Add best-effort type detection for known PDFs/images without blocking unknown file types.
+- [x] Update homeowner form file input hint to allow any file type.
+- [x] Fix diagnostics so file-bytes-received storage failures are not labeled JSON metadata-only.
 
-## Regression/deploy verification
-- [x] Run lint, type-check, full regression tests, and production build from the current working tree.
-- [x] Capture exact pass/fail results and logs.
+## Tests
+- [x] Add/update tests for .jiff/.jfif, unknown MIME, octet-stream, and arbitrary file upload behavior.
+- [x] Add/update route coverage proving multipart file bytes can persist stored metadata.
 
-## Commit and push
-- [x] Commit the deployment recovery and homeowner intake changes with a clear message.
-- [ ] Push the current branch to origin.
-- [ ] Verify remote branch contains the pushed commit.
-- [ ] Check master/origin master relationship and report whether master is accurate or needs a merge/PR.
-
-## Final operational recap
-- [ ] Report exactly what changed, what was tested, what was pushed, and what remains.
+## Validate + Deliver
+- [x] Run targeted tests and typecheck.
+- [ ] Commit directly on `dev`.
+- [ ] Push `dev`.
+- [ ] Report exact fix and QA evidence.

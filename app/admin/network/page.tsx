@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, useCallback, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, useCallback, type ReactNode } from 'react';
 import {
   Activity, AlertCircle, AlertTriangle, ArrowRight,
   BarChart3, CheckCircle2, ChevronDown, ChevronUp,
@@ -10,7 +10,7 @@ import {
   XCircle, Play, Eye, Star, Target, Layers,
   Inbox, Cpu, Webhook, RotateCcw, StopCircle,
   CheckCheck, Loader2, Ban, FlaskConical,
-  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink, ClipboardList, Copy,
+  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink, FileText, ClipboardList, Copy,
 } from 'lucide-react';
 import {
   buildEnrichmentChips,
@@ -1116,6 +1116,18 @@ export default function NetworkControlCenter() {
 
 interface IntakeLead {
   id: string;
+  intake_record_type?: string | null;
+  opportunity_id?: string | null;
+  event_id?: string | null;
+  event_type?: string | null;
+  review_status?: string | null;
+  received_at?: string | null;
+  source_funnel?: string | null;
+  ready_for_review?: boolean | null;
+  needs_missing_data?: string[] | null;
+  qualification_skipped?: boolean | null;
+  bill_attachment_metadata_only?: boolean | null;
+  validation_warning?: string[] | null;
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
@@ -1131,6 +1143,25 @@ interface IntakeLead {
   enrichment_status?: string | null;
   is_duplicate?: boolean | null;
   duplicate_score?: number | null;
+  qualification_payload?: Record<string, unknown> | null;
+  qualification_intelligence?: Record<string, unknown> | null;
+  qualification_event_id?: string | null;
+  qualification_status?: string | null;
+  lead_grade?: string | null;
+  finance_readiness?: boolean | null;
+  battery_readiness?: boolean | null;
+  estimated_income_band?: string | null;
+  estimated_credit_band?: string | null;
+  sunlight_confidence?: string | null;
+  property_type?: string | null;
+  utility_provider?: string | null;
+  battery_interest?: string | null;
+  homeowner_status?: string | null;
+  preferred_contact_method?: string | null;
+  timeline?: string | null;
+  roof_age?: string | null;
+  intake_metadata?: Record<string, unknown> | null;
+  bill_metadata?: Record<string, unknown> | null;
   created_at: string;
 }
 
@@ -1146,27 +1177,41 @@ function IntakeFeedSection() {
   const [leads, setLeads] = useState<IntakeLead[]>([]);
   const [stats, setStats] = useState<IntakeStats>({});
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [channelFilter, setChannelFilter] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams({ page: String(page), limit: '25' });
       if (search) params.set('search', search);
       if (sourceFilter) params.set('source_system', sourceFilter);
       if (channelFilter) params.set('source_channel', channelFilter);
       const res = await fetch(`/api/admin/network/intake?${params}`);
-      const data = await res.json();
-      if (data.success) {
-        setLeads(data.opportunities ?? []);
-        setStats(data.stats ?? {});
-        setTotal(data.total ?? 0);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        const stage = data.stage ? ` stage=${data.stage}` : '';
+        const code = data.code ? ` code=${data.code}` : '';
+        const message = data.message || data.error || `HTTP ${res.status}`;
+        throw new Error(`Intake Feed load failed${stage}${code}: ${message}`);
       }
-    } catch (e) { console.error(e); }
+      setLeads(data.opportunities ?? []);
+      setStats(data.stats ?? {});
+      setTotal(data.total ?? 0);
+    } catch (e) {
+      console.error(e);
+      setLeads([]);
+      setStats({});
+      setTotal(0);
+      setError(e instanceof Error ? e.message : 'Intake Feed load failed');
+    }
     finally { setLoading(false); }
   }, [page, search, sourceFilter, channelFilter]);
 
@@ -1197,6 +1242,148 @@ function IntakeFeedSection() {
 
   const totalPages = Math.ceil(total / 25);
 
+  const metadataText = (lead: IntakeLead, key: string) => {
+    const value = lead.intake_metadata?.[key];
+    return typeof value === 'string' && value.trim() ? value : null;
+  };
+
+  const metadataNumber = (lead: IntakeLead, key: string) => {
+    const value = lead.intake_metadata?.[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : null;
+  };
+
+  const payloadDisplay = (value: unknown) => {
+    if (value === null || value === undefined || value === '') return '—';
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.length ? value.join(', ') : 'None';
+    return JSON.stringify(value);
+  };
+
+  const billMetadataFor = (lead: IntakeLead) => {
+    const metadata = lead.bill_metadata ?? (typeof lead.intake_metadata?.bill_metadata === 'object' && lead.intake_metadata.bill_metadata !== null ? lead.intake_metadata.bill_metadata as Record<string, unknown> : null);
+    const filename = metadata?.filename ?? metadataText(lead, 'uploaded_bill_filename');
+    const accessibleUrl = typeof metadata?.accessible_url === 'string' && metadata.accessible_url.trim() ? metadata.accessible_url : null;
+    const downloadUrl = typeof metadata?.download_url === 'string' && metadata.download_url.trim() ? metadata.download_url : accessibleUrl;
+    return {
+      filename,
+      sizeBytes: metadata?.size_bytes ?? metadataNumber(lead, 'uploaded_bill_size_bytes'),
+      contentType: metadata?.content_type ?? metadataText(lead, 'uploaded_bill_content_type'),
+      storageStatus: metadata?.storage_status ?? (filename ? 'metadata_only_not_uploaded' : 'not_provided'),
+      storageProvider: metadata?.storage_provider,
+      uploadedAt: metadata?.uploaded_at,
+      accessibleUrl,
+      downloadUrl,
+      hasStoredAttachment: !!accessibleUrl && metadata?.storage_status === 'stored',
+    };
+  };
+
+  const reviewSignalsFor = (lead: IntakeLead): Array<[string, unknown]> => {
+    const warnings = lead.validation_warning ?? (Array.isArray(lead.intake_metadata?.validation_warning) ? lead.intake_metadata.validation_warning as string[] : []);
+    return [
+      ['Ready for Review', lead.ready_for_review],
+      ['Needs Missing Data', lead.needs_missing_data ?? []],
+      ['Qualification Skipped', lead.qualification_skipped],
+      ['Bill Attachment Metadata Only', lead.bill_attachment_metadata_only],
+      ['Validation Warning', warnings],
+    ];
+  };
+
+  const operatorActions: Array<{ action: string; label: string; tone: string; confirm?: string }> = [
+    { action: 'mark_contacted', label: 'Mark Contacted', tone: 'border-sky-700 text-sky-200 hover:bg-sky-950/40' },
+    { action: 'mark_no_answer', label: 'No Answer', tone: 'border-amber-700 text-amber-200 hover:bg-amber-950/40' },
+    { action: 'mark_needs_follow_up', label: 'Needs Follow-Up', tone: 'border-orange-700 text-orange-200 hover:bg-orange-950/40' },
+    { action: 'mark_financing_ready', label: 'Financing Ready', tone: 'border-emerald-700 text-emerald-200 hover:bg-emerald-950/40' },
+    { action: 'mark_qualified', label: 'Mark Qualified', tone: 'border-green-700 text-green-200 hover:bg-green-950/40' },
+    { action: 'approve_for_marketplace', label: 'Approve for Marketplace', tone: 'border-purple-700 text-purple-200 hover:bg-purple-950/40' },
+    { action: 'reject_lead', label: 'Reject Lead', tone: 'border-red-700 text-red-200 hover:bg-red-950/40', confirm: 'Reject this lead? This preserves audit history and removes it from active advancement.' },
+    { action: 'archive_lead', label: 'Archive Lead', tone: 'border-zinc-700 text-zinc-200 hover:bg-zinc-800/70', confirm: 'Archive this lead? This is a soft archive and preserves the full event history.' },
+  ];
+
+  const runOperatorAction = async (lead: IntakeLead, action: string, confirmMessage?: string) => {
+    const eventId = lead.event_id ?? lead.id;
+    if (!eventId) return;
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
+    setActionBusyId(`${eventId}:${action}`);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/admin/network/intake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_id: eventId, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || data.message || `HTTP ${res.status}`);
+      setActionMessage(`${data.review_status || action} saved for ${eventId}`);
+      await load();
+    } catch (e) {
+      setActionMessage(e instanceof Error ? e.message : 'Operator action failed');
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const eventDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => [
+    ['Intake Event ID', lead.event_id ?? lead.id],
+    ['Event Type', lead.event_type ?? (lead.intake_record_type === 'intake_event' ? 'homeowner_intake' : 'converted_opportunity')],
+    ['Review Status', lead.review_status ?? lead.status ?? 'pending_review'],
+    ['Opportunity ID', lead.opportunity_id ?? 'Not converted'],
+    ['Received At', lead.received_at ?? lead.created_at],
+    ['Source / Funnel', lead.source_funnel ?? lead.intake_metadata?.funnel_slug ?? lead.source_system],
+  ];
+
+  const formDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => {
+    const billFile = billMetadataFor(lead);
+    const details: Array<[string, unknown]> = [
+      ['Utility Provider', lead.utility_provider ?? metadataText(lead, 'utility_provider')],
+      ['Average Monthly Bill', lead.monthly_bill_amount],
+      ['Battery Interest', lead.battery_interest ?? metadataText(lead, 'battery_interest')],
+      ['Homeowner Status', lead.homeowner_status ?? metadataText(lead, 'homeowner_status') ?? metadataText(lead, 'home_ownership')],
+      ['Preferred Contact', lead.preferred_contact_method ?? metadataText(lead, 'preferred_contact_method')],
+      ['Timeline', lead.timeline ?? metadataText(lead, 'timeline')],
+      ['Roof Age Years', lead.roof_age ?? metadataText(lead, 'roof_age') ?? metadataText(lead, 'roof_age_years')],
+      ['Property Address', [lead.address_line1, lead.city, lead.state, lead.zip].filter(Boolean).join(', ')],
+      ['Utility Bill Evidence', billFile.hasStoredAttachment ? 'Stored attachment available' : (billFile.filename ? 'Metadata only — file was not uploaded/stored' : 'Not provided')],
+      ['Utility Bill Filename', billFile.filename],
+      ['Utility Bill File Size Bytes', billFile.sizeBytes],
+      ['Utility Bill MIME Type', billFile.contentType],
+      ['Utility Bill Storage Status', billFile.storageStatus],
+      ['Utility Bill Storage Provider', billFile.storageProvider],
+      ['Utility Bill Uploaded At', billFile.uploadedAt],
+      ['Consent', lead.intake_metadata?.consent_given],
+    ];
+    return details.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  };
+
+  const notesFor = (lead: IntakeLead) => metadataText(lead, 'notes') ?? metadataText(lead, 'optional_notes');
+
+  const qualificationDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => {
+    const intelligence = lead.qualification_intelligence ?? {};
+    const normalized = typeof intelligence.normalized === 'object' && intelligence.normalized !== null
+      ? intelligence.normalized as Record<string, unknown>
+      : {};
+    const details: Array<[string, unknown]> = [
+      ['Qualification Status', lead.qualification_status ?? intelligence.qualification_status],
+      ['Lead Grade', lead.lead_grade ?? intelligence.lead_grade],
+      ['Finance Ready', lead.finance_readiness ?? intelligence.finance_readiness],
+      ['Battery Ready', lead.battery_readiness ?? intelligence.battery_readiness],
+      ['Income Band', lead.estimated_income_band ?? normalized.estimated_income_band],
+      ['Estimated Credit', lead.estimated_credit_band ?? normalized.estimated_credit_band],
+      ['Sunlight', lead.sunlight_confidence ?? normalized.sunlight_confidence],
+      ['Property Type', lead.property_type ?? normalized.property_type],
+      ['Purchase Intent', lead.qualification_payload?.qualification && typeof lead.qualification_payload.qualification === 'object' ? (lead.qualification_payload.qualification as Record<string, unknown>).purchase_intent : normalized.purchase_intent],
+      ['Electrical Panel', lead.qualification_payload?.qualification && typeof lead.qualification_payload.qualification === 'object' ? (lead.qualification_payload.qualification as Record<string, unknown>).electrical_panel_size : normalized.electrical_panel_size],
+      ['Prior Quotes', lead.qualification_payload?.qualification && typeof lead.qualification_payload.qualification === 'object' ? (lead.qualification_payload.qualification as Record<string, unknown>).prior_quotes : normalized.prior_quotes],
+    ];
+    return details.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  };
+
+  const contractorSummaryFor = (lead: IntakeLead) => {
+    const value = lead.qualification_intelligence?.contractor_summary;
+    return typeof value === 'string' && value.trim() ? value : null;
+  };
+
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1205,6 +1392,18 @@ function IntakeFeedSection() {
         <StatCard label="Conversion Rate" value={`${((stats.conversion_rate ?? 0) * 100).toFixed(1)}%`} color="text-green-400" icon={TrendingUp} />
         <StatCard label="Validation Failures" value={`${((stats.validation_failure_rate ?? 0) * 100).toFixed(1)}%`} color={((stats.validation_failure_rate ?? 0) > 0.2) ? 'text-red-400' : 'text-zinc-300'} icon={AlertCircle} />
       </div>
+      {actionMessage && (
+        <div className="rounded-xl border border-blue-800/50 bg-blue-950/30 p-3 text-xs text-blue-100">
+          {actionMessage}
+        </div>
+      )}
+      {error && (
+        <div className="rounded-xl border border-red-800/50 bg-red-950/30 p-4 text-sm text-red-200">
+          <div className="flex items-center gap-2 font-semibold"><AlertCircle className="h-4 w-4" /> Intake Feed API error</div>
+          <p className="mt-1 font-mono text-xs text-red-300">{error}</p>
+          <p className="mt-2 text-xs text-red-200/70">The public form may still be saving into intake_events; this panel is showing the admin read-path failure instead of silently rendering zero leads.</p>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
@@ -1246,21 +1445,155 @@ function IntakeFeedSection() {
             </tr></thead>
             <tbody className="divide-y divide-zinc-800/50">
               {loading && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Loader2 className="w-5 h-5 animate-spin inline mr-2" />Loading…</td></tr>}
-              {!loading && leads.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Inbox className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>No intake leads. Run <code className="text-orange-400 text-xs">POST /api/migrate</code> first.</p></td></tr>}
-              {!loading && leads.map(lead => (
-                <tr key={lead.id} className="hover:bg-zinc-800/30 transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-white">{[lead.first_name, lead.last_name].filter(Boolean).join(' ') || <span className="text-zinc-600 italic">Anonymous</span>}</div>
-                    {lead.is_duplicate && <span className="text-xs text-amber-400">⚠ dup {lead.duplicate_score ? `(${(lead.duplicate_score * 100).toFixed(0)}%)` : ''}</span>}
-                  </td>
-                  <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.email ?? '—'}</div><div className="text-zinc-500 text-xs">{lead.phone ?? ''}</div></td>
-                  <td className="px-4 py-3 text-zinc-400 text-xs">{[lead.city, lead.state, lead.zip].filter(Boolean).join(', ') || lead.address_line1 || '—'}</td>
-                  <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.source_system ?? '—'}</div><div className={`text-xs ${sourceChannelColor(lead.source_channel)}`}>{lead.source_channel ?? ''}</div></td>
-                  <td className="px-4 py-3 text-zinc-300 text-xs">{lead.monthly_bill_amount ? `$${lead.monthly_bill_amount}/mo` : '—'}</td>
-                  <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${enrichBadge(lead.enrichment_status)}`}>{lead.enrichment_status ?? 'pending'}</span></td>
-                  <td className="px-4 py-3 text-zinc-500 text-xs">{new Date(lead.created_at).toLocaleString()}</td>
-                </tr>
-              ))}
+              {!loading && !error && leads.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-zinc-500"><Inbox className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>No intake leads found for the current filters. Public homeowner submissions save as pending-review intake events and should appear here after a successful form submit.</p></td></tr>}
+              {!loading && error && <tr><td colSpan={7} className="px-4 py-12 text-center text-red-300"><AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-60" /><p>Unable to load Intake Feed. See the API error above.</p></td></tr>}
+              {!loading && leads.map(lead => {
+                const details = formDetailsFor(lead);
+                const qualificationDetails = qualificationDetailsFor(lead);
+                const contractorSummary = contractorSummaryFor(lead);
+                const notes = notesFor(lead);
+                const eventDetails = eventDetailsFor(lead);
+                const reviewSignals = reviewSignalsFor(lead);
+                const billFile = billMetadataFor(lead);
+                const eventId = lead.event_id ?? lead.id;
+                const terminalLead = ['archived', 'rejected', 'bad_lead'].includes(String(lead.review_status ?? lead.status ?? '').toLowerCase());
+                return (
+                  <Fragment key={lead.id}>
+                    <tr className="hover:bg-zinc-800/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-white">{[lead.first_name, lead.last_name].filter(Boolean).join(' ') || <span className="text-zinc-600 italic">Anonymous</span>}</div>
+                        <div className="mt-1 text-[11px] text-zinc-500">{lead.review_status ?? lead.status ?? 'pending_review'} · {lead.event_type ?? lead.intake_record_type ?? 'intake'}</div>
+                        {lead.is_duplicate && <span className="text-xs text-amber-400">⚠ dup {lead.duplicate_score ? `(${(lead.duplicate_score * 100).toFixed(0)}%)` : ''}</span>}
+                      </td>
+                      <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.email ?? '—'}</div><div className="text-zinc-500 text-xs">{lead.phone ?? ''}</div></td>
+                      <td className="px-4 py-3 text-zinc-400 text-xs">{[lead.city, lead.state, lead.zip].filter(Boolean).join(', ') || lead.address_line1 || '—'}</td>
+                      <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.source_system ?? '—'}</div><div className={`text-xs ${sourceChannelColor(lead.source_channel)}`}>{lead.source_channel ?? ''}</div></td>
+                      <td className="px-4 py-3 text-zinc-300 text-xs">{lead.monthly_bill_amount ? `$${lead.monthly_bill_amount}/mo` : '—'}</td>
+                      <td className="px-4 py-3"><span className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-medium ${enrichBadge(lead.enrichment_status)}`}>{lead.enrichment_status ?? 'pending'}</span></td>
+                      <td className="px-4 py-3 text-zinc-500 text-xs">{new Date(lead.created_at).toLocaleString()}</td>
+                    </tr>
+                    <tr className="bg-zinc-950/30">
+                      <td colSpan={7} className="px-4 pb-4 pt-0">
+                        <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <div className="text-[11px] font-semibold uppercase tracking-wider text-orange-300">Submitted form payload</div>
+                            <div className="text-[10px] font-mono text-zinc-600">Intake Event ID: {lead.event_id ?? lead.id}</div>
+                          </div>
+                          <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {eventDetails.map(([label, value]) => (
+                              <div key={label} className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+                                <div className="mt-1 break-words text-xs text-zinc-200">{payloadDisplay(value)}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                            {reviewSignals.map(([label, value]) => (
+                              <div key={label} className="rounded-md border border-blue-900/40 bg-blue-950/20 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wider text-blue-400">{label}</div>
+                                <div className="mt-1 break-words text-xs text-blue-100">{payloadDisplay(value)}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {billFile.filename && (
+                            <div className="mb-3 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3">
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300">Utility bill attachment</div>
+                                  <div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.filename)} · {payloadDisplay(billFile.storageStatus)}</div>
+                                </div>
+                                {billFile.hasStoredAttachment ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    <a href={billFile.accessibleUrl ?? '#'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-amber-700 px-2.5 py-1 text-xs text-amber-100 hover:bg-amber-900/40">
+                                      <ExternalLink className="h-3 w-3" /> Open Bill
+                                    </a>
+                                    <a href={billFile.downloadUrl ?? billFile.accessibleUrl ?? '#'} download className="inline-flex items-center gap-1 rounded-md border border-amber-700 px-2.5 py-1 text-xs text-amber-100 hover:bg-amber-900/40">
+                                      <FileText className="h-3 w-3" /> Download Bill
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <div className="max-w-sm rounded-md border border-amber-900/50 bg-zinc-950/70 px-2.5 py-1 text-[11px] leading-5 text-amber-100">
+                                    No retrievable bill file is available for this intake. The homeowner selected a file, but storage only captured metadata. Configure BLOB_READ_WRITE_TOKEN so future bill uploads create Open Bill / Download Bill links.
+                                  </div>
+                                )}
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">MIME</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.contentType)}</div></div>
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">Size Bytes</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.sizeBytes)}</div></div>
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">Uploaded At</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.uploadedAt)}</div></div>
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">Provider</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.storageProvider)}</div></div>
+                              </div>
+                            </div>
+                          )}
+                          {details.length > 0 ? (
+                            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                              {details.map(([label, value]) => (
+                                <div key={label} className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+                                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+                                  <div className="mt-1 break-words text-xs text-zinc-200">{payloadDisplay(value)}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-xs text-zinc-500">No payload details were returned for this intake row.</div>
+                          )}
+                          {qualificationDetails.length > 0 && (
+                            <div className="mt-3 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">Qualification intelligence</div>
+                                {lead.qualification_event_id ? <div className="text-[10px] font-mono text-emerald-700">Qualification Event ID: {lead.qualification_event_id}</div> : <div className="text-[10px] text-emerald-700">Qualification skipped / not submitted</div>}
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                {qualificationDetails.map(([label, value]) => (
+                                  <div key={label} className="rounded-md border border-emerald-900/40 bg-zinc-900/70 px-3 py-2">
+                                    <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+                                    <div className="mt-1 break-words text-xs text-emerald-100">{payloadDisplay(value)}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              {contractorSummary && (
+                                <div className="mt-3 rounded-md border border-emerald-900/40 bg-zinc-950/70 px-3 py-2">
+                                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">Contractor Summary</div>
+                                  <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-emerald-100">{contractorSummary}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {lead.intake_record_type === 'intake_event' && (
+                            <div className="mt-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wider text-purple-300">Operator workflow controls</div>
+                                  <div className="mt-1 text-[11px] text-purple-200/70">Each action appends an immutable operator_review event and updates the current intake projection.</div>
+                                </div>
+                                {terminalLead && <span className="rounded-full border border-zinc-700 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-400">Terminal</span>}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {operatorActions.map(item => {
+                                  const busy = actionBusyId === `${eventId}:${item.action}`;
+                                  const disabled = !!actionBusyId || (terminalLead && !['archive_lead'].includes(item.action));
+                                  return (
+                                    <button key={item.action} type="button" disabled={disabled} onClick={() => runOperatorAction(lead, item.action, item.confirm)} className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${item.tone}`}>
+                                      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : item.action === 'approve_for_marketplace' ? <CheckCheck className="h-3 w-3" /> : item.action === 'reject_lead' ? <XCircle className="h-3 w-3" /> : item.action === 'archive_lead' ? <Ban className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                                      {item.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          {notes && (
+                            <div className="mt-3 rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wider text-zinc-500">Operational Notes</div>
+                              <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-zinc-300">{notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1800,16 +2133,30 @@ function SimulatorSection() {
       });
       const data = await parseAdminJsonResponse(res, 'Simulator action failed');
       setResult(data);
-      if (data.success !== false) setItems((data.opportunities as SimulatedOpportunity[] | undefined) ?? []);
+      if (data.success !== false) {
+        if (Array.isArray(data.opportunities)) setItems(data.opportunities as SimulatedOpportunity[]);
+        await loadSimulated();
+      }
     } catch (e) { setResult({ error: String(e) }); }
     finally { setBusy(null); }
   }
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-sm font-semibold text-white">Seed / Simulate Intake</h2>
-        <p className="mt-1 text-xs text-zinc-500">Super-admin operational simulator. Seeds canonical network opportunities with simulator metadata and runs real screening/scoring/release/matching actions.</p>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Seed / Simulate Intake</h2>
+          <p className="mt-1 text-xs text-zinc-500">Super-admin operational simulator. Seeds canonical network opportunities with simulator metadata and runs real screening/scoring/release/matching actions.</p>
+        </div>
+        <a
+          href="/free-solar-estimate"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/10 px-3 py-2 text-xs font-semibold text-orange-200 hover:bg-orange-500/20"
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          Real intake test form
+        </a>
       </div>
 
       <div className="rounded-xl border border-zinc-700/50 bg-zinc-800/40 p-4">
@@ -2149,10 +2496,14 @@ interface IntakeFunnel {
   source_channel: string;
   status: 'active' | 'inactive' | string;
   is_active: boolean;
-  canonical_path: string | null;
-  canonical_url: string | null;
-  embed_url: string | null;
-  utm_ready_url: string | null;
+  canonical_path?: string | null;
+  canonicalPath?: string | null;
+  canonical_url?: string | null;
+  canonicalUrl?: string | null;
+  embed_url?: string | null;
+  embedUrl?: string | null;
+  utm_ready_url?: string | null;
+  utmReadyUrl?: string | null;
   require_phone: boolean;
   require_address: boolean;
   require_monthly_bill: boolean;
@@ -2343,8 +2694,11 @@ function IntakeFunnelsSection() {
       ) : (
         <div className="grid gap-4 xl:grid-cols-2">
           {funnels.map(funnel => {
-            const generatedUtmUrl = funnel.canonical_url ? appendClientUtm(funnel.canonical_url, utm) : null;
-            const hasPublicUrl = Boolean(funnel.canonical_url);
+            const canonicalUrl = funnel.canonicalUrl || funnel.canonical_url || null;
+            const embedUrl = funnel.embedUrl || funnel.embed_url || null;
+            const serverUtmReadyUrl = funnel.utmReadyUrl || funnel.utm_ready_url || null;
+            const generatedUtmUrl = canonicalUrl ? appendClientUtm(canonicalUrl, utm) : null;
+            const hasPublicUrl = Boolean(canonicalUrl);
             return (
               <div key={funnel.id} className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5 shadow-lg shadow-black/10">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -2361,7 +2715,7 @@ function IntakeFunnelsSection() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <a
-                      href={funnel.canonical_url || '#'}
+                      href={canonicalUrl || '#'}
                       target="_blank"
                       rel="noreferrer"
                       aria-disabled={!hasPublicUrl}
@@ -2375,24 +2729,24 @@ function IntakeFunnelsSection() {
                       Open Funnel
                     </a>
                     <button
-                      onClick={() => void copyValue(`${funnel.slug} link`, funnel.canonical_url)}
-                      disabled={!funnel.canonical_url}
+                      onClick={() => void copyValue(`${funnel.slug} link`, canonicalUrl)}
+                      disabled={!canonicalUrl}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-blue-500/40 hover:text-blue-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       Copy Link
                     </button>
                     <button
-                      onClick={() => void copyValue(`${funnel.slug} embed URL`, funnel.embed_url)}
-                      disabled={!funnel.embed_url}
+                      onClick={() => void copyValue(`${funnel.slug} embed URL`, embedUrl)}
+                      disabled={!embedUrl}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-violet-500/40 hover:text-violet-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
                     >
                       <Copy className="h-3.5 w-3.5" />
                       Copy Embed URL
                     </button>
                     <button
-                      onClick={() => void copyValue(`${funnel.slug} UTM URL`, generatedUtmUrl || funnel.utm_ready_url)}
-                      disabled={!generatedUtmUrl && !funnel.utm_ready_url}
+                      onClick={() => void copyValue(`${funnel.slug} UTM URL`, generatedUtmUrl || serverUtmReadyUrl)}
+                      disabled={!canonicalUrl}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-emerald-500/40 hover:text-emerald-300 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-600"
                     >
                       <Copy className="h-3.5 w-3.5" />
@@ -2409,7 +2763,7 @@ function IntakeFunnelsSection() {
                 )}
 
                 <div className="mt-5 grid gap-4 md:grid-cols-3">
-                  <FunnelInfoRow label="Canonical URL" value={funnel.canonical_url ? <span className="break-all font-mono text-[11px] text-zinc-300">{funnel.canonical_url}</span> : <span className="text-zinc-500">No public page mapped</span>} />
+                  <FunnelInfoRow label="Canonical URL" value={canonicalUrl ? <span className="break-all font-mono text-[11px] text-zinc-300">{canonicalUrl}</span> : <span className="text-zinc-500">No public page mapped</span>} />
                   <FunnelInfoRow label="Source Channel" value={funnel.source_channel || '—'} />
                   <FunnelInfoRow label="Recent Intake Events" value={`${funnel.recent_intake_count} in 30 days`} />
                   <FunnelInfoRow label="Created" value={funnelDate(funnel.created_at)} />

@@ -1,12 +1,13 @@
 export const maxDuration = 30;
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const revalidate = 0;
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
-import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { NextRequest, NextResponse } from "next/server";
+import { getUserFromRequest } from "@/lib/auth";
+import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
+import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
 
 // ---------------------------------------------------------------------------
 // GET /api/network/opportunities
@@ -16,16 +17,17 @@ import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
 // ---------------------------------------------------------------------------
 export async function GET(req: NextRequest) {
   const user = getUserFromRequest(req);
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(req.url);
-  const page  = Math.max(1, parseInt(searchParams.get('page')  || '1'));
-  const limit = Math.min(50, parseInt(searchParams.get('limit') || '20'));
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+  const limit = Math.min(50, parseInt(searchParams.get("limit") || "20"));
   const offset = (page - 1) * limit;
-  const filterState = searchParams.get('state') || null;
-  const filterBattery = searchParams.get('battery') === '1';
-  const filterMinKw = parseFloat(searchParams.get('min_kw') || '0') || null;
-  const filterMaxKw = parseFloat(searchParams.get('max_kw') || '0') || null;
+  const filterState = searchParams.get("state") || null;
+  const filterBattery = searchParams.get("battery") === "1";
+  const filterMinKw = parseFloat(searchParams.get("min_kw") || "0") || null;
+  const filterMaxKw = parseFloat(searchParams.get("max_kw") || "0") || null;
 
   try {
     const sql = await getDbReady();
@@ -125,13 +127,35 @@ export async function GET(req: NextRequest) {
         oi.enrichment_payload,
         oi.enrichment_completeness,
         oi.enrichment_warnings,
-        oi.enriched_at
+        oi.enriched_at,
+        no.status AS marketplace_status,
+        no.screening_status AS marketplace_screening_status,
+        no.intake_metadata AS marketplace_intake_metadata,
+        no.raw_payload AS marketplace_raw_payload,
+        (
+          SELECT osq.auto_decision
+          FROM opportunity_screening_queue osq
+          WHERE osq.opportunity_id = no.id
+          LIMIT 1
+        ) AS marketplace_auto_decision,
+        (
+          SELECT osq.override_decision
+          FROM opportunity_screening_queue osq
+          WHERE osq.opportunity_id = no.id
+          LIMIT 1
+        ) AS marketplace_override_decision
       FROM opportunity_assignments oa
       JOIN network_opportunities no ON no.id = oa.opportunity_id
       LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
       WHERE oa.contractor_id = ${user.id}
         AND oa.status IN ('offered','viewed')
         AND no.status IN ('live','claimed')
+        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
+        AND EXISTS (
+          SELECT 1 FROM opportunity_screening_queue osq
+          WHERE osq.opportunity_id = no.id
+            AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+        )
         AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
         AND (${filterState}::text IS NULL OR no.location_state = ${filterState})
         AND (${filterBattery} = FALSE OR no.battery_candidate = TRUE)
@@ -160,6 +184,12 @@ export async function GET(req: NextRequest) {
       WHERE oa.contractor_id = ${user.id}
         AND oa.status IN ('offered','viewed')
         AND no.status IN ('live','claimed')
+        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
+        AND EXISTS (
+          SELECT 1 FROM opportunity_screening_queue osq
+          WHERE osq.opportunity_id = no.id
+            AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+        )
         AND (oa.offer_expires_at IS NULL OR oa.offer_expires_at > NOW())
         AND (${filterState}::text IS NULL OR no.location_state = ${filterState})
         AND (${filterBattery} = FALSE OR no.battery_candidate = TRUE)
@@ -167,19 +197,47 @@ export async function GET(req: NextRequest) {
         AND (${filterMaxKw}::numeric IS NULL OR no.estimated_system_size_kw <= ${filterMaxKw})
     `;
 
-    const legacyTotal = parseInt(String(countRows[0]?.total ?? '0'));
-    const assignedTotal = parseInt(String(assignedCountRows[0]?.total ?? '0'));
+    const legacyTotal = parseInt(String(countRows[0]?.total ?? "0"));
+    const assignedTotal = parseInt(String(assignedCountRows[0]?.total ?? "0"));
+
+    const assignedOpportunityRows = assignedRows as Array<Record<string, unknown>>;
+    assignedOpportunityRows.slice(0, 5).forEach((row) => {
+      logMarketplaceGate(
+        "[MARKETPLACE VISIBILITY]",
+        {
+          id: row.id,
+          status: row.marketplace_status,
+          screening_status: row.marketplace_screening_status,
+          auto_decision: row.marketplace_auto_decision,
+          override_decision: row.marketplace_override_decision,
+          intake_metadata: row.marketplace_intake_metadata,
+          raw_payload: row.marketplace_raw_payload,
+        },
+        "contractor_discovery_feed",
+      );
+    });
+    const visibleAssignedRows = assignedOpportunityRows.map(
+      ({
+        marketplace_status,
+        marketplace_screening_status,
+        marketplace_intake_metadata,
+        marketplace_raw_payload,
+        marketplace_auto_decision,
+        marketplace_override_decision,
+        ...row
+      }) => row,
+    );
 
     return NextResponse.json({
       success: true,
-      opportunities: [...assignedRows, ...rows],
+      opportunities: [...visibleAssignedRows, ...rows],
       total: legacyTotal + assignedTotal,
       page,
       limit,
       profile_states: (profile?.service_states as string[] | undefined) ?? [],
     });
   } catch (err: unknown) {
-    return handleRouteDbError('[GET /api/network/opportunities]', err);
+    return handleRouteDbError("[GET /api/network/opportunities]", err);
   }
 }
 
@@ -190,17 +248,22 @@ export async function GET(req: NextRequest) {
 // ---------------------------------------------------------------------------
 export async function POST(req: NextRequest) {
   const user = getUserFromRequest(req);
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rl = await checkRateLimit('standard', getClientIp(req));
-  if (!rl.allowed) return NextResponse.json({ error: 'Too many requests.' }, { status: 429 });
+  const rl = await checkRateLimit("standard", getClientIp(req));
+  if (!rl.allowed)
+    return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
   try {
     const body = await req.json();
     const { project_id, asking_price, listing_notes, expires_days } = body;
 
     if (!project_id || !isValidUUID(project_id)) {
-      return NextResponse.json({ error: 'project_id required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "project_id required" },
+        { status: 400 },
+      );
     }
 
     const sql = await getDbReady();
@@ -221,7 +284,7 @@ export async function POST(req: NextRequest) {
     `;
 
     if (!projectRows.length) {
-      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
     const p = projectRows[0] as Record<string, unknown>;
@@ -234,24 +297,41 @@ export async function POST(req: NextRequest) {
        LIMIT 1
     `;
     if (existing.length > 0) {
-      return NextResponse.json({ error: 'This project is already listed as an active opportunity.' }, { status: 409 });
+      return NextResponse.json(
+        { error: "This project is already listed as an active opportunity." },
+        { status: 409 },
+      );
     }
 
     // Extract intelligence from bill_data
     const billData = (p.bill_data as Record<string, unknown>) ?? {};
-    const annualKwh = (billData._annualKwh ?? billData.annual_kwh ?? null) as number | null;
-    const monthlyKwhAvg = (billData._averageMonthlyKwh ?? billData.average_monthly_kwh ?? null) as number | null;
-    const utilityName = (billData._utilityName ?? billData.utility_name ?? null) as string | null;
-    const utilityRate = (billData._utilityRatePerKwh ?? billData.utility_rate_per_kwh ?? null) as number | null;
+    const annualKwh = (billData._annualKwh ?? billData.annual_kwh ?? null) as
+      | number
+      | null;
+    const monthlyKwhAvg = (billData._averageMonthlyKwh ??
+      billData.average_monthly_kwh ??
+      null) as number | null;
+    const utilityName = (billData._utilityName ??
+      billData.utility_name ??
+      null) as string | null;
+    const utilityRate = (billData._utilityRatePerKwh ??
+      billData.utility_rate_per_kwh ??
+      null) as number | null;
 
     // Derive fit tags
     const roofPitch = (p.roof_pitch as string | null) ?? null;
-    const pitchNum = roofPitch ? parseInt(roofPitch.replace(/[^0-9].*/, '')) : 0;
+    const pitchNum = roofPitch
+      ? parseInt(roofPitch.replace(/[^0-9].*/, ""))
+      : 0;
     const steep_roof = !isNaN(pitchNum) && pitchNum >= 6;
 
     // Parse city/state/zip from address or dedicated columns
-    const stateCode = (p.state as string | null)?.toUpperCase().slice(0, 2) || null;
-    const expiryDays = Math.min(90, Math.max(7, parseInt(String(expires_days ?? 30))));
+    const stateCode =
+      (p.state as string | null)?.toUpperCase().slice(0, 2) || null;
+    const expiryDays = Math.min(
+      90,
+      Math.max(7, parseInt(String(expires_days ?? 30))),
+    );
 
     const [opp] = await sql`
       INSERT INTO opportunities (
@@ -294,8 +374,11 @@ export async function POST(req: NextRequest) {
       RETURNING *
     `;
 
-    return NextResponse.json({ success: true, opportunity: opp }, { status: 201 });
+    return NextResponse.json(
+      { success: true, opportunity: opp },
+      { status: 201 },
+    );
   } catch (err: unknown) {
-    return handleRouteDbError('[POST /api/network/opportunities]', err);
+    return handleRouteDbError("[POST /api/network/opportunities]", err);
   }
 }

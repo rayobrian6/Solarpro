@@ -176,7 +176,16 @@ export function buildOpportunityEnrichment(input: OpportunityEnrichmentInput): O
   const invalidUtility = bool(opp.invalid_utility_flag) === true
   const topMatchScore = num(intel.top_match_score)
   const eligibleContractors = num(intel.total_eligible_contractors)
-  const screeningFailures = arr(screening.step10_fail_reasons ?? screening.fail_reasons).map(String)
+  const screeningFailures = arr(screening.step10_fail_reasons).map(String)
+  const qualification = (intel.enrichment_payload && typeof intel.enrichment_payload === 'object'
+    ? (intel.enrichment_payload as Record<string, unknown>).qualification
+    : null) as Record<string, unknown> | null
+  const qualificationStatus = str(qualification?.qualification_status)
+  const qualificationGrade = str(qualification?.lead_grade)
+  const qualificationSummary = str(qualification?.contractor_summary)
+  const qualificationScore = num(qualification?.lead_score)
+  const qualificationFinanceReady = bool(qualification?.finance_readiness)
+  const qualificationBatteryReady = bool(qualification?.battery_readiness)
 
   const productionMissing: string[] = []
   pushMissing(missing, productionMissing, 'estimated_system_size_kw', systemSizeKw)
@@ -210,11 +219,13 @@ export function buildOpportunityEnrichment(input: OpportunityEnrichmentInput): O
     if (/loan|finance|monthly|yes/i.test(financingInterest)) financingProbability += 0.28
     if (/cash|no/i.test(financingInterest)) financingProbability -= 0.18
   }
+  if (qualificationFinanceReady === true) { financingProbability += 0.18; financingFactors.push('qualification finance readiness') }
   if ((projectValue ?? 0) >= 30000) { financingProbability += 0.08; financingFactors.push('larger project value') }
   if ((utilityRate ?? 0) >= 0.16) { financingProbability += 0.05; financingFactors.push('higher utility rate savings pressure') }
 
   const batteryFactors: string[] = []
-  let batteryLikelihood = batteryCandidate ? 0.72 : 0.34
+  let batteryLikelihood = qualificationBatteryReady ? 0.82 : batteryCandidate ? 0.72 : 0.34
+  if (qualificationBatteryReady) batteryFactors.push('qualification battery readiness')
   if (batteryCandidate) batteryFactors.push('battery candidate flag')
   if (batteryReason) batteryFactors.push(batteryReason)
   if ((utilityRate ?? 0) >= 0.18) { batteryLikelihood += 0.08; batteryFactors.push('high utility rates') }
@@ -305,7 +316,16 @@ export function buildOpportunityEnrichment(input: OpportunityEnrichmentInput): O
     service_area_confidence: field(serviceAreaConfidence, { confidence: serviceAreaConfidence, factors: territoryFactors, missing_data: [state ? null : 'location_state', opp.location_zip ? null : 'location_zip'].filter((v): v is string => !!v) }),
   }
 
+  const qualificationProjection = qualification ? {
+    qualification_status: field(qualificationStatus, { confidence: confidence({ fields: [qualificationStatus, qualificationScore], factors: ['post-submit qualification event'], maxConfidence: 0.92 }), factors: ['post-submit qualification event'] }),
+    lead_grade: field(qualificationGrade, { confidence: confidence({ fields: [qualificationGrade, qualificationScore], factors: ['qualification lead grading'], maxConfidence: 0.92 }), factors: ['qualification lead grading'] }),
+    contractor_summary: field(qualificationSummary, { confidence: confidence({ fields: [qualificationSummary], factors: ['contractor-facing qualification summary'], maxConfidence: 0.9 }), factors: ['contractor-facing qualification summary'] }),
+    finance_readiness: field(qualificationFinanceReady, { confidence: confidence({ fields: [qualificationFinanceReady], factors: ['qualification finance readiness'], maxConfidence: 0.9 }), factors: ['qualification finance readiness'] }),
+    battery_readiness: field(qualificationBatteryReady, { confidence: confidence({ fields: [qualificationBatteryReady], factors: ['qualification battery readiness'], maxConfidence: 0.9 }), factors: ['qualification battery readiness'] }),
+  } : {}
+
   const marketplace = {
+    ...qualificationProjection,
     contractor_fit_score: field(contractorFitScore, { confidence: confidence({ fields: [contractorFitScore, eligibleContractors], factors: ['top match score', 'eligible contractor count'], maxConfidence: 0.82 }), factors: ['top match score', 'eligible contractor count'], missing_data: contractorFitScore == null ? ['top_match_score'] : [] }),
     lead_liquidity_score: field(liquidityScore, { confidence: confidence({ fields: [eligibleContractors, activeOffers, opportunityScore], factors: ['eligible contractors', 'active offers', 'opportunity score'], maxConfidence: 0.82 }), factors: ['eligible contractors', 'active offers', 'opportunity score'] }),
     marketplace_priority: field(priorityLabel(marketplacePriorityScore), { confidence: confidence({ fields: [opportunityScore, closeProbability, liquidityScore, installDifficultyScore], factors: ['opportunity score', 'close probability', 'lead liquidity', 'install difficulty'], maxConfidence: 0.80 }), factors: ['opportunity score', 'close probability', 'lead liquidity', 'install difficulty'] }),
@@ -339,8 +359,8 @@ export function buildOpportunityEnrichment(input: OpportunityEnrichmentInput): O
     derivation: {
       method: 'rules_based_projection_from_canonical_opportunity_score_screening_assignment',
       version: OPPORTUNITY_ENRICHMENT_VERSION,
-      inputs: ['network_opportunities', 'opportunity_intelligence', 'opportunity_assignments', 'opportunity_screening_queue'],
-      notes: ['Deterministic enrichment projection; not a duplicate scoring system and not ML output.'],
+      inputs: ['network_opportunities', 'opportunity_intelligence', 'opportunity_assignments', 'opportunity_screening_queue', 'intake_events.homeowner_qualification'],
+      notes: ['Deterministic enrichment projection; not a duplicate scoring system and not ML output.', 'Post-submit homeowner qualification is included when projected into opportunity_intelligence.enrichment_payload.'],
     },
   }
 }
@@ -356,7 +376,7 @@ export async function enrichAndPersistOpportunity(
 
   const intelligenceRows = await sql`SELECT * FROM opportunity_intelligence WHERE opportunity_id = ${opportunityId} LIMIT 1`
   const assignmentRows = await sql`SELECT id, status, match_score, match_factors, offered_at, claimed_at, proposal_at, closed_at, close_status FROM opportunity_assignments WHERE opportunity_id = ${opportunityId}`
-  const screeningRows = await sql`SELECT auto_decision, override_decision, confidence_score, step10_fail_reasons, fail_reasons, review_flags FROM opportunity_screening_queue WHERE opportunity_id = ${opportunityId} LIMIT 1`
+  const screeningRows = await sql`SELECT auto_decision, override_decision, confidence_score, step10_fail_reasons, step10_review_flags AS review_flags FROM opportunity_screening_queue WHERE opportunity_id = ${opportunityId} LIMIT 1`
 
   const payload = buildOpportunityEnrichment({
     opportunity,

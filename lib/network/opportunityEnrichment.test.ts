@@ -228,6 +228,15 @@ describe('canonical opportunity enrichment', () => {
     expect(payload.completeness).toBeGreaterThan(0.6)
   })
 
+
+  it('selects screening failures from canonical step10_fail_reasons only', async () => {
+    const sql = makeSql()
+    await enrichAndPersistOpportunity(sql, 'sim-opp-1')
+    const screeningSelect = sql.queries.find((query: string) => query.includes('FROM opportunity_screening_queue')) ?? ''
+    expect(screeningSelect).toContain('step10_fail_reasons')
+    expect(screeningSelect).not.toMatch(/(^|[^.\w])fail_reasons([^\w]|$)/)
+  })
+
   it('persists enrichment into opportunity_intelligence with one canonical upsert and logs a network event', async () => {
     const sql = makeSql()
     const payload = await enrichAndPersistOpportunity(sql, 'sim-opp-1', { adminUserId: 'admin-1', triggeredBy: 'admin' })

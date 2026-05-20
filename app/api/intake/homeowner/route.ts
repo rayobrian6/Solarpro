@@ -20,8 +20,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDbReady } from '@/lib/db-neon';
 import {
   logMalformedHomeownerIntake,
+  makeHomeownerIntakeEventId,
   submitHomeownerIntakeEvent,
 } from '@/lib/intake/homeownerEventIntake';
+import {
+  isUtilityBillStorageFailure,
+  metadataOnlyUtilityBill,
+  storeUtilityBillAttachment,
+} from '@/lib/intake/utilityBillAttachment';
 
 async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
   const db = await getDbReady();
@@ -90,12 +96,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  // ── Parse body
+  // ── Parse body. Existing JSON clients remain supported; multipart carries the
+  // real utility bill file for the public homeowner form.
   let body: Record<string, unknown>;
+  let billFile: File | null = null;
+  const contentType = req.headers.get('content-type') || '';
   try {
-    body = await req.json();
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+      const payloadText = formData.get('payload');
+      if (typeof payloadText === 'string' && payloadText.trim()) {
+        body = JSON.parse(payloadText) as Record<string, unknown>;
+      } else {
+        body = {};
+        for (const [key, value] of formData.entries()) {
+          if (key === 'utility_bill') continue;
+          if (typeof value === 'string') body[key] = value;
+        }
+      }
+      const maybeFile = formData.get('utility_bill');
+      billFile = maybeFile instanceof File && maybeFile.size > 0 ? maybeFile : null;
+    } else {
+      body = await req.json();
+    }
   } catch (err) {
-    const eventId = await logMalformedHomeownerIntake((err as Error).message || 'Invalid JSON body', {
+    const eventId = await logMalformedHomeownerIntake((err as Error).message || 'Invalid request body', {
       source_system: 'homeowner_form',
       source_channel: 'web',
       funnel_slug: 'free-solar-estimate',
@@ -103,7 +128,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       user_agent: userAgent,
       referer,
     });
-    return NextResponse.json({ error: 'Invalid JSON body', event_id: eventId }, { status: 400 });
+    return NextResponse.json({ error: 'Invalid request body', event_id: eventId }, { status: 400 });
   }
 
   // ── Look up funnel config
@@ -133,6 +158,54 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     } catch (err) {
       console.warn('[POST /api/intake/homeowner] Funnel lookup failed (non-fatal):', (err as Error).message);
+    }
+  }
+
+  const eventId = makeHomeownerIntakeEventId();
+  body.event_id = eventId;
+
+  if (billFile) {
+    try {
+      const billMetadata = await storeUtilityBillAttachment(billFile, {
+        eventId,
+        funnelSlug,
+      });
+      body.uploaded_bill_filename = billMetadata.filename;
+      body.uploaded_bill_size_bytes = billMetadata.size_bytes;
+      body.uploaded_bill_content_type = billMetadata.content_type;
+      body.bill_metadata = billMetadata;
+      body.bill_attachment_metadata_only = false;
+    } catch (err) {
+      const fallbackMetadata = metadataOnlyUtilityBill(billFile);
+      body.uploaded_bill_filename = billFile.name;
+      body.uploaded_bill_size_bytes = billFile.size;
+      body.uploaded_bill_content_type = fallbackMetadata?.content_type || billFile.type || 'application/octet-stream';
+      if (fallbackMetadata) {
+        body.bill_metadata = {
+          ...fallbackMetadata,
+          upload_transport: 'multipart_file_storage_failed',
+        };
+      }
+      body.bill_attachment_metadata_only = true;
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[ATTACHMENT STORAGE FAILED]', {
+        event_id: eventId,
+        filename: billFile.name,
+        size_bytes: billFile.size,
+        content_type: billFile.type || null,
+        recoverable: isUtilityBillStorageFailure(err),
+        message,
+      });
+
+      if (!isUtilityBillStorageFailure(err)) {
+        return NextResponse.json(
+          {
+            error: message || 'Utility bill upload failed. Please try again without the file or choose a smaller non-empty file.',
+            event_id: eventId,
+          },
+          { status: 400 },
+        );
+      }
     }
   }
 

@@ -18,33 +18,92 @@
  *   - network_opportunities that already came through canonical intake, and
  *   - review-first intake_events rows with opportunity_id IS NULL.
  */
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const maxDuration = 30;
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getDbReady } from '@/lib/db-neon';
-import { requireAdminApi } from '@/lib/adminAuth';
+import { NextRequest, NextResponse } from "next/server";
+import { getDbReady } from "@/lib/db-neon";
+import { requireAdminApi } from "@/lib/adminAuth";
+import { randomUUID } from "crypto";
+import {
+  applyOperatorReviewAction,
+  deriveReleaseReadiness,
+  isOperatorReviewAction,
+  operationalIntelligence,
+  safeOperationalLog,
+  stateFromPipelineResult,
+} from "@/lib/intake/operationalLifecycle";
+
+type IntakeFeedStage =
+  | "auth"
+  | "db_connect"
+  | "request_parse"
+  | "feed_query"
+  | "stats_query"
+  | "today_events_query"
+  | "top_sources_query"
+  | "validation_stats_query"
+  | "review_event_lookup"
+  | "review_event_insert"
+  | "review_projection_update";
+
+function intakeFeedError(stage: IntakeFeedStage, error: unknown) {
+  const err = error as {
+    message?: string;
+    code?: string;
+    detail?: string;
+    constraint?: string;
+    column?: string;
+  };
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Intake Feed failed",
+      stage,
+      message: err?.message ?? String(error),
+      code: err?.code,
+      details: {
+        detail: err?.detail,
+        constraint: err?.constraint,
+        column: err?.column,
+      },
+    },
+    { status: 500 },
+  );
+}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const admin = await requireAdminApi(req);
-  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const sql = await getDbReady();
-  const { searchParams } = new URL(req.url);
-
-  const status = searchParams.get('status') || null;
-  const source_system = searchParams.get('source_system') || null;
-  const source_channel = searchParams.get('source_channel') || null;
-  const from = searchParams.get('from') || null;
-  const to = searchParams.get('to') || null;
-  const search = searchParams.get('search') || null;
-  const includeDebug = ['1', 'true', 'yes'].includes((searchParams.get('debug') || '').toLowerCase());
-  const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25')));
-  const offset = (page - 1) * limit;
+  let stage: IntakeFeedStage = "auth";
 
   try {
+    const admin = await requireAdminApi(req);
+    if (!admin)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    stage = "db_connect";
+    const sql = await getDbReady();
+
+    stage = "request_parse";
+    const { searchParams } = new URL(req.url);
+
+    const status = searchParams.get("status") || null;
+    const source_system = searchParams.get("source_system") || null;
+    const source_channel = searchParams.get("source_channel") || null;
+    const from = searchParams.get("from") || null;
+    const to = searchParams.get("to") || null;
+    const search = searchParams.get("search") || null;
+    const includeDebug = ["1", "true", "yes"].includes(
+      (searchParams.get("debug") || "").toLowerCase(),
+    );
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+    const limit = Math.min(
+      100,
+      Math.max(1, parseInt(searchParams.get("limit") || "25")),
+    );
+    const offset = (page - 1) * limit;
+
+    stage = "feed_query";
     const feedRows = await sql`
       WITH opportunity_rows AS (
         SELECT
@@ -52,15 +111,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           'opportunity'::text AS intake_record_type,
           no.id::text AS opportunity_id,
           NULL::text AS event_id,
+          NULL::text AS event_type,
+          'converted_opportunity'::text AS review_status,
+          no.created_at AS received_at,
+          no.source_system::text AS source_funnel,
+          true AS ready_for_review,
+          '[]'::jsonb AS needs_missing_data,
+          false AS qualification_skipped,
+          false AS bill_attachment_metadata_only,
+          '[]'::jsonb AS validation_warning,
           no.status::text AS status,
           no.first_name,
           no.last_name,
           no.email,
           no.phone,
           no.address_line1,
-          no.city,
-          no.state,
-          no.zip,
+          no.location_city AS city,
+          no.location_state AS state,
+          COALESCE(no.location_zip, no.zip) AS zip,
           no.source_system,
           no.source_channel,
           no.monthly_bill_amount,
@@ -71,13 +139,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           no.utm_term,
           no.gclid,
           no.fbclid,
-          no.is_duplicate_flagged AS is_duplicate,
-          no.is_duplicate_flagged,
+          no.duplicate_flag AS is_duplicate,
+          no.duplicate_flag AS is_duplicate_flagged,
           no.duplicate_score,
           no.duplicate_of_id::text AS duplicate_of_id,
           no.opportunity_score,
           no.opportunity_grade,
-          no.consent_given,
+          false AS consent_given,
           no.created_at,
           no.updated_at,
           eq.status AS enrichment_status,
@@ -86,14 +154,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           eq.utility_status,
           eq.completed_at AS enrichment_completed_at,
           eq.duration_ms AS enrichment_duration_ms,
-          no.peak_sun_hours_daily,
-          no.recommended_system_kw,
-          no.annual_savings_year1,
-          no.estimated_system_cost_net,
-          no.payback_period_years,
-          no.utility_name,
-          no.electricity_rate_kwh,
-          no.net_metering_available,
+          CASE WHEN no.peak_sun_hours_annual IS NOT NULL THEN ROUND((no.peak_sun_hours_annual / 365.0)::numeric, 2) ELSE NULL::numeric END AS peak_sun_hours_daily,
+          no.estimated_system_size_kw AS recommended_system_kw,
+          no.estimated_annual_savings AS annual_savings_year1,
+          no.estimated_project_value AS estimated_system_cost_net,
+          no.estimated_payback_yrs AS payback_period_years,
+          no.utility_provider AS utility_name,
+          no.utility_rate_per_kwh AS electricity_rate_kwh,
+          NULL::boolean AS net_metering_available,
           (SELECT action FROM intake_events WHERE opportunity_id = no.id ORDER BY occurred_at DESC LIMIT 1) AS last_event_action,
           (SELECT occurred_at FROM intake_events WHERE opportunity_id = no.id ORDER BY occurred_at DESC LIMIT 1) AS last_event_at,
           NULL::text AS error_code,
@@ -102,6 +170,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           '{}'::jsonb AS duplicate_result,
           '{}'::jsonb AS pipeline_result,
           '{}'::jsonb AS intake_metadata,
+          '{}'::jsonb AS qualification_payload,
+          '{}'::jsonb AS qualification_intelligence,
+          NULL::text AS qualification_event_id,
+          NULL::text AS qualification_status,
+          NULL::text AS lead_grade,
+          NULL::boolean AS finance_readiness,
+          NULL::boolean AS battery_readiness,
+          NULL::text AS estimated_income_band,
+          NULL::text AS estimated_credit_band,
+          NULL::text AS sunlight_confidence,
+          NULL::text AS property_type,
           NULL::text AS utility_provider,
           NULL::text AS battery_interest,
           no.home_ownership::text AS homeowner_status,
@@ -120,6 +199,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           'intake_event'::text AS intake_record_type,
           NULL::text AS opportunity_id,
           ie.event_id,
+          ie.event_type::text AS event_type,
+          COALESCE(ie.pipeline_result->>'review_status', CASE WHEN ie.action = 'pending_review' THEN 'pending_operator_review' ELSE 'not_reviewable' END) AS review_status,
+          ie.occurred_at AS received_at,
+          COALESCE(ie.payload->>'funnel_slug', ie.event_source, ie.source_system)::text AS source_funnel,
+          (
+            ie.action = 'pending_review'
+            AND COALESCE(ie.payload->>'consent_given', 'false') = 'true'
+            AND COALESCE(ie.payload->>'phone', ie.payload->>'email', '') <> ''
+            AND COALESCE(ie.payload->>'address_line1', ie.payload->>'property_address', '') <> ''
+            AND COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill', '') <> ''
+          ) AS ready_for_review,
+          to_jsonb(array_remove(ARRAY[
+            CASE WHEN COALESCE(ie.payload->>'phone', ie.payload->>'email', '') = '' THEN 'contact' END,
+            CASE WHEN COALESCE(ie.payload->>'address_line1', ie.payload->>'property_address', '') = '' THEN 'property_address' END,
+            CASE WHEN COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill', '') = '' THEN 'average_monthly_bill' END,
+            CASE WHEN COALESCE(ie.payload->>'consent_given', 'false') <> 'true' THEN 'consent' END
+          ]::text[], NULL)) AS needs_missing_data,
+          (q.event_id IS NULL) AS qualification_skipped,
+          COALESCE((ie.payload->>'bill_attachment_metadata_only')::boolean, false) AS bill_attachment_metadata_only,
+          COALESCE(ie.validation_result->'warnings', '[]'::jsonb) AS validation_warning,
           CASE
             WHEN ie.action = 'pending_review' THEN 'pending_review'
             WHEN ie.action IN ('validation_failed', 'malformed', 'error') THEN ie.action
@@ -137,6 +236,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.source_channel,
           CASE
             WHEN COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill', '') ~ '^[0-9]+(\\.[0-9]+)?$'
+              AND COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill')::numeric BETWEEN 0 AND 10000
               THEN COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill')::numeric
             ELSE NULL
           END AS monthly_bill_amount,
@@ -182,6 +282,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.duplicate_result,
           ie.pipeline_result,
           ie.payload AS intake_metadata,
+          COALESCE(q.payload, '{}'::jsonb) AS qualification_payload,
+          COALESCE(q.payload->'intelligence', '{}'::jsonb) AS qualification_intelligence,
+          q.event_id AS qualification_event_id,
+          COALESCE(q.payload->'intelligence'->>'qualification_status', q.payload->>'qualification_status') AS qualification_status,
+          COALESCE(q.payload->'intelligence'->>'lead_grade', q.payload->>'lead_grade') AS lead_grade,
+          CASE
+            WHEN q.payload->'intelligence' ? 'finance_readiness'
+              THEN (q.payload->'intelligence'->>'finance_readiness')::boolean
+            WHEN q.payload ? 'finance_readiness'
+              THEN (q.payload->>'finance_readiness')::boolean
+            ELSE NULL
+          END AS finance_readiness,
+          CASE
+            WHEN q.payload->'intelligence' ? 'battery_readiness'
+              THEN (q.payload->'intelligence'->>'battery_readiness')::boolean
+            WHEN q.payload ? 'battery_readiness'
+              THEN (q.payload->>'battery_readiness')::boolean
+            ELSE NULL
+          END AS battery_readiness,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_income_band', q.payload->>'estimated_income_band', q.payload->'qualification'->>'estimated_income_band') AS estimated_income_band,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'estimated_credit_band', q.payload->>'estimated_credit_band', q.payload->'qualification'->>'estimated_credit_band') AS estimated_credit_band,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'sunlight_confidence', q.payload->>'sunlight_confidence', q.payload->'qualification'->>'sunlight_confidence') AS sunlight_confidence,
+          COALESCE(q.payload->'intelligence'->'normalized'->>'property_type', q.payload->>'property_type', q.payload->'qualification'->>'property_type') AS property_type,
           ie.payload->>'utility_provider' AS utility_provider,
           ie.payload->>'battery_interest' AS battery_interest,
           COALESCE(ie.payload->>'homeowner_status', ie.payload->>'home_ownership') AS homeowner_status,
@@ -189,8 +312,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.payload->>'timeline' AS timeline,
           COALESCE(ie.payload->>'roof_age', ie.payload->>'roof_age_years') AS roof_age,
           COALESCE(ie.payload->'bill_metadata', '{}'::jsonb) AS bill_metadata,
-          ie.action IN ('validation_failed', 'malformed', 'error') AS debug_visible
+          (
+            ie.action IN ('validation_failed', 'malformed', 'error', 'archived', 'rejected', 'bad_lead')
+            OR COALESCE((ie.pipeline_result->'operational'->>'archived')::boolean, false) = true
+            OR COALESCE((ie.pipeline_result->'operational'->>'rejected')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_test')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_simulated')::boolean, false) = true
+          ) AS debug_visible
         FROM intake_events ie
+        LEFT JOIN LATERAL (
+          SELECT qie.event_id, qie.payload, qie.occurred_at
+          FROM intake_events qie
+          WHERE qie.event_type = 'homeowner_qualification'
+            AND (
+              qie.original_event_id = ie.event_id OR
+              qie.payload->>'original_event_id' = ie.event_id
+            )
+          ORDER BY qie.occurred_at DESC
+          LIMIT 1
+        ) q ON true
         WHERE ie.opportunity_id IS NULL
           AND ie.event_type = 'homeowner_intake'
       ),
@@ -228,16 +368,60 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const total = Number(feedRows[0]?.__total) || 0;
     const opportunities = feedRows.map((row: Record<string, unknown>) => {
       const { __total, ...rest } = row;
-      return rest;
+      const operational = stateFromPipelineResult(rest.pipeline_result);
+      const intelligence = operationalIntelligence({
+        operational,
+        intake: rest.intake_metadata,
+        qualification: rest.qualification_intelligence,
+        validation: rest.validation_result,
+        receivedAt: rest.received_at ?? rest.created_at,
+      });
+      const billMetadata = rest.bill_metadata && typeof rest.bill_metadata === "object" ? rest.bill_metadata as Record<string, unknown> : {};
+      const qualificationPayload = rest.qualification_payload && typeof rest.qualification_payload === "object" ? rest.qualification_payload as Record<string, unknown> : {};
+      return {
+        ...rest,
+        operational_lifecycle_status: operational.lifecycle_status,
+        operational_state: operational,
+        review_priority: intelligence.review_priority,
+        qualification_confidence: intelligence.qualification_confidence,
+        financing_readiness_reviewed: intelligence.financing_readiness,
+        estimated_close_quality: intelligence.estimated_close_quality,
+        follow_up_urgency: intelligence.follow_up_urgency,
+        stale_lead_hours: intelligence.stale_lead_hours,
+        operator_notes: intelligence.operator_notes,
+        last_contact_timestamp: intelligence.last_contact_timestamp,
+        release_readiness: intelligence.release_readiness,
+        attachment_completeness: billMetadata.storage_status === "stored" ? "complete" : (billMetadata.filename ? "metadata_only" : "missing"),
+        qualification_completeness: Object.keys(qualificationPayload).length > 0 ? "complete" : "missing",
+        contact_attempts: operational.no_answer_count ?? 0,
+        operator_action_history: operational.action_history ?? [],
+        last_updated_timestamp: operational.last_reviewed_at ?? rest.updated_at ?? rest.created_at,
+      };
     });
 
+    console.info("[ADMIN INTAKE PROJECTION]", {
+      count: opportunities.length,
+      sample: opportunities.slice(0, 3).map((row: Record<string, unknown>) => ({
+        id: row.id,
+        event_id: row.event_id,
+        event_type: row.event_type,
+        review_status: row.review_status,
+        opportunity_id: row.opportunity_id ?? "Not converted",
+        monthly_bill_amount: row.monthly_bill_amount,
+        bill_attachment_metadata_only: row.bill_attachment_metadata_only,
+        qualification_skipped: row.qualification_skipped,
+        ready_for_review: row.ready_for_review,
+      })),
+    });
+
+    stage = "stats_query";
     const statsResult = await sql`
       WITH combined AS (
         SELECT
           no.source_system,
           no.source_channel,
           no.created_at,
-          no.is_duplicate_flagged,
+          no.duplicate_flag AS is_duplicate_flagged,
           no.duplicate_score,
           'created'::text AS action,
           false AS debug_visible
@@ -255,7 +439,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             ELSE NULL
           END AS duplicate_score,
           ie.action,
-          ie.action IN ('validation_failed', 'malformed', 'error') AS debug_visible
+          (
+            ie.action IN ('validation_failed', 'malformed', 'error', 'archived', 'rejected', 'bad_lead')
+            OR COALESCE((ie.pipeline_result->'operational'->>'archived')::boolean, false) = true
+            OR COALESCE((ie.pipeline_result->'operational'->>'rejected')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_test')::boolean, false) = true
+            OR COALESCE((ie.payload->>'is_simulated')::boolean, false) = true
+          ) AS debug_visible
         FROM intake_events ie
         WHERE ie.opportunity_id IS NULL
           AND ie.event_type = 'homeowner_intake'
@@ -272,6 +462,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       FROM combined
     `;
 
+    stage = "today_events_query";
     const todayEvents = await sql`
       SELECT action, COUNT(*) AS count
       FROM intake_events
@@ -280,6 +471,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ORDER BY count DESC
     `;
 
+    stage = "top_sources_query";
     const topSources = await sql`
       WITH combined AS (
         SELECT source_system, source_channel, created_at, false AS debug_visible
@@ -305,6 +497,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       LIMIT 10
     `;
 
+    stage = "validation_stats_query";
     const validationStats = await sql`
       SELECT
         COUNT(*) AS total_events,
@@ -338,17 +531,192 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         total,
         today_events: todayEvents,
         top_sources: topSources,
-        validation_failure_rate: totalEvents > 0
-          ? Math.round((Number(vs.validation_failures) / totalEvents) * 100) / 100
-          : 0,
-        conversion_rate: totalEvents > 0
-          ? Math.round((Number(vs.created) / totalEvents) * 100) / 100
-          : 0,
+        validation_failure_rate:
+          totalEvents > 0
+            ? Math.round((Number(vs.validation_failures) / totalEvents) * 100) /
+              100
+            : 0,
+        conversion_rate:
+          totalEvents > 0
+            ? Math.round((Number(vs.created) / totalEvents) * 100) / 100
+            : 0,
         ...vs,
       },
     });
   } catch (err) {
-    console.error('[GET /api/admin/network/intake] Error:', err);
-    return NextResponse.json({ success: false, error: (err as Error).message }, { status: 500 });
+    console.error(`[GET /api/admin/network/intake] stage=${stage} Error:`, err);
+    return intakeFeedError(stage, err);
+  }
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  let stage: IntakeFeedStage = "auth";
+
+  try {
+    const admin = await requireAdminApi(req);
+    if (!admin)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    stage = "request_parse";
+    const body = await req.json().catch(() => ({}));
+    const eventId =
+      typeof body.event_id === "string" ? body.event_id.trim() : "";
+    const action = body.action;
+    const notes =
+      typeof body.notes === "string" ? body.notes.trim().slice(0, 2000) : null;
+
+    if (!eventId) {
+      return NextResponse.json(
+        { error: "event_id is required" },
+        { status: 400 },
+      );
+    }
+    if (!isOperatorReviewAction(action)) {
+      return NextResponse.json(
+        { error: "Unsupported operator review action" },
+        { status: 400 },
+      );
+    }
+
+    stage = "db_connect";
+    const sql = await getDbReady();
+
+    stage = "review_event_lookup";
+    const originalRows = await sql`
+      SELECT event_id, event_type, payload, validation_result, duplicate_result, pipeline_result, action, occurred_at
+      FROM intake_events
+      WHERE event_id = ${eventId}
+        AND event_type = 'homeowner_intake'
+      LIMIT 1
+    `;
+    const original = originalRows[0] as Record<string, unknown> | undefined;
+    if (!original)
+      return NextResponse.json(
+        { error: "Intake event not found" },
+        { status: 404 },
+      );
+
+    const currentState = stateFromPipelineResult(original.pipeline_result);
+    if (currentState.archived || currentState.rejected) {
+      return NextResponse.json(
+        {
+          error:
+            "Archived or rejected leads cannot be moved without a new intake event",
+        },
+        { status: 409 },
+      );
+    }
+
+    const nextState = applyOperatorReviewAction(currentState, action, {
+      adminId: admin.id,
+      notes,
+    });
+    const qualificationRows = await sql`
+      SELECT payload
+      FROM intake_events
+      WHERE event_type = 'homeowner_qualification'
+        AND (original_event_id = ${eventId} OR payload->>'original_event_id' = ${eventId})
+      ORDER BY occurred_at DESC
+      LIMIT 1
+    `;
+    const qualification = (
+      qualificationRows[0] as Record<string, unknown> | undefined
+    )?.payload;
+    const releaseReadiness = deriveReleaseReadiness({
+      operational: nextState,
+      intake: original.payload,
+      qualification:
+        qualification && typeof qualification === "object"
+          ? ((qualification as Record<string, unknown>).intelligence ??
+            qualification)
+          : qualification,
+      validation: original.validation_result,
+    });
+    nextState.release_readiness = releaseReadiness;
+
+    const reviewEventId = `review_${randomUUID()}`;
+    const pipelineResult = {
+      ...(typeof original.pipeline_result === "object" &&
+      original.pipeline_result !== null
+        ? (original.pipeline_result as Record<string, unknown>)
+        : {}),
+      review_status: nextState.review_status,
+      operational: nextState,
+      marketplace_auto_release: false,
+    };
+    const eventPayload = {
+      original_event_id: eventId,
+      action,
+      notes,
+      operational: nextState,
+      release_readiness: releaseReadiness,
+    };
+
+    stage = "review_event_insert";
+    await sql`
+      INSERT INTO intake_events (
+        event_id, opportunity_id, event_type, event_source,
+        source_system, source_channel,
+        payload, validation_result, duplicate_result, pipeline_result,
+        action, original_event_id,
+        occurred_at
+      ) VALUES (
+        ${reviewEventId}, ${null}, 'operator_review', 'admin_intake_feed',
+        'admin', 'operator_review',
+        ${JSON.stringify(eventPayload)}, ${JSON.stringify({ skipped: true, reason: "operator_review_event" })}, ${JSON.stringify({ skipped: true })}, ${JSON.stringify(pipelineResult)},
+        ${action}, ${eventId},
+        NOW()
+      )
+    `;
+
+    stage = "review_projection_update";
+    await sql`
+      UPDATE intake_events
+      SET pipeline_result = ${JSON.stringify(pipelineResult)},
+          action = CASE
+            WHEN ${action} = 'reject_lead' THEN 'rejected'
+            WHEN ${action} = 'archive_lead' THEN 'archived'
+            WHEN ${action} = 'mark_bad_lead' THEN 'bad_lead'
+            ELSE action
+          END
+      WHERE event_id = ${eventId}
+    `;
+
+    console.info(
+      "[OPERATOR ACTION]",
+      safeOperationalLog({
+        eventId,
+        action,
+        fromStatus: currentState.review_status,
+        toStatus: nextState.review_status,
+        releaseReadiness,
+      }),
+    );
+
+    console.info(
+      "[REVIEW STATUS TRANSITION]",
+      safeOperationalLog({
+        eventId,
+        action,
+        fromStatus: currentState.review_status,
+        toStatus: nextState.review_status,
+        releaseReadiness,
+      }),
+    );
+
+    return NextResponse.json({
+      success: true,
+      event_id: eventId,
+      review_event_id: reviewEventId,
+      review_status: nextState.review_status,
+      operational_state: nextState,
+      release_readiness: releaseReadiness,
+    });
+  } catch (err) {
+    console.error(
+      `[POST /api/admin/network/intake] stage=${stage} Error:`,
+      err,
+    );
+    return intakeFeedError(stage, err);
   }
 }

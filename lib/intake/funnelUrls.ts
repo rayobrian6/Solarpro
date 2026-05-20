@@ -22,8 +22,14 @@ export function normalizeBaseUrl(baseUrl?: string | null): string {
 }
 
 export function canonicalFunnelPath(slug: string, explicitPath?: string | null): string | null {
-  if (explicitPath && explicitPath.startsWith('/')) return explicitPath
-  return PUBLIC_FUNNEL_PATHS[slug] ?? null
+  const cleanSlug = slug.trim()
+  const cleanPath = explicitPath?.trim()
+
+  if (cleanPath && cleanPath.startsWith('/')) return cleanPath
+
+  if (cleanSlug === 'free-solar-estimate') return '/free-solar-estimate'
+
+  return PUBLIC_FUNNEL_PATHS[cleanSlug] ?? null
 }
 
 export function buildUtmParams(input: Pick<FunnelUrlInput, 'utm_source' | 'utm_medium' | 'utm_campaign'>): URLSearchParams {

@@ -47,6 +47,7 @@ function publicPathForFunnel(slug: string, customFields: unknown): string | null
     const path = (customFields as { canonical_path?: unknown }).canonical_path
     if (typeof path === 'string') return canonicalFunnelPath(slug, path)
   }
+
   return canonicalFunnelPath(slug)
 }
 
@@ -120,9 +121,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         status: row.is_active ? 'active' : 'inactive',
         is_active: row.is_active,
         canonical_path: canonicalPath,
+        canonicalPath,
         canonical_url: urls.canonicalUrl || null,
+        canonicalUrl: urls.canonicalUrl || null,
         embed_url: urls.embedUrl,
+        embedUrl: urls.embedUrl,
         utm_ready_url: urls.utmReadyUrl || null,
+        utmReadyUrl: urls.utmReadyUrl || null,
         require_phone: row.require_phone,
         require_address: row.require_address,
         require_monthly_bill: row.require_monthly_bill,

@@ -1,45 +1,118 @@
 /** Canonical admin Marketplace Workbench v1. */
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
-export const maxDuration = 60
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
-import { NextRequest, NextResponse } from 'next/server'
-import { getDbReady } from '@/lib/db-neon'
-import { requireAdminApi } from '@/lib/adminAuth'
-import { matchContractors } from '@/lib/network/contractorMatcher'
-import { logNetworkEvent } from '@/lib/network/attributionTracker'
+import { NextRequest, NextResponse } from "next/server";
+import { getDbReady } from "@/lib/db-neon";
+import { requireAdminApi } from "@/lib/adminAuth";
+import { matchContractors } from "@/lib/network/contractorMatcher";
+import { logNetworkEvent } from "@/lib/network/attributionTracker";
+import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
 
 function jsonError(error: string, status = 400, details?: unknown) {
-  return NextResponse.json({ success: false, error, details }, { status })
+  return NextResponse.json({ success: false, error, details }, { status });
 }
 
-async function assertLiveApprovedOpportunity(sql: Awaited<ReturnType<typeof getDbReady>>, opportunityId: string) {
+type MarketplaceStage =
+  | "auth"
+  | "db_connect"
+  | "request_parse"
+  | "list_query"
+  | "count_query"
+  | "gate_query"
+  | "assignment_query"
+  | "matching_call"
+  | "assignment_insert"
+  | "intelligence_update"
+  | "event_log";
+
+function marketplaceError(stage: MarketplaceStage, error: unknown) {
+  const err = error as {
+    message?: string;
+    code?: string;
+    detail?: string;
+    constraint?: string;
+    column?: string;
+  };
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Marketplace Workbench failed",
+      stage,
+      message: err?.message ?? String(error),
+      code: err?.code,
+      details: {
+        detail: err?.detail,
+        constraint: err?.constraint,
+        column: err?.column,
+      },
+    },
+    { status: 500 },
+  );
+}
+
+async function assertLiveApprovedOpportunity(
+  sql: Awaited<ReturnType<typeof getDbReady>>,
+  opportunityId: string,
+) {
   const rows = await sql`
-    SELECT no.id, no.status, no.screening_status, osq.auto_decision, osq.override_decision
+    SELECT no.id, no.status, no.screening_status, no.intake_metadata, no.raw_payload, osq.auto_decision, osq.override_decision
     FROM network_opportunities no
     LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
     WHERE no.id = ${opportunityId}
     LIMIT 1
-  `
-  const opp = rows[0] as Record<string, unknown> | undefined
-  if (!opp) return { ok: false as const, status: 404, error: 'Opportunity not found' }
-  const approved = opp.screening_status === 'approved' || opp.auto_decision === 'pass' || opp.override_decision === 'pass'
-  if (opp.status !== 'live') return { ok: false as const, status: 409, error: 'Only live opportunities can be managed in the marketplace workbench' }
-  if (!approved) return { ok: false as const, status: 409, error: 'Opportunity must have passed or approved screening' }
-  return { ok: true as const, opportunity: opp }
+  `;
+  const opp = rows[0] as Record<string, unknown> | undefined;
+  if (!opp)
+    return { ok: false as const, status: 404, error: "Opportunity not found" };
+  const gate = logMarketplaceGate(
+    "[MARKETPLACE RELEASE GATE]",
+    opp,
+    "marketplace_workbench_access",
+  );
+  if (opp.status !== "live")
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Only live opportunities can be managed in the marketplace workbench",
+    };
+  if (!gate.approvedScreening)
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Opportunity must have passed or approved screening",
+    };
+  if (!gate.releaseReadiness.ready)
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Opportunity must be operator reviewed, qualified, financing-ready, homeowner-intent verified, and approved for marketplace before workbench actions",
+      details: gate.missing,
+    };
+  return { ok: true as const, opportunity: opp };
 }
 
 export async function GET(req: NextRequest) {
+  let stage: MarketplaceStage = "auth";
   try {
-    const admin = await requireAdminApi(req)
-    if (!admin) return jsonError('Forbidden', 403)
+    const admin = await requireAdminApi(req);
+    if (!admin) return jsonError("Forbidden", 403);
 
-    const sql = await getDbReady()
-    const { searchParams } = new URL(req.url)
-    const page = Math.max(1, parseInt(searchParams.get('page') ?? '1'))
-    const limit = Math.min(Math.max(1, parseInt(searchParams.get('limit') ?? '25')), 100)
-    const offset = (page - 1) * limit
+    stage = "db_connect";
+    const sql = await getDbReady();
+    stage = "request_parse";
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
+    const limit = Math.min(
+      Math.max(1, parseInt(searchParams.get("limit") ?? "25")),
+      100,
+    );
+    const offset = (page - 1) * limit;
 
+    stage = "list_query";
     const rows = await sql`
       WITH assignment_summary AS (
         SELECT
@@ -72,84 +145,161 @@ export async function GET(req: NextRequest) {
       LEFT JOIN assignment_summary asg ON asg.opportunity_id = no.id
       WHERE no.status = 'live'
         AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
       ORDER BY no.live_at DESC NULLS LAST, no.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
-    `
+    `;
 
+    stage = "count_query";
     const countRows = await sql`
       SELECT COUNT(*)::int AS total
       FROM network_opportunities no
       LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
       WHERE no.status = 'live'
         AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
-    `
-    const total = Number((countRows[0] as Record<string, unknown> | undefined)?.total ?? 0)
+        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
+    `;
+    const total = Number(
+      (countRows[0] as Record<string, unknown> | undefined)?.total ?? 0,
+    );
 
-    return NextResponse.json({ success: true, opportunities: rows, pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
+    return NextResponse.json({
+      success: true,
+      opportunities: rows,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
   } catch (error) {
-    console.error('[GET /api/admin/network/marketplace]', error)
-    return jsonError('Internal server error', 500)
+    console.error("[GET /api/admin/network/marketplace]", { stage, error });
+    return marketplaceError(stage, error);
   }
 }
 
 export async function POST(req: NextRequest) {
+  let stage: MarketplaceStage = "auth";
   try {
-    const admin = await requireAdminApi(req)
-    if (!admin) return jsonError('Forbidden', 403)
+    const admin = await requireAdminApi(req);
+    if (!admin) return jsonError("Forbidden", 403);
 
-    const sql = await getDbReady()
-    const body = await req.json()
-    const { action, opportunity_id, limit = 10, min_score = 30 } = body as {
-      action: 'match_contractors' | 'create_assignments' | 'pause'
-      opportunity_id?: string
-      limit?: number
-      min_score?: number
+    stage = "db_connect";
+    const sql = await getDbReady();
+    stage = "request_parse";
+    const body = await req.json();
+    const {
+      action,
+      opportunity_id,
+      limit = 10,
+      min_score = 30,
+    } = body as {
+      action: "match_contractors" | "create_assignments" | "pause";
+      opportunity_id?: string;
+      limit?: number;
+      min_score?: number;
+    };
+    if (!action || !opportunity_id)
+      return jsonError("action and opportunity_id are required", 400);
+
+    stage = "gate_query";
+    const gate = await assertLiveApprovedOpportunity(sql, opportunity_id);
+    if (!gate.ok) return jsonError(gate.error, gate.status);
+
+    if (action === "pause") {
+      await sql`UPDATE network_opportunities SET status = 'scored', live_at = NULL, updated_at = NOW() WHERE id = ${opportunity_id}`;
+      await logNetworkEvent({
+        event_type: "opportunity.unpublished",
+        event_category: "opportunity",
+        opportunity_id,
+        admin_user_id: admin.id,
+        from_status: "live",
+        to_status: "scored",
+        data: { source: "marketplace_workbench" },
+        triggered_by: "admin",
+      });
+      return NextResponse.json({
+        success: true,
+        action,
+        opportunity_id,
+        new_status: "scored",
+      });
     }
-    if (!action || !opportunity_id) return jsonError('action and opportunity_id are required', 400)
 
-    const gate = await assertLiveApprovedOpportunity(sql, opportunity_id)
-    if (!gate.ok) return jsonError(gate.error, gate.status)
-
-    if (action === 'pause') {
-      await sql`UPDATE network_opportunities SET status = 'scored', live_at = NULL, updated_at = NOW() WHERE id = ${opportunity_id}`
-      await logNetworkEvent({ event_type: 'opportunity.unpublished', event_category: 'opportunity', opportunity_id, admin_user_id: admin.id, from_status: 'live', to_status: 'scored', data: { source: 'marketplace_workbench' }, triggered_by: 'admin' })
-      return NextResponse.json({ success: true, action, opportunity_id, new_status: 'scored' })
-    }
-
+    stage = "assignment_query";
     const existingAssignments = await sql`
       SELECT id, status, contractor_id
       FROM opportunity_assignments
       WHERE opportunity_id = ${opportunity_id}
         AND status IN ('offered','viewed','claimed','contacted','appointment','proposal','won')
       ORDER BY offered_at DESC NULLS LAST
-    `
+    `;
 
-    const result = await matchContractors(opportunity_id, { limit, minScore: min_score })
+    stage = "matching_call";
+    const result = await matchContractors(opportunity_id, {
+      limit,
+      minScore: min_score,
+    });
 
-    if (action === 'match_contractors') {
-      await logNetworkEvent({ event_type: 'assignment.match_previewed', event_category: 'assignment', opportunity_id, admin_user_id: admin.id, data: { source: 'marketplace_workbench', total_eligible: result.total_eligible, returned: result.matches.length }, triggered_by: 'admin' })
-      return NextResponse.json({ success: true, action, opportunity_id, already_assigned: existingAssignments.length > 0, existing_assignments: existingAssignments, total_eligible: result.total_eligible, top_match: result.top_match, matches: result.matches })
+    if (action === "match_contractors") {
+      await logNetworkEvent({
+        event_type: "assignment.match_previewed",
+        event_category: "assignment",
+        opportunity_id,
+        admin_user_id: admin.id,
+        data: {
+          source: "marketplace_workbench",
+          total_eligible: result.total_eligible,
+          returned: result.matches.length,
+        },
+        triggered_by: "admin",
+      });
+      return NextResponse.json({
+        success: true,
+        action,
+        opportunity_id,
+        already_assigned: existingAssignments.length > 0,
+        existing_assignments: existingAssignments,
+        total_eligible: result.total_eligible,
+        top_match: result.top_match,
+        matches: result.matches,
+      });
     }
 
-    if (existingAssignments.length > 0) return jsonError('Opportunity already has active assignments', 409, { existing_assignments: existingAssignments })
+    if (existingAssignments.length > 0)
+      return jsonError("Opportunity already has active assignments", 409, {
+        existing_assignments: existingAssignments,
+      });
 
     if (result.matches.length === 0) {
-      await logNetworkEvent({ event_type: 'assignment.no_eligible_contractors', event_category: 'assignment', opportunity_id, admin_user_id: admin.id, data: { source: 'marketplace_workbench', min_score }, triggered_by: 'admin' })
-      return NextResponse.json({ success: true, action, opportunity_id, total_eligible: 0, assignments_created: 0, matches: [] })
+      await logNetworkEvent({
+        event_type: "assignment.no_eligible_contractors",
+        event_category: "assignment",
+        opportunity_id,
+        admin_user_id: admin.id,
+        data: { source: "marketplace_workbench", min_score },
+        triggered_by: "admin",
+      });
+      return NextResponse.json({
+        success: true,
+        action,
+        opportunity_id,
+        total_eligible: 0,
+        assignments_created: 0,
+        matches: [],
+      });
     }
 
-    let created = 0
+    let created = 0;
     for (let i = 0; i < Math.min(result.matches.length, 5); i++) {
-      const match = result.matches[i]
+      const match = result.matches[i];
+      stage = "assignment_insert";
       const inserted = await sql`
         INSERT INTO opportunity_assignments (opportunity_id, contractor_id, status, assignment_rank, match_score, match_factors, offered_at, offer_expires_at)
-        VALUES (${opportunity_id}, ${match.contractor_id}, 'offered', ${i + 1}, ${match.overall_score}, ${JSON.stringify({ source: 'marketplace_workbench', geo_score: match.geo_score, size_fit_score: match.size_fit_score, service_score: match.service_score, performance_score: match.performance_score, capacity_score: match.capacity_score, reasons: match.match_reasons, concerns: match.match_concerns })}, NOW(), NOW() + INTERVAL '72 hours')
+        VALUES (${opportunity_id}, ${match.contractor_id}, 'offered', ${i + 1}, ${match.overall_score}, ${JSON.stringify({ source: "marketplace_workbench", geo_score: match.geo_score, size_fit_score: match.size_fit_score, service_score: match.service_score, performance_score: match.performance_score, capacity_score: match.capacity_score, reasons: match.match_reasons, concerns: match.match_concerns })}, NOW(), NOW() + INTERVAL '72 hours')
         ON CONFLICT DO NOTHING
         RETURNING id
-      `
-      if (inserted.length) created++
+      `;
+      if (inserted.length) created++;
     }
 
+    stage = "intelligence_update";
     await sql`
       UPDATE opportunity_intelligence
       SET total_eligible_contractors = ${result.total_eligible},
@@ -158,18 +308,57 @@ export async function POST(req: NextRequest) {
           match_summary = ${JSON.stringify(result.matches.slice(0, 5))},
           updated_at = NOW()
       WHERE opportunity_id = ${opportunity_id}
-    `
+    `;
 
     if (created === 0) {
-      await logNetworkEvent({ event_type: 'assignment.offer_insert_skipped', event_category: 'assignment', opportunity_id, admin_user_id: admin.id, data: { source: 'marketplace_workbench', total_eligible: result.total_eligible, matches_returned: result.matches.length }, triggered_by: 'admin' })
-      return jsonError('Matched contractors were found, but no assignment offers were created', 409, { total_eligible: result.total_eligible, matches_returned: result.matches.length, assignments_created: created })
+      await logNetworkEvent({
+        event_type: "assignment.offer_insert_skipped",
+        event_category: "assignment",
+        opportunity_id,
+        admin_user_id: admin.id,
+        data: {
+          source: "marketplace_workbench",
+          total_eligible: result.total_eligible,
+          matches_returned: result.matches.length,
+        },
+        triggered_by: "admin",
+      });
+      return jsonError(
+        "Matched contractors were found, but no assignment offers were created",
+        409,
+        {
+          total_eligible: result.total_eligible,
+          matches_returned: result.matches.length,
+          assignments_created: created,
+        },
+      );
     }
 
-    await logNetworkEvent({ event_type: 'assignment.offered', event_category: 'assignment', opportunity_id, admin_user_id: admin.id, data: { source: 'marketplace_workbench', total_eligible: result.total_eligible, assignments_created: created }, triggered_by: 'admin' })
+    stage = "event_log";
+    await logNetworkEvent({
+      event_type: "assignment.offered",
+      event_category: "assignment",
+      opportunity_id,
+      admin_user_id: admin.id,
+      data: {
+        source: "marketplace_workbench",
+        total_eligible: result.total_eligible,
+        assignments_created: created,
+      },
+      triggered_by: "admin",
+    });
 
-    return NextResponse.json({ success: true, action, opportunity_id, total_eligible: result.total_eligible, assignments_created: created, top_match: result.top_match, matches: result.matches })
+    return NextResponse.json({
+      success: true,
+      action,
+      opportunity_id,
+      total_eligible: result.total_eligible,
+      assignments_created: created,
+      top_match: result.top_match,
+      matches: result.matches,
+    });
   } catch (error) {
-    console.error('[POST /api/admin/network/marketplace]', error)
-    return jsonError('Internal server error', 500)
+    console.error("[POST /api/admin/network/marketplace]", { stage, error });
+    return marketplaceError(stage, error);
   }
 }

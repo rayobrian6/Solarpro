@@ -1,12 +1,13 @@
 export const maxDuration = 30;
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 export const revalidate = 0;
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromRequest } from '@/lib/auth';
-import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
-import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { NextRequest, NextResponse } from "next/server";
+import { getUserFromRequest } from "@/lib/auth";
+import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
+import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
 
 type Params = { params: { id: string } };
 
@@ -18,13 +19,16 @@ type Params = { params: { id: string } };
 // ---------------------------------------------------------------------------
 export async function POST(req: NextRequest, { params }: Params) {
   const user = getUserFromRequest(req);
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const rl = await checkRateLimit('standard', getClientIp(req));
-  if (!rl.allowed) return NextResponse.json({ error: 'Too many requests.' }, { status: 429 });
+  const rl = await checkRateLimit("standard", getClientIp(req));
+  if (!rl.allowed)
+    return NextResponse.json({ error: "Too many requests." }, { status: 429 });
 
   const { id } = params;
-  if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+  if (!isValidUUID(id))
+    return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
   try {
     const sql = await getDbReady();
@@ -44,9 +48,15 @@ export async function POST(req: NextRequest, { params }: Params) {
           oa.status AS assignment_status,
           no.id AS opportunity_id,
           no.status AS opportunity_status,
-          no.asking_price
+          no.asking_price,
+          no.intake_metadata,
+          no.raw_payload,
+          no.screening_status,
+          osq.auto_decision,
+          osq.override_decision
         FROM opportunity_assignments oa
         JOIN network_opportunities no ON no.id = oa.opportunity_id
+        LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
         WHERE no.id = ${id}
           AND oa.contractor_id = ${user.id}
           AND oa.status IN ('offered','viewed')
@@ -56,10 +66,35 @@ export async function POST(req: NextRequest, { params }: Params) {
       `;
 
       if (!assignmentRows.length) {
-        return NextResponse.json({ error: 'Opportunity not found' }, { status: 404 });
+        return NextResponse.json(
+          { error: "Opportunity not found" },
+          { status: 404 },
+        );
       }
 
       const assignment = assignmentRows[0] as Record<string, unknown>;
+      const claimGate = logMarketplaceGate(
+        "[CONTRACTOR CLAIM FLOW]",
+        {
+          id: assignment.opportunity_id,
+          status: assignment.opportunity_status,
+          screening_status: assignment.screening_status,
+          auto_decision: assignment.auto_decision,
+          override_decision: assignment.override_decision,
+          intake_metadata: assignment.intake_metadata,
+          raw_payload: assignment.raw_payload,
+        },
+        "contractor_claim",
+      );
+      if (!claimGate.ok) {
+        return NextResponse.json(
+          {
+            error: "Opportunity is not approved for marketplace claim.",
+            missing: claimGate.missing,
+          },
+          { status: 409 },
+        );
+      }
       const updated = await sql`
         UPDATE opportunity_assignments
            SET status = 'claimed',
@@ -73,7 +108,10 @@ export async function POST(req: NextRequest, { params }: Params) {
       `;
 
       if (!updated.length) {
-        return NextResponse.json({ error: 'This opportunity is no longer available.' }, { status: 409 });
+        return NextResponse.json(
+          { error: "This opportunity is no longer available." },
+          { status: 409 },
+        );
       }
 
       await sql`
@@ -128,26 +166,37 @@ export async function POST(req: NextRequest, { params }: Params) {
         LIMIT 1
       `;
 
-      return NextResponse.json({
-        success: true,
-        claim: updated[0],
-        opportunity: fullOpp[0],
-        message: "You have exclusively claimed this assigned SolarPro Network opportunity. The homeowner's full address is now visible.",
-      }, { status: 201 });
+      return NextResponse.json(
+        {
+          success: true,
+          claim: updated[0],
+          opportunity: fullOpp[0],
+          message:
+            "You have exclusively claimed this assigned SolarPro Network opportunity. The homeowner's full address is now visible.",
+        },
+        { status: 201 },
+      );
     }
 
     const opp = oppRows[0] as Record<string, unknown>;
 
     if (opp.created_by_user_id === user.id) {
-      return NextResponse.json({ error: 'You cannot claim your own opportunity.' }, { status: 400 });
+      return NextResponse.json(
+        { error: "You cannot claim your own opportunity." },
+        { status: 400 },
+      );
     }
 
-    if (opp.status !== 'open') {
-      return NextResponse.json({
-        error: opp.status === 'claimed'
-          ? 'This opportunity has already been claimed by another contractor.'
-          : `This opportunity is ${opp.status} and no longer available.`,
-      }, { status: 409 });
+    if (opp.status !== "open") {
+      return NextResponse.json(
+        {
+          error:
+            opp.status === "claimed"
+              ? "This opportunity has already been claimed by another contractor."
+              : `This opportunity is ${opp.status} and no longer available.`,
+        },
+        { status: 409 },
+      );
     }
 
     // Attempt exclusive claim — UNIQUE index will reject a concurrent claim
@@ -168,11 +217,18 @@ export async function POST(req: NextRequest, { params }: Params) {
       claim = claimRows[0] as Record<string, unknown>;
     } catch (insertErr: unknown) {
       // Unique constraint violation = race condition, someone beat us
-      const msg = (insertErr as Error)?.message ?? '';
-      if (msg.includes('unique') || msg.includes('duplicate') || msg.includes('23505')) {
-        return NextResponse.json({
-          error: 'This opportunity was just claimed by another contractor.',
-        }, { status: 409 });
+      const msg = (insertErr as Error)?.message ?? "";
+      if (
+        msg.includes("unique") ||
+        msg.includes("duplicate") ||
+        msg.includes("23505")
+      ) {
+        return NextResponse.json(
+          {
+            error: "This opportunity was just claimed by another contractor.",
+          },
+          { status: 409 },
+        );
       }
       throw insertErr;
     }
@@ -189,14 +245,20 @@ export async function POST(req: NextRequest, { params }: Params) {
       SELECT * FROM opportunities WHERE id = ${id} LIMIT 1
     `;
 
-    return NextResponse.json({
-      success: true,
-      claim,
-      opportunity: fullOpp[0],
-      message: `You have exclusively claimed this opportunity. The homeowner's full address is now visible.`,
-    }, { status: 201 });
+    return NextResponse.json(
+      {
+        success: true,
+        claim,
+        opportunity: fullOpp[0],
+        message: `You have exclusively claimed this opportunity. The homeowner's full address is now visible.`,
+      },
+      { status: 201 },
+    );
   } catch (err: unknown) {
-    return handleRouteDbError('[POST /api/network/opportunities/:id/claim]', err);
+    return handleRouteDbError(
+      "[POST /api/network/opportunities/:id/claim]",
+      err,
+    );
   }
 }
 
@@ -206,10 +268,12 @@ export async function POST(req: NextRequest, { params }: Params) {
 // ---------------------------------------------------------------------------
 export async function DELETE(req: NextRequest, { params }: Params) {
   const user = getUserFromRequest(req);
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = params;
-  if (!isValidUUID(id)) return NextResponse.json({ error: 'Invalid ID' }, { status: 400 });
+  if (!isValidUUID(id))
+    return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
 
   try {
     const sql = await getDbReady();
@@ -224,7 +288,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     `;
 
     if (!updated.length) {
-      return NextResponse.json({ error: 'No active claim found for this opportunity.' }, { status: 404 });
+      return NextResponse.json(
+        { error: "No active claim found for this opportunity." },
+        { status: 404 },
+      );
     }
 
     // Reopen the opportunity
@@ -234,8 +301,14 @@ export async function DELETE(req: NextRequest, { params }: Params) {
        WHERE id = ${id}
     `;
 
-    return NextResponse.json({ success: true, message: 'Claim released. Opportunity is now available again.' });
+    return NextResponse.json({
+      success: true,
+      message: "Claim released. Opportunity is now available again.",
+    });
   } catch (err: unknown) {
-    return handleRouteDbError('[DELETE /api/network/opportunities/:id/claim]', err);
+    return handleRouteDbError(
+      "[DELETE /api/network/opportunities/:id/claim]",
+      err,
+    );
   }
 }

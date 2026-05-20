@@ -28,13 +28,49 @@ describe('admin intake funnels infrastructure', () => {
   })
 
   it('aligns the public homeowner slug, canonical path, and existing intake funnel seed', () => {
-    expect(homeownerPageSource).toContain("funnel_slug: 'free-solar-estimate'")
+    expect(homeownerPageSource).toMatch(/funnel_slug:\s*["']free-solar-estimate["']/)
     expect(migrationSource).toContain("'free-solar-estimate'")
     expect(migrationSource).toContain("'Canonical Homeowner Intake'")
     expect(migrationSource).toContain('"canonical_path":"/free-solar-estimate"')
     expect(migrationSource).toContain('INSERT INTO intake_funnels')
     expect(migrationSource).toContain('ON CONFLICT (slug) DO UPDATE')
     expect(migrationSource).not.toMatch(/CREATE\s+TABLE/i)
+  })
+
+
+
+
+  it('keeps migration 071 compatible with the admin SQL splitter', () => {
+    const statements = migrationSource
+      .split(';')
+      .map((statement) => statement.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n').trim())
+      .filter(Boolean)
+
+    expect(statements.some((statement) => /^does\b/i.test(statement))).toBe(false)
+    expect(statements).toHaveLength(1)
+    expect(statements[0]).toContain('INSERT INTO intake_funnels')
+    expect(statements[0]).toContain('ON CONFLICT (slug) DO UPDATE')
+  })
+
+  it('returns camelCase URL fields for the canonical homeowner funnel API contract', () => {
+    expect(routeSource).toContain('canonicalPath')
+    expect(routeSource).toContain('canonicalUrl: urls.canonicalUrl || null')
+    expect(routeSource).toContain('embedUrl: urls.embedUrl')
+    expect(routeSource).toContain('utmReadyUrl: urls.utmReadyUrl || null')
+    expect(routeSource).toContain('canonical_url: urls.canonicalUrl || null')
+    expect(routeSource).toContain('utm_ready_url: urls.utmReadyUrl || null')
+  })
+
+  it('enables Open/Copy/UTM funnel actions from canonicalUrl without requiring campaigns or events', () => {
+    expect(adminPageSource).toContain('const canonicalUrl = funnel.canonicalUrl || funnel.canonical_url || null')
+    expect(adminPageSource).toContain('const generatedUtmUrl = canonicalUrl ? appendClientUtm(canonicalUrl, utm) : null')
+    expect(adminPageSource).toContain('const hasPublicUrl = Boolean(canonicalUrl)')
+    expect(adminPageSource).toContain("href={canonicalUrl || '#'}")
+    expect(adminPageSource).toContain('disabled={!canonicalUrl}')
+    expect(adminPageSource).not.toContain('disabled={!funnel.source_campaign_support')
+    expect(adminPageSource).not.toContain('disabled={!funnel.campaign_id')
+    expect(adminPageSource).not.toContain('disabled={!funnel.recent_intake_count')
+    expect(adminPageSource).not.toContain('disabled={funnel.recent_intake_count')
   })
 
   it('surfaces an operational Intake Funnels tab with required copy/open actions', () => {
