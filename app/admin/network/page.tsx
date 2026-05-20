@@ -1761,6 +1761,7 @@ type OperatorActionKey =
   | "mark_financing_ready"
   | "mark_qualified"
   | "approve_for_marketplace"
+  | "release_to_marketplace"
   | "reject_lead"
   | "archive_lead"
   | "assign_operator"
@@ -2116,6 +2117,13 @@ function IntakeFeedSection() {
         "Requires final approval note and centralized release-readiness gate checks.",
     },
     {
+      action: "release_to_marketplace",
+      label: "Release to Marketplace",
+      tone: "border-blue-700 text-blue-200 hover:bg-blue-950/40",
+      description:
+        "Runs the canonical marketplace release gate and publishes eligible inventory to contractor Discover.",
+    },
+    {
       action: "reject_lead",
       label: "Reject Lead",
       tone: "border-red-700 text-red-200 hover:bg-red-950/40",
@@ -2173,6 +2181,10 @@ function IntakeFeedSection() {
       task_priority: lead.follow_up_priority || "normal",
       financing_stage: lead.financing_stage || "financing_review",
       proposal_stage: lead.proposal_stage || "design_in_progress",
+      release_reason: "Release through marketplace gate",
+      claim_mode: "exclusive",
+      max_claims: "3",
+      expires_days: "30",
       release_check_operator_review: true,
       release_check_qualification:
         !!lead.qualification_completeness &&
@@ -2236,6 +2248,8 @@ function IntakeFeedSection() {
       return "Operator confidence is required.";
     if (action === "approve_for_marketplace" && !has("final_approval_note"))
       return "Final approval note is required.";
+    if (action === "release_to_marketplace" && !has("release_reason"))
+      return "Release reason is required.";
     if (action === "reject_lead" && !has("rejection_reason"))
       return "Rejection reason is required.";
     if (action === "archive_lead" && !has("archive_reason"))
@@ -2336,6 +2350,42 @@ function IntakeFeedSection() {
     setActionBusyId(`${eventId}:${modalAction.action}`);
     setActionMessage(null);
     try {
+      if (modalAction.action === "release_to_marketplace") {
+        const claimMode = actionText("claim_mode") === "shared" ? "shared" : "exclusive";
+        const maxClaims = Number.parseInt(actionText("max_claims") || "3", 10);
+        const expiresDays = Number.parseInt(actionText("expires_days") || "30", 10);
+        const res = await fetch("/api/admin/network/marketplace", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "release_from_intake",
+            intake_event_id: eventId,
+            reason: actionText("release_reason") || actionText("notes") || "operator_marketplace_release",
+            listing_notes: actionText("contractor_facing_notes") || actionText("notes") || null,
+            claim_mode: claimMode,
+            max_claims: claimMode === "shared" ? maxClaims : null,
+            expires_days: expiresDays,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          const missing = Array.isArray(data.details?.missing)
+            ? ` Missing: ${data.details.missing.join(", ")}`
+            : Array.isArray(data.missing)
+              ? ` Missing: ${data.missing.join(", ")}`
+              : "";
+          throw new Error(
+            `${data.error || data.message || `HTTP ${res.status}`}${missing}`,
+          );
+        }
+        setActionMessage(
+          `Released to marketplace as ${String(data.opportunity_id ?? "canonical inventory")}`,
+        );
+        closeActionModal();
+        await load();
+        return;
+      }
+
       const res = await fetch("/api/admin/network/intake", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2872,6 +2922,16 @@ function IntakeFeedSection() {
                       lead.review_status ?? lead.status ?? "",
                     ).toLowerCase(),
                   );
+                  const canReleaseToMarketplace =
+                    lead.intake_record_type === "intake_event" &&
+                    !lead.opportunity_id &&
+                    lead.current_queue === "marketplace_ready" &&
+                    lead.release_readiness?.ready === true;
+                  const visibleOperatorActions = operatorActions.filter(
+                    (item) =>
+                      item.action !== "release_to_marketplace" ||
+                      canReleaseToMarketplace,
+                  );
                   return (
                     <Fragment key={lead.id}>
                       <tr className="hover:bg-zinc-800/30 transition-colors">
@@ -3314,7 +3374,7 @@ function IntakeFeedSection() {
                                   )}
                                 </div>
                                 <div className="flex flex-wrap gap-2">
-                                  {operatorActions.map((item) => {
+                                  {visibleOperatorActions.map((item) => {
                                     const busy =
                                       actionBusyId ===
                                       `${eventId}:${item.action}`;
@@ -3341,6 +3401,9 @@ function IntakeFeedSection() {
                                         ) : item.action ===
                                           "approve_for_marketplace" ? (
                                           <CheckCheck className="h-3 w-3" />
+                                        ) : item.action ===
+                                          "release_to_marketplace" ? (
+                                          <ExternalLink className="h-3 w-3" />
                                         ) : item.action === "reject_lead" ? (
                                           <XCircle className="h-3 w-3" />
                                         ) : item.action === "archive_lead" ? (
@@ -3950,6 +4013,74 @@ function IntakeFeedSection() {
                   </label>
                   <label className="text-xs text-zinc-300 sm:col-span-2">
                     Contractor-facing notes
+                    <textarea
+                      value={actionText("contractor_facing_notes")}
+                      onChange={(e) =>
+                        setActionValue(
+                          "contractor_facing_notes",
+                          e.target.value,
+                        )
+                      }
+                      className="mt-1 min-h-20 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                </>
+              )}
+              {modalAction.action === "release_to_marketplace" && (
+                <>
+                  <div className="rounded-lg border border-blue-900/50 bg-blue-950/20 p-3 text-xs text-blue-100 sm:col-span-2">
+                    This uses the existing canonical marketplace gate. On success,
+                    the intake becomes live marketplace inventory with
+                    marketplace_status=live and is eligible for contractor Discover.
+                    Current readiness gaps: {" "}
+                    {(modalLead.release_readiness?.missing ?? []).join(", ") ||
+                      "none reported"}
+                    .
+                  </div>
+                  <label className="text-xs text-zinc-300">
+                    Claim mode
+                    <select
+                      value={actionText("claim_mode")}
+                      onChange={(e) => setActionValue("claim_mode", e.target.value)}
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="exclusive">Exclusive</option>
+                      <option value="shared">Shared</option>
+                    </select>
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Max shared claims
+                    <input
+                      type="number"
+                      min="2"
+                      max="10"
+                      disabled={actionText("claim_mode") !== "shared"}
+                      value={actionText("max_claims")}
+                      onChange={(e) => setActionValue("max_claims", e.target.value)}
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white disabled:opacity-50"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Expires in days
+                    <input
+                      type="number"
+                      min="1"
+                      max="90"
+                      value={actionText("expires_days")}
+                      onChange={(e) => setActionValue("expires_days", e.target.value)}
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Release reason
+                    <input
+                      value={actionText("release_reason")}
+                      onChange={(e) => setActionValue("release_reason", e.target.value)}
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300 sm:col-span-2">
+                    Contractor-facing listing notes
                     <textarea
                       value={actionText("contractor_facing_notes")}
                       onChange={(e) =>

@@ -722,9 +722,32 @@ describe("homeowner intake event-first flow", () => {
     expect(section).toContain("mark_financing_ready");
     expect(section).toContain("mark_qualified");
     expect(section).toContain("approve_for_marketplace");
+    expect(section).toContain("release_to_marketplace");
+    expect(section).toContain("Release to Marketplace");
     expect(section).toContain("reject_lead");
     expect(section).toContain("archive_lead");
     expect(section).toContain('fetch("/api/admin/network/intake"');
+  });
+
+  it("admin Intake Feed release button reuses canonical marketplace release path", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "app/admin/network/page.tsx"),
+      "utf8",
+    );
+    const section = source.slice(
+      source.indexOf("function IntakeFeedSection()"),
+      source.indexOf("// ── Enrichment Queue Section"),
+    );
+    expect(section).toContain("Release to Marketplace");
+    expect(section).toContain("canReleaseToMarketplace");
+    expect(section).toContain('lead.current_queue === "marketplace_ready"');
+    expect(section).toContain("lead.release_readiness?.ready === true");
+    expect(section).toContain('fetch("/api/admin/network/marketplace"');
+    expect(section).toContain('action: "release_from_intake"');
+    expect(section).toContain("intake_event_id: eventId");
+    expect(section).toContain("claim_mode: claimMode");
+    expect(section).toContain("expires_days: expiresDays");
+    expect(section).not.toContain("/api/admin/network/release");
   });
 
   it("admin Intake Feed UI labels event review relationship and readiness signals", () => {

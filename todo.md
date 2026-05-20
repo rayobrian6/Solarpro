@@ -1,24 +1,21 @@
-# SolarPro Contractor Network Canonical Marketplace Audit
+# Add Lead Operations Marketplace Release Button
 
-## Audit
-- [x] Verify repo state and branch before changes.
-- [x] Inspect contractor Network UI components/tabs and claim button wiring.
-- [x] Inspect Discover, My Claims, and claim APIs against canonical inventory/assignment model.
-- [x] Identify specific visibility/status/count/profile mapping mismatches.
+## Inspect
+- [x] Verify repo state on dev and identify current uncommitted files.
+- [x] Inspect Lead Operations action handling and modal requirements.
+- [x] Inspect existing canonical marketplace release endpoint and reusable helpers.
 
-## Fixes
-- [x] Align Discover API/UI with released eligible canonical marketplace inventory.
-- [x] Align My Claims API/UI with canonical opportunity_assignments claims.
-- [x] Ensure claim route/status behavior keeps claimed records visible after refresh.
-- [x] Add or update targeted tests for canonical Discover, claims, claim creation, legacy isolation, and counts.
+## Implement
+- [x] Add a Lead Operations release button/action that reuses the existing marketplace endpoint.
+- [x] Ensure released records set canonical marketplace fields and refresh UI state.
+- [x] Add or update focused tests for the release button/API path.
 
 ## QA
-- [x] Run targeted contractor/network tests.
+- [x] Run focused marketplace/intake tests.
 - [x] Run TypeScript type-check.
 - [x] Run ESLint.
-- [x] Run broader regression if practical.
 
 ## Delivery
-- [x] Review final diff and summarize exact mismatch found.
-- [x] Commit and push changes on an audit branch or dev as appropriate.
-- [x] Provide post-audit report with files changed, canonical claim source, and remaining UI limitations.
+- [x] Review diff.
+- [ ] Commit and push to dev only.
+- [ ] Report files changed, QA results, and release flow.
