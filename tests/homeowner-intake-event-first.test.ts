@@ -766,6 +766,9 @@ describe("homeowner intake event-first flow", () => {
     );
     expect(releaseSection).toContain("WHERE id::text = ${intakeEventId}");
     expect(releaseSection).toContain("OR event_id = ${intakeEventId}");
+    expect(releaseSection).toContain("event_type = 'homeowner_qualification'");
+    expect(releaseSection).toContain("payload->>'original_event_id'");
+    expect(releaseSection).toContain("qualificationFromPayload");
     expect(releaseSection).toContain("SET opportunity_id = ${opportunity.id as string}");
   });
 

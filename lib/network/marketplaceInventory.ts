@@ -89,16 +89,34 @@ function ownershipFromPayload(payload: Record<string, unknown>): string {
   return "unknown";
 }
 
-function mergedIntakeMetadata(row: Record<string, unknown>): Record<string, unknown> {
+function qualificationFromPayload(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  return isRecord(value.intelligence) ? value.intelligence : value;
+}
+
+function hasQualificationSignal(value: Record<string, unknown>): boolean {
+  return Object.keys(value).length > 0;
+}
+
+function mergedIntakeMetadata(
+  row: Record<string, unknown>,
+  latestQualification: Record<string, unknown> = {},
+): Record<string, unknown> {
   const payload = isRecord(row.payload) ? row.payload : {};
   const pipeline = isRecord(row.pipeline_result) ? row.pipeline_result : {};
   const validation = isRecord(row.validation_result) ? row.validation_result : {};
   const metadata = isRecord(payload.intake_metadata) ? payload.intake_metadata : {};
-  const qualification = isRecord(pipeline.qualification)
+  const pipelineQualification = isRecord(pipeline.qualification)
     ? pipeline.qualification
-    : isRecord(payload.qualification)
-      ? payload.qualification
-      : {};
+    : {};
+  const payloadQualification = isRecord(payload.qualification)
+    ? payload.qualification
+    : {};
+  const qualification = hasQualificationSignal(pipelineQualification)
+    ? pipelineQualification
+    : hasQualificationSignal(payloadQualification)
+      ? payloadQualification
+      : latestQualification;
   const operational = isRecord(pipeline.operational) ? pipeline.operational : {};
 
   return {
@@ -141,13 +159,35 @@ export async function releaseMarketplaceInventoryFromIntake({
 
   const payload = isRecord(intake.payload) ? intake.payload : {};
   const pipeline = isRecord(intake.pipeline_result) ? intake.pipeline_result : {};
-  const qualification = isRecord(pipeline.qualification)
+  const qualificationRows = await sql`
+    SELECT payload
+    FROM intake_events
+    WHERE event_type = 'homeowner_qualification'
+      AND (
+        original_event_id = ${str(intake.event_id) ?? intakeEventId}
+        OR payload->>'original_event_id' = ${str(intake.event_id) ?? intakeEventId}
+        OR original_event_id = ${intakeEventId}
+        OR payload->>'original_event_id' = ${intakeEventId}
+      )
+    ORDER BY occurred_at DESC
+    LIMIT 1
+  `;
+  const latestQualification = qualificationFromPayload(
+    (qualificationRows[0] as Record<string, unknown> | undefined)?.payload,
+  );
+  const pipelineQualification = isRecord(pipeline.qualification)
     ? pipeline.qualification
-    : isRecord(payload.qualification)
-      ? payload.qualification
-      : {};
+    : {};
+  const payloadQualification = isRecord(payload.qualification)
+    ? payload.qualification
+    : {};
+  const qualification = hasQualificationSignal(pipelineQualification)
+    ? pipelineQualification
+    : hasQualificationSignal(payloadQualification)
+      ? payloadQualification
+      : latestQualification;
   const operational = isRecord(pipeline.operational) ? pipeline.operational : {};
-  const intakeMetadata = mergedIntakeMetadata(intake);
+  const intakeMetadata = mergedIntakeMetadata(intake, latestQualification);
   const releaseGateRow: MarketplaceGateRow = {
     id: intake.id,
     status: "scored",
