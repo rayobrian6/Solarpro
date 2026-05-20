@@ -278,9 +278,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           no.id::text AS opportunity_id,
           NULL::text AS event_id,
           NULL::text AS event_type,
-          'converted_opportunity'::text AS review_status,
+          CASE WHEN no.status = 'live' AND COALESCE(no.marketplace_status, 'not_released') = 'live' THEN 'marketplace_live' ELSE 'converted_opportunity' END AS review_status,
           no.created_at AS received_at,
-          no.source_system::text AS source_funnel,
+          COALESCE(no.source_system, no.source_type)::text AS source_funnel,
           true AS ready_for_review,
           '[]'::jsonb AS needs_missing_data,
           false AS qualification_skipped,
@@ -357,7 +357,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           false AS debug_visible
         FROM network_opportunities no
         LEFT JOIN enrichment_queue eq ON eq.opportunity_id = no.id
-        WHERE no.source_system IS NOT NULL
+        WHERE (no.source_system IS NOT NULL OR no.source_type IS NOT NULL)
       ),
       event_rows AS (
         SELECT
@@ -710,7 +710,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           'created'::text AS action,
           false AS debug_visible
         FROM network_opportunities no
-        WHERE no.source_system IS NOT NULL
+        WHERE (no.source_system IS NOT NULL OR no.source_type IS NOT NULL)
         UNION ALL
         SELECT
           ie.source_system,

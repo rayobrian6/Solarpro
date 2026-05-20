@@ -554,6 +554,9 @@ describe("homeowner intake event-first flow", () => {
       sql.queries.find((q: string) => q.includes("WITH opportunity_rows AS")) ??
       "";
     expect(feedQuery).toContain("FROM network_opportunities no");
+    expect(feedQuery).toContain("marketplace_live");
+    expect(feedQuery).toContain("COALESCE(no.source_system, no.source_type)");
+    expect(feedQuery).toContain("no.source_system IS NOT NULL OR no.source_type IS NOT NULL");
     expect(feedQuery).toContain("FROM intake_events ie");
     expect(feedQuery).toContain("ie.opportunity_id IS NULL");
     expect(feedQuery).toContain("ie.event_type = 'homeowner_intake'");
@@ -588,6 +591,8 @@ describe("homeowner intake event-first flow", () => {
 
     expect(feedQuery).toContain("no.location_city AS city");
     expect(feedQuery).toContain("no.location_state AS state");
+    expect(feedQuery).toContain("marketplace_live");
+    expect(feedQuery).toContain("COALESCE(no.source_system, no.source_type)");
     expect(feedQuery).toContain("COALESCE(no.location_zip, no.zip) AS zip");
     expect(feedQuery).toContain("no.duplicate_flag AS is_duplicate");
     expect(feedQuery).toContain("no.duplicate_flag AS is_duplicate_flagged");

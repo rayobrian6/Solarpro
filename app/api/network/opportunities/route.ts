@@ -160,10 +160,13 @@ export async function GET(req: NextRequest) {
         AND COALESCE(no.marketplace_status, 'not_released') = 'live'
         AND COALESCE(no.claim_count, 0) < GREATEST(COALESCE(no.max_claims, 1), 1)
         AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
-        AND EXISTS (
-          SELECT 1 FROM opportunity_screening_queue osq
-          WHERE osq.opportunity_id = no.id
-            AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+        AND (
+          no.screening_status = 'approved'
+          OR EXISTS (
+            SELECT 1 FROM opportunity_screening_queue osq
+            WHERE osq.opportunity_id = no.id
+              AND (osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+          )
         )
         AND NOT EXISTS (
           SELECT 1 FROM opportunity_assignments claimed
