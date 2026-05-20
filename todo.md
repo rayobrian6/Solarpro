@@ -21,9 +21,10 @@
 - [x] Run TypeScript check.
 - [x] Run lint.
 - [x] Run build if practical.
-- [ ] Perform/manual-simulate required validation and confirm no auto-created network_opportunities.
+- [x] Perform/manual-simulate required validation and confirm no auto-created network_opportunities.
 
 ## Finalize
 - [x] Review diff and files changed.
-- [ ] Commit and push to dev if validation passes.
-- [ ] Report root causes, storage truth, event relationship, changed files, tests, and QA results.
+- [x] Commit local validated changes on dev.
+- [ ] Push local commit to origin/dev. Blocked: sandbox has no GitHub HTTPS credentials (`fatal: could not read Username for 'https://github.com'`).
+- [x] Report root causes, storage truth, event relationship, changed files, tests, and QA results.
