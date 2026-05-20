@@ -120,6 +120,7 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
   const funnel = cleanSegment(input.funnelSlug || "free-solar-estimate");
   const storageKey = `intake/utility-bills/${funnel}/${input.eventId}/${Date.now()}-${randomUUID()}-${safeName}.${ext}`;
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  const allowLocalFallback = process.env.NODE_ENV !== "production";
 
   if (blobToken) {
     const { put } = await import("@vercel/blob");
@@ -147,6 +148,12 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
       content_type: stored.content_type,
     });
     return stored;
+  }
+
+  if (!allowLocalFallback) {
+    throw new Error(
+      "Utility bill upload storage is not configured. Set BLOB_READ_WRITE_TOKEN for production uploads.",
+    );
   }
 
   const uploadsDir = join(process.cwd(), "public", "uploads", "intake", "utility-bills", funnel, input.eventId);

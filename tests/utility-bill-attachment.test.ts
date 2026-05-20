@@ -58,6 +58,18 @@ describe('utility bill attachment storage', () => {
     expect(existsSync(join(tempDir, stored.storage_key))).toBe(true)
   })
 
+  it('fails fast in production when Blob storage is not configured instead of writing to the deployment filesystem', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
+
+    await expect(
+      storeUtilityBillAttachment(pdfFile(), {
+        eventId: 'evt_homeowner_test',
+        funnelSlug: 'free-solar-estimate',
+      }),
+    ).rejects.toThrow(/BLOB_READ_WRITE_TOKEN/)
+  })
+
   it('rejects spoofed files before storage', async () => {
     await expect(
       storeUtilityBillAttachment(new File(['not a pdf'], 'bill.pdf', { type: 'application/pdf' }), {
