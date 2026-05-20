@@ -18,4 +18,4 @@
 ## Delivery
 - [x] Review diff.
 - [x] Commit and push to dev only.
-- [ ] Report files changed, QA results, and release flow.
+- [x] Report files changed, QA results, and release flow.
