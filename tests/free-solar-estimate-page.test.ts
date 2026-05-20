@@ -56,7 +56,9 @@ describe("/free-solar-estimate public intake funnel", () => {
     expect(pageSource).toContain("Battery interest:");
     expect(pageSource).toContain("Preferred contact method:");
     expect(pageSource).toContain("Timeline:");
-    expect(pageSource).toContain("The intake endpoint stores supported PDF/image utility bills and links the attachment metadata to the canonical intake event.");
+    expect(pageSource).toContain("The intake endpoint stores any non-empty utility bill file and links the attachment metadata to the canonical intake event.");
+    expect(pageSource).toContain("Optional — upload any utility bill file for review");
+    expect(pageSource).not.toContain('accept=\".pdf,image/*\"');
     expect(pageSource).toContain("const requestBody = new FormData()");
     expect(pageSource).toContain('requestBody.append("payload", JSON.stringify(payload))');
     expect(pageSource).toContain('requestBody.append("utility_bill", billFile)');

@@ -181,7 +181,7 @@ function buildOperationalNotes(form: FormState, billFile: File | null): string {
 
   if (billFile) {
     lines.push(
-      `Utility bill file selected: ${billFile.name} (${Math.round(billFile.size / 1024)} KB). The intake endpoint stores supported PDF/image utility bills and links the attachment metadata to the canonical intake event.`,
+      `Utility bill file selected: ${billFile.name} (${Math.round(billFile.size / 1024)} KB). The intake endpoint stores any non-empty utility bill file and links the attachment metadata to the canonical intake event.`,
     );
   }
 
@@ -1047,11 +1047,10 @@ function FileField({
         <span className="truncate">
           {file
             ? file.name
-            : "Optional — PDF/image metadata captured for review"}
+            : "Optional — upload any utility bill file for review"}
         </span>
         <input
           type="file"
-          accept=".pdf,image/*"
           className="sr-only"
           onChange={(event) => onChange(event.target.files?.[0] || null)}
         />

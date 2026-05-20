@@ -179,8 +179,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const fallbackMetadata = metadataOnlyUtilityBill(billFile);
       body.uploaded_bill_filename = billFile.name;
       body.uploaded_bill_size_bytes = billFile.size;
-      body.uploaded_bill_content_type = billFile.type || 'application/octet-stream';
-      if (fallbackMetadata) body.bill_metadata = fallbackMetadata;
+      body.uploaded_bill_content_type = fallbackMetadata?.content_type || billFile.type || 'application/octet-stream';
+      if (fallbackMetadata) {
+        body.bill_metadata = {
+          ...fallbackMetadata,
+          upload_transport: 'multipart_file_storage_failed',
+        };
+      }
       body.bill_attachment_metadata_only = true;
       const message = err instanceof Error ? err.message : String(err);
       console.error('[ATTACHMENT STORAGE FAILED]', {
@@ -195,7 +200,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (!isUtilityBillStorageFailure(err)) {
         return NextResponse.json(
           {
-            error: message || 'Utility bill upload failed. Please try again without the file or upload a supported PDF/image.',
+            error: message || 'Utility bill upload failed. Please try again without the file or choose a smaller non-empty file.',
             event_id: eventId,
           },
           { status: 400 },

@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockGetDbReady = vi.fn()
 const mockRequireAdminApi = vi.fn()
+const mockBlobPut = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/db-neon', () => ({ getDbReady: mockGetDbReady }))
 vi.mock('@/lib/adminAuth', () => ({ requireAdminApi: mockRequireAdminApi }))
+vi.mock('@vercel/blob', () => ({ put: mockBlobPut }))
 
 async function importHomeownerRoute() {
   return import('@/app/api/intake/homeowner/route')
@@ -37,6 +39,10 @@ function multipartHomeownerReq(payload: Record<string, unknown>, file: File): an
 
 function pdfUploadFile(name = 'utility bill.pdf'): File {
   return new File([Buffer.from('%PDF-1.7\nmock utility bill\n%%EOF')], name, { type: 'application/pdf' })
+}
+
+function jpegUploadFile(name = 'Braidon Bill.jiff', type = 'image/jiff'): File {
+  return new File([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01])], name, { type })
 }
 
 function adminReq(url = 'https://solarpro.test/api/admin/network/intake?page=1&limit=25'): any {
@@ -173,6 +179,11 @@ describe('homeowner intake event-first flow', () => {
     vi.resetModules()
     mockGetDbReady.mockReset().mockResolvedValue(makeSql())
     mockRequireAdminApi.mockReset().mockResolvedValue({ id: 'admin-1', role: 'admin', email: 'admin@test.com' })
+    mockBlobPut.mockReset().mockResolvedValue({
+      url: 'https://blob.solarpro.test/intake/utility-bills/free-solar-estimate/evt/file.jpg',
+      downloadUrl: 'https://blob.solarpro.test/intake/utility-bills/free-solar-estimate/evt/file.jpg?download=1',
+    })
+    vi.unstubAllEnvs()
   })
 
   it('persists valid homeowner submissions only to canonical intake_events and returns an event reference', async () => {
@@ -233,27 +244,81 @@ describe('homeowner intake event-first flow', () => {
       filename: 'Braidon Bill.pdf',
       content_type: 'application/pdf',
       storage_status: 'metadata_only_not_uploaded',
+      upload_transport: 'multipart_file_storage_failed',
       accessible_url: null,
       download_url: null,
     })
   })
 
-  it('still blocks unsupported utility bill files instead of silently accepting bad uploads', async () => {
+  it('stores multipart .jiff uploads as Blob-backed attachment metadata when storage is configured', async () => {
     vi.stubEnv('NODE_ENV', 'production')
-    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
+    vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'test_blob_token')
+    const sql = makeSql()
+    mockGetDbReady.mockResolvedValue(sql)
+    const { POST } = await importHomeownerRoute()
+
+    const res = await POST(multipartHomeownerReq(validPayload, jpegUploadFile('Braidon Bill.jiff', 'image/jiff')))
+
+    expect(res.status).toBe(200)
+    expect(mockBlobPut).toHaveBeenCalledTimes(1)
+    expect(mockBlobPut.mock.calls[0][0]).toMatch(/Braidon-Bill\.jpg$/i)
+    expect(mockBlobPut.mock.calls[0][2]).toMatchObject({
+      access: 'public',
+      contentType: 'image/jpeg',
+      token: 'test_blob_token',
+    })
+    const insertIndex = sql.queries.findIndex((q: string) => q.includes('INSERT INTO intake_events'))
+    expect(insertIndex).toBeGreaterThan(-1)
+    const payloadJson = sql.values[insertIndex].find((v: unknown) => typeof v === 'string' && v.includes('canonical_review_flow')) as string
+    const parsedPayload = JSON.parse(payloadJson)
+    expect(parsedPayload.bill_attachment_metadata_only).toBe(false)
+    expect(parsedPayload.bill_metadata).toMatchObject({
+      filename: 'Braidon Bill.jiff',
+      content_type: 'image/jpeg',
+      original_content_type: 'image/jiff',
+      detected_content_type: 'image/jpeg',
+      file_extension: 'jpg',
+      storage_status: 'stored',
+      storage_provider: 'vercel_blob',
+      accessible_url: 'https://blob.solarpro.test/intake/utility-bills/free-solar-estimate/evt/file.jpg',
+      download_url: 'https://blob.solarpro.test/intake/utility-bills/free-solar-estimate/evt/file.jpg?download=1',
+    })
+  })
+
+  it('does not block arbitrary unknown utility bill files solely because of MIME type', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('BLOB_READ_WRITE_TOKEN', 'test_blob_token')
     const sql = makeSql()
     mockGetDbReady.mockResolvedValue(sql)
     const { POST } = await importHomeownerRoute()
 
     const res = await POST(multipartHomeownerReq(
       validPayload,
-      new File(['not a supported bill'], 'Braidon Bill.fff', { type: 'application/octet-stream' }),
+      new File(['not a pdf but still homeowner-provided bill evidence'], 'Braidon Bill.fff', { type: 'application/octet-stream' }),
     ))
 
-    expect(res.status).toBe(400)
-    const json = await res.json()
-    expect(json.error).toMatch(/Unsupported utility bill file type/)
-    expect(sql.queries.some((q: string) => q.includes('INSERT INTO intake_events'))).toBe(false)
+    expect(res.status).toBe(200)
+    expect(mockBlobPut).toHaveBeenCalledTimes(1)
+    expect(mockBlobPut.mock.calls[0][0]).toMatch(/Braidon-Bill\.fff$/i)
+    expect(mockBlobPut.mock.calls[0][2]).toMatchObject({
+      access: 'public',
+      contentType: 'application/octet-stream',
+      token: 'test_blob_token',
+    })
+    const insertIndex = sql.queries.findIndex((q: string) => q.includes('INSERT INTO intake_events'))
+    expect(insertIndex).toBeGreaterThan(-1)
+    const payloadJson = sql.values[insertIndex].find((v: unknown) => typeof v === 'string' && v.includes('canonical_review_flow')) as string
+    const parsedPayload = JSON.parse(payloadJson)
+    expect(parsedPayload.bill_attachment_metadata_only).toBe(false)
+    expect(parsedPayload.bill_metadata).toMatchObject({
+      filename: 'Braidon Bill.fff',
+      content_type: 'application/octet-stream',
+      original_content_type: 'application/octet-stream',
+      detected_content_type: null,
+      file_extension: 'fff',
+      storage_status: 'stored',
+      storage_provider: 'vercel_blob',
+    })
   })
 
   it('records invalid homeowner payloads as validation_failed intake_events with clear public details', async () => {

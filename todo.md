@@ -1,17 +1,17 @@
-# SolarPro Bill Upload Error Audit
+# SolarPro Utility Bill Upload Functional Fix
 
-## Audit
-- [x] Inspect the uploaded screenshot and identify the exact user-facing error.
-- [x] Confirm repository branch/status and latest `dev` state.
-- [x] Trace the failing bill-upload/intake code path end to end.
-- [x] Search for adjacent hidden production/runtime errors in upload/storage handling.
+## Implement
+- [x] Update storage helper to store arbitrary utility bill files safely.
+- [x] Add best-effort type detection for known PDFs/images without blocking unknown file types.
+- [x] Update homeowner form file input hint to allow any file type.
+- [x] Fix diagnostics so file-bytes-received storage failures are not labeled JSON metadata-only.
 
-## Fix
-- [x] Implement the smallest safe fix on `dev` only.
-- [x] Add/update regression tests for the discovered failure.
+## Tests
+- [x] Add/update tests for .jiff/.jfif, unknown MIME, octet-stream, and arbitrary file upload behavior.
+- [x] Add/update route coverage proving multipart file bytes can persist stored metadata.
 
 ## Validate + Deliver
-- [x] Run targeted validation for touched areas.
+- [x] Run targeted tests and typecheck.
 - [ ] Commit directly on `dev`.
 - [ ] Push `dev`.
-- [ ] Report root cause, hidden-error audit findings, fix, and QA evidence.
+- [ ] Report exact fix and QA evidence.

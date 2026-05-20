@@ -347,13 +347,17 @@ export async function submitHomeownerIntakeEvent(
     separation:
       "monthly_bill_amount is homeowner bill; uploaded_bill_size_bytes is file metadata only",
   });
+  const billMetadataForLog = payload.bill_metadata as Record<string, unknown> | undefined;
+  const uploadTransport =
+    billMetadataForLog?.storage_status === "stored"
+      ? "stored_attachment_reference"
+      : billMetadataForLog?.upload_transport === "multipart_file_storage_failed"
+        ? "multipart_file_storage_failed"
+        : "json_metadata_only_no_file_bytes";
   console.info("[UTILITY BILL METADATA]", {
     event_id: eventId,
     bill_metadata: payload.bill_metadata,
-    upload_transport:
-      (payload.bill_metadata as Record<string, unknown> | undefined)?.storage_status === "stored"
-        ? "stored_attachment_reference"
-        : "json_metadata_only_no_file_bytes",
+    upload_transport: uploadTransport,
   });
   if ((payload.bill_metadata as Record<string, unknown> | undefined)?.storage_status === "stored") {
     console.info("[INTAKE ATTACHMENT LINKED]", {

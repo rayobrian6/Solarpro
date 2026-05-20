@@ -3,15 +3,7 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 
 const MAX_UTILITY_BILL_BYTES = 10 * 1024 * 1024;
-const ALLOWED_UTILITY_BILL_MIME_TYPES = new Set([
-  "application/pdf",
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "image/tiff",
-  "image/bmp",
-]);
+const GENERIC_BINARY_MIME = "application/octet-stream";
 
 const MIME_EXTENSION: Record<string, string> = {
   "application/pdf": "pdf",
@@ -21,13 +13,17 @@ const MIME_EXTENSION: Record<string, string> = {
   "image/gif": "gif",
   "image/tiff": "tif",
   "image/bmp": "bmp",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "application/json": "json",
+  "application/xml": "xml",
+  "text/xml": "xml",
+  "application/zip": "zip",
 };
 
 type UtilityBillAttachmentErrorCode =
-  | "unsupported_type"
   | "empty_file"
   | "too_large"
-  | "content_type_mismatch"
   | "storage_unconfigured"
   | "storage_failed";
 
@@ -54,6 +50,9 @@ export interface StoredUtilityBillAttachment {
   filename: string;
   size_bytes: number;
   content_type: string;
+  original_content_type: string | null;
+  detected_content_type: string | null;
+  file_extension: string;
   storage_status: "stored";
   storage_provider: "vercel_blob" | "local_public_uploads";
   storage_key: string;
@@ -70,37 +69,65 @@ function cleanSegment(value: string): string {
     .slice(0, 80) || "utility-bill";
 }
 
-function extensionFor(file: File): string {
-  const fromMime = MIME_EXTENSION[file.type.toLowerCase()];
-  if (fromMime) return fromMime;
-  const fromName = file.name.split(".").pop()?.toLowerCase();
-  return fromName && /^[a-z0-9]{2,5}$/.test(fromName) ? fromName : "bin";
+function cleanMime(value: string | undefined | null): string | null {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(normalized)) return null;
+  return normalized;
 }
 
-function hasMagicBytes(bytes: Uint8Array, mimeType: string): boolean {
-  if (bytes.length < 4) return false;
-  if (mimeType === "application/pdf") {
-    return bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46;
+function originalExtension(fileName: string): string | null {
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  return ext && /^[a-z0-9]{1,10}$/.test(ext) ? ext : null;
+}
+
+function extensionFor(contentType: string, fileName: string): string {
+  const fromMime = MIME_EXTENSION[contentType];
+  if (fromMime) return fromMime;
+  return originalExtension(fileName) || "bin";
+}
+
+function detectContentType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+    return "application/pdf";
   }
-  if (mimeType === "image/jpeg") {
-    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
   }
-  if (mimeType === "image/png") {
-    return bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) {
+    return "image/png";
   }
-  if (mimeType === "image/webp") {
-    return bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50;
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return "image/webp";
   }
-  if (mimeType === "image/gif") {
-    return bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38;
+  if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return "image/gif";
   }
-  if (mimeType === "image/tiff") {
-    return (bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00) || (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a);
+  if (bytes.length >= 4 && ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00) || (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a))) {
+    return "image/tiff";
   }
-  if (mimeType === "image/bmp") {
-    return bytes[0] === 0x42 && bytes[1] === 0x4d;
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) {
+    return "image/bmp";
   }
-  return false;
+  if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
+    return "application/zip";
+  }
+  return null;
+}
+
+function effectiveContentType(file: File, bytes: Uint8Array): { contentType: string; originalContentType: string | null; detectedContentType: string | null } {
+  const originalContentType = cleanMime(file.type);
+  const detectedContentType = detectContentType(bytes);
+
+  if (detectedContentType) {
+    return { contentType: detectedContentType, originalContentType, detectedContentType };
+  }
+
+  return {
+    contentType: originalContentType || GENERIC_BINARY_MIME,
+    originalContentType,
+    detectedContentType,
+  };
 }
 
 export function metadataOnlyUtilityBill(file: File | null): Record<string, unknown> | null {
@@ -108,7 +135,8 @@ export function metadataOnlyUtilityBill(file: File | null): Record<string, unkno
   return {
     filename: file.name,
     size_bytes: file.size,
-    content_type: file.type || "application/octet-stream",
+    content_type: cleanMime(file.type) || GENERIC_BINARY_MIME,
+    original_content_type: cleanMime(file.type),
     storage_status: "metadata_only_not_uploaded",
     accessible_url: null,
     download_url: null,
@@ -116,20 +144,14 @@ export function metadataOnlyUtilityBill(file: File | null): Record<string, unkno
 }
 
 export async function storeUtilityBillAttachment(file: File, input: { eventId: string; funnelSlug?: string | null }): Promise<StoredUtilityBillAttachment> {
-  const mimeType = (file.type || "").toLowerCase();
+  const originalContentType = cleanMime(file.type);
   console.info("[UTILITY BILL UPLOAD]", {
     event_id: input.eventId,
     filename: file.name,
     size_bytes: file.size,
-    content_type: mimeType || null,
+    content_type: originalContentType,
   });
 
-  if (!ALLOWED_UTILITY_BILL_MIME_TYPES.has(mimeType)) {
-    throw new UtilityBillAttachmentError(
-      "unsupported_type",
-      "Unsupported utility bill file type. Upload a PDF or image file.",
-    );
-  }
   if (file.size <= 0) {
     throw new UtilityBillAttachmentError("empty_file", "Utility bill file is empty.");
   }
@@ -142,16 +164,10 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
 
   const arrayBuffer = await file.arrayBuffer();
   const bytes = Buffer.from(arrayBuffer);
-  const header = new Uint8Array(arrayBuffer, 0, Math.min(12, arrayBuffer.byteLength));
-  if (!hasMagicBytes(header, mimeType)) {
-    throw new UtilityBillAttachmentError(
-      "content_type_mismatch",
-      "Utility bill file content does not match the declared file type.",
-    );
-  }
-
+  const header = new Uint8Array(arrayBuffer, 0, Math.min(32, arrayBuffer.byteLength));
+  const typeInfo = effectiveContentType(file, header);
   const uploadedAt = new Date().toISOString();
-  const ext = extensionFor(file);
+  const ext = extensionFor(typeInfo.contentType, file.name);
   const safeName = cleanSegment(file.name.replace(/\.[^.]+$/, ""));
   const funnel = cleanSegment(input.funnelSlug || "free-solar-estimate");
   const storageKey = `intake/utility-bills/${funnel}/${input.eventId}/${Date.now()}-${randomUUID()}-${safeName}.${ext}`;
@@ -164,7 +180,7 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
       const { put } = await import("@vercel/blob");
       blob = await put(storageKey, bytes, {
         access: "public",
-        contentType: mimeType,
+        contentType: typeInfo.contentType,
         token: blobToken,
       });
     } catch (err) {
@@ -177,7 +193,10 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
     const stored = {
       filename: file.name,
       size_bytes: file.size,
-      content_type: mimeType,
+      content_type: typeInfo.contentType,
+      original_content_type: typeInfo.originalContentType,
+      detected_content_type: typeInfo.detectedContentType,
+      file_extension: ext,
       storage_status: "stored" as const,
       storage_provider: "vercel_blob" as const,
       storage_key: storageKey,
@@ -191,6 +210,8 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
       storage_key: stored.storage_key,
       size_bytes: stored.size_bytes,
       content_type: stored.content_type,
+      original_content_type: stored.original_content_type,
+      detected_content_type: stored.detected_content_type,
     });
     return stored;
   }
@@ -226,7 +247,10 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
   const stored = {
     filename: file.name,
     size_bytes: file.size,
-    content_type: mimeType,
+    content_type: typeInfo.contentType,
+    original_content_type: typeInfo.originalContentType,
+    detected_content_type: typeInfo.detectedContentType,
+    file_extension: ext,
     storage_status: "stored" as const,
     storage_provider: "local_public_uploads" as const,
     storage_key: `public${publicUrl}`,
@@ -240,6 +264,8 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
     storage_key: stored.storage_key,
     size_bytes: stored.size_bytes,
     content_type: stored.content_type,
+    original_content_type: stored.original_content_type,
+    detected_content_type: stored.detected_content_type,
   });
   return stored;
 }
