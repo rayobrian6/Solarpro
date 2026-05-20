@@ -72,6 +72,7 @@ import {
   type EnrichmentChip,
   type EnrichmentState,
 } from "@/lib/network/opportunityEnrichmentDisplay";
+import { LEAD_OPS_QUEUE_DEFINITIONS } from "@/lib/intake/operationalQueues";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -1705,6 +1706,15 @@ interface IntakeLead {
   current_queue?: string | null;
   next_action?: string | null;
   next_follow_up_at?: string | null;
+  callback_at?: string | null;
+  dormant_until?: string | null;
+  dormant_reason?: string | null;
+  workflow_timeline?: Array<Record<string, unknown>> | null;
+  reopen_history?: Array<Record<string, unknown>> | null;
+  callback_history?: Array<Record<string, unknown>> | null;
+  financing_reopen_history?: Array<Record<string, unknown>> | null;
+  dormant_history?: Array<Record<string, unknown>> | null;
+  reactivation_history?: Array<Record<string, unknown>> | null;
   assigned_operator?: string | null;
   last_contacted_at?: string | null;
   contact_attempt_count?: number | null;
@@ -1756,6 +1766,13 @@ type OperatorActionKey =
   | "assign_operator"
   | "transfer_operator"
   | "unassign_operator"
+  | "return_to_queue"
+  | "reopen_qualification"
+  | "reopen_financing"
+  | "reopen_callback"
+  | "reopen_documents"
+  | "mark_dormant"
+  | "reactivate_lead"
   | "add_internal_note"
   | "log_contact_attempt"
   | "create_follow_up_task"
@@ -1774,23 +1791,7 @@ type ActionFormState = Record<string, string | boolean>;
 
 const LEAD_QUEUE_DEFINITIONS = [
   { key: "all", label: "All Active" },
-  { key: "new_intake", label: "New Intake" },
-  { key: "needs_first_contact", label: "Needs First Contact" },
-  { key: "no_answer_retry", label: "No Answer / Retry" },
-  { key: "needs_callback", label: "Needs Callback" },
-  { key: "overdue_callbacks", label: "Overdue Callbacks" },
-  { key: "callbacks_today", label: "Callbacks Today" },
-  { key: "callbacks_tomorrow", label: "Callbacks Tomorrow" },
-  { key: "urgent_financing_follow_up", label: "Urgent Financing" },
-  { key: "stale_leads", label: "Stale Leads" },
-  { key: "dormant_leads", label: "Dormant Leads" },
-  { key: "qualification_review", label: "Qualification Review" },
-  { key: "financing_review", label: "Financing Review" },
-  { key: "missing_documents", label: "Missing Documents" },
-  { key: "marketplace_ready", label: "Marketplace Ready" },
-  { key: "released", label: "Released" },
-  { key: "rejected", label: "Rejected" },
-  { key: "archived", label: "Archived" },
+  ...LEAD_OPS_QUEUE_DEFINITIONS,
 ] as const;
 
 interface OperatorDashboardStats {
@@ -1970,24 +1971,66 @@ function IntakeFeedSection() {
   const operatorActions: OperatorActionDefinition[] = [
     {
       action: "assign_operator",
-      label: "Assign Owner",
+      label: "Claim Lead",
       tone: "border-blue-700 text-blue-200 hover:bg-blue-950/40",
       description:
         "Assign or claim operator ownership while preserving reassignment history.",
     },
     {
       action: "transfer_operator",
-      label: "Transfer Owner",
+      label: "Reassign Lead",
       tone: "border-indigo-700 text-indigo-200 hover:bg-indigo-950/40",
       description:
         "Transfer lead ownership to another operator with immutable audit history.",
     },
     {
-      action: "unassign_operator",
-      label: "Unassign",
+      action: "return_to_queue",
+      label: "Return to Queue",
       tone: "border-zinc-700 text-zinc-200 hover:bg-zinc-800/70",
       description:
-        "Remove operator ownership without deleting prior assignment history.",
+        "Return lead to the active queue without deleting prior assignment history.",
+    },
+    {
+      action: "reopen_qualification",
+      label: "Reopen Qualification",
+      tone: "border-emerald-700 text-emerald-200 hover:bg-emerald-950/40",
+      description:
+        "Reopen qualification work without deleting prior lifecycle or review history.",
+    },
+    {
+      action: "reopen_financing",
+      label: "Reopen Financing",
+      tone: "border-teal-700 text-teal-200 hover:bg-teal-950/40",
+      description:
+        "Send a lead back to financing review while preserving prior financing decisions.",
+    },
+    {
+      action: "reopen_callback",
+      label: "Schedule Callback",
+      tone: "border-orange-700 text-orange-200 hover:bg-orange-950/40",
+      description:
+        "Requeue the lead for a callback with a required callback time and reason.",
+    },
+    {
+      action: "reopen_documents",
+      label: "Reopen Documents",
+      tone: "border-red-700 text-red-200 hover:bg-red-950/40",
+      description:
+        "Route the lead back to document collection/review without erasing prior decisions.",
+    },
+    {
+      action: "mark_dormant",
+      label: "Mark Dormant",
+      tone: "border-zinc-700 text-zinc-200 hover:bg-zinc-800/70",
+      description:
+        "Park the lead with dormant reason and optional reactivation timing.",
+    },
+    {
+      action: "reactivate_lead",
+      label: "Reactivate Lead",
+      tone: "border-lime-700 text-lime-200 hover:bg-lime-950/40",
+      description:
+        "Reactivate an archived, rejected, or dormant lead without creating a duplicate lead.",
     },
     {
       action: "add_internal_note",
@@ -2117,6 +2160,10 @@ function IntakeFeedSection() {
         lead.assigned_operator_name || lead.assigned_operator || "Operator",
       follow_up_priority: lead.follow_up_priority || "normal",
       follow_up_channel: lead.follow_up_channel || preferredMethod,
+      callback_at: lead.callback_at || lead.next_follow_up_at || "",
+      dormant_until: lead.dormant_until || "",
+      workflow_reason: "",
+      dormant_reason: lead.dormant_reason || "",
       note_type: "internal_note",
       contact_result: "connected",
       contact_duration_seconds: "",
@@ -2148,10 +2195,39 @@ function IntakeFeedSection() {
     const has = (key: string) => !!actionText(key).trim();
     if (action === "mark_no_answer" && !has("follow_up_at"))
       return "Follow-up date is required for No Answer.";
-    if (action === "mark_needs_follow_up" && !has("requested_callback_at"))
+    if (
+      action === "mark_needs_follow_up" &&
+      !has("requested_callback_at") &&
+      !has("callback_at") &&
+      !has("follow_up_at")
+    )
       return "Requested callback date/time is required.";
     if (action === "mark_needs_follow_up" && !has("callback_reason"))
       return "Callback reason is required.";
+    if (
+      action === "reopen_callback" &&
+      !has("callback_at") &&
+      !has("follow_up_at") &&
+      !has("requested_callback_at")
+    )
+      return "Callback date/time is required.";
+    if (
+      action === "reopen_callback" &&
+      !has("callback_reason") &&
+      !has("workflow_reason") &&
+      !has("notes")
+    )
+      return "Callback reason is required.";
+    if (
+      ["reopen_qualification", "reopen_financing", "reopen_documents"].includes(
+        action,
+      ) &&
+      !has("workflow_reason") &&
+      !has("notes")
+    )
+      return "Workflow reason is required.";
+    if (action === "mark_dormant" && !has("dormant_reason") && !has("notes"))
+      return "Dormant reason is required.";
     if (action === "mark_financing_ready" && !has("financing_path"))
       return "Financing path is required.";
     if (action === "mark_qualified" && !has("qualification_reason"))
@@ -2206,8 +2282,12 @@ function IntakeFeedSection() {
       voicemail_left: actionBool("voicemail_left"),
       next_step: actionText("next_step"),
       follow_up_at: actionText("follow_up_at"),
+      callback_at: actionText("callback_at"),
       requested_callback_at: actionText("requested_callback_at"),
       callback_reason: actionText("callback_reason"),
+      workflow_reason: actionText("workflow_reason"),
+      dormant_until: actionText("dormant_until"),
+      dormant_reason: actionText("dormant_reason"),
       financing_path: actionText("financing_path"),
       credit_band: actionText("credit_band"),
       income_band: actionText("income_band"),
@@ -2461,6 +2541,9 @@ function IntakeFeedSection() {
       needs_first_contact: "border-sky-800 bg-sky-950/30 text-sky-200",
       no_answer_retry: "border-amber-800 bg-amber-950/30 text-amber-200",
       needs_callback: "border-orange-800 bg-orange-950/30 text-orange-200",
+      waiting_on_homeowner: "border-amber-800 bg-amber-950/30 text-amber-200",
+      waiting_on_documents: "border-red-800 bg-red-950/30 text-red-200",
+      proposal_follow_up: "border-purple-800 bg-purple-950/30 text-purple-200",
       overdue_callbacks: "border-red-800 bg-red-950/40 text-red-200",
       callbacks_today: "border-orange-800 bg-orange-950/30 text-orange-200",
       callbacks_tomorrow: "border-amber-800 bg-amber-950/30 text-amber-200",
@@ -2501,7 +2584,10 @@ function IntakeFeedSection() {
     });
   }, [leads, activeQueue, includeTestLeads]);
 
-  const timelineFor = (lead: IntakeLead) => lead.operator_action_history ?? [];
+  const timelineFor = (lead: IntakeLead) => [
+    ...(lead.workflow_timeline ?? []),
+    ...(lead.operator_action_history ?? []),
+  ];
 
   return (
     <div className="space-y-5">
@@ -3238,6 +3324,7 @@ function IntakeFeedSection() {
                                         ![
                                           "archive_lead",
                                           "add_internal_note",
+                                          "reactivate_lead",
                                         ].includes(item.action));
                                     return (
                                       <button
@@ -3653,6 +3740,85 @@ function IntakeFeedSection() {
                         setActionValue("callback_reason", e.target.value)
                       }
                       placeholder="Customer asked for a callback in two weeks after reviewing current utility bill."
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                </>
+              )}
+              {[
+                "reopen_qualification",
+                "reopen_financing",
+                "reopen_documents",
+                "reactivate_lead",
+              ].includes(modalAction.action) && (
+                <label className="text-xs text-zinc-300 sm:col-span-2">
+                  Workflow reason required
+                  <textarea
+                    value={actionText("workflow_reason")}
+                    onChange={(e) =>
+                      setActionValue("workflow_reason", e.target.value)
+                    }
+                    placeholder="Explain why this lead is being moved back through operational workflow."
+                    className="mt-1 min-h-20 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                  />
+                </label>
+              )}
+              {modalAction.action === "reopen_callback" && (
+                <>
+                  <label className="text-xs text-zinc-300">
+                    Callback date/time required
+                    <input
+                      type="datetime-local"
+                      value={actionText("callback_at")}
+                      onChange={(e) =>
+                        setActionValue("callback_at", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Callback reason required
+                    <input
+                      value={actionText("callback_reason")}
+                      onChange={(e) =>
+                        setActionValue("callback_reason", e.target.value)
+                      }
+                      placeholder="Why should this lead be called back?"
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300 sm:col-span-2">
+                    Workflow reason
+                    <textarea
+                      value={actionText("workflow_reason")}
+                      onChange={(e) =>
+                        setActionValue("workflow_reason", e.target.value)
+                      }
+                      className="mt-1 min-h-20 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                </>
+              )}
+              {modalAction.action === "mark_dormant" && (
+                <>
+                  <label className="text-xs text-zinc-300">
+                    Dormant until
+                    <input
+                      type="datetime-local"
+                      value={actionText("dormant_until")}
+                      onChange={(e) =>
+                        setActionValue("dormant_until", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Dormant reason required
+                    <input
+                      value={actionText("dormant_reason")}
+                      onChange={(e) =>
+                        setActionValue("dormant_reason", e.target.value)
+                      }
                       className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
                     />
                   </label>

@@ -758,13 +758,20 @@ describe("homeowner intake event-first flow", () => {
     );
     expect(section).toContain("Lead Operations Queues");
     expect(section).toContain("LEAD_QUEUE_DEFINITIONS");
-    expect(source).toContain("Needs Callback");
-    expect(source).toContain("Overdue Callbacks");
-    expect(source).toContain("Callbacks Today");
-    expect(source).toContain("Urgent Financing");
-    expect(source).toContain("Stale Leads");
-    expect(source).toContain("Missing Documents");
-    expect(source).toContain("Marketplace Ready");
+    const queueSource = fs.readFileSync(
+      path.join(process.cwd(), "lib/intake/operationalQueues.ts"),
+      "utf8",
+    );
+    expect(source).toContain("LEAD_OPS_QUEUE_DEFINITIONS");
+    expect(source).toContain("@/lib/intake/operationalQueues");
+    expect(queueSource).toContain("Needs Callback");
+    expect(queueSource).toContain("Overdue Callbacks");
+    expect(queueSource).toContain("Callbacks Today");
+    expect(queueSource).toContain("Urgent Financing Follow-Up");
+    expect(queueSource).toContain("Stale Leads");
+    expect(queueSource).toContain("Missing Documents");
+    expect(queueSource).toContain("Marketplace Ready");
+    expect(queueSource).toContain("resolveOperationalQueue");
     expect(section).toContain("includeTestLeads");
     expect(section).toContain("openActionModal");
     expect(section).toContain("Save operator_review event");

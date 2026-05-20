@@ -6,6 +6,10 @@ import {
   operationalIntelligence,
   stateFromPipelineResult,
 } from "@/lib/intake/operationalLifecycle";
+import {
+  LEAD_OPS_QUEUE_DEFINITIONS,
+  resolveOperationalQueue,
+} from "@/lib/intake/operationalQueues";
 import { evaluateMarketplaceReleaseGate } from "@/lib/network/marketplaceReleaseGate";
 
 const readyOperational = {
@@ -512,5 +516,160 @@ describe("operational lifecycle and marketplace release gate", () => {
       contractor_readiness: "ready_for_contractor",
       lead_health: "healthy",
     });
+  });
+
+  it("centralizes operational queue definitions and routes reopened document work", () => {
+    expect(LEAD_OPS_QUEUE_DEFINITIONS.map((queue) => queue.key)).toEqual(
+      expect.arrayContaining([
+        "waiting_on_homeowner",
+        "waiting_on_documents",
+        "proposal_follow_up",
+        "dormant_leads",
+      ]),
+    );
+    const resolved = resolveOperationalQueue({
+      operational: { review_status: "documents_reopened" },
+      reviewStatus: "documents_reopened",
+      attachmentCompleteness: "metadata_only",
+      qualificationCompleteness: "complete",
+      nowMs: new Date("2026-01-02T12:00:00Z").getTime(),
+    });
+    expect(resolved.current_queue).toBe("waiting_on_documents");
+    expect(resolved.next_action).toContain("document");
+  });
+
+  it("reopens qualification, financing, callbacks, and documents without deleting workflow memory", () => {
+    const base = applyOperatorReviewAction(
+      applyOperatorReviewAction(stateFromPipelineResult({}), "mark_contacted", {
+        adminId: "admin-1",
+        occurredAt: "2026-01-01T09:00:00Z",
+      }),
+      "mark_qualified",
+      { adminId: "admin-1", occurredAt: "2026-01-01T09:05:00Z" },
+    );
+    const qualification = applyOperatorReviewAction(
+      base,
+      "reopen_qualification",
+      {
+        adminId: "admin-2",
+        occurredAt: "2026-01-01T10:00:00Z",
+        notes: "Income documentation changed",
+        details: { workflow_reason: "Income documentation changed" },
+      },
+    );
+    expect(qualification).toMatchObject({
+      review_status: "qualification_reopened",
+      lifecycle_status: "qualification_in_progress",
+      approved_for_marketplace: false,
+    });
+    expect(
+      qualification.action_history?.map((entry) => entry.action),
+    ).toContain("mark_qualified");
+    expect(qualification.reopen_history?.at(-1)).toMatchObject({
+      type: "qualification_reopened",
+      summary: "Income documentation changed",
+    });
+
+    const financing = applyOperatorReviewAction(
+      qualification,
+      "reopen_financing",
+      {
+        adminId: "admin-2",
+        occurredAt: "2026-01-01T10:10:00Z",
+        details: { workflow_reason: "Credit band needs review" },
+      },
+    );
+    expect(financing).toMatchObject({
+      review_status: "financing_reopened",
+      financing_ready: false,
+    });
+    expect(financing.financing_reopen_history).toHaveLength(1);
+
+    const callback = applyOperatorReviewAction(financing, "reopen_callback", {
+      adminId: "admin-3",
+      occurredAt: "2026-01-01T10:15:00Z",
+      details: {
+        callback_at: "2026-01-02T14:00:00Z",
+        callback_reason: "Homeowner asked for spouse callback",
+      },
+    });
+    expect(callback).toMatchObject({
+      review_status: "needs_callback",
+      callback_at: "2026-01-02T14:00:00Z",
+      needs_follow_up: true,
+    });
+    expect(callback.callback_history?.at(-1)).toMatchObject({
+      type: "callback_reopened",
+    });
+
+    const documents = applyOperatorReviewAction(callback, "reopen_documents", {
+      adminId: "admin-3",
+      occurredAt: "2026-01-01T10:20:00Z",
+      details: { workflow_reason: "Updated utility bill needed" },
+    });
+    expect(documents).toMatchObject({
+      review_status: "documents_reopened",
+      missing_items_resolved: false,
+    });
+    expect(documents.workflow_timeline?.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("uses callback_at for overdue routing and exposes callback countdown memory", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-03T12:00:00Z"));
+    const summary = deriveLeadOpsSummary({
+      operational: {
+        needs_follow_up: true,
+        callback_at: "2026-01-03T09:00:00Z",
+        follow_up_at: "2026-01-05T09:00:00Z",
+        callback_reason: "Callback takes precedence",
+      },
+      qualificationCompleteness: "complete",
+      attachmentCompleteness: "complete",
+    });
+    expect(summary.current_queue).toBe("overdue_callbacks");
+    expect(summary.next_follow_up_at).toBe("2026-01-03T09:00:00Z");
+    expect(summary.callback_bucket).toBe("overdue");
+    expect(summary.callback_countdown).toContain("overdue");
+  });
+
+  it("marks dormant leads and reactivates terminal projections without duplicate lead records", () => {
+    const archived = applyOperatorReviewAction(
+      stateFromPipelineResult({}),
+      "archive_lead",
+      {
+        adminId: "admin-1",
+        occurredAt: "2026-01-01T09:00:00Z",
+        details: { archive_reason: "Dormant campaign cleanup" },
+      },
+    );
+    const reactivated = applyOperatorReviewAction(archived, "reactivate_lead", {
+      adminId: "admin-2",
+      occurredAt: "2026-01-02T09:00:00Z",
+      details: { workflow_reason: "Homeowner replied" },
+    });
+    expect(reactivated).toMatchObject({
+      archived: false,
+      rejected: false,
+      review_status: "reactivated",
+    });
+    expect(reactivated.reactivation_history).toHaveLength(1);
+
+    const dormant = applyOperatorReviewAction(reactivated, "mark_dormant", {
+      adminId: "admin-2",
+      occurredAt: "2026-01-02T10:00:00Z",
+      details: {
+        dormant_reason: "Waiting until spring",
+        dormant_until: "2026-03-01T09:00:00Z",
+      },
+    });
+    const summary = deriveLeadOpsSummary({
+      operational: dormant,
+      qualificationCompleteness: "complete",
+      attachmentCompleteness: "complete",
+    });
+    expect(summary.current_queue).toBe("dormant_leads");
+    expect(summary.dormant_reason).toBe("Waiting until spring");
+    expect(dormant.dormant_history).toHaveLength(1);
   });
 });

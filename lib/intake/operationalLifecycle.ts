@@ -1,3 +1,10 @@
+import {
+  LEAD_OPS_QUEUE_DEFINITIONS,
+  LEAD_OPS_QUEUES,
+  LeadOpsQueue,
+  resolveOperationalQueue,
+} from "./operationalQueues";
+
 export const OPERATIONAL_LIFECYCLE = [
   "homeowner_intake",
   "pending_operator_review",
@@ -27,6 +34,13 @@ export const OPERATOR_REVIEW_ACTIONS = [
   "assign_operator",
   "transfer_operator",
   "unassign_operator",
+  "return_to_queue",
+  "reopen_qualification",
+  "reopen_financing",
+  "reopen_callback",
+  "reopen_documents",
+  "mark_dormant",
+  "reactivate_lead",
   "add_internal_note",
   "log_contact_attempt",
   "create_follow_up_task",
@@ -77,7 +91,19 @@ export interface OperationalState {
   release_readiness?: ReleaseReadiness;
   action_history?: Array<Record<string, unknown>>;
   follow_up_at?: string | null;
+  callback_at?: string | null;
   callback_reason?: string | null;
+  dormant_until?: string | null;
+  dormant_reason?: string | null;
+  workflow_reopened_at?: string | null;
+  workflow_reopened_by?: string | null;
+  workflow_reopen_reason?: string | null;
+  workflow_timeline?: OperationalMemoryEntry[];
+  reopen_history?: OperationalMemoryEntry[];
+  callback_history?: OperationalMemoryEntry[];
+  financing_reopen_history?: OperationalMemoryEntry[];
+  dormant_history?: OperationalMemoryEntry[];
+  reactivation_history?: OperationalMemoryEntry[];
   next_step?: string | null;
   contact_method?: string | null;
   reached_homeowner?: boolean | null;
@@ -124,32 +150,21 @@ export interface ReleaseReadiness {
   missing: string[];
 }
 
-export const LEAD_OPS_QUEUES = [
-  "new_intake",
-  "needs_first_contact",
-  "no_answer_retry",
-  "needs_callback",
-  "overdue_callbacks",
-  "callbacks_today",
-  "callbacks_tomorrow",
-  "urgent_financing_follow_up",
-  "stale_leads",
-  "dormant_leads",
-  "qualification_review",
-  "financing_review",
-  "missing_documents",
-  "marketplace_ready",
-  "released",
-  "rejected",
-  "archived",
-] as const;
-
-export type LeadOpsQueue = (typeof LEAD_OPS_QUEUES)[number];
+export { LEAD_OPS_QUEUE_DEFINITIONS, LEAD_OPS_QUEUES, resolveOperationalQueue };
 
 export interface LeadOpsSummary {
   current_queue: LeadOpsQueue;
   next_action: string;
   next_follow_up_at: string | null;
+  callback_at: string | null;
+  dormant_until: string | null;
+  dormant_reason: string | null;
+  workflow_timeline: OperationalMemoryEntry[];
+  reopen_history: OperationalMemoryEntry[];
+  callback_history: OperationalMemoryEntry[];
+  financing_reopen_history: OperationalMemoryEntry[];
+  dormant_history: OperationalMemoryEntry[];
+  reactivation_history: OperationalMemoryEntry[];
   assigned_operator: string | null;
   last_contacted_at: string | null;
   contact_attempt_count: number;
@@ -271,7 +286,33 @@ export function stateFromPipelineResult(
       ? (operational.action_history as Array<Record<string, unknown>>)
       : [],
     follow_up_at: str(operational.follow_up_at),
+    callback_at: str(operational.callback_at),
     callback_reason: str(operational.callback_reason),
+    dormant_until: str(operational.dormant_until),
+    dormant_reason: str(operational.dormant_reason),
+    workflow_reopened_at: str(operational.workflow_reopened_at),
+    workflow_reopened_by: str(operational.workflow_reopened_by),
+    workflow_reopen_reason: str(operational.workflow_reopen_reason),
+    workflow_timeline: Array.isArray(operational.workflow_timeline)
+      ? (operational.workflow_timeline as OperationalMemoryEntry[])
+      : [],
+    reopen_history: Array.isArray(operational.reopen_history)
+      ? (operational.reopen_history as OperationalMemoryEntry[])
+      : [],
+    callback_history: Array.isArray(operational.callback_history)
+      ? (operational.callback_history as OperationalMemoryEntry[])
+      : [],
+    financing_reopen_history: Array.isArray(
+      operational.financing_reopen_history,
+    )
+      ? (operational.financing_reopen_history as OperationalMemoryEntry[])
+      : [],
+    dormant_history: Array.isArray(operational.dormant_history)
+      ? (operational.dormant_history as OperationalMemoryEntry[])
+      : [],
+    reactivation_history: Array.isArray(operational.reactivation_history)
+      ? (operational.reactivation_history as OperationalMemoryEntry[])
+      : [],
     next_step: str(operational.next_step),
     contact_method: str(operational.contact_method),
     reached_homeowner:
@@ -362,8 +403,25 @@ export function applyOperatorReviewAction(
   };
 
   const followUpAt =
-    detailString("follow_up_at") ?? detailString("requested_callback_at");
-  if (followUpAt) next.follow_up_at = followUpAt;
+    detailString("follow_up_at") ??
+    detailString("callback_at") ??
+    detailString("requested_callback_at");
+  const workflowReason = detailString("workflow_reason") ?? note;
+  if (followUpAt) {
+    next.follow_up_at = followUpAt;
+    if (action === "reopen_callback") next.callback_at = followUpAt;
+  }
+  if (detailString("callback_at"))
+    next.callback_at = detailString("callback_at");
+  if (detailString("dormant_until"))
+    next.dormant_until = detailString("dormant_until");
+  if (detailString("dormant_reason"))
+    next.dormant_reason = detailString("dormant_reason");
+  if (workflowReason && action.startsWith("reopen_")) {
+    next.workflow_reopen_reason = workflowReason;
+    next.workflow_reopened_at = occurredAt;
+    next.workflow_reopened_by = options.adminId;
+  }
   if (detailString("contact_method"))
     next.contact_method = detailString("contact_method");
   if (detailBool("reached_homeowner") !== null)
@@ -403,7 +461,16 @@ export function applyOperatorReviewAction(
   const memoryId = (type: string) =>
     `${type}_${occurredAt.replace(/[^0-9A-Za-z]/g, "")}`;
   const appendMemory = (
-    key: "internal_notes" | "contact_history" | "contractor_communications",
+    key:
+      | "internal_notes"
+      | "contact_history"
+      | "contractor_communications"
+      | "workflow_timeline"
+      | "reopen_history"
+      | "callback_history"
+      | "financing_reopen_history"
+      | "dormant_history"
+      | "reactivation_history",
     entry: OperationalMemoryEntry,
   ) => {
     next[key] = [...(Array.isArray(next[key]) ? next[key]! : []), entry].slice(
@@ -421,6 +488,15 @@ export function applyOperatorReviewAction(
     summary,
     notes: note,
   });
+  const appendWorkflowMemory = (type: string, summary: string | null) => {
+    const entry = {
+      ...noteEntry(type, summary),
+      action,
+      previous_status: previousStatus,
+    };
+    appendMemory("workflow_timeline", entry);
+    return entry;
+  };
 
   if (detailString("follow_up_reason"))
     next.follow_up_reason = detailString("follow_up_reason");
@@ -458,7 +534,7 @@ export function applyOperatorReviewAction(
       },
     ].slice(-50);
     next.review_status = "operator_assigned";
-  } else if (action === "unassign_operator") {
+  } else if (action === "unassign_operator" || action === "return_to_queue") {
     const previousOperatorId = next.assigned_operator_id ?? null;
     const previousOperatorName = next.assigned_operator_name ?? null;
     next.assigned_operator_id = null;
@@ -478,7 +554,96 @@ export function applyOperatorReviewAction(
         assigned_operator_name: null,
       },
     ].slice(-50);
-    next.review_status = "operator_unassigned";
+    next.review_status =
+      action === "return_to_queue"
+        ? "returned_to_queue"
+        : "operator_unassigned";
+  } else if (action === "reopen_qualification") {
+    next.lifecycle_status = "qualification_in_progress";
+    next.review_status = "qualification_reopened";
+    next.qualified = false;
+    next.approved_for_marketplace = false;
+    next.rejected = false;
+    next.archived = false;
+    const entry = appendWorkflowMemory(
+      "qualification_reopened",
+      workflowReason ?? "Qualification reopened",
+    );
+    appendMemory("reopen_history", entry);
+  } else if (action === "reopen_financing") {
+    next.lifecycle_status = next.contacted
+      ? "qualification_in_progress"
+      : "pending_operator_review";
+    next.review_status = "financing_reopened";
+    next.financing_ready = false;
+    next.financing_stage =
+      detailString("financing_stage") ?? "financing_reopened";
+    next.approved_for_marketplace = false;
+    next.rejected = false;
+    next.archived = false;
+    const entry = appendWorkflowMemory(
+      "financing_reopened",
+      workflowReason ?? "Financing reopened",
+    );
+    appendMemory("reopen_history", entry);
+    appendMemory("financing_reopen_history", entry);
+  } else if (action === "reopen_callback") {
+    next.lifecycle_status = "qualification_in_progress";
+    next.review_status = "needs_callback";
+    next.needs_follow_up = true;
+    next.callback_at = next.callback_at ?? next.follow_up_at ?? null;
+    next.callback_reason =
+      detailString("callback_reason") ??
+      workflowReason ??
+      next.callback_reason ??
+      null;
+    next.follow_up_reason =
+      next.callback_reason ?? next.follow_up_reason ?? null;
+    next.rejected = false;
+    next.archived = false;
+    const entry = appendWorkflowMemory(
+      "callback_reopened",
+      next.callback_reason ?? "Callback reopened",
+    );
+    appendMemory("callback_history", entry);
+    appendMemory("reopen_history", entry);
+  } else if (action === "reopen_documents") {
+    next.lifecycle_status = "qualification_in_progress";
+    next.review_status = "documents_reopened";
+    next.missing_items_resolved = false;
+    next.approved_for_marketplace = false;
+    next.rejected = false;
+    next.archived = false;
+    const entry = appendWorkflowMemory(
+      "documents_reopened",
+      workflowReason ?? "Documents reopened",
+    );
+    appendMemory("reopen_history", entry);
+  } else if (action === "mark_dormant") {
+    next.review_status = "dormant";
+    next.needs_follow_up = false;
+    next.dormant_reason =
+      detailString("dormant_reason") ?? workflowReason ?? "Marked dormant";
+    next.dormant_until = next.dormant_until ?? null;
+    const entry = appendWorkflowMemory("marked_dormant", next.dormant_reason);
+    appendMemory("dormant_history", entry);
+  } else if (action === "reactivate_lead") {
+    next.lifecycle_status = next.contacted
+      ? "operator_contacted"
+      : "pending_operator_review";
+    next.review_status = "reactivated";
+    next.rejected = false;
+    next.archived = false;
+    next.bad_lead = false;
+    next.approved_for_marketplace = false;
+    next.dormant_until = null;
+    next.dormant_reason = null;
+    next.needs_follow_up = !!(next.follow_up_at || next.callback_at);
+    const entry = appendWorkflowMemory(
+      "reactivated",
+      workflowReason ?? "Lead reactivated",
+    );
+    appendMemory("reactivation_history", entry);
   } else if (action === "add_internal_note") {
     appendMemory(
       "internal_notes",
@@ -647,6 +812,10 @@ export function applyOperatorReviewAction(
       next_status: next.review_status,
       notes: note,
       follow_up_at: next.follow_up_at ?? null,
+      callback_at: next.callback_at ?? null,
+      dormant_until: next.dormant_until ?? null,
+      dormant_reason: next.dormant_reason ?? null,
+      workflow_reopen_reason: next.workflow_reopen_reason ?? null,
       contact_method: next.contact_method ?? null,
       reached_homeowner: next.reached_homeowner ?? null,
       voicemail_left: next.voicemail_left ?? null,
@@ -799,30 +968,6 @@ export function deriveLeadOpsSummary(input: {
     const hours = hoursSince(value);
     return hours == null ? null : Math.floor(hours / 24);
   };
-  const followUpMs = parseMs(operational.follow_up_at);
-  const startOfToday = new Date(nowMs);
-  startOfToday.setHours(0, 0, 0, 0);
-  const todayMs = startOfToday.getTime();
-  const tomorrowMs = todayMs + 86_400_000;
-  const dayAfterTomorrowMs = tomorrowMs + 86_400_000;
-  const overdue = followUpMs != null && followUpMs < nowMs;
-  const callback_bucket =
-    followUpMs == null
-      ? "unscheduled"
-      : overdue
-        ? "overdue"
-        : followUpMs < tomorrowMs
-          ? "today"
-          : followUpMs < dayAfterTomorrowMs
-            ? "tomorrow"
-            : "future";
-  const callback_countdown =
-    followUpMs == null
-      ? null
-      : overdue
-        ? `${Math.max(1, Math.ceil((nowMs - followUpMs) / 3_600_000))}h overdue`
-        : `${Math.max(1, Math.ceil((followUpMs - nowMs) / 3_600_000))}h remaining`;
-
   const contactHistory = Array.isArray(operational.contact_history)
     ? operational.contact_history
     : [];
@@ -860,118 +1005,26 @@ export function deriveLeadOpsSummary(input: {
   const assigned_operator_id = operational.assigned_operator_id ?? null;
   const assigned_operator =
     assigned_operator_name ?? operational.last_reviewed_by ?? null;
-  const time_since_intake_hours = hoursSince(
-    str((input as Record<string, unknown>).receivedAt) ?? null,
-  );
-  const time_since_last_contact_hours = hoursSince(
-    operational.last_contact_timestamp,
-  );
-  const time_waiting_on_follow_up_hours = operational.needs_follow_up
-    ? hoursSince(operational.follow_up_at ?? operational.last_reviewed_at)
-    : null;
-  const staleLead =
-    !operational.approved_for_marketplace &&
-    !operational.rejected &&
-    !operational.archived &&
-    ((time_since_last_contact_hours != null &&
-      time_since_last_contact_hours >= 72) ||
-      (!operational.contacted &&
-        time_since_intake_hours != null &&
-        time_since_intake_hours >= 24));
-  const dormantLead =
-    !operational.approved_for_marketplace &&
-    !operational.rejected &&
-    !operational.archived &&
-    ((time_since_last_contact_hours != null &&
-      time_since_last_contact_hours >= 168) ||
-      (!operational.contacted &&
-        time_since_intake_hours != null &&
-        time_since_intake_hours >= 72));
-  const urgentFinancingFollowUp =
-    operational.follow_up_priority === "urgent" &&
-    (operational.financing_stage ?? operational.financing_path ?? "").includes(
-      "financ",
-    );
-
-  let current_queue: LeadOpsQueue = "new_intake";
-  let next_action = "Review intake and confirm contact information";
-
-  if (operational.archived || reviewStatus === "archived") {
-    current_queue = "archived";
-    next_action = "No action — soft archived";
-  } else if (
-    operational.rejected ||
-    operational.bad_lead ||
-    ["rejected", "bad_lead"].includes(reviewStatus)
-  ) {
-    current_queue = "rejected";
-    next_action = "No action — rejected";
-  } else if (
-    operational.lifecycle_status === "marketplace_live" ||
-    reviewStatus === "marketplace_live"
-  ) {
-    current_queue = "released";
-    next_action = "Monitor marketplace claim activity";
-  } else if (
-    operational.approved_for_marketplace ||
-    operational.lifecycle_status === "ready_for_marketplace" ||
-    reviewStatus === "approved_for_marketplace"
-  ) {
-    current_queue = "marketplace_ready";
-    next_action = releaseReadiness?.ready
-      ? "Release through marketplace gate"
-      : "Resolve release readiness gaps";
-  } else if (overdue || overdue_task_count > 0) {
-    current_queue = "overdue_callbacks";
-    next_action = "Work overdue callback or follow-up task immediately";
-  } else if (urgentFinancingFollowUp) {
-    current_queue = "urgent_financing_follow_up";
-    next_action = "Resolve urgent financing follow-up";
-  } else if (callback_bucket === "today") {
-    current_queue = "callbacks_today";
-    next_action = "Complete today's scheduled callback";
-  } else if (callback_bucket === "tomorrow") {
-    current_queue = "callbacks_tomorrow";
-    next_action = "Prepare tomorrow's scheduled callback";
-  } else if (dormantLead) {
-    current_queue = "dormant_leads";
-    next_action = "Revive or archive dormant lead";
-  } else if (staleLead) {
-    current_queue = "stale_leads";
-    next_action = "Refresh stale lead context and contact plan";
-  } else if (
-    operational.needs_follow_up &&
-    (operational.callback_reason ||
-      operational.follow_up_reason ||
-      reviewStatus === "needs_callback")
-  ) {
-    current_queue = "needs_callback";
-    next_action = "Call homeowner at scheduled callback time";
-  } else if (reviewStatus === "no_answer") {
-    current_queue = "no_answer_retry";
-    next_action = "Retry contact attempt";
-  } else if (!operational.contacted && readyForReview) {
-    current_queue = "needs_first_contact";
-    next_action = "Make first contact attempt";
-  } else if (attachmentCompleteness !== "complete") {
-    current_queue = "missing_documents";
-    next_action = "Review or waive utility bill evidence";
-  } else if (
-    qualificationCompleteness !== "complete" ||
-    operational.lifecycle_status === "qualification_in_progress"
-  ) {
-    current_queue = "qualification_review";
-    next_action = "Complete qualification review";
-  } else if (!operational.financing_ready) {
-    current_queue = "financing_review";
-    next_action = "Review financing readiness";
-  } else if (!operational.contacted) {
-    current_queue = "new_intake";
-    next_action = "Triage new intake";
-  } else {
-    current_queue = "qualification_review";
-    next_action = "Advance lead qualification";
-  }
+  const queueResolution = resolveOperationalQueue({
+    operational,
+    reviewStatus,
+    readyForReview,
+    qualificationCompleteness,
+    attachmentCompleteness,
+    releaseReadiness,
+    receivedAt: str(input.receivedAt) ?? null,
+    nowMs,
+  });
+  const { current_queue, next_action, timing } = queueResolution;
+  const callback_bucket = timing.callback_bucket;
+  const callback_countdown = timing.callback_countdown;
+  const overdue = timing.overdue;
+  const staleLead = timing.stale_lead;
+  const dormantLead = timing.dormant_lead;
+  const time_since_intake_hours = timing.time_since_intake_hours;
+  const time_since_last_contact_hours = timing.time_since_last_contact_hours;
+  const time_waiting_on_follow_up_hours =
+    timing.time_waiting_on_follow_up_hours;
 
   const financing_stage =
     operational.financing_stage ?? operational.financing_path ?? "not_started";
@@ -1026,7 +1079,17 @@ export function deriveLeadOpsSummary(input: {
   return {
     current_queue,
     next_action,
-    next_follow_up_at: operational.follow_up_at ?? null,
+    next_follow_up_at:
+      operational.callback_at ?? operational.follow_up_at ?? null,
+    callback_at: operational.callback_at ?? null,
+    dormant_until: operational.dormant_until ?? null,
+    dormant_reason: operational.dormant_reason ?? null,
+    workflow_timeline: operational.workflow_timeline ?? [],
+    reopen_history: operational.reopen_history ?? [],
+    callback_history: operational.callback_history ?? [],
+    financing_reopen_history: operational.financing_reopen_history ?? [],
+    dormant_history: operational.dormant_history ?? [],
+    reactivation_history: operational.reactivation_history ?? [],
     assigned_operator,
     last_contacted_at: operational.last_contact_timestamp ?? null,
     contact_attempt_count,

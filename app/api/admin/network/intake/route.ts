@@ -108,8 +108,12 @@ function sanitizeOperatorDetails(
     voicemail_left: bodyBoolean(body, "voicemail_left"),
     next_step: bodyString(body, "next_step", 500),
     follow_up_at: bodyString(body, "follow_up_at", 80),
+    callback_at: bodyString(body, "callback_at", 80),
     requested_callback_at: bodyString(body, "requested_callback_at", 80),
     callback_reason: bodyString(body, "callback_reason", 500),
+    workflow_reason: bodyString(body, "workflow_reason", 1000),
+    dormant_until: bodyString(body, "dormant_until", 80),
+    dormant_reason: bodyString(body, "dormant_reason", 1000),
     financing_path: bodyString(body, "financing_path", 120),
     credit_band: bodyString(body, "credit_band", 120),
     income_band: bodyString(body, "income_band", 120),
@@ -162,9 +166,33 @@ function requiredOperatorFields(
       missing.push("follow_up_at");
   }
   if (action === "mark_needs_follow_up") {
-    if (!has("follow_up_at") && !has("requested_callback_at"))
+    if (
+      !has("follow_up_at") &&
+      !has("callback_at") &&
+      !has("requested_callback_at")
+    )
       missing.push("requested_callback_at");
     if (!has("callback_reason")) missing.push("callback_reason");
+  }
+  if (action === "reopen_callback") {
+    if (
+      !has("callback_at") &&
+      !has("follow_up_at") &&
+      !has("requested_callback_at")
+    )
+      missing.push("callback_at");
+    if (!has("callback_reason") && !has("workflow_reason") && !notes)
+      missing.push("callback_reason");
+  }
+  if (
+    action === "reopen_qualification" ||
+    action === "reopen_financing" ||
+    action === "reopen_documents"
+  ) {
+    if (!has("workflow_reason") && !notes) missing.push("workflow_reason");
+  }
+  if (action === "mark_dormant") {
+    if (!has("dormant_reason") && !notes) missing.push("dormant_reason");
   }
   if (action === "mark_financing_ready") {
     if (!has("financing_path")) missing.push("financing_path");
@@ -560,6 +588,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         current_queue: leadOpsSummary.current_queue,
         next_action: leadOpsSummary.next_action,
         next_follow_up_at: leadOpsSummary.next_follow_up_at,
+        callback_at: leadOpsSummary.callback_at,
+        dormant_until: leadOpsSummary.dormant_until,
+        dormant_reason: leadOpsSummary.dormant_reason,
+        workflow_timeline: leadOpsSummary.workflow_timeline,
+        reopen_history: leadOpsSummary.reopen_history,
+        callback_history: leadOpsSummary.callback_history,
+        financing_reopen_history: leadOpsSummary.financing_reopen_history,
+        dormant_history: leadOpsSummary.dormant_history,
+        reactivation_history: leadOpsSummary.reactivation_history,
         assigned_operator: leadOpsSummary.assigned_operator,
         last_contacted_at: leadOpsSummary.last_contacted_at,
         contact_attempt_count: leadOpsSummary.contact_attempt_count,
@@ -889,11 +926,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
 
     const currentState = stateFromPipelineResult(original.pipeline_result);
-    if (currentState.archived || currentState.rejected) {
+    if (
+      (currentState.archived || currentState.rejected) &&
+      action !== "reactivate_lead"
+    ) {
       return NextResponse.json(
         {
           error:
-            "Archived or rejected leads cannot be moved without a new intake event",
+            "Archived or rejected leads must be reactivated before ordinary workflow actions",
         },
         { status: 409 },
       );
