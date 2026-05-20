@@ -8,35 +8,40 @@
  * PATCH /api/admin/network/screening — override screening decision
  */
 
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-import { NextRequest, NextResponse } from 'next/server'
-import { getDbReady } from '@/lib/db-neon'
-import { requireAdminApi } from '@/lib/adminAuth'
-import { runScreeningPipeline } from '@/lib/network/screeningPipeline'
-import { logNetworkEvent } from '@/lib/network/attributionTracker'
-import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunityScorer'
-import { enrichAndPersistOpportunity } from '@/lib/network/opportunityEnrichment'
+import { NextRequest, NextResponse } from "next/server";
+import { getDbReady } from "@/lib/db-neon";
+import { requireAdminApi } from "@/lib/adminAuth";
+import { runScreeningPipeline } from "@/lib/network/screeningPipeline";
+import { logNetworkEvent } from "@/lib/network/attributionTracker";
+import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import {
+  scoreOpportunity,
+  scoreToListingPrice,
+} from "@/lib/network/opportunityScorer";
+import { enrichAndPersistOpportunity } from "@/lib/network/opportunityEnrichment";
 
 function toPostgresTextArray(values: string[]) {
-  return `{${values.map((value) => `\"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}\"`).join(',')}}`
+  return `{${values.map((value) => `\"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}\"`).join(",")}}`;
 }
 
 // ── GET: Screening queue ────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   try {
-    const admin = await requireAdminApi(req)
-    if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const admin = await requireAdminApi(req);
+    if (!admin)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const sql = await getDbReady()
+    const sql = await getDbReady();
 
-    const { searchParams } = new URL(req.url)
-    const pipelineStatus = searchParams.get('status')   // pending | running | completed | failed
-    const autoDecision   = searchParams.get('decision') // pass | fail | needs_review
-    const page  = parseInt(searchParams.get('page') ?? '1')
-    const limit = Math.min(parseInt(searchParams.get('limit') ?? '25'), 100)
-    const offset = (page - 1) * limit
+    const { searchParams } = new URL(req.url);
+    const pipelineStatus = searchParams.get("status"); // pending | running | completed | failed
+    const autoDecision = searchParams.get("decision"); // pass | fail | needs_review
+    const page = parseInt(searchParams.get("page") ?? "1");
+    const limit = Math.min(parseInt(searchParams.get("limit") ?? "25"), 100);
+    const offset = (page - 1) * limit;
 
     const rows = await sql`
       SELECT
@@ -58,20 +63,20 @@ export async function GET(req: NextRequest) {
       JOIN network_opportunities no ON no.id = osq.opportunity_id
       LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = osq.opportunity_id
       WHERE
-        (${pipelineStatus ?? null} IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ''})
-        AND (${autoDecision ?? null} IS NULL OR osq.auto_decision = ${autoDecision ?? ''})
+        (${pipelineStatus ?? null} IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ""})
+        AND (${autoDecision ?? null} IS NULL OR osq.auto_decision = ${autoDecision ?? ""})
       ORDER BY osq.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
-    `
+    `;
 
     const countRows = await sql`
       SELECT COUNT(*)::int as total
       FROM opportunity_screening_queue osq
       WHERE
-        (${pipelineStatus ?? null} IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ''})
-        AND (${autoDecision ?? null} IS NULL OR osq.auto_decision = ${autoDecision ?? ''})
-    `
-    const countResult = countRows[0] as Record<string, unknown>
+        (${pipelineStatus ?? null} IS NULL OR osq.pipeline_status = ${pipelineStatus ?? ""})
+        AND (${autoDecision ?? null} IS NULL OR osq.auto_decision = ${autoDecision ?? ""})
+    `;
+    const countResult = countRows[0] as Record<string, unknown>;
 
     const statsRows = await sql`
       SELECT
@@ -85,8 +90,8 @@ export async function GET(req: NextRequest) {
         COUNT(*) FILTER (WHERE override_decision IS NOT NULL)    AS overridden,
         AVG(duration_ms)                                         AS avg_duration_ms
       FROM opportunity_screening_queue
-    `
-    const stats = statsRows[0] as Record<string, unknown>
+    `;
+    const stats = statsRows[0] as Record<string, unknown>;
 
     return NextResponse.json({
       success: true,
@@ -98,37 +103,44 @@ export async function GET(req: NextRequest) {
         pages: Math.ceil((countResult.total as number) / limit),
       },
       stats,
-    })
+    });
   } catch (error) {
-    console.error('[GET /api/admin/network/screening]', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("[GET /api/admin/network/screening]", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
 // ── POST: Trigger screening ─────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const admin = await requireAdminApi(req)
-    if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const admin = await requireAdminApi(req);
+    if (!admin)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const body = await req.json()
-    const { opportunity_id } = body
+    const body = await req.json();
+    const { opportunity_id } = body;
 
     if (!opportunity_id) {
-      return NextResponse.json({ error: 'opportunity_id is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "opportunity_id is required" },
+        { status: 400 },
+      );
     }
 
     // Run the pipeline
-    const result = await runScreeningPipeline(opportunity_id)
+    const result = await runScreeningPipeline(opportunity_id);
 
     await logNetworkEvent({
-      event_type: 'opportunity.screening_started',
-      event_category: 'opportunity',
+      event_type: "opportunity.screening_started",
+      event_category: "opportunity",
       opportunity_id,
       admin_user_id: admin.id,
       data: { triggered_by_admin: true, decision: result.auto_decision },
-      triggered_by: 'admin',
-    })
+      triggered_by: "admin",
+    });
 
     return NextResponse.json({
       success: true,
@@ -141,18 +153,25 @@ export async function POST(req: NextRequest) {
         fail_reasons: result.fail_reasons,
         review_flags: result.review_flags,
       },
-    })
+    });
   } catch (error) {
-    console.error('[POST /api/admin/network/screening]', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("[POST /api/admin/network/screening]", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
-
-async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbReady>>, opportunity_id: string, adminId: string) {
-  const rows = await sql`SELECT * FROM network_opportunities WHERE id = ${opportunity_id} LIMIT 1`
-  const opp = rows[0] as Record<string, unknown> | undefined
-  if (!opp) throw new Error('Opportunity not found')
+async function scoreAndPersistOpportunity(
+  sql: Awaited<ReturnType<typeof getDbReady>>,
+  opportunity_id: string,
+  adminId: string,
+) {
+  const rows =
+    await sql`SELECT * FROM network_opportunities WHERE id = ${opportunity_id} LIMIT 1`;
+  const opp = rows[0] as Record<string, unknown> | undefined;
+  if (!opp) throw new Error("Opportunity not found");
 
   const scored = scoreOpportunity({
     monthly_bill: opp.monthly_bill as number,
@@ -165,13 +184,21 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
     peak_sun_hours: opp.peak_sun_hours_annual as number,
     estimated_system_size_kw: opp.estimated_system_size_kw as number,
     annual_usage_kwh: opp.annual_usage_kwh as number,
-    battery_interest: (opp.battery_interest ?? opp.battery_candidate) as boolean,
+    battery_interest: (opp.battery_interest ??
+      opp.battery_candidate) as boolean,
     avg_rate_kwh: opp.utility_rate_per_kwh as number,
     net_metering: opp.net_metering_type ? true : null,
-  })
-  const pricing = scoreToListingPrice(scored.overall_score, scored.overall_grade)
-  const networkOpportunityGrade = ['A+', 'A', 'B', 'C'].includes(scored.overall_grade) ? scored.overall_grade : null
-  const networkScore = Math.round(scored.overall_score)
+  });
+  const pricing = scoreToListingPrice(
+    scored.overall_score,
+    scored.overall_grade,
+  );
+  const networkOpportunityGrade = ["A+", "A", "B", "C"].includes(
+    scored.overall_grade,
+  )
+    ? scored.overall_grade
+    : null;
+  const networkScore = Math.round(scored.overall_score);
 
   await sql`
     UPDATE network_opportunities SET
@@ -183,7 +210,7 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
       scored_at = COALESCE(scored_at, NOW()),
       updated_at = NOW()
     WHERE id = ${opportunity_id}
-  `
+  `;
 
   await sql`
     INSERT INTO opportunity_intelligence (
@@ -215,85 +242,144 @@ async function scoreAndPersistOpportunity(sql: Awaited<ReturnType<typeof getDbRe
       opportunity_highlights = EXCLUDED.opportunity_highlights,
       executive_summary = EXCLUDED.executive_summary,
       updated_at = NOW()
-  `
+  `;
 
-  const enrichment = await enrichAndPersistOpportunity(sql, opportunity_id, { adminUserId: adminId, triggeredBy: 'admin' })
+  const enrichment = await enrichAndPersistOpportunity(sql, opportunity_id, {
+    adminUserId: adminId,
+    triggeredBy: "admin",
+  });
 
-  return { scored, pricing, enrichment }
+  return { scored, pricing, enrichment };
 }
 
 // ── PATCH: Override screening decision ─────────────────────────────────────
 export async function PATCH(req: NextRequest) {
   try {
-    const admin = await requireAdminApi(req)
-    if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const admin = await requireAdminApi(req);
+    if (!admin)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const sql = await getDbReady()
+    const sql = await getDbReady();
 
-    const body = await req.json()
+    const body = await req.json();
     const { opportunity_id, action, decision, reason } = body as {
-      opportunity_id: string
-      action?: 'approve' | 'reject' | 'request_more_info' | 'release_to_marketplace'
-      decision?: 'pass' | 'fail' | 'hold'
-      reason?: string
-    }
+      opportunity_id: string;
+      action?:
+        | "approve"
+        | "reject"
+        | "request_more_info"
+        | "release_to_marketplace";
+      decision?: "pass" | "fail" | "hold";
+      reason?: string;
+    };
 
     if (!opportunity_id) {
-      return NextResponse.json({ error: 'opportunity_id is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "opportunity_id is required" },
+        { status: 400 },
+      );
     }
 
-    const normalizedAction = action ?? (
-      decision === 'pass' ? 'approve' :
-      decision === 'fail' ? 'reject' :
-      decision === 'hold' ? 'request_more_info' : undefined
-    )
+    const normalizedAction =
+      action ??
+      (decision === "pass"
+        ? "approve"
+        : decision === "fail"
+          ? "reject"
+          : decision === "hold"
+            ? "request_more_info"
+            : undefined);
 
     if (!normalizedAction) {
-      return NextResponse.json({ error: 'action is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: "action is required" },
+        { status: 400 },
+      );
     }
 
     const oppRows = await sql`
-      SELECT no.id, no.status, no.screening_status, osq.auto_decision, osq.override_decision
+      SELECT no.id, no.status, no.screening_status, no.intake_metadata, no.raw_payload, osq.auto_decision, osq.override_decision
       FROM network_opportunities no
       LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
       WHERE no.id = ${opportunity_id}
       LIMIT 1
-    `
-    const opp = oppRows[0] as Record<string, unknown> | undefined
-    if (!opp) return NextResponse.json({ error: 'Opportunity not found' }, { status: 404 })
+    `;
+    const opp = oppRows[0] as Record<string, unknown> | undefined;
+    if (!opp)
+      return NextResponse.json(
+        { error: "Opportunity not found" },
+        { status: 404 },
+      );
 
-    let newStatus = String(opp.status ?? 'screening')
-    let screeningStatus = String(opp.screening_status ?? 'pending')
-    let overrideDecision: 'pass' | 'fail' | 'hold' | null = null
-    let eventType = 'screening.override'
-    let responsePayload: Record<string, unknown> = {}
+    let newStatus = String(opp.status ?? "screening");
+    let screeningStatus = String(opp.screening_status ?? "pending");
+    let overrideDecision: "pass" | "fail" | "hold" | null = null;
+    let eventType = "screening.override";
+    let responsePayload: Record<string, unknown> = {};
 
-    if (normalizedAction === 'approve') {
-      overrideDecision = 'pass'
-      screeningStatus = 'approved'
-      newStatus = 'scored'
-      await scoreAndPersistOpportunity(sql, opportunity_id, admin.id)
-      responsePayload = { action: normalizedAction, screening_status: screeningStatus, new_status: newStatus }
-    } else if (normalizedAction === 'reject') {
-      overrideDecision = 'fail'
-      screeningStatus = 'rejected'
-      newStatus = 'rejected'
-      responsePayload = { action: normalizedAction, screening_status: screeningStatus, new_status: newStatus }
-    } else if (normalizedAction === 'request_more_info') {
-      overrideDecision = 'hold'
-      screeningStatus = 'escalated'
-      newStatus = 'screening'
-      responsePayload = { action: normalizedAction, screening_status: 'needs_more_info', stored_screening_status: screeningStatus, new_status: newStatus }
-    } else if (normalizedAction === 'release_to_marketplace') {
-      const approved = opp.screening_status === 'approved' || opp.override_decision === 'pass' || opp.auto_decision === 'pass'
-      if (!approved) {
-        return NextResponse.json({ error: 'Opportunity must be approved by screening before marketplace release' }, { status: 409 })
+    if (normalizedAction === "approve") {
+      overrideDecision = "pass";
+      screeningStatus = "approved";
+      newStatus = "scored";
+      await scoreAndPersistOpportunity(sql, opportunity_id, admin.id);
+      responsePayload = {
+        action: normalizedAction,
+        screening_status: screeningStatus,
+        new_status: newStatus,
+      };
+    } else if (normalizedAction === "reject") {
+      overrideDecision = "fail";
+      screeningStatus = "rejected";
+      newStatus = "rejected";
+      responsePayload = {
+        action: normalizedAction,
+        screening_status: screeningStatus,
+        new_status: newStatus,
+      };
+    } else if (normalizedAction === "request_more_info") {
+      overrideDecision = "hold";
+      screeningStatus = "escalated";
+      newStatus = "screening";
+      responsePayload = {
+        action: normalizedAction,
+        screening_status: "needs_more_info",
+        stored_screening_status: screeningStatus,
+        new_status: newStatus,
+      };
+    } else if (normalizedAction === "release_to_marketplace") {
+      const releaseGate = logMarketplaceGate(
+        "[MARKETPLACE RELEASE GATE]",
+        opp,
+        "release_to_marketplace",
+      );
+      if (!releaseGate.approvedScreening) {
+        return NextResponse.json(
+          {
+            error:
+              "Opportunity must be approved by screening before marketplace release",
+          },
+          { status: 409 },
+        );
       }
-      const { scored, pricing, enrichment } = await scoreAndPersistOpportunity(sql, opportunity_id, admin.id)
-      overrideDecision = 'pass'
-      screeningStatus = 'approved'
-      newStatus = 'live'
-      eventType = 'opportunity.published'
+      if (!releaseGate.releaseReadiness.ready) {
+        return NextResponse.json(
+          {
+            error:
+              "Opportunity must pass operational marketplace release readiness before marketplace release",
+            missing: releaseGate.missing,
+          },
+          { status: 409 },
+        );
+      }
+      const { scored, pricing, enrichment } = await scoreAndPersistOpportunity(
+        sql,
+        opportunity_id,
+        admin.id,
+      );
+      overrideDecision = "pass";
+      screeningStatus = "approved";
+      newStatus = "live";
+      eventType = "opportunity.published";
       responsePayload = {
         action: normalizedAction,
         screening_status: screeningStatus,
@@ -303,7 +389,7 @@ export async function PATCH(req: NextRequest) {
         market_price: pricing.price,
         enrichment_completeness: enrichment.completeness,
         enrichment_warnings: enrichment.warnings,
-      }
+      };
     }
 
     await sql`
@@ -314,7 +400,7 @@ export async function PATCH(req: NextRequest) {
         override_at       = NOW(),
         updated_at        = NOW()
       WHERE opportunity_id = ${opportunity_id}
-    `
+    `;
 
     await sql`
       UPDATE network_opportunities SET
@@ -327,22 +413,28 @@ export async function PATCH(req: NextRequest) {
         expires_at = CASE WHEN ${newStatus} = 'live' THEN GREATEST(expires_at, NOW() + INTERVAL '30 days') ELSE expires_at END,
         updated_at = NOW()
       WHERE id = ${opportunity_id}
-    `
+    `;
 
     await logNetworkEvent({
       event_type: eventType,
-      event_category: normalizedAction === 'release_to_marketplace' ? 'opportunity' : 'screening',
+      event_category:
+        normalizedAction === "release_to_marketplace"
+          ? "opportunity"
+          : "screening",
       opportunity_id,
       admin_user_id: admin.id,
       data: { action: normalizedAction, reason, ...responsePayload },
-      from_status: String(opp.status ?? ''),
+      from_status: String(opp.status ?? ""),
       to_status: newStatus,
-      triggered_by: 'admin',
-    })
+      triggered_by: "admin",
+    });
 
-    return NextResponse.json({ success: true, ...responsePayload })
+    return NextResponse.json({ success: true, ...responsePayload });
   } catch (error) {
-    console.error('[PATCH /api/admin/network/screening]', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error("[PATCH /api/admin/network/screening]", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

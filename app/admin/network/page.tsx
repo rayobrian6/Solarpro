@@ -10,7 +10,7 @@ import {
   XCircle, Play, Eye, Star, Target, Layers,
   Inbox, Cpu, Webhook, RotateCcw, StopCircle,
   CheckCheck, Loader2, Ban, FlaskConical,
-  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink, ClipboardList, Copy,
+  Megaphone, DollarSign, TrendingDown, PlusCircle, Pencil, Trash2, ExternalLink, FileText, ClipboardList, Copy,
 } from 'lucide-react';
 import {
   buildEnrichmentChips,
@@ -1183,6 +1183,8 @@ function IntakeFeedSection() {
   const [channelFilter, setChannelFilter] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1262,11 +1264,18 @@ function IntakeFeedSection() {
   const billMetadataFor = (lead: IntakeLead) => {
     const metadata = lead.bill_metadata ?? (typeof lead.intake_metadata?.bill_metadata === 'object' && lead.intake_metadata.bill_metadata !== null ? lead.intake_metadata.bill_metadata as Record<string, unknown> : null);
     const filename = metadata?.filename ?? metadataText(lead, 'uploaded_bill_filename');
+    const accessibleUrl = typeof metadata?.accessible_url === 'string' && metadata.accessible_url.trim() ? metadata.accessible_url : null;
+    const downloadUrl = typeof metadata?.download_url === 'string' && metadata.download_url.trim() ? metadata.download_url : accessibleUrl;
     return {
       filename,
       sizeBytes: metadata?.size_bytes ?? metadataNumber(lead, 'uploaded_bill_size_bytes'),
       contentType: metadata?.content_type ?? metadataText(lead, 'uploaded_bill_content_type'),
       storageStatus: metadata?.storage_status ?? (filename ? 'metadata_only_not_uploaded' : 'not_provided'),
+      storageProvider: metadata?.storage_provider,
+      uploadedAt: metadata?.uploaded_at,
+      accessibleUrl,
+      downloadUrl,
+      hasStoredAttachment: !!accessibleUrl && metadata?.storage_status === 'stored',
     };
   };
 
@@ -1279,6 +1288,40 @@ function IntakeFeedSection() {
       ['Bill Attachment Metadata Only', lead.bill_attachment_metadata_only],
       ['Validation Warning', warnings],
     ];
+  };
+
+  const operatorActions: Array<{ action: string; label: string; tone: string; confirm?: string }> = [
+    { action: 'mark_contacted', label: 'Mark Contacted', tone: 'border-sky-700 text-sky-200 hover:bg-sky-950/40' },
+    { action: 'mark_no_answer', label: 'No Answer', tone: 'border-amber-700 text-amber-200 hover:bg-amber-950/40' },
+    { action: 'mark_needs_follow_up', label: 'Needs Follow-Up', tone: 'border-orange-700 text-orange-200 hover:bg-orange-950/40' },
+    { action: 'mark_financing_ready', label: 'Financing Ready', tone: 'border-emerald-700 text-emerald-200 hover:bg-emerald-950/40' },
+    { action: 'mark_qualified', label: 'Mark Qualified', tone: 'border-green-700 text-green-200 hover:bg-green-950/40' },
+    { action: 'approve_for_marketplace', label: 'Approve for Marketplace', tone: 'border-purple-700 text-purple-200 hover:bg-purple-950/40' },
+    { action: 'reject_lead', label: 'Reject Lead', tone: 'border-red-700 text-red-200 hover:bg-red-950/40', confirm: 'Reject this lead? This preserves audit history and removes it from active advancement.' },
+    { action: 'archive_lead', label: 'Archive Lead', tone: 'border-zinc-700 text-zinc-200 hover:bg-zinc-800/70', confirm: 'Archive this lead? This is a soft archive and preserves the full event history.' },
+  ];
+
+  const runOperatorAction = async (lead: IntakeLead, action: string, confirmMessage?: string) => {
+    const eventId = lead.event_id ?? lead.id;
+    if (!eventId) return;
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
+    setActionBusyId(`${eventId}:${action}`);
+    setActionMessage(null);
+    try {
+      const res = await fetch('/api/admin/network/intake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event_id: eventId, action }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || data.message || `HTTP ${res.status}`);
+      setActionMessage(`${data.review_status || action} saved for ${eventId}`);
+      await load();
+    } catch (e) {
+      setActionMessage(e instanceof Error ? e.message : 'Operator action failed');
+    } finally {
+      setActionBusyId(null);
+    }
   };
 
   const eventDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => [
@@ -1301,10 +1344,13 @@ function IntakeFeedSection() {
       ['Timeline', lead.timeline ?? metadataText(lead, 'timeline')],
       ['Roof Age Years', lead.roof_age ?? metadataText(lead, 'roof_age') ?? metadataText(lead, 'roof_age_years')],
       ['Property Address', [lead.address_line1, lead.city, lead.state, lead.zip].filter(Boolean).join(', ')],
-      ['Utility Bill Evidence', billFile.filename ? 'Metadata only — file was not uploaded/stored' : 'Not provided'],
+      ['Utility Bill Evidence', billFile.hasStoredAttachment ? 'Stored attachment available' : (billFile.filename ? 'Metadata only — file was not uploaded/stored' : 'Not provided')],
       ['Utility Bill Filename', billFile.filename],
       ['Utility Bill File Size Bytes', billFile.sizeBytes],
       ['Utility Bill MIME Type', billFile.contentType],
+      ['Utility Bill Storage Status', billFile.storageStatus],
+      ['Utility Bill Storage Provider', billFile.storageProvider],
+      ['Utility Bill Uploaded At', billFile.uploadedAt],
       ['Consent', lead.intake_metadata?.consent_given],
     ];
     return details.filter(([, value]) => value !== null && value !== undefined && value !== '');
@@ -1346,6 +1392,11 @@ function IntakeFeedSection() {
         <StatCard label="Conversion Rate" value={`${((stats.conversion_rate ?? 0) * 100).toFixed(1)}%`} color="text-green-400" icon={TrendingUp} />
         <StatCard label="Validation Failures" value={`${((stats.validation_failure_rate ?? 0) * 100).toFixed(1)}%`} color={((stats.validation_failure_rate ?? 0) > 0.2) ? 'text-red-400' : 'text-zinc-300'} icon={AlertCircle} />
       </div>
+      {actionMessage && (
+        <div className="rounded-xl border border-blue-800/50 bg-blue-950/30 p-3 text-xs text-blue-100">
+          {actionMessage}
+        </div>
+      )}
       {error && (
         <div className="rounded-xl border border-red-800/50 bg-red-950/30 p-4 text-sm text-red-200">
           <div className="flex items-center gap-2 font-semibold"><AlertCircle className="h-4 w-4" /> Intake Feed API error</div>
@@ -1403,6 +1454,9 @@ function IntakeFeedSection() {
                 const notes = notesFor(lead);
                 const eventDetails = eventDetailsFor(lead);
                 const reviewSignals = reviewSignalsFor(lead);
+                const billFile = billMetadataFor(lead);
+                const eventId = lead.event_id ?? lead.id;
+                const terminalLead = ['archived', 'rejected', 'bad_lead'].includes(String(lead.review_status ?? lead.status ?? '').toLowerCase());
                 return (
                   <Fragment key={lead.id}>
                     <tr className="hover:bg-zinc-800/30 transition-colors">
@@ -1441,6 +1495,34 @@ function IntakeFeedSection() {
                               </div>
                             ))}
                           </div>
+                          {billFile.filename && (
+                            <div className="mb-3 rounded-lg border border-amber-900/50 bg-amber-950/20 p-3">
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300">Utility bill attachment</div>
+                                  <div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.filename)} · {payloadDisplay(billFile.storageStatus)}</div>
+                                </div>
+                                {billFile.hasStoredAttachment ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    <a href={billFile.accessibleUrl ?? '#'} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-amber-700 px-2.5 py-1 text-xs text-amber-100 hover:bg-amber-900/40">
+                                      <ExternalLink className="h-3 w-3" /> Open Bill
+                                    </a>
+                                    <a href={billFile.downloadUrl ?? billFile.accessibleUrl ?? '#'} download className="inline-flex items-center gap-1 rounded-md border border-amber-700 px-2.5 py-1 text-xs text-amber-100 hover:bg-amber-900/40">
+                                      <FileText className="h-3 w-3" /> Download Bill
+                                    </a>
+                                  </div>
+                                ) : (
+                                  <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2.5 py-1 text-[11px] text-zinc-400">Missing stored file — metadata only</div>
+                                )}
+                              </div>
+                              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">MIME</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.contentType)}</div></div>
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">Size Bytes</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.sizeBytes)}</div></div>
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">Uploaded At</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.uploadedAt)}</div></div>
+                                <div className="rounded-md border border-amber-900/40 bg-zinc-950/50 px-3 py-2"><div className="text-[10px] uppercase tracking-wider text-zinc-500">Provider</div><div className="mt-1 text-xs text-amber-100">{payloadDisplay(billFile.storageProvider)}</div></div>
+                              </div>
+                            </div>
+                          )}
                           {details.length > 0 ? (
                             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                               {details.map(([label, value]) => (
@@ -1473,6 +1555,29 @@ function IntakeFeedSection() {
                                   <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-emerald-100">{contractorSummary}</p>
                                 </div>
                               )}
+                            </div>
+                          )}
+                          {lead.intake_record_type === 'intake_event' && (
+                            <div className="mt-3 rounded-lg border border-purple-900/50 bg-purple-950/20 p-3">
+                              <div className="mb-2 flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="text-[11px] font-semibold uppercase tracking-wider text-purple-300">Operator workflow controls</div>
+                                  <div className="mt-1 text-[11px] text-purple-200/70">Each action appends an immutable operator_review event and updates the current intake projection.</div>
+                                </div>
+                                {terminalLead && <span className="rounded-full border border-zinc-700 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-400">Terminal</span>}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {operatorActions.map(item => {
+                                  const busy = actionBusyId === `${eventId}:${item.action}`;
+                                  const disabled = !!actionBusyId || (terminalLead && !['archive_lead'].includes(item.action));
+                                  return (
+                                    <button key={item.action} type="button" disabled={disabled} onClick={() => runOperatorAction(lead, item.action, item.confirm)} className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${item.tone}`}>
+                                      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : item.action === 'approve_for_marketplace' ? <CheckCheck className="h-3 w-3" /> : item.action === 'reject_lead' ? <XCircle className="h-3 w-3" /> : item.action === 'archive_lead' ? <Ban className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                                      {item.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                           {notes && (

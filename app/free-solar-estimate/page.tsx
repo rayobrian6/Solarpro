@@ -181,7 +181,7 @@ function buildOperationalNotes(form: FormState, billFile: File | null): string {
 
   if (billFile) {
     lines.push(
-      `Utility bill file selected: ${billFile.name} (${Math.round(billFile.size / 1024)} KB). File metadata only; canonical intake endpoint currently accepts JSON and does not ingest documents.`,
+      `Utility bill file selected: ${billFile.name} (${Math.round(billFile.size / 1024)} KB). The intake endpoint stores supported PDF/image utility bills and links the attachment metadata to the canonical intake event.`,
     );
   }
 
@@ -378,10 +378,13 @@ export default function FreeSolarEstimatePage() {
     setSubmitState("submitting");
 
     try {
+      const requestBody = new FormData();
+      requestBody.append("payload", JSON.stringify(payload));
+      if (billFile) requestBody.append("utility_bill", billFile);
+
       const response = await fetch("/api/intake/homeowner", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: requestBody,
       });
 
       const data = await response.json().catch(() => ({}));
