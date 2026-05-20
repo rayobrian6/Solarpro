@@ -7,6 +7,8 @@ const mockHandleRouteDbError = vi.fn((_label: string, err: unknown) => {
 });
 const mockCheckRateLimit = vi.fn();
 const mockGetClientIp = vi.fn();
+const mockEvaluateContractorEligibility = vi.fn();
+const mockLogNetworkEvent = vi.fn();
 
 vi.mock("@/lib/auth", () => ({ getUserFromRequest: mockGetUserFromRequest }));
 vi.mock("@/lib/db-neon", () => ({
@@ -17,6 +19,12 @@ vi.mock("@/lib/db-neon", () => ({
 vi.mock("@/lib/rateLimiter", () => ({
   checkRateLimit: mockCheckRateLimit,
   getClientIp: mockGetClientIp,
+}));
+vi.mock("@/lib/network/contractorEligibility", () => ({
+  evaluateContractorEligibility: mockEvaluateContractorEligibility,
+}));
+vi.mock("@/lib/network/attributionTracker", () => ({
+  logNetworkEvent: mockLogNetworkEvent,
 }));
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
@@ -199,7 +207,9 @@ function makeSql() {
       ];
     }
 
-    if (q.includes("UPDATE network_opportunities")) return [];
+    if (q.includes("UPDATE network_opportunities")) {
+      return [{ id: OPP_ID, status: "claimed", marketplace_status: "claimed", claim_count: 1 }];
+    }
 
     if (
       q.includes("SELECT") &&
@@ -254,6 +264,28 @@ describe("contractor network assignment visibility", () => {
     mockGetDbReady.mockReset().mockResolvedValue(makeSql());
     mockCheckRateLimit.mockReset().mockResolvedValue({ allowed: true });
     mockGetClientIp.mockReset().mockReturnValue("127.0.0.1");
+    mockEvaluateContractorEligibility.mockReset().mockResolvedValue({
+      eligible: true,
+      reasons: [
+        "release_gate_passed",
+        "contractor_active",
+        "territory_state_TX",
+        "claim_capacity_available_exclusive",
+      ],
+      denials: [],
+      warnings: [],
+      contractor_id: USER_ID,
+      opportunity_id: OPP_ID,
+      release_gate_result: { ok: true, missing: [] },
+      claim_state: {
+        mode: "exclusive",
+        max_claims: 1,
+        current_claims: 0,
+        contractor_has_active_claim: false,
+        contractor_has_claimable_offer: true,
+      },
+    });
+    mockLogNetworkEvent.mockReset().mockResolvedValue(undefined);
   });
 
   it("includes direct network assignments in the Discover feed and total count", async () => {

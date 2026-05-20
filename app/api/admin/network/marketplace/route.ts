@@ -9,6 +9,11 @@ import { requireAdminApi } from "@/lib/adminAuth";
 import { matchContractors } from "@/lib/network/contractorMatcher";
 import { logNetworkEvent } from "@/lib/network/attributionTracker";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import {
+  releaseMarketplaceInventoryFromIntake,
+  transitionMarketplaceInventory,
+  type MarketplaceInventoryAction,
+} from "@/lib/network/marketplaceInventory";
 
 function jsonError(error: string, status = 400, details?: unknown) {
   return NextResponse.json({ success: false, error, details }, { status });
@@ -21,6 +26,8 @@ type MarketplaceStage =
   | "list_query"
   | "count_query"
   | "gate_query"
+  | "inventory_release"
+  | "inventory_transition"
   | "assignment_query"
   | "matching_call"
   | "assignment_insert"
@@ -187,40 +194,85 @@ export async function POST(req: NextRequest) {
     const {
       action,
       opportunity_id,
+      intake_event_id,
+      reason = null,
+      asking_price = null,
+      listing_notes = null,
+      expires_days = 30,
+      claim_mode = "exclusive",
+      max_claims = null,
       limit = 10,
       min_score = 30,
     } = body as {
-      action: "match_contractors" | "create_assignments" | "pause";
+      action:
+        | "release_from_intake"
+        | MarketplaceInventoryAction
+        | "match_contractors"
+        | "create_assignments";
       opportunity_id?: string;
+      intake_event_id?: string;
+      reason?: string | null;
+      asking_price?: number | null;
+      listing_notes?: string | null;
+      expires_days?: number | null;
+      claim_mode?: "exclusive" | "shared";
+      max_claims?: number | null;
       limit?: number;
       min_score?: number;
     };
-    if (!action || !opportunity_id)
-      return jsonError("action and opportunity_id are required", 400);
+    if (!action) return jsonError("action is required", 400);
+
+    if (action === "release_from_intake") {
+      if (!intake_event_id)
+        return jsonError("intake_event_id is required for release_from_intake", 400);
+      stage = "inventory_release";
+      const result = await releaseMarketplaceInventoryFromIntake({
+        sql,
+        intakeEventId: intake_event_id,
+        adminUserId: admin.id,
+        askingPrice: asking_price,
+        listingNotes: listing_notes,
+        expiresDays: expires_days,
+        claimMode: claim_mode,
+        maxClaims: max_claims,
+      });
+      if (!result.ok) return jsonError(result.error, result.status, result);
+      return NextResponse.json(
+        { success: true, ...result, opportunity_id: result.opportunity.id },
+        { status: result.status },
+      );
+    }
+
+    const inventoryActions: MarketplaceInventoryAction[] = [
+      "release",
+      "pause",
+      "unrelease",
+      "archive",
+    ];
+    if (inventoryActions.includes(action as MarketplaceInventoryAction)) {
+      if (!opportunity_id)
+        return jsonError("opportunity_id is required for inventory actions", 400);
+      stage = "inventory_transition";
+      const result = await transitionMarketplaceInventory({
+        sql,
+        opportunityId: opportunity_id,
+        adminUserId: admin.id,
+        action: action as MarketplaceInventoryAction,
+        reason,
+      });
+      if (!result.ok) return jsonError(result.error, result.status, result);
+      return NextResponse.json(
+        { success: true, ...result, opportunity_id: result.opportunity.id },
+        { status: result.status },
+      );
+    }
+
+    if (!opportunity_id)
+      return jsonError("opportunity_id is required for assignment actions", 400);
 
     stage = "gate_query";
     const gate = await assertLiveApprovedOpportunity(sql, opportunity_id);
-    if (!gate.ok) return jsonError(gate.error, gate.status);
-
-    if (action === "pause") {
-      await sql`UPDATE network_opportunities SET status = 'scored', live_at = NULL, updated_at = NOW() WHERE id = ${opportunity_id}`;
-      await logNetworkEvent({
-        event_type: "opportunity.unpublished",
-        event_category: "opportunity",
-        opportunity_id,
-        admin_user_id: admin.id,
-        from_status: "live",
-        to_status: "scored",
-        data: { source: "marketplace_workbench" },
-        triggered_by: "admin",
-      });
-      return NextResponse.json({
-        success: true,
-        action,
-        opportunity_id,
-        new_status: "scored",
-      });
-    }
+    if (!gate.ok) return jsonError(gate.error, gate.status, gate);
 
     stage = "assignment_query";
     const existingAssignments = await sql`
