@@ -123,6 +123,24 @@ function sanitizeOperatorDetails(
     archive_reason: bodyString(body, "archive_reason", 500),
     is_test_lead: bodyBoolean(body, "is_test_lead"),
     utility_bill_review: bodyString(body, "utility_bill_review", 120),
+    assigned_operator_id: bodyString(body, "assigned_operator_id", 120),
+    assigned_operator_name: bodyString(body, "assigned_operator_name", 160),
+    follow_up_reason: bodyString(body, "follow_up_reason", 500),
+    follow_up_priority: bodyString(body, "follow_up_priority", 80),
+    follow_up_channel: bodyString(body, "follow_up_channel", 80),
+    follow_up_completed_at: bodyString(body, "follow_up_completed_at", 80),
+    snooze_until: bodyString(body, "snooze_until", 80),
+    note_type: bodyString(body, "note_type", 80),
+    contact_result: bodyString(body, "contact_result", 80),
+    contact_duration_seconds: bodyString(body, "contact_duration_seconds", 40),
+    task_id: bodyString(body, "task_id", 160),
+    task_title: bodyString(body, "task_title", 240),
+    task_owner_id: bodyString(body, "task_owner_id", 120),
+    task_owner_name: bodyString(body, "task_owner_name", 160),
+    task_due_at: bodyString(body, "task_due_at", 80),
+    task_priority: bodyString(body, "task_priority", 80),
+    financing_stage: bodyString(body, "financing_stage", 120),
+    proposal_stage: bodyString(body, "proposal_stage", 120),
     release_checklist:
       body.release_checklist && typeof body.release_checklist === "object"
         ? body.release_checklist
@@ -164,6 +182,31 @@ function requiredOperatorFields(
   }
   if (action === "archive_lead") {
     if (!has("archive_reason")) missing.push("archive_reason");
+  }
+  if (action === "assign_operator" || action === "transfer_operator") {
+    if (!has("assigned_operator_id")) missing.push("assigned_operator_id");
+    if (!has("assigned_operator_name")) missing.push("assigned_operator_name");
+  }
+  if (action === "add_internal_note") {
+    if (!notes) missing.push("notes");
+  }
+  if (action === "log_contact_attempt") {
+    if (!has("contact_method")) missing.push("contact_method");
+    if (!has("contact_result")) missing.push("contact_result");
+  }
+  if (action === "create_follow_up_task") {
+    if (!has("task_title")) missing.push("task_title");
+    if (!has("task_due_at") && !has("follow_up_at"))
+      missing.push("task_due_at");
+  }
+  if (action === "complete_follow_up_task") {
+    if (!has("task_id")) missing.push("task_id");
+  }
+  if (action === "update_financing_stage") {
+    if (!has("financing_stage")) missing.push("financing_stage");
+  }
+  if (action === "update_proposal_stage") {
+    if (!has("proposal_stage")) missing.push("proposal_stage");
   }
   return missing;
 }
@@ -495,6 +538,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         qualificationCompleteness,
         attachmentCompleteness,
         releaseReadiness: intelligence.release_readiness as any,
+        receivedAt: rest.received_at ?? rest.created_at,
       });
       return {
         ...rest,
@@ -522,10 +566,85 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         last_operator_action: leadOpsSummary.last_operator_action,
         financing_status: leadOpsSummary.financing_status,
         qualification_summary_status: leadOpsSummary.qualification_status,
+        assigned_operator_id: leadOpsSummary.assigned_operator_id,
+        assigned_operator_name: leadOpsSummary.assigned_operator_name,
+        assigned_at: leadOpsSummary.assigned_at,
+        ownership_age_hours: leadOpsSummary.ownership_age_hours,
+        last_touched_by: leadOpsSummary.last_touched_by,
+        follow_up_reason: leadOpsSummary.follow_up_reason,
+        follow_up_priority: leadOpsSummary.follow_up_priority,
+        follow_up_channel: leadOpsSummary.follow_up_channel,
+        follow_up_completed_at: leadOpsSummary.follow_up_completed_at,
+        snooze_until: leadOpsSummary.snooze_until,
+        callback_bucket: leadOpsSummary.callback_bucket,
+        callback_countdown: leadOpsSummary.callback_countdown,
+        overdue: leadOpsSummary.overdue,
+        latest_note: leadOpsSummary.latest_note,
+        last_contact_result: leadOpsSummary.last_contact_result,
+        successful_contact_count: leadOpsSummary.successful_contact_count,
+        days_since_last_contact: leadOpsSummary.days_since_last_contact,
+        open_task_count: leadOpsSummary.open_task_count,
+        overdue_task_count: leadOpsSummary.overdue_task_count,
+        financing_stage: leadOpsSummary.financing_stage,
+        proposal_stage: leadOpsSummary.proposal_stage,
+        proposal_readiness: leadOpsSummary.proposal_readiness,
+        contractor_readiness: leadOpsSummary.contractor_readiness,
+        lead_health: leadOpsSummary.lead_health,
+        lead_health_reasons: leadOpsSummary.lead_health_reasons,
+        time_since_intake_hours: leadOpsSummary.time_since_intake_hours,
+        time_since_last_contact_hours:
+          leadOpsSummary.time_since_last_contact_hours,
+        time_waiting_on_follow_up_hours:
+          leadOpsSummary.time_waiting_on_follow_up_hours,
         last_updated_timestamp:
           operational.last_reviewed_at ?? rest.updated_at ?? rest.created_at,
       };
     });
+
+    const dashboard = opportunities.reduce(
+      (acc: Record<string, number | null>, row: Record<string, unknown>) => {
+        if (row.assigned_operator_id) acc.leads_assigned += 1;
+        if (row.callback_bucket === "today") acc.callbacks_today += 1;
+        if (row.overdue === true) acc.overdue_callbacks += 1;
+        if (row.current_queue === "financing_review")
+          acc.financing_reviews_pending += 1;
+        if (row.current_queue === "marketplace_ready")
+          acc.marketplace_ready_leads += 1;
+        if (
+          row.current_queue === "stale_leads" ||
+          row.current_queue === "dormant_leads"
+        )
+          acc.stale_leads += 1;
+        if (
+          typeof row.proposal_stage === "string" &&
+          !["not_started", "proposal_accepted"].includes(row.proposal_stage)
+        )
+          acc.proposal_follow_ups += 1;
+        if ((Number(row.contact_attempt_count) || 0) > 0)
+          acc.contact_attempts += Number(row.contact_attempt_count) || 0;
+        if ((Number(row.successful_contact_count) || 0) > 0)
+          acc.successful_contacts += Number(row.successful_contact_count) || 0;
+        const responseHours = Number(row.time_since_intake_hours);
+        if (Number.isFinite(responseHours) && row.last_contacted_at) {
+          acc.response_hour_total += responseHours;
+          acc.response_hour_count += 1;
+        }
+        return acc;
+      },
+      {
+        leads_assigned: 0,
+        callbacks_today: 0,
+        overdue_callbacks: 0,
+        financing_reviews_pending: 0,
+        marketplace_ready_leads: 0,
+        stale_leads: 0,
+        proposal_follow_ups: 0,
+        contact_attempts: 0,
+        successful_contacts: 0,
+        response_hour_total: 0,
+        response_hour_count: 0,
+      },
+    );
 
     console.info("[ADMIN INTAKE PROJECTION]", {
       count: opportunities.length,
@@ -668,6 +787,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           totalEvents > 0
             ? Math.round((Number(vs.created) / totalEvents) * 100) / 100
             : 0,
+        operator_dashboard: {
+          leads_assigned_to_me: dashboard.leads_assigned,
+          callbacks_today: dashboard.callbacks_today,
+          overdue_callbacks: dashboard.overdue_callbacks,
+          financing_reviews_pending: dashboard.financing_reviews_pending,
+          marketplace_ready_leads: dashboard.marketplace_ready_leads,
+          stale_leads: dashboard.stale_leads,
+          proposal_follow_ups: dashboard.proposal_follow_ups,
+          average_response_time_hours:
+            dashboard.response_hour_count && dashboard.response_hour_count > 0
+              ? Math.round(
+                  (Number(dashboard.response_hour_total) /
+                    Number(dashboard.response_hour_count)) *
+                    10,
+                ) / 10
+              : null,
+          contact_conversion_rate:
+            dashboard.contact_attempts && dashboard.contact_attempts > 0
+              ? Math.round(
+                  (Number(dashboard.successful_contacts) /
+                    Number(dashboard.contact_attempts)) *
+                    100,
+                ) / 100
+              : 0,
+        },
         ...vs,
       },
     });

@@ -1712,6 +1712,34 @@ interface IntakeLead {
   financing_status?: string | null;
   qualification_summary_status?: string | null;
   operator_notes?: string | null;
+  assigned_operator_id?: string | null;
+  assigned_operator_name?: string | null;
+  assigned_at?: string | null;
+  ownership_age_hours?: number | null;
+  last_touched_by?: string | null;
+  follow_up_reason?: string | null;
+  follow_up_priority?: string | null;
+  follow_up_channel?: string | null;
+  follow_up_completed_at?: string | null;
+  snooze_until?: string | null;
+  callback_bucket?: string | null;
+  callback_countdown?: string | null;
+  overdue?: boolean | null;
+  latest_note?: string | null;
+  last_contact_result?: string | null;
+  successful_contact_count?: number | null;
+  days_since_last_contact?: number | null;
+  open_task_count?: number | null;
+  overdue_task_count?: number | null;
+  financing_stage?: string | null;
+  proposal_stage?: string | null;
+  proposal_readiness?: string | null;
+  contractor_readiness?: string | null;
+  lead_health?: string | null;
+  lead_health_reasons?: string[] | null;
+  time_since_intake_hours?: number | null;
+  time_since_last_contact_hours?: number | null;
+  time_waiting_on_follow_up_hours?: number | null;
   last_updated_timestamp?: string | null;
   created_at: string;
 }
@@ -1724,7 +1752,16 @@ type OperatorActionKey =
   | "mark_qualified"
   | "approve_for_marketplace"
   | "reject_lead"
-  | "archive_lead";
+  | "archive_lead"
+  | "assign_operator"
+  | "transfer_operator"
+  | "unassign_operator"
+  | "add_internal_note"
+  | "log_contact_attempt"
+  | "create_follow_up_task"
+  | "complete_follow_up_task"
+  | "update_financing_stage"
+  | "update_proposal_stage";
 
 interface OperatorActionDefinition {
   action: OperatorActionKey;
@@ -1741,6 +1778,12 @@ const LEAD_QUEUE_DEFINITIONS = [
   { key: "needs_first_contact", label: "Needs First Contact" },
   { key: "no_answer_retry", label: "No Answer / Retry" },
   { key: "needs_callback", label: "Needs Callback" },
+  { key: "overdue_callbacks", label: "Overdue Callbacks" },
+  { key: "callbacks_today", label: "Callbacks Today" },
+  { key: "callbacks_tomorrow", label: "Callbacks Tomorrow" },
+  { key: "urgent_financing_follow_up", label: "Urgent Financing" },
+  { key: "stale_leads", label: "Stale Leads" },
+  { key: "dormant_leads", label: "Dormant Leads" },
   { key: "qualification_review", label: "Qualification Review" },
   { key: "financing_review", label: "Financing Review" },
   { key: "missing_documents", label: "Missing Documents" },
@@ -1750,11 +1793,24 @@ const LEAD_QUEUE_DEFINITIONS = [
   { key: "archived", label: "Archived" },
 ] as const;
 
+interface OperatorDashboardStats {
+  leads_assigned_to_me?: number;
+  callbacks_today?: number;
+  overdue_callbacks?: number;
+  financing_reviews_pending?: number;
+  marketplace_ready_leads?: number;
+  stale_leads?: number;
+  proposal_follow_ups?: number;
+  average_response_time_hours?: number | null;
+  contact_conversion_rate?: number;
+}
+
 interface IntakeStats {
   today_count?: number;
   conversion_rate?: number;
   validation_failure_rate?: number;
   top_sources?: Array<{ source: string; count: number }>;
+  operator_dashboard?: OperatorDashboardStats;
   total?: number;
 }
 
@@ -1913,6 +1969,68 @@ function IntakeFeedSection() {
 
   const operatorActions: OperatorActionDefinition[] = [
     {
+      action: "assign_operator",
+      label: "Assign Owner",
+      tone: "border-blue-700 text-blue-200 hover:bg-blue-950/40",
+      description:
+        "Assign or claim operator ownership while preserving reassignment history.",
+    },
+    {
+      action: "transfer_operator",
+      label: "Transfer Owner",
+      tone: "border-indigo-700 text-indigo-200 hover:bg-indigo-950/40",
+      description:
+        "Transfer lead ownership to another operator with immutable audit history.",
+    },
+    {
+      action: "unassign_operator",
+      label: "Unassign",
+      tone: "border-zinc-700 text-zinc-200 hover:bg-zinc-800/70",
+      description:
+        "Remove operator ownership without deleting prior assignment history.",
+    },
+    {
+      action: "add_internal_note",
+      label: "Add Note",
+      tone: "border-cyan-700 text-cyan-200 hover:bg-cyan-950/40",
+      description:
+        "Append an internal operator note to the event-first memory thread.",
+    },
+    {
+      action: "log_contact_attempt",
+      label: "Log Contact",
+      tone: "border-sky-700 text-sky-200 hover:bg-sky-950/40",
+      description:
+        "Append contact history with channel, result, duration, summary, and next action.",
+    },
+    {
+      action: "create_follow_up_task",
+      label: "Create Task",
+      tone: "border-orange-700 text-orange-200 hover:bg-orange-950/40",
+      description:
+        "Create a lightweight follow-up task projected from immutable operator_review events.",
+    },
+    {
+      action: "complete_follow_up_task",
+      label: "Complete Task",
+      tone: "border-green-700 text-green-200 hover:bg-green-950/40",
+      description:
+        "Complete a projected follow-up task and preserve completion history.",
+    },
+    {
+      action: "update_financing_stage",
+      label: "Financing Stage",
+      tone: "border-emerald-700 text-emerald-200 hover:bg-emerald-950/40",
+      description:
+        "Advance financing stage while keeping financing notes in operator memory.",
+    },
+    {
+      action: "update_proposal_stage",
+      label: "Proposal Stage",
+      tone: "border-purple-700 text-purple-200 hover:bg-purple-950/40",
+      description: "Advance proposal/design stage and preserve proposal notes.",
+    },
+    {
       action: "mark_contacted",
       label: "Mark Contacted",
       tone: "border-sky-700 text-sky-200 hover:bg-sky-950/40",
@@ -1993,6 +2111,21 @@ function IntakeFeedSection() {
       missing_items_resolved: false,
       is_test_lead: false,
       notes: "",
+      assigned_operator_id:
+        lead.assigned_operator_id || lead.last_touched_by || "operator",
+      assigned_operator_name:
+        lead.assigned_operator_name || lead.assigned_operator || "Operator",
+      follow_up_priority: lead.follow_up_priority || "normal",
+      follow_up_channel: lead.follow_up_channel || preferredMethod,
+      note_type: "internal_note",
+      contact_result: "connected",
+      contact_duration_seconds: "",
+      task_id: "",
+      task_title: lead.next_action || "Follow up with homeowner",
+      task_due_at: lead.next_follow_up_at || "",
+      task_priority: lead.follow_up_priority || "normal",
+      financing_stage: lead.financing_stage || "financing_review",
+      proposal_stage: lead.proposal_stage || "design_in_progress",
       release_check_operator_review: true,
       release_check_qualification:
         !!lead.qualification_completeness &&
@@ -2031,6 +2164,27 @@ function IntakeFeedSection() {
       return "Rejection reason is required.";
     if (action === "archive_lead" && !has("archive_reason"))
       return "Archive reason is required.";
+    if (
+      ["assign_operator", "transfer_operator"].includes(action) &&
+      (!has("assigned_operator_id") || !has("assigned_operator_name"))
+    )
+      return "Operator ID and name are required for assignment.";
+    if (action === "add_internal_note" && !has("notes"))
+      return "Internal note text is required.";
+    if (action === "log_contact_attempt" && !has("contact_method"))
+      return "Contact method is required.";
+    if (action === "log_contact_attempt" && !has("contact_result"))
+      return "Contact result is required.";
+    if (action === "create_follow_up_task" && !has("task_title"))
+      return "Task title is required.";
+    if (action === "create_follow_up_task" && !has("task_due_at"))
+      return "Task due date is required.";
+    if (action === "complete_follow_up_task" && !has("task_id"))
+      return "Task ID is required to complete a task.";
+    if (action === "update_financing_stage" && !has("financing_stage"))
+      return "Financing stage is required.";
+    if (action === "update_proposal_stage" && !has("proposal_stage"))
+      return "Proposal stage is required.";
     return null;
   };
 
@@ -2067,6 +2221,26 @@ function IntakeFeedSection() {
       archive_reason: actionText("archive_reason"),
       is_test_lead: actionBool("is_test_lead"),
       utility_bill_review: actionText("utility_bill_review"),
+      assigned_operator_id: actionText("assigned_operator_id"),
+      assigned_operator_name: actionText("assigned_operator_name"),
+      follow_up_reason:
+        actionText("follow_up_reason") || actionText("callback_reason"),
+      follow_up_priority: actionText("follow_up_priority"),
+      follow_up_channel:
+        actionText("follow_up_channel") || actionText("contact_method"),
+      follow_up_completed_at: actionText("follow_up_completed_at"),
+      snooze_until: actionText("snooze_until"),
+      note_type: actionText("note_type"),
+      contact_result: actionText("contact_result"),
+      contact_duration_seconds: actionText("contact_duration_seconds"),
+      task_id: actionText("task_id"),
+      task_title: actionText("task_title"),
+      task_owner_id: actionText("task_owner_id"),
+      task_owner_name: actionText("task_owner_name"),
+      task_due_at: actionText("task_due_at"),
+      task_priority: actionText("task_priority"),
+      financing_stage: actionText("financing_stage"),
+      proposal_stage: actionText("proposal_stage"),
       release_checklist: {
         operator_review_complete: actionBool("release_check_operator_review"),
         qualification_reviewed: actionBool("release_check_qualification"),
@@ -2287,6 +2461,13 @@ function IntakeFeedSection() {
       needs_first_contact: "border-sky-800 bg-sky-950/30 text-sky-200",
       no_answer_retry: "border-amber-800 bg-amber-950/30 text-amber-200",
       needs_callback: "border-orange-800 bg-orange-950/30 text-orange-200",
+      overdue_callbacks: "border-red-800 bg-red-950/40 text-red-200",
+      callbacks_today: "border-orange-800 bg-orange-950/30 text-orange-200",
+      callbacks_tomorrow: "border-amber-800 bg-amber-950/30 text-amber-200",
+      urgent_financing_follow_up:
+        "border-pink-800 bg-pink-950/30 text-pink-200",
+      stale_leads: "border-yellow-800 bg-yellow-950/30 text-yellow-200",
+      dormant_leads: "border-zinc-700 bg-zinc-900 text-zinc-300",
       qualification_review:
         "border-emerald-800 bg-emerald-950/30 text-emerald-200",
       financing_review: "border-teal-800 bg-teal-950/30 text-teal-200",
@@ -2352,6 +2533,56 @@ function IntakeFeedSection() {
               : "text-zinc-300"
           }
           icon={AlertCircle}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+        <StatCard
+          label="Assigned"
+          value={stats.operator_dashboard?.leads_assigned_to_me ?? 0}
+          color="text-blue-300"
+          icon={Users}
+        />
+        <StatCard
+          label="Callbacks Today"
+          value={stats.operator_dashboard?.callbacks_today ?? 0}
+          color="text-orange-300"
+          icon={Clock}
+        />
+        <StatCard
+          label="Overdue"
+          value={stats.operator_dashboard?.overdue_callbacks ?? 0}
+          color="text-red-300"
+          icon={AlertTriangle}
+        />
+        <StatCard
+          label="Financing"
+          value={stats.operator_dashboard?.financing_reviews_pending ?? 0}
+          color="text-emerald-300"
+          icon={DollarSign}
+        />
+        <StatCard
+          label="Marketplace Ready"
+          value={stats.operator_dashboard?.marketplace_ready_leads ?? 0}
+          color="text-purple-300"
+          icon={CheckCheck}
+        />
+        <StatCard
+          label="Stale"
+          value={stats.operator_dashboard?.stale_leads ?? 0}
+          color="text-yellow-300"
+          icon={AlertCircle}
+        />
+        <StatCard
+          label="Proposal Follow-ups"
+          value={stats.operator_dashboard?.proposal_follow_ups ?? 0}
+          color="text-cyan-300"
+          icon={ClipboardList}
+        />
+        <StatCard
+          label="Contact Conv."
+          value={`${((stats.operator_dashboard?.contact_conversion_rate ?? 0) * 100).toFixed(0)}%`}
+          color="text-green-300"
+          icon={TrendingUp}
         />
       </div>
       {actionMessage && (
@@ -2436,8 +2667,8 @@ function IntakeFeedSection() {
             </div>
             <div className="text-xs text-zinc-500">
               Queues derive from latest operator_review, lifecycle state,
-              follow-up dates, qualification, financing, attachments, and
-              release readiness.
+              follow-up dates, task state, assignment, qualification, financing,
+              attachments, lead health, and release readiness.
             </div>
           </div>
           <label className="inline-flex items-center gap-2 text-xs text-zinc-300">
@@ -2641,14 +2872,20 @@ function IntakeFeedSection() {
                                   {lead.next_action ?? "Review lead"}
                                 </div>
                                 <div className="mt-1 text-xs text-zinc-400">
-                                  Follow-up:{" "}
+                                  Owner:{" "}
+                                  {lead.assigned_operator_name ??
+                                    lead.assigned_operator ??
+                                    "Unassigned"}{" "}
+                                  · Follow-up:{" "}
                                   {lead.next_follow_up_at
                                     ? new Date(
                                         lead.next_follow_up_at,
                                       ).toLocaleString()
                                     : "Not scheduled"}{" "}
-                                  · Last action:{" "}
-                                  {lead.last_operator_action ?? "None"} ·
+                                  {lead.callback_countdown
+                                    ? `(${lead.callback_countdown})`
+                                    : ""}{" "}
+                                  · Health: {lead.lead_health ?? "active"} ·
                                   Attempts: {lead.contact_attempt_count ?? 0}
                                 </div>
                               </div>
@@ -2687,39 +2924,44 @@ function IntakeFeedSection() {
                             <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                               <div className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
                                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                                  Qualification Status
+                                  Qualification / Grade
                                 </div>
                                 <div className="mt-1 text-xs text-zinc-200">
                                   {lead.qualification_summary_status ??
                                     lead.qualification_status ??
+                                    lead.lead_grade ??
                                     "pending"}
                                 </div>
                               </div>
                               <div className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
                                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                                  Financing Status
+                                  Financing / Proposal
                                 </div>
                                 <div className="mt-1 text-xs text-zinc-200">
-                                  {lead.financing_status ??
-                                    "needs_financing_review"}
+                                  {lead.financing_stage ??
+                                    lead.financing_status ??
+                                    "needs_financing_review"}{" "}
+                                  / {lead.proposal_stage ?? "not_started"}
                                 </div>
                               </div>
                               <div className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
                                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                                  Last Note
+                                  Latest Note / Contact
                                 </div>
                                 <div className="mt-1 text-xs text-zinc-200">
-                                  {lead.operator_notes ?? notes ?? "—"}
+                                  {lead.latest_note ??
+                                    lead.operator_notes ??
+                                    notes ??
+                                    lead.last_contact_result ??
+                                    "—"}
                                 </div>
                               </div>
                               <div className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
                                 <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                                  Release Readiness
+                                  Tasks / Release
                                 </div>
                                 <div className="mt-1 text-xs text-zinc-200">
-                                  {lead.release_readiness?.ready
-                                    ? "Ready"
-                                    : `Gaps: ${(lead.release_readiness?.missing ?? []).join(", ") || "not reviewed"}`}
+                                  {`${lead.open_task_count ?? 0} open / ${lead.overdue_task_count ?? 0} overdue · ${lead.release_readiness?.ready ? "Ready" : `Gaps: ${(lead.release_readiness?.missing ?? []).join(", ") || "not reviewed"}`}`}
                                 </div>
                               </div>
                             </div>
@@ -2993,9 +3235,10 @@ function IntakeFeedSection() {
                                     const disabled =
                                       !!actionBusyId ||
                                       (terminalLead &&
-                                        !["archive_lead"].includes(
-                                          item.action,
-                                        ));
+                                        ![
+                                          "archive_lead",
+                                          "add_internal_note",
+                                        ].includes(item.action));
                                     return (
                                       <button
                                         key={item.action}
@@ -3097,9 +3340,11 @@ function IntakeFeedSection() {
               </button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              {["mark_contacted", "mark_no_answer"].includes(
-                modalAction.action,
-              ) && (
+              {[
+                "mark_contacted",
+                "mark_no_answer",
+                "log_contact_attempt",
+              ].includes(modalAction.action) && (
                 <>
                   <label className="text-xs text-zinc-300">
                     Contact method
@@ -3126,6 +3371,181 @@ function IntakeFeedSection() {
                     Reached homeowner
                   </label>
                 </>
+              )}
+              {["assign_operator", "transfer_operator"].includes(
+                modalAction.action,
+              ) && (
+                <>
+                  <label className="text-xs text-zinc-300">
+                    Operator ID
+                    <input
+                      value={actionText("assigned_operator_id")}
+                      onChange={(e) =>
+                        setActionValue("assigned_operator_id", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Operator name
+                    <input
+                      value={actionText("assigned_operator_name")}
+                      onChange={(e) =>
+                        setActionValue("assigned_operator_name", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                </>
+              )}
+              {modalAction.action === "add_internal_note" && (
+                <label className="text-xs text-zinc-300 sm:col-span-2">
+                  Note type
+                  <select
+                    value={actionText("note_type")}
+                    onChange={(e) =>
+                      setActionValue("note_type", e.target.value)
+                    }
+                    className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                  >
+                    <option value="internal_note">Internal note</option>
+                    <option value="financing_note">Financing note</option>
+                    <option value="proposal_note">Proposal note</option>
+                    <option value="contractor_coordination">
+                      Contractor coordination
+                    </option>
+                  </select>
+                </label>
+              )}
+              {modalAction.action === "log_contact_attempt" && (
+                <>
+                  <label className="text-xs text-zinc-300">
+                    Contact result
+                    <select
+                      value={actionText("contact_result")}
+                      onChange={(e) =>
+                        setActionValue("contact_result", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="connected">Connected</option>
+                      <option value="appointment_set">Appointment set</option>
+                      <option value="text_reply">Text reply</option>
+                      <option value="email_reply">Email reply</option>
+                      <option value="no_answer">No answer</option>
+                      <option value="voicemail">Voicemail</option>
+                      <option value="wrong_number">Wrong number</option>
+                    </select>
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Duration seconds
+                    <input
+                      value={actionText("contact_duration_seconds")}
+                      onChange={(e) =>
+                        setActionValue(
+                          "contact_duration_seconds",
+                          e.target.value,
+                        )
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                </>
+              )}
+              {modalAction.action === "create_follow_up_task" && (
+                <>
+                  <label className="text-xs text-zinc-300">
+                    Task title
+                    <input
+                      value={actionText("task_title")}
+                      onChange={(e) =>
+                        setActionValue("task_title", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Task due date
+                    <input
+                      type="datetime-local"
+                      value={actionText("task_due_at")}
+                      onChange={(e) =>
+                        setActionValue("task_due_at", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    />
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Task priority
+                    <select
+                      value={actionText("task_priority")}
+                      onChange={(e) =>
+                        setActionValue("task_priority", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="low">Low</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </label>
+                </>
+              )}
+              {modalAction.action === "complete_follow_up_task" && (
+                <label className="text-xs text-zinc-300 sm:col-span-2">
+                  Task ID
+                  <input
+                    value={actionText("task_id")}
+                    onChange={(e) => setActionValue("task_id", e.target.value)}
+                    placeholder="Paste task ID from Debug Details / operational_state.tasks"
+                    className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                  />
+                </label>
+              )}
+              {modalAction.action === "update_financing_stage" && (
+                <label className="text-xs text-zinc-300 sm:col-span-2">
+                  Financing stage
+                  <select
+                    value={actionText("financing_stage")}
+                    onChange={(e) =>
+                      setActionValue("financing_stage", e.target.value)
+                    }
+                    className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                  >
+                    <option value="financing_review">Financing review</option>
+                    <option value="documents_requested">
+                      Documents requested
+                    </option>
+                    <option value="prequal_started">Prequal started</option>
+                    <option value="financing_approved">
+                      Financing approved
+                    </option>
+                    <option value="cash_purchase">Cash purchase</option>
+                    <option value="financing_blocked">Financing blocked</option>
+                  </select>
+                </label>
+              )}
+              {modalAction.action === "update_proposal_stage" && (
+                <label className="text-xs text-zinc-300 sm:col-span-2">
+                  Proposal stage
+                  <select
+                    value={actionText("proposal_stage")}
+                    onChange={(e) =>
+                      setActionValue("proposal_stage", e.target.value)
+                    }
+                    className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                  >
+                    <option value="not_started">Not started</option>
+                    <option value="design_in_progress">
+                      Design in progress
+                    </option>
+                    <option value="proposal_drafted">Proposal drafted</option>
+                    <option value="proposal_sent">Proposal sent</option>
+                    <option value="proposal_accepted">Proposal accepted</option>
+                    <option value="proposal_stalled">Proposal stalled</option>
+                  </select>
+                </label>
               )}
               {modalAction.action === "mark_no_answer" && (
                 <>
@@ -3174,6 +3594,41 @@ function IntakeFeedSection() {
                       }
                       className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
                     />
+                  </label>
+                </>
+              )}
+              {["mark_needs_follow_up", "create_follow_up_task"].includes(
+                modalAction.action,
+              ) && (
+                <>
+                  <label className="text-xs text-zinc-300">
+                    Follow-up priority
+                    <select
+                      value={actionText("follow_up_priority")}
+                      onChange={(e) =>
+                        setActionValue("follow_up_priority", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="low">Low</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </label>
+                  <label className="text-xs text-zinc-300">
+                    Follow-up channel
+                    <select
+                      value={actionText("follow_up_channel")}
+                      onChange={(e) =>
+                        setActionValue("follow_up_channel", e.target.value)
+                      }
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-white"
+                    >
+                      <option value="phone">Phone</option>
+                      <option value="text">Text</option>
+                      <option value="email">Email</option>
+                    </select>
                   </label>
                 </>
               )}

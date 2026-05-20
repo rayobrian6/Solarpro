@@ -24,9 +24,38 @@ export const OPERATOR_REVIEW_ACTIONS = [
   "approve_for_marketplace",
   "reject_lead",
   "archive_lead",
+  "assign_operator",
+  "transfer_operator",
+  "unassign_operator",
+  "add_internal_note",
+  "log_contact_attempt",
+  "create_follow_up_task",
+  "complete_follow_up_task",
+  "update_financing_stage",
+  "update_proposal_stage",
 ] as const;
 
 export type OperatorReviewAction = (typeof OPERATOR_REVIEW_ACTIONS)[number];
+
+export interface OperationalMemoryEntry extends Record<string, unknown> {
+  id: string;
+  created_at: string;
+  created_by: string;
+  type: string;
+  summary?: string | null;
+}
+
+export interface OperationalTask extends Record<string, unknown> {
+  id: string;
+  title: string;
+  owner_id?: string | null;
+  owner_name?: string | null;
+  due_at?: string | null;
+  priority?: string | null;
+  status: "open" | "completed";
+  completed_at?: string | null;
+  notes?: string | null;
+}
 
 export interface OperationalState {
   lifecycle_status: OperationalLifecycleStatus;
@@ -65,6 +94,23 @@ export interface OperationalState {
   rejection_reason?: string | null;
   archive_reason?: string | null;
   is_test_lead?: boolean;
+  assigned_operator_id?: string | null;
+  assigned_operator_name?: string | null;
+  assigned_at?: string | null;
+  assignment_history?: Array<Record<string, unknown>>;
+  follow_up_reason?: string | null;
+  follow_up_priority?: string | null;
+  follow_up_channel?: string | null;
+  follow_up_completed_at?: string | null;
+  snooze_until?: string | null;
+  internal_notes?: OperationalMemoryEntry[];
+  contact_history?: OperationalMemoryEntry[];
+  tasks?: OperationalTask[];
+  financing_stage?: string | null;
+  proposal_stage?: string | null;
+  contractor_communications?: OperationalMemoryEntry[];
+  lead_health?: string | null;
+  lead_health_reasons?: string[];
 }
 
 export interface ReleaseReadiness {
@@ -83,6 +129,12 @@ export const LEAD_OPS_QUEUES = [
   "needs_first_contact",
   "no_answer_retry",
   "needs_callback",
+  "overdue_callbacks",
+  "callbacks_today",
+  "callbacks_tomorrow",
+  "urgent_financing_follow_up",
+  "stale_leads",
+  "dormant_leads",
   "qualification_review",
   "financing_review",
   "missing_documents",
@@ -105,6 +157,46 @@ export interface LeadOpsSummary {
   release_readiness: ReleaseReadiness | null;
   financing_status: string;
   qualification_status: string;
+  assigned_operator_id: string | null;
+  assigned_operator_name: string | null;
+  assigned_at: string | null;
+  ownership_age_hours: number | null;
+  last_touched_by: string | null;
+  follow_up_reason: string | null;
+  follow_up_priority: string | null;
+  follow_up_channel: string | null;
+  follow_up_completed_at: string | null;
+  snooze_until: string | null;
+  callback_bucket: string;
+  callback_countdown: string | null;
+  overdue: boolean;
+  latest_note: string | null;
+  last_contact_result: string | null;
+  successful_contact_count: number;
+  days_since_last_contact: number | null;
+  open_task_count: number;
+  overdue_task_count: number;
+  financing_stage: string;
+  proposal_stage: string;
+  proposal_readiness: string;
+  contractor_readiness: string;
+  lead_health: string;
+  lead_health_reasons: string[];
+  time_since_intake_hours: number | null;
+  time_since_last_contact_hours: number | null;
+  time_waiting_on_follow_up_hours: number | null;
+}
+
+export interface OperatorDashboardSummary {
+  leads_assigned_to_me: number;
+  callbacks_today: number;
+  overdue_callbacks: number;
+  financing_reviews_pending: number;
+  marketplace_ready_leads: number;
+  stale_leads: number;
+  proposal_follow_ups: number;
+  average_response_time_hours: number | null;
+  contact_conversion_rate: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -208,6 +300,37 @@ export function stateFromPipelineResult(
     rejection_reason: str(operational.rejection_reason),
     archive_reason: str(operational.archive_reason),
     is_test_lead: bool(operational.is_test_lead),
+    assigned_operator_id: str(operational.assigned_operator_id),
+    assigned_operator_name: str(operational.assigned_operator_name),
+    assigned_at: str(operational.assigned_at),
+    assignment_history: Array.isArray(operational.assignment_history)
+      ? (operational.assignment_history as Array<Record<string, unknown>>)
+      : [],
+    follow_up_reason: str(operational.follow_up_reason),
+    follow_up_priority: str(operational.follow_up_priority),
+    follow_up_channel: str(operational.follow_up_channel),
+    follow_up_completed_at: str(operational.follow_up_completed_at),
+    snooze_until: str(operational.snooze_until),
+    internal_notes: Array.isArray(operational.internal_notes)
+      ? (operational.internal_notes as OperationalMemoryEntry[])
+      : [],
+    contact_history: Array.isArray(operational.contact_history)
+      ? (operational.contact_history as OperationalMemoryEntry[])
+      : [],
+    tasks: Array.isArray(operational.tasks)
+      ? (operational.tasks as OperationalTask[])
+      : [],
+    financing_stage: str(operational.financing_stage),
+    proposal_stage: str(operational.proposal_stage),
+    contractor_communications: Array.isArray(
+      operational.contractor_communications,
+    )
+      ? (operational.contractor_communications as OperationalMemoryEntry[])
+      : [],
+    lead_health: str(operational.lead_health),
+    lead_health_reasons: Array.isArray(operational.lead_health_reasons)
+      ? (operational.lead_health_reasons as string[])
+      : [],
   };
 }
 
@@ -275,7 +398,187 @@ export function applyOperatorReviewAction(
   if (detailBool("is_test_lead") !== null)
     next.is_test_lead = detailBool("is_test_lead") ?? false;
 
-  if (action === "mark_contacted") {
+  const operatorId = detailString("assigned_operator_id") ?? options.adminId;
+  const operatorName = detailString("assigned_operator_name") ?? operatorId;
+  const memoryId = (type: string) =>
+    `${type}_${occurredAt.replace(/[^0-9A-Za-z]/g, "")}`;
+  const appendMemory = (
+    key: "internal_notes" | "contact_history" | "contractor_communications",
+    entry: OperationalMemoryEntry,
+  ) => {
+    next[key] = [...(Array.isArray(next[key]) ? next[key]! : []), entry].slice(
+      -100,
+    );
+  };
+  const noteEntry = (
+    type: string,
+    summary: string | null,
+  ): OperationalMemoryEntry => ({
+    id: memoryId(type),
+    created_at: occurredAt,
+    created_by: options.adminId,
+    type,
+    summary,
+    notes: note,
+  });
+
+  if (detailString("follow_up_reason"))
+    next.follow_up_reason = detailString("follow_up_reason");
+  if (detailString("follow_up_priority"))
+    next.follow_up_priority = detailString("follow_up_priority");
+  if (detailString("follow_up_channel"))
+    next.follow_up_channel = detailString("follow_up_channel");
+  if (detailString("follow_up_completed_at"))
+    next.follow_up_completed_at = detailString("follow_up_completed_at");
+  if (detailString("snooze_until"))
+    next.snooze_until = detailString("snooze_until");
+  if (detailString("financing_stage"))
+    next.financing_stage = detailString("financing_stage");
+  if (detailString("proposal_stage"))
+    next.proposal_stage = detailString("proposal_stage");
+
+  if (action === "assign_operator" || action === "transfer_operator") {
+    const previousOperatorId = next.assigned_operator_id ?? null;
+    const previousOperatorName = next.assigned_operator_name ?? null;
+    next.assigned_operator_id = operatorId;
+    next.assigned_operator_name = operatorName;
+    next.assigned_at = occurredAt;
+    next.assignment_history = [
+      ...(Array.isArray(current.assignment_history)
+        ? current.assignment_history
+        : []),
+      {
+        action,
+        assigned_by: options.adminId,
+        assigned_at: occurredAt,
+        previous_operator_id: previousOperatorId,
+        previous_operator_name: previousOperatorName,
+        assigned_operator_id: operatorId,
+        assigned_operator_name: operatorName,
+      },
+    ].slice(-50);
+    next.review_status = "operator_assigned";
+  } else if (action === "unassign_operator") {
+    const previousOperatorId = next.assigned_operator_id ?? null;
+    const previousOperatorName = next.assigned_operator_name ?? null;
+    next.assigned_operator_id = null;
+    next.assigned_operator_name = null;
+    next.assigned_at = null;
+    next.assignment_history = [
+      ...(Array.isArray(current.assignment_history)
+        ? current.assignment_history
+        : []),
+      {
+        action,
+        assigned_by: options.adminId,
+        assigned_at: occurredAt,
+        previous_operator_id: previousOperatorId,
+        previous_operator_name: previousOperatorName,
+        assigned_operator_id: null,
+        assigned_operator_name: null,
+      },
+    ].slice(-50);
+    next.review_status = "operator_unassigned";
+  } else if (action === "add_internal_note") {
+    appendMemory(
+      "internal_notes",
+      noteEntry(detailString("note_type") ?? "quick_note", note),
+    );
+    if (detailString("contractor_facing_notes"))
+      appendMemory(
+        "contractor_communications",
+        noteEntry(
+          "contractor_coordination",
+          detailString("contractor_facing_notes"),
+        ),
+      );
+    next.review_status = "note_added";
+  } else if (action === "log_contact_attempt") {
+    const result =
+      detailString("contact_result") ??
+      (next.reached_homeowner ? "connected" : "no_answer");
+    appendMemory("contact_history", {
+      ...noteEntry("contact_attempt", note),
+      contact_method: next.contact_method ?? detailString("contact_method"),
+      contact_result: result,
+      duration_seconds: num(details.contact_duration_seconds),
+      next_action: next.next_step ?? null,
+    });
+    next.contacted = true;
+    next.last_contact_timestamp = occurredAt;
+    if (["connected", "text_reply", "email_reply"].includes(result))
+      next.reached_homeowner = true;
+    if (
+      ["no_answer", "voicemail", "disconnected", "wrong_number"].includes(
+        result,
+      )
+    )
+      next.no_answer_count = (next.no_answer_count ?? 0) + 1;
+    next.review_status = result;
+  } else if (action === "create_follow_up_task") {
+    const taskId = detailString("task_id") ?? memoryId("task");
+    const dueAt = followUpAt ?? detailString("task_due_at");
+    const task: OperationalTask = {
+      id: taskId,
+      title:
+        detailString("task_title") ??
+        next.next_step ??
+        "Follow up with homeowner",
+      owner_id:
+        detailString("task_owner_id") ??
+        next.assigned_operator_id ??
+        operatorId,
+      owner_name:
+        detailString("task_owner_name") ??
+        next.assigned_operator_name ??
+        operatorName,
+      due_at: dueAt,
+      priority:
+        detailString("task_priority") ?? next.follow_up_priority ?? "normal",
+      status: "open",
+      notes: note,
+    };
+    next.tasks = [...(Array.isArray(next.tasks) ? next.tasks : []), task].slice(
+      -100,
+    );
+    next.needs_follow_up = true;
+    if (task.due_at) next.follow_up_at = task.due_at;
+    next.review_status = "task_opened";
+  } else if (action === "complete_follow_up_task") {
+    const taskId = detailString("task_id");
+    next.tasks = (Array.isArray(next.tasks) ? next.tasks : []).map((task) =>
+      !taskId || task.id === taskId
+        ? {
+            ...task,
+            status: "completed",
+            completed_at: occurredAt,
+            notes: note ?? task.notes ?? null,
+          }
+        : task,
+    );
+    next.follow_up_completed_at = occurredAt;
+    next.needs_follow_up = (next.tasks ?? []).some(
+      (task) => task.status !== "completed",
+    );
+    next.review_status = "task_completed";
+  } else if (action === "update_financing_stage") {
+    next.financing_stage =
+      detailString("financing_stage") ??
+      next.financing_stage ??
+      "financing_review";
+    next.financing_ready = ["financing_approved", "cash_purchase"].includes(
+      next.financing_stage,
+    );
+    next.review_status = next.financing_stage;
+    if (note) appendMemory("internal_notes", noteEntry("financing_note", note));
+  } else if (action === "update_proposal_stage") {
+    next.proposal_stage =
+      detailString("proposal_stage") ??
+      next.proposal_stage ??
+      "design_in_progress";
+    next.review_status = next.proposal_stage;
+    if (note) appendMemory("internal_notes", noteEntry("proposal_note", note));
+  } else if (action === "mark_contacted") {
     next.lifecycle_status = "operator_contacted";
     next.review_status =
       next.reached_homeowner === false
@@ -361,6 +664,18 @@ export function applyOperatorReviewAction(
       rejection_reason: next.rejection_reason ?? null,
       archive_reason: next.archive_reason ?? null,
       is_test_lead: next.is_test_lead ?? false,
+      assigned_operator_id: next.assigned_operator_id ?? null,
+      assigned_operator_name: next.assigned_operator_name ?? null,
+      follow_up_reason: next.follow_up_reason ?? null,
+      follow_up_priority: next.follow_up_priority ?? null,
+      follow_up_channel: next.follow_up_channel ?? null,
+      follow_up_completed_at: next.follow_up_completed_at ?? null,
+      snooze_until: next.snooze_until ?? null,
+      contact_result: detailString("contact_result"),
+      task_title: detailString("task_title"),
+      task_due_at: detailString("task_due_at"),
+      financing_stage: next.financing_stage ?? null,
+      proposal_stage: next.proposal_stage ?? null,
     },
   ].slice(-50);
 
@@ -455,6 +770,7 @@ export function deriveLeadOpsSummary(input: {
   qualificationCompleteness?: unknown;
   attachmentCompleteness?: unknown;
   releaseReadiness?: ReleaseReadiness | null;
+  receivedAt?: unknown;
 }): LeadOpsSummary {
   const operational = stateFromPipelineResult({
     operational: input.operational,
@@ -466,6 +782,116 @@ export function deriveLeadOpsSummary(input: {
   const releaseReadiness =
     input.releaseReadiness ?? operational.release_readiness ?? null;
   const readyForReview = bool(input.readyForReview);
+
+  const nowMs = Date.now();
+  const parseMs = (value?: string | null) => {
+    if (!value) return null;
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const hoursSince = (value?: string | null) => {
+    const parsed = parseMs(value);
+    return parsed == null
+      ? null
+      : Math.max(0, Math.round(((nowMs - parsed) / 3_600_000) * 10) / 10);
+  };
+  const daysSince = (value?: string | null) => {
+    const hours = hoursSince(value);
+    return hours == null ? null : Math.floor(hours / 24);
+  };
+  const followUpMs = parseMs(operational.follow_up_at);
+  const startOfToday = new Date(nowMs);
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayMs = startOfToday.getTime();
+  const tomorrowMs = todayMs + 86_400_000;
+  const dayAfterTomorrowMs = tomorrowMs + 86_400_000;
+  const overdue = followUpMs != null && followUpMs < nowMs;
+  const callback_bucket =
+    followUpMs == null
+      ? "unscheduled"
+      : overdue
+        ? "overdue"
+        : followUpMs < tomorrowMs
+          ? "today"
+          : followUpMs < dayAfterTomorrowMs
+            ? "tomorrow"
+            : "future";
+  const callback_countdown =
+    followUpMs == null
+      ? null
+      : overdue
+        ? `${Math.max(1, Math.ceil((nowMs - followUpMs) / 3_600_000))}h overdue`
+        : `${Math.max(1, Math.ceil((followUpMs - nowMs) / 3_600_000))}h remaining`;
+
+  const contactHistory = Array.isArray(operational.contact_history)
+    ? operational.contact_history
+    : [];
+  const internalNotes = Array.isArray(operational.internal_notes)
+    ? operational.internal_notes
+    : [];
+  const latestNoteEntry = [...internalNotes, ...contactHistory]
+    .sort(
+      (first, second) =>
+        (parseMs(str(first.created_at)) ?? 0) -
+        (parseMs(str(second.created_at)) ?? 0),
+    )
+    .at(-1);
+  const latest_note =
+    str(latestNoteEntry?.summary) ?? str(latestNoteEntry?.notes) ?? null;
+  const lastContactEntry = contactHistory.at(-1) ?? null;
+  const last_contact_result = str(lastContactEntry?.contact_result);
+  const successful_contact_count = contactHistory.filter((entry) =>
+    ["connected", "text_reply", "email_reply", "appointment_set"].includes(
+      str(entry.contact_result) ?? "",
+    ),
+  ).length;
+  const openTasks = (
+    Array.isArray(operational.tasks) ? operational.tasks : []
+  ).filter((task) => task.status !== "completed");
+  const overdue_task_count = openTasks.filter((task) => {
+    const due = parseMs(task.due_at);
+    return due != null && due < nowMs;
+  }).length;
+  const contact_attempt_count = Math.max(
+    contactHistory.length,
+    operational.no_answer_count ?? 0,
+  );
+  const assigned_operator_name = operational.assigned_operator_name ?? null;
+  const assigned_operator_id = operational.assigned_operator_id ?? null;
+  const assigned_operator =
+    assigned_operator_name ?? operational.last_reviewed_by ?? null;
+  const time_since_intake_hours = hoursSince(
+    str((input as Record<string, unknown>).receivedAt) ?? null,
+  );
+  const time_since_last_contact_hours = hoursSince(
+    operational.last_contact_timestamp,
+  );
+  const time_waiting_on_follow_up_hours = operational.needs_follow_up
+    ? hoursSince(operational.follow_up_at ?? operational.last_reviewed_at)
+    : null;
+  const staleLead =
+    !operational.approved_for_marketplace &&
+    !operational.rejected &&
+    !operational.archived &&
+    ((time_since_last_contact_hours != null &&
+      time_since_last_contact_hours >= 72) ||
+      (!operational.contacted &&
+        time_since_intake_hours != null &&
+        time_since_intake_hours >= 24));
+  const dormantLead =
+    !operational.approved_for_marketplace &&
+    !operational.rejected &&
+    !operational.archived &&
+    ((time_since_last_contact_hours != null &&
+      time_since_last_contact_hours >= 168) ||
+      (!operational.contacted &&
+        time_since_intake_hours != null &&
+        time_since_intake_hours >= 72));
+  const urgentFinancingFollowUp =
+    operational.follow_up_priority === "urgent" &&
+    (operational.financing_stage ?? operational.financing_path ?? "").includes(
+      "financ",
+    );
 
   let current_queue: LeadOpsQueue = "new_intake";
   let next_action = "Review intake and confirm contact information";
@@ -495,9 +921,29 @@ export function deriveLeadOpsSummary(input: {
     next_action = releaseReadiness?.ready
       ? "Release through marketplace gate"
       : "Resolve release readiness gaps";
+  } else if (overdue || overdue_task_count > 0) {
+    current_queue = "overdue_callbacks";
+    next_action = "Work overdue callback or follow-up task immediately";
+  } else if (urgentFinancingFollowUp) {
+    current_queue = "urgent_financing_follow_up";
+    next_action = "Resolve urgent financing follow-up";
+  } else if (callback_bucket === "today") {
+    current_queue = "callbacks_today";
+    next_action = "Complete today's scheduled callback";
+  } else if (callback_bucket === "tomorrow") {
+    current_queue = "callbacks_tomorrow";
+    next_action = "Prepare tomorrow's scheduled callback";
+  } else if (dormantLead) {
+    current_queue = "dormant_leads";
+    next_action = "Revive or archive dormant lead";
+  } else if (staleLead) {
+    current_queue = "stale_leads";
+    next_action = "Refresh stale lead context and contact plan";
   } else if (
     operational.needs_follow_up &&
-    (operational.callback_reason || reviewStatus === "needs_callback")
+    (operational.callback_reason ||
+      operational.follow_up_reason ||
+      reviewStatus === "needs_callback")
   ) {
     current_queue = "needs_callback";
     next_action = "Call homeowner at scheduled callback time";
@@ -527,9 +973,12 @@ export function deriveLeadOpsSummary(input: {
     next_action = "Advance lead qualification";
   }
 
+  const financing_stage =
+    operational.financing_stage ?? operational.financing_path ?? "not_started";
+  const proposal_stage = operational.proposal_stage ?? "not_started";
   const financing_status = operational.financing_ready
     ? "financing_ready"
-    : operational.financing_path
+    : operational.financing_path || operational.financing_stage
       ? "financing_reviewed"
       : "needs_financing_review";
   const qualification_status = operational.qualified
@@ -537,18 +986,84 @@ export function deriveLeadOpsSummary(input: {
     : qualificationCompleteness === "complete"
       ? "needs_operator_qualification"
       : "missing_qualification";
+  const proposal_readiness = ["proposal_sent", "proposal_accepted"].includes(
+    proposal_stage,
+  )
+    ? "ready"
+    : proposal_stage === "not_started"
+      ? "not_started"
+      : "in_progress";
+  const contractor_readiness = releaseReadiness?.ready
+    ? "ready_for_contractor"
+    : releaseReadiness?.missing?.length
+      ? "blocked"
+      : "pending";
+  const lead_health_reasons = new Set<string>(
+    operational.lead_health_reasons ?? [],
+  );
+  if (overdue) lead_health_reasons.add("callback_overdue");
+  if (overdue_task_count > 0) lead_health_reasons.add("task_overdue");
+  if (dormantLead) lead_health_reasons.add("dormant_no_recent_contact");
+  else if (staleLead) lead_health_reasons.add("stale_no_recent_contact");
+  if (releaseReadiness?.ready)
+    lead_health_reasons.add("marketplace_release_ready");
+  if (successful_contact_count > 0)
+    lead_health_reasons.add("homeowner_contacted");
+  const lead_health =
+    operational.lead_health ??
+    (operational.rejected || operational.archived
+      ? "closed"
+      : overdue || overdue_task_count > 0
+        ? "at_risk"
+        : dormantLead
+          ? "dormant"
+          : staleLead
+            ? "stale"
+            : releaseReadiness?.ready
+              ? "healthy"
+              : "active");
 
   return {
     current_queue,
     next_action,
     next_follow_up_at: operational.follow_up_at ?? null,
-    assigned_operator: operational.last_reviewed_by ?? null,
+    assigned_operator,
     last_contacted_at: operational.last_contact_timestamp ?? null,
-    contact_attempt_count: operational.no_answer_count ?? 0,
+    contact_attempt_count,
     last_operator_action: operational.last_review_action ?? null,
     release_readiness: releaseReadiness,
     financing_status,
     qualification_status,
+    assigned_operator_id,
+    assigned_operator_name,
+    assigned_at: operational.assigned_at ?? null,
+    ownership_age_hours: hoursSince(operational.assigned_at),
+    last_touched_by: operational.last_reviewed_by ?? assigned_operator_id,
+    follow_up_reason:
+      operational.follow_up_reason ?? operational.callback_reason ?? null,
+    follow_up_priority: operational.follow_up_priority ?? null,
+    follow_up_channel:
+      operational.follow_up_channel ?? operational.contact_method ?? null,
+    follow_up_completed_at: operational.follow_up_completed_at ?? null,
+    snooze_until: operational.snooze_until ?? null,
+    callback_bucket,
+    callback_countdown,
+    overdue,
+    latest_note,
+    last_contact_result,
+    successful_contact_count,
+    days_since_last_contact: daysSince(operational.last_contact_timestamp),
+    open_task_count: openTasks.length,
+    overdue_task_count,
+    financing_stage,
+    proposal_stage,
+    proposal_readiness,
+    contractor_readiness,
+    lead_health,
+    lead_health_reasons: Array.from(lead_health_reasons),
+    time_since_intake_hours,
+    time_since_last_contact_hours,
+    time_waiting_on_follow_up_hours,
   };
 }
 
