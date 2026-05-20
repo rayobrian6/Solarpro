@@ -25,7 +25,6 @@ import {
 } from '@/lib/intake/homeownerEventIntake';
 import {
   isUtilityBillStorageFailure,
-  metadataOnlyUtilityBill,
   storeUtilityBillAttachment,
 } from '@/lib/intake/utilityBillAttachment';
 
@@ -176,36 +175,38 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       body.bill_metadata = billMetadata;
       body.bill_attachment_metadata_only = false;
     } catch (err) {
-      const fallbackMetadata = metadataOnlyUtilityBill(billFile);
-      body.uploaded_bill_filename = billFile.name;
-      body.uploaded_bill_size_bytes = billFile.size;
-      body.uploaded_bill_content_type = fallbackMetadata?.content_type || billFile.type || 'application/octet-stream';
-      if (fallbackMetadata) {
-        body.bill_metadata = {
-          ...fallbackMetadata,
-          upload_transport: 'multipart_file_storage_failed',
-        };
-      }
-      body.bill_attachment_metadata_only = true;
       const message = err instanceof Error ? err.message : String(err);
+      const storageFailure = isUtilityBillStorageFailure(err);
       console.error('[ATTACHMENT STORAGE FAILED]', {
         event_id: eventId,
         filename: billFile.name,
         size_bytes: billFile.size,
         content_type: billFile.type || null,
-        recoverable: isUtilityBillStorageFailure(err),
+        recoverable: storageFailure,
         message,
       });
 
-      if (!isUtilityBillStorageFailure(err)) {
-        return NextResponse.json(
-          {
-            error: message || 'Utility bill upload failed. Please try again without the file or choose a smaller non-empty file.',
-            event_id: eventId,
+      return NextResponse.json(
+        {
+          error: storageFailure
+            ? 'We received your utility bill file, but secure file storage is not available right now. Please try again shortly.'
+            : message || 'Utility bill upload failed. Please try again without the file or choose a smaller non-empty file.',
+          event_id: eventId,
+          utility_bill_upload: {
+            selected: true,
+            server_received: true,
+            storage_status: storageFailure ? 'storage_unavailable' : 'upload_failed',
+            filename: billFile.name,
+            size_bytes: billFile.size,
+            content_type: billFile.type || null,
+            stored_for_admin_review: false,
+            message: storageFailure
+              ? 'File bytes reached the intake endpoint, but durable storage did not return a retrievable admin link.'
+              : message || 'The utility bill file could not be accepted.',
           },
-          { status: 400 },
-        );
-      }
+        },
+        { status: storageFailure ? 503 : 400 },
+      );
     }
   }
 

@@ -223,7 +223,7 @@ describe('homeowner intake event-first flow', () => {
   })
 
 
-  it('does not drop a homeowner intake when production bill storage is not configured', async () => {
+  it('rejects multipart homeowner bill submissions when production storage is not configured instead of persisting metadata-only fake success', async () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
     const sql = makeSql()
@@ -232,22 +232,24 @@ describe('homeowner intake event-first flow', () => {
 
     const res = await POST(multipartHomeownerReq(validPayload, pdfUploadFile('Braidon Bill.pdf')))
 
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(503)
     const json = await res.json()
-    expect(json).toMatchObject({ success: true, opportunity_id: null, review_status: 'pending_operator_review' })
-    const insertIndex = sql.queries.findIndex((q: string) => q.includes('INSERT INTO intake_events'))
-    expect(insertIndex).toBeGreaterThan(-1)
-    const payloadJson = sql.values[insertIndex].find((v: unknown) => typeof v === 'string' && v.includes('canonical_review_flow')) as string
-    const parsedPayload = JSON.parse(payloadJson)
-    expect(parsedPayload.bill_attachment_metadata_only).toBe(true)
-    expect(parsedPayload.bill_metadata).toMatchObject({
-      filename: 'Braidon Bill.pdf',
-      content_type: 'application/pdf',
-      storage_status: 'metadata_only_not_uploaded',
-      upload_transport: 'multipart_file_storage_failed',
-      accessible_url: null,
-      download_url: null,
+    expect(json).toMatchObject({
+      error: 'We received your utility bill file, but secure file storage is not available right now. Please try again shortly.',
+      utility_bill_upload: {
+        selected: true,
+        server_received: true,
+        storage_status: 'storage_unavailable',
+        filename: 'Braidon Bill.pdf',
+        size_bytes: 32,
+        content_type: 'application/pdf',
+        stored_for_admin_review: false,
+      },
     })
+    expect(json.event_id).toMatch(/^evt_homeowner_/)
+    expect(json.utility_bill_upload.message).toContain('durable storage did not return a retrievable admin link')
+    expect(mockBlobPut).not.toHaveBeenCalled()
+    expect(sql.queries.some((q: string) => q.includes('INSERT INTO intake_events'))).toBe(false)
   })
 
   it('stores multipart .jiff uploads as Blob-backed attachment metadata when storage is configured', async () => {
