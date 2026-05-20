@@ -11,10 +11,10 @@ async function importHelper() {
 }
 
 function sqlForQualificationFallback() {
-  const calls: string[] = [];
-  const sql = vi.fn(async (strings: TemplateStringsArray) => {
+  const calls: Array<{ query: string; values: unknown[] }> = [];
+  const sql = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
     const q = strings.join(" ");
-    calls.push(q);
+    calls.push({ query: q, values });
     if (q.includes("FROM intake_events") && q.includes("event_type = 'homeowner_intake'")) {
       return [];
     }
@@ -103,7 +103,18 @@ describe("releaseMarketplaceInventoryFromIntake", () => {
     expect(result.ok).toBe(true);
     expect(result.status).toBe(201);
     expect(result.opportunity.id).toBe("opp-live-1");
-    expect(sql.calls.some((q: string) => q.includes("event_type = 'homeowner_qualification'"))).toBe(true);
+    expect(sql.calls.some((call: { query: string }) => call.query.includes("event_type = 'homeowner_qualification'"))).toBe(true);
+    const existingLookup = sql.calls.find((call: { query: string }) =>
+      call.query.includes("FROM network_opportunities") &&
+      call.query.includes("WHERE intake_event_id"),
+    );
+    const insert = sql.calls.find((call: { query: string }) =>
+      call.query.includes("INSERT INTO network_opportunities"),
+    );
+    expect(existingLookup?.values).toContain("11111111-1111-4111-8111-111111111111");
+    expect(existingLookup?.values).not.toContain("evt-homeowner-1");
+    expect(insert?.values[0]).toBe("11111111-1111-4111-8111-111111111111");
+    expect(insert?.values).not.toContain("evt-homeowner-1");
     expect(mockLogNetworkEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ event_type: "opportunity.release_blocked" }),
     );

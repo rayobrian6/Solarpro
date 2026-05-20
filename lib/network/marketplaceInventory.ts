@@ -157,6 +157,8 @@ export async function releaseMarketplaceInventoryFromIntake({
     return { ok: false as const, status: 404, error: "Intake event not found" };
   }
 
+  const canonicalIntakeEventId = str(intake.id) ?? intakeEventId;
+  const sourceEventId = str(intake.event_id) ?? intakeEventId;
   const payload = isRecord(intake.payload) ? intake.payload : {};
   const pipeline = isRecord(intake.pipeline_result) ? intake.pipeline_result : {};
   const qualificationRows = await sql`
@@ -164,8 +166,8 @@ export async function releaseMarketplaceInventoryFromIntake({
     FROM intake_events
     WHERE event_type = 'homeowner_qualification'
       AND (
-        original_event_id = ${str(intake.event_id) ?? intakeEventId}
-        OR payload->>'original_event_id' = ${str(intake.event_id) ?? intakeEventId}
+        original_event_id = ${sourceEventId}
+        OR payload->>'original_event_id' = ${sourceEventId}
         OR original_event_id = ${intakeEventId}
         OR payload->>'original_event_id' = ${intakeEventId}
       )
@@ -224,7 +226,7 @@ export async function releaseMarketplaceInventoryFromIntake({
   const existing = await sql`
     SELECT id, status, marketplace_status
     FROM network_opportunities
-    WHERE intake_event_id = ${intakeEventId}
+    WHERE intake_event_id = ${canonicalIntakeEventId}
     LIMIT 1
   `;
   if (existing.length) {
@@ -296,7 +298,7 @@ export async function releaseMarketplaceInventoryFromIntake({
       max_claims,
       claim_count
     ) VALUES (
-      ${intakeEventId},
+      ${canonicalIntakeEventId},
       ${sourceTypeFromIntake(intake)},
       'live',
       'live',
@@ -365,7 +367,9 @@ export async function releaseMarketplaceInventoryFromIntake({
     to_status: "live",
     data: {
       source: "marketplace_inventory_v1",
-      intake_event_id: intakeEventId,
+      intake_event_id: canonicalIntakeEventId,
+      source_event_id: sourceEventId,
+      submitted_intake_event_id: intakeEventId,
       release_gate_result: releaseGate,
       marketplace_status: "live",
       claim_mode: effectiveClaimMode,
