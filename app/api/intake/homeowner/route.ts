@@ -164,7 +164,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const eventId = makeHomeownerIntakeEventId();
   body.event_id = eventId;
 
+  let utilityBillUploadReceipt: Record<string, unknown> = {
+    selected: false,
+    server_received: false,
+    storage_status: 'not_provided',
+    filename: null,
+    size_bytes: null,
+    content_type: null,
+    stored_for_admin_review: false,
+    message: 'No utility bill file was attached to this request.',
+  };
+
   if (billFile) {
+    utilityBillUploadReceipt = {
+      selected: true,
+      server_received: true,
+      storage_status: 'received_pending_storage',
+      filename: billFile.name,
+      size_bytes: billFile.size,
+      content_type: billFile.type || null,
+      stored_for_admin_review: false,
+      message: 'Utility bill bytes were received by the intake endpoint.',
+    };
     try {
       const billMetadata = await storeUtilityBillAttachment(billFile, {
         eventId,
@@ -175,6 +196,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       body.uploaded_bill_content_type = billMetadata.content_type;
       body.bill_metadata = billMetadata;
       body.bill_attachment_metadata_only = false;
+      utilityBillUploadReceipt = {
+        selected: true,
+        server_received: true,
+        storage_status: billMetadata.storage_status,
+        filename: billMetadata.filename,
+        size_bytes: billMetadata.size_bytes,
+        content_type: billMetadata.content_type,
+        stored_for_admin_review: true,
+        message: 'Utility bill bytes were received, stored, and linked for Admin Intake Feed review.',
+      };
     } catch (err) {
       const fallbackMetadata = metadataOnlyUtilityBill(billFile);
       body.uploaded_bill_filename = billFile.name;
@@ -187,6 +218,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         };
       }
       body.bill_attachment_metadata_only = true;
+      utilityBillUploadReceipt = {
+        selected: true,
+        server_received: true,
+        storage_status: fallbackMetadata?.storage_status || 'metadata_only_not_uploaded',
+        filename: fallbackMetadata?.filename || billFile.name,
+        size_bytes: fallbackMetadata?.size_bytes || billFile.size,
+        content_type: fallbackMetadata?.content_type || billFile.type || 'application/octet-stream',
+        stored_for_admin_review: false,
+        message: 'Utility bill bytes were received by the server, but durable file storage did not return a retrievable admin link.',
+      };
       const message = err instanceof Error ? err.message : String(err);
       console.error('[ATTACHMENT STORAGE FAILED]', {
         event_id: eventId,
@@ -227,14 +268,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Public responses are intentionally vague on duplicates
   if (result.action === 'validation_failed') {
     return NextResponse.json(
-      { error: 'Please check your information and try again.', details: result.validation_errors, event_id: result.event_id },
+      { error: 'Please check your information and try again.', details: result.validation_errors, event_id: result.event_id, utility_bill_upload: utilityBillUploadReceipt },
       { status: 422 }
     );
   }
 
   if (result.action === 'error') {
     return NextResponse.json(
-      { error: 'Something went wrong. Please try again.', event_id: result.event_id },
+      { error: 'Something went wrong. Please try again.', event_id: result.event_id, utility_bill_upload: utilityBillUploadReceipt },
       { status: 500 }
     );
   }
@@ -247,6 +288,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       event_id: result.event_id,
       opportunity_id: null,
       review_status: 'pending_operator_review',
+      utility_bill_upload: utilityBillUploadReceipt,
     },
     {
       status: 200,

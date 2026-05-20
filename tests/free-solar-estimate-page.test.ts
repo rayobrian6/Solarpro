@@ -62,6 +62,12 @@ describe("/free-solar-estimate public intake funnel", () => {
     expect(pageSource).toContain("const requestBody = new FormData()");
     expect(pageSource).toContain('requestBody.append("payload", JSON.stringify(payload))');
     expect(pageSource).toContain('requestBody.append("utility_bill", billFile)');
+    expect(pageSource).toContain("File selected locally, not uploaded yet. It will be sent when you submit the estimate request.");
+    expect(pageSource).toContain("Uploading estimate + utility bill bytes...");
+    expect(pageSource).toContain("Utility bill file received by SolarPro");
+    expect(pageSource).toContain("data.utility_bill_upload");
+    expect(pageSource).toContain("server_received");
+    expect(pageSource).toContain("Stored and linked for Admin Intake Feed review.");
 
     const homeownerFetchStart = pageSource.indexOf('fetch("/api/intake/homeowner",');
     expect(homeownerFetchStart).toBeGreaterThan(-1);

@@ -20,6 +20,16 @@ import {
 } from "lucide-react";
 
 type SubmitState = "idle" | "submitting" | "success" | "error";
+type BillUploadReceipt = {
+  selected: boolean;
+  server_received: boolean;
+  storage_status: "stored" | "metadata_only_not_uploaded" | "not_provided" | string;
+  filename: string | null;
+  size_bytes: number | null;
+  content_type: string | null;
+  stored_for_admin_review: boolean;
+  message: string;
+};
 type QualificationSubmitState =
   | "idle"
   | "submitting"
@@ -197,6 +207,7 @@ export default function FreeSolarEstimatePage() {
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [error, setError] = useState("");
   const [intakeReference, setIntakeReference] = useState<string | null>(null);
+  const [billUploadReceipt, setBillUploadReceipt] = useState<BillUploadReceipt | null>(null);
   const [qualification, setQualification] = useState<QualificationState>(
     INITIAL_QUALIFICATION,
   );
@@ -213,6 +224,7 @@ export default function FreeSolarEstimatePage() {
   const updateField = (field: keyof FormState, value: string | boolean) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     if (error) setError("");
+    if (submitState === "success") setSubmitState("idle");
   };
 
   const validate = (): string | null => {
@@ -375,6 +387,7 @@ export default function FreeSolarEstimatePage() {
       notes: buildOperationalNotes(form, billFile),
     };
 
+    setBillUploadReceipt(null);
     setSubmitState("submitting");
 
     try {
@@ -400,6 +413,11 @@ export default function FreeSolarEstimatePage() {
 
       setIntakeReference(
         typeof data.event_id === "string" ? data.event_id : null,
+      );
+      setBillUploadReceipt(
+        data.utility_bill_upload && typeof data.utility_bill_upload === "object"
+          ? (data.utility_bill_upload as BillUploadReceipt)
+          : null,
       );
       setSubmitState("success");
     } catch {
@@ -437,6 +455,41 @@ export default function FreeSolarEstimatePage() {
                   {intakeReference}
                 </span>
               </p>
+            )}
+            {billUploadReceipt?.server_received && (
+              <div className="mt-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/[0.06] p-4 text-sm leading-6 text-emerald-100">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-300" />
+                  <div>
+                    <p className="font-bold text-emerald-50">
+                      Utility bill file received by SolarPro
+                    </p>
+                    <p className="mt-1 text-emerald-100/85">
+                      {billUploadReceipt.message}
+                    </p>
+                    <p className="mt-2 text-xs text-emerald-100/70">
+                      Received bytes: {billUploadReceipt.filename || "utility bill"}
+                      {typeof billUploadReceipt.size_bytes === "number"
+                        ? ` · ${Math.max(1, Math.round(billUploadReceipt.size_bytes / 1024))} KB`
+                        : ""}
+                      {billUploadReceipt.content_type
+                        ? ` · ${billUploadReceipt.content_type}`
+                        : ""}
+                    </p>
+                    <p className="mt-2 text-xs font-semibold text-emerald-100/80">
+                      {billUploadReceipt.stored_for_admin_review
+                        ? "Stored and linked for Admin Intake Feed review."
+                        : "The server received the file, but durable storage did not return a retrievable admin link."}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {billUploadReceipt && !billUploadReceipt.server_received && billUploadReceipt.selected && (
+              <div className="mt-5 rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] p-4 text-sm leading-6 text-amber-100">
+                <p className="font-bold">Utility bill was selected but not received by the server.</p>
+                <p className="mt-1 text-amber-100/80">{billUploadReceipt.message}</p>
+              </div>
             )}
             <div className="mt-8 rounded-2xl border border-amber-300/20 bg-amber-300/[0.06] p-4">
               <p className="text-xs font-black uppercase tracking-[0.2em] text-amber-200">
@@ -896,7 +949,7 @@ export default function FreeSolarEstimatePage() {
                 inputMode="numeric"
                 placeholder="8"
               />
-              <FileField file={billFile} onChange={setBillFile} />
+              <FileField file={billFile} isUploading={submitState === "submitting" && !!billFile} onChange={setBillFile} />
             </div>
 
             <div>
@@ -935,8 +988,10 @@ export default function FreeSolarEstimatePage() {
             >
               {submitState === "submitting" ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Submitting to
-                  intake pipeline...
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {billFile
+                    ? "Uploading estimate + utility bill bytes..."
+                    : "Submitting to intake pipeline..."}
                 </>
               ) : (
                 <>
@@ -1032,29 +1087,55 @@ function SelectField({
 
 function FileField({
   file,
+  isUploading,
   onChange,
 }: {
   file: File | null;
+  isUploading: boolean;
   onChange: (file: File | null) => void;
 }) {
   return (
-    <label className="block">
-      <span className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
-        Utility bill upload
-      </span>
-      <span className="flex min-h-[46px] cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-white/[0.13] bg-white/[0.025] px-4 py-3 text-sm text-slate-400 transition hover:border-amber-300/30 hover:bg-white/[0.04]">
-        <FileText className="h-4 w-4 text-slate-500" />
-        <span className="truncate">
-          {file
-            ? file.name
-            : "Optional — upload any utility bill file for review"}
+    <div className="block">
+      <label>
+        <span className="mb-2 block text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">
+          Utility bill upload
         </span>
-        <input
-          type="file"
-          className="sr-only"
-          onChange={(event) => onChange(event.target.files?.[0] || null)}
-        />
-      </span>
-    </label>
+        <span className="flex min-h-[46px] cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-white/[0.13] bg-white/[0.025] px-4 py-3 text-sm text-slate-400 transition hover:border-amber-300/30 hover:bg-white/[0.04]">
+          {isUploading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-amber-300" />
+          ) : (
+            <FileText className="h-4 w-4 text-slate-500" />
+          )}
+          <span className="truncate">
+            {file
+              ? file.name
+              : "Optional — upload any utility bill file for review"}
+          </span>
+          <input
+            type="file"
+            className="sr-only"
+            disabled={isUploading}
+            onChange={(event) => onChange(event.target.files?.[0] || null)}
+          />
+        </span>
+      </label>
+      {file && (
+        <div className="mt-2 rounded-xl border border-white/[0.08] bg-white/[0.025] px-3 py-2 text-xs leading-5 text-slate-400">
+          {isUploading ? (
+            <span className="font-semibold text-amber-200">
+              Uploading this file with your request now — sending actual file bytes to SolarPro intake.
+            </span>
+          ) : (
+            <span>
+              File selected locally, not uploaded yet. It will be sent when you submit the estimate request.
+            </span>
+          )}
+          <span className="block text-slate-500">
+            {Math.max(1, Math.round(file.size / 1024))} KB
+            {file.type ? ` · ${file.type}` : " · browser did not report a file type"}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }

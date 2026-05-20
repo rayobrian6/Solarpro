@@ -193,7 +193,17 @@ describe('homeowner intake event-first flow', () => {
     const res = await POST(postReq(validPayload))
     expect(res.status).toBe(200)
     const json = await res.json()
-    expect(json).toMatchObject({ success: true, opportunity_id: null, review_status: 'pending_operator_review' })
+    expect(json).toMatchObject({
+      success: true,
+      opportunity_id: null,
+      review_status: 'pending_operator_review',
+      utility_bill_upload: {
+        selected: false,
+        server_received: false,
+        storage_status: 'not_provided',
+        stored_for_admin_review: false,
+      },
+    })
     expect(json.event_id).toMatch(/^evt_homeowner_/)
     expect(sql.queries.some((q: string) => q.includes('INSERT INTO intake_events'))).toBe(true)
     expect(sql.queries.some((q: string) => q.includes('INSERT INTO network_opportunities'))).toBe(false)
@@ -234,7 +244,21 @@ describe('homeowner intake event-first flow', () => {
 
     expect(res.status).toBe(200)
     const json = await res.json()
-    expect(json).toMatchObject({ success: true, opportunity_id: null, review_status: 'pending_operator_review' })
+    expect(json).toMatchObject({
+      success: true,
+      opportunity_id: null,
+      review_status: 'pending_operator_review',
+      utility_bill_upload: {
+        selected: true,
+        server_received: true,
+        storage_status: 'metadata_only_not_uploaded',
+        filename: 'Braidon Bill.pdf',
+        size_bytes: 32,
+        content_type: 'application/pdf',
+        stored_for_admin_review: false,
+      },
+    })
+    expect(json.utility_bill_upload.message).toContain('bytes were received by the server')
     const insertIndex = sql.queries.findIndex((q: string) => q.includes('INSERT INTO intake_events'))
     expect(insertIndex).toBeGreaterThan(-1)
     const payloadJson = sql.values[insertIndex].find((v: unknown) => typeof v === 'string' && v.includes('canonical_review_flow')) as string
@@ -260,6 +284,19 @@ describe('homeowner intake event-first flow', () => {
     const res = await POST(multipartHomeownerReq(validPayload, jpegUploadFile('Braidon Bill.jiff', 'image/jiff')))
 
     expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      utility_bill_upload: {
+        selected: true,
+        server_received: true,
+        storage_status: 'stored',
+        filename: 'Braidon Bill.jiff',
+        size_bytes: 12,
+        content_type: 'image/jpeg',
+        stored_for_admin_review: true,
+      },
+    })
+    expect(json.utility_bill_upload.message).toContain('bytes were received, stored, and linked')
     expect(mockBlobPut).toHaveBeenCalledTimes(1)
     expect(mockBlobPut.mock.calls[0][0]).toMatch(/Braidon-Bill\.jpg$/i)
     expect(mockBlobPut.mock.calls[0][2]).toMatchObject({
@@ -298,6 +335,18 @@ describe('homeowner intake event-first flow', () => {
     ))
 
     expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json).toMatchObject({
+      utility_bill_upload: {
+        selected: true,
+        server_received: true,
+        storage_status: 'stored',
+        filename: 'Braidon Bill.fff',
+        size_bytes: 52,
+        content_type: 'application/octet-stream',
+        stored_for_admin_review: true,
+      },
+    })
     expect(mockBlobPut).toHaveBeenCalledTimes(1)
     expect(mockBlobPut.mock.calls[0][0]).toMatch(/Braidon-Bill\.fff$/i)
     expect(mockBlobPut.mock.calls[0][2]).toMatchObject({
