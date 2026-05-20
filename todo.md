@@ -11,6 +11,6 @@
 
 ## Validate + Deliver
 - [x] Run targeted validation for touched files.
-- [ ] Commit directly on `dev`.
-- [ ] Push `dev`.
+- [x] Commit directly on `dev`.
+- [x] Push `dev`.
 - [ ] Report root cause, fix, and QA evidence.
