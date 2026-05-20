@@ -25,6 +25,15 @@ export const maxDuration = 30;
 import { NextRequest, NextResponse } from "next/server";
 import { getDbReady } from "@/lib/db-neon";
 import { requireAdminApi } from "@/lib/adminAuth";
+import { randomUUID } from "crypto";
+import {
+  applyOperatorReviewAction,
+  deriveReleaseReadiness,
+  isOperatorReviewAction,
+  operationalIntelligence,
+  safeOperationalLog,
+  stateFromPipelineResult,
+} from "@/lib/intake/operationalLifecycle";
 
 type IntakeFeedStage =
   | "auth"
@@ -34,7 +43,10 @@ type IntakeFeedStage =
   | "stats_query"
   | "today_events_query"
   | "top_sources_query"
-  | "validation_stats_query";
+  | "validation_stats_query"
+  | "review_event_lookup"
+  | "review_event_insert"
+  | "review_projection_update";
 
 function intakeFeedError(stage: IntakeFeedStage, error: unknown) {
   const err = error as {
@@ -350,17 +362,38 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const total = Number(feedRows[0]?.__total) || 0;
     const opportunities = feedRows.map((row: Record<string, unknown>) => {
       const { __total, ...rest } = row;
-      return rest;
+      const operational = stateFromPipelineResult(rest.pipeline_result);
+      const intelligence = operationalIntelligence({
+        operational,
+        intake: rest.intake_metadata,
+        qualification: rest.qualification_intelligence,
+        validation: rest.validation_result,
+        receivedAt: rest.received_at ?? rest.created_at,
+      });
+      return {
+        ...rest,
+        operational_lifecycle_status: operational.lifecycle_status,
+        operational_state: operational,
+        review_priority: intelligence.review_priority,
+        qualification_confidence: intelligence.qualification_confidence,
+        financing_readiness_reviewed: intelligence.financing_readiness,
+        estimated_close_quality: intelligence.estimated_close_quality,
+        follow_up_urgency: intelligence.follow_up_urgency,
+        stale_lead_hours: intelligence.stale_lead_hours,
+        operator_notes: intelligence.operator_notes,
+        last_contact_timestamp: intelligence.last_contact_timestamp,
+        release_readiness: intelligence.release_readiness,
+      };
     });
 
-    console.info('[ADMIN INTAKE PROJECTION]', {
+    console.info("[ADMIN INTAKE PROJECTION]", {
       count: opportunities.length,
       sample: opportunities.slice(0, 3).map((row: Record<string, unknown>) => ({
         id: row.id,
         event_id: row.event_id,
         event_type: row.event_type,
         review_status: row.review_status,
-        opportunity_id: row.opportunity_id ?? 'Not converted',
+        opportunity_id: row.opportunity_id ?? "Not converted",
         monthly_bill_amount: row.monthly_bill_amount,
         bill_attachment_metadata_only: row.bill_attachment_metadata_only,
         qualification_skipped: row.qualification_skipped,
@@ -493,6 +526,167 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   } catch (err) {
     console.error(`[GET /api/admin/network/intake] stage=${stage} Error:`, err);
+    return intakeFeedError(stage, err);
+  }
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  let stage: IntakeFeedStage = "auth";
+
+  try {
+    const admin = await requireAdminApi(req);
+    if (!admin)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    stage = "request_parse";
+    const body = await req.json().catch(() => ({}));
+    const eventId =
+      typeof body.event_id === "string" ? body.event_id.trim() : "";
+    const action = body.action;
+    const notes =
+      typeof body.notes === "string" ? body.notes.trim().slice(0, 2000) : null;
+
+    if (!eventId) {
+      return NextResponse.json(
+        { error: "event_id is required" },
+        { status: 400 },
+      );
+    }
+    if (!isOperatorReviewAction(action)) {
+      return NextResponse.json(
+        { error: "Unsupported operator review action" },
+        { status: 400 },
+      );
+    }
+
+    stage = "db_connect";
+    const sql = await getDbReady();
+
+    stage = "review_event_lookup";
+    const originalRows = await sql`
+      SELECT event_id, event_type, payload, validation_result, duplicate_result, pipeline_result, action, occurred_at
+      FROM intake_events
+      WHERE event_id = ${eventId}
+        AND event_type = 'homeowner_intake'
+      LIMIT 1
+    `;
+    const original = originalRows[0] as Record<string, unknown> | undefined;
+    if (!original)
+      return NextResponse.json(
+        { error: "Intake event not found" },
+        { status: 404 },
+      );
+
+    const currentState = stateFromPipelineResult(original.pipeline_result);
+    if (currentState.archived || currentState.rejected) {
+      return NextResponse.json(
+        {
+          error:
+            "Archived or rejected leads cannot be moved without a new intake event",
+        },
+        { status: 409 },
+      );
+    }
+
+    const nextState = applyOperatorReviewAction(currentState, action, {
+      adminId: admin.id,
+      notes,
+    });
+    const qualificationRows = await sql`
+      SELECT payload
+      FROM intake_events
+      WHERE event_type = 'homeowner_qualification'
+        AND (original_event_id = ${eventId} OR payload->>'original_event_id' = ${eventId})
+      ORDER BY occurred_at DESC
+      LIMIT 1
+    `;
+    const qualification = (
+      qualificationRows[0] as Record<string, unknown> | undefined
+    )?.payload;
+    const releaseReadiness = deriveReleaseReadiness({
+      operational: nextState,
+      intake: original.payload,
+      qualification:
+        qualification && typeof qualification === "object"
+          ? ((qualification as Record<string, unknown>).intelligence ??
+            qualification)
+          : qualification,
+      validation: original.validation_result,
+    });
+    nextState.release_readiness = releaseReadiness;
+
+    const reviewEventId = `review_${randomUUID()}`;
+    const pipelineResult = {
+      ...(typeof original.pipeline_result === "object" &&
+      original.pipeline_result !== null
+        ? (original.pipeline_result as Record<string, unknown>)
+        : {}),
+      review_status: nextState.review_status,
+      operational: nextState,
+      marketplace_auto_release: false,
+    };
+    const eventPayload = {
+      original_event_id: eventId,
+      action,
+      notes,
+      operational: nextState,
+      release_readiness: releaseReadiness,
+    };
+
+    stage = "review_event_insert";
+    await sql`
+      INSERT INTO intake_events (
+        event_id, opportunity_id, event_type, event_source,
+        source_system, source_channel,
+        payload, validation_result, duplicate_result, pipeline_result,
+        action, original_event_id,
+        occurred_at
+      ) VALUES (
+        ${reviewEventId}, ${null}, 'operator_review', 'admin_intake_feed',
+        'admin', 'operator_review',
+        ${JSON.stringify(eventPayload)}, ${JSON.stringify({ skipped: true, reason: "operator_review_event" })}, ${JSON.stringify({ skipped: true })}, ${JSON.stringify(pipelineResult)},
+        ${action}, ${eventId},
+        NOW()
+      )
+    `;
+
+    stage = "review_projection_update";
+    await sql`
+      UPDATE intake_events
+      SET pipeline_result = ${JSON.stringify(pipelineResult)},
+          action = CASE
+            WHEN ${action} = 'reject_lead' THEN 'rejected'
+            WHEN ${action} = 'archive_lead' THEN 'archived'
+            WHEN ${action} = 'mark_bad_lead' THEN 'bad_lead'
+            ELSE action
+          END
+      WHERE event_id = ${eventId}
+    `;
+
+    console.info(
+      "[REVIEW STATUS TRANSITION]",
+      safeOperationalLog({
+        eventId,
+        action,
+        fromStatus: currentState.review_status,
+        toStatus: nextState.review_status,
+        releaseReadiness,
+      }),
+    );
+
+    return NextResponse.json({
+      success: true,
+      event_id: eventId,
+      review_event_id: reviewEventId,
+      review_status: nextState.review_status,
+      operational_state: nextState,
+      release_readiness: releaseReadiness,
+    });
+  } catch (err) {
+    console.error(
+      `[POST /api/admin/network/intake] stage=${stage} Error:`,
+      err,
+    );
     return intakeFeedError(stage, err);
   }
 }

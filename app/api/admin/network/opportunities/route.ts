@@ -7,36 +7,41 @@
  * POST  — manually create an opportunity
  * PATCH — bulk action (publish / reject / score / set_status)
  */
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 function toPostgresTextArray(values: string[]) {
-  return `{${values.map((value) => `\"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}\"`).join(',')}}`
+  return `{${values.map((value) => `\"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}\"`).join(",")}}`;
 }
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 export const maxDuration = 60;
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getDbReady } from '@/lib/db-neon';
-import { requireAdminApi } from '@/lib/adminAuth';
-import { scoreOpportunity, scoreToListingPrice } from '@/lib/network/opportunityScorer';
-import { logNetworkEvent } from '@/lib/network/attributionTracker';
-import { enrichAndPersistOpportunity } from '@/lib/network/opportunityEnrichment';
+import { NextRequest, NextResponse } from "next/server";
+import { getDbReady } from "@/lib/db-neon";
+import { requireAdminApi } from "@/lib/adminAuth";
+import {
+  scoreOpportunity,
+  scoreToListingPrice,
+} from "@/lib/network/opportunityScorer";
+import { logNetworkEvent } from "@/lib/network/attributionTracker";
+import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import { enrichAndPersistOpportunity } from "@/lib/network/opportunityEnrichment";
 
 // ── GET: List opportunities ───────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
   try {
     const admin = await requireAdminApi(req);
-    if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!admin)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const { searchParams } = new URL(req.url);
-    const status  = searchParams.get('status');
-    const source  = searchParams.get('source');
-    const state   = searchParams.get('state');
-    const grade   = searchParams.get('grade');
-    const search  = searchParams.get('search');
-    const page    = parseInt(searchParams.get('page') ?? '1');
-    const limit   = Math.min(parseInt(searchParams.get('limit') ?? '25'), 100);
-    const offset  = (page - 1) * limit;
+    const status = searchParams.get("status");
+    const source = searchParams.get("source");
+    const state = searchParams.get("state");
+    const grade = searchParams.get("grade");
+    const search = searchParams.get("search");
+    const page = parseInt(searchParams.get("page") ?? "1");
+    const limit = Math.min(parseInt(searchParams.get("limit") ?? "25"), 100);
+    const offset = (page - 1) * limit;
 
     const sql = await getDbReady();
 
@@ -71,17 +76,17 @@ export async function GET(req: NextRequest) {
       LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
       LEFT JOIN opportunity_sources         os  ON os.opportunity_id  = no.id
       WHERE
-        (${status ?? null} IS NULL OR no.status = ${status ?? ''})
-        AND (${source ?? null} IS NULL OR no.source_type = ${source ?? ''})
-        AND (${state ?? null} IS NULL OR no.state = ${state ?? ''})
-        AND (${grade ?? null} IS NULL OR oi.overall_grade = ${grade ?? ''})
+        (${status ?? null} IS NULL OR no.status = ${status ?? ""})
+        AND (${source ?? null} IS NULL OR no.source_type = ${source ?? ""})
+        AND (${state ?? null} IS NULL OR no.state = ${state ?? ""})
+        AND (${grade ?? null} IS NULL OR oi.overall_grade = ${grade ?? ""})
         AND (
           ${search ?? null} IS NULL
-          OR no.homeowner_first_name ILIKE ${'%' + (search ?? '') + '%'}
-          OR no.homeowner_last_name  ILIKE ${'%' + (search ?? '') + '%'}
-          OR no.homeowner_phone      ILIKE ${'%' + (search ?? '') + '%'}
-          OR no.address              ILIKE ${'%' + (search ?? '') + '%'}
-          OR no.city                 ILIKE ${'%' + (search ?? '') + '%'}
+          OR no.homeowner_first_name ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.homeowner_last_name  ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.homeowner_phone      ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.address              ILIKE ${"%" + (search ?? "") + "%"}
+          OR no.city                 ILIKE ${"%" + (search ?? "") + "%"}
         )
       ORDER BY no.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
@@ -92,10 +97,10 @@ export async function GET(req: NextRequest) {
       FROM network_opportunities no
       LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
       WHERE
-        (${status ?? null} IS NULL OR no.status = ${status ?? ''})
-        AND (${source ?? null} IS NULL OR no.source_type = ${source ?? ''})
-        AND (${state ?? null} IS NULL OR no.state = ${state ?? ''})
-        AND (${grade ?? null} IS NULL OR oi.overall_grade = ${grade ?? ''})
+        (${status ?? null} IS NULL OR no.status = ${status ?? ""})
+        AND (${source ?? null} IS NULL OR no.source_type = ${source ?? ""})
+        AND (${state ?? null} IS NULL OR no.state = ${state ?? ""})
+        AND (${grade ?? null} IS NULL OR oi.overall_grade = ${grade ?? ""})
     `;
 
     const [stats] = await sql`
@@ -124,8 +129,11 @@ export async function GET(req: NextRequest) {
       stats,
     });
   } catch (error: unknown) {
-    console.error('[GET /api/admin/network/opportunities]', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("[GET /api/admin/network/opportunities]", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
@@ -133,21 +141,33 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const admin = await requireAdminApi(req);
-    if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!admin)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const body = await req.json();
     const {
-      homeowner_first_name, homeowner_last_name,
-      homeowner_email, homeowner_phone,
-      address, city, state, zip,
-      monthly_bill, utility_name,
-      roof_age_years, structure_type, stories,
-      source_type = 'homeowner_direct',
+      homeowner_first_name,
+      homeowner_last_name,
+      homeowner_email,
+      homeowner_phone,
+      address,
+      city,
+      state,
+      zip,
+      monthly_bill,
+      utility_name,
+      roof_age_years,
+      structure_type,
+      stories,
+      source_type = "homeowner_direct",
       intake_notes,
     } = body;
 
     if (!homeowner_phone || !state) {
-      return NextResponse.json({ error: 'phone and state are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "phone and state are required" },
+        { status: 400 },
+      );
     }
 
     const sql = await getDbReady();
@@ -173,18 +193,21 @@ export async function POST(req: NextRequest) {
     `;
 
     await logNetworkEvent({
-      event_type: 'opportunity.created',
-      event_category: 'opportunity',
+      event_type: "opportunity.created",
+      event_category: "opportunity",
       opportunity_id: created.id as string,
       admin_user_id: admin.id,
-      data: { source_type, state, created_by: 'admin' },
-      triggered_by: 'admin',
+      data: { source_type, state, created_by: "admin" },
+      triggered_by: "admin",
     });
 
     return NextResponse.json({ success: true, id: created.id });
   } catch (error: unknown) {
-    console.error('[POST /api/admin/network/opportunities]', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("[POST /api/admin/network/opportunities]", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }
 
@@ -192,26 +215,34 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const admin = await requireAdminApi(req);
-    if (!admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!admin)
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const body = await req.json();
-    const { action, opportunity_ids, data: actionData } = body as {
-      action: 'publish' | 'reject' | 'score' | 'set_status';
+    const {
+      action,
+      opportunity_ids,
+      data: actionData,
+    } = body as {
+      action: "publish" | "reject" | "score" | "set_status";
       opportunity_ids: string[];
       data?: Record<string, unknown>;
     };
 
     if (!action || !opportunity_ids?.length) {
-      return NextResponse.json({ error: 'action and opportunity_ids required' }, { status: 400 });
+      return NextResponse.json(
+        { error: "action and opportunity_ids required" },
+        { status: 400 },
+      );
     }
 
     const sql = await getDbReady();
     const results: string[] = [];
 
     for (const id of opportunity_ids) {
-      if (action === 'publish') {
+      if (action === "publish") {
         const gateRows = await sql`
-          SELECT no.status, no.screening_status, osq.auto_decision, osq.override_decision, oi.overall_score
+          SELECT no.id, no.status, no.screening_status, no.intake_metadata, no.raw_payload, osq.auto_decision, osq.override_decision, oi.overall_score
           FROM network_opportunities no
           LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
           LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
@@ -219,10 +250,26 @@ export async function PATCH(req: NextRequest) {
           LIMIT 1
         `;
         const gate = gateRows[0] as Record<string, unknown> | undefined;
-        const screeningApproved = gate?.screening_status === 'approved' || gate?.override_decision === 'pass' || gate?.auto_decision === 'pass';
-        const scored = gate?.overall_score != null || gate?.status === 'scored' || gate?.status === 'routed' || gate?.status === 'live';
-        if (!screeningApproved || !scored) {
-          results.push(`Blocked publish: ${id} requires approved screening and scoring`);
+        const releaseGate = gate
+          ? logMarketplaceGate(
+              "[MARKETPLACE RELEASE GATE]",
+              gate,
+              "bulk_publish",
+            )
+          : null;
+        const scored =
+          gate?.overall_score != null ||
+          gate?.status === "scored" ||
+          gate?.status === "routed" ||
+          gate?.status === "live";
+        if (
+          !releaseGate?.approvedScreening ||
+          !scored ||
+          !releaseGate.releaseReadiness.ready
+        ) {
+          results.push(
+            `Blocked publish: ${id} requires approved screening, scoring, and operational marketplace readiness`,
+          );
           continue;
         }
 
@@ -236,16 +283,15 @@ export async function PATCH(req: NextRequest) {
           WHERE id = ${id}
         `;
         results.push(`Published: ${id}`);
-
-      } else if (action === 'reject') {
+      } else if (action === "reject") {
         await sql`
           UPDATE network_opportunities SET status = 'rejected', updated_at = NOW()
           WHERE id = ${id}
         `;
         results.push(`Rejected: ${id}`);
-
-      } else if (action === 'score') {
-        const rows = await sql`SELECT * FROM network_opportunities WHERE id = ${id} LIMIT 1`;
+      } else if (action === "score") {
+        const rows =
+          await sql`SELECT * FROM network_opportunities WHERE id = ${id} LIMIT 1`;
         const opp = rows[0] as Record<string, unknown> | undefined;
         if (opp) {
           const scored = scoreOpportunity({
@@ -257,7 +303,10 @@ export async function PATCH(req: NextRequest) {
             stories: opp.stories as number,
             source_type: opp.source_type as string,
           });
-          const pricing = scoreToListingPrice(scored.overall_score, scored.overall_grade);
+          const pricing = scoreToListingPrice(
+            scored.overall_score,
+            scored.overall_grade,
+          );
           const networkScore = Math.round(scored.overall_score);
 
           await sql`
@@ -297,11 +346,15 @@ export async function PATCH(req: NextRequest) {
               executive_summary = EXCLUDED.executive_summary,
               updated_at = NOW()
           `;
-          await enrichAndPersistOpportunity(sql, id, { adminUserId: admin.id, triggeredBy: 'admin' });
-          results.push(`Scored ${id}: ${scored.overall_grade} (${scored.overall_score})`);
+          await enrichAndPersistOpportunity(sql, id, {
+            adminUserId: admin.id,
+            triggeredBy: "admin",
+          });
+          results.push(
+            `Scored ${id}: ${scored.overall_grade} (${scored.overall_score})`,
+          );
         }
-
-      } else if (action === 'set_status') {
+      } else if (action === "set_status") {
         const newStatus = actionData?.status as string;
         if (newStatus) {
           await sql`
@@ -314,16 +367,19 @@ export async function PATCH(req: NextRequest) {
     }
 
     await logNetworkEvent({
-      event_type: 'admin.bulk_action',
-      event_category: 'admin',
+      event_type: "admin.bulk_action",
+      event_category: "admin",
       admin_user_id: admin.id,
       data: { action, count: opportunity_ids.length, results },
-      triggered_by: 'admin',
+      triggered_by: "admin",
     });
 
     return NextResponse.json({ success: true, results });
   } catch (error: unknown) {
-    console.error('[PATCH /api/admin/network/opportunities]', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error("[PATCH /api/admin/network/opportunities]", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
   }
 }

@@ -28,7 +28,7 @@ describe('admin intake funnels infrastructure', () => {
   })
 
   it('aligns the public homeowner slug, canonical path, and existing intake funnel seed', () => {
-    expect(homeownerPageSource).toContain("funnel_slug: 'free-solar-estimate'")
+    expect(homeownerPageSource).toMatch(/funnel_slug:\s*["']free-solar-estimate["']/)
     expect(migrationSource).toContain("'free-solar-estimate'")
     expect(migrationSource).toContain("'Canonical Homeowner Intake'")
     expect(migrationSource).toContain('"canonical_path":"/free-solar-estimate"')
