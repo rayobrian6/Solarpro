@@ -78,6 +78,20 @@ function num(value: unknown): number | null {
   return null;
 }
 
+
+function safeQualificationLog(originalEventId: string, qualification: Record<string, unknown>) {
+  return {
+    original_event_id: originalEventId,
+    purchase_intent: str(qualification.purchase_intent),
+    estimated_credit_band: str(qualification.estimated_credit_band),
+    estimated_income_band: str(qualification.estimated_income_band),
+    property_type: str(qualification.property_type),
+    electrical_panel_size: str(qualification.electrical_panel_size),
+    sunlight_confidence: str(qualification.sunlight_confidence),
+    prior_quotes: str(qualification.prior_quotes),
+  };
+}
+
 function makeEventId(originalEventId: string): string {
   const random = Math.random().toString(36).slice(2, 10);
   return `qual_${originalEventId}_${Date.now()}_${random}`
@@ -114,6 +128,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ? (body.qualification as Record<string, unknown>)
         : body;
     const qualification = normalizeQualificationInput(submittedQualification);
+    console.info('[QUALIFICATION SUBMIT]', {
+      nested_payload: body.qualification && typeof body.qualification === 'object',
+      ...safeQualificationLog(originalEventId, qualification),
+    });
 
     stage = "db_connect";
     const sql = await getDbReady();
@@ -255,6 +273,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       )
       ON CONFLICT (event_id) DO NOTHING
     `;
+
+    console.info('[QUALIFICATION PERSISTED]', {
+      event_id: eventId,
+      original_event_id: originalEventId,
+      event_type: HOMEOWNER_QUALIFICATION_EVENT_TYPE,
+      opportunity_id: opportunityId ?? 'Not converted',
+      qualification_status: intelligence.qualification_status,
+      lead_grade: intelligence.lead_grade,
+    });
 
     if (opportunityId) {
       const qualificationProjection = {

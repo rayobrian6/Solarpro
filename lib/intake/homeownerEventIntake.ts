@@ -87,6 +87,44 @@ function numberOrNull(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+
+function maskForLog(value: unknown): string | null {
+  const text = cleanString(value)
+  if (!text) return null
+  if (text.includes('@')) {
+    const [name, domain] = text.split('@')
+    return `${name.slice(0, 2)}***@${domain ?? 'redacted'}`
+  }
+  const digits = text.replace(/\D/g, '')
+  if (digits.length >= 7) return `***${digits.slice(-4)}`
+  return text.slice(0, 32)
+}
+
+function safeIntakeLogPayload(raw: Record<string, unknown>, normalized?: ValidatedIntakePayload | null, eventId?: string) {
+  return {
+    event_id: eventId,
+    has_first_name: !!cleanString(raw.first_name),
+    has_last_name: !!cleanString(raw.last_name),
+    email: maskForLog(raw.email),
+    phone: maskForLog(raw.phone),
+    has_property_address: !!(cleanString(raw.address_line1) ?? cleanString(raw.property_address)),
+    city: cleanString(raw.city),
+    state: cleanString(raw.state),
+    zip: maskForLog(raw.zip),
+    monthly_bill_amount_raw: raw.monthly_bill_amount,
+    average_monthly_bill_raw: raw.average_monthly_bill,
+    monthly_bill_amount_normalized: normalized?.monthly_bill_amount ?? numberOrNull(raw.monthly_bill_amount) ?? numberOrNull(raw.average_monthly_bill),
+    uploaded_bill_filename: cleanString(raw.uploaded_bill_filename),
+    uploaded_bill_size_bytes: numberOrNull(raw.uploaded_bill_size_bytes),
+    uploaded_bill_content_type: cleanString(raw.uploaded_bill_content_type),
+    utility_provider_present: !!cleanString(raw.utility_provider),
+    consent_given: raw.consent_given === true,
+    utm_source: cleanString(raw.utm_source),
+    utm_campaign: cleanString(raw.utm_campaign),
+    source_channel: cleanString(raw.source_channel),
+  }
+}
+
 function deriveIdempotencyKey(payload: Record<string, unknown>): string | null {
   const explicit = cleanString(payload.idempotency_key)
   if (explicit) return explicit
@@ -126,7 +164,10 @@ function operationalPayload(raw: Record<string, unknown>, normalized: ValidatedI
       filename: cleanString(raw.uploaded_bill_filename),
       size_bytes: numberOrNull(raw.uploaded_bill_size_bytes),
       content_type: cleanString(raw.uploaded_bill_content_type),
+      storage_status: cleanString(raw.uploaded_bill_filename) ? 'metadata_only_not_uploaded' : 'not_provided',
+      accessible_url: null,
     },
+    bill_attachment_metadata_only: !!cleanString(raw.uploaded_bill_filename),
     attribution: {
       utm_source: normalized?.utm_source ?? cleanString(raw.utm_source),
       utm_medium: normalized?.utm_medium ?? cleanString(raw.utm_medium),
@@ -203,6 +244,20 @@ export async function submitHomeownerIntakeEvent(rawPayload: Record<string, unkn
 
   const normalized = validation.payload
   const payload = operationalPayload(rawPayload, normalized, options)
+  console.info('[HOMEOWNER INTAKE PAYLOAD]', safeIntakeLogPayload(rawPayload, null, eventId))
+  console.info('[HOMEOWNER INTAKE NORMALIZED]', safeIntakeLogPayload(payload, normalized, eventId))
+  console.info('[BILL FIELD TRACE]', {
+    event_id: eventId,
+    monthly_bill_amount: payload.monthly_bill_amount,
+    average_monthly_bill_raw: rawPayload.average_monthly_bill,
+    uploaded_bill_size_bytes: rawPayload.uploaded_bill_size_bytes,
+    separation: 'monthly_bill_amount is homeowner bill; uploaded_bill_size_bytes is file metadata only',
+  })
+  console.info('[UTILITY BILL METADATA]', {
+    event_id: eventId,
+    bill_metadata: payload.bill_metadata,
+    upload_transport: 'json_metadata_only_no_file_bytes',
+  })
   const validationResult = { errors: validation.errors, warnings: validation.warnings }
   const attribution = payload.attribution as Record<string, unknown> | undefined
 
@@ -232,6 +287,7 @@ export async function submitHomeownerIntakeEvent(rawPayload: Record<string, unkn
       gclid: cleanString(attribution?.gclid),
       fbclid: cleanString(attribution?.fbclid),
     })
+    console.info('[HOMEOWNER INTAKE PERSISTED]', { event_id: eventId, event_type: 'homeowner_intake', action: 'validation_failed', review_status: 'not_reviewable', opportunity_id: null })
     return { action: 'validation_failed', event_id: eventId, validation_errors: validation.errors, validation_warnings: validation.warnings, duration_ms: Date.now() - startedAt }
   }
 
@@ -264,6 +320,7 @@ export async function submitHomeownerIntakeEvent(rawPayload: Record<string, unkn
       gclid: normalized.gclid,
       fbclid: normalized.fbclid,
     })
+    console.info('[HOMEOWNER INTAKE PERSISTED]', { event_id: eventId, event_type: 'homeowner_intake', action: 'pending_review', review_status: 'pending_operator_review', opportunity_id: null })
     return { action: 'pending_review', event_id: eventId, validation_errors: [], validation_warnings: validation.warnings, duration_ms: Date.now() - startedAt }
   } catch (err) {
     console.error('[homeownerEventIntake] Failed to persist homeowner intake event:', err)

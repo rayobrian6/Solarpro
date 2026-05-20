@@ -247,6 +247,17 @@ describe("homeowner post-submit qualification intelligence", () => {
     );
   });
 
+
+  it("logs qualification submit and persisted stages for temporary audit tracing", () => {
+    const routeSource = fs.readFileSync(
+      path.join(process.cwd(), "app/api/intake/homeowner/qualification/route.ts"),
+      "utf8",
+    );
+    expect(routeSource).toContain("[QUALIFICATION SUBMIT]");
+    expect(routeSource).toContain("[QUALIFICATION PERSISTED]");
+    expect(routeSource).toContain("body.qualification && typeof body.qualification === 'object'");
+  });
+
   it("feeds qualification intelligence into opportunity scoring dimensions", () => {
     const intelligence = deriveQualificationIntelligence(
       {
@@ -340,6 +351,8 @@ describe("homeowner post-submit qualification intelligence", () => {
     expect(routeSource).toContain("estimated_credit_band");
     expect(routeSource).toContain("sunlight_confidence");
     expect(routeSource).toContain("property_type");
+    expect(routeSource).toContain("qualification_skipped");
+    expect(routeSource).toContain("qualification_event_id");
 
     const uiSource = fs.readFileSync(
       path.join(process.cwd(), "app/admin/network/page.tsx"),
@@ -352,6 +365,10 @@ describe("homeowner post-submit qualification intelligence", () => {
     expect(uiSource).toContain("['Finance Ready'");
     expect(uiSource).toContain("['Battery Ready'");
     expect(uiSource).toContain("Contractor Summary");
+    expect(uiSource).toContain("Purchase Intent");
+    expect(uiSource).toContain("Electrical Panel");
+    expect(uiSource).toContain("Prior Quotes");
+    expect(uiSource).toContain("Qualification Event ID");
   });
 
   it("contractor matcher reads canonical qualification projection without duplicate opportunity systems", () => {

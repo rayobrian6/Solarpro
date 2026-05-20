@@ -99,6 +99,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           'opportunity'::text AS intake_record_type,
           no.id::text AS opportunity_id,
           NULL::text AS event_id,
+          NULL::text AS event_type,
+          'converted_opportunity'::text AS review_status,
+          no.created_at AS received_at,
+          no.source_system::text AS source_funnel,
+          true AS ready_for_review,
+          '[]'::jsonb AS needs_missing_data,
+          false AS qualification_skipped,
+          false AS bill_attachment_metadata_only,
+          '[]'::jsonb AS validation_warning,
           no.status::text AS status,
           no.first_name,
           no.last_name,
@@ -178,6 +187,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           'intake_event'::text AS intake_record_type,
           NULL::text AS opportunity_id,
           ie.event_id,
+          ie.event_type::text AS event_type,
+          COALESCE(ie.pipeline_result->>'review_status', CASE WHEN ie.action = 'pending_review' THEN 'pending_operator_review' ELSE 'not_reviewable' END) AS review_status,
+          ie.occurred_at AS received_at,
+          COALESCE(ie.payload->>'funnel_slug', ie.event_source, ie.source_system)::text AS source_funnel,
+          (
+            ie.action = 'pending_review'
+            AND COALESCE(ie.payload->>'consent_given', 'false') = 'true'
+            AND COALESCE(ie.payload->>'phone', ie.payload->>'email', '') <> ''
+            AND COALESCE(ie.payload->>'address_line1', ie.payload->>'property_address', '') <> ''
+            AND COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill', '') <> ''
+          ) AS ready_for_review,
+          to_jsonb(array_remove(ARRAY[
+            CASE WHEN COALESCE(ie.payload->>'phone', ie.payload->>'email', '') = '' THEN 'contact' END,
+            CASE WHEN COALESCE(ie.payload->>'address_line1', ie.payload->>'property_address', '') = '' THEN 'property_address' END,
+            CASE WHEN COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill', '') = '' THEN 'average_monthly_bill' END,
+            CASE WHEN COALESCE(ie.payload->>'consent_given', 'false') <> 'true' THEN 'consent' END
+          ]::text[], NULL)) AS needs_missing_data,
+          (q.event_id IS NULL) AS qualification_skipped,
+          COALESCE((ie.payload->>'bill_attachment_metadata_only')::boolean, false) AS bill_attachment_metadata_only,
+          COALESCE(ie.validation_result->'warnings', '[]'::jsonb) AS validation_warning,
           CASE
             WHEN ie.action = 'pending_review' THEN 'pending_review'
             WHEN ie.action IN ('validation_failed', 'malformed', 'error') THEN ie.action
@@ -195,6 +224,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.source_channel,
           CASE
             WHEN COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill', '') ~ '^[0-9]+(\\.[0-9]+)?$'
+              AND COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill')::numeric BETWEEN 0 AND 10000
               THEN COALESCE(ie.payload->>'monthly_bill_amount', ie.payload->>'average_monthly_bill')::numeric
             ELSE NULL
           END AS monthly_bill_amount,
@@ -321,6 +351,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const opportunities = feedRows.map((row: Record<string, unknown>) => {
       const { __total, ...rest } = row;
       return rest;
+    });
+
+    console.info('[ADMIN INTAKE PROJECTION]', {
+      count: opportunities.length,
+      sample: opportunities.slice(0, 3).map((row: Record<string, unknown>) => ({
+        id: row.id,
+        event_id: row.event_id,
+        event_type: row.event_type,
+        review_status: row.review_status,
+        opportunity_id: row.opportunity_id ?? 'Not converted',
+        monthly_bill_amount: row.monthly_bill_amount,
+        bill_attachment_metadata_only: row.bill_attachment_metadata_only,
+        qualification_skipped: row.qualification_skipped,
+        ready_for_review: row.ready_for_review,
+      })),
     });
 
     stage = "stats_query";

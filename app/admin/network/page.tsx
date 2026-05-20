@@ -1119,6 +1119,15 @@ interface IntakeLead {
   intake_record_type?: string | null;
   opportunity_id?: string | null;
   event_id?: string | null;
+  event_type?: string | null;
+  review_status?: string | null;
+  received_at?: string | null;
+  source_funnel?: string | null;
+  ready_for_review?: boolean | null;
+  needs_missing_data?: string[] | null;
+  qualification_skipped?: boolean | null;
+  bill_attachment_metadata_only?: boolean | null;
+  validation_warning?: string[] | null;
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
@@ -1246,23 +1255,57 @@ function IntakeFeedSection() {
     if (typeof value === 'boolean') return value ? 'Yes' : 'No';
     if (typeof value === 'number') return String(value);
     if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.length ? value.join(', ') : 'None';
     return JSON.stringify(value);
   };
 
+  const billMetadataFor = (lead: IntakeLead) => {
+    const metadata = lead.bill_metadata ?? (typeof lead.intake_metadata?.bill_metadata === 'object' && lead.intake_metadata.bill_metadata !== null ? lead.intake_metadata.bill_metadata as Record<string, unknown> : null);
+    const filename = metadata?.filename ?? metadataText(lead, 'uploaded_bill_filename');
+    return {
+      filename,
+      sizeBytes: metadata?.size_bytes ?? metadataNumber(lead, 'uploaded_bill_size_bytes'),
+      contentType: metadata?.content_type ?? metadataText(lead, 'uploaded_bill_content_type'),
+      storageStatus: metadata?.storage_status ?? (filename ? 'metadata_only_not_uploaded' : 'not_provided'),
+    };
+  };
+
+  const reviewSignalsFor = (lead: IntakeLead): Array<[string, unknown]> => {
+    const warnings = lead.validation_warning ?? (Array.isArray(lead.intake_metadata?.validation_warning) ? lead.intake_metadata.validation_warning as string[] : []);
+    return [
+      ['Ready for Review', lead.ready_for_review],
+      ['Needs Missing Data', lead.needs_missing_data ?? []],
+      ['Qualification Skipped', lead.qualification_skipped],
+      ['Bill Attachment Metadata Only', lead.bill_attachment_metadata_only],
+      ['Validation Warning', warnings],
+    ];
+  };
+
+  const eventDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => [
+    ['Intake Event ID', lead.event_id ?? lead.id],
+    ['Event Type', lead.event_type ?? (lead.intake_record_type === 'intake_event' ? 'homeowner_intake' : 'converted_opportunity')],
+    ['Review Status', lead.review_status ?? lead.status ?? 'pending_review'],
+    ['Opportunity ID', lead.opportunity_id ?? 'Not converted'],
+    ['Received At', lead.received_at ?? lead.created_at],
+    ['Source / Funnel', lead.source_funnel ?? lead.intake_metadata?.funnel_slug ?? lead.source_system],
+  ];
+
   const formDetailsFor = (lead: IntakeLead): Array<[string, unknown]> => {
-    const billFile = lead.bill_metadata ?? (typeof lead.intake_metadata?.bill_metadata === 'object' && lead.intake_metadata.bill_metadata !== null ? lead.intake_metadata.bill_metadata as Record<string, unknown> : null);
+    const billFile = billMetadataFor(lead);
     const details: Array<[string, unknown]> = [
-      ['Utility', lead.utility_provider ?? metadataText(lead, 'utility_provider')],
-      ['Battery', lead.battery_interest ?? metadataText(lead, 'battery_interest')],
-      ['Homeowner', lead.homeowner_status ?? metadataText(lead, 'homeowner_status') ?? metadataText(lead, 'home_ownership')],
-      ['Contact Pref', lead.preferred_contact_method ?? metadataText(lead, 'preferred_contact_method')],
+      ['Utility Provider', lead.utility_provider ?? metadataText(lead, 'utility_provider')],
+      ['Average Monthly Bill', lead.monthly_bill_amount],
+      ['Battery Interest', lead.battery_interest ?? metadataText(lead, 'battery_interest')],
+      ['Homeowner Status', lead.homeowner_status ?? metadataText(lead, 'homeowner_status') ?? metadataText(lead, 'home_ownership')],
+      ['Preferred Contact', lead.preferred_contact_method ?? metadataText(lead, 'preferred_contact_method')],
       ['Timeline', lead.timeline ?? metadataText(lead, 'timeline')],
-      ['Roof Age', lead.roof_age ?? metadataText(lead, 'roof_age') ?? metadataText(lead, 'roof_age_years')],
-      ['Address', [lead.address_line1, lead.city, lead.state, lead.zip].filter(Boolean).join(', ')],
-      ['Bill File', billFile?.filename ?? metadataText(lead, 'uploaded_bill_filename')],
-      ['Bill Size', billFile?.size_bytes ?? metadataNumber(lead, 'uploaded_bill_size_bytes')],
+      ['Roof Age Years', lead.roof_age ?? metadataText(lead, 'roof_age') ?? metadataText(lead, 'roof_age_years')],
+      ['Property Address', [lead.address_line1, lead.city, lead.state, lead.zip].filter(Boolean).join(', ')],
+      ['Utility Bill Evidence', billFile.filename ? 'Metadata only — file was not uploaded/stored' : 'Not provided'],
+      ['Utility Bill Filename', billFile.filename],
+      ['Utility Bill File Size Bytes', billFile.sizeBytes],
+      ['Utility Bill MIME Type', billFile.contentType],
       ['Consent', lead.intake_metadata?.consent_given],
-      ['Event', lead.event_id ?? lead.id],
     ];
     return details.filter(([, value]) => value !== null && value !== undefined && value !== '');
   };
@@ -1283,6 +1326,9 @@ function IntakeFeedSection() {
       ['Estimated Credit', lead.estimated_credit_band ?? normalized.estimated_credit_band],
       ['Sunlight', lead.sunlight_confidence ?? normalized.sunlight_confidence],
       ['Property Type', lead.property_type ?? normalized.property_type],
+      ['Purchase Intent', lead.qualification_payload?.qualification && typeof lead.qualification_payload.qualification === 'object' ? (lead.qualification_payload.qualification as Record<string, unknown>).purchase_intent : normalized.purchase_intent],
+      ['Electrical Panel', lead.qualification_payload?.qualification && typeof lead.qualification_payload.qualification === 'object' ? (lead.qualification_payload.qualification as Record<string, unknown>).electrical_panel_size : normalized.electrical_panel_size],
+      ['Prior Quotes', lead.qualification_payload?.qualification && typeof lead.qualification_payload.qualification === 'object' ? (lead.qualification_payload.qualification as Record<string, unknown>).prior_quotes : normalized.prior_quotes],
     ];
     return details.filter(([, value]) => value !== null && value !== undefined && value !== '');
   };
@@ -1355,12 +1401,14 @@ function IntakeFeedSection() {
                 const qualificationDetails = qualificationDetailsFor(lead);
                 const contractorSummary = contractorSummaryFor(lead);
                 const notes = notesFor(lead);
+                const eventDetails = eventDetailsFor(lead);
+                const reviewSignals = reviewSignalsFor(lead);
                 return (
                   <Fragment key={lead.id}>
                     <tr className="hover:bg-zinc-800/30 transition-colors">
                       <td className="px-4 py-3">
                         <div className="font-medium text-white">{[lead.first_name, lead.last_name].filter(Boolean).join(' ') || <span className="text-zinc-600 italic">Anonymous</span>}</div>
-                        <div className="mt-1 text-[11px] text-zinc-500">{lead.status ?? 'pending_review'} · {lead.intake_record_type ?? 'intake'}</div>
+                        <div className="mt-1 text-[11px] text-zinc-500">{lead.review_status ?? lead.status ?? 'pending_review'} · {lead.event_type ?? lead.intake_record_type ?? 'intake'}</div>
                         {lead.is_duplicate && <span className="text-xs text-amber-400">⚠ dup {lead.duplicate_score ? `(${(lead.duplicate_score * 100).toFixed(0)}%)` : ''}</span>}
                       </td>
                       <td className="px-4 py-3"><div className="text-zinc-300 text-xs">{lead.email ?? '—'}</div><div className="text-zinc-500 text-xs">{lead.phone ?? ''}</div></td>
@@ -1375,7 +1423,23 @@ function IntakeFeedSection() {
                         <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
                           <div className="mb-2 flex items-center justify-between gap-3">
                             <div className="text-[11px] font-semibold uppercase tracking-wider text-orange-300">Submitted form payload</div>
-                            <div className="text-[10px] font-mono text-zinc-600">{lead.event_id ?? lead.id}</div>
+                            <div className="text-[10px] font-mono text-zinc-600">Intake Event ID: {lead.event_id ?? lead.id}</div>
+                          </div>
+                          <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                            {eventDetails.map(([label, value]) => (
+                              <div key={label} className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
+                                <div className="mt-1 break-words text-xs text-zinc-200">{payloadDisplay(value)}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="mb-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                            {reviewSignals.map(([label, value]) => (
+                              <div key={label} className="rounded-md border border-blue-900/40 bg-blue-950/20 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-wider text-blue-400">{label}</div>
+                                <div className="mt-1 break-words text-xs text-blue-100">{payloadDisplay(value)}</div>
+                              </div>
+                            ))}
                           </div>
                           {details.length > 0 ? (
                             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -1393,7 +1457,7 @@ function IntakeFeedSection() {
                             <div className="mt-3 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3">
                               <div className="mb-2 flex items-center justify-between gap-3">
                                 <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">Qualification intelligence</div>
-                                {lead.qualification_event_id && <div className="text-[10px] font-mono text-emerald-700">{lead.qualification_event_id}</div>}
+                                {lead.qualification_event_id ? <div className="text-[10px] font-mono text-emerald-700">Qualification Event ID: {lead.qualification_event_id}</div> : <div className="text-[10px] text-emerald-700">Qualification skipped / not submitted</div>}
                               </div>
                               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                                 {qualificationDetails.map(([label, value]) => (

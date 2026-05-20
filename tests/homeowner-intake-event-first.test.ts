@@ -54,7 +54,16 @@ function makeSql(opts: { failOn?: string; failError?: Error & { code?: string; c
       zip: '78701',
       source_system: 'homeowner_form',
       source_channel: 'web',
-      monthly_bill_amount: 240,
+      monthly_bill_amount: 350,
+      event_type: 'homeowner_intake',
+      review_status: 'pending_operator_review',
+      received_at: '2025-01-01T00:00:00Z',
+      source_funnel: 'free-solar-estimate',
+      ready_for_review: true,
+      needs_missing_data: [],
+      qualification_skipped: false,
+      bill_attachment_metadata_only: true,
+      validation_warning: [],
       enrichment_status: 'pending_review',
       qualification_event_id: 'qual_evt_homeowner_test',
       qualification_status: 'high_intent',
@@ -70,7 +79,7 @@ function makeSql(opts: { failOn?: string; failError?: Error & { code?: string; c
         lead_grade: 'A',
         finance_readiness: true,
         battery_readiness: true,
-        contractor_summary: 'A-Grade Opportunity\n\n• $240 utility bill',
+        contractor_summary: 'A-Grade Opportunity\n\n• $350 utility bill',
         normalized: {
           estimated_income_band: '100k_150k',
           estimated_credit_band: '680_719',
@@ -85,7 +94,7 @@ function makeSql(opts: { failOn?: string; failError?: Error & { code?: string; c
       preferred_contact_method: 'text',
       timeline: '1_3_months',
       roof_age: '8',
-      bill_metadata: { filename: 'bill.pdf', size_bytes: 1234, content_type: 'application/pdf' },
+      bill_metadata: { filename: 'bill.pdf', size_bytes: 71524, content_type: 'application/pdf', storage_status: 'metadata_only_not_uploaded', accessible_url: null },
       intake_metadata: {
         utility_provider: 'Austin Energy',
         battery_interest: 'yes',
@@ -94,6 +103,7 @@ function makeSql(opts: { failOn?: string; failError?: Error & { code?: string; c
         timeline: '1_3_months',
         roof_age: '8',
         notes: 'Homeowner notes: wants backup power',
+        bill_attachment_metadata_only: true,
       },
       created_at: '2025-01-01T00:00:00Z',
       __total: 1,
@@ -119,7 +129,8 @@ const validPayload = {
   city: 'Austin',
   state: 'TX',
   zip: '78701',
-  monthly_bill_amount: '240',
+  monthly_bill_amount: '350',
+  average_monthly_bill: '350',
   utility_provider: 'Austin Energy',
   battery_interest: 'yes',
   homeowner_status: 'own',
@@ -128,7 +139,7 @@ const validPayload = {
   timeline: '1_3_months',
   roof_age: '8',
   uploaded_bill_filename: 'bill.pdf',
-  uploaded_bill_size_bytes: 1234,
+  uploaded_bill_size_bytes: 71524,
   uploaded_bill_content_type: 'application/pdf',
   source_channel: 'web',
   funnel_slug: 'free-solar-estimate',
@@ -166,6 +177,18 @@ describe('homeowner intake event-first flow', () => {
     const insertIndex = sql.queries.findIndex((q: string) => q.includes('INSERT INTO intake_events'))
     const payloadJson = sql.values[insertIndex].find((v: unknown) => typeof v === 'string' && v.includes('canonical_review_flow')) as string
     expect(payloadJson).toContain('Austin Energy')
+    const parsedPayload = JSON.parse(payloadJson)
+    expect(parsedPayload.monthly_bill_amount).toBe(350)
+    expect(parsedPayload.average_monthly_bill).toBe('350')
+    expect(parsedPayload.bill_metadata).toMatchObject({
+      filename: 'bill.pdf',
+      size_bytes: 71524,
+      content_type: 'application/pdf',
+      storage_status: 'metadata_only_not_uploaded',
+      accessible_url: null,
+    })
+    expect(parsedPayload.bill_attachment_metadata_only).toBe(true)
+    expect(parsedPayload.monthly_bill_amount).not.toBe(parsedPayload.bill_metadata.size_bytes)
     expect(payloadJson).toContain('bill.pdf')
     expect(payloadJson).toContain('gclid-123')
     expect(sql.values[insertIndex]).toContain('pending_review')
@@ -222,7 +245,7 @@ describe('homeowner intake event-first flow', () => {
       estimated_credit_band: '680_719',
       sunlight_confidence: 'full_sun',
       property_type: 'single_family',
-      bill_metadata: { filename: 'bill.pdf' },
+      bill_metadata: { filename: 'bill.pdf', size_bytes: 71524, storage_status: 'metadata_only_not_uploaded' },
     })
     expect(json.opportunities[0].intake_metadata).toMatchObject({
       utility_provider: 'Austin Energy',
@@ -245,6 +268,11 @@ describe('homeowner intake event-first flow', () => {
     expect(feedQuery).toContain('qie.original_event_id = ie.event_id')
     expect(feedQuery).toContain('qualification_intelligence')
     expect(feedQuery).toContain('debug_visible')
+    expect(feedQuery).toContain('ready_for_review')
+    expect(feedQuery).toContain('needs_missing_data')
+    expect(feedQuery).toContain('qualification_skipped')
+    expect(feedQuery).toContain('bill_attachment_metadata_only')
+    expect(feedQuery).toContain('BETWEEN 0 AND 10000')
   })
 
   it('admin intake feed query uses canonical opportunity columns so event-first rows are not blocked by legacy schema names', async () => {
@@ -310,14 +338,35 @@ describe('homeowner intake event-first flow', () => {
     const section = source.slice(source.indexOf('function IntakeFeedSection()'), source.indexOf('// ── Enrichment Queue Section'))
     expect(section).toContain('Submitted form payload')
     expect(section).toContain('formDetailsFor')
-    expect(section).toContain("['Utility', lead.utility_provider")
-    expect(section).toContain("['Battery', lead.battery_interest")
-    expect(section).toContain("['Homeowner', lead.homeowner_status")
-    expect(section).toContain("['Contact Pref', lead.preferred_contact_method")
+    expect(section).toContain("['Utility Provider', lead.utility_provider")
+    expect(section).toContain("['Battery Interest', lead.battery_interest")
+    expect(section).toContain("['Homeowner Status', lead.homeowner_status")
+    expect(section).toContain("['Preferred Contact', lead.preferred_contact_method")
     expect(section).toContain("['Timeline', lead.timeline")
-    expect(section).toContain("['Roof Age', lead.roof_age")
+    expect(section).toContain("['Roof Age Years', lead.roof_age")
     expect(section).toContain('Operational Notes')
     expect(section).toContain("metadataText(lead, 'notes')")
     expect(section).toContain('bill_metadata')
+    expect(section).toContain('Average Monthly Bill')
+    expect(section).toContain('Utility Bill Evidence')
+    expect(section).toContain('Metadata only — file was not uploaded/stored')
+    expect(section).toContain('Utility Bill File Size Bytes')
+    expect(section).not.toContain("['Bill Size'")
+    expect(section).not.toContain('href={bill')
+  })
+
+  it('admin Intake Feed UI labels event review relationship and readiness signals', () => {
+    const source = fs.readFileSync(path.join(process.cwd(), 'app/admin/network/page.tsx'), 'utf8')
+    const section = source.slice(source.indexOf('function IntakeFeedSection()'), source.indexOf('// ── Enrichment Queue Section'))
+    expect(section).toContain('Intake Event ID')
+    expect(section).toContain('Event Type')
+    expect(section).toContain('Review Status')
+    expect(section).toContain('Opportunity ID')
+    expect(section).toContain('Not converted')
+    expect(section).toContain('Ready for Review')
+    expect(section).toContain('Needs Missing Data')
+    expect(section).toContain('Qualification Skipped')
+    expect(section).toContain('Bill Attachment Metadata Only')
+    expect(section).toContain('Validation Warning')
   })
 })
