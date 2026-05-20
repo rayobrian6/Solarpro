@@ -24,6 +24,21 @@ function postReq(body: unknown, init: RequestInit = {}): any {
   })
 }
 
+function multipartHomeownerReq(payload: Record<string, unknown>, file: File): any {
+  const formData = new FormData()
+  formData.append('payload', JSON.stringify(payload))
+  formData.append('utility_bill', file)
+  return new Request('https://solarpro.test/api/intake/homeowner', {
+    method: 'POST',
+    headers: { 'x-real-ip': `198.51.100.${Math.floor(Math.random() * 200) + 1}` },
+    body: formData,
+  })
+}
+
+function pdfUploadFile(name = 'utility bill.pdf'): File {
+  return new File([Buffer.from('%PDF-1.7\nmock utility bill\n%%EOF')], name, { type: 'application/pdf' })
+}
+
 function adminReq(url = 'https://solarpro.test/api/admin/network/intake?page=1&limit=25'): any {
   return new Request(url, { method: 'GET', headers: { cookie: 'solarpro_session=test' } })
 }
@@ -194,6 +209,51 @@ describe('homeowner intake event-first flow', () => {
     expect(sql.values[insertIndex]).toContain('pending_review')
     expect(sql.values[insertIndex]).toContain('google')
     expect(sql.values[insertIndex]).toContain('fbclid-123')
+  })
+
+
+  it('does not drop a homeowner intake when production bill storage is not configured', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
+    const sql = makeSql()
+    mockGetDbReady.mockResolvedValue(sql)
+    const { POST } = await importHomeownerRoute()
+
+    const res = await POST(multipartHomeownerReq(validPayload, pdfUploadFile('Braidon Bill.pdf')))
+
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json).toMatchObject({ success: true, opportunity_id: null, review_status: 'pending_operator_review' })
+    const insertIndex = sql.queries.findIndex((q: string) => q.includes('INSERT INTO intake_events'))
+    expect(insertIndex).toBeGreaterThan(-1)
+    const payloadJson = sql.values[insertIndex].find((v: unknown) => typeof v === 'string' && v.includes('canonical_review_flow')) as string
+    const parsedPayload = JSON.parse(payloadJson)
+    expect(parsedPayload.bill_attachment_metadata_only).toBe(true)
+    expect(parsedPayload.bill_metadata).toMatchObject({
+      filename: 'Braidon Bill.pdf',
+      content_type: 'application/pdf',
+      storage_status: 'metadata_only_not_uploaded',
+      accessible_url: null,
+      download_url: null,
+    })
+  })
+
+  it('still blocks unsupported utility bill files instead of silently accepting bad uploads', async () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
+    const sql = makeSql()
+    mockGetDbReady.mockResolvedValue(sql)
+    const { POST } = await importHomeownerRoute()
+
+    const res = await POST(multipartHomeownerReq(
+      validPayload,
+      new File(['not a supported bill'], 'Braidon Bill.fff', { type: 'application/octet-stream' }),
+    ))
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.error).toMatch(/Unsupported utility bill file type/)
+    expect(sql.queries.some((q: string) => q.includes('INSERT INTO intake_events'))).toBe(false)
   })
 
   it('records invalid homeowner payloads as validation_failed intake_events with clear public details', async () => {

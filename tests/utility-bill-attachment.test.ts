@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { metadataOnlyUtilityBill, storeUtilityBillAttachment } from '@/lib/intake/utilityBillAttachment'
+import { isUtilityBillStorageFailure, metadataOnlyUtilityBill, storeUtilityBillAttachment } from '@/lib/intake/utilityBillAttachment'
 
 const originalCwd = process.cwd()
 let tempDir: string | null = null
@@ -58,24 +58,34 @@ describe('utility bill attachment storage', () => {
     expect(existsSync(join(tempDir, stored.storage_key))).toBe(true)
   })
 
-  it('fails fast in production when Blob storage is not configured instead of writing to the deployment filesystem', async () => {
+  it('classifies production no-Blob failures as recoverable storage failures instead of writing to the deployment filesystem', async () => {
     vi.stubEnv('NODE_ENV', 'production')
     vi.stubEnv('BLOB_READ_WRITE_TOKEN', '')
 
-    await expect(
-      storeUtilityBillAttachment(pdfFile(), {
+    try {
+      await storeUtilityBillAttachment(pdfFile(), {
         eventId: 'evt_homeowner_test',
         funnelSlug: 'free-solar-estimate',
-      }),
-    ).rejects.toThrow(/BLOB_READ_WRITE_TOKEN/)
+      })
+      throw new Error('expected storage failure')
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error)
+      expect((err as Error).message).toMatch(/BLOB_READ_WRITE_TOKEN/)
+      expect(isUtilityBillStorageFailure(err)).toBe(true)
+    }
   })
 
-  it('rejects spoofed files before storage', async () => {
-    await expect(
-      storeUtilityBillAttachment(new File(['not a pdf'], 'bill.pdf', { type: 'application/pdf' }), {
+  it('rejects spoofed files before storage and does not classify them as storage failures', async () => {
+    try {
+      await storeUtilityBillAttachment(new File(['not a pdf'], 'bill.pdf', { type: 'application/pdf' }), {
         eventId: 'evt_homeowner_test',
         funnelSlug: 'free-solar-estimate',
-      }),
-    ).rejects.toThrow(/does not match/)
+      })
+      throw new Error('expected validation failure')
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error)
+      expect((err as Error).message).toMatch(/does not match/)
+      expect(isUtilityBillStorageFailure(err)).toBe(false)
+    }
   })
 })

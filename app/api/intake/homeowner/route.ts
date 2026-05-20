@@ -24,6 +24,7 @@ import {
   submitHomeownerIntakeEvent,
 } from '@/lib/intake/homeownerEventIntake';
 import {
+  isUtilityBillStorageFailure,
   metadataOnlyUtilityBill,
   storeUtilityBillAttachment,
 } from '@/lib/intake/utilityBillAttachment';
@@ -181,20 +182,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       body.uploaded_bill_content_type = billFile.type || 'application/octet-stream';
       if (fallbackMetadata) body.bill_metadata = fallbackMetadata;
       body.bill_attachment_metadata_only = true;
+      const message = err instanceof Error ? err.message : String(err);
       console.error('[ATTACHMENT STORAGE FAILED]', {
         event_id: eventId,
         filename: billFile.name,
         size_bytes: billFile.size,
         content_type: billFile.type || null,
-        message: err instanceof Error ? err.message : String(err),
+        recoverable: isUtilityBillStorageFailure(err),
+        message,
       });
-      return NextResponse.json(
-        {
-          error: err instanceof Error ? err.message : 'Utility bill upload failed. Please try again without the file or upload a supported PDF/image.',
-          event_id: eventId,
-        },
-        { status: 400 },
-      );
+
+      if (!isUtilityBillStorageFailure(err)) {
+        return NextResponse.json(
+          {
+            error: message || 'Utility bill upload failed. Please try again without the file or upload a supported PDF/image.',
+            event_id: eventId,
+          },
+          { status: 400 },
+        );
+      }
     }
   }
 

@@ -23,6 +23,33 @@ const MIME_EXTENSION: Record<string, string> = {
   "image/bmp": "bmp",
 };
 
+type UtilityBillAttachmentErrorCode =
+  | "unsupported_type"
+  | "empty_file"
+  | "too_large"
+  | "content_type_mismatch"
+  | "storage_unconfigured"
+  | "storage_failed";
+
+export class UtilityBillAttachmentError extends Error {
+  code: UtilityBillAttachmentErrorCode;
+
+  constructor(code: UtilityBillAttachmentErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "UtilityBillAttachmentError";
+    this.code = code;
+    if (options && "cause" in options) {
+      this.cause = options.cause;
+    }
+  }
+}
+
+export function isUtilityBillStorageFailure(err: unknown): boolean {
+  return err instanceof UtilityBillAttachmentError && (
+    err.code === "storage_unconfigured" || err.code === "storage_failed"
+  );
+}
+
 export interface StoredUtilityBillAttachment {
   filename: string;
   size_bytes: number;
@@ -98,20 +125,29 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
   });
 
   if (!ALLOWED_UTILITY_BILL_MIME_TYPES.has(mimeType)) {
-    throw new Error("Unsupported utility bill file type. Upload a PDF or image file.");
+    throw new UtilityBillAttachmentError(
+      "unsupported_type",
+      "Unsupported utility bill file type. Upload a PDF or image file.",
+    );
   }
   if (file.size <= 0) {
-    throw new Error("Utility bill file is empty.");
+    throw new UtilityBillAttachmentError("empty_file", "Utility bill file is empty.");
   }
   if (file.size > MAX_UTILITY_BILL_BYTES) {
-    throw new Error("Utility bill file is too large. Maximum size is 10MB.");
+    throw new UtilityBillAttachmentError(
+      "too_large",
+      "Utility bill file is too large. Maximum size is 10MB.",
+    );
   }
 
   const arrayBuffer = await file.arrayBuffer();
   const bytes = Buffer.from(arrayBuffer);
   const header = new Uint8Array(arrayBuffer, 0, Math.min(12, arrayBuffer.byteLength));
   if (!hasMagicBytes(header, mimeType)) {
-    throw new Error("Utility bill file content does not match the declared file type.");
+    throw new UtilityBillAttachmentError(
+      "content_type_mismatch",
+      "Utility bill file content does not match the declared file type.",
+    );
   }
 
   const uploadedAt = new Date().toISOString();
@@ -123,12 +159,21 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
   const allowLocalFallback = process.env.NODE_ENV !== "production";
 
   if (blobToken) {
-    const { put } = await import("@vercel/blob");
-    const blob = await put(storageKey, bytes, {
-      access: "public",
-      contentType: mimeType,
-      token: blobToken,
-    });
+    let blob: { url: string; downloadUrl?: string | null };
+    try {
+      const { put } = await import("@vercel/blob");
+      blob = await put(storageKey, bytes, {
+        access: "public",
+        contentType: mimeType,
+        token: blobToken,
+      });
+    } catch (err) {
+      throw new UtilityBillAttachmentError(
+        "storage_failed",
+        "Utility bill upload storage is temporarily unavailable.",
+        { cause: err },
+      );
+    }
     const stored = {
       filename: file.name,
       size_bytes: file.size,
@@ -151,15 +196,32 @@ export async function storeUtilityBillAttachment(file: File, input: { eventId: s
   }
 
   if (!allowLocalFallback) {
-    throw new Error(
+    throw new UtilityBillAttachmentError(
+      "storage_unconfigured",
       "Utility bill upload storage is not configured. Set BLOB_READ_WRITE_TOKEN for production uploads.",
     );
   }
 
   const uploadsDir = join(process.cwd(), "public", "uploads", "intake", "utility-bills", funnel, input.eventId);
-  await mkdir(uploadsDir, { recursive: true });
+  try {
+    await mkdir(uploadsDir, { recursive: true });
+  } catch (err) {
+    throw new UtilityBillAttachmentError(
+      "storage_failed",
+      "Utility bill upload storage is temporarily unavailable.",
+      { cause: err },
+    );
+  }
   const localFileName = `${Date.now()}-${randomUUID()}-${safeName}.${ext}`;
-  await writeFile(join(uploadsDir, localFileName), bytes);
+  try {
+    await writeFile(join(uploadsDir, localFileName), bytes);
+  } catch (err) {
+    throw new UtilityBillAttachmentError(
+      "storage_failed",
+      "Utility bill upload storage is temporarily unavailable.",
+      { cause: err },
+    );
+  }
   const publicUrl = `/uploads/intake/utility-bills/${funnel}/${input.eventId}/${localFileName}`;
   const stored = {
     filename: file.name,
