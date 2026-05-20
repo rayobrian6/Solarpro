@@ -71,7 +71,7 @@ const assignedOpportunity = {
   ahj_name: null,
   equipment_ecosystem: null,
   asking_price: 500,
-  listing_notes: null,
+  listing_notes: "Released contractor-facing notes",
   expires_at: "2099-01-01T00:00:00Z",
   created_at: "2026-01-01T00:00:00Z",
   creator_company: "SolarPro",
@@ -328,6 +328,7 @@ describe("contractor network assignment visibility", () => {
         id: OPP_ID,
         city: "Austin",
         state_code: "TX",
+        listing_notes: "Released contractor-facing notes",
         marketplace_status: "live",
         claim_mode: expect.anything(),
       }),
@@ -343,6 +344,7 @@ describe("contractor network assignment visibility", () => {
           q.includes("FROM network_opportunities no") &&
           q.includes("COALESCE(no.marketplace_status, 'not_released') = 'live"),
       ) ?? "";
+    expect(canonicalQuery).toContain("COALESCE(no.listing_notes, no.screening_notes) AS listing_notes");
     expect(canonicalQuery).toContain("no.status = 'live'");
     expect(canonicalQuery).toContain("COALESCE(no.claim_count, 0) < GREATEST");
     expect(canonicalQuery).toContain("NOT EXISTS");
@@ -353,6 +355,7 @@ describe("contractor network assignment visibility", () => {
 
   it("filters ineligible canonical marketplace inventory out of Discover", async () => {
     const sql = makeSql({ canonicalRows: [assignedOpportunity, ineligibleOpportunity] });
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
     mockGetDbReady.mockResolvedValueOnce(sql);
     const { GET } = await import("@/app/api/network/opportunities/route");
 
@@ -367,6 +370,15 @@ describe("contractor network assignment visibility", () => {
       contractorId: USER_ID,
       opportunityId: INELIGIBLE_OPP_ID,
     });
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[MARKETPLACE VISIBILITY DENIED]",
+      expect.objectContaining({
+        id: INELIGIBLE_OPP_ID,
+        contractor_id: USER_ID,
+        denials: ["battery_certification_required"],
+      }),
+    );
+    infoSpy.mockRestore();
   });
 
   it("claims an assigned network opportunity through the existing contractor claim endpoint", async () => {

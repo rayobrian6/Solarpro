@@ -118,7 +118,7 @@ export async function GET(req: NextRequest) {
         no.ahj_name,
         NULL::text AS equipment_ecosystem,
         no.asking_price,
-        no.screening_notes AS listing_notes,
+        COALESCE(no.listing_notes, no.screening_notes) AS listing_notes,
         no.expires_at,
         no.created_at,
         'SolarPro'::text AS creator_company,
@@ -204,7 +204,23 @@ export async function GET(req: NextRequest) {
         contractorId: user.id,
         opportunityId: String(row.id),
       });
-      if (!eligibility.eligible) continue;
+      if (!eligibility.eligible) {
+        console.info("[MARKETPLACE VISIBILITY DENIED]", {
+          id: row.id,
+          contractor_id: user.id,
+          denials: eligibility.denials,
+          reasons: eligibility.reasons,
+          warnings: eligibility.warnings,
+          claim_state: eligibility.claim_state,
+          release_gate_result: eligibility.release_gate_result,
+          status: row.marketplace_lifecycle_status,
+          marketplace_status: row.marketplace_status,
+          screening_status: row.marketplace_screening_status,
+          auto_decision: row.marketplace_auto_decision,
+          override_decision: row.marketplace_override_decision,
+        });
+        continue;
+      }
       eligibleCanonicalRows.push({
         ...row,
         eligibility_summary: {
