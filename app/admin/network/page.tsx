@@ -1512,7 +1512,9 @@ function IntakeFeedSection() {
                                     </a>
                                   </div>
                                 ) : (
-                                  <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-2.5 py-1 text-[11px] text-zinc-400">Missing stored file — metadata only</div>
+                                  <div className="max-w-sm rounded-md border border-amber-900/50 bg-zinc-950/70 px-2.5 py-1 text-[11px] leading-5 text-amber-100">
+                                    No retrievable bill file is available for this intake. The homeowner selected a file, but storage only captured metadata. Configure BLOB_READ_WRITE_TOKEN so future bill uploads create Open Bill / Download Bill links.
+                                  </div>
                                 )}
                               </div>
                               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
