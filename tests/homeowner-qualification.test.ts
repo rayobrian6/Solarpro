@@ -247,15 +247,19 @@ describe("homeowner post-submit qualification intelligence", () => {
     );
   });
 
-
   it("logs qualification submit and persisted stages for temporary audit tracing", () => {
     const routeSource = fs.readFileSync(
-      path.join(process.cwd(), "app/api/intake/homeowner/qualification/route.ts"),
+      path.join(
+        process.cwd(),
+        "app/api/intake/homeowner/qualification/route.ts",
+      ),
       "utf8",
     );
     expect(routeSource).toContain("[QUALIFICATION SUBMIT]");
     expect(routeSource).toContain("[QUALIFICATION PERSISTED]");
-    expect(routeSource).toContain("body.qualification && typeof body.qualification === 'object'");
+    expect(routeSource).toContain(
+      "body.qualification && typeof body.qualification === 'object'",
+    );
   });
 
   it("feeds qualification intelligence into opportunity scoring dimensions", () => {
@@ -360,10 +364,10 @@ describe("homeowner post-submit qualification intelligence", () => {
     );
     expect(uiSource).toContain("Qualification intelligence");
     expect(uiSource).toContain("qualificationDetailsFor");
-    expect(uiSource).toContain("['Qualification Status'");
-    expect(uiSource).toContain("['Lead Grade'");
-    expect(uiSource).toContain("['Finance Ready'");
-    expect(uiSource).toContain("['Battery Ready'");
+    expect(uiSource).toContain("Qualification Status");
+    expect(uiSource).toContain("Lead Grade");
+    expect(uiSource).toContain("Finance Ready");
+    expect(uiSource).toContain("Battery Ready");
     expect(uiSource).toContain("Contractor Summary");
     expect(uiSource).toContain("Purchase Intent");
     expect(uiSource).toContain("Electrical Panel");

@@ -47,6 +47,24 @@ export interface OperationalState {
   last_reviewed_at?: string | null;
   release_readiness?: ReleaseReadiness;
   action_history?: Array<Record<string, unknown>>;
+  follow_up_at?: string | null;
+  callback_reason?: string | null;
+  next_step?: string | null;
+  contact_method?: string | null;
+  reached_homeowner?: boolean | null;
+  voicemail_left?: boolean | null;
+  financing_path?: string | null;
+  credit_band?: string | null;
+  income_band?: string | null;
+  financing_notes?: string | null;
+  qualification_reason?: string | null;
+  operator_confidence?: string | null;
+  missing_items_resolved?: boolean | null;
+  final_approval_note?: string | null;
+  contractor_facing_notes?: string | null;
+  rejection_reason?: string | null;
+  archive_reason?: string | null;
+  is_test_lead?: boolean;
 }
 
 export interface ReleaseReadiness {
@@ -58,6 +76,35 @@ export interface ReleaseReadiness {
   approved_for_marketplace: boolean;
   ready: boolean;
   missing: string[];
+}
+
+export const LEAD_OPS_QUEUES = [
+  "new_intake",
+  "needs_first_contact",
+  "no_answer_retry",
+  "needs_callback",
+  "qualification_review",
+  "financing_review",
+  "missing_documents",
+  "marketplace_ready",
+  "released",
+  "rejected",
+  "archived",
+] as const;
+
+export type LeadOpsQueue = (typeof LEAD_OPS_QUEUES)[number];
+
+export interface LeadOpsSummary {
+  current_queue: LeadOpsQueue;
+  next_action: string;
+  next_follow_up_at: string | null;
+  assigned_operator: string | null;
+  last_contacted_at: string | null;
+  contact_attempt_count: number;
+  last_operator_action: string | null;
+  release_readiness: ReleaseReadiness | null;
+  financing_status: string;
+  qualification_status: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -131,37 +178,111 @@ export function stateFromPipelineResult(
     action_history: Array.isArray(operational.action_history)
       ? (operational.action_history as Array<Record<string, unknown>>)
       : [],
+    follow_up_at: str(operational.follow_up_at),
+    callback_reason: str(operational.callback_reason),
+    next_step: str(operational.next_step),
+    contact_method: str(operational.contact_method),
+    reached_homeowner:
+      operational.reached_homeowner === null ||
+      operational.reached_homeowner === undefined
+        ? null
+        : bool(operational.reached_homeowner),
+    voicemail_left:
+      operational.voicemail_left === null ||
+      operational.voicemail_left === undefined
+        ? null
+        : bool(operational.voicemail_left),
+    financing_path: str(operational.financing_path),
+    credit_band: str(operational.credit_band),
+    income_band: str(operational.income_band),
+    financing_notes: str(operational.financing_notes),
+    qualification_reason: str(operational.qualification_reason),
+    operator_confidence: str(operational.operator_confidence),
+    missing_items_resolved:
+      operational.missing_items_resolved === null ||
+      operational.missing_items_resolved === undefined
+        ? null
+        : bool(operational.missing_items_resolved),
+    final_approval_note: str(operational.final_approval_note),
+    contractor_facing_notes: str(operational.contractor_facing_notes),
+    rejection_reason: str(operational.rejection_reason),
+    archive_reason: str(operational.archive_reason),
+    is_test_lead: bool(operational.is_test_lead),
   };
 }
 
 export function applyOperatorReviewAction(
   current: OperationalState,
   action: OperatorReviewAction,
-  options: { adminId: string; notes?: string | null; occurredAt?: string },
+  options: {
+    adminId: string;
+    notes?: string | null;
+    occurredAt?: string;
+    details?: Record<string, unknown>;
+  },
 ): OperationalState {
   const occurredAt = options.occurredAt ?? new Date().toISOString();
+  const details = isRecord(options.details) ? options.details : {};
+  const previousStatus = current.review_status;
+  const note = options.notes?.trim() || null;
+  const detailString = (key: string) => str(details[key]);
+  const detailBool = (key: string): boolean | null =>
+    details[key] === null || details[key] === undefined
+      ? null
+      : bool(details[key]);
   const next: OperationalState = {
     ...current,
-    operator_notes: options.notes?.trim() || current.operator_notes || null,
+    operator_notes: note || current.operator_notes || null,
     last_review_action: action,
     last_reviewed_by: options.adminId,
     last_reviewed_at: occurredAt,
-    action_history: [
-      ...(Array.isArray(current.action_history) ? current.action_history : []),
-      {
-        action,
-        reviewed_by: options.adminId,
-        reviewed_at: occurredAt,
-        notes: options.notes?.trim() || null,
-      },
-    ].slice(-50),
   };
+
+  const followUpAt =
+    detailString("follow_up_at") ?? detailString("requested_callback_at");
+  if (followUpAt) next.follow_up_at = followUpAt;
+  if (detailString("contact_method"))
+    next.contact_method = detailString("contact_method");
+  if (detailBool("reached_homeowner") !== null)
+    next.reached_homeowner = detailBool("reached_homeowner");
+  if (detailBool("voicemail_left") !== null)
+    next.voicemail_left = detailBool("voicemail_left");
+  if (detailString("next_step")) next.next_step = detailString("next_step");
+  if (detailString("callback_reason"))
+    next.callback_reason = detailString("callback_reason");
+  if (detailString("financing_path"))
+    next.financing_path = detailString("financing_path");
+  if (detailString("credit_band"))
+    next.credit_band = detailString("credit_band");
+  if (detailString("income_band"))
+    next.income_band = detailString("income_band");
+  if (detailString("financing_notes"))
+    next.financing_notes = detailString("financing_notes");
+  if (detailString("qualification_reason"))
+    next.qualification_reason = detailString("qualification_reason");
+  if (detailString("operator_confidence"))
+    next.operator_confidence = detailString("operator_confidence");
+  if (detailBool("missing_items_resolved") !== null)
+    next.missing_items_resolved = detailBool("missing_items_resolved");
+  if (detailString("final_approval_note"))
+    next.final_approval_note = detailString("final_approval_note");
+  if (detailString("contractor_facing_notes"))
+    next.contractor_facing_notes = detailString("contractor_facing_notes");
+  if (detailString("rejection_reason"))
+    next.rejection_reason = detailString("rejection_reason");
+  if (detailString("archive_reason"))
+    next.archive_reason = detailString("archive_reason");
+  if (detailBool("is_test_lead") !== null)
+    next.is_test_lead = detailBool("is_test_lead") ?? false;
 
   if (action === "mark_contacted") {
     next.lifecycle_status = "operator_contacted";
-    next.review_status = "operator_contacted";
+    next.review_status =
+      next.reached_homeowner === false
+        ? "contact_attempted"
+        : "operator_contacted";
     next.contacted = true;
-    next.needs_follow_up = false;
+    next.needs_follow_up = !!next.follow_up_at;
     next.last_contact_timestamp = occurredAt;
   } else if (action === "mark_no_answer") {
     next.lifecycle_status = "operator_contacted";
@@ -189,7 +310,9 @@ export function applyOperatorReviewAction(
     next.financing_ready = true;
   } else if (action === "mark_needs_follow_up") {
     next.lifecycle_status = "qualification_in_progress";
-    next.review_status = "needs_follow_up";
+    next.review_status = next.callback_reason
+      ? "needs_callback"
+      : "needs_follow_up";
     next.needs_follow_up = true;
   } else if (action === "approve_for_marketplace") {
     next.lifecycle_status = "ready_for_marketplace";
@@ -210,6 +333,36 @@ export function applyOperatorReviewAction(
     next.archived = true;
     next.approved_for_marketplace = false;
   }
+
+  next.action_history = [
+    ...(Array.isArray(current.action_history) ? current.action_history : []),
+    {
+      action,
+      reviewed_by: options.adminId,
+      reviewed_at: occurredAt,
+      previous_status: previousStatus,
+      next_status: next.review_status,
+      notes: note,
+      follow_up_at: next.follow_up_at ?? null,
+      contact_method: next.contact_method ?? null,
+      reached_homeowner: next.reached_homeowner ?? null,
+      voicemail_left: next.voicemail_left ?? null,
+      next_step: next.next_step ?? null,
+      callback_reason: next.callback_reason ?? null,
+      financing_path: next.financing_path ?? null,
+      credit_band: next.credit_band ?? null,
+      income_band: next.income_band ?? null,
+      financing_notes: next.financing_notes ?? null,
+      qualification_reason: next.qualification_reason ?? null,
+      operator_confidence: next.operator_confidence ?? null,
+      missing_items_resolved: next.missing_items_resolved ?? null,
+      final_approval_note: next.final_approval_note ?? null,
+      contractor_facing_notes: next.contractor_facing_notes ?? null,
+      rejection_reason: next.rejection_reason ?? null,
+      archive_reason: next.archive_reason ?? null,
+      is_test_lead: next.is_test_lead ?? false,
+    },
+  ].slice(-50);
 
   return next;
 }
@@ -292,6 +445,110 @@ export function deriveReleaseReadiness(input: {
       missing.length === 0 &&
       (Object.keys(screening).length === 0 || screeningApproved),
     missing,
+  };
+}
+
+export function deriveLeadOpsSummary(input: {
+  operational?: unknown;
+  reviewStatus?: unknown;
+  readyForReview?: unknown;
+  qualificationCompleteness?: unknown;
+  attachmentCompleteness?: unknown;
+  releaseReadiness?: ReleaseReadiness | null;
+}): LeadOpsSummary {
+  const operational = stateFromPipelineResult({
+    operational: input.operational,
+  });
+  const reviewStatus = str(input.reviewStatus) ?? operational.review_status;
+  const qualificationCompleteness =
+    str(input.qualificationCompleteness) ?? "missing";
+  const attachmentCompleteness = str(input.attachmentCompleteness) ?? "missing";
+  const releaseReadiness =
+    input.releaseReadiness ?? operational.release_readiness ?? null;
+  const readyForReview = bool(input.readyForReview);
+
+  let current_queue: LeadOpsQueue = "new_intake";
+  let next_action = "Review intake and confirm contact information";
+
+  if (operational.archived || reviewStatus === "archived") {
+    current_queue = "archived";
+    next_action = "No action — soft archived";
+  } else if (
+    operational.rejected ||
+    operational.bad_lead ||
+    ["rejected", "bad_lead"].includes(reviewStatus)
+  ) {
+    current_queue = "rejected";
+    next_action = "No action — rejected";
+  } else if (
+    operational.lifecycle_status === "marketplace_live" ||
+    reviewStatus === "marketplace_live"
+  ) {
+    current_queue = "released";
+    next_action = "Monitor marketplace claim activity";
+  } else if (
+    operational.approved_for_marketplace ||
+    operational.lifecycle_status === "ready_for_marketplace" ||
+    reviewStatus === "approved_for_marketplace"
+  ) {
+    current_queue = "marketplace_ready";
+    next_action = releaseReadiness?.ready
+      ? "Release through marketplace gate"
+      : "Resolve release readiness gaps";
+  } else if (
+    operational.needs_follow_up &&
+    (operational.callback_reason || reviewStatus === "needs_callback")
+  ) {
+    current_queue = "needs_callback";
+    next_action = "Call homeowner at scheduled callback time";
+  } else if (reviewStatus === "no_answer") {
+    current_queue = "no_answer_retry";
+    next_action = "Retry contact attempt";
+  } else if (!operational.contacted && readyForReview) {
+    current_queue = "needs_first_contact";
+    next_action = "Make first contact attempt";
+  } else if (attachmentCompleteness !== "complete") {
+    current_queue = "missing_documents";
+    next_action = "Review or waive utility bill evidence";
+  } else if (
+    qualificationCompleteness !== "complete" ||
+    operational.lifecycle_status === "qualification_in_progress"
+  ) {
+    current_queue = "qualification_review";
+    next_action = "Complete qualification review";
+  } else if (!operational.financing_ready) {
+    current_queue = "financing_review";
+    next_action = "Review financing readiness";
+  } else if (!operational.contacted) {
+    current_queue = "new_intake";
+    next_action = "Triage new intake";
+  } else {
+    current_queue = "qualification_review";
+    next_action = "Advance lead qualification";
+  }
+
+  const financing_status = operational.financing_ready
+    ? "financing_ready"
+    : operational.financing_path
+      ? "financing_reviewed"
+      : "needs_financing_review";
+  const qualification_status = operational.qualified
+    ? "qualified"
+    : qualificationCompleteness === "complete"
+      ? "needs_operator_qualification"
+      : "missing_qualification";
+
+  return {
+    current_queue,
+    next_action,
+    next_follow_up_at: operational.follow_up_at ?? null,
+    assigned_operator: operational.last_reviewed_by ?? null,
+    last_contacted_at: operational.last_contact_timestamp ?? null,
+    contact_attempt_count: operational.no_answer_count ?? 0,
+    last_operator_action: operational.last_review_action ?? null,
+    release_readiness: releaseReadiness,
+    financing_status,
+    qualification_status,
   };
 }
 
