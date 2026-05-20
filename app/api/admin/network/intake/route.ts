@@ -28,6 +28,7 @@ import { requireAdminApi } from "@/lib/adminAuth";
 import { randomUUID } from "crypto";
 import {
   applyOperatorReviewAction,
+  deriveLeadOpsSummary,
   deriveReleaseReadiness,
   isOperatorReviewAction,
   operationalIntelligence,
@@ -71,6 +72,100 @@ function intakeFeedError(stage: IntakeFeedStage, error: unknown) {
     },
     { status: 500 },
   );
+}
+
+function bodyString(
+  body: Record<string, unknown>,
+  key: string,
+  max = 2000,
+): string | null {
+  const value = body[key];
+  return typeof value === "string" && value.trim()
+    ? value.trim().slice(0, max)
+    : null;
+}
+
+function bodyBoolean(
+  body: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  const value = body[key];
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.toLowerCase();
+    if (["true", "yes", "1", "on"].includes(normalized)) return true;
+    if (["false", "no", "0", "off"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function sanitizeOperatorDetails(
+  body: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    contact_method: bodyString(body, "contact_method", 80),
+    reached_homeowner: bodyBoolean(body, "reached_homeowner"),
+    voicemail_left: bodyBoolean(body, "voicemail_left"),
+    next_step: bodyString(body, "next_step", 500),
+    follow_up_at: bodyString(body, "follow_up_at", 80),
+    requested_callback_at: bodyString(body, "requested_callback_at", 80),
+    callback_reason: bodyString(body, "callback_reason", 500),
+    financing_path: bodyString(body, "financing_path", 120),
+    credit_band: bodyString(body, "credit_band", 120),
+    income_band: bodyString(body, "income_band", 120),
+    financing_notes: bodyString(body, "financing_notes", 2000),
+    qualification_reason: bodyString(body, "qualification_reason", 1000),
+    operator_confidence: bodyString(body, "operator_confidence", 80),
+    missing_items_resolved: bodyBoolean(body, "missing_items_resolved"),
+    final_approval_note: bodyString(body, "final_approval_note", 2000),
+    contractor_facing_notes: bodyString(body, "contractor_facing_notes", 2000),
+    rejection_reason: bodyString(body, "rejection_reason", 500),
+    archive_reason: bodyString(body, "archive_reason", 500),
+    is_test_lead: bodyBoolean(body, "is_test_lead"),
+    utility_bill_review: bodyString(body, "utility_bill_review", 120),
+    release_checklist:
+      body.release_checklist && typeof body.release_checklist === "object"
+        ? body.release_checklist
+        : null,
+  };
+}
+
+function requiredOperatorFields(
+  action: unknown,
+  details: Record<string, unknown>,
+  notes: string | null,
+): string[] {
+  const missing: string[] = [];
+  const has = (key: string) =>
+    typeof details[key] === "string" && !!String(details[key]).trim();
+  if (action === "mark_no_answer") {
+    if (!has("contact_method")) missing.push("contact_method");
+    if (!has("follow_up_at") && !has("requested_callback_at"))
+      missing.push("follow_up_at");
+  }
+  if (action === "mark_needs_follow_up") {
+    if (!has("follow_up_at") && !has("requested_callback_at"))
+      missing.push("requested_callback_at");
+    if (!has("callback_reason")) missing.push("callback_reason");
+  }
+  if (action === "mark_financing_ready") {
+    if (!has("financing_path")) missing.push("financing_path");
+  }
+  if (action === "mark_qualified") {
+    if (!has("qualification_reason")) missing.push("qualification_reason");
+    if (!has("operator_confidence")) missing.push("operator_confidence");
+  }
+  if (action === "approve_for_marketplace") {
+    if (!has("final_approval_note") && !notes)
+      missing.push("final_approval_note");
+  }
+  if (action === "reject_lead") {
+    if (!has("rejection_reason")) missing.push("rejection_reason");
+  }
+  if (action === "archive_lead") {
+    if (!has("archive_reason")) missing.push("archive_reason");
+  }
+  return missing;
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -376,8 +471,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         validation: rest.validation_result,
         receivedAt: rest.received_at ?? rest.created_at,
       });
-      const billMetadata = rest.bill_metadata && typeof rest.bill_metadata === "object" ? rest.bill_metadata as Record<string, unknown> : {};
-      const qualificationPayload = rest.qualification_payload && typeof rest.qualification_payload === "object" ? rest.qualification_payload as Record<string, unknown> : {};
+      const billMetadata =
+        rest.bill_metadata && typeof rest.bill_metadata === "object"
+          ? (rest.bill_metadata as Record<string, unknown>)
+          : {};
+      const qualificationPayload =
+        rest.qualification_payload &&
+        typeof rest.qualification_payload === "object"
+          ? (rest.qualification_payload as Record<string, unknown>)
+          : {};
+      const attachmentCompleteness =
+        billMetadata.storage_status === "stored"
+          ? "complete"
+          : billMetadata.filename
+            ? "metadata_only"
+            : "missing";
+      const qualificationCompleteness =
+        Object.keys(qualificationPayload).length > 0 ? "complete" : "missing";
+      const leadOpsSummary = deriveLeadOpsSummary({
+        operational,
+        reviewStatus: rest.review_status,
+        readyForReview: rest.ready_for_review,
+        qualificationCompleteness,
+        attachmentCompleteness,
+        releaseReadiness: intelligence.release_readiness as any,
+      });
       return {
         ...rest,
         operational_lifecycle_status: operational.lifecycle_status,
@@ -391,11 +509,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         operator_notes: intelligence.operator_notes,
         last_contact_timestamp: intelligence.last_contact_timestamp,
         release_readiness: intelligence.release_readiness,
-        attachment_completeness: billMetadata.storage_status === "stored" ? "complete" : (billMetadata.filename ? "metadata_only" : "missing"),
-        qualification_completeness: Object.keys(qualificationPayload).length > 0 ? "complete" : "missing",
+        attachment_completeness: attachmentCompleteness,
+        qualification_completeness: qualificationCompleteness,
         contact_attempts: operational.no_answer_count ?? 0,
         operator_action_history: operational.action_history ?? [],
-        last_updated_timestamp: operational.last_reviewed_at ?? rest.updated_at ?? rest.created_at,
+        current_queue: leadOpsSummary.current_queue,
+        next_action: leadOpsSummary.next_action,
+        next_follow_up_at: leadOpsSummary.next_follow_up_at,
+        assigned_operator: leadOpsSummary.assigned_operator,
+        last_contacted_at: leadOpsSummary.last_contacted_at,
+        contact_attempt_count: leadOpsSummary.contact_attempt_count,
+        last_operator_action: leadOpsSummary.last_operator_action,
+        financing_status: leadOpsSummary.financing_status,
+        qualification_summary_status: leadOpsSummary.qualification_status,
+        last_updated_timestamp:
+          operational.last_reviewed_at ?? rest.updated_at ?? rest.created_at,
       };
     });
 
@@ -559,11 +687,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     stage = "request_parse";
     const body = await req.json().catch(() => ({}));
+    const requestBody =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : {};
     const eventId =
-      typeof body.event_id === "string" ? body.event_id.trim() : "";
-    const action = body.action;
-    const notes =
-      typeof body.notes === "string" ? body.notes.trim().slice(0, 2000) : null;
+      typeof requestBody.event_id === "string"
+        ? requestBody.event_id.trim()
+        : "";
+    const action = requestBody.action;
+    const notes = bodyString(requestBody, "notes");
+    const operatorDetails = sanitizeOperatorDetails(requestBody);
 
     if (!eventId) {
       return NextResponse.json(
@@ -574,6 +708,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!isOperatorReviewAction(action)) {
       return NextResponse.json(
         { error: "Unsupported operator review action" },
+        { status: 400 },
+      );
+    }
+    const missingFields = requiredOperatorFields(
+      action,
+      operatorDetails,
+      notes,
+    );
+    if (missingFields.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Missing required operator review fields",
+          missing_fields: missingFields,
+        },
         { status: 400 },
       );
     }
@@ -610,6 +758,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const nextState = applyOperatorReviewAction(currentState, action, {
       adminId: admin.id,
       notes,
+      details: operatorDetails,
     });
     const qualificationRows = await sql`
       SELECT payload
@@ -633,6 +782,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       validation: original.validation_result,
     });
     nextState.release_readiness = releaseReadiness;
+    if (action === "approve_for_marketplace" && !releaseReadiness.ready) {
+      return NextResponse.json(
+        {
+          error: "Marketplace release readiness is incomplete",
+          release_readiness: releaseReadiness,
+        },
+        { status: 409 },
+      );
+    }
 
     const reviewEventId = `review_${randomUUID()}`;
     const pipelineResult = {
@@ -648,6 +806,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       original_event_id: eventId,
       action,
       notes,
+      details: operatorDetails,
       operational: nextState,
       release_readiness: releaseReadiness,
     };
