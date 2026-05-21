@@ -105,6 +105,42 @@ export async function GET(req: NextRequest) {
         no.utility_rate_per_kwh,
         no.estimated_project_value AS estimated_system_cost,
         no.estimated_payback_yrs,
+        no.monthly_bill_amount,
+        no.homeowner_ownership AS homeowner_status,
+        no.homeowner_timeline AS timeline,
+        no.homeowner_financing_interest AS finance_readiness,
+        no.opportunity_grade AS lead_grade,
+        COALESCE(
+          no.intake_metadata->'qualification'->>'qualification_status',
+          no.intake_metadata->'qualification'->>'lead_grade'
+        ) AS qualification_status,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'estimated_income_band',
+          no.intake_metadata->'qualification'->>'estimated_income_band',
+          no.intake_metadata->'qualification'->>'income_band'
+        ) AS estimated_income_band,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'estimated_credit_band',
+          no.intake_metadata->'qualification'->>'estimated_credit_band'
+        ) AS estimated_credit_band,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'sunlight_confidence',
+          no.intake_metadata->'qualification'->>'sunlight_confidence'
+        ) AS sunlight_confidence,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'property_type',
+          no.intake_metadata->'qualification'->>'property_type',
+          no.raw_payload->>'property_type'
+        ) AS property_type,
+        COALESCE(
+          no.raw_payload->>'battery_interest',
+          no.intake_metadata->>'battery_interest',
+          CASE WHEN no.battery_candidate THEN 'yes' ELSE NULL END
+        ) AS battery_interest,
+        COALESCE(
+          no.raw_payload->>'preferred_contact_method',
+          no.intake_metadata->>'preferred_contact_method'
+        ) AS preferred_contact_method,
         no.roof_material,
         no.roof_pitch,
         no.roof_condition,

@@ -58,6 +58,18 @@ const assignedOpportunity = {
   utility_rate_per_kwh: 0.14,
   estimated_system_cost: 24000,
   estimated_payback_yrs: 8,
+  monthly_bill_amount: 744,
+  homeowner_status: "own",
+  timeline: "asap",
+  finance_readiness: true,
+  lead_grade: "A",
+  qualification_status: "high_intent",
+  estimated_income_band: "50k_100k",
+  estimated_credit_band: "680_719",
+  sunlight_confidence: "full_sun",
+  property_type: "single_family",
+  battery_interest: "yes",
+  preferred_contact_method: "phone",
   roof_material: "asphalt",
   roof_pitch: "5/12",
   roof_condition: null,
@@ -329,6 +341,18 @@ describe("contractor network assignment visibility", () => {
         city: "Austin",
         state_code: "TX",
         listing_notes: "Released contractor-facing notes",
+        monthly_bill_amount: 744,
+        homeowner_status: "own",
+        timeline: "asap",
+        finance_readiness: true,
+        lead_grade: "A",
+        qualification_status: "high_intent",
+        estimated_income_band: "50k_100k",
+        estimated_credit_band: "680_719",
+        sunlight_confidence: "full_sun",
+        property_type: "single_family",
+        battery_interest: "yes",
+        preferred_contact_method: "phone",
         marketplace_status: "live",
         claim_mode: expect.anything(),
       }),
@@ -345,6 +369,11 @@ describe("contractor network assignment visibility", () => {
           q.includes("COALESCE(no.marketplace_status, 'not_released') = 'live"),
       ) ?? "";
     expect(canonicalQuery).toContain("COALESCE(no.listing_notes, no.screening_notes) AS listing_notes");
+    expect(canonicalQuery).toContain("no.monthly_bill_amount");
+    expect(canonicalQuery).toContain("no.homeowner_ownership AS homeowner_status");
+    expect(canonicalQuery).toContain("no.homeowner_timeline AS timeline");
+    expect(canonicalQuery).toContain("no.opportunity_grade AS lead_grade");
+    expect(canonicalQuery).toContain("preferred_contact_method");
     expect(canonicalQuery).toContain("no.status = 'live'");
     expect(canonicalQuery).toContain("COALESCE(no.claim_count, 0) < GREATEST");
     expect(canonicalQuery).toContain("NOT EXISTS");

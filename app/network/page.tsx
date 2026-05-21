@@ -36,6 +36,18 @@ interface Opportunity extends EnrichmentCarrier {
   utility_rate_per_kwh: number | null;
   estimated_system_cost: number | null;
   estimated_payback_yrs: number | null;
+  monthly_bill_amount?: number | null;
+  homeowner_status?: string | null;
+  timeline?: string | null;
+  finance_readiness?: boolean | null;
+  lead_grade?: string | null;
+  qualification_status?: string | null;
+  estimated_income_band?: string | null;
+  estimated_credit_band?: string | null;
+  sunlight_confidence?: string | null;
+  property_type?: string | null;
+  battery_interest?: string | null;
+  preferred_contact_method?: string | null;
   roof_material: string | null;
   roof_pitch: string | null;
   roof_condition: string | null;
@@ -106,6 +118,10 @@ function fmtCurrency(n: number | null) {
 function fmtRate(r: number | null) {
   if (!r) return '—';
   return `$${(r * 100).toFixed(1)}¢/kWh`;
+}
+function fmtBool(value: boolean | null | undefined) {
+  if (value == null) return '—';
+  return value ? 'Yes' : 'No';
 }
 function daysLeft(expires: string) {
   const d = Math.ceil((new Date(expires).getTime() - Date.now()) / 86400000);
@@ -439,6 +455,31 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
                 { label: 'Utility', value: opp.utility_name || '—' },
                 { label: 'Rate', value: fmtRate(opp.utility_rate_per_kwh), accent: 'text-emerald-400' },
                 { label: 'Est. Cost', value: fmtCurrency(opp.estimated_system_cost) },
+              ].map(item => (
+                <div key={item.label} className="bg-slate-800/50 rounded-lg p-3">
+                  <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
+                  <div className={`font-semibold text-sm ${item.accent ?? 'text-white'}`}>{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="mb-5">
+            <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-3">Lead Qualification</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'Avg. Bill', value: fmtCurrency(opp.monthly_bill_amount ?? null), accent: 'text-emerald-400' },
+                { label: 'Lead Grade', value: opp.lead_grade || '—', accent: 'text-amber-400' },
+                { label: 'Qualification', value: formatDisplayValue(opp.qualification_status) },
+                { label: 'Timeline', value: formatDisplayValue(opp.timeline) },
+                { label: 'Homeowner', value: formatDisplayValue(opp.homeowner_status) },
+                { label: 'Preferred Contact', value: formatDisplayValue(opp.preferred_contact_method) },
+                { label: 'Finance Ready', value: fmtBool(opp.finance_readiness) },
+                { label: 'Battery Interest', value: formatDisplayValue(opp.battery_interest) },
+                { label: 'Income Band', value: formatDisplayValue(opp.estimated_income_band) },
+                { label: 'Credit Band', value: formatDisplayValue(opp.estimated_credit_band) },
+                { label: 'Sunlight', value: formatDisplayValue(opp.sunlight_confidence) },
+                { label: 'Property Type', value: formatDisplayValue(opp.property_type) },
               ].map(item => (
                 <div key={item.label} className="bg-slate-800/50 rounded-lg p-3">
                   <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
