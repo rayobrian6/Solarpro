@@ -589,6 +589,18 @@ describe("homeowner intake event-first flow", () => {
     const statsQuery =
       sql.queries.find((q: string) => q.includes("COUNT(*) FILTER")) ?? "";
 
+    expect(feedQuery).toContain("COALESCE(no.first_name, SPLIT_PART(no.homeowner_name, ' ', 1)) AS first_name");
+    expect(feedQuery).toContain("COALESCE(no.email, no.homeowner_email) AS email");
+    expect(feedQuery).toContain("COALESCE(no.phone, no.homeowner_phone) AS phone");
+    expect(feedQuery).toContain("COALESCE(no.address_line1, no.address) AS address_line1");
+    expect(feedQuery).toContain("WHEN COALESCE(no.raw_payload->>'monthly_bill_amount', no.raw_payload->>'monthly_bill', '') ~ '^[0-9]+(\\.[0-9]+)?$'");
+    expect(feedQuery).toContain("THEN COALESCE(no.raw_payload->>'monthly_bill_amount', no.raw_payload->>'monthly_bill')::numeric");
+    expect(feedQuery).toContain("jsonb_build_object(");
+    expect(feedQuery).toContain("COALESCE(no.intake_metadata, '{}'::jsonb) AS intake_metadata");
+    expect(feedQuery).toContain("COALESCE(no.intake_metadata->'qualification', '{}'::jsonb) AS qualification_intelligence");
+    expect(feedQuery).not.toContain("'{}'::jsonb AS pipeline_result");
+    expect(feedQuery).not.toContain("'{}'::jsonb AS intake_metadata");
+    expect(feedQuery).not.toContain("'{}'::jsonb AS qualification_intelligence");
     expect(feedQuery).toContain("no.location_city AS city");
     expect(feedQuery).toContain("no.location_state AS state");
     expect(feedQuery).toContain("marketplace_live");
