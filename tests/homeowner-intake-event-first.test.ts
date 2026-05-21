@@ -684,6 +684,8 @@ describe("homeowner intake event-first flow", () => {
     expect(feedQuery).toContain("bill_attachment_metadata_only");
     expect(feedQuery).toContain("AS bill_intelligence");
     expect(feedQuery).toContain("AS bill_marketplace_projection");
+    expect(feedQuery).toContain("no.raw_payload->'bill_intelligence'");
+    expect(feedQuery).toContain("no.intake_metadata->'bill_intelligence'");
     expect(feedQuery).toContain("ie.payload->'bill_intelligence'");
     expect(feedQuery).toContain("ie.payload->'bill_marketplace_projection'");
     expect(feedQuery).toContain("BETWEEN 0 AND 10000");

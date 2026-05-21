@@ -118,9 +118,21 @@ function mergedIntakeMetadata(
       ? payloadQualification
       : latestQualification;
   const operational = isRecord(pipeline.operational) ? pipeline.operational : {};
+  const billIntelligence = isRecord(payload.bill_intelligence)
+    ? payload.bill_intelligence
+    : isRecord(metadata.bill_intelligence)
+      ? metadata.bill_intelligence
+      : null;
+  const billMarketplaceProjection = isRecord(payload.bill_marketplace_projection)
+    ? payload.bill_marketplace_projection
+    : isRecord(metadata.bill_marketplace_projection)
+      ? metadata.bill_marketplace_projection
+      : null;
 
   return {
     ...metadata,
+    ...(billIntelligence ? { bill_intelligence: billIntelligence } : {}),
+    ...(billMarketplaceProjection ? { bill_marketplace_projection: billMarketplaceProjection } : {}),
     source_event_id: row.event_id,
     intake_event_id: row.id,
     event_type: row.event_type,
@@ -249,6 +261,11 @@ export async function releaseMarketplaceInventoryFromIntake({
   const billProjection = isRecord(payload.bill_marketplace_projection)
     ? payload.bill_marketplace_projection
     : {};
+  const billIntelligence = isRecord(payload.bill_intelligence)
+    ? payload.bill_intelligence
+    : isRecord(intakeMetadata.bill_intelligence)
+      ? intakeMetadata.bill_intelligence
+      : {};
 
   console.info("[MARKETPLACE BILL PROJECTION]", {
     intake_event_id: sourceEventId,
@@ -352,7 +369,12 @@ export async function releaseMarketplaceInventoryFromIntake({
       ${str(intake.utm_term)},
       ${str(intake.gclid)},
       ${str(intake.fbclid)},
-      ${JSON.stringify({ ...payload, operational, bill_marketplace_projection: billProjection })},
+      ${JSON.stringify({
+        ...payload,
+        operational,
+        bill_intelligence: billIntelligence,
+        bill_marketplace_projection: billProjection,
+      })},
       ${JSON.stringify(intakeMetadata)},
       ${effectiveClaimMode},
       ${effectiveMaxClaims},

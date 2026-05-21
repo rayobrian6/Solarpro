@@ -112,6 +112,22 @@ function sqlForBillProjectionFallback() {
             state: "TX",
             zip: "78701",
             timeline: "1_3_months",
+            bill_intelligence: {
+              schema_version: "utility-bill-intelligence.v1",
+              extraction: { success: true, method: "pdf_text", confidence: 0.94 },
+              bill: {
+                utility_provider: "Austin Energy",
+                monthly_kwh: 1450,
+                annual_kwh: 17400,
+                total_amount: 264.63,
+              },
+              marketplace_projection: {
+                utility_provider: "Austin Energy",
+                monthly_usage_avg_kwh: 1450,
+                annual_usage_kwh: 17400,
+                utility_rate_per_kwh: 0.1825,
+              },
+            },
             bill_marketplace_projection: {
               utility_provider: "Austin Energy",
               monthly_usage_avg_kwh: 1450,
@@ -219,13 +235,42 @@ describe("releaseMarketplaceInventoryFromIntake", () => {
     expect(insert?.values).toContain(0.1825);
     expect(insert?.values).toContain(11.7);
     expect(insert?.values).toContain(true);
-    const rawPayloadJson = insert?.values.find(
-      (value: unknown) =>
-        typeof value === "string" && value.includes("bill_marketplace_projection"),
-    ) as string;
-    expect(JSON.parse(rawPayloadJson).bill_marketplace_projection).toMatchObject({
+    const parsedJsonValues = (insert?.values ?? [])
+      .filter((value: unknown): value is string =>
+        typeof value === "string" &&
+        value.startsWith("{") &&
+        (value.includes("bill_intelligence") || value.includes("bill_marketplace_projection")),
+      )
+      .map((value: string) => JSON.parse(value));
+    const rawPayload = parsedJsonValues.find((value: Record<string, unknown>) =>
+      Object.prototype.hasOwnProperty.call(value, "first_name"),
+    ) as Record<string, unknown>;
+    const intakeMetadata = parsedJsonValues.find((value: Record<string, unknown>) =>
+      Object.prototype.hasOwnProperty.call(value, "source_event_id"),
+    ) as Record<string, unknown>;
+
+    expect(rawPayload.bill_intelligence).toMatchObject({
+      schema_version: "utility-bill-intelligence.v1",
+      bill: {
+        utility_provider: "Austin Energy",
+        annual_kwh: 17400,
+      },
+      marketplace_projection: {
+        annual_usage_kwh: 17400,
+        utility_rate_per_kwh: 0.1825,
+      },
+    });
+    expect(rawPayload.bill_marketplace_projection).toMatchObject({
       annual_usage_kwh: 17400,
       estimated_system_size_kw: 11.7,
+    });
+    expect(intakeMetadata.bill_intelligence).toMatchObject({
+      schema_version: "utility-bill-intelligence.v1",
+      extraction: { success: true },
+    });
+    expect(intakeMetadata.bill_marketplace_projection).toMatchObject({
+      utility_provider: "Austin Energy",
+      monthly_usage_avg_kwh: 1450,
     });
   });
 });
