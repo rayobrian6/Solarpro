@@ -483,27 +483,27 @@ async function persistIntakeBillIntelligence(input: {
       LIMIT 1
     ), projected AS (
       SELECT id, event_id,
-        CASE WHEN next_payload ? 'utility_provider' OR ${projection.utility_provider} IS NULL THEN next_payload ELSE jsonb_set(next_payload, '{utility_provider}', to_jsonb(${projection.utility_provider}::text), true) END AS p1
+        CASE WHEN next_payload ? 'utility_provider' OR ${projection.utility_provider}::text IS NULL THEN next_payload ELSE jsonb_set(next_payload, '{utility_provider}', to_jsonb(${projection.utility_provider}::text), true) END AS p1
       FROM base
     ), p2 AS (
       SELECT id, event_id,
-        CASE WHEN p1 ? 'monthly_usage_avg_kwh' OR ${projection.monthly_usage_avg_kwh} IS NULL THEN p1 ELSE jsonb_set(p1, '{monthly_usage_avg_kwh}', to_jsonb(${projection.monthly_usage_avg_kwh}::numeric), true) END AS p
+        CASE WHEN p1 ? 'monthly_usage_avg_kwh' OR ${projection.monthly_usage_avg_kwh}::numeric IS NULL THEN p1 ELSE jsonb_set(p1, '{monthly_usage_avg_kwh}', to_jsonb(${projection.monthly_usage_avg_kwh}::numeric), true) END AS p
       FROM projected
     ), p3 AS (
       SELECT id, event_id,
-        CASE WHEN p ? 'annual_usage_kwh' OR ${projection.annual_usage_kwh} IS NULL THEN p ELSE jsonb_set(p, '{annual_usage_kwh}', to_jsonb(${projection.annual_usage_kwh}::numeric), true) END AS p
+        CASE WHEN p ? 'annual_usage_kwh' OR ${projection.annual_usage_kwh}::numeric IS NULL THEN p ELSE jsonb_set(p, '{annual_usage_kwh}', to_jsonb(${projection.annual_usage_kwh}::numeric), true) END AS p
       FROM p2
     ), p4 AS (
       SELECT id, event_id,
-        CASE WHEN p ? 'utility_rate_per_kwh' OR ${projection.utility_rate_per_kwh} IS NULL THEN p ELSE jsonb_set(p, '{utility_rate_per_kwh}', to_jsonb(${projection.utility_rate_per_kwh}::numeric), true) END AS p
+        CASE WHEN p ? 'utility_rate_per_kwh' OR ${projection.utility_rate_per_kwh}::numeric IS NULL THEN p ELSE jsonb_set(p, '{utility_rate_per_kwh}', to_jsonb(${projection.utility_rate_per_kwh}::numeric), true) END AS p
       FROM p3
     ), p5 AS (
       SELECT id, event_id,
-        CASE WHEN p ? 'estimated_system_size_kw' OR ${projection.estimated_system_size_kw} IS NULL THEN p ELSE jsonb_set(p, '{estimated_system_size_kw}', to_jsonb(${projection.estimated_system_size_kw}::numeric), true) END AS p
+        CASE WHEN p ? 'estimated_system_size_kw' OR ${projection.estimated_system_size_kw}::numeric IS NULL THEN p ELSE jsonb_set(p, '{estimated_system_size_kw}', to_jsonb(${projection.estimated_system_size_kw}::numeric), true) END AS p
       FROM p4
     ), p6 AS (
       SELECT id, event_id,
-        CASE WHEN p ? 'estimated_project_value' OR ${projection.estimated_project_value} IS NULL THEN p ELSE jsonb_set(p, '{estimated_project_value}', to_jsonb(${projection.estimated_project_value}::numeric), true) END AS p
+        CASE WHEN p ? 'estimated_project_value' OR ${projection.estimated_project_value}::numeric IS NULL THEN p ELSE jsonb_set(p, '{estimated_project_value}', to_jsonb(${projection.estimated_project_value}::numeric), true) END AS p
       FROM p5
     ), p7 AS (
       SELECT id, event_id,
