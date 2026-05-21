@@ -199,7 +199,10 @@ export async function GET(req: NextRequest) {
       WHERE no.status = 'live'
         AND COALESCE(no.marketplace_status, 'not_released') = 'live'
         AND COALESCE(no.claim_count, 0) < GREATEST(COALESCE(no.max_claims, 1), 1)
-        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
+        AND COALESCE((no.intake_metadata->'operational'->>'archived')::boolean, false) = false
+        AND COALESCE((no.intake_metadata->'operational'->>'rejected')::boolean, false) = false
+        AND COALESCE((no.intake_metadata->>'is_test')::boolean, false) = false
+        AND COALESCE((no.intake_metadata->>'is_simulated')::boolean, false) = false
         AND (
           no.screening_status = 'approved'
           OR EXISTS (
