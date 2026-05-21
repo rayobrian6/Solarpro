@@ -1,5 +1,6 @@
 import { getDbReady } from "@/lib/db-neon";
-import { parseUtilityBill } from "@/lib/billPipeline";
+import { mapAiResultToBillExtractResult, parseUtilityBill } from "@/lib/billPipeline";
+import { extractBillWithClaude } from "@/lib/billClaudeExtractor";
 import { enrichBillData, type BillEnrichmentInput } from "@/lib/billEnrichment";
 import { confidenceFromBillExtractResult } from "@/lib/billConfidence";
 import { estimateSystemSize } from "@/lib/billParser";
@@ -66,6 +67,167 @@ function round2(value: number | null): number | null {
 function safeRawTextSample(text: string | undefined): string | null {
   if (!text || !text.trim()) return null;
   return text.replace(/\s+/g, " ").trim().slice(0, 1200);
+}
+
+function isImageMimeType(mimeType: string | null | undefined): boolean {
+  return typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/");
+}
+
+function hasUsefulBillData(parsed: BillExtractResult): boolean {
+  return (
+    (parsed.extractedFields?.length ?? 0) >= 2 ||
+    ((parsed.monthlyKwh ?? 0) > 0) ||
+    (parsed.monthlyUsageHistory?.length ?? 0) >= 3
+  );
+}
+
+function buildExtractionEvidence(input: {
+  parsed: BillExtractResult;
+  source: "claude-image" | "pipeline";
+  extractionMethod: string | null;
+  claudeStatus?: string | null;
+  claudeValidationFlags?: unknown;
+}) {
+  const parsed = input.parsed;
+  return {
+    monthlySource: input.source,
+    monthlyConfidence:
+      input.source === "claude-image"
+        ? input.claudeStatus === "complete"
+          ? 95
+          : 65
+        : parsed.confidence === "high"
+          ? 90
+          : parsed.confidence === "medium"
+            ? 60
+            : 30,
+    monthsFound: parsed.monthlyUsageHistory?.length ?? 0,
+    monthlyEvidence:
+      input.source === "claude-image"
+        ? `Claude image parser: ${(parsed.extractedFields ?? []).join(", ")}`
+        : `AI pipeline: ${(parsed.extractedFields ?? []).join(", ")}`,
+    annualSource: parsed.annualKwh || parsed.estimatedAnnualKwh ? (input.source === "claude-image" ? "claude" : "ai") : "derived",
+    annualSourceText: null,
+    utilitySource: parsed.utilityProvider ? (input.source === "claude-image" ? "claude" : "ai") : "none",
+    rateSource: parsed.electricityRate ? (input.source === "claude-image" ? "claude" : "ai") : "none",
+    debugLog: [
+      input.source === "claude-image"
+        ? `[claude-image] status=${input.claudeStatus ?? "unknown"} validationFlags=${JSON.stringify(input.claudeValidationFlags ?? {})}`
+        : `[pipeline] method=${input.extractionMethod ?? "pipeline"} fields=${(parsed.extractedFields ?? []).join(",")}`,
+    ],
+  };
+}
+
+function buildDashboardParserResult(input: {
+  parsed: BillExtractResult;
+  extractionMethod: string | null;
+  extractionEvidence: Record<string, unknown>;
+  durationMs: number;
+  parserPath: "claude-image" | "pipeline";
+  claude?: {
+    status: string | null;
+    model: string | null;
+    inputType: string | null;
+    validationFlags: unknown;
+  } | null;
+}) {
+  const { rawText: _rawText, ...safeBillData } = input.parsed;
+  return {
+    success: true,
+    billData: {
+      ...safeBillData,
+      rawTextSample: safeRawTextSample(input.parsed.rawText),
+    },
+    extractionEvidence: input.extractionEvidence,
+    extractionMethod: input.extractionMethod,
+    parserPath: input.parserPath,
+    elapsedMs: input.durationMs,
+    claude: input.claude ?? null,
+    locationData: null,
+    utilityData: null,
+    matchedUtility: null,
+    systemSizing: null,
+    rateValidation: null,
+    validation: { valid: true, warnings: [], errors: [] },
+  };
+}
+
+type IntakeBillParseResult = {
+  success: boolean;
+  data?: BillExtractResult;
+  rawText?: string;
+  extractionMethod?: string;
+  error?: string;
+  parserPath?: "claude-image" | "pipeline";
+  extractionEvidence?: Record<string, unknown>;
+  claude?: {
+    status: string | null;
+    model: string | null;
+    inputType: string | null;
+    validationFlags: unknown;
+  } | null;
+};
+
+async function parseStoredBillWithDashboardParity(buffer: Buffer, mimeType: string): Promise<IntakeBillParseResult> {
+  if (isImageMimeType(mimeType) && process.env.ANTHROPIC_API_KEY) {
+    try {
+      const claudeResult = await extractBillWithClaude({ imageBuffer: buffer, mimeType }, { timeoutMs: 40000 });
+      if (claudeResult && claudeResult.status !== "failed") {
+        const parsed = mapAiResultToBillExtractResult(
+          claudeResult.data,
+          `[claude-image] status=${claudeResult.status}`,
+          "claude-3-5-sonnet",
+        );
+        if (hasUsefulBillData(parsed)) {
+          const extractionEvidence = buildExtractionEvidence({
+            parsed,
+            source: "claude-image",
+            extractionMethod: "claude-3-5-sonnet",
+            claudeStatus: claudeResult.status,
+            claudeValidationFlags: claudeResult.validationFlags,
+          });
+          return {
+            success: true,
+            data: parsed,
+            rawText: parsed.rawText,
+            extractionMethod: "claude-3-5-sonnet",
+            parserPath: "claude-image",
+            extractionEvidence,
+            claude: {
+              status: claudeResult.status,
+              model: claudeResult.model,
+              inputType: claudeResult.inputType,
+              validationFlags: claudeResult.validationFlags,
+            },
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("[UTILITY BILL INTELLIGENCE] claude_image_failed_falling_back", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const pipelineResult = await parseUtilityBill(buffer, mimeType);
+  const extractionEvidence = pipelineResult.data
+    ? buildExtractionEvidence({
+        parsed: pipelineResult.data,
+        source: "pipeline",
+        extractionMethod: pipelineResult.extractionMethod ?? "pipeline",
+      })
+    : undefined;
+
+  return {
+    ...pipelineResult,
+    parserPath: "pipeline",
+    extractionEvidence,
+    claude: null,
+  };
+}
+
+function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
 }
 
 function eventSuffix(): string {
@@ -156,6 +318,9 @@ function buildProjection(parsed: BillExtractResult, enrichment: Awaited<ReturnTy
 function buildIntelligencePayload(input: {
   parsed: BillExtractResult;
   extractionMethod: string | null;
+  extractionEvidence: Record<string, unknown> | null;
+  parserPath: "claude-image" | "pipeline";
+  parserResult: Record<string, unknown>;
   enrichment: Awaited<ReturnType<typeof enrichBillData>> | null;
   projection: ReturnType<typeof buildProjection>;
   billMetadata: StoredBillMetadata | null;
@@ -181,7 +346,10 @@ function buildIntelligencePayload(input: {
       extracted_fields: input.parsed.extractedFields,
       used_llm_fallback: input.parsed.usedLlmFallback ?? false,
       raw_text_sample: safeRawTextSample(input.parsed.rawText),
+      evidence: input.extractionEvidence,
+      parser_path: input.parserPath,
     },
+    parser_result: input.parserResult,
     bill: {
       utility_provider: input.parsed.utilityProvider ?? null,
       customer_name_present: !!input.parsed.customerName,
@@ -351,7 +519,13 @@ async function projectExistingOpportunity(sql: SqlClient, opportunityId: string,
 }
 
 export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligenceInput): Promise<
-  | { ok: true; projected: ReturnType<typeof buildProjection>; opportunity_id: string | null }
+  | {
+      ok: true;
+      projected: ReturnType<typeof buildProjection>;
+      opportunity_id: string | null;
+      intelligence: Record<string, unknown>;
+      parser_result: Record<string, unknown>;
+    }
   | { ok: false; reason: string }
 > {
   const startedAt = Date.now();
@@ -391,7 +565,7 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
       bytes: downloaded.buffer.length,
     });
 
-    const parsedResult = await parseUtilityBill(downloaded.buffer, downloaded.mimeType);
+    const parsedResult = await parseStoredBillWithDashboardParity(downloaded.buffer, downloaded.mimeType);
     if (!parsedResult.success || !parsedResult.data) {
       console.warn("[UTILITY BILL INTELLIGENCE] parser_failed", {
         event_id: row.event_id,
@@ -427,6 +601,16 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
     const intelligence = buildIntelligencePayload({
       parsed,
       extractionMethod: parsedResult.extractionMethod ?? null,
+      extractionEvidence: parsedResult.extractionEvidence ?? null,
+      parserPath: parsedResult.parserPath ?? "pipeline",
+      parserResult: buildDashboardParserResult({
+        parsed,
+        extractionMethod: parsedResult.extractionMethod ?? null,
+        extractionEvidence: parsedResult.extractionEvidence ?? {},
+        durationMs: Date.now() - startedAt,
+        parserPath: parsedResult.parserPath ?? "pipeline",
+        claude: parsedResult.claude ?? null,
+      }),
       enrichment,
       projection,
       billMetadata,
@@ -466,7 +650,13 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
         .map(([key]) => key),
     });
 
-    return { ok: true, projected: projection, opportunity_id: row.opportunity_id };
+    return {
+      ok: true,
+      projected: projection,
+      opportunity_id: row.opportunity_id,
+      intelligence,
+      parser_result: recordFromUnknown(intelligence.parser_result),
+    };
   } catch (err) {
     console.warn("[UTILITY BILL INTELLIGENCE] ingest_failed_non_fatal", {
       event_id: input.eventId,

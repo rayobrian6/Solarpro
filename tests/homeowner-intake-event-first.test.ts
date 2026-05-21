@@ -323,6 +323,43 @@ describe("homeowner intake event-first flow", () => {
         battery_candidate: true,
       },
       opportunity_id: null,
+      intelligence: {
+        schema_version: "utility-bill-intelligence.v1",
+        extraction: {
+          method: "claude-3-5-sonnet",
+          parser_path: "claude-image",
+          confidence_label: "high",
+          extracted_fields: ["utilityProvider", "monthlyKwh"],
+        },
+        parser_result: {
+          success: true,
+          extractionMethod: "claude-3-5-sonnet",
+          parserPath: "claude-image",
+          elapsedMs: 1234,
+          billData: {
+            confidence: "high",
+            extractedFields: ["utilityProvider", "monthlyKwh"],
+            utilityProvider: "Austin Energy",
+            monthlyKwh: 1450,
+          },
+          extractionEvidence: {
+            monthlySource: "claude-image",
+            monthsFound: 12,
+          },
+          claude: {
+            status: "complete",
+            model: "claude-sonnet-4-5-20250929",
+            inputType: "image",
+            validationFlags: {},
+          },
+        },
+      },
+      parser_result: {
+        success: true,
+        extractionMethod: "claude-3-5-sonnet",
+        parserPath: "claude-image",
+        elapsedMs: 1234,
+      },
     });
     vi.unstubAllEnvs();
   });
@@ -770,11 +807,37 @@ describe("homeowner intake event-first flow", () => {
         annual_usage_kwh: 17400,
         estimated_system_size_kw: 11.7,
       },
+      parser_result: {
+        success: true,
+        extractionMethod: "claude-3-5-sonnet",
+        parserPath: "claude-image",
+        elapsedMs: 1234,
+      },
+      intelligence: {
+        schema_version: "utility-bill-intelligence.v1",
+      },
     });
+    expect(mockIngestUtilityBillIntelligence).toHaveBeenCalledTimes(1);
     expect(mockIngestUtilityBillIntelligence).toHaveBeenCalledWith({
       eventId: "evt_homeowner_test",
       trigger: "operator_review",
     });
+  });
+
+  it("utility bill intelligence adapter preserves dashboard parser parity for stored image bills", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "lib/intake/utilityBillIntelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain('import { extractBillWithClaude } from "@/lib/billClaudeExtractor"');
+    expect(source).toContain("parseStoredBillWithDashboardParity");
+    expect(source).toContain('isImageMimeType(mimeType) && process.env.ANTHROPIC_API_KEY');
+    expect(source).toContain('extractBillWithClaude({ imageBuffer: buffer, mimeType }');
+    expect(source).toContain("mapAiResultToBillExtractResult");
+    expect(source).toContain('parserPath: "claude-image"');
+    expect(source).toContain("const pipelineResult = await parseUtilityBill(buffer, mimeType)");
+    expect(source).toContain("parser_result: input.parserResult");
   });
 
   it("admin bill intelligence retry route reports canonical adapter skip reasons", async () => {
@@ -869,6 +932,11 @@ describe("homeowner intake event-first flow", () => {
     expect(section).toContain("Parse output remains on the intake event");
     expect(section).toContain("Monthly Avg kWh");
     expect(section).toContain("Estimated System kW");
+    expect(section).toContain("Dashboard Parser Output");
+    expect(section).toContain("Parser Evidence");
+    expect(section).toContain("Raw Text Sample");
+    expect(section).toContain("parser_result");
+    expect(section).toContain("parserPath");
     expect(section).not.toContain("['Bill Size'");
   });
 

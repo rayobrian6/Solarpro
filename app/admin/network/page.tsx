@@ -1969,19 +1969,43 @@ function IntakeFeedSection() {
     const extraction = recordValue(intelligence?.extraction);
     const bill = recordValue(intelligence?.bill);
     const enrichment = recordValue(intelligence?.enrichment);
+    const parserResult = recordValue(intelligence?.parser_result);
+    const parserBillData = recordValue(parserResult?.billData);
+    const parserEvidence = recordValue(parserResult?.extractionEvidence) ?? recordValue(extraction?.evidence);
+    const parserClaude = recordValue(parserResult?.claude);
+    const parserValidation = recordValue(parserResult?.validation);
+    const billInsights = recordValue(parserBillData?.billInsights) ?? recordValue(bill?.insights);
     const pipelineResult = recordValue(lead.pipeline_result);
     const pipelineBillStatus = recordValue(pipelineResult?.bill_intelligence);
+    const monthlyUsageHistory = Array.isArray(parserBillData?.monthlyUsageHistory)
+      ? parserBillData.monthlyUsageHistory.filter(
+          (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0,
+        )
+      : Array.isArray(bill?.monthly_usage_history)
+        ? bill.monthly_usage_history.filter(
+            (value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0,
+          )
+        : [];
+    const extractedFields = Array.isArray(parserBillData?.extractedFields)
+      ? parserBillData.extractedFields
+      : Array.isArray(extraction?.extracted_fields)
+        ? extraction.extracted_fields
+        : [];
     const hasData = !!intelligence || !!projection;
     const rawDetails: Array<[string, unknown]> = [
       [
         "Utility Provider",
-        projection?.utility_provider ??
+        parserBillData?.utilityProvider ??
+          projection?.utility_provider ??
           enrichment?.canonicalName ??
           bill?.utility_provider,
       ],
-      ["Monthly Avg kWh", projection?.monthly_usage_avg_kwh ?? bill?.monthly_kwh],
-      ["Annual Usage kWh", projection?.annual_usage_kwh ?? bill?.annual_kwh],
-      ["Utility Rate / kWh", projection?.utility_rate_per_kwh ?? bill?.electricity_rate],
+      ["Customer Name", parserBillData?.customerName],
+      ["Service Address", parserBillData?.serviceAddress],
+      ["Monthly Avg kWh", projection?.monthly_usage_avg_kwh ?? parserBillData?.monthlyKwh ?? bill?.monthly_kwh],
+      ["Annual Usage kWh", projection?.annual_usage_kwh ?? parserBillData?.estimatedAnnualKwh ?? parserBillData?.annualKwh ?? bill?.annual_kwh],
+      ["Utility Rate / kWh", projection?.utility_rate_per_kwh ?? parserBillData?.electricityRate ?? bill?.electricity_rate],
+      ["Monthly Bill", parserBillData?.estimatedMonthlyBill ?? parserBillData?.totalAmount ?? bill?.total_amount],
       ["Estimated System kW", projection?.estimated_system_size_kw],
       ["Estimated Annual Savings", projection?.estimated_annual_savings],
       ["Estimated Project Value", projection?.estimated_project_value],
@@ -1989,7 +2013,7 @@ function IntakeFeedSection() {
       ["Battery Candidate", projection?.battery_candidate],
       ["Battery Reason", projection?.battery_reason],
       ["Offset %", projection?.offset_percentage],
-      ["Bill Total Amount", bill?.total_amount],
+      ["Bill Type", parserBillData?.billType ?? bill?.bill_type],
     ];
     const details = rawDetails.filter(
       ([, value]) => value !== null && value !== undefined && value !== "",
@@ -2001,16 +2025,27 @@ function IntakeFeedSection() {
       projection,
       extraction,
       bill,
+      parserResult,
+      parserBillData,
+      parserEvidence,
+      parserClaude,
+      parserValidation,
+      billInsights,
+      monthlyUsageHistory,
+      extractedFields,
       details,
       generatedAt: intelligence?.generated_at,
       schemaVersion: intelligence?.schema_version,
       parseStatus: pipelineBillStatus?.status ?? (hasData ? "completed" : "not_run"),
       confidence:
-        extraction?.confidence ?? extraction?.confidence_label ?? bill?.confidence,
-      method: extraction?.method,
+        parserBillData?.confidence ?? extraction?.confidence_label ?? extraction?.confidence ?? bill?.confidence,
+      confidenceScore: extraction?.confidence,
+      method: parserResult?.extractionMethod ?? extraction?.method,
+      parserPath: parserResult?.parserPath ?? extraction?.parser_path,
       completedAt: pipelineBillStatus?.completed_at,
-      durationMs: pipelineBillStatus?.duration_ms,
+      durationMs: pipelineBillStatus?.duration_ms ?? parserResult?.elapsedMs,
       trigger: pipelineBillStatus?.trigger,
+      rawTextSample: parserBillData?.rawTextSample ?? extraction?.raw_text_sample,
     };
   };
 
@@ -3463,6 +3498,123 @@ function IntakeFeedSection() {
                                           </div>
                                         </div>
                                       ))}
+                                    </div>
+
+                                    <div className="mt-3 rounded-lg border border-sky-900/40 bg-zinc-950/60 p-3">
+                                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                                        <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
+                                          Dashboard Parser Output
+                                        </div>
+                                        <span className="rounded-full border border-sky-800 bg-sky-950/70 px-2 py-0.5 text-[10px] text-sky-100">
+                                          {payloadDisplay(billIntelligence.parserPath)}
+                                        </span>
+                                        <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-300">
+                                          {billIntelligence.extractedFields.length} fields extracted
+                                        </span>
+                                      </div>
+                                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                        {([
+                                          ["Extraction Confidence", billIntelligence.confidence],
+                                          ["Confidence Score", billIntelligence.confidenceScore],
+                                          ["Parser Method", billIntelligence.method],
+                                          ["Claude Model", billIntelligence.parserClaude?.model],
+                                          ["Claude Input", billIntelligence.parserClaude?.inputType],
+                                          ["Claude Status", billIntelligence.parserClaude?.status],
+                                          ["Validation", billIntelligence.parserValidation?.valid],
+                                          ["Months Found", billIntelligence.monthlyUsageHistory.length],
+                                        ] as Array<[string, unknown]>).map(([label, value]) => (
+                                          <div key={String(label)} className="rounded-md border border-sky-900/40 bg-zinc-950/70 px-3 py-2">
+                                            <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                              {label}
+                                            </div>
+                                            <div className="mt-1 break-words text-xs text-sky-100">
+                                              {payloadDisplay(value)}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                      {billIntelligence.extractedFields.length ? (
+                                        <div className="mt-2 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-300">
+                                          <span className="text-zinc-500">Extracted fields: </span>
+                                          {payloadDisplay(billIntelligence.extractedFields)}
+                                        </div>
+                                      ) : null}
+                                      {billIntelligence.monthlyUsageHistory.length >= 3 ? (
+                                        <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2">
+                                          <div className="mb-2 text-[10px] uppercase tracking-wider text-zinc-500">
+                                            Monthly Usage ({billIntelligence.monthlyUsageHistory.length} months)
+                                          </div>
+                                          <div className="flex h-12 items-end gap-1">
+                                            {billIntelligence.monthlyUsageHistory.map((kwh, index) => {
+                                              const max = Math.max(...billIntelligence.monthlyUsageHistory);
+                                              const pct = max > 0 ? (kwh / max) * 100 : 0;
+                                              return (
+                                                <div
+                                                  key={`${kwh}-${index}`}
+                                                  title={`${kwh.toLocaleString()} kWh`}
+                                                  className="flex-1 rounded-sm bg-amber-500/45"
+                                                  style={{ height: `${Math.max(pct, 8)}%` }}
+                                                />
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                      {billIntelligence.billInsights ? (
+                                        <div className="mt-3 rounded-md border border-sky-900/40 bg-sky-950/20 px-3 py-2 text-xs">
+                                          <div className="mb-2 flex items-center justify-between gap-2">
+                                            <span className="font-semibold uppercase tracking-wider text-sky-300 text-[10px]">
+                                              Bill Analysis
+                                            </span>
+                                            <span className="rounded-full border border-sky-800 px-2 py-0.5 text-[10px] text-sky-100">
+                                              {payloadDisplay(billIntelligence.billInsights.confidence)} confidence
+                                            </span>
+                                          </div>
+                                          <div className="grid gap-1.5 sm:grid-cols-2">
+                                            <div className="flex justify-between gap-2">
+                                              <span className="text-zinc-500">Combined Utility Bill</span>
+                                              <span className="text-sky-100">{payloadDisplay(billIntelligence.billInsights.combinedUtilityDetected)}</span>
+                                            </div>
+                                            <div className="flex justify-between gap-2">
+                                              <span className="text-zinc-500">Detected Services</span>
+                                              <span className="text-right text-sky-100">{payloadDisplay(billIntelligence.billInsights.detectedServices)}</span>
+                                            </div>
+                                            <div className="flex justify-between gap-2">
+                                              <span className="text-zinc-500">Suggested Rate</span>
+                                              <span className="text-sky-100">{payloadDisplay(billIntelligence.billInsights.suggestedRate)}</span>
+                                            </div>
+                                            <div className="flex justify-between gap-2">
+                                              <span className="text-zinc-500">Rate Source</span>
+                                              <span className="text-sky-100">{payloadDisplay(billIntelligence.billInsights.rateSource)}</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                      {billIntelligence.parserEvidence ? (
+                                        <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-300">
+                                          <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                                            Parser Evidence
+                                          </div>
+                                          <div className="grid gap-1.5 sm:grid-cols-2">
+                                            {Object.entries(billIntelligence.parserEvidence).map(([key, value]) => (
+                                              <div key={key} className="flex justify-between gap-2">
+                                                <span className="text-zinc-500">{key}</span>
+                                                <span className="break-words text-right text-zinc-300">{payloadDisplay(value)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                      {billIntelligence.rawTextSample ? (
+                                        <details className="mt-3 rounded-md border border-zinc-800 bg-zinc-950/70 px-3 py-2 text-xs text-zinc-300">
+                                          <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                                            Raw Text Sample
+                                          </summary>
+                                          <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-zinc-300">
+                                            {String(billIntelligence.rawTextSample)}
+                                          </pre>
+                                        </details>
+                                      ) : null}
                                     </div>
                                   </>
                                 ) : (

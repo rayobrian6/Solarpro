@@ -50,5 +50,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     status: "completed",
     projected: result.projected,
     opportunity_id: result.opportunity_id,
+    intelligence: result.intelligence,
+    parser_result: result.parser_result,
   });
 }
