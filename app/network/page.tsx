@@ -187,6 +187,8 @@ type Tab = 'discover' | 'my-shared' | 'my-claims' | 'profile';
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'];
+const MARKETPLACE_CARD_INTELLIGENCE_BUILD = 'network-card-audit-v1';
+const CARD_RENDERER_MARKER = 'canonical-marketplace-v1';
 const ECOSYSTEMS = ['enphase','solaredge','tesla','franklin','sungrow','goodwe','generac','sol-ark','ecoflow','other'];
 const ECOSYSTEM_LABELS: Record<string, string> = {
   enphase: 'Enphase', solaredge: 'SolarEdge', tesla: 'Tesla / Powerwall',
@@ -448,6 +450,9 @@ function OpportunityCard({
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-3xl border border-slate-700/60 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.13),transparent_34%),#0f1623] shadow-xl shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-400/35 hover:shadow-emerald-950/25 cursor-pointer" onClick={() => onViewDetail(opp)}>
       <div className={`h-1.5 w-full ${confidence?.level === 'high' ? 'bg-gradient-to-r from-emerald-400 via-amber-300 to-emerald-500' : opp.battery_candidate ? 'bg-gradient-to-r from-amber-500 to-orange-400' : 'bg-gradient-to-r from-slate-600 to-emerald-600'}`} />
+      <div className="border-b border-slate-800/70 px-5 py-1 text-[10px] font-mono text-slate-600" data-card-renderer-marker>
+        Card renderer: {CARD_RENDERER_MARKER}
+      </div>
 
       <div className="flex-1 p-5">
         <div className="flex items-start justify-between gap-4 mb-4">
@@ -984,6 +989,10 @@ export default function NetworkPage() {
   const [filterBattery, setFilterBattery] = useState(false);
   const [total, setTotal] = useState(0);
 
+  useEffect(() => {
+    console.info(`MARKETPLACE_CARD_INTELLIGENCE_BUILD=${MARKETPLACE_CARD_INTELLIGENCE_BUILD}`);
+  }, []);
+
   const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
@@ -1089,6 +1098,9 @@ export default function NetworkPage() {
                 </h1>
                 <p className="text-slate-400 text-sm max-w-lg leading-relaxed">
                   Exclusive, pre-analyzed solar opportunities — matched to your capabilities, your territory, your equipment.
+                </p>
+                <p className="mt-2 text-[10px] font-mono text-slate-600" data-marketplace-build-marker>
+                  MARKETPLACE_CARD_INTELLIGENCE_BUILD={MARKETPLACE_CARD_INTELLIGENCE_BUILD}
                 </p>
               </div>
 

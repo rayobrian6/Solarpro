@@ -297,6 +297,31 @@ export async function GET(req: NextRequest) {
       .slice(offset, offset + limit)
       .map((candidateRow) => {
         const marketplace_intelligence = buildMarketplaceIntelligence(candidateRow);
+        const intakeMetadata = candidateRow.marketplace_intake_metadata as Record<string, unknown> | null | undefined;
+        const rawPayload = candidateRow.marketplace_raw_payload as Record<string, unknown> | null | undefined;
+        console.info("[NETWORK_DISCOVER_PAYLOAD_SHAPE]", {
+          id: candidateRow.id,
+          source: candidateRow.source,
+          has_intake_metadata: Boolean(intakeMetadata && Object.keys(intakeMetadata).length),
+          has_raw_payload: Boolean(rawPayload && Object.keys(rawPayload).length),
+          has_intake_bill_intelligence: Boolean(intakeMetadata?.bill_intelligence),
+          has_raw_bill_intelligence: Boolean(rawPayload?.bill_intelligence),
+          has_bill_marketplace_projection: Boolean(rawPayload?.bill_marketplace_projection || intakeMetadata?.bill_marketplace_projection),
+          has_release_readiness: Boolean((intakeMetadata?.operational as Record<string, unknown> | undefined)?.release_readiness || (rawPayload?.operational as Record<string, unknown> | undefined)?.release_readiness),
+          has_estimated_system_kw: candidateRow.system_size_kw != null || Boolean(marketplace_intelligence.revenue.estimated_system_size_kw?.value),
+          has_annual_usage_kwh: candidateRow.annual_kwh != null || Boolean(marketplace_intelligence.revenue.annual_usage_kwh?.value),
+          has_monthly_bill: candidateRow.monthly_bill_amount != null || Boolean(marketplace_intelligence.revenue.monthly_bill_amount?.value),
+          has_utility_rate: candidateRow.utility_rate_per_kwh != null || Boolean(marketplace_intelligence.revenue.utility_rate_per_kwh?.value),
+          has_lead_grade: candidateRow.lead_grade != null || Boolean((marketplace_intelligence.evidence.qualification as Record<string, unknown>).lead_grade),
+          has_qualification: Boolean(candidateRow.qualification_status || Object.keys(marketplace_intelligence.evidence.qualification).length),
+          has_badges: marketplace_intelligence.badges.length > 0,
+          badge_labels: marketplace_intelligence.badges.map((badge) => badge.label),
+          has_narrative: Boolean(marketplace_intelligence.narrative?.summary || marketplace_intelligence.narrative?.headline),
+          has_bill_visuals: Boolean(marketplace_intelligence.bill_visuals),
+          bill_visual_months_found: marketplace_intelligence.bill_visuals?.months_found ?? 0,
+          release_ok: marketplace_intelligence.release.ok,
+          release_missing_count: marketplace_intelligence.release.missing.length,
+        });
         const {
           marketplace_lifecycle_status,
           marketplace_screening_status,
