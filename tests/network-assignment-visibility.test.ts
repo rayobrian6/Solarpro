@@ -377,9 +377,15 @@ describe("contractor network assignment visibility", () => {
     expect(canonicalQuery).toContain("no.status = 'live'");
     expect(canonicalQuery).toContain("COALESCE(no.claim_count, 0) < GREATEST");
     expect(canonicalQuery).toContain("NOT EXISTS");
-    expect(canonicalQuery).toContain("approved_for_marketplace");
+    expect(canonicalQuery).toContain("archived");
+    expect(canonicalQuery).toContain("rejected");
+    expect(canonicalQuery).toContain("is_test");
+    expect(canonicalQuery).toContain("is_simulated");
+    expect(canonicalQuery).not.toContain("approved_for_marketplace");
     expect(canonicalQuery).toContain("no.screening_status = 'approved'");
     expect(canonicalQuery).toContain("opportunity_screening_queue");
+    expect(canonicalQuery).toContain("auto_decision = 'pass'");
+    expect(canonicalQuery).toContain("override_decision = 'pass'");
   });
 
   it("filters ineligible canonical marketplace inventory out of Discover", async () => {

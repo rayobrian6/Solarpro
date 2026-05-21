@@ -139,11 +139,32 @@ export async function evaluateContractorEligibility({
       no.screening_status,
       no.intake_metadata,
       no.raw_payload,
-      osq.auto_decision,
-      osq.override_decision
+      CASE
+        WHEN BOOL_OR(osq.auto_decision = 'pass') THEN 'pass'
+        ELSE (ARRAY_AGG(osq.auto_decision ORDER BY osq.created_at DESC NULLS LAST) FILTER (WHERE osq.auto_decision IS NOT NULL))[1]
+      END AS auto_decision,
+      CASE
+        WHEN BOOL_OR(osq.override_decision = 'pass') THEN 'pass'
+        ELSE (ARRAY_AGG(osq.override_decision ORDER BY osq.created_at DESC NULLS LAST) FILTER (WHERE osq.override_decision IS NOT NULL))[1]
+      END AS override_decision
     FROM network_opportunities no
     LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
     WHERE no.id = ${opportunityId}
+    GROUP BY
+      no.id,
+      no.status,
+      no.marketplace_status,
+      no.claim_mode,
+      no.max_claims,
+      no.claim_count,
+      no.location_state,
+      no.location_zip,
+      no.estimated_system_size_kw,
+      no.battery_candidate,
+      no.steep_roof_flag,
+      no.screening_status,
+      no.intake_metadata,
+      no.raw_payload
     LIMIT 1
   `;
   const opportunity = opportunityRows[0] as Record<string, unknown> | undefined;

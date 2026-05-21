@@ -178,16 +178,20 @@ export async function GET(req: NextRequest) {
         no.intake_metadata AS marketplace_intake_metadata,
         no.raw_payload AS marketplace_raw_payload,
         (
-          SELECT osq.auto_decision
+          SELECT CASE
+            WHEN BOOL_OR(osq.auto_decision = 'pass') THEN 'pass'
+            ELSE (ARRAY_AGG(osq.auto_decision ORDER BY osq.created_at DESC NULLS LAST) FILTER (WHERE osq.auto_decision IS NOT NULL))[1]
+          END
           FROM opportunity_screening_queue osq
           WHERE osq.opportunity_id = no.id
-          LIMIT 1
         ) AS marketplace_auto_decision,
         (
-          SELECT osq.override_decision
+          SELECT CASE
+            WHEN BOOL_OR(osq.override_decision = 'pass') THEN 'pass'
+            ELSE (ARRAY_AGG(osq.override_decision ORDER BY osq.created_at DESC NULLS LAST) FILTER (WHERE osq.override_decision IS NOT NULL))[1]
+          END
           FROM opportunity_screening_queue osq
           WHERE osq.opportunity_id = no.id
-          LIMIT 1
         ) AS marketplace_override_decision
       FROM network_opportunities no
       LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id

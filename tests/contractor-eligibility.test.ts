@@ -26,8 +26,10 @@ function operationalMetadata() {
 }
 
 function makeSql({ contractor = {}, opportunity = {}, assignments = {} }: { contractor?: Record<string, unknown> | null; opportunity?: Record<string, unknown> | null; assignments?: Record<string, unknown> } = {}) {
+  const calls: string[] = [];
   const sql = vi.fn(async (strings: TemplateStringsArray) => {
     const q = strings.join(" ");
+    calls.push(q);
     if (q.includes("FROM contractor_profiles cp")) {
       if (contractor === null) return [];
       return [{ user_id: CONTRACTOR_ID, service_states: ["TX"], service_zips: [], battery_certified: true, commercial_capable: false, steep_roof_capable: true, min_project_kw: null, max_project_kw: 20, total_installs: 12, avg_close_rate_pct: 35, avg_response_hours: 4, inspection_pass_rate: 98, profile_complete: true, network_active: true, tier: "preferred", match_rules: {}, ...contractor }];
@@ -39,6 +41,7 @@ function makeSql({ contractor = {}, opportunity = {}, assignments = {} }: { cont
     if (q.includes("FROM opportunity_assignments")) return [{ active_claim_count: 0, contractor_active_claim_count: 0, contractor_claimable_offer_count: 1, ...assignments }];
     return [];
   }) as any;
+  sql.calls = calls;
   return sql;
 }
 
@@ -67,5 +70,19 @@ describe("evaluateContractorEligibility", () => {
     const result = await evaluateContractorEligibility({ sql: makeSql({ contractor: { battery_certified: false }, opportunity: { battery_candidate: true } }), contractorId: CONTRACTOR_ID, opportunityId: OPP_ID });
     expect(result.eligible).toBe(false);
     expect(result.denials).toContain("battery_certification_required");
+  });
+
+  it("prefers any passing screening queue decision when evaluating canonical opportunities", async () => {
+    const { evaluateContractorEligibility } = await importEligibility();
+    const sql = makeSql();
+
+    await evaluateContractorEligibility({ sql, contractorId: CONTRACTOR_ID, opportunityId: OPP_ID });
+
+    const opportunityQuery = sql.calls.find((q: string) => q.includes("FROM network_opportunities no")) ?? "";
+    expect(opportunityQuery).toContain("BOOL_OR(osq.auto_decision = 'pass')");
+    expect(opportunityQuery).toContain("BOOL_OR(osq.override_decision = 'pass')");
+    expect(opportunityQuery).toContain("ARRAY_AGG(osq.auto_decision ORDER BY osq.created_at DESC NULLS LAST)");
+    expect(opportunityQuery).toContain("ARRAY_AGG(osq.override_decision ORDER BY osq.created_at DESC NULLS LAST)");
+    expect(opportunityQuery).toContain("GROUP BY");
   });
 });

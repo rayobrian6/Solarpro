@@ -14,6 +14,7 @@ export interface MarketplaceGateRow {
   intake_metadata?: unknown;
   raw_payload?: unknown;
   qualification_intelligence?: unknown;
+  marketplace_status?: unknown;
 }
 
 type ParsedBillSource = "payload.bill_intelligence" | "intake_metadata.bill_intelligence" | "none";
@@ -352,10 +353,12 @@ function billWarnings(evidence: MarketplaceReleaseGateEvidence): string[] {
 
 export function evaluateMarketplaceReleaseGate(row: MarketplaceGateRow): MarketplaceReleaseGateResult {
   const metadata = releaseGateMetadata(row);
+  const isLiveMarketplaceInventory = row.status === "live" && row.marketplace_status === "live";
   const approvedScreening =
     row.screening_status === "approved" ||
     row.auto_decision === "pass" ||
-    row.override_decision === "pass";
+    row.override_decision === "pass" ||
+    isLiveMarketplaceInventory;
   const operational = metadata.operational;
   const archivedOrRejected = !!(operational.archived || operational.rejected || row.status === "archived" || row.status === "rejected");
   const testOrSimulated = !!(metadata.intakeMetadata.is_test || metadata.intakeMetadata.is_simulated || metadata.rawPayload.is_test || metadata.rawPayload.is_simulated);
@@ -371,13 +374,13 @@ export function evaluateMarketplaceReleaseGate(row: MarketplaceGateRow): Marketp
     },
   });
   const evidence = buildGateEvidence(row, metadata, approvedScreening);
-  const missing = [...releaseReadiness.missing];
+  const missing = isLiveMarketplaceInventory ? [] : [...releaseReadiness.missing];
   if (!approvedScreening) missing.push("screening_approved");
   if (archivedOrRejected) missing.push("active_not_archived_or_rejected");
   if (testOrSimulated) missing.push("not_test_or_simulated");
-  if (!evidence.homeowner_intake.present) missing.push("homeowner_intake_present");
-  if (!evidence.qualification.present) missing.push("qualification_present");
-  if (!(evidence.operator_review.financing_ready || evidence.qualification.finance_readiness)) missing.push("financing_readiness");
+  if (!isLiveMarketplaceInventory && !evidence.homeowner_intake.present) missing.push("homeowner_intake_present");
+  if (!isLiveMarketplaceInventory && !evidence.qualification.present) missing.push("qualification_present");
+  if (!isLiveMarketplaceInventory && !(evidence.operator_review.financing_ready || evidence.qualification.finance_readiness)) missing.push("financing_readiness");
 
   const blockers = Array.from(new Set(missing));
   const warnings = billWarnings(evidence);

@@ -115,6 +115,16 @@ describe("operational lifecycle and marketplace release gate", () => {
     expect(blocked.ok).toBe(false);
     expect(blocked.missing).toContain("approved_for_marketplace");
 
+    const releasedInventoryWithStaleMetadata = evaluateMarketplaceReleaseGate({
+      id: "opp-2-live",
+      status: "live",
+      marketplace_status: "live",
+      screening_status: "approved",
+      intake_metadata: { operational: { contacted: true }, qualification },
+    });
+    expect(releasedInventoryWithStaleMetadata.ok).toBe(true);
+    expect(releasedInventoryWithStaleMetadata.missing).not.toContain("approved_for_marketplace");
+
     const archived = evaluateMarketplaceReleaseGate({
       id: "opp-3",
       status: "live",
