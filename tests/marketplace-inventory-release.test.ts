@@ -84,6 +84,98 @@ function sqlForQualificationFallback() {
   return sql;
 }
 
+function sqlForNestedMarketplaceProjectionFallback() {
+  const calls: Array<{ query: string; values: unknown[] }> = [];
+  const sql = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const q = strings.join(" ");
+    calls.push({ query: q, values });
+    if (q.includes("FROM intake_events") && q.includes("event_type = 'homeowner_intake'")) {
+      return [];
+    }
+    if (q.includes("FROM intake_events") && q.includes("WHERE id::text")) {
+      return [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          event_id: "evt-homeowner-nested-visuals",
+          event_type: "homeowner_intake",
+          action: "pending_review",
+          occurred_at: "2026-05-20T12:00:00.000Z",
+          source_system: "homeowner_form",
+          source_channel: "web",
+          payload: {
+            first_name: "Nested",
+            last_name: "Visuals",
+            email: "nested@example.com",
+            phone: "+18476212222",
+            property_address: "789 Solar Blvd",
+            city: "Phoenix",
+            state: "AZ",
+            zip: "85001",
+            timeline: "1_3_months",
+            monthly_bill_amount: 312,
+            bill_intelligence: {
+              schema_version: "utility-bill-intelligence.v1",
+              parser_result: {
+                billData: {
+                  utilityName: "APS",
+                  annualKwh: 20100,
+                  costPerKwh: 0.19,
+                  totalAmount: 312,
+                },
+              },
+              marketplace_projection: {
+                utility_provider: "APS",
+                monthly_usage_avg_kwh: 1675,
+                annual_usage_kwh: 20100,
+                utility_rate_per_kwh: 0.19,
+                estimated_system_size_kw: 13.4,
+                battery_candidate: true,
+              },
+            },
+          },
+          validation_result: { valid: true, errors: [] },
+          pipeline_result: {
+            operational: {
+              contacted: true,
+              qualified: true,
+              financing_ready: true,
+              approved_for_marketplace: true,
+              lifecycle_status: "ready_for_marketplace",
+              review_status: "approved_for_marketplace",
+            },
+          },
+        },
+      ];
+    }
+    if (q.includes("event_type = 'homeowner_qualification'")) {
+      return [
+        {
+          payload: {
+            intelligence: {
+              qualification_status: "high_intent",
+              lead_grade: "A",
+              lead_score: 93,
+              finance_readiness: true,
+            },
+          },
+        },
+      ];
+    }
+    if (q.includes("FROM network_opportunities") && q.includes("WHERE intake_event_id")) {
+      return [];
+    }
+    if (q.includes("INSERT INTO network_opportunities")) {
+      return [{ id: "opp-live-nested-visuals", status: "live", marketplace_status: "live" }];
+    }
+    if (q.includes("UPDATE intake_events")) {
+      return [];
+    }
+    return [];
+  }) as any;
+  sql.calls = calls;
+  return sql;
+}
+
 function sqlForBillProjectionFallback() {
   const calls: Array<{ query: string; values: unknown[] }> = [];
   const sql = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -214,6 +306,55 @@ describe("releaseMarketplaceInventoryFromIntake", () => {
     expect(mockLogNetworkEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ event_type: "opportunity.release_blocked" }),
     );
+  });
+
+  it("projects nested bill intelligence marketplace visuals into canonical marketplace payload", async () => {
+    const { releaseMarketplaceInventoryFromIntake } = await importHelper();
+    const sql = sqlForNestedMarketplaceProjectionFallback();
+
+    const result = await releaseMarketplaceInventoryFromIntake({
+      sql,
+      intakeEventId: "evt-homeowner-nested-visuals",
+      adminUserId: "admin-1",
+    });
+
+    expect(result.ok).toBe(true);
+    const insert = sql.calls.find((call: { query: string }) =>
+      call.query.includes("INSERT INTO network_opportunities"),
+    );
+    expect(insert?.values).toContain("APS");
+    expect(insert?.values).toContain(1675);
+    expect(insert?.values).toContain(0.19);
+    expect(insert?.values).toContain(13.4);
+    expect(insert?.values).toContain(true);
+
+    const parsedJsonValues = (insert?.values ?? [])
+      .filter((value: unknown): value is string =>
+        typeof value === "string" &&
+        value.startsWith("{") &&
+        (value.includes("bill_intelligence") || value.includes("bill_marketplace_projection")),
+      )
+      .map((value: string) => JSON.parse(value));
+    const rawPayload = parsedJsonValues.find((value: Record<string, unknown>) =>
+      Object.prototype.hasOwnProperty.call(value, "first_name"),
+    ) as Record<string, unknown>;
+    const intakeMetadata = parsedJsonValues.find((value: Record<string, unknown>) =>
+      Object.prototype.hasOwnProperty.call(value, "source_event_id"),
+    ) as Record<string, unknown>;
+
+    expect(rawPayload.bill_marketplace_projection).toMatchObject({
+      utility_provider: "APS",
+      monthly_usage_avg_kwh: 1675,
+      annual_usage_kwh: 20100,
+      utility_rate_per_kwh: 0.19,
+      estimated_system_size_kw: 13.4,
+      battery_candidate: true,
+    });
+    expect(intakeMetadata.bill_marketplace_projection).toMatchObject({
+      utility_provider: "APS",
+      annual_usage_kwh: 20100,
+      estimated_system_size_kw: 13.4,
+    });
   });
 
   it("uses bill marketplace projection as release fallback for canonical opportunity intelligence fields", async () => {

@@ -98,6 +98,24 @@ function hasQualificationSignal(value: Record<string, unknown>): boolean {
   return Object.keys(value).length > 0;
 }
 
+function marketplaceProjectionFromBillIntelligence(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  return isRecord(value.marketplace_projection) ? value.marketplace_projection : {};
+}
+
+function billMarketplaceProjectionFromPayload(
+  payload: Record<string, unknown>,
+  metadata: Record<string, unknown> = {},
+): Record<string, unknown> {
+  if (isRecord(payload.bill_marketplace_projection)) return payload.bill_marketplace_projection;
+  if (isRecord(metadata.bill_marketplace_projection)) return metadata.bill_marketplace_projection;
+
+  const payloadBillProjection = marketplaceProjectionFromBillIntelligence(payload.bill_intelligence);
+  if (Object.keys(payloadBillProjection).length > 0) return payloadBillProjection;
+
+  return marketplaceProjectionFromBillIntelligence(metadata.bill_intelligence);
+}
+
 function mergedIntakeMetadata(
   row: Record<string, unknown>,
   latestQualification: Record<string, unknown> = {},
@@ -123,11 +141,7 @@ function mergedIntakeMetadata(
     : isRecord(metadata.bill_intelligence)
       ? metadata.bill_intelligence
       : null;
-  const billMarketplaceProjection = isRecord(payload.bill_marketplace_projection)
-    ? payload.bill_marketplace_projection
-    : isRecord(metadata.bill_marketplace_projection)
-      ? metadata.bill_marketplace_projection
-      : null;
+  const billMarketplaceProjection = billMarketplaceProjectionFromPayload(payload, metadata);
 
   return {
     ...metadata,
@@ -258,9 +272,7 @@ export async function releaseMarketplaceInventoryFromIntake({
   const locationState = str(payload.state)?.toUpperCase().slice(0, 2) ?? null;
   const locationZip = str(payload.zip) ?? str(payload.postal_code);
   const addressLine1 = str(payload.address_line1) ?? str(payload.property_address);
-  const billProjection = isRecord(payload.bill_marketplace_projection)
-    ? payload.bill_marketplace_projection
-    : {};
+  const billProjection = billMarketplaceProjectionFromPayload(payload, intakeMetadata);
   const billIntelligence = isRecord(payload.bill_intelligence)
     ? payload.bill_intelligence
     : isRecord(intakeMetadata.bill_intelligence)
