@@ -20,6 +20,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const eventId =
     typeof requestBody.event_id === "string" ? requestBody.event_id.trim() : "";
 
+  console.info("[ADMIN_BILL_PARSE_REQUEST]", {
+    intake_event_id: eventId || null,
+    has_event_id: !!eventId,
+    trigger: "operator_review",
+  });
+
   if (!eventId) {
     return NextResponse.json(
       { success: false, error: "event_id is required" },

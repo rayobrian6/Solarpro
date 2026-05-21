@@ -2019,6 +2019,24 @@ function IntakeFeedSection() {
       ([, value]) => value !== null && value !== undefined && value !== "",
     );
 
+    if (hasData || billMetadataFor(lead).hasStoredAttachment) {
+      console.info("[ADMIN_BILL_UI_RENDER]", {
+        intake_event_id: lead.event_id ?? lead.id,
+        has_bill_intelligence: !!intelligence,
+        bill_intelligence_keys: intelligence ? Object.keys(intelligence).sort() : [],
+        has_parser_result: !!parserResult,
+        parser_result_keys: parserResult ? Object.keys(parserResult).sort() : [],
+        parser_bill_data_keys: parserBillData ? Object.keys(parserBillData).sort() : [],
+        extraction_keys: extraction ? Object.keys(extraction).sort() : [],
+        parser_path: parserResult?.parserPath ?? extraction?.parser_path ?? null,
+        parser_method: parserResult?.extractionMethod ?? extraction?.method ?? null,
+        claude_keys: parserClaude ? Object.keys(parserClaude).sort() : [],
+        extracted_field_count: extractedFields.length,
+        months_found: monthlyUsageHistory.length,
+        parse_status: pipelineBillStatus?.status ?? (hasData ? "completed" : "not_run"),
+      });
+    }
+
     return {
       hasData,
       intelligence,

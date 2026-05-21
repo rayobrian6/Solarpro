@@ -832,7 +832,9 @@ describe("homeowner intake event-first flow", () => {
 
     expect(source).toContain('import { extractBillWithClaude } from "@/lib/billClaudeExtractor"');
     expect(source).toContain("parseStoredBillWithDashboardParity");
-    expect(source).toContain('isImageMimeType(mimeType) && process.env.ANTHROPIC_API_KEY');
+    expect(source).toContain("const imageMimeType = isImageMimeType(mimeType)");
+    expect(source).toContain("const anthropicKeyPresent = !!process.env.ANTHROPIC_API_KEY");
+    expect(source).toContain("if (imageMimeType && anthropicKeyPresent)");
     expect(source).toContain('extractBillWithClaude({ imageBuffer: buffer, mimeType }');
     expect(source).toContain("mapAiResultToBillExtractResult");
     expect(source).toContain('parserPath: "claude-image"');

@@ -566,6 +566,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         rest.bill_metadata && typeof rest.bill_metadata === "object"
           ? (rest.bill_metadata as Record<string, unknown>)
           : {};
+      const billIntelligence =
+        rest.bill_intelligence && typeof rest.bill_intelligence === "object"
+          ? (rest.bill_intelligence as Record<string, unknown>)
+          : {};
+      const billParserResult =
+        billIntelligence.parser_result && typeof billIntelligence.parser_result === "object"
+          ? (billIntelligence.parser_result as Record<string, unknown>)
+          : {};
+      const billParserData =
+        billParserResult.billData && typeof billParserResult.billData === "object"
+          ? (billParserResult.billData as Record<string, unknown>)
+          : {};
+      console.info("[ADMIN_BILL_FEED_PROJECTION]", {
+        intake_event_id: rest.event_id ?? rest.id,
+        record_type: rest.intake_record_type,
+        has_bill_intelligence: Object.keys(billIntelligence).length > 0,
+        bill_intelligence_keys: Object.keys(billIntelligence).sort(),
+        has_parser_result: Object.keys(billParserResult).length > 0,
+        parser_result_keys: Object.keys(billParserResult).sort(),
+        parser_bill_data_keys: Object.keys(billParserData).sort(),
+        extraction_keys: billIntelligence.extraction && typeof billIntelligence.extraction === "object"
+          ? Object.keys(billIntelligence.extraction as Record<string, unknown>).sort()
+          : [],
+        extracted_field_count: Array.isArray(billParserData.extractedFields)
+          ? billParserData.extractedFields.length
+          : Array.isArray((billIntelligence.extraction as Record<string, unknown> | undefined)?.extracted_fields)
+            ? ((billIntelligence.extraction as Record<string, unknown>).extracted_fields as unknown[]).length
+            : 0,
+      });
       const qualificationPayload =
         rest.qualification_payload &&
         typeof rest.qualification_payload === "object"

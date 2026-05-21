@@ -73,6 +73,22 @@ function isImageMimeType(mimeType: string | null | undefined): boolean {
   return typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/");
 }
 
+function safeObjectKeys(value: unknown): string[] {
+  return isRecord(value) ? Object.keys(value).sort() : [];
+}
+
+function extractedFieldCount(parsed: BillExtractResult | null | undefined): number {
+  return parsed?.extractedFields?.length ?? 0;
+}
+
+function monthsFound(parsed: BillExtractResult | null | undefined): number {
+  return parsed?.monthlyUsageHistory?.filter((value) => Number.isFinite(value) && value > 0).length ?? 0;
+}
+
+function logAdminBillAudit(label: string, payload: Record<string, unknown>): void {
+  console.info(label, payload);
+}
+
 function hasUsefulBillData(parsed: BillExtractResult): boolean {
   return (
     (parsed.extractedFields?.length ?? 0) >= 2 ||
@@ -168,9 +184,25 @@ type IntakeBillParseResult = {
   } | null;
 };
 
-async function parseStoredBillWithDashboardParity(buffer: Buffer, mimeType: string): Promise<IntakeBillParseResult> {
-  if (isImageMimeType(mimeType) && process.env.ANTHROPIC_API_KEY) {
+async function parseStoredBillWithDashboardParity(buffer: Buffer, mimeType: string, eventId: string): Promise<IntakeBillParseResult> {
+  const imageMimeType = isImageMimeType(mimeType);
+  const anthropicKeyPresent = !!process.env.ANTHROPIC_API_KEY;
+  logAdminBillAudit("[ADMIN_BILL_PARSER_SELECTED]", {
+    intake_event_id: eventId,
+    mime_type: mimeType,
+    buffer_byte_length: buffer.length,
+    is_image_mime_type: imageMimeType,
+    anthropic_key_present: anthropicKeyPresent,
+    selected_parser_path: imageMimeType && anthropicKeyPresent ? "claude-image" : "pipeline",
+  });
+
+  if (imageMimeType && anthropicKeyPresent) {
     try {
+      logAdminBillAudit("[ADMIN_BILL_CLAUDE_START]", {
+        intake_event_id: eventId,
+        mime_type: mimeType,
+        buffer_byte_length: buffer.length,
+      });
       const claudeResult = await extractBillWithClaude({ imageBuffer: buffer, mimeType }, { timeoutMs: 40000 });
       if (claudeResult && claudeResult.status !== "failed") {
         const parsed = mapAiResultToBillExtractResult(
@@ -178,7 +210,19 @@ async function parseStoredBillWithDashboardParity(buffer: Buffer, mimeType: stri
           `[claude-image] status=${claudeResult.status}`,
           "claude-3-5-sonnet",
         );
-        if (hasUsefulBillData(parsed)) {
+        const useful = hasUsefulBillData(parsed);
+        logAdminBillAudit("[ADMIN_BILL_CLAUDE_RESULT]", {
+          intake_event_id: eventId,
+          claude_executed: true,
+          claude_status: claudeResult.status,
+          claude_model: claudeResult.model,
+          claude_input_type: claudeResult.inputType,
+          extracted_field_count: extractedFieldCount(parsed),
+          months_found: monthsFound(parsed),
+          has_useful_bill_data: useful,
+          validation_flag_keys: safeObjectKeys(claudeResult.validationFlags),
+        });
+        if (useful) {
           const extractionEvidence = buildExtractionEvidence({
             parsed,
             source: "claude-image",
@@ -203,10 +247,22 @@ async function parseStoredBillWithDashboardParity(buffer: Buffer, mimeType: stri
         }
       }
     } catch (err) {
+      console.warn("[ADMIN_BILL_CLAUDE_RESULT]", {
+        intake_event_id: eventId,
+        claude_executed: true,
+        claude_status: "error",
+        error: err instanceof Error ? err.message : String(err),
+      });
       console.warn("[UTILITY BILL INTELLIGENCE] claude_image_failed_falling_back", {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  } else {
+    logAdminBillAudit("[ADMIN_BILL_CLAUDE_RESULT]", {
+      intake_event_id: eventId,
+      claude_executed: false,
+      skip_reason: imageMimeType ? "anthropic_key_missing" : "non_image_mime_type",
+    });
   }
 
   const pipelineResult = await parseUtilityBill(buffer, mimeType);
@@ -217,6 +273,16 @@ async function parseStoredBillWithDashboardParity(buffer: Buffer, mimeType: stri
         extractionMethod: pipelineResult.extractionMethod ?? "pipeline",
       })
     : undefined;
+
+  logAdminBillAudit("[ADMIN_BILL_FALLBACK_RESULT]", {
+    intake_event_id: eventId,
+    fallback_executed: true,
+    success: pipelineResult.success,
+    extraction_method: pipelineResult.extractionMethod ?? null,
+    error: pipelineResult.error ?? null,
+    extracted_field_count: extractedFieldCount(pipelineResult.data),
+    months_found: monthsFound(pipelineResult.data),
+  });
 
   return {
     ...pipelineResult,
@@ -543,6 +609,17 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
 
     const billMetadata = resolveBillMetadata(input, row);
     const downloadUrl = downloadUrlFromMetadata(billMetadata);
+    logAdminBillAudit("[ADMIN_BILL_ATTACHMENT_LOOKUP]", {
+      intake_event_id: row.event_id,
+      row_found: true,
+      attachment_exists: !!billMetadata,
+      has_download_url: !!downloadUrl,
+      storage_status: str(billMetadata?.storage_status),
+      storage_provider: str(billMetadata?.storage_provider),
+      content_type: str(billMetadata?.content_type),
+      size_bytes: num(billMetadata?.size_bytes),
+      metadata_keys: safeObjectKeys(billMetadata),
+    });
     if (!billMetadata || !downloadUrl) {
       console.info("[UTILITY BILL INTELLIGENCE] skipped_no_stored_bill", {
         event_id: row.event_id,
@@ -559,13 +636,26 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
     });
 
     const downloaded = await fetchStoredBill(billMetadata);
+    logAdminBillAudit("[ADMIN_BILL_BLOB_DOWNLOAD]", {
+      intake_event_id: row.event_id,
+      storage_provider: str(billMetadata.storage_provider),
+      download_succeeded: true,
+      response_mime_type: downloaded.mimeType,
+      buffer_byte_length: downloaded.buffer.length,
+    });
+    logAdminBillAudit("[ADMIN_BILL_BUFFER_READY]", {
+      intake_event_id: row.event_id,
+      mime_type: downloaded.mimeType,
+      buffer_byte_length: downloaded.buffer.length,
+      non_empty: downloaded.buffer.length > 0,
+    });
     console.info("[UTILITY BILL INTELLIGENCE] parser_start", {
       event_id: row.event_id,
       mime_type: downloaded.mimeType,
       bytes: downloaded.buffer.length,
     });
 
-    const parsedResult = await parseStoredBillWithDashboardParity(downloaded.buffer, downloaded.mimeType);
+    const parsedResult = await parseStoredBillWithDashboardParity(downloaded.buffer, downloaded.mimeType, row.event_id);
     if (!parsedResult.success || !parsedResult.data) {
       console.warn("[UTILITY BILL INTELLIGENCE] parser_failed", {
         event_id: row.event_id,
@@ -576,6 +666,21 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
     }
 
     const parsed = parsedResult.data;
+    logAdminBillAudit("[ADMIN_BILL_NORMALIZED_RESULT]", {
+      intake_event_id: row.event_id,
+      success: parsedResult.success,
+      parser_path: parsedResult.parserPath ?? null,
+      extraction_method: parsedResult.extractionMethod ?? null,
+      claude_metadata_keys: safeObjectKeys(parsedResult.claude),
+      extracted_field_count: extractedFieldCount(parsed),
+      extracted_fields: parsed.extractedFields ?? [],
+      months_found: monthsFound(parsed),
+      confidence_label: parsed.confidence ?? null,
+      has_utility_provider: !!parsed.utilityProvider,
+      has_monthly_kwh: parsed.monthlyKwh != null,
+      has_annual_kwh: parsed.annualKwh != null || parsed.estimatedAnnualKwh != null,
+    });
+
     const enrichmentInput: BillEnrichmentInput = {
       utilityName: parsed.utilityProvider ?? null,
       state: str(row.payload?.state) ?? str(row.payload?.location_state),
@@ -635,6 +740,48 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
       projection,
       trigger,
       durationMs,
+    });
+
+    const persistedRows = await sql`
+      SELECT
+        payload->'bill_intelligence' AS bill_intelligence,
+        payload->'bill_marketplace_projection' AS bill_marketplace_projection,
+        pipeline_result->'bill_intelligence' AS pipeline_bill_intelligence
+      FROM intake_events
+      WHERE id::text = ${row.id}
+         OR event_id = ${row.event_id}
+      LIMIT 1
+    `;
+    const persisted = persistedRows[0] as Record<string, unknown> | undefined;
+    const persistedIntelligence = recordFromUnknown(persisted?.bill_intelligence);
+    const persistedParserResult = recordFromUnknown(persistedIntelligence.parser_result);
+    const persistedParserBillData = recordFromUnknown(persistedParserResult.billData);
+    const persistedExtraction = recordFromUnknown(persistedIntelligence.extraction);
+    const persistedPipelineStatus = recordFromUnknown(persisted?.pipeline_bill_intelligence);
+
+    logAdminBillAudit("[ADMIN_BILL_PERSISTED]", {
+      intake_event_id: row.event_id,
+      persisted_row_found: !!persisted,
+      db_payload_key: "payload.bill_intelligence",
+      db_projection_key: "payload.bill_marketplace_projection",
+      db_status_key: "pipeline_result.bill_intelligence",
+      has_bill_intelligence: safeObjectKeys(persistedIntelligence).length > 0,
+      has_bill_marketplace_projection: safeObjectKeys(persisted?.bill_marketplace_projection).length > 0,
+      has_pipeline_bill_status: safeObjectKeys(persistedPipelineStatus).length > 0,
+      intelligence_keys: safeObjectKeys(persistedIntelligence),
+      parser_result_keys: safeObjectKeys(persistedParserResult),
+      extraction_keys: safeObjectKeys(persistedExtraction),
+      parser_bill_data_keys: safeObjectKeys(persistedParserBillData),
+      pipeline_status_keys: safeObjectKeys(persistedPipelineStatus),
+      extracted_field_count: Array.isArray(persistedParserBillData.extractedFields)
+        ? persistedParserBillData.extractedFields.length
+        : Array.isArray(persistedExtraction.extracted_fields)
+          ? persistedExtraction.extracted_fields.length
+          : 0,
+      months_found: Array.isArray(persistedParserBillData.monthlyUsageHistory)
+        ? persistedParserBillData.monthlyUsageHistory.filter((value) => Number.isFinite(value) && value > 0).length
+        : 0,
+      duration_ms: durationMs,
     });
 
     if (row.opportunity_id) {
