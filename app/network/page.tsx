@@ -21,6 +21,77 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+
+type MarketplaceValueSource =
+  | 'homeowner_entered'
+  | 'parsed_bill'
+  | 'estimated'
+  | 'qualification'
+  | 'operator_review'
+  | 'release_gate'
+  | 'marketplace';
+
+interface MarketplaceSourcedValue<T> {
+  value: T;
+  source: MarketplaceValueSource;
+  label: string;
+}
+
+interface MarketplaceBadge {
+  label: string;
+  tone: 'emerald' | 'amber' | 'blue' | 'violet' | 'orange' | 'rose' | 'slate';
+  reason: string;
+  source: string;
+}
+
+interface MarketplaceConfidenceProjection {
+  level: 'high' | 'medium' | 'low';
+  score: number;
+  label: string;
+  reasons: string[];
+  warnings: string[];
+}
+
+interface MarketplaceNarrativeProjection {
+  headline: string;
+  summary: string;
+  bullets: string[];
+  source_note: string;
+}
+
+interface MarketplaceIntelligenceProjection {
+  confidence: MarketplaceConfidenceProjection;
+  badges: MarketplaceBadge[];
+  narrative: MarketplaceNarrativeProjection;
+  revenue: {
+    estimated_project_value: MarketplaceSourcedValue<number> | null;
+    estimated_system_size_kw: MarketplaceSourcedValue<number> | null;
+    monthly_bill_amount: MarketplaceSourcedValue<number> | null;
+    annual_usage_kwh: MarketplaceSourcedValue<number> | null;
+    monthly_usage_avg_kwh: MarketplaceSourcedValue<number> | null;
+    utility_rate_per_kwh: MarketplaceSourcedValue<number> | null;
+    estimated_annual_savings: MarketplaceSourcedValue<number> | null;
+    estimated_offset_pct: MarketplaceSourcedValue<number> | null;
+    estimated_payback_yrs: MarketplaceSourcedValue<number> | null;
+    utility_provider: MarketplaceSourcedValue<string> | null;
+  };
+  evidence: {
+    homeowner_intake: Record<string, unknown>;
+    bill_evidence: Record<string, unknown>;
+    parsed_bill: Record<string, unknown>;
+    qualification: Record<string, unknown>;
+    operator_review: Record<string, unknown>;
+    screening: Record<string, unknown>;
+    source_separation: Record<string, unknown>;
+  };
+  release: {
+    ok: boolean;
+    blockers: string[];
+    warnings: string[];
+    missing: string[];
+  };
+}
+
 interface Opportunity extends EnrichmentCarrier {
   id: string;
   source: 'contractor_shared' | 'solarpro_generated';
@@ -74,6 +145,10 @@ interface Opportunity extends EnrichmentCarrier {
   claim_mode?: 'exclusive' | 'shared' | string;
   claim_count?: number;
   max_claims?: number;
+  released_at?: string | null;
+  estimated_annual_savings?: number | null;
+  estimated_offset_pct?: number | null;
+  marketplace_intelligence?: MarketplaceIntelligenceProjection | null;
 }
 
 interface ContractorProfile {
@@ -117,7 +192,7 @@ function fmtCurrency(n: number | null) {
 }
 function fmtRate(r: number | null) {
   if (!r) return '—';
-  return `$${(r * 100).toFixed(1)}¢/kWh`;
+  return `${(r * 100).toFixed(1)}¢/kWh`;
 }
 function fmtBool(value: boolean | null | undefined) {
   if (value == null) return '—';
@@ -139,6 +214,81 @@ function contractorToneClasses(tone: EnrichmentChip['tone'] | ReturnType<typeof 
   };
   return tones[tone] ?? tones.slate;
 }
+
+function sourceLabel(source: MarketplaceValueSource | string | undefined) {
+  const labels: Record<string, string> = {
+    homeowner_entered: 'Homeowner-entered',
+    parsed_bill: 'Parsed bill',
+    estimated: 'Estimated',
+    qualification: 'Qualification',
+    operator_review: 'Operator-reviewed',
+    release_gate: 'Release gate',
+    marketplace: 'Marketplace',
+  };
+  return source ? labels[source] ?? source.replace(/_/g, ' ') : 'Available data';
+}
+
+function sourcedNumber(value: MarketplaceSourcedValue<number> | null | undefined, formatter: (n: number | null) => string) {
+  return value ? formatter(value.value) : '—';
+}
+
+function fmtKwh(n: number | null | undefined) {
+  if (!n) return '—';
+  return Math.round(n).toLocaleString('en-US') + ' kWh';
+}
+
+function fmtPct(n: number | null | undefined) {
+  if (!n) return '—';
+  return Math.round(n) + '%';
+}
+
+function intelligenceBadgeTone(tone: MarketplaceBadge['tone']) {
+  return contractorToneClasses(tone);
+}
+
+function confidenceClasses(level: MarketplaceConfidenceProjection['level'] | undefined) {
+  if (level === 'high') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
+  if (level === 'medium') return 'border-amber-500/40 bg-amber-500/10 text-amber-300';
+  return 'border-slate-700 bg-slate-800/70 text-slate-300';
+}
+
+function RevenueMetric({ label, value, source, accent }: { label: string; value: string; source?: string; accent?: string }) {
+  return (
+    <div className="rounded-xl border border-slate-800/80 bg-slate-950/35 p-3">
+      <div className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">{label}</div>
+      <div className={`font-black text-lg tabular-nums ${accent ?? 'text-white'}`}>{value}</div>
+      {source && <div className="mt-1 text-[10px] text-slate-500">{source}</div>}
+    </div>
+  );
+}
+
+
+function evidenceValue(value: unknown) {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number') return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  return formatDisplayValue(String(value));
+}
+
+function EvidencePanel({ title, subtitle, items }: { title: string; subtitle?: string; items: { label: string; value: unknown; accent?: string }[] }) {
+  return (
+    <section className="mb-4 rounded-2xl border border-slate-800 bg-slate-950/25 p-4">
+      <div className="mb-3">
+        <p className="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black">{title}</p>
+        {subtitle && <p className="mt-1 text-[11px] text-slate-600">{subtitle}</p>}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {items.map(item => (
+          <div key={`${title}-${item.label}`} className="rounded-xl bg-slate-900/55 border border-slate-800/80 p-3">
+            <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
+            <div className={`font-semibold text-sm ${item.accent ?? 'text-white'}`}>{evidenceValue(item.value)}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ContractorEnrichmentChips({ chips }: { chips: EnrichmentChip[] }) {
   if (!chips.length) return null;
   return (
@@ -197,153 +347,107 @@ function OpportunityCard({
   const pitchNum = opp.roof_pitch ? parseInt(opp.roof_pitch) : 0;
   const isSteep = !isNaN(pitchNum) && pitchNum >= 6;
   const payload = getEnrichmentPayload(opp);
-  const chips = buildEnrichmentChips(opp, 'contractor');
+  const enrichmentChips = buildEnrichmentChips(opp, 'contractor');
+  const intelligence = opp.marketplace_intelligence;
+  const revenue = intelligence?.revenue;
   const enrichedSystemSize = fieldValue<number>(payload, 'core', 'estimated_system_size_kw') ?? opp.system_size_kw;
   const enrichedProjectValue = fieldValue<number>(payload, 'core', 'estimated_project_value') ?? opp.estimated_system_cost;
-  const roofComplexity = fieldValue<string>(payload, 'roof_install', 'install_difficulty');
-  const ahjComplexity = fieldValue<string>(payload, 'territory_utility', 'ahj_complexity');
+  const projectValue = revenue?.estimated_project_value ?? (enrichedProjectValue ? { value: enrichedProjectValue, source: 'estimated' as const, label: 'Estimated project value' } : null);
+  const systemSize = revenue?.estimated_system_size_kw ?? (enrichedSystemSize ? { value: enrichedSystemSize, source: 'estimated' as const, label: 'Estimated system size' } : null);
+  const annualUsage = revenue?.annual_usage_kwh ?? (opp.annual_kwh ? { value: opp.annual_kwh, source: 'estimated' as const, label: 'Annual usage' } : null);
+  const monthlyBill = revenue?.monthly_bill_amount ?? (opp.monthly_bill_amount ? { value: opp.monthly_bill_amount, source: 'homeowner_entered' as const, label: 'Homeowner-entered monthly bill' } : null);
+  const rate = revenue?.utility_rate_per_kwh ?? (opp.utility_rate_per_kwh ? { value: opp.utility_rate_per_kwh, source: 'estimated' as const, label: 'Utility rate' } : null);
+  const savings = revenue?.estimated_annual_savings ?? (opp.estimated_annual_savings ? { value: opp.estimated_annual_savings, source: 'estimated' as const, label: 'Estimated annual savings' } : null);
+  const offset = revenue?.estimated_offset_pct ?? (opp.estimated_offset_pct ? { value: opp.estimated_offset_pct, source: 'estimated' as const, label: 'Estimated offset' } : null);
+  const utility = revenue?.utility_provider?.value ?? opp.utility_name;
+  const confidence = intelligence?.confidence;
+  const marketplaceBadges = intelligence?.badges ?? [];
+  const visibleBadges = marketplaceBadges.length ? marketplaceBadges.slice(0, 6) : enrichmentChips.slice(0, 5).map(chip => ({ label: chip.label, tone: chip.tone, reason: 'Derived from opportunity enrichment data', source: 'enrichment' }));
+  const headline = intelligence?.narrative?.headline ?? (opp.source === 'solarpro_generated' ? 'Marketplace opportunity intelligence' : 'Contractor-shared opportunity');
+  const summary = intelligence?.narrative?.summary;
 
   return (
-    <div className="group relative flex flex-col bg-[#0f1623] border border-slate-700/50 rounded-2xl overflow-hidden hover:border-slate-500/70 hover:shadow-lg hover:shadow-black/40 transition-all duration-200 cursor-pointer" onClick={() => onViewDetail(opp)}>
-
-      {/* Accent bar at top based on battery/urgency */}
-      <div className={`h-1 w-full ${opp.battery_candidate ? 'bg-gradient-to-r from-amber-500 to-amber-400' : 'bg-gradient-to-r from-emerald-600 to-emerald-500'}`} />
+    <div className="group relative flex flex-col overflow-hidden rounded-3xl border border-slate-700/60 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,0.13),transparent_34%),#0f1623] shadow-xl shadow-black/20 transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-400/35 hover:shadow-emerald-950/25 cursor-pointer" onClick={() => onViewDetail(opp)}>
+      <div className={`h-1.5 w-full ${confidence?.level === 'high' ? 'bg-gradient-to-r from-emerald-400 via-amber-300 to-emerald-500' : opp.battery_candidate ? 'bg-gradient-to-r from-amber-500 to-orange-400' : 'bg-gradient-to-r from-slate-600 to-emerald-600'}`} />
 
       <div className="flex-1 p-5">
-        {/* Header row */}
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex-1 min-w-0">
-            {/* Location — the hero */}
-            <div className="flex items-center gap-2 mb-0.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 flex-shrink-0" />
-              <h3 className="text-white font-bold text-lg leading-tight truncate">
-                {opp.city && opp.state_code
-                  ? `${opp.city}, ${opp.state_code}`
-                  : opp.state_code || 'Location Pending'}
-              </h3>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-emerald-300">
+              <Sparkles size={12} /> Revenue intelligence feed
             </div>
-            <p className="text-slate-500 text-xs pl-3.5">
-              Shared by {opp.creator_company || 'SolarPro contractor'}
-            </p>
+            <h3 className="text-white font-black text-xl leading-tight truncate">
+              {opp.city && opp.state_code ? `${opp.city}, ${opp.state_code}` : opp.state_code || 'Location Pending'}
+            </h3>
+            <p className="mt-1 text-xs text-slate-400 line-clamp-2">{headline}</p>
           </div>
-
-          {/* Tags cluster */}
-          <div className="flex flex-col gap-1 ml-3 flex-shrink-0">
-            {opp.battery_candidate && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-amber-500/15 border border-amber-500/40 rounded-md text-amber-400 text-[10px] font-bold uppercase tracking-wide">
-                <Battery size={8} /> Battery
-              </span>
-            )}
-            {isSteep && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-rose-500/15 border border-rose-500/30 rounded-md text-rose-400 text-[10px] font-bold uppercase tracking-wide">
-                ▲ Steep
-              </span>
-            )}
-            {opp.complex_ahj && (
-              <span className="flex items-center gap-1 px-2 py-0.5 bg-orange-500/15 border border-orange-500/30 rounded-md text-orange-400 text-[10px] font-bold uppercase tracking-wide">
-                <AlertTriangle size={8} /> AHJ
-              </span>
-            )}
-          </div>
+          {confidence && (
+            <div className={`rounded-2xl border px-3 py-2 text-right ${confidenceClasses(confidence.level)}`}>
+              <div className="text-xl font-black tabular-nums">{confidence.score}</div>
+              <div className="text-[9px] font-bold uppercase tracking-widest">AI confidence</div>
+            </div>
+          )}
         </div>
 
-        <ContractorEnrichmentChips chips={chips} />
+        {summary && <p className="mb-4 rounded-2xl border border-slate-800 bg-slate-950/35 p-3 text-xs leading-relaxed text-slate-300">{summary}</p>}
 
-        {/* System intel — 3 columns */}
-        <div className="grid grid-cols-3 gap-px bg-slate-700/30 rounded-xl overflow-hidden mb-4">
-          <div className="bg-[#0f1623] px-3 py-2.5 text-center">
-            <div className="text-amber-400 font-bold text-xl tabular-nums">{fmtKw(enrichedSystemSize)}</div>
-            <div className="text-slate-500 text-[10px] uppercase tracking-widest mt-0.5">System</div>
-          </div>
-          <div className="bg-[#0f1623] px-3 py-2.5 text-center">
-            <div className="text-white font-bold text-xl tabular-nums">
-              {opp.annual_kwh ? `${(opp.annual_kwh / 1000).toFixed(1)}k` : '—'}
-            </div>
-            <div className="text-slate-500 text-[10px] uppercase tracking-widest mt-0.5">kWh/yr</div>
-          </div>
-          <div className="bg-[#0f1623] px-3 py-2.5 text-center">
-            <div className="text-emerald-400 font-bold text-xl tabular-nums">{fmtRate(opp.utility_rate_per_kwh)}</div>
-            <div className="text-slate-500 text-[10px] uppercase tracking-widest mt-0.5">Rate</div>
-          </div>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <RevenueMetric label="Project value" value={sourcedNumber(projectValue, fmtCurrency)} source={projectValue ? sourceLabel(projectValue.source) : undefined} accent="text-emerald-300" />
+          <RevenueMetric label="System size" value={sourcedNumber(systemSize, fmtKw)} source={systemSize ? sourceLabel(systemSize.source) : undefined} accent="text-amber-300" />
+          <RevenueMetric label="Monthly bill" value={sourcedNumber(monthlyBill, fmtCurrency)} source={monthlyBill ? sourceLabel(monthlyBill.source) : undefined} />
+          <RevenueMetric label="Annual usage" value={annualUsage ? fmtKwh(annualUsage.value) : '—'} source={annualUsage ? sourceLabel(annualUsage.source) : undefined} />
         </div>
 
-        {/* Roof + utility details */}
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          <RevenueMetric label="Rate" value={rate ? fmtRate(rate.value) : '—'} source={rate ? sourceLabel(rate.source) : undefined} accent="text-emerald-300" />
+          <RevenueMetric label="Savings" value={savings ? fmtCurrency(savings.value) : '—'} source={savings ? sourceLabel(savings.source) : undefined} />
+          <RevenueMetric label="Offset" value={offset ? fmtPct(offset.value) : '—'} source={offset ? sourceLabel(offset.source) : undefined} />
+        </div>
+
         <div className="flex flex-wrap gap-1.5 mb-4">
-          {enrichedProjectValue && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/30">
-              <DollarSign size={9} />Value {fmtCurrency(enrichedProjectValue)}
+          {visibleBadges.map(badge => (
+            <span key={`${badge.source}-${badge.label}`} title={badge.reason} className={`px-2 py-1 rounded-lg border text-[10px] font-black uppercase tracking-wide ${intelligenceBadgeTone(badge.tone as MarketplaceBadge['tone'])}`}>
+              {badge.label}
             </span>
+          ))}
+          {opp.battery_candidate && !visibleBadges.some(badge => badge.label.toLowerCase().includes('battery')) && (
+            <span className="flex items-center gap-1 px-2 py-1 bg-amber-500/15 border border-amber-500/40 rounded-lg text-amber-400 text-[10px] font-black uppercase tracking-wide"><Battery size={9} /> Battery</span>
           )}
-          {roofComplexity && (
-            <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800/70 px-2 py-0.5 rounded-md border border-slate-700/50">
-              <Home size={9} />Roof {formatDisplayValue(roofComplexity)}
-            </span>
-          )}
-          {ahjComplexity && (
-            <span className="flex items-center gap-1 text-xs text-orange-300 bg-orange-500/10 px-2 py-0.5 rounded-md border border-orange-500/30">
-              <AlertTriangle size={9} />AHJ {formatDisplayValue(ahjComplexity)}
-            </span>
-          )}
-          {opp.utility_name && (
-            <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800/70 px-2 py-0.5 rounded-md border border-slate-700/50">
-              <Zap size={9} className="text-slate-500" />{opp.utility_name}
-            </span>
-          )}
-          {opp.roof_material && (
-            <span className="flex items-center gap-1 text-xs text-slate-400 bg-slate-800/70 px-2 py-0.5 rounded-md border border-slate-700/50">
-              <Home size={9} className="text-slate-500" />{opp.roof_material}
-            </span>
-          )}
-          {opp.roof_pitch && (
-            <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border ${
-              isSteep
-                ? 'text-rose-400 bg-rose-500/10 border-rose-500/30'
-                : 'text-slate-400 bg-slate-800/70 border-slate-700/50'
-            }`}>
-              <TrendingUp size={9} />{opp.roof_pitch} pitch
-            </span>
-          )}
-          {opp.equipment_ecosystem && (
-            <span className="flex items-center gap-1 text-xs text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-md border border-blue-500/30">
-              <Zap size={9} />{ECOSYSTEM_LABELS[opp.equipment_ecosystem] || opp.equipment_ecosystem}
-            </span>
-          )}
+          {isSteep && <span className="px-2 py-1 bg-rose-500/15 border border-rose-500/30 rounded-lg text-rose-400 text-[10px] font-black uppercase tracking-wide">Steep roof</span>}
+          {opp.complex_ahj && <span className="px-2 py-1 bg-orange-500/15 border border-orange-500/30 rounded-lg text-orange-400 text-[10px] font-black uppercase tracking-wide">Complex AHJ</span>}
         </div>
 
-        {/* Notes if any */}
-        {opp.listing_notes && (
-          <p className="text-slate-500 text-xs mb-4 italic line-clamp-1">
-            "{opp.listing_notes}"
-          </p>
-        )}
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="rounded-xl bg-slate-950/30 border border-slate-800/80 p-3">
+            <div className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">Utility</div>
+            <div className="font-semibold text-white truncate">{utility || '—'}</div>
+          </div>
+          <div className="rounded-xl bg-slate-950/30 border border-slate-800/80 p-3">
+            <div className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">Timeline</div>
+            <div className="font-semibold text-white truncate">{formatDisplayValue(opp.timeline)}</div>
+          </div>
+        </div>
+
+        {opp.listing_notes && <p className="text-slate-500 text-xs mt-4 italic line-clamp-1">&quot;{opp.listing_notes}&quot;</p>}
       </div>
 
-      {/* Footer — always pinned to bottom */}
       <div className="px-5 pb-4 pt-0">
-        <div className="flex items-center justify-between pt-3 border-t border-slate-800">
-          <div className="flex items-center gap-3">
-            {opp.asking_price ? (
-              <span className="text-emerald-400 font-bold">{fmtCurrency(opp.asking_price)}</span>
-            ) : (
-              <span className="text-slate-600 text-xs font-medium">Price on claim</span>
-            )}
-            <span className={`text-xs flex items-center gap-1 ${isUrgent ? 'text-rose-400' : 'text-slate-600'}`}>
-              <Clock size={10} />{expiry}
-            </span>
+        <div className="flex items-center justify-between gap-3 pt-4 border-t border-slate-800/80">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              {opp.asking_price ? <span className="text-emerald-300 font-black">{fmtCurrency(opp.asking_price)}</span> : <span className="text-slate-500 text-xs font-medium">Price on claim</span>}
+              <span className={`text-xs flex items-center gap-1 ${isUrgent ? 'text-orange-300' : 'text-slate-500'}`}><Clock size={10} />{expiry}</span>
+            </div>
+            <div className="mt-1 text-[10px] text-slate-600">{intelligence?.evidence?.source_separation ? 'Homeowner and parsed-bill sources kept separate' : `Shared by ${opp.creator_company || 'SolarPro contractor'}`}</div>
           </div>
 
-          <div className="flex gap-2" onClick={e => e.stopPropagation()}>
+          <div className="flex gap-2 flex-shrink-0" onClick={e => e.stopPropagation()}>
             {!claimed ? (
-              <button
-                onClick={() => onClaim(opp.id)}
-                className="px-4 py-1.5 text-xs font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm"
-              >
-                Claim <ArrowRight size={11} />
+              <button onClick={() => onClaim(opp.id)} className="px-4 py-2 text-xs font-black text-slate-950 bg-emerald-300 hover:bg-emerald-200 rounded-xl transition-colors flex items-center gap-1.5 shadow-lg shadow-emerald-950/30">
+                Claim <ArrowRight size={12} />
               </button>
             ) : (
-              <span className="px-3 py-1.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-lg flex items-center gap-1.5">
-                <CheckCircle size={11} /> Claimed
-              </span>
+              <span className="px-3 py-2 text-xs font-black text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-1.5"><CheckCircle size={12} /> Claimed</span>
             )}
           </div>
         </div>
@@ -431,106 +535,166 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
   onClose: () => void;
   isClaimed: boolean;
 }) {
+  const intelligence = opp.marketplace_intelligence;
+  const revenue = intelligence?.revenue;
+  const confidence = intelligence?.confidence;
+  const evidence = intelligence?.evidence;
+  const release = intelligence?.release;
+  const narrative = intelligence?.narrative;
+  const revenueItems = [
+    { label: 'Project Value', value: revenue?.estimated_project_value ? fmtCurrency(revenue.estimated_project_value.value) : fmtCurrency(opp.estimated_system_cost), accent: 'text-emerald-300', source: sourceLabel(revenue?.estimated_project_value?.source ?? 'estimated') },
+    { label: 'System Size', value: revenue?.estimated_system_size_kw ? fmtKw(revenue.estimated_system_size_kw.value) : fmtKw(opp.system_size_kw), accent: 'text-amber-300', source: sourceLabel(revenue?.estimated_system_size_kw?.source ?? 'estimated') },
+    { label: 'Monthly Bill', value: revenue?.monthly_bill_amount ? fmtCurrency(revenue.monthly_bill_amount.value) : fmtCurrency(opp.monthly_bill_amount ?? null), source: sourceLabel(revenue?.monthly_bill_amount?.source ?? 'homeowner_entered') },
+    { label: 'Annual Usage', value: revenue?.annual_usage_kwh ? fmtKwh(revenue.annual_usage_kwh.value) : fmtKwh(opp.annual_kwh), source: sourceLabel(revenue?.annual_usage_kwh?.source ?? 'estimated') },
+    { label: 'Utility Rate', value: revenue?.utility_rate_per_kwh ? fmtRate(revenue.utility_rate_per_kwh.value) : fmtRate(opp.utility_rate_per_kwh), accent: 'text-emerald-300', source: sourceLabel(revenue?.utility_rate_per_kwh?.source ?? 'estimated') },
+    { label: 'Annual Savings', value: revenue?.estimated_annual_savings ? fmtCurrency(revenue.estimated_annual_savings.value) : fmtCurrency(opp.estimated_annual_savings ?? null), source: 'Estimated' },
+    { label: 'Offset', value: revenue?.estimated_offset_pct ? fmtPct(revenue.estimated_offset_pct.value) : fmtPct(opp.estimated_offset_pct), source: 'Estimated' },
+    { label: 'Payback', value: revenue?.estimated_payback_yrs ? `${revenue.estimated_payback_yrs.value.toFixed(1)} yrs` : opp.estimated_payback_yrs ? `${opp.estimated_payback_yrs.toFixed(1)} yrs` : '—', source: 'Estimated' },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-[#0f1623] border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
+      <div className="bg-[#0f1623] border border-slate-700 rounded-3xl w-full max-w-3xl shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-white font-bold text-lg">Opportunity Intelligence</h2>
-              <p className="text-slate-500 text-xs mt-0.5">
+          <div className="flex items-start justify-between gap-4 mb-5">
+            <div className="min-w-0">
+              <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300">
+                <Sparkles size={12} /> Mini deal room
+              </div>
+              <h2 className="text-white font-black text-2xl leading-tight">{narrative?.headline ?? 'Opportunity Intelligence'}</h2>
+              <p className="text-slate-500 text-xs mt-1">
                 {opp.city && opp.state_code ? `${opp.city}, ${opp.state_code}` : 'Full address revealed after claim'}
               </p>
             </div>
-            <button onClick={onClose} className="text-slate-500 hover:text-white"><X size={18} /></button>
+            <div className="flex items-start gap-3">
+              {confidence && (
+                <div className={`rounded-2xl border px-3 py-2 text-right ${confidenceClasses(confidence.level)}`}>
+                  <div className="text-xl font-black tabular-nums">{confidence.score}</div>
+                  <div className="text-[9px] font-bold uppercase tracking-widest">{confidence.label}</div>
+                </div>
+              )}
+              <button onClick={onClose} className="text-slate-500 hover:text-white"><X size={18} /></button>
+            </div>
           </div>
 
-          <section className="mb-5">
-            <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-3">System</p>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { label: 'System Size', value: fmtKw(opp.system_size_kw), accent: 'text-amber-400' },
-                { label: 'Annual kWh', value: opp.annual_kwh ? `${Math.round(opp.annual_kwh).toLocaleString()}` : '—' },
-                { label: 'Monthly Avg', value: opp.monthly_kwh_avg ? `${Math.round(opp.monthly_kwh_avg)} kWh` : '—' },
-                { label: 'Utility', value: opp.utility_name || '—' },
-                { label: 'Rate', value: fmtRate(opp.utility_rate_per_kwh), accent: 'text-emerald-400' },
-                { label: 'Est. Cost', value: fmtCurrency(opp.estimated_system_cost) },
-              ].map(item => (
-                <div key={item.label} className="bg-slate-800/50 rounded-lg p-3">
-                  <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
-                  <div className={`font-semibold text-sm ${item.accent ?? 'text-white'}`}>{item.value}</div>
+          {narrative?.summary && (
+            <div className="mb-4 rounded-2xl border border-emerald-500/20 bg-emerald-500/8 p-4">
+              <p className="text-sm leading-relaxed text-slate-200">{narrative.summary}</p>
+              {narrative.bullets.length > 0 && (
+                <div className="mt-3 grid gap-2">
+                  {narrative.bullets.map(bullet => (
+                    <div key={bullet} className="flex items-start gap-2 text-xs text-slate-300"><CheckCircle size={12} className="mt-0.5 flex-shrink-0 text-emerald-300" />{bullet}</div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="mb-5">
-            <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-3">Lead Qualification</p>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: 'Avg. Bill', value: fmtCurrency(opp.monthly_bill_amount ?? null), accent: 'text-emerald-400' },
-                { label: 'Lead Grade', value: opp.lead_grade || '—', accent: 'text-amber-400' },
-                { label: 'Qualification', value: formatDisplayValue(opp.qualification_status) },
-                { label: 'Timeline', value: formatDisplayValue(opp.timeline) },
-                { label: 'Homeowner', value: formatDisplayValue(opp.homeowner_status) },
-                { label: 'Preferred Contact', value: formatDisplayValue(opp.preferred_contact_method) },
-                { label: 'Finance Ready', value: fmtBool(opp.finance_readiness) },
-                { label: 'Battery Interest', value: formatDisplayValue(opp.battery_interest) },
-                { label: 'Income Band', value: formatDisplayValue(opp.estimated_income_band) },
-                { label: 'Credit Band', value: formatDisplayValue(opp.estimated_credit_band) },
-                { label: 'Sunlight', value: formatDisplayValue(opp.sunlight_confidence) },
-                { label: 'Property Type', value: formatDisplayValue(opp.property_type) },
-              ].map(item => (
-                <div key={item.label} className="bg-slate-800/50 rounded-lg p-3">
-                  <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
-                  <div className={`font-semibold text-sm ${item.accent ?? 'text-white'}`}>{item.value}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="mb-5">
-            <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-3">Roof</p>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: 'Material', value: opp.roof_material || '—' },
-                { label: 'Pitch', value: opp.roof_pitch || '—', flag: opp.steep_roof },
-                { label: 'Condition', value: opp.roof_condition || '—' },
-                { label: 'Age', value: opp.roof_age_years ? `${opp.roof_age_years} yrs` : '—' },
-                { label: 'Structure', value: opp.structure_type || '—' },
-                { label: 'Usable %', value: opp.usable_roof_pct ? `${opp.usable_roof_pct}%` : '—' },
-              ].map(item => (
-                <div key={item.label} className="bg-slate-800/50 rounded-lg p-3">
-                  <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
-                  <div className={`font-semibold text-sm ${item.flag ? 'text-rose-400' : 'text-white'}`}>{item.value}</div>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="mb-5">
-            <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-3">Fit Flags</p>
-            <div className="flex flex-wrap gap-2">
-              {[
-                { label: 'Battery Candidate', active: opp.battery_candidate, color: 'amber', icon: <Battery size={11} /> },
-                { label: 'Steep Roof', active: opp.steep_roof, color: 'rose', icon: <TrendingUp size={11} /> },
-                { label: `Complex AHJ${opp.ahj_name ? `: ${opp.ahj_name}` : ''}`, active: opp.complex_ahj, color: 'orange', icon: <AlertTriangle size={11} /> },
-              ].map(f => (
-                <span key={f.label} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${
-                  f.active
-                    ? f.color === 'amber' ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
-                    : f.color === 'rose' ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
-                    : 'bg-orange-500/15 border-orange-500/30 text-orange-400'
-                    : 'bg-slate-800/50 border-slate-700 text-slate-600'
-                }`}>{f.icon}{f.label}</span>
-              ))}
-              {opp.equipment_ecosystem && (
-                <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-500/15 border border-blue-500/30 text-blue-400">
-                  <Zap size={11} />{ECOSYSTEM_LABELS[opp.equipment_ecosystem] || opp.equipment_ecosystem}
-                </span>
               )}
+              <p className="mt-3 text-[10px] text-slate-600">{narrative.source_note}</p>
+            </div>
+          )}
+
+          <section className="mb-4">
+            <p className="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black mb-3">Revenue intelligence</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {revenueItems.map(item => (
+                <div key={item.label} className="rounded-2xl border border-slate-800 bg-slate-950/35 p-3">
+                  <div className="text-slate-500 text-[10px] uppercase tracking-widest mb-1">{item.label}</div>
+                  <div className={`font-black text-lg tabular-nums ${item.accent ?? 'text-white'}`}>{item.value}</div>
+                  <div className="mt-1 text-[10px] text-slate-600">{item.source}</div>
+                </div>
+              ))}
             </div>
           </section>
+
+          {intelligence?.badges?.length ? (
+            <section className="mb-4 rounded-2xl border border-slate-800 bg-slate-950/25 p-4">
+              <p className="text-slate-400 text-[10px] uppercase tracking-[0.2em] font-black mb-3">Intelligence badges</p>
+              <div className="flex flex-wrap gap-2">
+                {intelligence.badges.map(badge => (
+                  <span key={`${badge.source}-${badge.label}`} title={badge.reason} className={`px-2.5 py-1 rounded-lg border text-[10px] font-black uppercase tracking-wide ${intelligenceBadgeTone(badge.tone)}`}>{badge.label}</span>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <EvidencePanel
+            title="Homeowner intake"
+            subtitle="Homeowner-entered values are shown as their own source and are not overwritten by parsed bill data."
+            items={[
+              { label: 'Intake Present', value: evidence?.homeowner_intake?.present },
+              { label: 'Monthly Bill', value: evidence?.homeowner_intake?.monthly_bill_amount ? fmtCurrency(Number(evidence.homeowner_intake.monthly_bill_amount)) : fmtCurrency(opp.monthly_bill_amount ?? null), accent: 'text-emerald-300' },
+              { label: 'Utility', value: evidence?.homeowner_intake?.utility_provider ?? opp.utility_name },
+              { label: 'Timeline', value: evidence?.homeowner_intake?.timeline ?? opp.timeline },
+              { label: 'Financing Interest', value: evidence?.homeowner_intake?.financing_interest ?? opp.finance_readiness },
+              { label: 'Source', value: evidence?.homeowner_intake?.source ?? 'opportunity' },
+            ]}
+          />
+
+          <EvidencePanel
+            title="Bill intelligence"
+            subtitle="Parsed bill values support or challenge intake values, but do not silently replace homeowner-entered truth."
+            items={[
+              { label: 'Stored Bill', value: evidence?.bill_evidence?.stored_attachment },
+              { label: 'Storage Status', value: evidence?.bill_evidence?.storage_status },
+              { label: 'Bill Parsed', value: evidence?.parsed_bill?.has_real_parser_output },
+              { label: 'Parsed Utility', value: evidence?.parsed_bill?.utility_provider },
+              { label: 'Parsed Annual Usage', value: evidence?.parsed_bill?.annual_usage_kwh ? fmtKwh(Number(evidence.parsed_bill.annual_usage_kwh)) : '—' },
+              { label: 'Parsed Rate', value: evidence?.parsed_bill?.utility_rate_per_kwh ? fmtRate(Number(evidence.parsed_bill.utility_rate_per_kwh)) : '—' },
+              { label: 'Parsed Bill Total', value: evidence?.parsed_bill?.total_amount ? fmtCurrency(Number(evidence.parsed_bill.total_amount)) : '—' },
+              { label: 'Parsed Source', value: evidence?.parsed_bill?.source },
+            ]}
+          />
+
+          <EvidencePanel
+            title="Qualification and financing"
+            items={[
+              { label: 'Lead Grade', value: evidence?.qualification?.lead_grade ?? opp.lead_grade, accent: 'text-amber-300' },
+              { label: 'Qualification', value: evidence?.qualification?.status ?? opp.qualification_status },
+              { label: 'Finance Ready', value: evidence?.qualification?.finance_readiness ?? opp.finance_readiness },
+              { label: 'Income Band', value: opp.estimated_income_band },
+              { label: 'Credit Band', value: opp.estimated_credit_band },
+              { label: 'Sunlight', value: opp.sunlight_confidence },
+              { label: 'Owner Status', value: opp.homeowner_status },
+              { label: 'Battery Interest', value: opp.battery_interest },
+            ]}
+          />
+
+          <EvidencePanel
+            title="Operator review and release readiness"
+            items={[
+              { label: 'Contacted', value: evidence?.operator_review?.contacted },
+              { label: 'Qualified', value: evidence?.operator_review?.qualified },
+              { label: 'Financing Ready', value: evidence?.operator_review?.financing_ready },
+              { label: 'Marketplace Approved', value: evidence?.operator_review?.approved_for_marketplace },
+              { label: 'Screening Approved', value: evidence?.screening?.approved },
+              { label: 'Release Gate', value: release ? (release.ok ? 'Passed' : 'Warnings / blockers') : '—', accent: release?.ok ? 'text-emerald-300' : 'text-amber-300' },
+              { label: 'Claim Mode', value: opp.claim_mode ?? '—' },
+              { label: 'Claim Capacity', value: opp.max_claims ? `${opp.claim_count ?? 0}/${opp.max_claims}` : '—' },
+            ]}
+          />
+
+          {(release?.warnings?.length || release?.blockers?.length || confidence?.warnings?.length) ? (
+            <section className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-4">
+              <p className="text-amber-300 text-[10px] uppercase tracking-[0.2em] font-black mb-3">Evidence warnings</p>
+              <div className="space-y-1.5">
+                {[...(release?.warnings ?? []), ...(release?.blockers ?? []), ...(confidence?.warnings ?? [])].slice(0, 8).map(warning => (
+                  <div key={warning} className="text-xs text-amber-100/80 flex items-center gap-2"><AlertTriangle size={12} className="text-amber-300" />{formatDisplayValue(warning)}</div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <EvidencePanel
+            title="Roof and fit signals"
+            items={[
+              { label: 'Material', value: opp.roof_material },
+              { label: 'Pitch', value: opp.roof_pitch, accent: opp.steep_roof ? 'text-rose-300' : undefined },
+              { label: 'Condition', value: opp.roof_condition },
+              { label: 'Age', value: opp.roof_age_years ? `${opp.roof_age_years} yrs` : '—' },
+              { label: 'Structure', value: opp.structure_type },
+              { label: 'Usable Roof', value: opp.usable_roof_pct ? `${opp.usable_roof_pct}%` : '—' },
+              { label: 'Battery Candidate', value: opp.battery_candidate },
+              { label: 'Complex AHJ', value: opp.complex_ahj ? (opp.ahj_name || 'Yes') : false },
+            ]}
+          />
 
           <ContractorEnrichmentDetails opp={opp} />
 
@@ -546,7 +710,7 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
           {opp.listing_notes && (
             <section className="mb-5">
               <p className="text-slate-500 text-[10px] uppercase tracking-wider font-semibold mb-2">Notes</p>
-              <p className="text-slate-300 text-sm italic bg-slate-800/50 rounded-lg p-3">"{opp.listing_notes}"</p>
+              <p className="text-slate-300 text-sm italic bg-slate-800/50 rounded-lg p-3">&quot;{opp.listing_notes}&quot;</p>
             </section>
           )}
 
@@ -557,11 +721,11 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
                 onClick={() => { onClose(); onClaim(opp.id); }}
                 className="flex-1 py-2.5 text-sm font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-colors flex items-center justify-center gap-2"
               >
-                <CheckCircle size={15} /> {opp.claim_mode === 'shared' ? 'Claim Shared Lead' : 'Claim Exclusively'}
+                <CheckCircle size={15} /> {opp.claim_mode === 'shared' ? 'Claim Shared Lead' : opp.claim_mode === 'exclusive' ? 'Claim Exclusively' : 'Claim Lead'}
               </button>
             ) : (
               <span className="flex-1 py-2.5 text-sm font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-center gap-2">
-                <CheckCircle size={15} /> {opp.claim_mode === 'shared' ? 'Claimed by You' : 'You Own This'}
+                <CheckCircle size={15} /> {opp.claim_mode === 'shared' ? 'Claimed by You' : opp.claim_mode === 'exclusive' ? 'You Own This' : 'Claimed by You'}
               </span>
             )}
           </div>

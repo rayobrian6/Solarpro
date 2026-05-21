@@ -9,6 +9,7 @@ import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
 import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
 import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
 import { evaluateContractorEligibility } from "@/lib/network/contractorEligibility";
+import { buildMarketplaceIntelligence } from "@/lib/network/marketplaceIntelligence";
 
 // ---------------------------------------------------------------------------
 // GET /api/network/opportunities
@@ -104,6 +105,8 @@ export async function GET(req: NextRequest) {
         no.utility_provider AS utility_name,
         no.utility_rate_per_kwh,
         no.estimated_project_value AS estimated_system_cost,
+        no.estimated_annual_savings,
+        no.offset_percentage AS estimated_offset_pct,
         no.estimated_payback_yrs,
         no.monthly_bill_amount,
         no.homeowner_ownership AS homeowner_status,
@@ -157,6 +160,7 @@ export async function GET(req: NextRequest) {
         COALESCE(no.listing_notes, no.screening_notes) AS listing_notes,
         no.expires_at,
         no.created_at,
+        no.released_at,
         'SolarPro'::text AS creator_company,
         offer.id AS claim_id,
         offer.status AS claim_status,
@@ -284,8 +288,9 @@ export async function GET(req: NextRequest) {
     });
     const visibleCanonicalRows = eligibleCanonicalRows
       .slice(offset, offset + limit)
-      .map(
-        ({
+      .map((candidateRow) => {
+        const marketplace_intelligence = buildMarketplaceIntelligence(candidateRow);
+        const {
           marketplace_lifecycle_status,
           marketplace_screening_status,
           marketplace_intake_metadata,
@@ -293,8 +298,15 @@ export async function GET(req: NextRequest) {
           marketplace_auto_decision,
           marketplace_override_decision,
           ...row
-        }) => row,
-      );
+        } = candidateRow;
+        void marketplace_lifecycle_status;
+        void marketplace_screening_status;
+        void marketplace_intake_metadata;
+        void marketplace_raw_payload;
+        void marketplace_auto_decision;
+        void marketplace_override_decision;
+        return { ...row, marketplace_intelligence };
+      });
 
     return NextResponse.json({
       success: true,

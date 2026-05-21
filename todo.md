@@ -1,21 +1,24 @@
-# Add Lead Operations Marketplace Release Button
+# Solarpro Marketplace Revenue Intelligence UI
 
-## Inspect
-- [x] Verify repo state on dev and identify current uncommitted files.
-- [x] Inspect Lead Operations action handling and modal requirements.
-- [x] Inspect existing canonical marketplace release endpoint and reusable helpers.
+## Audit
+- [x] Inspect repository state and create/confirm a feature branch for marketplace revenue intelligence UI work.
+- [x] View uploaded reference image and extract applicable visual direction.
+- [x] Audit current marketplace card/detail components and opportunity payload shape.
+- [x] Audit existing release readiness, bill intelligence, qualification, and reusable marketplace helpers.
 
-## Implement
-- [x] Add a Lead Operations release button/action that reuses the existing marketplace endpoint.
-- [x] Ensure released records set canonical marketplace fields and refresh UI state.
-- [x] Add or update focused tests for the release button/API path.
+## Architecture
+- [x] Design centralized deterministic marketplace intelligence projection helpers with no fabricated data.
+- [x] Implement `lib/network/marketplaceBadges.ts` for real-data badge derivation.
+- [x] Implement `lib/network/marketplaceNarratives.ts` for deterministic opportunity story generation.
+- [x] Implement `lib/network/marketplaceConfidence.ts` for confidence scoring from evidence.
 
-## QA
-- [x] Run focused marketplace/intake tests.
-- [x] Run TypeScript type-check.
-- [x] Run ESLint.
+## UI Implementation
+- [x] Transform marketplace cards into mini deal rooms with strong revenue/intelligence hierarchy.
+- [x] Add evidence-separated detail drawer/breakdown for homeowner, bill, qualification, financing, operator, and release readiness data.
+- [x] Preserve existing claim flow and graceful degradation for missing data.
 
-## Delivery
-- [x] Review diff.
-- [x] Commit and push to dev only.
-- [x] Report files changed, QA results, and release flow.
+## Verification
+- [x] Add or update targeted tests for badge, narrative, confidence, and UI projection behavior.
+- [x] Run targeted Vitest, `npm run type-check`, and build validation.
+- [x] Review diff for fake metrics, silent overwrites, placeholder economics, and claim-flow regressions.
+- [x] Commit and push the feature branch.
