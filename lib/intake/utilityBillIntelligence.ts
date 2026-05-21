@@ -596,21 +596,47 @@ async function persistIntakeBillIntelligence(input: {
   `;
 }
 
-async function projectExistingOpportunity(sql: SqlClient, opportunityId: string, projection: ReturnType<typeof buildProjection>) {
+async function projectExistingOpportunity(
+  sql: SqlClient,
+  opportunityId: string,
+  projection: ReturnType<typeof buildProjection>,
+  intelligence: Record<string, unknown>,
+) {
   await sql`
     UPDATE network_opportunities
     SET
-      utility_provider = COALESCE(utility_provider, ${projection.utility_provider}),
-      monthly_usage_avg_kwh = COALESCE(monthly_usage_avg_kwh, ${projection.monthly_usage_avg_kwh}),
-      annual_usage_kwh = COALESCE(annual_usage_kwh, ${projection.annual_usage_kwh}),
-      utility_rate_per_kwh = COALESCE(utility_rate_per_kwh, ${projection.utility_rate_per_kwh}),
-      estimated_system_size_kw = COALESCE(estimated_system_size_kw, ${projection.estimated_system_size_kw}),
-      estimated_project_value = COALESCE(estimated_project_value, ${projection.estimated_project_value}),
-      estimated_annual_savings = COALESCE(estimated_annual_savings, ${projection.estimated_annual_savings}),
-      estimated_payback_yrs = COALESCE(estimated_payback_yrs, ${projection.estimated_payback_yrs}),
-      battery_candidate = COALESCE(battery_candidate, ${projection.battery_candidate}),
-      battery_reason = COALESCE(battery_reason, ${projection.battery_reason}),
-      raw_payload = jsonb_set(COALESCE(raw_payload, '{}'::jsonb), '{bill_marketplace_projection}', ${JSON.stringify(projection)}::jsonb, true),
+      utility_provider = COALESCE(${projection.utility_provider}, utility_provider),
+      monthly_usage_avg_kwh = COALESCE(${projection.monthly_usage_avg_kwh}, monthly_usage_avg_kwh),
+      annual_usage_kwh = COALESCE(${projection.annual_usage_kwh}, annual_usage_kwh),
+      utility_rate_per_kwh = COALESCE(${projection.utility_rate_per_kwh}, utility_rate_per_kwh),
+      estimated_system_size_kw = COALESCE(${projection.estimated_system_size_kw}, estimated_system_size_kw),
+      estimated_project_value = COALESCE(${projection.estimated_project_value}, estimated_project_value),
+      estimated_annual_savings = COALESCE(${projection.estimated_annual_savings}, estimated_annual_savings),
+      estimated_payback_yrs = COALESCE(${projection.estimated_payback_yrs}, estimated_payback_yrs),
+      battery_candidate = COALESCE(${projection.battery_candidate}, battery_candidate),
+      battery_reason = COALESCE(${projection.battery_reason}, battery_reason),
+      raw_payload = jsonb_set(
+        jsonb_set(
+          COALESCE(raw_payload, '{}'::jsonb),
+          '{bill_intelligence}',
+          ${JSON.stringify(intelligence)}::jsonb,
+          true
+        ),
+        '{bill_marketplace_projection}',
+        ${JSON.stringify(projection)}::jsonb,
+        true
+      ),
+      intake_metadata = jsonb_set(
+        jsonb_set(
+          COALESCE(intake_metadata, '{}'::jsonb),
+          '{bill_intelligence}',
+          ${JSON.stringify(intelligence)}::jsonb,
+          true
+        ),
+        '{bill_marketplace_projection}',
+        ${JSON.stringify(projection)}::jsonb,
+        true
+      ),
       updated_at = NOW()
     WHERE id = ${opportunityId}
   `;
@@ -842,7 +868,7 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
     });
 
     if (row.opportunity_id) {
-      await projectExistingOpportunity(sql, row.opportunity_id, projection);
+      await projectExistingOpportunity(sql, row.opportunity_id, projection, intelligence);
     }
 
     console.info("[UTILITY BILL INTELLIGENCE] enrichment_projection_complete", {
