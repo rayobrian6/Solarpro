@@ -466,66 +466,42 @@ async function persistIntakeBillIntelligence(input: {
   durationMs: number;
 }) {
   const projection = input.projection;
-  const intelligenceJson = JSON.stringify(input.intelligence);
-  const projectionJson = JSON.stringify(projection);
   const eventId = `billintel_${input.row.event_id}_${eventSuffix()}`;
+  const nextPayload: Record<string, unknown> = {
+    ...(input.row.payload ?? {}),
+    bill_intelligence: input.intelligence,
+    bill_marketplace_projection: projection,
+  };
+  const backfillIfMissing = (key: string, value: unknown) => {
+    if (!(key in nextPayload) && value !== null && value !== undefined) {
+      nextPayload[key] = value;
+    }
+  };
+  backfillIfMissing("utility_provider", projection.utility_provider);
+  backfillIfMissing("monthly_usage_avg_kwh", projection.monthly_usage_avg_kwh);
+  backfillIfMissing("annual_usage_kwh", projection.annual_usage_kwh);
+  backfillIfMissing("utility_rate_per_kwh", projection.utility_rate_per_kwh);
+  backfillIfMissing("estimated_system_size_kw", projection.estimated_system_size_kw);
+  backfillIfMissing("estimated_project_value", projection.estimated_project_value);
+  backfillIfMissing("battery_candidate", projection.battery_candidate);
+
+  const nextPipelineResult: Record<string, unknown> = {
+    ...(input.row.pipeline_result ?? {}),
+    bill_intelligence: {
+      status: "completed",
+      schema_version: UTILITY_BILL_INTELLIGENCE_VERSION,
+      completed_at: new Date().toISOString(),
+      duration_ms: input.durationMs,
+      trigger: input.trigger,
+    },
+  };
 
   await input.sql`
-    WITH base AS (
-      SELECT id, event_id,
-        jsonb_set(
-          jsonb_set(COALESCE(payload, '{}'::jsonb), '{bill_intelligence}', ${intelligenceJson}::jsonb, true),
-          '{bill_marketplace_projection}', ${projectionJson}::jsonb, true
-        ) AS next_payload
-      FROM intake_events
-      WHERE id::text = ${input.row.id}
-         OR event_id = ${input.row.event_id}
-      LIMIT 1
-    ), projected AS (
-      SELECT id, event_id,
-        CASE WHEN next_payload ? 'utility_provider' OR ${projection.utility_provider}::text IS NULL THEN next_payload ELSE jsonb_set(next_payload, '{utility_provider}', to_jsonb(${projection.utility_provider}::text), true) END AS p1
-      FROM base
-    ), p2 AS (
-      SELECT id, event_id,
-        CASE WHEN p1 ? 'monthly_usage_avg_kwh' OR ${projection.monthly_usage_avg_kwh}::numeric IS NULL THEN p1 ELSE jsonb_set(p1, '{monthly_usage_avg_kwh}', to_jsonb(${projection.monthly_usage_avg_kwh}::numeric), true) END AS p
-      FROM projected
-    ), p3 AS (
-      SELECT id, event_id,
-        CASE WHEN p ? 'annual_usage_kwh' OR ${projection.annual_usage_kwh}::numeric IS NULL THEN p ELSE jsonb_set(p, '{annual_usage_kwh}', to_jsonb(${projection.annual_usage_kwh}::numeric), true) END AS p
-      FROM p2
-    ), p4 AS (
-      SELECT id, event_id,
-        CASE WHEN p ? 'utility_rate_per_kwh' OR ${projection.utility_rate_per_kwh}::numeric IS NULL THEN p ELSE jsonb_set(p, '{utility_rate_per_kwh}', to_jsonb(${projection.utility_rate_per_kwh}::numeric), true) END AS p
-      FROM p3
-    ), p5 AS (
-      SELECT id, event_id,
-        CASE WHEN p ? 'estimated_system_size_kw' OR ${projection.estimated_system_size_kw}::numeric IS NULL THEN p ELSE jsonb_set(p, '{estimated_system_size_kw}', to_jsonb(${projection.estimated_system_size_kw}::numeric), true) END AS p
-      FROM p4
-    ), p6 AS (
-      SELECT id, event_id,
-        CASE WHEN p ? 'estimated_project_value' OR ${projection.estimated_project_value}::numeric IS NULL THEN p ELSE jsonb_set(p, '{estimated_project_value}', to_jsonb(${projection.estimated_project_value}::numeric), true) END AS p
-      FROM p5
-    ), p7 AS (
-      SELECT id, event_id,
-        CASE WHEN p ? 'battery_candidate' THEN p ELSE jsonb_set(p, '{battery_candidate}', to_jsonb(${projection.battery_candidate}::boolean), true) END AS p
-      FROM p6
-    )
     UPDATE intake_events
-    SET payload = jsonb_strip_nulls(p7.p),
-        pipeline_result = jsonb_set(
-          COALESCE(pipeline_result, '{}'::jsonb),
-          '{bill_intelligence}',
-          jsonb_build_object(
-            'status', 'completed',
-            'schema_version', ${UTILITY_BILL_INTELLIGENCE_VERSION},
-            'completed_at', NOW(),
-            'duration_ms', ${input.durationMs},
-            'trigger', ${input.trigger}
-          ),
-          true
-        )
-    FROM p7
-    WHERE intake_events.id = p7.id
+    SET payload = jsonb_strip_nulls(${JSON.stringify(nextPayload)}::jsonb),
+        pipeline_result = ${JSON.stringify(nextPipelineResult)}::jsonb
+    WHERE id::text = ${input.row.id}
+       OR event_id = ${input.row.event_id}
   `;
 
   await input.sql`
