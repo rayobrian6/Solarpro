@@ -1,7 +1,12 @@
-# Restore Missing Marketplace Opportunities
+# SolarPro Marketplace Regression Investigation
 
-- [x] Inspect the uploaded screenshot to understand the visible regression.
-- [x] Audit the `dev` marketplace opportunity API/UI changes that could hide opportunities.
-- [x] Identify and patch the visibility regression without creating fake opportunity data.
-- [x] Run focused verification for the patch.
-- [x] Commit and push only to `dev`.
+- [x] Inspect the current screenshot and confirm the exact user-visible failure.
+- [x] Verify local repo branch, latest commits, and working tree state.
+- [x] Compare the pre-enhancement working state against the bill-data/UI enhancement commits.
+- [x] Trace the contractor Discover API response path for regressions introduced by enhanced intelligence projection.
+- [x] Identify the exact failing gate or runtime error causing previously visible leads to disappear.
+- [x] Implement the smallest corrective fix.
+- [x] Add regression coverage for the exact enhanced-data Discover failure path.
+- [x] Run targeted validation and type-check.
+- [ ] Commit and push directly to `dev`.
+- [ ] Report root cause, files changed, validation, and commit hash.

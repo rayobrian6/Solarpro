@@ -90,6 +90,7 @@ const assignedOpportunity = {
   claim_id: ASSIGNMENT_ID,
   claim_status: "offered",
   claimed_by_user_id: USER_ID,
+  marketplace_lifecycle_status: "live",
   marketplace_status: "live",
   marketplace_screening_status: "approved",
   marketplace_auto_decision: "pass",
@@ -407,6 +408,95 @@ describe("contractor network assignment visibility", () => {
       sql,
       contractorId: USER_ID,
       opportunityId: OPP_ID,
+    });
+  });
+
+  it("returns two enhanced released bill-intelligence opportunities in Discover", async () => {
+    const enhancedOne = {
+      ...assignedOpportunity,
+      id: OPP_ID,
+      claim_id: null,
+      claim_status: null,
+      claimed_by_user_id: null,
+      city: "Phoenix",
+      state_code: "AZ",
+      utility_name: "APS",
+      marketplace_status: "live",
+      marketplace_intake_metadata: {
+        operational: {},
+        qualification: {},
+        bill_intelligence: {
+          parser_result: {
+            billData: {
+              utilityName: "APS",
+              annualKwh: "20100",
+              costPerKwh: "0.19",
+              monthlyUsageHistory: ["1600", null, "bad", 1750],
+              extractedFields: ["utilityName", "annualKwh"],
+            },
+            metadata: { parserMethod: "pdf_text", claudeModel: "claude-test" },
+          },
+          marketplace_projection: {
+            utility_provider: "APS",
+            annual_usage_kwh: 20100,
+            monthly_usage_avg_kwh: 1675,
+            utility_rate_per_kwh: 0.19,
+            estimated_system_size_kw: 13.4,
+          },
+        },
+      },
+      marketplace_raw_payload: {
+        bill_intelligence: {
+          extraction: { status: "complete", confidence_label: "high", confidence: "0.93" },
+          parser_result: {
+            billData: {
+              utilityName: "APS",
+              annualKwh: "20100",
+              costPerKwh: "0.19",
+              monthlyUsageHistory: ["1600", null, "bad", 1750],
+              extractedFields: ["utilityName", "annualKwh"],
+            },
+          },
+        },
+      },
+    };
+    const enhancedTwo = {
+      ...enhancedOne,
+      id: "55555555-5555-4555-8555-555555555555",
+      city: "Tucson",
+      utility_name: "TEP",
+      marketplace_raw_payload: {
+        bill_intelligence: {
+          bill: {
+            utility_provider: "TEP",
+            monthly_usage_history: [900, "950", undefined, -1],
+            bill_type: "electric",
+          },
+        },
+      },
+    };
+    const sql = makeSql({ canonicalRows: [enhancedOne, enhancedTwo] });
+    mockGetDbReady.mockResolvedValueOnce(sql);
+    const { GET } = await import("@/app/api/network/opportunities/route");
+
+    const res = await GET(req("https://solarpro.test/api/network/opportunities"));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.total).toBe(2);
+    expect(json.opportunities.map((opp: { id: string }) => opp.id)).toEqual([
+      OPP_ID,
+      "55555555-5555-4555-8555-555555555555",
+    ]);
+    expect(json.opportunities[0].marketplace_intelligence.bill_visuals).toMatchObject({
+      months_found: 2,
+      monthly_usage_history: [1600, 1750],
+      confidence_label: "high",
+    });
+    expect(json.opportunities[1].marketplace_intelligence.bill_visuals).toMatchObject({
+      months_found: 2,
+      monthly_usage_history: [900, 950],
+      bill_type: "electric",
     });
   });
 

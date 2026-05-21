@@ -180,10 +180,6 @@ export async function evaluateContractorEligibility({
   `;
   const assignmentState = assignmentRows[0] as Record<string, unknown> | undefined;
 
-  const releaseGate = evaluateMarketplaceReleaseGate(opportunity);
-  if (!releaseGate.ok) denials.push(`release_gate_failed:${releaseGate.missing.join(",")}`);
-  else reasons.push("release_gate_passed");
-
   const status = asString(opportunity.status);
   const storedMarketplaceStatus = asString(opportunity.marketplace_status) ?? "live";
   const terminalMarketplaceStatuses = new Set(["paused", "archived", "withdrawn", "rejected"]);
@@ -191,6 +187,14 @@ export async function evaluateContractorEligibility({
     status === "live" && !terminalMarketplaceStatuses.has(storedMarketplaceStatus)
       ? "live"
       : storedMarketplaceStatus;
+  const releaseGateOpportunity = {
+    ...opportunity,
+    marketplace_status: marketplaceStatus,
+  };
+  const releaseGate = evaluateMarketplaceReleaseGate(releaseGateOpportunity);
+  if (!releaseGate.ok) denials.push(`release_gate_failed:${releaseGate.missing.join(",")}`);
+  else reasons.push("release_gate_passed");
+
   if (status !== "live" && status !== "claimed") denials.push(`opportunity_status_${status ?? "unknown"}`);
   else reasons.push(`opportunity_status_${status}`);
   if (marketplaceStatus !== "live" && marketplaceStatus !== "claimed") denials.push(`marketplace_status_${storedMarketplaceStatus}`);

@@ -57,16 +57,27 @@ describe("evaluateContractorEligibility", () => {
     expect(result.claim_state).toMatchObject({ mode: "exclusive", max_claims: 1, current_claims: 0, contractor_has_claimable_offer: true });
   });
 
-  it("recovers stale marketplace_status for live published opportunities", async () => {
+  it("recovers stale marketplace_status before release-gate evaluation for live published opportunities", async () => {
     const { evaluateContractorEligibility } = await importEligibility();
     const result = await evaluateContractorEligibility({
-      sql: makeSql({ opportunity: { marketplace_status: "unreleased" } }),
+      sql: makeSql({
+        opportunity: {
+          marketplace_status: "unreleased",
+          screening_status: null,
+          auto_decision: null,
+          override_decision: null,
+          intake_metadata: {},
+          raw_payload: {},
+        },
+      }),
       contractorId: CONTRACTOR_ID,
       opportunityId: OPP_ID,
     });
     expect(result.eligible).toBe(true);
     expect(result.denials).toEqual([]);
+    expect(result.reasons).toContain("release_gate_passed");
     expect(result.reasons).toContain("marketplace_status_recovered_unreleased");
+    expect(result.release_gate_result?.ok).toBe(true);
   });
 
   it("does not recover intentionally paused marketplace inventory", async () => {

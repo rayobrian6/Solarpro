@@ -283,6 +283,7 @@ export async function GET(req: NextRequest) {
         {
           id: row.id,
           status: row.marketplace_lifecycle_status,
+          marketplace_status: row.marketplace_status,
           screening_status: row.marketplace_screening_status,
           auto_decision: row.marketplace_auto_decision,
           override_decision: row.marketplace_override_decision,
