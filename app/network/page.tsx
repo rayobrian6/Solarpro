@@ -59,6 +59,19 @@ interface MarketplaceNarrativeProjection {
   source_note: string;
 }
 
+interface MarketplaceBillVisualsProjection {
+  status: string | null;
+  confidence_label: string | null;
+  confidence_score: number | null;
+  parser_method: string | null;
+  parser_model: string | null;
+  parser_input: string | null;
+  months_found: number;
+  monthly_usage_history: number[];
+  extracted_fields: string[];
+  bill_type: string | null;
+}
+
 interface MarketplaceIntelligenceProjection {
   confidence: MarketplaceConfidenceProjection;
   badges: MarketplaceBadge[];
@@ -75,6 +88,7 @@ interface MarketplaceIntelligenceProjection {
     estimated_payback_yrs: MarketplaceSourcedValue<number> | null;
     utility_provider: MarketplaceSourcedValue<string> | null;
   };
+  bill_visuals?: MarketplaceBillVisualsProjection;
   evidence: {
     homeowner_intake: Record<string, unknown>;
     bill_evidence: Record<string, unknown>;
@@ -285,6 +299,71 @@ function EvidencePanel({ title, subtitle, items }: { title: string; subtitle?: s
           </div>
         ))}
       </div>
+    </section>
+  );
+}
+
+function BillVisualsPanel({ visuals }: { visuals?: MarketplaceBillVisualsProjection | null }) {
+  if (!visuals || (!visuals.monthly_usage_history.length && !visuals.extracted_fields.length && !visuals.confidence_label && !visuals.parser_method)) return null;
+  const maxUsage = Math.max(...visuals.monthly_usage_history, 1);
+
+  return (
+    <section className="mb-4 rounded-2xl border border-amber-500/25 bg-amber-500/8 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-amber-300 text-[10px] uppercase tracking-[0.2em] font-black">Enhanced bill visuals</p>
+          <p className="mt-1 text-[11px] text-slate-500">Contractor-safe parser output projected from the released marketplace payload.</p>
+        </div>
+        {visuals.confidence_label && (
+          <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-300">
+            {visuals.confidence_label}
+          </span>
+        )}
+      </div>
+
+      {visuals.monthly_usage_history.length ? (
+        <div className="mb-4 rounded-xl border border-slate-800 bg-slate-950/30 p-3">
+          <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-wider text-slate-500">
+            <span>Monthly usage history</span>
+            <span>{visuals.months_found} months</span>
+          </div>
+          <div className="space-y-1.5">
+            {visuals.monthly_usage_history.slice(0, 12).map((kwh, index) => (
+              <div key={`marketplace-usage-${index}`} className="flex items-center gap-2">
+                <span className="w-8 text-[10px] text-slate-500">M{index + 1}</span>
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-800">
+                  <div className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-400" style={{ width: `${Math.max(6, Math.round((kwh / maxUsage) * 100))}%` }} />
+                </div>
+                <span className="w-16 text-right text-[10px] font-semibold tabular-nums text-slate-300">{Math.round(kwh).toLocaleString()} kWh</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {[
+          { label: 'Parser', value: visuals.parser_method },
+          { label: 'Model', value: visuals.parser_model },
+          { label: 'Input', value: visuals.parser_input },
+          { label: 'Bill Type', value: visuals.bill_type },
+        ].map(item => (
+          <div key={item.label} className="rounded-xl bg-slate-900/55 border border-slate-800/80 p-3">
+            <div className="text-slate-500 text-[10px] uppercase tracking-wider mb-1">{item.label}</div>
+            <div className="font-semibold text-sm text-white truncate">{evidenceValue(item.value)}</div>
+          </div>
+        ))}
+      </div>
+
+      {visuals.extracted_fields.length ? (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {visuals.extracted_fields.slice(0, 12).map(field => (
+            <span key={field} className="rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-300">
+              {formatDisplayValue(field)}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -541,6 +620,7 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
   const evidence = intelligence?.evidence;
   const release = intelligence?.release;
   const narrative = intelligence?.narrative;
+  const billVisuals = intelligence?.bill_visuals;
   const revenueItems = [
     { label: 'Project Value', value: revenue?.estimated_project_value ? fmtCurrency(revenue.estimated_project_value.value) : fmtCurrency(opp.estimated_system_cost), accent: 'text-emerald-300', source: sourceLabel(revenue?.estimated_project_value?.source ?? 'estimated') },
     { label: 'System Size', value: revenue?.estimated_system_size_kw ? fmtKw(revenue.estimated_system_size_kw.value) : fmtKw(opp.system_size_kw), accent: 'text-amber-300', source: sourceLabel(revenue?.estimated_system_size_kw?.source ?? 'estimated') },
@@ -627,6 +707,8 @@ function DetailModal({ opp, onClaim, onClose, isClaimed }: {
               { label: 'Source', value: evidence?.homeowner_intake?.source ?? 'opportunity' },
             ]}
           />
+
+          <BillVisualsPanel visuals={billVisuals} />
 
           <EvidencePanel
             title="Bill intelligence"

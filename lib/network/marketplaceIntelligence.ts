@@ -22,6 +22,19 @@ export interface MarketplaceSourcedValue<T> {
   label: string;
 }
 
+export interface MarketplaceBillVisualsProjection {
+  status: string | null;
+  confidence_label: string | null;
+  confidence_score: number | null;
+  parser_method: string | null;
+  parser_model: string | null;
+  parser_input: string | null;
+  months_found: number;
+  monthly_usage_history: number[];
+  extracted_fields: string[];
+  bill_type: string | null;
+}
+
 export interface MarketplaceRevenueIntelligence {
   estimated_project_value: MarketplaceSourcedValue<number> | null;
   estimated_system_size_kw: MarketplaceSourcedValue<number> | null;
@@ -57,6 +70,7 @@ export interface MarketplaceIntelligenceProjection {
   badges: MarketplaceBadge[];
   narrative: MarketplaceNarrativeResult;
   revenue: MarketplaceRevenueIntelligence;
+  bill_visuals: MarketplaceBillVisualsProjection;
   evidence: MarketplaceEvidenceSummary;
   release: MarketplaceReleaseSummary;
 }
@@ -86,6 +100,73 @@ function boolValue(value: unknown): boolean | null {
     if (["false", "no", "0", "n", "off"].includes(normalized)) return false;
   }
   return null;
+}
+
+function recordAt(source: Record<string, unknown>, key: string): Record<string, unknown> {
+  return isRecord(source[key]) ? source[key] : {};
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function numberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => numberValue(item))
+    .filter((item): item is number => item !== null && item > 0);
+}
+
+function firstStringFrom(...values: unknown[]): string | null {
+  for (const value of values) {
+    const resolved = stringValue(value);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function firstNumberFrom(...values: unknown[]): number | null {
+  for (const value of values) {
+    const resolved = numberValue(value);
+    if (resolved !== null) return resolved;
+  }
+  return null;
+}
+
+function buildBillVisuals(row: Record<string, unknown>): MarketplaceBillVisualsProjection {
+  const rawPayload = isRecord(row.marketplace_raw_payload) ? row.marketplace_raw_payload : {};
+  const intakeMetadata = isRecord(row.marketplace_intake_metadata) ? row.marketplace_intake_metadata : {};
+  const billIntelligence = isRecord(rawPayload.bill_intelligence)
+    ? rawPayload.bill_intelligence
+    : isRecord(intakeMetadata.bill_intelligence)
+      ? intakeMetadata.bill_intelligence
+      : {};
+  const parserResult = recordAt(billIntelligence, "parser_result");
+  const billData = recordAt(parserResult, "billData");
+  const bill = recordAt(billIntelligence, "bill");
+  const extraction = recordAt(billIntelligence, "extraction");
+  const metadata = recordAt(parserResult, "metadata");
+
+  const parserMonthlyUsageHistory = numberArray(billData.monthlyUsageHistory);
+  const billMonthlyUsageHistory = numberArray(bill.monthly_usage_history);
+  const monthlyUsageHistory = parserMonthlyUsageHistory.length ? parserMonthlyUsageHistory : billMonthlyUsageHistory;
+  const parserExtractedFields = stringArray(billData.extractedFields);
+  const extractionExtractedFields = stringArray(extraction.extracted_fields);
+  const extractedFields = parserExtractedFields.length ? parserExtractedFields : extractionExtractedFields;
+
+  return {
+    status: firstStringFrom(extraction.status, billIntelligence.status),
+    confidence_label: firstStringFrom(extraction.confidence_label, billData.confidence),
+    confidence_score: firstNumberFrom(extraction.confidence, billData.confidenceScore),
+    parser_method: firstStringFrom(extraction.method, metadata.parserMethod, parserResult.parserMethod),
+    parser_model: firstStringFrom(metadata.claudeModel, metadata.model, parserResult.model),
+    parser_input: firstStringFrom(metadata.inputType, metadata.input, extraction.parser_path),
+    months_found: monthlyUsageHistory.length,
+    monthly_usage_history: monthlyUsageHistory,
+    extracted_fields: extractedFields,
+    bill_type: firstStringFrom(bill.bill_type, billData.billType),
+  };
 }
 
 function field<T>(value: T | null, source: MarketplaceValueSource, label: string): MarketplaceSourcedValue<T> | null {
@@ -123,6 +204,7 @@ function enrichmentField<T = unknown>(row: Record<string, unknown>, group: strin
 export function buildMarketplaceIntelligence(row: Record<string, unknown>): MarketplaceIntelligenceProjection {
   const releaseGate = buildReleaseGate(row);
   const evidence = releaseGate.evidence;
+  const billVisuals = buildBillVisuals(row);
 
   const estimatedProjectValue = numberValue(row.estimated_system_cost ?? enrichmentField(row, "core", "estimated_project_value"));
   const estimatedSystemSize = numberValue(row.system_size_kw ?? evidence.parsed_bill.estimated_system_size_kw ?? enrichmentField(row, "core", "estimated_system_size_kw"));
@@ -201,6 +283,7 @@ export function buildMarketplaceIntelligence(row: Record<string, unknown>): Mark
       estimated_payback_yrs: field(estimatedPayback, "estimated", "Estimated payback"),
       utility_provider: field(utilityProvider, utilityProvider === evidence.parsed_bill.utility_provider ? "parsed_bill" : "homeowner_entered", "Utility provider"),
     },
+    bill_visuals: billVisuals,
     evidence: {
       homeowner_intake: evidence.homeowner_intake,
       bill_evidence: evidence.bill_evidence,

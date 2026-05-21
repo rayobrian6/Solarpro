@@ -34,6 +34,9 @@ const intakeMetadata = {
         costPerKwh: 0.21,
         totalAmount: 260,
         monthlyUsageHistory: [1500, 1480, 1520],
+        confidence: "high",
+        extractedFields: ["utilityProvider", "annualKwh", "monthlyUsageHistory"],
+        billType: "electric",
       },
     },
     marketplace_projection: {
@@ -183,6 +186,13 @@ describe("marketplace revenue intelligence helpers", () => {
     expect(projection.evidence.source_separation).toEqual({
       homeowner_values_preserved: true,
       parsed_bill_values_do_not_overwrite_homeowner_intake: true,
+    });
+    expect(projection.bill_visuals).toMatchObject({
+      confidence_label: "high",
+      months_found: 3,
+      monthly_usage_history: [1500, 1480, 1520],
+      extracted_fields: ["utilityProvider", "annualKwh", "monthlyUsageHistory"],
+      bill_type: "electric",
     });
     expect(JSON.stringify(projection)).not.toContain("marketplace_raw_payload");
     expect(JSON.stringify(projection)).not.toContain("marketplace_intake_metadata");
