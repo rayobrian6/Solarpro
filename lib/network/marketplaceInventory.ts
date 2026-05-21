@@ -246,6 +246,17 @@ export async function releaseMarketplaceInventoryFromIntake({
   const locationState = str(payload.state)?.toUpperCase().slice(0, 2) ?? null;
   const locationZip = str(payload.zip) ?? str(payload.postal_code);
   const addressLine1 = str(payload.address_line1) ?? str(payload.property_address);
+  const billProjection = isRecord(payload.bill_marketplace_projection)
+    ? payload.bill_marketplace_projection
+    : {};
+
+  console.info("[MARKETPLACE BILL PROJECTION]", {
+    intake_event_id: sourceEventId,
+    has_bill_projection: Object.keys(billProjection).length > 0,
+    projected_fields: Object.entries(billProjection)
+      .filter(([, value]) => value !== null && value !== undefined)
+      .map(([key]) => key),
+  });
 
   const rows = await sql`
     INSERT INTO network_opportunities (
@@ -320,12 +331,12 @@ export async function releaseMarketplaceInventoryFromIntake({
       ${str(payload.city)},
       ${locationState},
       ${locationZip},
-      ${str(payload.utility_provider)},
-      ${num(payload.monthly_usage_avg_kwh) ?? num(payload.average_monthly_kwh) ?? num(payload.monthly_bill_amount)},
-      ${num(payload.utility_rate_per_kwh) ?? num(payload.current_electricity_rate)},
-      ${num(payload.estimated_system_size_kw)},
+      ${str(payload.utility_provider) ?? str(billProjection.utility_provider)},
+      ${num(payload.monthly_usage_avg_kwh) ?? num(payload.average_monthly_kwh) ?? num(billProjection.monthly_usage_avg_kwh) ?? num(payload.monthly_bill_amount)},
+      ${num(payload.utility_rate_per_kwh) ?? num(payload.current_electricity_rate) ?? num(billProjection.utility_rate_per_kwh)},
+      ${num(payload.estimated_system_size_kw) ?? num(billProjection.estimated_system_size_kw)},
       ${num(payload.roof_age)},
-      ${bool(payload.battery_interest) || bool(qualification.battery_readiness)},
+      ${bool(payload.battery_interest) || bool(qualification.battery_readiness) || bool(billProjection.battery_candidate)},
       ${num(qualification.lead_score)},
       ${str(qualification.lead_grade) ?? null},
       'approved',
@@ -341,7 +352,7 @@ export async function releaseMarketplaceInventoryFromIntake({
       ${str(intake.utm_term)},
       ${str(intake.gclid)},
       ${str(intake.fbclid)},
-      ${JSON.stringify({ ...payload, operational })},
+      ${JSON.stringify({ ...payload, operational, bill_marketplace_projection: billProjection })},
       ${JSON.stringify(intakeMetadata)},
       ${effectiveClaimMode},
       ${effectiveMaxClaims},

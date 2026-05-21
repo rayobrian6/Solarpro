@@ -5,10 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockGetDbReady = vi.fn();
 const mockRequireAdminApi = vi.fn();
 const mockBlobPut = vi.hoisted(() => vi.fn());
+const mockRunUtilityBillIntelligenceAsync = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db-neon", () => ({ getDbReady: mockGetDbReady }));
 vi.mock("@/lib/adminAuth", () => ({ requireAdminApi: mockRequireAdminApi }));
 vi.mock("@vercel/blob", () => ({ put: mockBlobPut }));
+vi.mock("@/lib/intake/utilityBillIntelligence", () => ({
+  runUtilityBillIntelligenceAsync: mockRunUtilityBillIntelligenceAsync,
+}));
 
 async function importHomeownerRoute() {
   return import("@/app/api/intake/homeowner/route");
@@ -267,6 +271,7 @@ describe("homeowner intake event-first flow", () => {
       downloadUrl:
         "https://blob.solarpro.test/intake/utility-bills/free-solar-estimate/evt/file.jpg?download=1",
     });
+    mockRunUtilityBillIntelligenceAsync.mockReset();
     vi.unstubAllEnvs();
   });
 
@@ -414,6 +419,17 @@ describe("homeowner intake event-first flow", () => {
       download_url:
         "https://blob.solarpro.test/intake/utility-bills/free-solar-estimate/evt/file.jpg?download=1",
     });
+    expect(mockRunUtilityBillIntelligenceAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: expect.stringMatching(/^evt_homeowner_/),
+        trigger: "homeowner_intake",
+        billMetadata: expect.objectContaining({
+          filename: "Braidon Bill.jiff",
+          storage_status: "stored",
+          storage_provider: "vercel_blob",
+        }),
+      }),
+    );
   });
 
   it("does not block arbitrary unknown utility bill files solely because of MIME type", async () => {

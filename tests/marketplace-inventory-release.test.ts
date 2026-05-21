@@ -84,6 +84,86 @@ function sqlForQualificationFallback() {
   return sql;
 }
 
+function sqlForBillProjectionFallback() {
+  const calls: Array<{ query: string; values: unknown[] }> = [];
+  const sql = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    const q = strings.join(" ");
+    calls.push({ query: q, values });
+    if (q.includes("FROM intake_events") && q.includes("event_type = 'homeowner_intake'")) {
+      return [];
+    }
+    if (q.includes("FROM intake_events") && q.includes("WHERE id::text")) {
+      return [
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          event_id: "evt-homeowner-bill",
+          event_type: "homeowner_intake",
+          action: "pending_review",
+          occurred_at: "2026-05-20T11:00:00.000Z",
+          source_system: "homeowner_form",
+          source_channel: "web",
+          payload: {
+            first_name: "Bill",
+            last_name: "Upload",
+            email: "bill@example.com",
+            phone: "+18476211111",
+            property_address: "456 Solar Ave",
+            city: "Austin",
+            state: "TX",
+            zip: "78701",
+            timeline: "1_3_months",
+            bill_marketplace_projection: {
+              utility_provider: "Austin Energy",
+              monthly_usage_avg_kwh: 1450,
+              annual_usage_kwh: 17400,
+              utility_rate_per_kwh: 0.1825,
+              estimated_system_size_kw: 11.7,
+              battery_candidate: true,
+            },
+          },
+          validation_result: { valid: true, errors: [] },
+          pipeline_result: {
+            operational: {
+              contacted: true,
+              qualified: true,
+              financing_ready: true,
+              approved_for_marketplace: true,
+              lifecycle_status: "ready_for_marketplace",
+              review_status: "approved_for_marketplace",
+            },
+          },
+        },
+      ];
+    }
+    if (q.includes("event_type = 'homeowner_qualification'")) {
+      return [
+        {
+          payload: {
+            intelligence: {
+              qualification_status: "high_intent",
+              lead_grade: "A",
+              lead_score: 91,
+              finance_readiness: true,
+            },
+          },
+        },
+      ];
+    }
+    if (q.includes("FROM network_opportunities") && q.includes("WHERE intake_event_id")) {
+      return [];
+    }
+    if (q.includes("INSERT INTO network_opportunities")) {
+      return [{ id: "opp-live-bill", status: "live", marketplace_status: "live" }];
+    }
+    if (q.includes("UPDATE intake_events")) {
+      return [];
+    }
+    return [];
+  }) as any;
+  sql.calls = calls;
+  return sql;
+}
+
 describe("releaseMarketplaceInventoryFromIntake", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -118,5 +198,34 @@ describe("releaseMarketplaceInventoryFromIntake", () => {
     expect(mockLogNetworkEvent).not.toHaveBeenCalledWith(
       expect.objectContaining({ event_type: "opportunity.release_blocked" }),
     );
+  });
+
+  it("uses bill marketplace projection as release fallback for canonical opportunity intelligence fields", async () => {
+    const { releaseMarketplaceInventoryFromIntake } = await importHelper();
+    const sql = sqlForBillProjectionFallback();
+
+    const result = await releaseMarketplaceInventoryFromIntake({
+      sql,
+      intakeEventId: "evt-homeowner-bill",
+      adminUserId: "admin-1",
+    });
+
+    expect(result.ok).toBe(true);
+    const insert = sql.calls.find((call: { query: string }) =>
+      call.query.includes("INSERT INTO network_opportunities"),
+    );
+    expect(insert?.values).toContain("Austin Energy");
+    expect(insert?.values).toContain(1450);
+    expect(insert?.values).toContain(0.1825);
+    expect(insert?.values).toContain(11.7);
+    expect(insert?.values).toContain(true);
+    const rawPayloadJson = insert?.values.find(
+      (value: unknown) =>
+        typeof value === "string" && value.includes("bill_marketplace_projection"),
+    ) as string;
+    expect(JSON.parse(rawPayloadJson).bill_marketplace_projection).toMatchObject({
+      annual_usage_kwh: 17400,
+      estimated_system_size_kw: 11.7,
+    });
   });
 });
