@@ -375,7 +375,7 @@ describe("contractor network assignment visibility", () => {
     expect(canonicalQuery).toContain("no.opportunity_grade AS lead_grade");
     expect(canonicalQuery).toContain("preferred_contact_method");
     expect(canonicalQuery).toContain("no.status = 'live'");
-    expect(canonicalQuery).toContain("COALESCE(no.claim_count, 0) < GREATEST");
+    expect(canonicalQuery).not.toContain("COALESCE(no.claim_count, 0) < GREATEST");
     expect(canonicalQuery).toContain("NOT EXISTS");
     expect(canonicalQuery).toContain("archived");
     expect(canonicalQuery).toContain("rejected");
@@ -386,6 +386,29 @@ describe("contractor network assignment visibility", () => {
     expect(canonicalQuery).toContain("opportunity_screening_queue");
     expect(canonicalQuery).toContain("auto_decision = 'pass'");
     expect(canonicalQuery).toContain("override_decision = 'pass'");
+  });
+
+  it("does not hide live canonical inventory solely because summary claim_count is stale", async () => {
+    const staleClaimCountOpportunity = {
+      ...assignedOpportunity,
+      claim_count: 1,
+      max_claims: 1,
+    };
+    const sql = makeSql({ canonicalRows: [staleClaimCountOpportunity] });
+    mockGetDbReady.mockResolvedValueOnce(sql);
+    const { GET } = await import("@/app/api/network/opportunities/route");
+
+    const res = await GET(req("https://solarpro.test/api/network/opportunities"));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.total).toBe(1);
+    expect(json.opportunities.map((opp: { id: string }) => opp.id)).toEqual([OPP_ID]);
+    expect(mockEvaluateContractorEligibility).toHaveBeenCalledWith({
+      sql,
+      contractorId: USER_ID,
+      opportunityId: OPP_ID,
+    });
   });
 
   it("filters ineligible canonical marketplace inventory out of Discover", async () => {
