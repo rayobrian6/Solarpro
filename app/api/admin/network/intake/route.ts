@@ -370,6 +370,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           COALESCE(no.homeowner_timeline, no.raw_payload->>'timeline', no.intake_metadata->>'timeline') AS timeline,
           no.roof_age_years::text AS roof_age,
           '{}'::jsonb AS bill_metadata,
+          COALESCE(no.intake_metadata->'bill_intelligence', '{}'::jsonb) AS bill_intelligence,
+          COALESCE(no.raw_payload->'bill_marketplace_projection', no.intake_metadata->'bill_marketplace_projection', '{}'::jsonb) AS bill_marketplace_projection,
           false AS debug_visible
         FROM network_opportunities no
         LEFT JOIN enrichment_queue eq ON eq.opportunity_id = no.id
@@ -494,6 +496,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ie.payload->>'timeline' AS timeline,
           COALESCE(ie.payload->>'roof_age', ie.payload->>'roof_age_years') AS roof_age,
           COALESCE(ie.payload->'bill_metadata', '{}'::jsonb) AS bill_metadata,
+          COALESCE(ie.payload->'bill_intelligence', '{}'::jsonb) AS bill_intelligence,
+          COALESCE(ie.payload->'bill_marketplace_projection', '{}'::jsonb) AS bill_marketplace_projection,
           (
             ie.action IN ('validation_failed', 'malformed', 'error', 'archived', 'rejected', 'bad_lead')
             OR COALESCE((ie.pipeline_result->'operational'->>'archived')::boolean, false) = true

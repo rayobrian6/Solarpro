@@ -6,12 +6,14 @@ const mockGetDbReady = vi.fn();
 const mockRequireAdminApi = vi.fn();
 const mockBlobPut = vi.hoisted(() => vi.fn());
 const mockRunUtilityBillIntelligenceAsync = vi.hoisted(() => vi.fn());
+const mockIngestUtilityBillIntelligence = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db-neon", () => ({ getDbReady: mockGetDbReady }));
 vi.mock("@/lib/adminAuth", () => ({ requireAdminApi: mockRequireAdminApi }));
 vi.mock("@vercel/blob", () => ({ put: mockBlobPut }));
 vi.mock("@/lib/intake/utilityBillIntelligence", () => ({
   runUtilityBillIntelligenceAsync: mockRunUtilityBillIntelligenceAsync,
+  ingestUtilityBillIntelligence: mockIngestUtilityBillIntelligence,
 }));
 
 async function importHomeownerRoute() {
@@ -20,6 +22,10 @@ async function importHomeownerRoute() {
 
 async function importAdminFeedRoute() {
   return import("@/app/api/admin/network/intake/route");
+}
+
+async function importAdminBillIntelligenceRoute() {
+  return import("@/app/api/admin/network/intake/bill-intelligence/route");
 }
 
 function postReq(body: unknown, init: RequestInit = {}): any {
@@ -74,6 +80,17 @@ function adminReq(
   return new Request(url, {
     method: "GET",
     headers: { cookie: "solarpro_session=test" },
+  });
+}
+
+function adminPostReq(url: string, body: Record<string, unknown>): any {
+  return new Request(url, {
+    method: "POST",
+    headers: {
+      cookie: "solarpro_session=test",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 }
 
@@ -166,6 +183,28 @@ function makeSql(
             content_type: "application/pdf",
             storage_status: "metadata_only_not_uploaded",
             accessible_url: null,
+          },
+          bill_intelligence: {
+            schema_version: "utility-bill-intelligence.v1",
+            generated_at: "2025-01-01T00:01:00Z",
+            extraction: { success: true, method: "ocr", confidence: 0.88 },
+            bill: { monthly_kwh: 1450, annual_kwh: 17400, total_amount: 264.63 },
+          },
+          bill_marketplace_projection: {
+            utility_provider: "Austin Energy",
+            monthly_usage_avg_kwh: 1450,
+            annual_usage_kwh: 17400,
+            utility_rate_per_kwh: 0.1825,
+            estimated_system_size_kw: 11.7,
+            estimated_annual_savings: 2490.44,
+            battery_candidate: true,
+          },
+          pipeline_result: {
+            bill_intelligence: {
+              status: "completed",
+              trigger: "homeowner_intake",
+              duration_ms: 742,
+            },
           },
           intake_metadata: {
             utility_provider: "Austin Energy",
@@ -272,6 +311,19 @@ describe("homeowner intake event-first flow", () => {
         "https://blob.solarpro.test/intake/utility-bills/free-solar-estimate/evt/file.jpg?download=1",
     });
     mockRunUtilityBillIntelligenceAsync.mockReset();
+    mockIngestUtilityBillIntelligence.mockReset().mockResolvedValue({
+      ok: true,
+      projected: {
+        utility_provider: "Austin Energy",
+        monthly_usage_avg_kwh: 1450,
+        annual_usage_kwh: 17400,
+        utility_rate_per_kwh: 0.1825,
+        estimated_system_size_kw: 11.7,
+        estimated_annual_savings: 2490.44,
+        battery_candidate: true,
+      },
+      opportunity_id: null,
+    });
     vi.unstubAllEnvs();
   });
 
@@ -551,6 +603,15 @@ describe("homeowner intake event-first flow", () => {
         size_bytes: 71524,
         storage_status: "metadata_only_not_uploaded",
       },
+      bill_intelligence: {
+        schema_version: "utility-bill-intelligence.v1",
+      },
+      bill_marketplace_projection: {
+        utility_provider: "Austin Energy",
+        annual_usage_kwh: 17400,
+        estimated_system_size_kw: 11.7,
+        battery_candidate: true,
+      },
     });
     expect(json.opportunities[0].intake_metadata).toMatchObject({
       utility_provider: "Austin Energy",
@@ -584,6 +645,10 @@ describe("homeowner intake event-first flow", () => {
     expect(feedQuery).toContain("needs_missing_data");
     expect(feedQuery).toContain("qualification_skipped");
     expect(feedQuery).toContain("bill_attachment_metadata_only");
+    expect(feedQuery).toContain("AS bill_intelligence");
+    expect(feedQuery).toContain("AS bill_marketplace_projection");
+    expect(feedQuery).toContain("ie.payload->'bill_intelligence'");
+    expect(feedQuery).toContain("ie.payload->'bill_marketplace_projection'");
     expect(feedQuery).toContain("BETWEEN 0 AND 10000");
   });
 
@@ -668,6 +733,73 @@ describe("homeowner intake event-first flow", () => {
     expect(JSON.stringify(json)).not.toMatch(/DATABASE_URL|JWT_SECRET|ghp_/);
   });
 
+
+
+  it("admin bill intelligence retry route is admin-gated and calls the canonical intake adapter", async () => {
+    const { POST } = await importAdminBillIntelligenceRoute();
+
+    mockRequireAdminApi.mockResolvedValueOnce(null);
+    const denied = await POST(
+      adminPostReq(
+        "https://solarpro.test/api/admin/network/intake/bill-intelligence",
+        { event_id: "evt_homeowner_test" },
+      ),
+    );
+    expect(denied.status).toBe(401);
+
+    mockRequireAdminApi.mockResolvedValueOnce({
+      id: "admin-1",
+      role: "admin",
+      email: "admin@test.com",
+    });
+    const res = await POST(
+      adminPostReq(
+        "https://solarpro.test/api/admin/network/intake/bill-intelligence",
+        { event_id: "evt_homeowner_test" },
+      ),
+    );
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      success: true,
+      status: "completed",
+      opportunity_id: null,
+      projected: {
+        utility_provider: "Austin Energy",
+        annual_usage_kwh: 17400,
+        estimated_system_size_kw: 11.7,
+      },
+    });
+    expect(mockIngestUtilityBillIntelligence).toHaveBeenCalledWith({
+      eventId: "evt_homeowner_test",
+      trigger: "operator_review",
+    });
+  });
+
+  it("admin bill intelligence retry route reports canonical adapter skip reasons", async () => {
+    mockIngestUtilityBillIntelligence.mockResolvedValueOnce({
+      ok: false,
+      reason: "no_stored_bill",
+    });
+    const { POST } = await importAdminBillIntelligenceRoute();
+
+    const res = await POST(
+      adminPostReq(
+        "https://solarpro.test/api/admin/network/intake/bill-intelligence",
+        { event_id: "evt_homeowner_metadata_only" },
+      ),
+    );
+
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      success: false,
+      status: "skipped",
+      reason: "no_stored_bill",
+    });
+  });
+
   it("admin Intake Feed UI surfaces API errors instead of silently rendering an empty feed", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "app/admin/network/page.tsx"),
@@ -728,6 +860,15 @@ describe("homeowner intake event-first flow", () => {
     expect(section).toContain("bill uploads create Open Bill / Download");
     expect(section).toContain("Bill links");
     expect(section).toContain("Utility Bill File Size Bytes");
+    expect(section).toContain("Bill Intelligence");
+    expect(section).toContain("billIntelligenceFor");
+    expect(section).toContain("bill_marketplace_projection");
+    expect(section).toContain("Run Bill Parse");
+    expect(section).toContain("Retry Bill Parse");
+    expect(section).toContain('fetch("/api/admin/network/intake/bill-intelligence"');
+    expect(section).toContain("Parse output remains on the intake event");
+    expect(section).toContain("Monthly Avg kWh");
+    expect(section).toContain("Estimated System kW");
     expect(section).not.toContain("['Bill Size'");
   });
 

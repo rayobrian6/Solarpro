@@ -1697,7 +1697,10 @@ interface IntakeLead {
   timeline?: string | null;
   roof_age?: string | null;
   intake_metadata?: Record<string, unknown> | null;
+  pipeline_result?: Record<string, unknown> | null;
   bill_metadata?: Record<string, unknown> | null;
+  bill_intelligence?: Record<string, unknown> | null;
+  bill_marketplace_projection?: Record<string, unknown> | null;
   operational_state?: Record<string, unknown> | null;
   release_readiness?: { ready?: boolean; missing?: string[] } | null;
   attachment_completeness?: string | null;
@@ -1916,13 +1919,14 @@ function IntakeFeedSection() {
     return JSON.stringify(value);
   };
 
+  const recordValue = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
+
   const billMetadataFor = (lead: IntakeLead) => {
     const metadata =
-      lead.bill_metadata ??
-      (typeof lead.intake_metadata?.bill_metadata === "object" &&
-      lead.intake_metadata.bill_metadata !== null
-        ? (lead.intake_metadata.bill_metadata as Record<string, unknown>)
-        : null);
+      recordValue(lead.bill_metadata) ?? recordValue(lead.intake_metadata?.bill_metadata);
     const filename =
       metadata?.filename ?? metadataText(lead, "uploaded_bill_filename");
     const accessibleUrl =
@@ -1951,6 +1955,62 @@ function IntakeFeedSection() {
       downloadUrl,
       hasStoredAttachment:
         !!accessibleUrl && metadata?.storage_status === "stored",
+    };
+  };
+
+  const billIntelligenceFor = (lead: IntakeLead) => {
+    const intelligence =
+      recordValue(lead.bill_intelligence) ??
+      recordValue(lead.intake_metadata?.bill_intelligence);
+    const projection =
+      recordValue(lead.bill_marketplace_projection) ??
+      recordValue(intelligence?.marketplace_projection) ??
+      recordValue(lead.intake_metadata?.bill_marketplace_projection);
+    const extraction = recordValue(intelligence?.extraction);
+    const bill = recordValue(intelligence?.bill);
+    const enrichment = recordValue(intelligence?.enrichment);
+    const pipelineResult = recordValue(lead.pipeline_result);
+    const pipelineBillStatus = recordValue(pipelineResult?.bill_intelligence);
+    const hasData = !!intelligence || !!projection;
+    const rawDetails: Array<[string, unknown]> = [
+      [
+        "Utility Provider",
+        projection?.utility_provider ??
+          enrichment?.canonicalName ??
+          bill?.utility_provider,
+      ],
+      ["Monthly Avg kWh", projection?.monthly_usage_avg_kwh ?? bill?.monthly_kwh],
+      ["Annual Usage kWh", projection?.annual_usage_kwh ?? bill?.annual_kwh],
+      ["Utility Rate / kWh", projection?.utility_rate_per_kwh ?? bill?.electricity_rate],
+      ["Estimated System kW", projection?.estimated_system_size_kw],
+      ["Estimated Annual Savings", projection?.estimated_annual_savings],
+      ["Estimated Project Value", projection?.estimated_project_value],
+      ["Payback Years", projection?.estimated_payback_yrs],
+      ["Battery Candidate", projection?.battery_candidate],
+      ["Battery Reason", projection?.battery_reason],
+      ["Offset %", projection?.offset_percentage],
+      ["Bill Total Amount", bill?.total_amount],
+    ];
+    const details = rawDetails.filter(
+      ([, value]) => value !== null && value !== undefined && value !== "",
+    );
+
+    return {
+      hasData,
+      intelligence,
+      projection,
+      extraction,
+      bill,
+      details,
+      generatedAt: intelligence?.generated_at,
+      schemaVersion: intelligence?.schema_version,
+      parseStatus: pipelineBillStatus?.status ?? (hasData ? "completed" : "not_run"),
+      confidence:
+        extraction?.confidence ?? extraction?.confidence_label ?? bill?.confidence,
+      method: extraction?.method,
+      completedAt: pipelineBillStatus?.completed_at,
+      durationMs: pipelineBillStatus?.duration_ms,
+      trigger: pipelineBillStatus?.trigger,
     };
   };
 
@@ -2411,6 +2471,34 @@ function IntakeFeedSection() {
     } catch (e) {
       setActionMessage(
         e instanceof Error ? e.message : "Operator action failed",
+      );
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+
+
+  const runBillParse = async (lead: IntakeLead) => {
+    const eventId = lead.event_id ?? lead.id;
+    if (!eventId) return;
+    setActionBusyId(`${eventId}:bill_intelligence`);
+    setActionMessage(null);
+    try {
+      const res = await fetch("/api/admin/network/intake/bill-intelligence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event_id: eventId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.reason || data.error || data.message || `HTTP ${res.status}`);
+      }
+      setActionMessage(`Bill intelligence completed for ${eventId}`);
+      await load();
+    } catch (e) {
+      setActionMessage(
+        e instanceof Error ? e.message : "Bill intelligence retry failed",
       );
     } finally {
       setActionBusyId(null);
@@ -2908,7 +2996,9 @@ function IntakeFeedSection() {
                   const eventDetails = eventDetailsFor(lead);
                   const reviewSignals = reviewSignalsFor(lead);
                   const billFile = billMetadataFor(lead);
+                  const billIntelligence = billIntelligenceFor(lead);
                   const eventId = lead.event_id ?? lead.id;
+                  const billParseBusy = actionBusyId === `${eventId}:bill_intelligence`;
                   const timeline = timelineFor(lead);
                   const expanded = expandedLeadId === lead.id;
                   const debugOpen = debugLeadId === lead.id;
@@ -3283,6 +3373,105 @@ function IntakeFeedSection() {
                                     </div>
                                   </div>
                                 </div>
+                              </div>
+                            )}
+                            {expanded && (billFile.filename || billIntelligence.hasData) && (
+                              <div className="mb-3 rounded-lg border border-sky-900/50 bg-sky-950/20 p-3">
+                                <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
+                                  <div>
+                                    <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
+                                      Bill Intelligence
+                                    </div>
+                                    <div className="mt-1 text-xs text-sky-100">
+                                      {billIntelligence.hasData
+                                        ? `Parsed · ${payloadDisplay(billIntelligence.parseStatus)}`
+                                        : "No parsed bill intelligence is stored yet"}
+                                      {billIntelligence.generatedAt
+                                        ? ` · Generated ${new Date(String(billIntelligence.generatedAt)).toLocaleString()}`
+                                        : ""}
+                                    </div>
+                                    <div className="mt-1 text-[11px] text-sky-200/70">
+                                      Parse output remains on the intake event until an operator releases the lead to marketplace inventory.
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    disabled={!!actionBusyId || !billFile.hasStoredAttachment}
+                                    onClick={() => runBillParse(lead)}
+                                    className="inline-flex items-center gap-1 rounded-md border border-sky-700 px-2.5 py-1 text-xs text-sky-100 hover:bg-sky-900/40 disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={
+                                      billFile.hasStoredAttachment
+                                        ? "Run or retry the canonical utility bill parser"
+                                        : "A stored Open/Download Bill attachment is required before parsing"
+                                    }
+                                  >
+                                    {billParseBusy ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="h-3 w-3" />
+                                    )}
+                                    {billIntelligence.hasData ? "Retry Bill Parse" : "Run Bill Parse"}
+                                  </button>
+                                </div>
+                                {billIntelligence.hasData ? (
+                                  <>
+                                    <div className="mb-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                      <div className="rounded-md border border-sky-900/40 bg-zinc-950/50 px-3 py-2">
+                                        <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                          Confidence
+                                        </div>
+                                        <div className="mt-1 text-xs text-sky-100">
+                                          {payloadDisplay(billIntelligence.confidence)}
+                                        </div>
+                                      </div>
+                                      <div className="rounded-md border border-sky-900/40 bg-zinc-950/50 px-3 py-2">
+                                        <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                          Method
+                                        </div>
+                                        <div className="mt-1 text-xs text-sky-100">
+                                          {payloadDisplay(billIntelligence.method)}
+                                        </div>
+                                      </div>
+                                      <div className="rounded-md border border-sky-900/40 bg-zinc-950/50 px-3 py-2">
+                                        <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                          Trigger
+                                        </div>
+                                        <div className="mt-1 text-xs text-sky-100">
+                                          {payloadDisplay(billIntelligence.trigger)}
+                                        </div>
+                                      </div>
+                                      <div className="rounded-md border border-sky-900/40 bg-zinc-950/50 px-3 py-2">
+                                        <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                          Duration ms
+                                        </div>
+                                        <div className="mt-1 text-xs text-sky-100">
+                                          {payloadDisplay(billIntelligence.durationMs)}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                      {billIntelligence.details.map(([label, value]) => (
+                                        <div
+                                          key={label}
+                                          className="rounded-md border border-sky-900/40 bg-zinc-950/50 px-3 py-2"
+                                        >
+                                          <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                            {label}
+                                          </div>
+                                          <div className="mt-1 break-words text-xs text-sky-100">
+                                            {payloadDisplay(value)}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="rounded-md border border-sky-900/40 bg-zinc-950/60 px-3 py-2 text-xs leading-relaxed text-sky-100">
+                                    {billFile.hasStoredAttachment
+                                      ? "The bill file is stored and ready. Use Run Bill Parse to populate parsed usage, rate, savings, system-size, and battery-candidate signals."
+                                      : "The parser needs a stored Open/Download Bill attachment. This lead only has metadata or no bill file, so there is nothing retrievable to parse yet."}
+                                  </div>
+                                )}
                               </div>
                             )}
                             {expanded &&
