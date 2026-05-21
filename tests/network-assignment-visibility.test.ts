@@ -212,7 +212,7 @@ function makeSql(opts: { canonicalRows?: Record<string, unknown>[]; assignmentRo
 
     if (
       q.includes("FROM network_opportunities no") &&
-      q.includes("COALESCE(no.marketplace_status, 'not_released') = 'live'")
+      q.includes("no.marketplace_status = 'live' OR no.marketplace_status IS NULL")
     ) {
       return opts.canonicalRows ?? [assignedOpportunity];
     }
@@ -366,7 +366,7 @@ describe("contractor network assignment visibility", () => {
       sql.calls.find(
         (q: string) =>
           q.includes("FROM network_opportunities no") &&
-          q.includes("COALESCE(no.marketplace_status, 'not_released') = 'live"),
+          q.includes("no.marketplace_status = 'live' OR no.marketplace_status IS NULL"),
       ) ?? "";
     expect(canonicalQuery).toContain("COALESCE(no.listing_notes, no.screening_notes) AS listing_notes");
     expect(canonicalQuery).toContain("no.monthly_bill_amount");
@@ -386,6 +386,28 @@ describe("contractor network assignment visibility", () => {
     expect(canonicalQuery).toContain("opportunity_screening_queue");
     expect(canonicalQuery).toContain("auto_decision = 'pass'");
     expect(canonicalQuery).toContain("override_decision = 'pass'");
+  });
+
+  it("does not hide live canonical inventory solely because marketplace_status is null on recovered rows", async () => {
+    const recoveredMarketplaceOpportunity = {
+      ...assignedOpportunity,
+      marketplace_status: null,
+    };
+    const sql = makeSql({ canonicalRows: [recoveredMarketplaceOpportunity] });
+    mockGetDbReady.mockResolvedValueOnce(sql);
+    const { GET } = await import("@/app/api/network/opportunities/route");
+
+    const res = await GET(req("https://solarpro.test/api/network/opportunities"));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.total).toBe(1);
+    expect(json.opportunities.map((opp: { id: string }) => opp.id)).toEqual([OPP_ID]);
+    expect(mockEvaluateContractorEligibility).toHaveBeenCalledWith({
+      sql,
+      contractorId: USER_ID,
+      opportunityId: OPP_ID,
+    });
   });
 
   it("does not hide live canonical inventory solely because summary claim_count is stale", async () => {
