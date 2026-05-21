@@ -1924,6 +1924,16 @@ function IntakeFeedSection() {
       ? (value as Record<string, unknown>)
       : null;
 
+  const nonEmptyRecordValue = (value: unknown): Record<string, unknown> | null => {
+    const record = recordValue(value);
+    return record && Object.keys(record).length > 0 ? record : null;
+  };
+
+  const recordKeys = (value: unknown): string[] => {
+    const record = recordValue(value);
+    return record ? Object.keys(record).sort() : [];
+  };
+
   const billMetadataFor = (lead: IntakeLead) => {
     const metadata =
       recordValue(lead.bill_metadata) ?? recordValue(lead.intake_metadata?.bill_metadata);
@@ -1960,12 +1970,12 @@ function IntakeFeedSection() {
 
   const billIntelligenceFor = (lead: IntakeLead) => {
     const intelligence =
-      recordValue(lead.bill_intelligence) ??
-      recordValue(lead.intake_metadata?.bill_intelligence);
+      nonEmptyRecordValue(lead.bill_intelligence) ??
+      nonEmptyRecordValue(lead.intake_metadata?.bill_intelligence);
     const projection =
-      recordValue(lead.bill_marketplace_projection) ??
-      recordValue(intelligence?.marketplace_projection) ??
-      recordValue(lead.intake_metadata?.bill_marketplace_projection);
+      nonEmptyRecordValue(lead.bill_marketplace_projection) ??
+      nonEmptyRecordValue(intelligence?.marketplace_projection) ??
+      nonEmptyRecordValue(lead.intake_metadata?.bill_marketplace_projection);
     const extraction = recordValue(intelligence?.extraction);
     const bill = recordValue(intelligence?.bill);
     const enrichment = recordValue(intelligence?.enrichment);
@@ -1991,7 +2001,9 @@ function IntakeFeedSection() {
       : Array.isArray(extraction?.extracted_fields)
         ? extraction.extracted_fields
         : [];
-    const hasData = !!intelligence || !!projection;
+    const pipelineStatus = typeof pipelineBillStatus?.status === "string"
+      ? pipelineBillStatus.status
+      : null;
     const rawDetails: Array<[string, unknown]> = [
       [
         "Utility Provider",
@@ -2018,8 +2030,20 @@ function IntakeFeedSection() {
     const details = rawDetails.filter(
       ([, value]) => value !== null && value !== undefined && value !== "",
     );
+    const hasRealParserOutput =
+      (recordKeys(parserResult).length > 0 || recordKeys(extraction).length > 0) &&
+      (recordKeys(parserBillData).length > 0 || extractedFields.length > 0 || monthlyUsageHistory.length > 0 || details.length > 0);
+    const parseStatus = pipelineStatus === "completed"
+      ? hasRealParserOutput
+        ? "completed"
+        : "attempted_no_parser_output"
+      : pipelineStatus ?? (hasRealParserOutput ? "completed" : "not_run");
+    const hasAttemptStatus = parseStatus !== "not_run";
+    const hasData = hasRealParserOutput;
+    const failureReason =
+      pipelineBillStatus?.reason ?? pipelineBillStatus?.error ?? pipelineBillStatus?.message ?? null;
 
-    if (hasData || billMetadataFor(lead).hasStoredAttachment) {
+    if (hasData || hasAttemptStatus || billMetadataFor(lead).hasStoredAttachment) {
       console.info("[ADMIN_BILL_UI_RENDER]", {
         intake_event_id: lead.event_id ?? lead.id,
         has_bill_intelligence: !!intelligence,
@@ -2033,12 +2057,15 @@ function IntakeFeedSection() {
         claude_keys: parserClaude ? Object.keys(parserClaude).sort() : [],
         extracted_field_count: extractedFields.length,
         months_found: monthlyUsageHistory.length,
-        parse_status: pipelineBillStatus?.status ?? (hasData ? "completed" : "not_run"),
+        parse_status: parseStatus,
+        failure_reason: failureReason,
+        has_real_parser_output: hasRealParserOutput,
       });
     }
 
     return {
       hasData,
+      hasAttemptStatus,
       intelligence,
       projection,
       extraction,
@@ -2054,7 +2081,8 @@ function IntakeFeedSection() {
       details,
       generatedAt: intelligence?.generated_at,
       schemaVersion: intelligence?.schema_version,
-      parseStatus: pipelineBillStatus?.status ?? (hasData ? "completed" : "not_run"),
+      parseStatus,
+      failureReason,
       confidence:
         parserBillData?.confidence ?? extraction?.confidence_label ?? extraction?.confidence ?? bill?.confidence,
       confidenceScore: extraction?.confidence,
@@ -3428,23 +3456,25 @@ function IntakeFeedSection() {
                                 </div>
                               </div>
                             )}
-                            {expanded && (billFile.filename || billIntelligence.hasData) && (
+                            {expanded && (billFile.filename || billIntelligence.hasData || billIntelligence.hasAttemptStatus) && (
                               <div className="mb-3 rounded-lg border border-sky-900/50 bg-sky-950/20 p-3">
                                 <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
                                   <div>
                                     <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-300">
-                                      Bill Intelligence
+                                      Bill Intelligence — parsed bill-derived values
                                     </div>
                                     <div className="mt-1 text-xs text-sky-100">
                                       {billIntelligence.hasData
-                                        ? `Parsed · ${payloadDisplay(billIntelligence.parseStatus)}`
-                                        : "No parsed bill intelligence is stored yet"}
+                                        ? `Parsed bill output · ${payloadDisplay(billIntelligence.parseStatus)}`
+                                        : billIntelligence.hasAttemptStatus
+                                          ? `Parser state · ${payloadDisplay(billIntelligence.parseStatus)}`
+                                          : "No parsed bill intelligence is stored yet"}
                                       {billIntelligence.generatedAt
                                         ? ` · Generated ${new Date(String(billIntelligence.generatedAt)).toLocaleString()}`
                                         : ""}
                                     </div>
                                     <div className="mt-1 text-[11px] text-sky-200/70">
-                                      Parse output remains on the intake event until an operator releases the lead to marketplace inventory.
+                                      Parse output remains on the intake event until an operator releases the lead to marketplace inventory. These values come from the stored utility bill parser, not from homeowner-entered intake fields.
                                     </div>
                                   </div>
                                   <button
@@ -3463,7 +3493,7 @@ function IntakeFeedSection() {
                                     ) : (
                                       <RefreshCw className="h-3 w-3" />
                                     )}
-                                    {billIntelligence.hasData ? "Retry Bill Parse" : "Run Bill Parse"}
+                                    {billIntelligence.hasData || billIntelligence.hasAttemptStatus ? "Retry Bill Parse" : "Run Bill Parse"}
                                   </button>
                                 </div>
                                 {billIntelligence.hasData ? (
@@ -3637,29 +3667,51 @@ function IntakeFeedSection() {
                                   </>
                                 ) : (
                                   <div className="rounded-md border border-sky-900/40 bg-zinc-950/60 px-3 py-2 text-xs leading-relaxed text-sky-100">
-                                    {billFile.hasStoredAttachment
-                                      ? "The bill file is stored and ready. Use Run Bill Parse to populate parsed usage, rate, savings, system-size, and battery-candidate signals."
-                                      : "The parser needs a stored Open/Download Bill attachment. This lead only has metadata or no bill file, so there is nothing retrievable to parse yet."}
+                                    {billIntelligence.hasAttemptStatus ? (
+                                      <div>
+                                        <div className="font-semibold text-amber-200">
+                                          Parser did not produce stored bill-derived output.
+                                        </div>
+                                        <div className="mt-1 text-sky-100">
+                                          Status: {payloadDisplay(billIntelligence.parseStatus)}
+                                          {billIntelligence.failureReason
+                                            ? ` · Reason: ${payloadDisplay(billIntelligence.failureReason)}`
+                                            : ""}
+                                        </div>
+                                      </div>
+                                    ) : billFile.hasStoredAttachment ? (
+                                      "The bill file is stored and ready. Use Run Bill Parse to populate parsed usage, rate, savings, system-size, and battery-candidate signals."
+                                    ) : (
+                                      "The parser needs a stored Open/Download Bill attachment. This lead only has metadata or no bill file, so there is nothing retrievable to parse yet."
+                                    )}
                                   </div>
                                 )}
                               </div>
                             )}
                             {expanded &&
                               (details.length > 0 ? (
-                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                                  {details.map(([label, value]) => (
-                                    <div
-                                      key={label}
-                                      className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2"
-                                    >
-                                      <div className="text-[10px] uppercase tracking-wider text-zinc-500">
-                                        {label}
+                                <div className="mt-3 rounded-lg border border-zinc-800/80 bg-zinc-950/30 p-3">
+                                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                                    Homeowner-entered intake values
+                                  </div>
+                                  <div className="mb-2 text-[11px] text-zinc-500">
+                                    These are the values submitted on the intake form or copied from intake metadata; they are intentionally kept separate from parsed utility-bill values above.
+                                  </div>
+                                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                                    {details.map(([label, value]) => (
+                                      <div
+                                        key={label}
+                                        className="rounded-md border border-zinc-800/80 bg-zinc-900/60 px-3 py-2"
+                                      >
+                                        <div className="text-[10px] uppercase tracking-wider text-zinc-500">
+                                          {label}
+                                        </div>
+                                        <div className="mt-1 break-words text-xs text-zinc-200">
+                                          {payloadDisplay(value)}
+                                        </div>
                                       </div>
-                                      <div className="mt-1 break-words text-xs text-zinc-200">
-                                        {payloadDisplay(value)}
-                                      </div>
-                                    </div>
-                                  ))}
+                                    ))}
+                                  </div>
                                 </div>
                               ) : (
                                 <div className="text-xs text-zinc-500">

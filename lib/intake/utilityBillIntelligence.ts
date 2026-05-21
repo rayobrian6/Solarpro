@@ -456,6 +456,37 @@ async function loadIntakeRow(sql: SqlClient, eventId: string): Promise<IntakeRow
   return (rows[0] as IntakeRow | undefined) ?? null;
 }
 
+async function persistBillIntelligenceFailureStatus(input: {
+  sql: SqlClient;
+  row: IntakeRow;
+  reason: string;
+  trigger: string;
+  startedAt: number;
+  parserPath?: string | null;
+  extractionMethod?: string | null;
+}) {
+  await input.sql`
+    UPDATE intake_events
+    SET pipeline_result = jsonb_set(
+      COALESCE(pipeline_result, '{}'::jsonb),
+      '{bill_intelligence}',
+      ${JSON.stringify({
+        status: "failed",
+        reason: input.reason,
+        schema_version: UTILITY_BILL_INTELLIGENCE_VERSION,
+        completed_at: new Date().toISOString(),
+        duration_ms: Date.now() - input.startedAt,
+        trigger: input.trigger,
+        parser_path: input.parserPath ?? null,
+        extraction_method: input.extractionMethod ?? null,
+      })}::jsonb,
+      true
+    )
+    WHERE id::text = ${input.row.id}
+       OR event_id = ${input.row.event_id}
+  `;
+}
+
 async function persistIntakeBillIntelligence(input: {
   sql: SqlClient;
   row: IntakeRow;
@@ -495,6 +526,36 @@ async function persistIntakeBillIntelligence(input: {
       trigger: input.trigger,
     },
   };
+
+  const attemptParserResult = recordFromUnknown(input.intelligence.parser_result);
+  const attemptParserBillData = recordFromUnknown(attemptParserResult.billData);
+  const attemptExtraction = recordFromUnknown(input.intelligence.extraction);
+  logAdminBillAudit("[ADMIN_BILL_PERSIST_ATTEMPT]", {
+    intake_event_id: input.row.event_id,
+    update_strategy: "typescript-jsonb-merge",
+    db_payload_key: "payload.bill_intelligence",
+    db_projection_key: "payload.bill_marketplace_projection",
+    db_status_key: "pipeline_result.bill_intelligence",
+    payload_keys: safeObjectKeys(nextPayload),
+    pipeline_result_keys: safeObjectKeys(nextPipelineResult),
+    intelligence_keys: safeObjectKeys(input.intelligence),
+    projection_keys: safeObjectKeys(projection),
+    has_parser_result: safeObjectKeys(attemptParserResult).length > 0,
+    parser_result_keys: safeObjectKeys(attemptParserResult),
+    parser_bill_data_keys: safeObjectKeys(attemptParserBillData),
+    extraction_keys: safeObjectKeys(attemptExtraction),
+    extracted_field_count: Array.isArray(attemptParserBillData.extractedFields)
+      ? attemptParserBillData.extractedFields.length
+      : Array.isArray(attemptExtraction.extracted_fields)
+        ? attemptExtraction.extracted_fields.length
+        : 0,
+    months_found: Array.isArray(attemptParserBillData.monthlyUsageHistory)
+      ? attemptParserBillData.monthlyUsageHistory.filter((value) => Number.isFinite(value) && value > 0).length
+      : 0,
+    duration_ms: input.durationMs,
+    trigger: input.trigger,
+    schema_version: UTILITY_BILL_INTELLIGENCE_VERSION,
+  });
 
   await input.sql`
     UPDATE intake_events
@@ -575,9 +636,12 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
 
   console.info("[UTILITY BILL INTELLIGENCE] ingest_start", { event_id: input.eventId, trigger });
 
+  let sql: SqlClient | null = null;
+  let row: IntakeRow | null = null;
+
   try {
-    const sql = await getDbReady();
-    const row = await loadIntakeRow(sql, input.eventId);
+    sql = await getDbReady();
+    row = await loadIntakeRow(sql, input.eventId);
     if (!row) {
       console.warn("[UTILITY BILL INTELLIGENCE] intake_not_found", { event_id: input.eventId });
       return { ok: false, reason: "intake_not_found" };
@@ -633,12 +697,29 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
 
     const parsedResult = await parseStoredBillWithDashboardParity(downloaded.buffer, downloaded.mimeType, row.event_id);
     if (!parsedResult.success || !parsedResult.data) {
+      const failureReason = parsedResult.error ?? "parse_failed";
       console.warn("[UTILITY BILL INTELLIGENCE] parser_failed", {
         event_id: row.event_id,
         extraction_method: parsedResult.extractionMethod,
         error: parsedResult.error,
       });
-      return { ok: false, reason: parsedResult.error ?? "parse_failed" };
+      try {
+        await persistBillIntelligenceFailureStatus({
+          sql,
+          row,
+          reason: failureReason,
+          trigger,
+          startedAt,
+          parserPath: parsedResult.parserPath ?? null,
+          extractionMethod: parsedResult.extractionMethod ?? null,
+        });
+      } catch (statusErr) {
+        console.warn("[UTILITY BILL INTELLIGENCE] parser_failure_status_persist_failed_non_fatal", {
+          event_id: row.event_id,
+          error: statusErr instanceof Error ? statusErr.message : String(statusErr),
+        });
+      }
+      return { ok: false, reason: failureReason };
     }
 
     const parsed = parsedResult.data;
@@ -781,11 +862,28 @@ export async function ingestUtilityBillIntelligence(input: UtilityBillIntelligen
       parser_result: recordFromUnknown(intelligence.parser_result),
     };
   } catch (err) {
+    const failureReason = err instanceof Error ? err.message : "ingest_failed";
     console.warn("[UTILITY BILL INTELLIGENCE] ingest_failed_non_fatal", {
       event_id: input.eventId,
-      error: err instanceof Error ? err.message : String(err),
+      error: failureReason,
     });
-    return { ok: false, reason: err instanceof Error ? err.message : "ingest_failed" };
+    if (sql && row) {
+      try {
+        await persistBillIntelligenceFailureStatus({
+          sql,
+          row,
+          reason: failureReason,
+          trigger,
+          startedAt,
+        });
+      } catch (statusErr) {
+        console.warn("[UTILITY BILL INTELLIGENCE] ingest_failure_status_persist_failed_non_fatal", {
+          event_id: row.event_id,
+          error: statusErr instanceof Error ? statusErr.message : String(statusErr),
+        });
+      }
+    }
+    return { ok: false, reason: failureReason };
   }
 }
 
