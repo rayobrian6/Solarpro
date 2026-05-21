@@ -57,6 +57,29 @@ describe("evaluateContractorEligibility", () => {
     expect(result.claim_state).toMatchObject({ mode: "exclusive", max_claims: 1, current_claims: 0, contractor_has_claimable_offer: true });
   });
 
+  it("recovers stale marketplace_status for live published opportunities", async () => {
+    const { evaluateContractorEligibility } = await importEligibility();
+    const result = await evaluateContractorEligibility({
+      sql: makeSql({ opportunity: { marketplace_status: "unreleased" } }),
+      contractorId: CONTRACTOR_ID,
+      opportunityId: OPP_ID,
+    });
+    expect(result.eligible).toBe(true);
+    expect(result.denials).toEqual([]);
+    expect(result.reasons).toContain("marketplace_status_recovered_unreleased");
+  });
+
+  it("does not recover intentionally paused marketplace inventory", async () => {
+    const { evaluateContractorEligibility } = await importEligibility();
+    const result = await evaluateContractorEligibility({
+      sql: makeSql({ opportunity: { marketplace_status: "paused" } }),
+      contractorId: CONTRACTOR_ID,
+      opportunityId: OPP_ID,
+    });
+    expect(result.eligible).toBe(false);
+    expect(result.denials).toContain("marketplace_status_paused");
+  });
+
   it("denies inactive, out-of-territory, full exclusive opportunities with explanations", async () => {
     const { evaluateContractorEligibility } = await importEligibility();
     const result = await evaluateContractorEligibility({ sql: makeSql({ contractor: { network_active: false, service_states: ["CA"] }, assignments: { active_claim_count: 1, contractor_claimable_offer_count: 0 } }), contractorId: CONTRACTOR_ID, opportunityId: OPP_ID });

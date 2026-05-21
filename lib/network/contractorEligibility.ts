@@ -185,10 +185,16 @@ export async function evaluateContractorEligibility({
   else reasons.push("release_gate_passed");
 
   const status = asString(opportunity.status);
-  const marketplaceStatus = asString(opportunity.marketplace_status) ?? "live";
+  const storedMarketplaceStatus = asString(opportunity.marketplace_status) ?? "live";
+  const terminalMarketplaceStatuses = new Set(["paused", "archived", "withdrawn", "rejected"]);
+  const marketplaceStatus =
+    status === "live" && !terminalMarketplaceStatuses.has(storedMarketplaceStatus)
+      ? "live"
+      : storedMarketplaceStatus;
   if (status !== "live" && status !== "claimed") denials.push(`opportunity_status_${status ?? "unknown"}`);
   else reasons.push(`opportunity_status_${status}`);
-  if (marketplaceStatus !== "live" && marketplaceStatus !== "claimed") denials.push(`marketplace_status_${marketplaceStatus}`);
+  if (marketplaceStatus !== "live" && marketplaceStatus !== "claimed") denials.push(`marketplace_status_${storedMarketplaceStatus}`);
+  else if (marketplaceStatus !== storedMarketplaceStatus) reasons.push(`marketplace_status_recovered_${storedMarketplaceStatus}`);
   else reasons.push(`marketplace_status_${marketplaceStatus}`);
 
   if (!asBool(contractor.network_active)) denials.push("contractor_inactive");

@@ -212,7 +212,7 @@ function makeSql(opts: { canonicalRows?: Record<string, unknown>[]; assignmentRo
 
     if (
       q.includes("FROM network_opportunities no") &&
-      q.includes("no.marketplace_status = 'live' OR no.marketplace_status IS NULL")
+      q.includes("COALESCE(no.marketplace_status, 'live') NOT IN")
     ) {
       return opts.canonicalRows ?? [assignedOpportunity];
     }
@@ -366,7 +366,7 @@ describe("contractor network assignment visibility", () => {
       sql.calls.find(
         (q: string) =>
           q.includes("FROM network_opportunities no") &&
-          q.includes("no.marketplace_status = 'live' OR no.marketplace_status IS NULL"),
+          q.includes("COALESCE(no.marketplace_status, 'live') NOT IN")
       ) ?? "";
     expect(canonicalQuery).toContain("COALESCE(no.listing_notes, no.screening_notes) AS listing_notes");
     expect(canonicalQuery).toContain("no.monthly_bill_amount");
@@ -388,10 +388,10 @@ describe("contractor network assignment visibility", () => {
     expect(canonicalQuery).toContain("override_decision = 'pass'");
   });
 
-  it("does not hide live canonical inventory solely because marketplace_status is null on recovered rows", async () => {
+  it("does not hide live canonical inventory solely because marketplace_status is stale on recovered rows", async () => {
     const recoveredMarketplaceOpportunity = {
       ...assignedOpportunity,
-      marketplace_status: null,
+      marketplace_status: "unreleased",
     };
     const sql = makeSql({ canonicalRows: [recoveredMarketplaceOpportunity] });
     mockGetDbReady.mockResolvedValueOnce(sql);

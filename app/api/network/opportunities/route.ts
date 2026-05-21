@@ -201,7 +201,7 @@ export async function GET(req: NextRequest) {
        AND offer.status IN ('offered','viewed')
        AND (offer.offer_expires_at IS NULL OR offer.offer_expires_at > NOW())
       WHERE no.status = 'live'
-        AND (no.marketplace_status = 'live' OR no.marketplace_status IS NULL)
+        AND COALESCE(no.marketplace_status, 'live') NOT IN ('claimed','paused','archived','withdrawn','rejected')
         AND COALESCE((no.intake_metadata->'operational'->>'archived')::boolean, false) = false
         AND COALESCE((no.intake_metadata->'operational'->>'rejected')::boolean, false) = false
         AND COALESCE((no.intake_metadata->>'is_test')::boolean, false) = false
