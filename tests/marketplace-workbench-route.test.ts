@@ -240,13 +240,13 @@ describe("/api/admin/network/marketplace", () => {
       path.join(process.cwd(), "app/api/admin/network/simulator/route.ts"),
       "utf8",
     );
-    const readyGate =
-      "no.status = 'live' AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')";
-    expect(simulatorSource).toContain(readyGate);
+    const screeningGate =
+      "no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass'";
+    expect(simulatorSource).toContain("no.status = 'live'");
+    expect(simulatorSource).toContain("COALESCE(no.marketplace_status, 'live') = 'live'");
+    expect(simulatorSource).toContain(screeningGate);
     expect(marketplaceSource).toContain("WHERE no.status = 'live'");
-    expect(marketplaceSource).toContain(
-      "AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')",
-    );
+    expect(marketplaceSource).toContain(screeningGate);
     expect(marketplaceSource).toContain("approved_for_marketplace");
   });
 

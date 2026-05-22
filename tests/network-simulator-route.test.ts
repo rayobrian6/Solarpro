@@ -78,6 +78,7 @@ function makeSql() {
         {
           id: "sim-opp-1",
           status: "live",
+          marketplace_status: "live",
           screening_status: "approved",
           marketplace_ready: true,
           city: "Austin",
@@ -229,11 +230,16 @@ describe("/api/admin/network/simulator", () => {
       marketplace_ready: {
         marketplace_ready: true,
         status: "live",
+        marketplace_status: "live",
         screening_status: "approved",
       },
     });
     const releaseRead =
       sql.queries.find((q: string) => q.includes("AS marketplace_ready")) ?? "";
+    expect(releaseRead).toContain("no.marketplace_status");
+    expect(releaseRead).toContain("no.released_at");
+    expect(releaseRead).toContain("no.expires_at");
+    expect(releaseRead).toContain("COALESCE(no.marketplace_status, 'live') = 'live'");
     expect(releaseRead).toContain("oi.enrichment_payload");
     expect(releaseRead).toContain("oi.enrichment_completeness");
     const releaseUpdate =
@@ -242,11 +248,19 @@ describe("/api/admin/network/simulator", () => {
           q.includes("UPDATE network_opportunities") &&
           q.includes("status = 'live'"),
       ) ?? "";
+    expect(releaseUpdate).toContain("marketplace_status = 'live'");
     expect(releaseUpdate).toContain("screening_status = 'approved'");
     expect(releaseUpdate).toContain(
       "screened_at = COALESCE(screened_at, NOW())",
     );
     expect(releaseUpdate).toContain("live_at = COALESCE(live_at, NOW())");
+    expect(releaseUpdate).toContain("released_at = COALESCE(released_at, NOW())");
+    expect(releaseUpdate).toContain(
+      "released_by = COALESCE(released_by, ",
+    );
+    expect(releaseUpdate).toContain(
+      "expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW() + INTERVAL '30 days')",
+    );
     expect(mockLogNetworkEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event_type: "opportunity.released_to_marketplace",

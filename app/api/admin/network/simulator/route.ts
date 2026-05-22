@@ -87,17 +87,21 @@ async function releaseToMarketplace(sql: Awaited<ReturnType<typeof getDbReady>>,
   await sql`
     UPDATE network_opportunities
     SET status = 'live',
+        marketplace_status = 'live',
         screening_status = 'approved',
         screened_at = COALESCE(screened_at, NOW()),
         live_at = COALESCE(live_at, NOW()),
+        released_at = COALESCE(released_at, NOW()),
+        released_by = COALESCE(released_by, ${adminId}),
+        expires_at = GREATEST(COALESCE(expires_at, NOW()), NOW() + INTERVAL '30 days'),
         updated_at = NOW()
     WHERE id = ${opportunityId}
   `
 
   const rows = await sql`
-    SELECT no.id, no.status, no.screening_status, no.live_at, no.location_city AS city, no.location_state AS state,
+    SELECT no.id, no.status, no.marketplace_status, no.screening_status, no.live_at, no.released_at, no.expires_at, no.location_city AS city, no.location_state AS state,
            oi.overall_score, oi.overall_grade, oi.market_price, oi.enrichment_payload, oi.enrichment_completeness,
-           (no.status = 'live' AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')) AS marketplace_ready
+           (no.status = 'live' AND COALESCE(no.marketplace_status, 'live') = 'live' AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')) AS marketplace_ready
     FROM network_opportunities no
     LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
     LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
