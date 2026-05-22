@@ -141,7 +141,7 @@ const claimedOpportunity = {
   claimed_at: "2026-01-01T01:00:00Z",
 };
 
-function makeSql(opts: { canonicalRows?: Record<string, unknown>[]; assignmentRows?: Record<string, unknown>[] } = {}) {
+function makeSql(opts: { canonicalRows?: Record<string, unknown>[]; legacyRows?: Record<string, unknown>[]; assignmentRows?: Record<string, unknown>[] } = {}) {
   const calls: string[] = [];
   const sql = vi.fn(async (strings: TemplateStringsArray) => {
     const q = strings.join(" ");
@@ -160,13 +160,13 @@ function makeSql(opts: { canonicalRows?: Record<string, unknown>[]; assignmentRo
       ];
     }
 
-    if (q.includes("FROM opportunities o") && q.includes("o.status = 'open'"))
-      return [];
     if (
       q.includes("SELECT COUNT(*) AS total") &&
       q.includes("FROM opportunities o")
     )
-      return [{ total: 0 }];
+      return [{ total: opts.legacyRows?.length ?? 0 }];
+    if (q.includes("FROM opportunities o") && q.includes("o.status = 'open'"))
+      return opts.legacyRows ?? [];
 
     if (
       q.includes("SELECT COUNT(*) AS total") &&
@@ -387,6 +387,65 @@ describe("contractor network assignment visibility", () => {
     expect(canonicalQuery).toContain("opportunity_screening_queue");
     expect(canonicalQuery).toContain("auto_decision = 'pass'");
     expect(canonicalQuery).toContain("override_decision = 'pass'");
+  });
+
+  it("normalizes legacy Discover opportunities with marketplace intelligence for card rendering", async () => {
+    const legacyOpportunity = {
+      id: "66666666-6666-4666-8666-666666666666",
+      source: "contractor_shared",
+      status: "open",
+      site_name: "Legacy Shared Lead",
+      city: "Mesa",
+      state_code: "AZ",
+      zip: "85201",
+      system_size_kw: 7.25,
+      annual_kwh: 9800,
+      monthly_kwh_avg: 817,
+      utility_name: "SRP",
+      utility_rate_per_kwh: 0.16,
+      estimated_system_cost: 21400,
+      estimated_payback_yrs: 7.5,
+      roof_material: "tile",
+      roof_pitch: "4/12",
+      roof_condition: "good",
+      roof_age_years: 8,
+      battery_candidate: true,
+      steep_roof: false,
+      complex_ahj: false,
+      ahj_name: "Mesa",
+      equipment_ecosystem: null,
+      asking_price: 300,
+      listing_notes: "Legacy shared opportunity",
+      expires_at: "2099-01-01T00:00:00Z",
+      created_at: "2026-01-01T00:00:00Z",
+      creator_company: "Partner Solar",
+    };
+    const sql = makeSql({ canonicalRows: [], legacyRows: [legacyOpportunity] });
+    mockGetDbReady.mockResolvedValueOnce(sql);
+    const { GET } = await import("@/app/api/network/opportunities/route");
+
+    const res = await GET(req("https://solarpro.test/api/network/opportunities"));
+
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.total).toBe(1);
+    expect(json.opportunities).toHaveLength(1);
+    expect(json.opportunities[0]).toEqual(expect.objectContaining({
+      id: legacyOpportunity.id,
+      marketplace_intelligence: expect.objectContaining({
+        revenue: expect.objectContaining({
+          estimated_project_value: expect.objectContaining({ value: 21400 }),
+          estimated_system_size_kw: expect.objectContaining({ value: 7.25 }),
+          annual_usage_kwh: expect.objectContaining({ value: 9800 }),
+          utility_rate_per_kwh: expect.objectContaining({ value: 0.16 }),
+          utility_provider: expect.objectContaining({ value: "SRP" }),
+        }),
+        narrative: expect.objectContaining({
+          headline: expect.any(String),
+        }),
+        badges: expect.any(Array),
+      }),
+    }));
   });
 
   it("does not hide live canonical inventory solely because marketplace_status is stale on recovered rows", async () => {

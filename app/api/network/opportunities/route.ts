@@ -293,6 +293,15 @@ export async function GET(req: NextRequest) {
         "contractor_discovery_feed",
       );
     });
+    const visibleLegacyRows = (rows as Array<Record<string, unknown>>).map((legacyRow) => ({
+      ...legacyRow,
+      marketplace_intelligence: buildMarketplaceIntelligence({
+        ...legacyRow,
+        marketplace_lifecycle_status: legacyRow.status,
+        marketplace_status: legacyRow.status,
+      }),
+    }));
+
     const visibleCanonicalRows = eligibleCanonicalRows
       .slice(offset, offset + limit)
       .map((candidateRow) => {
@@ -342,7 +351,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      opportunities: [...visibleCanonicalRows, ...rows],
+      opportunities: [...visibleCanonicalRows, ...visibleLegacyRows],
       total: legacyTotal + eligibleCanonicalRows.length,
       page,
       limit,
