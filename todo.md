@@ -10,6 +10,6 @@
 - [x] Validate TypeScript, lint, build, and source markers.
 
 ## Git
-- [ ] Commit correction directly on dev.
-- [ ] Push dev.
-- [ ] Report exact correction and validation evidence.
+- [x] Commit correction directly on dev.
+- [x] Push dev.
+- [x] Report exact correction and validation evidence.
