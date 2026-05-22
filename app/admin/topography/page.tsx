@@ -5,12 +5,13 @@
 //   LEFT  — tab toggle: "Map" (original iframe) | "Pipeline" (unified topology)
 //   RIGHT — System Integration Panel (live audit, unchanged from v2)
 //
-// Pipeline tab shows the FULL end-to-end connected flow:
-//   Partner Mobile → Partner Backend → Outbound Webhook Queue
-//   → SolarPro Ingest → project_physical_data → Engineering Report
+// Pipeline tab shows the canonical SolarPro architecture map:
+//   Homeowner Intake → Bill Intelligence → Lead Ops → Marketplace
+//   → Contractor Claim → Project/Portal/Engineering, plus Survey → 3D
+//   → Engineering documents.
 //
-// Both pipelines (partner app + SolarPro) are shown with their real
-// source files, env vars, and live connection status.
+// Evidence-backed nodes and edges are shown with route/API/table/library
+// references, explicit partial/external/blocked status, and copy/export context.
 //
 // Data source: GET /api/topography/state?projectId=XXX
 // If no projectId is provided, right panel shows a project selector prompt.
@@ -600,10 +601,9 @@ function IntegrationPanel({
 }
 
 // ===========================================================================
-// PIPELINE TOPOLOGY VIEW — unified partner + SolarPro pipeline
+// PIPELINE TOPOLOGY VIEW — canonical SolarPro architecture map
 // ===========================================================================
 
-// Colors matching partner app's PIPELINE_TOPOLOGY.html
 const COLOR = {
   mobile:      { bg: 'bg-[#4fd1c5]/10', border: 'border-[#4fd1c5]/30', text: 'text-[#4fd1c5]', dot: 'bg-[#4fd1c5]', glow: 'shadow-[0_0_8px_rgba(79,209,197,0.4)]' },
   backend:     { bg: 'bg-[#7aa2ff]/10', border: 'border-[#7aa2ff]/30', text: 'text-[#7aa2ff]', dot: 'bg-[#7aa2ff]', glow: 'shadow-[0_0_8px_rgba(122,162,255,0.4)]' },
@@ -616,372 +616,202 @@ const COLOR = {
 };
 
 type ColorKey = keyof typeof COLOR;
+type ArchitectureStatus = 'live' | 'partial' | 'external' | 'legacy' | 'blocked';
 
-interface PipelineStep {
-  num: number;
-  layer: ColorKey;
-  layerLabel: string;
+interface ArchitectureNode {
+  id: string;
+  group: string;
   title: string;
   detail: string;
-  code: string;
-  envVars?: string[];
-  status: 'live' | 'degraded' | 'blocked' | 'external';
+  evidence: string[];
+  tables?: string[];
+  status: ArchitectureStatus;
+  layer: ColorKey;
 }
 
-const PIPELINE_STEPS: PipelineStep[] = [
-  {
-    num: 0,
-    layer: 'solarpro',
-    layerLabel: 'SolarPro · SSO (v60.5)',
-    title: 'Identity Handoff · /api/auth/authorize',
-    detail: 'OAuth-style authorize endpoint. Mobile app opens /api/auth/authorize?redirect_uri=sitesurvey://login&state=<r>. If user has a session, SolarPro mints HS256 JWT (10 min TTL) with sub, solarpro_user_id, email, name, iat, exp, jti; records jti in mobile_sso_used_jtis (replay protection); 302-redirects to sitesurvey://login?token=<jwt>&state=<r>. SolarPro is the ONLY source of user identity.',
-    code: 'app/api/auth/authorize/route.ts\nJWT: HS256 (SOLARPRO_HANDOFF_SECRET ≥ 32 chars)\nAllowlist: AUTHORIZE_ALLOWED_REDIRECTS (default sitesurvey://)\nJTI store: mobile_sso_used_jtis (replay protection)',
-    envVars: ['SOLARPRO_HANDOFF_SECRET', 'AUTHORIZE_ALLOWED_REDIRECTS'],
-    status: 'live',
-  },
-  {
-    num: 1,
-    layer: 'mobile',
-    layerLabel: 'Partner · Mobile',
-    title: 'Field Survey Captured (w/ bearer JWT)',
-    detail: 'Inspector fills survey on mobile app (Expo/React Native). GPS, photos, metadata collected. Stored locally then synced. Every API call to the partner backend carries Authorization: Bearer <jwt> from step 0 — device-supplied user_id is never trusted.',
-    code: 'mobile/src/screens/NewSurveyScreen.tsx\nmobile/src/services/SyncManager.ts\nmobile/src/screens/LoginScreen.tsx (SSO button → /api/auth/authorize)',
-    status: 'external',
-  },
-  {
-    num: 2,
-    layer: 'backend',
-    layerLabel: 'Partner · Backend',
-    title: 'Survey Persisted + Complete Trigger',
-    detail: 'POST /api/surveys (create) → POST /api/surveys/:id/complete. SyncManager now auto-calls /complete after successful sync. Survey row written to PostgreSQL/PostGIS.',
-    code: 'backend/src/routes/surveys.ts\nPOST /api/surveys/:id/complete',
-    status: 'live',
-  },
-  {
-    num: 3,
-    layer: 'db',
-    layerLabel: 'Partner · DB',
-    title: 'surveys Table + webhook_deliveries',
-    detail: 'Survey persisted with metadata JSONB (RoofMountMetadata | GroundMountMetadata | SolarFencingMetadata), PostGIS location. Thin event enqueued in webhook_deliveries.',
-    code: 'surveys.metadata: { roof_material, rafter_size,\n  rafter_spacing, roof_age_years, azimuth,\n  soil_type, slope_degrees, ... }\nwebhook_deliveries: pending → delivered',
-    status: 'live',
-  },
-  {
-    num: 4,
-    layer: 'integration',
-    layerLabel: 'Partner · Outbound Webhook',
-    title: 'HMAC-Signed Delivery Worker',
-    detail: 'Worker runs every 30s. Signs payload with HMAC-SHA256 over "${timestamp}.${rawBody}". Retry schedule: 1→5→30→120→720 min. Delivers thin event to SolarPro.',
-    code: 'backend/src/services/webhookService.ts\nPOST ${SOLARPRO_WEBHOOK_URL}/api/webhooks/survey-complete\nHeaders: X-Survey-Signature, X-Survey-Timestamp, X-Survey-Event-Id',
-    envVars: ['SOLARPRO_WEBHOOK_URL', 'SURVEY_WEBHOOK_SECRET'],
-    status: 'live',
-  },
-  {
-    num: 5,
-    layer: 'cloud',
-    layerLabel: 'Boundary · Wire',
-    title: '⚡ Partner → SolarPro Webhook Boundary',
-    detail: 'Thin event crosses the wire. v60.5 payload includes ownership claims: { event, event_id, occurred_at, survey_id, project_id, project_name, inspector_name, site_name, completed_at, solarpro_user_id, solarpro_project_id, solarpro_email }. HMAC verified on arrival. solarpro_user_id drives owner resolution; solarpro_project_id drives ATTACH-vs-CREATE routing in step 9.',
-    code: '{\n  \"event\":\"survey.completed\",\n  \"survey_id\":\"uuid\",\n  \"solarpro_user_id\":\"uuid\",          // v60.5 \u2014 from JWT\n  \"solarpro_project_id\":\"uuid|null\",  // v60.5 \u2014 optional\n  \"project_name\":\"...\",\n  \"inspector_name\":\"...\",\n  \"site_name\":\"...\",\n  \"completed_at\":\"ISO\"\n}',
-    status: 'live',
-  },
-  {
-    num: 6,
-    layer: 'solarpro',
-    layerLabel: 'SolarPro · Ingest',
-    title: 'Webhook Receiver + HMAC Verify',
-    detail: 'POST /api/webhooks/survey-complete. Reads raw body bytes, verifies HMAC-SHA256, checks idempotency via event_id. Inserts webhook_deliveries row with status=verified.',
-    code: 'app/api/webhooks/survey-complete/route.ts\nlib/survey/verifyWebhookSignature.ts\nlib/survey/envelopeValidator.ts',
-    envVars: ['SURVEY_WEBHOOK_SECRET'],
-    status: 'live',
-  },
-  {
-    num: 7,
-    layer: 'solarpro',
-    layerLabel: 'SolarPro · Ingest',
-    title: 'Full Payload Fetch from Partner API',
-    detail: 'GET ${PARTNER_BASE_URL}/api/surveys/:id with Bearer token. Returns full survey JSON including category metadata. Falls back to degraded mode (thin event only) on failure.',
-    code: 'lib/survey/ingest/payloadFetcher.ts\nGET ${PARTNER_BASE_URL}/api/surveys/${surveyId}\nAuthorization: Bearer ${PARTNER_API_BEARER_TOKEN}',
-    envVars: ['PARTNER_BASE_URL', 'PARTNER_API_BEARER_TOKEN'],
-    status: 'live',
-  },
-  {
-    num: 8,
-    layer: 'solarpro',
-    layerLabel: 'SolarPro · Transform',
-    title: 'Field Mapping + Enum Normalization',
-    detail: 'v1.0 transformer: maps partner metadata fields to SolarPro schema. roof_material → "Asphalt Shingle", rafter_spacing → numeric inches, panel_rating → numeric amps. All values normalized through explicit maps.',
-    code: 'lib/survey/ingest/transformLayer.ts\npartner.metadata.roof_material → project_physical_data.roof_material\npartner.metadata.rafter_spacing → rafter_spacing_in (int)\npartner.metadata.roof_age_years → roof_age_years\npartner.metadata.azimuth → [stored in survey_meta JSONB]',
-    status: 'live',
-  },
-  {
-    num: 9,
-    layer: 'db',
-    layerLabel: 'SolarPro · DB Write (v60.5)',
-    title: 'projects + project_physical_data — per-event routing',
-    detail: 'v60.5 projectLinkResolver decides per-event: if webhook carries solarpro_project_id → ATTACH to the existing project (Case 1, \"survey started from a SolarPro project page\"). If absent → CREATE new project under the SSO user (Case 2, \"user logs into app and starts survey from scratch\"). TRIAGE_QUEUE env override still honoured as ops pause-everything switch. Idempotent ON CONFLICT upsert on survey_external_id; re-deliveries overwrite with latest data. project_files inserted for photos.',
-    code: 'lib/survey/ingest/projectLinkResolver.ts  (v60.5 per-event)\nlib/survey/ingest/ingestPipeline.ts\n→ projects (origin=\'survey\', survey_external_id)\n→ project_physical_data (20 fields, source=\'survey\')\n→ project_files (photos, status=\'pending\')',
-    envVars: ['SURVEY_PROJECT_LINK_STRATEGY'],
-    status: 'live',
-  },
-  {
-    num: 10,
-    layer: 'engineering',
-    layerLabel: 'SolarPro · Engineering',
-    title: 'Engineering Report Generator',
-    detail: 'Reads 4/20 physical_data fields: panel_rating_amps (NEC 705.12B calc), rafter_spacing_in (structural), roof_material (load type), interconnection_point (diagram). 16 fields captured but NOT consumed.',
-    code: 'lib/engineering/reportGenerator.ts\n→ pd.panel_rating_amps      ✓ used\n→ pd.rafter_spacing_in      ✓ used\n→ pd.roof_material          ✓ used\n→ pd.interconnection_point  ✓ used\n→ pd.roof_pitch             ✗ not consumed\n→ pd.panel_brand            ✗ not consumed\n→ [14 more fields]          ✗ not consumed',
-    status: 'degraded',
-  },
-  {
-    num: 11,
-    layer: 'blocked',
-    layerLabel: 'SolarPro · NOT Wired',
-    title: 'SystemDefinition / CAD / Permit / Proposal',
-    detail: 'applyToSystemDefinition, buildCADFromSurvey, permitIntegration, electricalFromSurvey — all built in lib/siteSurvey/ (Phase 1-10) but ZERO callers in app/ production routes. Survey data does not flow here.',
-    code: 'lib/siteSurvey/applyToSystemDefinition.ts  ✗ 0 callers\nlib/siteSurvey/buildCADFromSurvey.ts       ✗ 0 callers\nlib/siteSurvey/permitIntegration.ts        ✗ 0 callers\nlib/siteSurvey/electricalFromSurvey.ts     ✗ 0 callers',
-    status: 'blocked',
-  },
+interface ArchitectureEdge {
+  from: string;
+  to: string;
+  label: string;
+  status: ArchitectureStatus;
+}
+
+const ARCHITECTURE_NODES: ArchitectureNode[] = [
+  { id: 'intake', group: 'Entry & Intake', title: 'Homeowner Intake', detail: 'Public review-first estimate funnel persists homeowner submissions without immediately creating marketplace inventory.', evidence: ['/free-solar-estimate', 'POST /api/intake/homeowner', 'lib/intake/homeownerEventIntake.ts'], tables: ['intake_events', 'intake_funnels'], status: 'live', layer: 'solarpro' },
+  { id: 'qualification', group: 'Entry & Intake', title: 'Qualification Event', detail: 'Post-submit qualification appends derived intelligence for admin review, scoring, matching, and enrichment.', evidence: ['POST /api/intake/homeowner/qualification'], tables: ['intake_events'], status: 'live', layer: 'solarpro' },
+  { id: 'bill', group: 'Bill Intelligence', title: 'Utility Bill Storage + Intelligence', detail: 'Bill attachments use Vercel Blob or local fallback, then OCR/parser/Claude/enrichment/confidence/insights prepare bill intelligence.', evidence: ['/api/bill-upload', '/api/admin/network/intake/bill-intelligence', 'lib/intake/utilityBillAttachment.ts', 'lib/intake/utilityBillIntelligence.ts'], tables: ['project_files', 'projects.bill_data', 'opportunity_intelligence'], status: 'live', layer: 'cloud' },
+  { id: 'leadops', group: 'Admin Lead Operations', title: 'Admin Intake Review', detail: 'Admin network control center reviews intake, funnels, enrichment, analytics, health, campaigns, and webhooks before release.', evidence: ['/admin/network', '/api/admin/network/intake', '/api/admin/network/enrichment', '/api/admin/network/health'], tables: ['intake_events', 'enrichment_queue', 'campaign_analytics', 'webhook_ingestion_log'], status: 'live', layer: 'backend' },
+  { id: 'marketplace', group: 'Marketplace', title: 'Marketplace Release + Screening', detail: 'Operator release converts approved intake/opportunities into marketplace inventory guarded by screening and release gates.', evidence: ['/api/admin/network/marketplace', 'lib/network/marketplaceInventory.ts', 'lib/network/marketplaceReleaseGate.ts'], tables: ['network_opportunities', 'opportunity_screening_queue', 'opportunity_sources'], status: 'live', layer: 'integration' },
+  { id: 'intelligence', group: 'Marketplace', title: 'Opportunity Intelligence + Revenue Projection', detail: 'Marketplace intelligence, enrichment, matching, and revenue projection annotate and prioritize opportunities.', evidence: ['lib/network/marketplaceIntelligence.ts', 'lib/network/marketplaceRevenueProjection.ts', 'lib/network/contractorMatcher.ts'], tables: ['opportunity_intelligence', 'opportunity_assignments', 'network_events'], status: 'live', layer: 'integration' },
+  { id: 'contractor', group: 'Contractor Network', title: 'Discovery + Claim', detail: 'Contractors discover live opportunities, maintain profiles, claim jobs, and view assigned/claimed inventory.', evidence: ['/network', '/api/network/opportunities', '/api/network/opportunities/[id]/claim', '/api/network/contractor-profile'], tables: ['contractor_profiles', 'opportunity_claims', 'opportunity_assignments', 'network_opportunities'], status: 'live', layer: 'mobile' },
+  { id: 'portal', group: 'Homeowner Portal', title: 'OTP Portal + Dashboard', detail: 'Homeowners access project dashboard, stage state, bill upload, files, proposals, and logout flows.', evidence: ['/portal/dashboard', '/api/portal/dashboard', '/api/portal/bill-upload', '/api/portal/logout'], tables: ['portal_otp_tokens', 'projects', 'project_homeowner_stage_history', 'project_micro_stages'], status: 'live', layer: 'solarpro' },
+  { id: 'core', group: 'Core Project/CRM', title: 'Clients, Projects, Layouts, Files, Proposals', detail: 'Canonical CRM/project layer backing project creation, design state, generated artifacts, proposal outputs, and portal surfaces.', evidence: ['/projects', '/proposals', '/api/projects', '/api/project-files', '/api/proposals'], tables: ['clients', 'projects', 'layouts', 'project_files', 'proposals', 'proposal_signatures'], status: 'live', layer: 'db' },
+  { id: 'survey', group: 'Survey & Physical Data', title: 'Survey Ingest + project_physical_data', detail: 'Partner/mobile and SolarPro survey paths normalize field data, webhook events, photos, and physical/electrical facts.', evidence: ['/api/auth/authorize', '/api/webhooks/survey-complete', '/api/survey/submit', 'lib/survey/ingest/ingestPipeline.ts'], tables: ['site_surveys', 'site_survey_files', 'project_physical_data', 'webhook_deliveries', 'webhook_ingestion_log'], status: 'live', layer: 'mobile' },
+  { id: 'survey-partial', group: 'Survey & Physical Data', title: 'Survey → Engineering Consumption', detail: 'Engineering report reads 4/20 physical-data fields; SystemDefinition/CAD/Permit/Proposal auto-application has source files but no production callers.', evidence: ['lib/topography/getTopographyState.ts', 'lib/engineering/reportGenerator.ts', 'lib/siteSurvey/applyToSystemDefinition.ts', 'lib/siteSurvey/permitIntegration.ts'], tables: ['project_physical_data', 'project_files'], status: 'partial', layer: 'blocked' },
+  { id: 'engineering', group: 'Engineering & Documents', title: 'Engineering, SLD, BOM, Permit, Plan Set', detail: 'Engineering APIs calculate topology, BOM, SLD/PDF, permit, plan-set, PVWatts, structural output, sync, and saved artifacts.', evidence: ['/engineering', '/api/engineering/topology', '/api/engineering/bom', '/api/engineering/sld', '/api/engineering/permit', '/api/engineering/plan-set', '/api/engineering/pvwatts'], tables: ['engineering_runs', 'project_hardware', 'project_files', 'productions'], status: 'live', layer: 'engineering' },
+  { id: 'maps3d', group: '3D / Maps / Solar Design', title: 'Maps, 3D, Solar Placement', detail: 'Map/session/solar design surfaces and dependencies support visual placement and layout persistence; external iframe remains static/external.', evidence: ['/api/maps-session', '/api/solar', 'Mapbox/Cesium/Three dependencies', TOPO_URL], tables: ['layouts', 'projects'], status: 'partial', layer: 'cloud' },
+  { id: 'equipment', group: 'Equipment / Pricing / Utility', title: 'Equipment Registry + Pricing + Utility Policy', detail: 'Equipment registries, user equipment tables, distributor pricing, utility policies, and pricing config feed design, SLD/BOM, and proposal logic.', evidence: ['lib/topology-manager.ts', 'lib/equipment-registry-v4.ts', 'lib/proposal/buildCanonicalProposal.ts'], tables: ['user_equipment_panels', 'user_equipment_inverters', 'user_equipment_batteries', 'user_equipment_mounting', 'distributor_prices', 'utility_policies', 'pricing_config'], status: 'live', layer: 'backend' },
+  { id: 'health', group: 'Health / Logging', title: 'Admin Health, Events, Logs', detail: 'Operational visibility comes through admin health, analytics, network events, webhook ingestion logs, and admin activity logs.', evidence: ['/api/admin/network/health', '/api/admin/network/analytics', '/api/admin/network/webhooks'], tables: ['network_events', 'webhook_ingestion_log', 'admin_activity_log', 'campaign_analytics'], status: 'live', layer: 'db' },
+  { id: 'external', group: 'External Services', title: 'External AI, Storage, Maps, Payments, Email', detail: 'External integrations appear in source/dependencies and should be marked external rather than treated as SolarPro-owned database systems.', evidence: ['Vercel Blob', 'Claude/OpenAI/OCR hints', 'Google Maps/Solar', 'NREL/PVWATTS', 'Stripe', 'Resend', PARTNER_API_URL], status: 'external', layer: 'cloud' },
 ];
 
-function statusBadge(status: PipelineStep['status']) {
-  switch (status) {
-    case 'live':     return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">LIVE</span>;
-    case 'degraded': return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">PARTIAL</span>;
-    case 'blocked':  return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-700/60 text-slate-400 border border-slate-600/30">NOT WIRED</span>;
-    case 'external': return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-[#4fd1c5]/10 text-[#4fd1c5] border border-[#4fd1c5]/30">EXTERNAL</span>;
-  }
+const ARCHITECTURE_EDGES: ArchitectureEdge[] = [
+  { from: 'intake', to: 'qualification', label: 'homeowner submission → qualification lifecycle event', status: 'live' },
+  { from: 'qualification', to: 'bill', label: 'bill attachment/intelligence can enrich intake and opportunity context', status: 'live' },
+  { from: 'bill', to: 'leadops', label: 'operator-triggered bill intelligence for admin review', status: 'live' },
+  { from: 'leadops', to: 'marketplace', label: 'reviewed intake/opportunity → release gate', status: 'live' },
+  { from: 'marketplace', to: 'intelligence', label: 'screening, matching, enrichment, projection', status: 'live' },
+  { from: 'intelligence', to: 'contractor', label: 'live opportunity discovery and claim', status: 'live' },
+  { from: 'contractor', to: 'core', label: 'claims/assignments connect marketplace to project operations', status: 'live' },
+  { from: 'portal', to: 'core', label: 'homeowner dashboard reads project, files, proposals, stage state', status: 'live' },
+  { from: 'survey', to: 'core', label: 'survey ingest creates/attaches projects and files', status: 'live' },
+  { from: 'survey', to: 'survey-partial', label: 'physical data feeds engineering report only partially', status: 'partial' },
+  { from: 'survey-partial', to: 'engineering', label: '4/20 survey fields used by engineering report', status: 'partial' },
+  { from: 'core', to: 'engineering', label: 'project/layout/equipment → documents and calculations', status: 'live' },
+  { from: 'maps3d', to: 'core', label: 'layout and visual design state persists to projects/layouts', status: 'partial' },
+  { from: 'equipment', to: 'engineering', label: 'equipment registry resolves topology, accessories, BOM/SLD stages', status: 'live' },
+  { from: 'engineering', to: 'portal', label: 'generated artifacts/proposals become portal-visible project outputs', status: 'partial' },
+  { from: 'health', to: 'leadops', label: 'events/logs/health inform admin operations', status: 'live' },
+  { from: 'external', to: 'bill', label: 'AI/OCR/storage services support bill intelligence', status: 'external' },
+  { from: 'external', to: 'maps3d', label: 'maps/solar/PVWATTS providers support design calculations', status: 'external' },
+];
+
+function architectureStatusBadge(status: ArchitectureStatus) {
+  const cls = status === 'live' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : status === 'partial' ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : status === 'external' ? 'bg-[#c084fc]/10 text-[#c084fc] border-[#c084fc]/30' : status === 'legacy' ? 'bg-slate-700/60 text-slate-400 border-slate-600/30' : 'bg-red-500/10 text-red-400 border-red-500/30';
+  return <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${cls}`}>{status.toUpperCase()}</span>;
 }
 
-function PipelineStepCard({ step, isLast }: { step: PipelineStep; isLast: boolean }) {
+function buildTopologyExportText() {
+  return [
+    'SolarPro Canonical Topology Snapshot',
+    'Evidence source: Admin Topography audit, app/admin/topography/page.tsx, route/API inventory, migrations, and pipeline library excerpts.',
+    '',
+    'Nodes:',
+    ...ARCHITECTURE_NODES.map(n => `- [${n.status}] ${n.group} / ${n.title}: ${n.detail} Evidence: ${n.evidence.join('; ')}${n.tables ? ` Tables: ${n.tables.join(', ')}` : ''}`),
+    '',
+    'Edges:',
+    ...ARCHITECTURE_EDGES.map(e => `- [${e.status}] ${e.from} -> ${e.to}: ${e.label}`),
+    '',
+    'Known partial/stale items: external iframe is static; partner map is legacy/reference; survey-to-engineering consumes 4/20 physical fields; SystemDefinition/CAD/Permit/Proposal survey auto-application has source files but no production callers.',
+  ].join('\n');
+}
+
+function ArchitectureNodeCard({ node }: { node: ArchitectureNode }) {
   const [expanded, setExpanded] = useState(false);
-  const c = COLOR[step.layer];
-  const isWire = step.num === 5;
-
+  const c = COLOR[node.layer];
   return (
-    <div className="flex gap-3">
-      {/* Spine */}
-      <div className="flex flex-col items-center flex-shrink-0">
-        <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-[11px] font-bold flex-shrink-0 ${c.border} ${c.bg} ${c.text} ${step.status === 'live' || step.status === 'external' ? c.glow : ''}`}>
-          {step.num}
+    <div className={`rounded-xl border ${c.border} ${c.bg} overflow-hidden`}>
+      <button className="w-full text-left px-4 py-3 flex items-start justify-between gap-3" onClick={() => setExpanded(v => !v)}>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            <span className={`text-[9px] font-semibold uppercase tracking-widest ${c.text} opacity-75`}>{node.group}</span>
+            {architectureStatusBadge(node.status)}
+          </div>
+          <div className={`text-sm font-semibold ${c.text}`}>{node.title}</div>
+          <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{node.detail}</p>
         </div>
-        {!isLast && (
-          <div className={`w-px flex-1 mt-1 min-h-[20px] ${isWire ? 'bg-gradient-to-b from-[#f472b6] via-[#c084fc] to-cyan-500' : 'bg-slate-700/60'}`} />
-        )}
-      </div>
-
-      {/* Card */}
-      <div className={`flex-1 mb-3 rounded-xl border ${c.border} ${c.bg} overflow-hidden`}>
-        {/* Header */}
-        <button
-          className="w-full text-left px-4 py-3 flex items-start justify-between gap-2"
-          onClick={() => setExpanded(v => !v)}
-        >
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-              <span className={`text-[9px] font-semibold uppercase tracking-widest ${c.text} opacity-70`}>
-                {step.layerLabel}
-              </span>
-              {statusBadge(step.status)}
-            </div>
-            <div className={`text-sm font-semibold ${c.text} leading-snug ${isWire ? 'text-base' : ''}`}>
-              {step.title}
-            </div>
-            <div className="text-[11px] text-slate-400 mt-0.5 leading-relaxed line-clamp-2">
-              {step.detail}
-            </div>
+        {expanded ? <ChevronDown size={13} className="text-slate-500" /> : <ChevronRight size={13} className="text-slate-500" />}
+      </button>
+      {expanded && (
+        <div className="px-4 pb-4 border-t border-white/5 pt-3 space-y-3">
+          <div>
+            <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Evidence</p>
+            <div className="flex flex-wrap gap-1.5">{node.evidence.map(x => <span key={x} className="text-[9px] font-mono bg-[#070d1e] border border-white/5 text-slate-300 px-2 py-0.5 rounded-full">{x}</span>)}</div>
           </div>
-          <div className="flex-shrink-0 mt-1">
-            {expanded
-              ? <ChevronDown size={13} className="text-slate-500" />
-              : <ChevronRight size={13} className="text-slate-500" />
-            }
-          </div>
-        </button>
-
-        {/* Expanded */}
-        {expanded && (
-          <div className="px-4 pb-4 border-t border-white/5 pt-3 space-y-3">
-            <div className="text-[11px] text-slate-300 leading-relaxed">
-              {step.detail}
-            </div>
-            <pre className={`text-[10px] font-mono rounded-lg p-3 bg-[#070d1e] border border-white/5 ${c.text} opacity-80 leading-relaxed whitespace-pre-wrap break-all overflow-x-auto`}>
-              {step.code}
-            </pre>
-            {step.envVars && step.envVars.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {step.envVars.map(v => (
-                  <span key={v} className="text-[9px] font-mono bg-slate-800/80 border border-slate-700/50 text-slate-400 px-2 py-0.5 rounded-full">
-                    {v}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+          {node.tables && <div><p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">DB Tables / Fields</p><p className="text-[10px] font-mono text-[#fbbf24]/90 leading-relaxed">{node.tables.join(' · ')}</p></div>}
+        </div>
+      )}
     </div>
   );
 }
 
-// Field mapping table — partner → SolarPro
-const FIELD_MAP = [
-  { from: 'metadata.roof_material',    fromLabel: 'roof_material (enum)',     to: 'roof_material',        toLabel: 'Roof Material',        eng: true  },
-  { from: 'metadata.rafter_size',      fromLabel: 'rafter_size (string)',     to: 'rafter_spacing_in',    toLabel: 'Rafter Spacing (in)',   eng: true  },
-  { from: 'metadata.rafter_spacing',   fromLabel: 'rafter_spacing (string)',  to: 'rafter_spacing_in',    toLabel: 'Rafter Spacing (in)',   eng: true  },
-  { from: 'metadata.roof_age_years',   fromLabel: 'roof_age_years (int)',     to: 'roof_age_years',       toLabel: 'Roof Age (yrs)',        eng: false },
-  { from: 'metadata.azimuth',          fromLabel: 'azimuth (float)',          to: 'survey_meta JSONB',    toLabel: '[survey_meta only]',    eng: false },
-  { from: 'site_address',              fromLabel: 'site_address',             to: 'address',              toLabel: 'Project Address',       eng: false },
-  { from: 'latitude / longitude',      fromLabel: 'lat / lng',                to: 'lat / lng',            toLabel: 'GPS Coordinates',       eng: false },
-  { from: 'inspector_name',            fromLabel: 'inspector_name',           to: 'inspector_name',       toLabel: 'Inspector Name',        eng: false },
-  { from: 'site_name / project_name',  fromLabel: 'site_name',                to: 'projects.name',        toLabel: 'Project Name',          eng: false },
-  { from: 'photos[].remote_url',       fromLabel: 'photo remote_url',         to: 'project_files',        toLabel: 'Project Files',         eng: false },
-];
-
-function FieldMappingTable() {
+function ArchitectureEdgesView() {
   return (
-    <div className="rounded-xl border border-slate-700/40 overflow-hidden">
-      <div className="grid grid-cols-[1fr_20px_1fr_auto] gap-0 bg-slate-800/40 px-4 py-2">
-        <span className="text-[10px] font-semibold text-[#4fd1c5] uppercase tracking-wide">Partner surveys.{'{field}'}</span>
-        <span />
-        <span className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wide">SolarPro project_physical_data</span>
-        <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide text-right">Eng</span>
+    <div className="rounded-xl border border-slate-700/40 bg-[#0a1020] p-4">
+      <h4 className="text-xs font-bold text-white mb-3 uppercase tracking-wide">Canonical Data Flow Edges</h4>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+        {ARCHITECTURE_EDGES.map((edge, i) => (
+          <div key={`${edge.from}-${edge.to}-${i}`} className="flex items-center justify-between gap-3 rounded-lg border border-slate-800/80 bg-[#070d1e] px-3 py-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-mono text-slate-300 truncate">{edge.from} <span className="text-cyan-400">→</span> {edge.to}</div>
+              <div className="text-[10px] text-slate-500 truncate">{edge.label}</div>
+            </div>
+            {architectureStatusBadge(edge.status)}
+          </div>
+        ))}
       </div>
-      {FIELD_MAP.map((row, i) => (
-        <div key={i} className={`grid grid-cols-[1fr_20px_1fr_auto] gap-0 px-4 py-2 border-t border-slate-800/50 items-center ${row.eng ? 'bg-emerald-500/5' : ''}`}>
-          <div>
-            <div className="text-[10px] font-mono text-[#4fd1c5]/80">{row.from}</div>
-            <div className="text-[9px] text-slate-600">{row.fromLabel}</div>
-          </div>
-          <ArrowRight size={10} className="text-slate-600 mx-auto" />
-          <div>
-            <div className="text-[10px] font-mono text-cyan-400/80">{row.to}</div>
-            <div className="text-[9px] text-slate-600">{row.toLabel}</div>
-          </div>
-          <div className="text-right">
-            {row.eng
-              ? <span className="text-[9px] font-bold text-emerald-400">✓</span>
-              : <span className="text-[9px] text-slate-700">—</span>
-            }
-          </div>
-        </div>
-      ))}
     </div>
   );
 }
 
 function PipelineTopologyView() {
-  const [showFieldMap, setShowFieldMap] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTopology = async () => {
+    const text = buildTopologyExportText();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      window.prompt('Copy SolarPro topology context:', text);
+    }
+  };
+
+  const groups = Array.from(new Set(ARCHITECTURE_NODES.map(n => n.group)));
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-[#060c1a]">
-      {/* Header */}
       <div className="flex-shrink-0 px-5 py-4 border-b border-white/5 bg-[#070d1e]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-base font-bold text-white tracking-tight">
-              End-to-End Pipeline Topology
-            </h2>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Partner Mobile Sync → Backend → Outbound Webhook → SolarPro Ingest → Engineering
-            </p>
+            <h2 className="text-base font-bold text-white tracking-tight">Canonical SolarPro Architecture Topology</h2>
+            <p className="text-[11px] text-slate-400 mt-0.5">Homeowner Intake → Bill Intelligence → Lead Ops → Marketplace → Contractor Claim → Project/Portal/Engineering, plus Survey → 3D → Engineering documents.</p>
           </div>
-          <div className="flex flex-wrap gap-1.5 flex-shrink-0 mt-0.5">
-            {(['mobile', 'backend', 'cloud', 'db', 'integration', 'solarpro', 'engineering', 'blocked'] as ColorKey[]).map(k => (
-              <div key={k} className="flex items-center gap-1">
-                <div className={`w-2 h-2 rounded-full ${COLOR[k].dot}`} />
-                <span className="text-[9px] text-slate-500 capitalize">{k === 'solarpro' ? 'SolarPro' : k === 'blocked' ? 'Not Wired' : k}</span>
-              </div>
-            ))}
-          </div>
+          <button onClick={copyTopology} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 hover:border-cyan-400/60 text-xs text-cyan-300 hover:text-white transition-all">
+            <FileText size={12} /> {copied ? 'Copied' : 'Copy for ChatGPT'}
+          </button>
         </div>
-
-        {/* Partner app runtime badge */}
         <div className="mt-3 flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2 bg-[#0d1633] border border-[#7aa2ff]/20 rounded-lg px-3 py-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#7aa2ff] animate-pulse" />
-            <span className="text-[10px] text-[#7aa2ff] font-mono">{PARTNER_API_URL}</span>
-            <span className="text-[9px] text-slate-600">partner runtime</span>
-          </div>
-          <div className="flex items-center gap-2 bg-[#0d1633] border border-cyan-500/20 rounded-lg px-3 py-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-            <span className="text-[10px] text-cyan-400 font-mono">solar-pro.app</span>
-            <span className="text-[9px] text-slate-600">SolarPro runtime</span>
-          </div>
-          <div className="flex items-center gap-2 bg-[#0d1633] border border-[#f472b6]/20 rounded-lg px-3 py-1.5">
-            <span className="text-[9px] text-[#f472b6]">WEBHOOK_PRE_INGEST_ACCEPT_202=true</span>
-          </div>
+          {(['live', 'partial', 'external', 'legacy', 'blocked'] as ArchitectureStatus[]).map(s => <div key={s}>{architectureStatusBadge(s)}</div>)}
+          <span className="text-[10px] text-slate-600">Nodes: {ARCHITECTURE_NODES.length} · Edges: {ARCHITECTURE_EDGES.length} · Evidence-backed audit model</span>
         </div>
       </div>
 
-      {/* Scrollable steps */}
-      <div className="flex-1 overflow-y-auto px-5 py-5">
-
-        {/* Steps */}
-        {PIPELINE_STEPS.map((step, i) => (
-          <PipelineStepCard
-            key={step.num}
-            step={step}
-            isLast={i === PIPELINE_STEPS.length - 1}
-          />
-        ))}
-
-        {/* Field Mapping Table */}
-        <div className="mt-2 mb-4">
-          <button
-            onClick={() => setShowFieldMap(v => !v)}
-            className="flex items-center gap-2 w-full mb-3 group"
-          >
-            <div className="flex items-center gap-2 flex-1">
-              <Link2 size={13} className="text-cyan-400" />
-              <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-widest">
-                Field Mapping: Partner → SolarPro
-              </span>
-              <span className="text-[9px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-1.5 py-0.5 rounded-full">
-                {FIELD_MAP.filter(r => r.eng).length} feed engineering
-              </span>
-            </div>
-            {showFieldMap
-              ? <ChevronDown size={13} className="text-slate-500" />
-              : <ChevronRight size={13} className="text-slate-500" />
-            }
-          </button>
-          {showFieldMap && <FieldMappingTable />}
+      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+          <p className="text-[11px] text-amber-200 leading-relaxed"><span className="font-bold">Audit note:</span> this replaces the stale survey-only pipeline as the canonical Mission Control map. The original map iframe, partner reference tab, surveys/debug tab, and live right-side project integration panel are preserved. Partial and external systems are marked explicitly rather than promoted to live.</p>
         </div>
 
-        {/* Summary verdict */}
+        {groups.map(group => (
+          <section key={group} className="space-y-3">
+            <h3 className="text-[11px] font-bold text-slate-300 uppercase tracking-widest flex items-center gap-2"><GitBranch size={12} className="text-cyan-400" />{group}</h3>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+              {ARCHITECTURE_NODES.filter(n => n.group === group).map(node => <ArchitectureNodeCard key={node.id} node={node} />)}
+            </div>
+          </section>
+        ))}
+
+        <ArchitectureEdgesView />
+
         <div className="rounded-xl border border-slate-700/40 bg-[#0a1020] p-4 mb-4">
           <h4 className="text-xs font-bold text-white mb-3 uppercase tracking-wide">Connection Audit Summary</h4>
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
             {[
-              { label: 'Partner mobile → Partner backend', status: 'LIVE', color: 'text-emerald-400' },
-              { label: 'Partner backend → webhook_deliveries queue', status: 'LIVE', color: 'text-emerald-400' },
-              { label: 'Outbound delivery worker (30s interval)', status: 'LIVE', color: 'text-emerald-400' },
-              { label: 'HMAC-SHA256 signing (timestamp.rawBody)', status: 'LIVE', color: 'text-emerald-400' },
-              { label: 'SolarPro webhook receiver + HMAC verify', status: 'LIVE', color: 'text-emerald-400' },
-              { label: 'Full payload fetch from partner API', status: 'LIVE', color: 'text-emerald-400' },
-              { label: 'Transform → project_physical_data upsert', status: 'LIVE', color: 'text-emerald-400' },
-              { label: 'Engineering report reads 4/20 fields', status: 'PARTIAL', color: 'text-amber-400' },
-              { label: 'SystemDefinition / CAD / Permit / Proposal', status: 'NOT WIRED', color: 'text-slate-500' },
-            ].map((row, i) => (
-              <div key={i} className="flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">{row.label}</span>
-                <span className={`text-[9px] font-bold ${row.color}`}>{row.status}</span>
-              </div>
+              ['Homeowner intake → intake_events', 'LIVE', 'text-emerald-400'],
+              ['Bill intelligence → OCR/parser/AI/enrichment', 'LIVE', 'text-emerald-400'],
+              ['Admin review → marketplace release gate', 'LIVE', 'text-emerald-400'],
+              ['Marketplace → contractor discovery/claim', 'LIVE', 'text-emerald-400'],
+              ['Portal → project/files/proposals/stages', 'LIVE', 'text-emerald-400'],
+              ['Survey ingest → project_physical_data', 'LIVE', 'text-emerald-400'],
+              ['Engineering topology/BOM/SLD/permit/plan-set', 'LIVE', 'text-emerald-400'],
+              ['Survey data → engineering report fields', 'PARTIAL 4/20', 'text-amber-400'],
+              ['Survey auto-apply → SystemDefinition/CAD/Permit/Proposal', 'NOT WIRED', 'text-slate-500'],
+              ['External iframe and partner map', 'EXTERNAL/REFERENCE', 'text-[#c084fc]'],
+            ].map(([label, status, color]) => (
+              <div key={label} className="flex items-center justify-between gap-3"><span className="text-[11px] text-slate-400">{label}</span><span className={`text-[9px] font-bold ${color}`}>{status}</span></div>
             ))}
           </div>
         </div>
-
-        {/* Partner topology link */}
-        <div className="rounded-xl border border-[#7aa2ff]/20 bg-[#7aa2ff]/5 p-3 mb-2">
-          <p className="text-[10px] text-[#7aa2ff] font-semibold mb-1">Partner App Pipeline Topology</p>
-          <p className="text-[10px] text-slate-500 leading-relaxed">
-            The partner app ships its own pipeline visualization at <span className="font-mono text-[#7aa2ff]/70">PIPELINE_TOPOLOGY.html</span> (root of repo).
-            It covers steps 1–7 (Mobile → Backend → Queue → Delivery → Pre-Ingest Handshake).
-            This view extends that with SolarPro steps 8–11.
-          </p>
-        </div>
-
       </div>
     </div>
   );
@@ -1776,7 +1606,7 @@ export default function AdminTopography() {
           {leftTab === 'pipeline' && (
             <span className="flex items-center gap-1 text-[10px] bg-[#f472b6]/10 text-[#f472b6] border border-[#f472b6]/20 px-2 py-0.5 rounded-full font-medium">
               <Network size={9} />
-              11 Steps · Partner + SolarPro
+              {ARCHITECTURE_NODES.length} Nodes · {ARCHITECTURE_EDGES.length} Edges
             </span>
           )}
           {/* Partner badge */}

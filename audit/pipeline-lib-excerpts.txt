@@ -1,0 +1,1993 @@
+\n===== lib/intake/homeownerEventIntake.ts =====
+/**
+ * homeownerEventIntake.ts
+ *
+ * Review-first homeowner intake for /free-solar-estimate.
+ *
+ * This module intentionally persists public homeowner submissions to the
+ * canonical intake_events table only. It does not create network_opportunities,
+ * opportunity_sources, enrichment_queue rows, assignments, or marketplace
+ * inventory. Operator review can later convert an intake event into an
+ * opportunity through the canonical admin workflow.
+ */
+
+import { getDbReady } from "@/lib/db-neon";
+import {
+  validateIntakePayload,
+  type RawIntakePayload,
+  type ValidatedIntakePayload,
+} from "./intakeValidator";
+
+async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  const db = await getDbReady();
+  return (db as any)(strings, ...values);
+}
+
+export type HomeownerIntakeAction =
+  | "pending_review"
+  | "validation_failed"
+  | "error";
+
+export interface HomeownerIntakeOptions {
+  source_system?: string;
+  source_channel?: string;
+  funnel_id?: string | null;
+  funnel_slug?: string | null;
+  campaign_id?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  referer?: string | null;
+  require_email?: boolean;
+  require_phone?: boolean;
+  require_address?: boolean;
+}
+
+export interface HomeownerIntakeResult {
+  action: HomeownerIntakeAction;
+  event_id: string | null;
+  validation_errors: string[];
+  validation_warnings: string[];
+  duration_ms: number;
+}
+
+interface HomeownerEventData {
+  event_id: string;
+  action: HomeownerIntakeAction | "malformed";
+  source_system: string;
+  source_channel: string;
+  funnel_id?: string | null;
+  campaign_id?: string | null;
+  idempotency_key?: string | null;
+  payload: Record<string, unknown>;
+  validation_result: Record<string, unknown>;
+  duplicate_result: Record<string, unknown>;
+  pipeline_result: Record<string, unknown>;
+  error_code?: string | null;
+  error_message?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  referer?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_content?: string | null;
+  utm_term?: string | null;
+  gclid?: string | null;
+  fbclid?: string | null;
+}
+
+export function makeHomeownerIntakeEventId(): string {
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `evt_homeowner_${ts}_${rand}`;
+}
+
+function cleanString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function numberOrNull(value: unknown): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const parsed = Number(value.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function maskForLog(value: unknown): string | null {
+  const text = cleanString(value);
+  if (!text) return null;
+  if (text.includes("@")) {
+    const [name, domain] = text.split("@");
+    return `${name.slice(0, 2)}***@${domain ?? "redacted"}`;
+  }
+  const digits = text.replace(/\D/g, "");
+  if (digits.length >= 7) return `***${digits.slice(-4)}`;
+  return text.slice(0, 32);
+}
+
+function safeIntakeLogPayload(
+  raw: Record<string, unknown>,
+  normalized?: ValidatedIntakePayload | null,
+  eventId?: string,
+) {
+  return {
+    event_id: eventId,
+    has_first_name: !!cleanString(raw.first_name),
+    has_last_name: !!cleanString(raw.last_name),
+    email: maskForLog(raw.email),
+    phone: maskForLog(raw.phone),
+    has_property_address: !!(
+      cleanString(raw.address_line1) ?? cleanString(raw.property_address)
+    ),
+    city: cleanString(raw.city),
+    state: cleanString(raw.state),
+    zip: maskForLog(raw.zip),
+    monthly_bill_amount_raw: raw.monthly_bill_amount,
+    average_monthly_bill_raw: raw.average_monthly_bill,
+    monthly_bill_amount_normalized:
+      normalized?.monthly_bill_amount ??
+      numberOrNull(raw.monthly_bill_amount) ??
+      numberOrNull(raw.average_monthly_bill),
+    uploaded_bill_filename: cleanString(raw.uploaded_bill_filename),
+    uploaded_bill_size_bytes: numberOrNull(raw.uploaded_bill_size_bytes),
+    uploaded_bill_content_type: cleanString(raw.uploaded_bill_content_type),
+    utility_provider_present: !!cleanString(raw.utility_provider),
+    consent_given: raw.consent_given === true,
+    utm_source: cleanString(raw.utm_source),
+    utm_campaign: cleanString(raw.utm_campaign),
+    source_channel: cleanString(raw.source_channel),
+  };
+}
+
+function deriveIdempotencyKey(payload: Record<string, unknown>): string | null {
+  const explicit = cleanString(payload.idempotency_key);
+  if (explicit) return explicit;
+
+  const email = cleanString(payload.email)?.toLowerCase() ?? "";
+  const phone = cleanString(payload.phone)?.replace(/\D/g, "") ?? "";
+  const address =
+    cleanString(payload.address_line1) ??
+    cleanString(payload.property_address) ??
+    "";
+  if (!email && !phone && !address) return null;
+  return ["homeowner_form", email, phone, address.toLowerCase()]
+    .join(":")
+    .slice(0, 240);
+}
+
+function operationalPayload(
+  raw: Record<string, unknown>,
+  normalized: ValidatedIntakePayload | null,
+  opts: HomeownerIntakeOptions,
+): Record<string, unknown> {
+  const providedBillMetadata =
+    raw.bill_metadata && typeof raw.bill_metadata === "object" && !Array.isArray(raw.bill_metadata)
+      ? (raw.bill_metadata as Record<string, unknown>)
+      : null;
+  const storedBillUrl = cleanString(providedBillMetadata?.accessible_url) ?? cleanString(providedBillMetadata?.download_url);
+  const billFilename = cleanString(providedBillMetadata?.filename) ?? cleanString(raw.uploaded_bill_filename);
+  const billMetadata = providedBillMetadata
+    ? {
+        ...providedBillMetadata,
+        filename: billFilename,
+        size_bytes: numberOrNull(providedBillMetadata.size_bytes) ?? numberOrNull(raw.uploaded_bill_size_bytes),
+        content_type: cleanString(providedBillMetadata.content_type) ?? cleanString(raw.uploaded_bill_content_type),
+        storage_status: storedBillUrl ? "stored" : (cleanString(providedBillMetadata.storage_status) ?? "metadata_only_not_uploaded"),
+        accessible_url: storedBillUrl,
+        download_url: cleanString(providedBillMetadata.download_url) ?? storedBillUrl,
+      }
+    : {
+\n===== lib/intake/utilityBillAttachment.ts =====
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
+import { randomUUID } from "crypto";
+
+const MAX_UTILITY_BILL_BYTES = 10 * 1024 * 1024;
+const GENERIC_BINARY_MIME = "application/octet-stream";
+
+const MIME_EXTENSION: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/tiff": "tif",
+  "image/bmp": "bmp",
+  "text/plain": "txt",
+  "text/csv": "csv",
+  "application/json": "json",
+  "application/xml": "xml",
+  "text/xml": "xml",
+  "application/zip": "zip",
+};
+
+type UtilityBillAttachmentErrorCode =
+  | "empty_file"
+  | "too_large"
+  | "storage_unconfigured"
+  | "storage_failed";
+
+export class UtilityBillAttachmentError extends Error {
+  code: UtilityBillAttachmentErrorCode;
+
+  constructor(code: UtilityBillAttachmentErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = "UtilityBillAttachmentError";
+    this.code = code;
+    if (options && "cause" in options) {
+      this.cause = options.cause;
+    }
+  }
+}
+
+export function isUtilityBillStorageFailure(err: unknown): boolean {
+  return err instanceof UtilityBillAttachmentError && (
+    err.code === "storage_unconfigured" || err.code === "storage_failed"
+  );
+}
+
+export interface StoredUtilityBillAttachment {
+  filename: string;
+  size_bytes: number;
+  content_type: string;
+  original_content_type: string | null;
+  detected_content_type: string | null;
+  file_extension: string;
+  storage_status: "stored";
+  storage_provider: "vercel_blob" | "local_public_uploads";
+  storage_key: string;
+  uploaded_at: string;
+  accessible_url: string;
+  download_url: string;
+}
+
+function cleanSegment(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "utility-bill";
+}
+
+function cleanMime(value: string | undefined | null): string | null {
+  const normalized = (value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(normalized)) return null;
+  return normalized;
+}
+
+function originalExtension(fileName: string): string | null {
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  return ext && /^[a-z0-9]{1,10}$/.test(ext) ? ext : null;
+}
+
+function extensionFor(contentType: string, fileName: string): string {
+  const fromMime = MIME_EXTENSION[contentType];
+  if (fromMime) return fromMime;
+  return originalExtension(fileName) || "bin";
+}
+
+function detectContentType(bytes: Uint8Array): string | null {
+  if (bytes.length >= 4 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+    return "application/pdf";
+  }
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) {
+    return "image/png";
+  }
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return "image/webp";
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return "image/gif";
+  }
+  if (bytes.length >= 4 && ((bytes[0] === 0x49 && bytes[1] === 0x49 && bytes[2] === 0x2a && bytes[3] === 0x00) || (bytes[0] === 0x4d && bytes[1] === 0x4d && bytes[2] === 0x00 && bytes[3] === 0x2a))) {
+    return "image/tiff";
+  }
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) {
+    return "image/bmp";
+  }
+  if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) {
+    return "application/zip";
+  }
+  return null;
+}
+
+function effectiveContentType(file: File, bytes: Uint8Array): { contentType: string; originalContentType: string | null; detectedContentType: string | null } {
+  const originalContentType = cleanMime(file.type);
+  const detectedContentType = detectContentType(bytes);
+
+  if (detectedContentType) {
+    return { contentType: detectedContentType, originalContentType, detectedContentType };
+  }
+
+  return {
+    contentType: originalContentType || GENERIC_BINARY_MIME,
+    originalContentType,
+    detectedContentType,
+  };
+}
+
+export function metadataOnlyUtilityBill(file: File | null): Record<string, unknown> | null {
+  if (!file) return null;
+  return {
+    filename: file.name,
+    size_bytes: file.size,
+    content_type: cleanMime(file.type) || GENERIC_BINARY_MIME,
+    original_content_type: cleanMime(file.type),
+    storage_status: "metadata_only_not_uploaded",
+    accessible_url: null,
+    download_url: null,
+  };
+}
+
+export async function storeUtilityBillAttachment(file: File, input: { eventId: string; funnelSlug?: string | null }): Promise<StoredUtilityBillAttachment> {
+  const originalContentType = cleanMime(file.type);
+  console.info("[UTILITY BILL UPLOAD]", {
+    event_id: input.eventId,
+    filename: file.name,
+    size_bytes: file.size,
+    content_type: originalContentType,
+  });
+
+  if (file.size <= 0) {
+    throw new UtilityBillAttachmentError("empty_file", "Utility bill file is empty.");
+  }
+  if (file.size > MAX_UTILITY_BILL_BYTES) {
+    throw new UtilityBillAttachmentError(
+      "too_large",
+      "Utility bill file is too large. Maximum size is 10MB.",
+    );
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = Buffer.from(arrayBuffer);
+  const header = new Uint8Array(arrayBuffer, 0, Math.min(32, arrayBuffer.byteLength));
+  const typeInfo = effectiveContentType(file, header);
+  const uploadedAt = new Date().toISOString();
+  const ext = extensionFor(typeInfo.contentType, file.name);
+  const safeName = cleanSegment(file.name.replace(/\.[^.]+$/, ""));
+  const funnel = cleanSegment(input.funnelSlug || "free-solar-estimate");
+  const storageKey = `intake/utility-bills/${funnel}/${input.eventId}/${Date.now()}-${randomUUID()}-${safeName}.${ext}`;
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  const allowLocalFallback = process.env.NODE_ENV !== "production";
+
+  if (blobToken) {
+    let blob: { url: string; downloadUrl?: string | null };
+    try {
+      const { put } = await import("@vercel/blob");
+\n===== lib/intake/utilityBillIntelligence.ts =====
+import { getDbReady } from "@/lib/db-neon";
+import { mapAiResultToBillExtractResult, parseUtilityBill } from "@/lib/billPipeline";
+import { extractBillWithClaude } from "@/lib/billClaudeExtractor";
+import { enrichBillData, type BillEnrichmentInput } from "@/lib/billEnrichment";
+import { confidenceFromBillExtractResult } from "@/lib/billConfidence";
+import { estimateSystemSize } from "@/lib/billParser";
+import { computeBillInsights } from "@/lib/billInsights";
+import { enrichAndPersistOpportunity } from "@/lib/network/opportunityEnrichment";
+import type { BillExtractResult } from "@/lib/billOcr";
+
+type SqlClient = Awaited<ReturnType<typeof getDbReady>>;
+type StoredBillMetadata = Record<string, unknown>;
+
+export const UTILITY_BILL_INTELLIGENCE_VERSION = "utility-bill-intelligence.v1";
+
+export interface UtilityBillIntelligenceInput {
+  eventId: string;
+  billMetadata?: StoredBillMetadata | null;
+  trigger?: "homeowner_intake" | "operator_review" | "system";
+}
+
+interface IntakeRow {
+  id: string;
+  event_id: string;
+  opportunity_id: string | null;
+  payload: Record<string, unknown> | null;
+  pipeline_result: Record<string, unknown> | null;
+  source_system: string | null;
+  source_channel: string | null;
+  funnel_id: string | null;
+  campaign_id: string | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function str(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function num(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function bool(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return ["true", "yes", "1", "y"].includes(value.toLowerCase());
+  return false;
+}
+
+function average(values: number[]): number | null {
+  const clean = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (!clean.length) return null;
+  return Math.round(clean.reduce((sum, value) => sum + value, 0) / clean.length);
+}
+
+function round2(value: number | null): number | null {
+  return value == null || !Number.isFinite(value) ? null : Math.round(value * 100) / 100;
+}
+
+function safeRawTextSample(text: string | undefined): string | null {
+  if (!text || !text.trim()) return null;
+  return text.replace(/\s+/g, " ").trim().slice(0, 1200);
+}
+
+function isImageMimeType(mimeType: string | null | undefined): boolean {
+  return typeof mimeType === "string" && mimeType.toLowerCase().startsWith("image/");
+}
+
+function safeObjectKeys(value: unknown): string[] {
+  return isRecord(value) ? Object.keys(value).sort() : [];
+}
+
+function extractedFieldCount(parsed: BillExtractResult | null | undefined): number {
+  return parsed?.extractedFields?.length ?? 0;
+}
+
+function monthsFound(parsed: BillExtractResult | null | undefined): number {
+  return parsed?.monthlyUsageHistory?.filter((value) => Number.isFinite(value) && value > 0).length ?? 0;
+}
+
+function logAdminBillAudit(label: string, payload: Record<string, unknown>): void {
+  console.info(label, payload);
+}
+
+function hasUsefulBillData(parsed: BillExtractResult): boolean {
+  return (
+    (parsed.extractedFields?.length ?? 0) >= 2 ||
+    ((parsed.monthlyKwh ?? 0) > 0) ||
+    (parsed.monthlyUsageHistory?.length ?? 0) >= 3
+  );
+}
+
+function buildExtractionEvidence(input: {
+  parsed: BillExtractResult;
+  source: "claude-image" | "pipeline";
+  extractionMethod: string | null;
+  claudeStatus?: string | null;
+  claudeValidationFlags?: unknown;
+}) {
+  const parsed = input.parsed;
+  return {
+    monthlySource: input.source,
+    monthlyConfidence:
+      input.source === "claude-image"
+        ? input.claudeStatus === "complete"
+          ? 95
+          : 65
+        : parsed.confidence === "high"
+          ? 90
+          : parsed.confidence === "medium"
+            ? 60
+            : 30,
+    monthsFound: parsed.monthlyUsageHistory?.length ?? 0,
+    monthlyEvidence:
+      input.source === "claude-image"
+        ? `Claude image parser: ${(parsed.extractedFields ?? []).join(", ")}`
+        : `AI pipeline: ${(parsed.extractedFields ?? []).join(", ")}`,
+    annualSource: parsed.annualKwh || parsed.estimatedAnnualKwh ? (input.source === "claude-image" ? "claude" : "ai") : "derived",
+    annualSourceText: null,
+    utilitySource: parsed.utilityProvider ? (input.source === "claude-image" ? "claude" : "ai") : "none",
+    rateSource: parsed.electricityRate ? (input.source === "claude-image" ? "claude" : "ai") : "none",
+    debugLog: [
+      input.source === "claude-image"
+        ? `[claude-image] status=${input.claudeStatus ?? "unknown"} validationFlags=${JSON.stringify(input.claudeValidationFlags ?? {})}`
+        : `[pipeline] method=${input.extractionMethod ?? "pipeline"} fields=${(parsed.extractedFields ?? []).join(",")}`,
+    ],
+  };
+}
+
+function buildDashboardParserResult(input: {
+  parsed: BillExtractResult;
+  extractionMethod: string | null;
+  extractionEvidence: Record<string, unknown>;
+  durationMs: number;
+  parserPath: "claude-image" | "pipeline";
+  claude?: {
+    status: string | null;
+    model: string | null;
+    inputType: string | null;
+    validationFlags: unknown;
+  } | null;
+}) {
+  const { rawText: _rawText, ...safeBillData } = input.parsed;
+  return {
+    success: true,
+    billData: {
+      ...safeBillData,
+      rawTextSample: safeRawTextSample(input.parsed.rawText),
+    },
+    extractionEvidence: input.extractionEvidence,
+    extractionMethod: input.extractionMethod,
+    parserPath: input.parserPath,
+    elapsedMs: input.durationMs,
+    claude: input.claude ?? null,
+    locationData: null,
+    utilityData: null,
+    matchedUtility: null,
+    systemSizing: null,
+    rateValidation: null,
+    validation: { valid: true, warnings: [], errors: [] },
+  };
+}
+
+type IntakeBillParseResult = {
+  success: boolean;
+  data?: BillExtractResult;
+  rawText?: string;
+  extractionMethod?: string;
+  error?: string;
+  parserPath?: "claude-image" | "pipeline";
+  extractionEvidence?: Record<string, unknown>;
+  claude?: {
+    status: string | null;
+\n===== lib/network/marketplaceInventory.ts =====
+import { getDbReady } from "@/lib/db-neon";
+import { logNetworkEvent } from "@/lib/network/attributionTracker";
+import {
+  evaluateMarketplaceReleaseGate,
+  type MarketplaceGateRow,
+} from "@/lib/network/marketplaceReleaseGate";
+
+type SqlClient = Awaited<ReturnType<typeof getDbReady>>;
+
+export type MarketplaceInventoryAction =
+  | "release"
+  | "pause"
+  | "unrelease"
+  | "archive";
+
+export interface MarketplaceInventoryTransitionInput {
+  sql: SqlClient;
+  opportunityId: string;
+  adminUserId: string;
+  reason?: string | null;
+}
+
+export interface MarketplaceInventoryReleaseFromIntakeInput {
+  sql: SqlClient;
+  intakeEventId: string;
+  adminUserId: string;
+  askingPrice?: number | null;
+  listingNotes?: string | null;
+  expiresDays?: number | null;
+  claimMode?: "exclusive" | "shared";
+  maxClaims?: number | null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function str(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function num(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function bool(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return ["true", "yes", "1", "y"].includes(value.toLowerCase());
+  return false;
+}
+
+function sourceTypeFromIntake(row: Record<string, unknown>): string {
+  const sourceSystem = str(row.source_system)?.toLowerCase() ?? "";
+  const sourceChannel = str(row.source_channel)?.toLowerCase() ?? "";
+  if (sourceSystem.includes("google") || sourceChannel.includes("google")) return "google_ads";
+  if (sourceSystem.includes("facebook") || sourceSystem.includes("meta") || sourceChannel.includes("facebook") || sourceChannel.includes("meta")) return "facebook_ads";
+  if (sourceSystem.includes("tiktok") || sourceChannel.includes("tiktok")) return "tiktok";
+  if (sourceSystem.includes("seo") || sourceChannel.includes("seo")) return "seo";
+  if (sourceSystem.includes("referral") || sourceChannel.includes("referral")) return "referral";
+  if (sourceSystem.includes("partner") || sourceChannel.includes("partner")) return "partner";
+  return "homeowner_direct";
+}
+
+function nameFromPayload(payload: Record<string, unknown>): string | null {
+  const first = str(payload.first_name);
+  const last = str(payload.last_name);
+  const full = str(payload.homeowner_name) ?? str(payload.name);
+  return full ?? ([first, last].filter(Boolean).join(" ") || null);
+}
+
+function timelineFromPayload(payload: Record<string, unknown>): string {
+  const value = str(payload.timeline) ?? str(payload.homeowner_timeline);
+  if (!value) return "unknown";
+  if (["asap", "3_months", "6_months", "1_year", "just_researching", "unknown"].includes(value)) return value;
+  if (["0_1_month", "1_3_months", "now"].includes(value)) return "asap";
+  if (["3_6_months"].includes(value)) return "6_months";
+  if (["6_12_months", "12_months"].includes(value)) return "1_year";
+  return "unknown";
+}
+
+function ownershipFromPayload(payload: Record<string, unknown>): string {
+  const value = str(payload.homeowner_status) ?? str(payload.home_ownership) ?? str(payload.homeowner_ownership);
+  if (value === "own" || value === "rent") return value;
+  return "unknown";
+}
+
+function qualificationFromPayload(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  return isRecord(value.intelligence) ? value.intelligence : value;
+}
+
+function hasQualificationSignal(value: Record<string, unknown>): boolean {
+  return Object.keys(value).length > 0;
+}
+
+function marketplaceProjectionFromBillIntelligence(value: unknown): Record<string, unknown> {
+  if (!isRecord(value)) return {};
+  return isRecord(value.marketplace_projection) ? value.marketplace_projection : {};
+}
+
+function billMarketplaceProjectionFromPayload(
+  payload: Record<string, unknown>,
+  metadata: Record<string, unknown> = {},
+): Record<string, unknown> {
+  if (isRecord(payload.bill_marketplace_projection)) return payload.bill_marketplace_projection;
+  if (isRecord(metadata.bill_marketplace_projection)) return metadata.bill_marketplace_projection;
+
+  const payloadBillProjection = marketplaceProjectionFromBillIntelligence(payload.bill_intelligence);
+  if (Object.keys(payloadBillProjection).length > 0) return payloadBillProjection;
+
+  return marketplaceProjectionFromBillIntelligence(metadata.bill_intelligence);
+}
+
+function mergedIntakeMetadata(
+  row: Record<string, unknown>,
+  latestQualification: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const payload = isRecord(row.payload) ? row.payload : {};
+  const pipeline = isRecord(row.pipeline_result) ? row.pipeline_result : {};
+  const validation = isRecord(row.validation_result) ? row.validation_result : {};
+  const metadata = isRecord(payload.intake_metadata) ? payload.intake_metadata : {};
+  const pipelineQualification = isRecord(pipeline.qualification)
+    ? pipeline.qualification
+    : {};
+  const payloadQualification = isRecord(payload.qualification)
+    ? payload.qualification
+    : {};
+  const qualification = hasQualificationSignal(pipelineQualification)
+    ? pipelineQualification
+    : hasQualificationSignal(payloadQualification)
+      ? payloadQualification
+      : latestQualification;
+  const operational = isRecord(pipeline.operational) ? pipeline.operational : {};
+  const billIntelligence = isRecord(payload.bill_intelligence)
+    ? payload.bill_intelligence
+    : isRecord(metadata.bill_intelligence)
+      ? metadata.bill_intelligence
+      : null;
+  const billMarketplaceProjection = billMarketplaceProjectionFromPayload(payload, metadata);
+
+  return {
+    ...metadata,
+    ...(billIntelligence ? { bill_intelligence: billIntelligence } : {}),
+    ...(billMarketplaceProjection ? { bill_marketplace_projection: billMarketplaceProjection } : {}),
+    source_event_id: row.event_id,
+    intake_event_id: row.id,
+    event_type: row.event_type,
+    action: row.action,
+    source_system: row.source_system,
+    source_channel: row.source_channel,
+    funnel_id: row.funnel_id,
+    campaign_id: row.campaign_id,
+    qualification,
+    operational,
+    validation,
+  };
+}
+
+export async function releaseMarketplaceInventoryFromIntake({
+  sql,
+  intakeEventId,
+  adminUserId,
+  askingPrice = null,
+  listingNotes = null,
+  expiresDays = 30,
+  claimMode = "exclusive",
+  maxClaims = null,
+}: MarketplaceInventoryReleaseFromIntakeInput) {
+  const intakeRows = await sql`
+    SELECT *
+    FROM intake_events
+    WHERE id::text = ${intakeEventId}
+       OR event_id = ${intakeEventId}
+    LIMIT 1
+  `;
+\n===== lib/network/marketplaceReleaseGate.ts =====
+import {
+  deriveReleaseReadiness,
+  safeOperationalLog,
+  stateFromPipelineResult,
+  type ReleaseReadiness,
+} from "@/lib/intake/operationalLifecycle";
+
+export interface MarketplaceGateRow {
+  id?: unknown;
+  status?: unknown;
+  screening_status?: unknown;
+  auto_decision?: unknown;
+  override_decision?: unknown;
+  intake_metadata?: unknown;
+  raw_payload?: unknown;
+  qualification_intelligence?: unknown;
+  marketplace_status?: unknown;
+}
+
+type ParsedBillSource = "payload.bill_intelligence" | "intake_metadata.bill_intelligence" | "none";
+
+export interface MarketplaceReleaseGateEvidence {
+  homeowner_intake: {
+    present: boolean;
+    monthly_bill_amount: number | null;
+    utility_provider: string | null;
+    timeline: string | null;
+    financing_interest: boolean;
+    source: "raw_payload" | "intake_metadata" | "none";
+  };
+  bill_evidence: {
+    stored_attachment: boolean;
+    storage_status: string | null;
+    filename: string | null;
+    storage_provider: string | null;
+  };
+  parsed_bill: {
+    status: string | null;
+    has_real_parser_output: boolean;
+    utility_provider: string | null;
+    monthly_usage_avg_kwh: number | null;
+    annual_usage_kwh: number | null;
+    utility_rate_per_kwh: number | null;
+    estimated_system_size_kw: number | null;
+    total_amount: number | null;
+    source: "payload.bill_intelligence" | "intake_metadata.bill_intelligence" | "none";
+  };
+  qualification: {
+    present: boolean;
+    status: string | null;
+    lead_grade: string | null;
+    finance_readiness: boolean;
+    purchase_intent: string | null;
+  };
+  operator_review: {
+    contacted: boolean;
+    qualified: boolean;
+    financing_ready: boolean;
+    approved_for_marketplace: boolean;
+  };
+  screening: {
+    approved: boolean;
+    screening_status: string | null;
+    auto_decision: string | null;
+    override_decision: string | null;
+  };
+  source_separation: {
+    homeowner_values_preserved: true;
+    parsed_bill_values_do_not_overwrite_homeowner_intake: true;
+  };
+}
+
+export interface MarketplaceReleaseGateResult {
+  approvedScreening: boolean;
+  releaseReadiness: ReleaseReadiness;
+  ok: boolean;
+  missing: string[];
+  blockers: string[];
+  warnings: string[];
+  evidence: MarketplaceReleaseGateEvidence;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function boolValue(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    return ["true", "yes", "1", "y", "on"].includes(value.toLowerCase());
+  }
+  return false;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const string = stringValue(value);
+    if (string) return string;
+  }
+  return null;
+}
+
+function firstNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const number = numberValue(value);
+    if (number !== null) return number;
+  }
+  return null;
+}
+
+function recordAt(source: Record<string, unknown>, key: string): Record<string, unknown> {
+  return isRecord(source[key]) ? source[key] : {};
+}
+
+function parserBillData(billIntelligence: Record<string, unknown>): Record<string, unknown> {
+  const parserResult = recordAt(billIntelligence, "parser_result");
+  return recordAt(parserResult, "billData");
+}
+
+function hasRealParserOutput(billIntelligence: Record<string, unknown>): boolean {
+  const parserResult = recordAt(billIntelligence, "parser_result");
+  const extraction = recordAt(billIntelligence, "extraction");
+  const billData = parserBillData(billIntelligence);
+  const bill = recordAt(billIntelligence, "bill");
+  const projection = recordAt(billIntelligence, "marketplace_projection");
+  const monthlyHistory = Array.isArray(billData.monthlyUsageHistory)
+    ? billData.monthlyUsageHistory
+    : [];
+  const extractedFields = Array.isArray(billData.extractedFields)
+    ? billData.extractedFields
+    : Array.isArray(extraction.extracted_fields)
+      ? extraction.extracted_fields
+      : [];
+  return !!(
+    Object.keys(parserResult).length > 0 ||
+    Object.keys(extraction).length > 0 ||
+    Object.keys(billData).length > 0 ||
+    Object.keys(bill).length > 0 ||
+    Object.keys(projection).length > 0 ||
+    extractedFields.length > 0 ||
+    monthlyHistory.some((value) => numberValue(value) !== null)
+  );
+}
+
+function monthlyAverageFromHistory(value: unknown): number | null {
+  if (!Array.isArray(value)) return null;
+  const months = value
+    .map((month) => numberValue(month))
+    .filter((month): month is number => month !== null && month > 0);
+  if (!months.length) return null;
+  return Math.round((months.reduce((sum, month) => sum + month, 0) / months.length) * 10) / 10;
+}
+
+export function releaseGateMetadata(row: MarketplaceGateRow) {
+  const intakeMetadata = isRecord(row.intake_metadata)
+    ? row.intake_metadata
+    : {};
+  const rawPayload = isRecord(row.raw_payload) ? row.raw_payload : {};
+  const operationalSource = isRecord(intakeMetadata.operational)
+    ? intakeMetadata.operational
+    : isRecord(rawPayload.operational)
+      ? rawPayload.operational
+      : {};
+  const qualification = isRecord(row.qualification_intelligence)
+    ? row.qualification_intelligence
+    : isRecord(intakeMetadata.qualification)
+      ? intakeMetadata.qualification
+\n===== lib/network/marketplaceIntelligence.ts =====
+import {
+  deriveMarketplaceBadges,
+  type MarketplaceBadge,
+} from "@/lib/network/marketplaceBadges";
+import {
+  deriveMarketplaceConfidence,
+  type MarketplaceConfidenceResult,
+} from "@/lib/network/marketplaceConfidence";
+import {
+  buildMarketplaceNarrative,
+  type MarketplaceNarrativeResult,
+} from "@/lib/network/marketplaceNarratives";
+import {
+  deriveFinancingIntelligence,
+  type FinancingIntelligenceResult,
+} from "@/lib/network/financingIntelligence";
+import {
+  deriveInstallComplexity,
+  type InstallComplexityResult,
+} from "@/lib/network/installComplexity";
+import {
+  deriveOpportunityScore,
+  type OpportunityScoreResult,
+} from "@/lib/network/opportunityScore";
+import {
+  deriveProjectValue,
+  type ProjectValueResult,
+} from "@/lib/network/projectValue";
+import {
+  deriveMarketplaceRevenueProjection,
+  type MarketplaceRevenueProjectionResult,
+} from "@/lib/network/marketplaceRevenueProjection";
+import {
+  derivePurchaseBehavior,
+  type PurchaseBehaviorResult,
+} from "@/lib/network/purchaseBehavior";
+import {
+  deriveMarketplaceExperience,
+  type MarketplaceExperienceProjection,
+} from "@/lib/network/marketplaceExperience";
+import {
+  derivePurchaseProfile,
+  type PurchaseProfileResult,
+} from "@/lib/network/purchaseProfile";
+import {
+  deriveSalesComplexity,
+  type SalesComplexityResult,
+} from "@/lib/network/salesComplexity";
+import {
+  evaluateMarketplaceReleaseGate,
+  type MarketplaceReleaseGateEvidence,
+  type MarketplaceReleaseGateResult,
+} from "@/lib/network/marketplaceReleaseGate";
+
+export type MarketplaceValueSource =
+  | "homeowner_entered"
+  | "parsed_bill"
+  | "estimated"
+  | "qualification"
+  | "operator_review"
+  | "release_gate"
+  | "marketplace";
+
+export interface MarketplaceSourcedValue<T> {
+  value: T;
+  source: MarketplaceValueSource;
+  label: string;
+}
+
+export interface MarketplaceBillVisualsProjection {
+  status: string | null;
+  confidence_label: string | null;
+  confidence_score: number | null;
+  parser_method: string | null;
+  parser_model: string | null;
+  parser_input: string | null;
+  months_found: number;
+  monthly_usage_history: number[];
+  extracted_fields: string[];
+  bill_type: string | null;
+}
+
+export interface MarketplaceRevenueIntelligence {
+  estimated_project_value: MarketplaceSourcedValue<number> | null;
+  estimated_system_size_kw: MarketplaceSourcedValue<number> | null;
+  monthly_bill_amount: MarketplaceSourcedValue<number> | null;
+  annual_usage_kwh: MarketplaceSourcedValue<number> | null;
+  monthly_usage_avg_kwh: MarketplaceSourcedValue<number> | null;
+  utility_rate_per_kwh: MarketplaceSourcedValue<number> | null;
+  estimated_annual_savings: MarketplaceSourcedValue<number> | null;
+  estimated_offset_pct: MarketplaceSourcedValue<number> | null;
+  estimated_payback_yrs: MarketplaceSourcedValue<number> | null;
+  utility_provider: MarketplaceSourcedValue<string> | null;
+  projection: MarketplaceRevenueProjectionResult;
+}
+
+export interface MarketplaceEvidenceSummary {
+  homeowner_intake: MarketplaceReleaseGateEvidence["homeowner_intake"];
+  bill_evidence: MarketplaceReleaseGateEvidence["bill_evidence"];
+  parsed_bill: MarketplaceReleaseGateEvidence["parsed_bill"];
+  qualification: MarketplaceReleaseGateEvidence["qualification"];
+  operator_review: MarketplaceReleaseGateEvidence["operator_review"];
+  screening: MarketplaceReleaseGateEvidence["screening"];
+  source_separation: MarketplaceReleaseGateEvidence["source_separation"];
+}
+
+export interface MarketplaceReleaseSummary {
+  ok: boolean;
+  blockers: string[];
+  warnings: string[];
+  missing: string[];
+}
+
+export interface MarketplaceIntelligenceProjection {
+  confidence: MarketplaceConfidenceResult;
+  badges: MarketplaceBadge[];
+  narrative: MarketplaceNarrativeResult;
+  revenue: MarketplaceRevenueIntelligence;
+  purchase_profile: PurchaseProfileResult;
+  purchase_behavior: PurchaseBehaviorResult;
+  project_value: ProjectValueResult;
+  financing: FinancingIntelligenceResult;
+  sales_complexity: SalesComplexityResult;
+  install_complexity: InstallComplexityResult;
+  opportunity_score: OpportunityScoreResult;
+  experience: MarketplaceExperienceProjection;
+  bill_visuals: MarketplaceBillVisualsProjection;
+  evidence: MarketplaceEvidenceSummary;
+  release: MarketplaceReleaseSummary;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function numberValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function boolValue(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string" && value.trim()) {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "yes", "1", "y", "on"].includes(normalized)) return true;
+    if (["false", "no", "0", "n", "off"].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function recordAt(
+  source: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  return isRecord(source[key]) ? source[key] : {};
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
+  );
+}
+
+function numberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => numberValue(item))
+    .filter((item): item is number => item !== null && item > 0);
+}
+
+\n===== lib/network/marketplaceRevenueProjection.ts =====
+import {
+  boundedRange,
+  displayText,
+  formatRange,
+  normalizedText,
+  pushUnique,
+  type IntelligenceEvidenceNote,
+  type IntelligenceLevel,
+  type IntelligenceRange,
+} from "@/lib/network/intelligenceUtils";
+
+export interface StateSolarPricingAssumption {
+  lowPricePerWatt: number;
+  marketPricePerWatt: number;
+  premiumPricePerWatt: number;
+  sourceLabel: string;
+}
+
+export interface MarketplaceRevenueProjectionInput {
+  stateCode?: string | null;
+  estimatedSystemSizeKw?: number | null;
+  batteryInterest?: string | boolean | null;
+  batteryCandidate?: boolean | null;
+  purchaseIntent?: string | null;
+  financingPreference?: string | null;
+  utilityProvider?: string | null;
+  utilityRatePerKwh?: number | null;
+  monthlyBillAmount?: number | null;
+  annualUsageKwh?: number | null;
+  estimatedOffsetPct?: number | null;
+  estimatedAnnualSavings?: number | null;
+  verifiedProjectValue?: number | null;
+  installComplexityLevel?: IntelligenceLevel | null;
+  installProfitabilitySignal?:
+    | "favorable"
+    | "standard"
+    | "margin_watch"
+    | "unknown"
+    | null;
+}
+
+export interface MarketplaceRevenueProjectionResult {
+  pricing_assumption: {
+    state_code: string;
+    low_price_per_watt: number;
+    market_price_per_watt: number;
+    premium_price_per_watt: number;
+    source_label: string;
+  };
+  project_value_range: IntelligenceRange | null;
+  low_install_estimate: number | null;
+  market_average_estimate: number | null;
+  premium_install_estimate: number | null;
+  financed_payment_range: IntelligenceRange | null;
+  ppa_lease_payment_range: IntelligenceRange | null;
+  battery_attachment_value: IntelligenceRange | null;
+  battery_inclusive_value_range: IntelligenceRange | null;
+  install_complexity_modifier: {
+    factor: number;
+    label: string;
+    applied: boolean;
+  };
+  project_value_display_label: string;
+  battery_inclusive_display_label: string;
+  financed_payment_label: string;
+  ppa_lease_payment_label: string;
+  payment_replacement_label: string;
+  utility_arbitrage_label: string;
+  estimated_monthly_utility_reduction: number | null;
+  gross_opportunity_tier:
+    | "premium"
+    | "high"
+    | "standard"
+    | "developing"
+    | "unknown";
+  gross_opportunity_label: string;
+  opportunity_score_contribution: number;
+  payment_profile_label: string;
+  basis: string;
+  evidence: IntelligenceEvidenceNote[];
+  missing: string[];
+  disclaimers: string[];
+}
+
+const DEFAULT_PRICING: StateSolarPricingAssumption = {
+  lowPricePerWatt: 2.75,
+  marketPricePerWatt: 3.05,
+  premiumPricePerWatt: 3.35,
+  sourceLabel: "SolarPro national marketplace assumption",
+};
+
+export const STATE_SOLAR_PRICING_ASSUMPTIONS: Record<
+  string,
+  StateSolarPricingAssumption
+> = {
+  AZ: {
+    lowPricePerWatt: 2.55,
+    marketPricePerWatt: 2.9,
+    premiumPricePerWatt: 3.25,
+    sourceLabel: "SolarPro Arizona marketplace assumption",
+  },
+  CA: {
+    lowPricePerWatt: 3.05,
+    marketPricePerWatt: 3.45,
+    premiumPricePerWatt: 3.9,
+    sourceLabel: "SolarPro California marketplace assumption",
+  },
+  CO: {
+    lowPricePerWatt: 2.85,
+    marketPricePerWatt: 3.2,
+    premiumPricePerWatt: 3.55,
+    sourceLabel: "SolarPro Colorado marketplace assumption",
+  },
+  FL: {
+    lowPricePerWatt: 2.55,
+    marketPricePerWatt: 2.9,
+    premiumPricePerWatt: 3.25,
+    sourceLabel: "SolarPro Florida marketplace assumption",
+  },
+  IL: {
+    lowPricePerWatt: 2.8,
+    marketPricePerWatt: 3.0,
+    premiumPricePerWatt: 3.2,
+    sourceLabel: "SolarPro Illinois marketplace assumption",
+  },
+  MA: {
+    lowPricePerWatt: 3.0,
+    marketPricePerWatt: 3.35,
+    premiumPricePerWatt: 3.75,
+    sourceLabel: "SolarPro Massachusetts marketplace assumption",
+  },
+  NJ: {
+    lowPricePerWatt: 2.85,
+    marketPricePerWatt: 3.15,
+    premiumPricePerWatt: 3.5,
+    sourceLabel: "SolarPro New Jersey marketplace assumption",
+  },
+  NY: {
+    lowPricePerWatt: 3.0,
+    marketPricePerWatt: 3.35,
+    premiumPricePerWatt: 3.75,
+    sourceLabel: "SolarPro New York marketplace assumption",
+  },
+  NV: {
+    lowPricePerWatt: 2.6,
+    marketPricePerWatt: 2.95,
+    premiumPricePerWatt: 3.3,
+    sourceLabel: "SolarPro Nevada marketplace assumption",
+  },
+  PA: {
+    lowPricePerWatt: 2.75,
+    marketPricePerWatt: 3.05,
+    premiumPricePerWatt: 3.4,
+    sourceLabel: "SolarPro Pennsylvania marketplace assumption",
+  },
+  TX: {
+    lowPricePerWatt: 2.55,
+    marketPricePerWatt: 2.85,
+    premiumPricePerWatt: 3.2,
+    sourceLabel: "SolarPro Texas marketplace assumption",
+  },
+};
+
+const FINANCE_TERM_MONTHS = 240;
+const FINANCE_APR_LOW = 0.0599;
+const FINANCE_APR_HIGH = 0.0899;
+const PPA_DISCOUNT_LOW = 0.72;
+const PPA_DISCOUNT_HIGH = 0.92;
+const DEFAULT_TARGET_OFFSET = 100;
+const BATTERY_ATTACHMENT_LOW = 12000;
+const BATTERY_ATTACHMENT_HIGH = 18000;
+
+function normalizeState(value: string | null | undefined): string {
+  const normalized = value?.trim().toUpperCase();
+  return normalized && /^[A-Z]{2}$/.test(normalized) ? normalized : "US";
+}
+
+function pricingForState(stateCode: string): StateSolarPricingAssumption {
+  return STATE_SOLAR_PRICING_ASSUMPTIONS[stateCode] ?? DEFAULT_PRICING;
+}
+\n===== lib/network/marketplaceExperience.ts =====
+import type { MarketplaceBadge } from "@/lib/network/marketplaceBadges";
+import type {
+  MarketplaceBillVisualsProjection,
+  MarketplaceEvidenceSummary,
+} from "@/lib/network/marketplaceIntelligence";
+import type { MarketplaceConfidenceResult } from "@/lib/network/marketplaceConfidence";
+import type { FinancingIntelligenceResult } from "@/lib/network/financingIntelligence";
+import type { InstallComplexityResult } from "@/lib/network/installComplexity";
+import type { OpportunityScoreResult } from "@/lib/network/opportunityScore";
+import type { MarketplaceRevenueProjectionResult } from "@/lib/network/marketplaceRevenueProjection";
+import type { PurchaseBehaviorResult } from "@/lib/network/purchaseBehavior";
+import type { PurchaseProfileResult } from "@/lib/network/purchaseProfile";
+import type { IntelligenceLevel } from "@/lib/network/intelligenceUtils";
+
+export type MarketplaceExperienceTone =
+  | "emerald"
+  | "amber"
+  | "blue"
+  | "violet"
+  | "orange"
+  | "rose"
+  | "slate";
+
+export interface MarketplaceHeroMetric {
+  key:
+    | "project_value"
+    | "payment_estimate"
+    | "system_size"
+    | "opportunity_score";
+  label: string;
+  value: string;
+  subtext: string;
+  tone: MarketplaceExperienceTone;
+  priority: number;
+}
+
+export interface MarketplaceTrustSignal {
+  label: string;
+  verified: boolean;
+  tone: MarketplaceExperienceTone;
+  reason: string;
+  source:
+    | "bill"
+    | "release_gate"
+    | "qualification"
+    | "operator_review"
+    | "marketplace";
+}
+
+export interface MarketplacePaymentPath {
+  key: "financed" | "lease_ppa" | "utility_replacement";
+  label: string;
+  value: string;
+  sales_copy: string;
+  tone: MarketplaceExperienceTone;
+}
+
+export interface MarketplaceExperienceProjection {
+  hero_metrics: MarketplaceHeroMetric[];
+  trust_signals: MarketplaceTrustSignal[];
+  why_this_scores_high: string[];
+  economic_story: string[];
+  payment_paths: MarketplacePaymentPath[];
+  acquisition_tags: string[];
+  deal_attractiveness: string[];
+  liquidity_label: string;
+  confidence_story: string;
+  source_note: string;
+}
+
+export interface MarketplaceExperienceInput {
+  revenueProjection: MarketplaceRevenueProjectionResult;
+  confidence: MarketplaceConfidenceResult;
+  badges: MarketplaceBadge[];
+  opportunityScore: OpportunityScoreResult;
+  purchaseProfile: PurchaseProfileResult;
+  purchaseBehavior: PurchaseBehaviorResult;
+  financing: FinancingIntelligenceResult;
+  installComplexity: InstallComplexityResult;
+  billVisuals: MarketplaceBillVisualsProjection;
+  evidence: MarketplaceEvidenceSummary;
+  estimatedSystemSizeKw?: number | null;
+  monthlyBillAmount?: number | null;
+  annualUsageKwh?: number | null;
+  utilityRatePerKwh?: number | null;
+  estimatedAnnualSavings?: number | null;
+  estimatedOffsetPct?: number | null;
+  utilityProvider?: string | null;
+  timeline?: string | null;
+}
+
+function compactMoney(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return null;
+  const rounded = Math.round(value / 1000);
+  return `$${rounded}k`;
+}
+
+function money(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return null;
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function moneyRange(
+  range: MarketplaceRevenueProjectionResult["project_value_range"],
+): string | null {
+  if (!range) return null;
+  const min = compactMoney(range.min);
+  const max = compactMoney(range.max);
+  if (!min || !max) return null;
+  return `${min}–${max}`;
+}
+
+function monthlyRange(
+  range: MarketplaceRevenueProjectionResult["financed_payment_range"],
+): string | null {
+  if (!range) return null;
+  const min = money(range.min);
+  const max = money(range.max);
+  if (!min || !max) return null;
+  return `${min}–${max}/mo`;
+}
+
+function kw(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return null;
+  return `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10} kW`;
+}
+
+function pct(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return null;
+  const normalized = value <= 1 ? value * 100 : value;
+  return `${Math.round(normalized)}%`;
+}
+
+function rate(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
+    return null;
+  return `${(value * 100).toFixed(1)}¢/kWh`;
+}
+
+function pushUnique(target: string[], value: string | null | undefined) {
+  if (value && !target.includes(value)) target.push(value);
+}
+
+function hasBadge(badges: MarketplaceBadge[], label: string): boolean {
+  return badges.some(
+    (badge) => badge.label.toLowerCase() === label.toLowerCase(),
+  );
+}
+
+function normalizeTag(tag: string): string {
+  return tag.replace(/-/g, " ").replace(/PPA/g, "PPA");
+}
+
+function timelineFast(value: string | null | undefined): boolean {
+  const normalized = value?.toLowerCase() ?? "";
+  return ["asap", "now", "immediate", "0_1", "30_days", "1_3", "soon"].some(
+    (token) => normalized.includes(token),
+  );
+}
+
+function trustSignal(
+  label: string,
+  verified: boolean,
+  source: MarketplaceTrustSignal["source"],
+  reason: string,
+): MarketplaceTrustSignal {
+  return {
+    label,
+    verified,
+    source,
+    reason,
+    tone: verified ? "emerald" : "slate",
+  };
+}
+
+function confidenceStory(
+\n===== lib/network/contractorMatcher.ts =====
+/**
+ * contractorMatcher.ts
+ *
+ * SolarPro Network Intelligence OS — Contractor Matching Engine
+ *
+ * Given a network_opportunity, finds and ranks all eligible contractors
+ * using a multi-factor fit score. Returns an ordered list with explanations.
+ *
+ * Matching Factors (weighted):
+ *   Geographic Coverage    30%  — does contractor serve this state?
+ *   System Size Fit        20%  — does their typical job size match?
+ *   Service Offerings      15%  — residential solar / battery / etc.
+ *   Performance Metrics    20%  — close rate, response time, rating
+ *   Capacity / Bandwidth   15%  — how busy are they right now?
+ */
+
+import { getDbReady } from '@/lib/db-neon'
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface ContractorProfile {
+  user_id: string
+  company_name?: string | null
+  service_states?: string[] | null
+  min_system_size_kw?: number | null
+  max_system_size_kw?: number | null
+  services_offered?: string[] | null
+  avg_close_rate?: number | null   // 0.0 – 1.0
+  avg_response_hours?: number | null
+  avg_rating?: number | null       // 1.0 – 5.0
+  total_claims?: number | null
+  active_claims?: number | null
+  max_active_claims?: number | null
+  is_active?: boolean | null
+  is_verified?: boolean | null
+  tier?: string | null             // standard | preferred | elite
+}
+
+export interface OpportunityForMatching {
+  id: string
+  state?: string | null
+  estimated_system_size_kw?: number | null
+  battery_interest?: boolean | null
+  structure_type?: string | null
+  opportunity_score?: number | null
+  qualification_status?: string | null
+  lead_grade?: string | null
+  contractor_summary?: string | null
+}
+
+export interface ContractorMatchScore {
+  contractor_id: string
+  company_name: string
+  overall_score: number         // 0-100
+  geo_score: number
+  size_fit_score: number
+  service_score: number
+  performance_score: number
+  capacity_score: number
+  match_reasons: string[]       // why this is a good match
+  match_concerns: string[]      // potential issues
+  tier_bonus: number            // bonus for preferred/elite contractors
+  recommended: boolean          // top-tier recommendation
+}
+
+export interface MatchingResult {
+  opportunity_id: string
+  total_eligible: number
+  matches: ContractorMatchScore[]
+  top_match: ContractorMatchScore | null
+  matched_at: string
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Scoring Functions
+// ──────────────────────────────────────────────────────────────────────────────
+
+function scoreGeo(
+  contractor: ContractorProfile,
+  opportunity: OpportunityForMatching
+): { score: number; reasons: string[] } {
+  const reasons: string[] = []
+
+  if (!opportunity.state) return { score: 75, reasons: ['no_state_on_opportunity'] }
+
+  const served = contractor.service_states ?? []
+  const stateUpper = opportunity.state.toUpperCase()
+
+  if (served.includes(stateUpper)) {
+    reasons.push(`serves_${stateUpper}`)
+    return { score: 100, reasons }
+  }
+
+  return { score: 0, reasons: ['does_not_serve_state'] }
+}
+
+function scoreSizeFit(
+  contractor: ContractorProfile,
+  opportunity: OpportunityForMatching
+): { score: number; reasons: string[] } {
+  const reasons: string[] = []
+  const estKw = opportunity.estimated_system_size_kw
+
+  if (!estKw) return { score: 80, reasons: ['no_system_size_estimate'] }
+
+  const min = contractor.min_system_size_kw ?? 2
+  const max = contractor.max_system_size_kw ?? 25
+
+  if (estKw >= min && estKw <= max) {
+    reasons.push('system_size_in_range')
+    // Bonus for being well within range (not at edges)
+    const rangePct = (estKw - min) / (max - min)
+    const score = rangePct > 0.2 && rangePct < 0.8 ? 100 : 85
+    return { score, reasons }
+  }
+
+  if (estKw < min) {
+    const gap = min - estKw
+    reasons.push('system_below_minimum')
+    return { score: Math.max(20, 70 - gap * 5), reasons }
+  }
+
+  // estKw > max
+  const gap = estKw - max
+  reasons.push('system_above_maximum')
+  return { score: Math.max(20, 70 - gap * 3), reasons }
+}
+
+function scoreServices(
+  contractor: ContractorProfile,
+  opportunity: OpportunityForMatching
+): { score: number; reasons: string[] } {
+  const reasons: string[] = []
+  const services = contractor.services_offered ?? []
+  let score = 60
+
+  // Must have residential solar
+  if (services.includes('residential_solar') || services.includes('solar')) {
+    score += 25
+    reasons.push('offers_residential_solar')
+  } else {
+    return { score: 20, reasons: ['no_residential_solar'] }
+  }
+
+  // Battery match
+  if (opportunity.battery_interest && services.includes('battery_storage')) {
+    score += 15
+    reasons.push('offers_battery_storage')
+  }
+
+  // Structure type
+  if (opportunity.structure_type === 'commercial' && services.includes('commercial_solar')) {
+    score += 10
+    reasons.push('offers_commercial_solar')
+  }
+
+  return { score: Math.min(100, score), reasons }
+}
+
+function scorePerformance(
+  contractor: ContractorProfile
+): { score: number; reasons: string[] } {
+  const reasons: string[] = []
+  const weights: Array<[number, number]> = []
+
+  // Close rate (40% of performance)
+  if (contractor.avg_close_rate != null) {
+    const rate = contractor.avg_close_rate  // 0.0 – 1.0
+    const s = Math.round(rate * 100)
+    weights.push([s, 0.40])
+    if (rate >= 0.5) reasons.push('high_close_rate')
+  }
+
+  // Response time (30% of performance) — faster = better
+  if (contractor.avg_response_hours != null) {
+    const h = contractor.avg_response_hours
+    const s = h <= 1 ? 100 : h <= 4 ? 90 : h <= 12 ? 75 : h <= 24 ? 60 : h <= 48 ? 40 : 20
+    weights.push([s, 0.30])
+\n===== lib/engineering/canonicalEngineeringPayload.ts =====
+MISSING
+\n===== lib/engineering/reportGenerator.ts =====
+// ============================================================
+// Engineering Automation System — Report Generator
+// Derives all engineering outputs from the Design Snapshot
+// ============================================================
+
+import type {
+  DesignSnapshot, EngineeringReport, SystemSummary,
+  ElectricalEngineering, StructuralEngineering,
+  EquipmentSchedule, EquipmentLineItem,
+  PanelLayoutData, PanelLayoutItem, PermitPackage,
+  ProjectPhysicalData, SitePhotosSection,
+} from './types';
+import type { EnrichedSiteSurvey } from '@/lib/siteSurvey/types';
+
+// NEC wire sizing tables (simplified)
+const DC_WIRE_SIZING: { maxAmps: number; gauge: string; conduit: string }[] = [
+  { maxAmps: 20,  gauge: '#12 AWG',  conduit: '3/4" EMT' },
+  { maxAmps: 30,  gauge: '#10 AWG',  conduit: '3/4" EMT' },
+  { maxAmps: 40,  gauge: '#8 AWG',   conduit: '1" EMT'   },
+  { maxAmps: 55,  gauge: '#6 AWG',   conduit: '1" EMT'   },
+  { maxAmps: 70,  gauge: '#4 AWG',   conduit: '1-1/4" EMT' },
+  { maxAmps: 85,  gauge: '#3 AWG',   conduit: '1-1/4" EMT' },
+  { maxAmps: 95,  gauge: '#2 AWG',   conduit: '1-1/2" EMT' },
+  { maxAmps: 130, gauge: '#1 AWG',   conduit: '1-1/2" EMT' },
+  { maxAmps: 150, gauge: '#1/0 AWG', conduit: '2" EMT'   },
+];
+
+const AC_WIRE_SIZING: { maxAmps: number; gauge: string; conduit: string }[] = [
+  { maxAmps: 20,  gauge: '#12 AWG',  conduit: '3/4" EMT' },
+  { maxAmps: 30,  gauge: '#10 AWG',  conduit: '3/4" EMT' },
+  { maxAmps: 40,  gauge: '#8 AWG',   conduit: '1" EMT'   },
+  { maxAmps: 55,  gauge: '#6 AWG',   conduit: '1" EMT'   },
+  { maxAmps: 70,  gauge: '#4 AWG',   conduit: '1-1/4" EMT' },
+  { maxAmps: 95,  gauge: '#2 AWG',   conduit: '1-1/2" EMT' },
+  { maxAmps: 130, gauge: '#1/0 AWG', conduit: '2" EMT'   },
+];
+
+// State NEC version mapping
+const STATE_NEC: Record<string, string> = {
+  CA: 'NEC 2022', TX: 'NEC 2020', FL: 'NEC 2020', NY: 'NEC 2020',
+  IL: 'NEC 2020', PA: 'NEC 2020', OH: 'NEC 2020', GA: 'NEC 2020',
+  NC: 'NEC 2020', MI: 'NEC 2020', NJ: 'NEC 2020', VA: 'NEC 2020',
+  WA: 'NEC 2020', AZ: 'NEC 2020', MA: 'NEC 2020', TN: 'NEC 2020',
+  IN: 'NEC 2020', MO: 'NEC 2020', MD: 'NEC 2020', WI: 'NEC 2020',
+  CO: 'NEC 2020', MN: 'NEC 2020', SC: 'NEC 2020', AL: 'NEC 2020',
+  OR: 'NEC 2020', NV: 'NEC 2020', KY: 'NEC 2020', OK: 'NEC 2020',
+  CT: 'NEC 2020', UT: 'NEC 2020', IA: 'NEC 2020', AR: 'NEC 2020',
+  NM: 'NEC 2020', KS: 'NEC 2020', NE: 'NEC 2020', ID: 'NEC 2020',
+  WV: 'NEC 2020', HI: 'NEC 2020', NH: 'NEC 2020', ME: 'NEC 2020',
+  RI: 'NEC 2020', MT: 'NEC 2020', DE: 'NEC 2020', SD: 'NEC 2020',
+  ND: 'NEC 2020', AK: 'NEC 2020', VT: 'NEC 2020', WY: 'NEC 2020',
+  DC: 'NEC 2020', MS: 'NEC 2020', LA: 'NEC 2020',
+};
+
+// State wind speed (mph, ASCE 7-22 Risk Category II)
+const STATE_WIND: Record<string, number> = {
+  FL: 150, TX: 130, LA: 130, MS: 130, AL: 130, GA: 120, SC: 120,
+  NC: 115, VA: 110, MD: 110, DE: 110, NJ: 110, NY: 110, CT: 110,
+  RI: 110, MA: 110, NH: 110, ME: 110, CA: 110, OR: 110, WA: 110,
+  HI: 130, AK: 110,
+};
+
+// State ground snow load (psf)
+const STATE_SNOW: Record<string, number> = {
+  AK: 100, MT: 60, WY: 50, CO: 50, ID: 40, UT: 40, WA: 35, OR: 30,
+  MN: 35, WI: 30, MI: 30, NY: 30, VT: 50, NH: 50, ME: 50, MA: 25,
+  CT: 25, RI: 25, PA: 25, NJ: 20, OH: 20, IN: 20, IL: 20, IA: 25,
+  MO: 15, KS: 15, NE: 20, SD: 30, ND: 35,
+};
+
+function getWindSpeed(stateCode: string): number {
+  return STATE_WIND[stateCode] || 115;
+}
+
+function getSnowLoad(stateCode: string): number {
+  return STATE_SNOW[stateCode] || 0;
+}
+
+function getNecVersion(stateCode: string): string {
+  return STATE_NEC[stateCode] || 'NEC 2020';
+}
+
+function selectWire(amps: number, table: typeof DC_WIRE_SIZING): { gauge: string; conduit: string } {
+  // NEC 690.8: multiply by 1.25 for continuous load
+  const designAmps = amps * 1.25;
+  for (const entry of table) {
+    if (designAmps <= entry.maxAmps) return { gauge: entry.gauge, conduit: entry.conduit };
+  }
+  return { gauge: '#2/0 AWG', conduit: '2" EMT' };
+}
+
+// ── Main Report Generator ─────────────────────────────────────────────────────
+
+export function generateEngineeringReport(
+  snapshot: DesignSnapshot,
+  reportId: string,
+  physicalData?: ProjectPhysicalData | null,
+  enrichedSurvey?: EnrichedSiteSurvey | null,
+): EngineeringReport {
+  const pd = physicalData ?? null;
+  const systemSummary = generateSystemSummary(snapshot);
+  const electrical = generateElectricalEngineering(snapshot, pd);
+  const structural = generateStructuralEngineering(snapshot, pd);
+  const equipmentSchedule = generateEquipmentSchedule(snapshot, electrical);
+  const panelLayout = generatePanelLayout(snapshot);
+  const permitPackage = generatePermitPackage(snapshot, electrical, structural);
+
+  // Optional: Site Photos section — populated only when enrichedSurvey is provided
+  // and contains photos from the project_files ingest pipeline.
+  // Read-only and informational — no engineering calculations depend on this.
+  const sitePhotos = generateSitePhotosSection(enrichedSurvey ?? null);
+
+  return {
+    id: reportId,
+    projectId: snapshot.projectId,
+    layoutId: snapshot.layoutId,
+    designVersionId: snapshot.designVersionId,
+    status: 'complete',
+    systemSummary,
+    electrical,
+    structural,
+    equipmentSchedule,
+    panelLayout,
+    permitPackage,
+    generatedAt: new Date().toISOString(),
+    generatedBy: 'auto',
+    version: '1.0',
+    // Only include sitePhotos when photos are actually available
+    ...(sitePhotos !== null ? { sitePhotos } : {}),
+  };
+}
+
+// ── System Summary ────────────────────────────────────────────────────────────
+
+function generateSystemSummary(snap: DesignSnapshot): SystemSummary {
+  const panel = snap.panel;
+  const inverter = snap.inverter;
+  const mounting = snap.mounting;
+
+  // Estimate annual production (simplified PVWatts-like)
+  const peakSunHours = getPeakSunHours(snap.lat, snap.stateCode);
+  const systemLoss = 0.86; // 14% system losses
+  const estimatedAnnualKwh = Math.round(snap.systemSizeKw * peakSunHours * 365 * systemLoss);
+  const co2OffsetTons = parseFloat((estimatedAnnualKwh * 0.000386).toFixed(1));
+
+  const mountType = snap.systemType === 'roof' ? 'Roof Mount' :
+                    snap.systemType === 'ground' ? 'Ground Mount' : 'Fence Mount';
+
+  return {
+    panelCount: snap.panelCount,
+    systemSizeKw: snap.systemSizeKw,
+    systemSizeDcKw: snap.systemSizeKw,
+    systemSizeAcKw: inverter ? Math.min(snap.systemSizeKw, inverter.capacity) : snap.systemSizeKw,
+    panelModel: `${panel.manufacturer} ${panel.model}`,
+    panelWattage: panel.wattage,
+    inverterModel: inverter ? `${inverter.manufacturer} ${inverter.model}` : 'TBD',
+    inverterType: inverter?.type || 'string',
+    mountType,
+    systemType: snap.systemType,
+    address: snap.address,
+    ahj: snap.ahj,
+    utilityName: snap.utilityName,
+    estimatedAnnualKwh,
+    co2OffsetTons,
+    roofSegmentCount: snap.roofSegments.length,
+    groundArrayCount: snap.groundArrays.length,
+    fenceArrayCount: snap.fenceArrays.length,
+  };
+}
+
+function getPeakSunHours(lat: number, stateCode: string): number {
+  // Simplified peak sun hours by latitude band
+  if (lat >= 45) return 4.0;
+  if (lat >= 40) return 4.5;
+  if (lat >= 35) return 5.0;
+  if (lat >= 30) return 5.5;
+  return 5.8;
+}
+
+// ── Electrical Engineering ────────────────────────────────────────────────────
+\n===== lib/survey/ingest/ingestPipeline.ts =====
+// ============================================================================
+// v47.440 Stage 9.3 - Survey Ingest: Pipeline Orchestrator
+//
+// runIngestPipeline() is the single entry point for the ingest pipeline.
+// The route handler calls it AFTER:
+//   1. HMAC verification (already done)
+//   2. webhook_deliveries INSERT with status='verified' (already done)
+//
+// Pipeline steps:
+//   A. Validate context (ownerId present, event fields present)
+//   B. Resolve project link (Q8 strategy - projectLinkResolver)
+//   C. Fetch full survey payload (STUB: blocked on Q2)
+//   D. Transform (transformLayer - field scaffold, blocked on Q3)
+//   E. Write to DB (upsert project, insert files)
+//   F. Update webhook_deliveries row (status='ingested' | 'failed')
+//
+// CONTRACT:
+//   - NEVER throws. Returns IngestResult in all cases.
+//   - All DB errors are caught and surfaced in IngestResultFailure.
+//   - The delivery row status is always updated, even on failure (best-effort:
+//     if the update itself fails, the error is logged but not re-raised).
+//
+// v47.435 STUB NOTES:
+//   - Step C (payload fetch) is a no-op stub: rawPayload = null.
+//     Unblock by implementing lib/survey/ingest/payloadFetcher.ts (Q2).
+//   - Step D (transform) runs with rawPayload=null: produces minimal output.
+//     Field mapping fills in when Q3 is answered.
+//   - Step E (project upsert) creates/updates a real project row using
+//     the transform output (minimal: name only + survey_meta).
+// ============================================================================
+
+import type {
+  IngestContext,
+  IngestResult,
+  IngestErrorCode,
+  LinkResolution,
+  TransformOutput,
+  TransformFile,
+  SurveyRawPayload,
+  PhysicalDataOutput,
+} from './types';
+import { resolveProjectLink } from './projectLinkResolver';
+import { transform, buildTransformSummary, type TransformResult } from './transformLayer';
+import { fetchFullPayload } from './payloadFetcher';
+import { getDbReady, createSiteSurvey, bulkAddSiteSurveyFiles, isValidUUID } from '@/lib/db-neon';
+import { writeMicroStage } from '@/lib/microStage';
+
+// ---------------------------------------------------------------------------
+// runIngestPipeline - main entry point.
+// ---------------------------------------------------------------------------
+export async function runIngestPipeline(context: IngestContext): Promise<IngestResult> {
+  const startMs = Date.now();
+  const { deliveryId, ownerId, event, traceId } = context;
+
+  const log = (msg: string) =>
+    console.log(`[ingestPipeline] traceId=${traceId} deliveryId=${deliveryId} ${msg}`);
+  const warn = (msg: string) =>
+    console.warn(`[ingestPipeline] traceId=${traceId} deliveryId=${deliveryId} ${msg}`);
+  const error = (msg: string) =>
+    console.error(`[ingestPipeline] traceId=${traceId} deliveryId=${deliveryId} ${msg}`);
+
+  log(`START survey_id=${event.survey_id} event_id=${event.event_id}`);
+
+  // -- A. Validate context --------------------------------------------------
+  if (!ownerId) {
+    error('MISSING_OWNER_ID: SURVEY_INGEST_DEFAULT_USER_ID is not set');
+    await _markDeliveryFailed(
+      deliveryId,
+      'MISSING_OWNER_ID: SURVEY_INGEST_DEFAULT_USER_ID env var is not configured. ' +
+      'Set this to the UUID of the SolarPro user that should own survey-origin projects.',
+      traceId,
+    );
+    return {
+      status: 'failed',
+      error: 'SURVEY_INGEST_DEFAULT_USER_ID is not configured',
+      code: 'MISSING_OWNER_ID',
+      durationMs: Date.now() - startMs,
+    };
+  }
+
+  // -- B. Resolve project link ----------------------------------------------
+  // resolveProjectLink() is pure (no DB). It returns:
+  //   action='attach'           — direct UUID known (JWT or on-device picker)
+  //   action='resolve_existing' — must look up existing project by survey_id/address
+  //   action='error'            — could not even form a lookup strategy
+  log('STEP_B resolving project link');
+  const linkResolution: LinkResolution = resolveProjectLink(context);
+  log(`STEP_B resolved action="${linkResolution.action}"`);
+
+  if (linkResolution.action === 'error') {
+    error(`LINK_RESOLUTION_FAILED: ${linkResolution.error}`);
+    await _markDeliveryFailed(
+      deliveryId,
+      `LINK_RESOLUTION_FAILED: ${linkResolution.error}`,
+      traceId,
+    );
+    return {
+      status: 'failed',
+      error: linkResolution.error,
+      code: 'LINK_RESOLUTION_FAILED',
+      durationMs: Date.now() - startMs,
+    };
+  }
+
+  // -- C. Fetch full survey payload ------------------------------------------
+  // Priority 1: Use inline_payload if provided by /api/survey/submit.
+  //   This is the full SurveyV2Payload already in memory - no network fetch needed.
+  //   External partner webhooks never set inline_payload.
+  // Priority 2: Fetch from GET ${PARTNER_BASE_URL}/api/surveys/{survey_id}
+  //   Used for survey-app webhook worker path where only a thin event arrives.
+  log('STEP_C fetching full payload');
+  let rawPayload: SurveyRawPayload | null = null;
+
+  if (event.inline_payload && typeof event.inline_payload === 'object') {
+    rawPayload = event.inline_payload as SurveyRawPayload;
+    log('STEP_C using inline_payload from submit route (no network fetch needed)');
+  } else {
+    rawPayload = await fetchFullPayload(event.survey_id, traceId);
+    if (rawPayload === null) {
+      log('STEP_C payload fetch returned null - continuing in degraded mode');
+    } else {
+      log('STEP_C payload fetch OK');
+    }
+  }
+
+  // -- D. Transform ---------------------------------------------------------
+  // v47.441: When inline_payload is present (mobile direct submit via
+  // /api/survey/submit), use the v2.0 transformer so photos, physicalData,
+  // and siteOverview fields are correctly extracted.
+  // For external partner webhooks (schemaVersion always '1.0'), use the
+  // v1.0 transformer as before.
+  log('STEP_D running transform');
+  const transformEvent = rawPayload === event.inline_payload && rawPayload !== null
+    ? { ...event, schemaVersion: '2.0' as const }
+    : event;
+  const transformResult: TransformResult = transform({
+    event: transformEvent,
+    rawPayload,
+    linkResolution,
+    context,
+  });
+
+  if (transformResult.ok === false) {
+    const transformError = transformResult.error;
+    error(`TRANSFORM_FAILED: ${transformError}`);
+    await _markDeliveryFailed(
+      deliveryId,
+      `TRANSFORM_FAILED: ${transformError}`,
+      traceId,
+    );
+    return {
+      status: 'failed',
+      error: transformError,
+      code: 'TRANSFORM_FAILED',
+      durationMs: Date.now() - startMs,
+    };
+  }
+
+  const transformOutput = transformResult.output;
+  log(`STEP_D transform OK name="${transformOutput.projectName}" files=${transformOutput.files.length}`);
+
+  // -- E. Write to DB -------------------------------------------------------
+  log('STEP_E writing to DB');
+  let sql;
+  try {
+    sql = await getDbReady();
+  } catch (dbErr) {
+    const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+    error(`DB_WRITE_FAILED: getDbReady threw: ${msg}`);
+    await _markDeliveryFailed(deliveryId, `DB_WRITE_FAILED: ${msg}`, traceId);
+    return {
+      status: 'failed',
+      error: `Database connection failed: ${msg}`,
+      code: 'DB_WRITE_FAILED',
+      durationMs: Date.now() - startMs,
+    };
+  }
+
+  // -- E-pre-1. Merge ownership claims into surveyMeta (F-06) ----------------
+  // Persists solarpro_user_id, owner_source, and solarpro_project_id into

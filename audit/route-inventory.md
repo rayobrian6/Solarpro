@@ -1,0 +1,308 @@
+# App Route Inventory
+
+Generated from filesystem.
+
+## Pages
+
+- `/account/billing` → `app/account/billing/page.tsx`
+- `/admin/activity-log` → `app/admin/activity-log/page.tsx`
+- `/admin/companies` → `app/admin/companies/page.tsx`
+- `/admin/database` → `app/admin/database/page.tsx`
+- `/admin/distributor-prices` → `app/admin/distributor-prices/page.tsx`
+- `/admin/engineering` → `app/admin/engineering/page.tsx`
+- `/admin/feedback` → `app/admin/feedback/page.tsx`
+- `/admin/files` → `app/admin/files/page.tsx`
+- `/admin/hardware` → `app/admin/hardware/page.tsx`
+- `/admin/health` → `app/admin/health/page.tsx`
+- `/admin/incentives` → `app/admin/incentives/page.tsx`
+- `/admin/leads/[id]` → `app/admin/leads/[id]/page.tsx`
+- `/admin/leads` → `app/admin/leads/page.tsx`
+- `/admin/network/intelligence` → `app/admin/network/intelligence/page.tsx`
+- `/admin/network` → `app/admin/network/page.tsx`
+- `/admin` → `app/admin/page.tsx`
+- `/admin/portal-dashboard` → `app/admin/portal-dashboard/page.tsx`
+- `/admin/pricing` → `app/admin/pricing/page.tsx`
+- `/admin/projects/[id]` → `app/admin/projects/[id]/page.tsx`
+- `/admin/projects/[id]/portal-preview` → `app/admin/projects/[id]/portal-preview/page.tsx`
+- `/admin/projects` → `app/admin/projects/page.tsx`
+- `/admin/roadmap` → `app/admin/roadmap/page.tsx`
+- `/admin/sld-emblems` → `app/admin/sld-emblems/page.tsx`
+- `/admin/system-tools` → `app/admin/system-tools/page.tsx`
+- `/admin/topography` → `app/admin/topography/page.tsx`
+- `/admin/users` → `app/admin/users/page.tsx`
+- `/admin/utilities` → `app/admin/utilities/page.tsx`
+- `/analytics` → `app/analytics/page.tsx`
+- `/auth/forgot-password` → `app/auth/forgot-password/page.tsx`
+- `/auth/login` → `app/auth/login/page.tsx`
+- `/auth/register` → `app/auth/register/page.tsx`
+- `/auth/reset-password` → `app/auth/reset-password/page.tsx`
+- `/auth/subscribe` → `app/auth/subscribe/page.tsx`
+- `/clients/[id]/edit` → `app/clients/[id]/edit/page.tsx`
+- `/clients/[id]` → `app/clients/[id]/page.tsx`
+- `/clients/new` → `app/clients/new/page.tsx`
+- `/clients` → `app/clients/page.tsx`
+- `/dashboard` → `app/dashboard/page.tsx`
+- `/debug/project` → `app/debug/project/page.tsx`
+- `/design` → `app/design/page.tsx`
+- `/engineering/[projectId]` → `app/engineering/[projectId]/page.tsx`
+- `/engineering/assist` → `app/engineering/assist/page.tsx`
+- `/engineering` → `app/engineering/page.tsx`
+- `/engineering/permit` → `app/engineering/permit/page.tsx`
+- `/enterprise` → `app/enterprise/page.tsx`
+- `/free-solar-estimate` → `app/free-solar-estimate/page.tsx`
+- `/get-a-quote` → `app/get-a-quote/page.tsx`
+- `/hardware` → `app/hardware/page.tsx`
+- `/mobile-login` → `app/mobile-login/page.tsx`
+- `/network` → `app/network/page.tsx`
+- `/onboarding` → `app/onboarding/page.tsx`
+- `/operations` → `app/operations/page.tsx`
+- `/` → `app/page.tsx`
+- `/portal/dashboard` → `app/portal/dashboard/page.tsx`
+- `/portal/login` → `app/portal/login/page.tsx`
+- `/portal` → `app/portal/page.tsx`
+- `/pricing` → `app/pricing/page.tsx`
+- `/projects/[id]` → `app/projects/[id]/page.tsx`
+- `/projects/[id]/survey/[surveyId]` → `app/projects/[id]/survey/[surveyId]/page.tsx`
+- `/projects/new` → `app/projects/new/page.tsx`
+- `/projects` → `app/projects/page.tsx`
+- `/proposals` → `app/proposals/page.tsx`
+- `/proposals/view/[id]` → `app/proposals/view/[id]/page.tsx`
+- `/settings` → `app/settings/page.tsx`
+- `/subscribe` → `app/subscribe/page.tsx`
+- `/survey/[token]` → `app/survey/[token]/page.tsx`
+- `/terms` → `app/terms/page.tsx`
+
+## API Route Handlers
+
+- `/api/activity` [GET,POST] → `app/api/activity/route.ts`
+- `/api/admin/activity-log` [GET] → `app/api/admin/activity-log/route.ts`
+- `/api/admin/companies` [GET,PATCH] → `app/api/admin/companies/route.ts`
+- `/api/admin/debug-role` [GET] → `app/api/admin/debug-role/route.ts`
+- `/api/admin/debug/account-state` [GET] → `app/api/admin/debug/account-state/route.ts`
+- `/api/admin/debug/auth-loop` [GET] → `app/api/admin/debug/auth-loop/route.ts`
+- `/api/admin/debug/auth-status` [GET] → `app/api/admin/debug/auth-status/route.ts`
+- `/api/admin/debug/db-identity` [GET] → `app/api/admin/debug/db-identity/route.ts`
+- `/api/admin/debug/env-fingerprint` [GET] → `app/api/admin/debug/env-fingerprint/route.ts`
+- `/api/admin/debug/owner-resolver-probe` [GET] → `app/api/admin/debug/owner-resolver-probe/route.ts`
+- `/api/admin/debug` [GET] → `app/api/admin/debug/route.ts`
+- `/api/admin/debug/user-audit` [GET] → `app/api/admin/debug/user-audit/route.ts`
+- `/api/admin/distributor-prices` [GET,POST,DELETE,PATCH] → `app/api/admin/distributor-prices/route.ts`
+- `/api/admin/feedback/count` [GET] → `app/api/admin/feedback/count/route.ts`
+- `/api/admin/feedback` [GET,POST] → `app/api/admin/feedback/route.ts`
+- `/api/admin/feedback/screenshot` [GET] → `app/api/admin/feedback/screenshot/route.ts`
+- `/api/admin/files` [GET,DELETE] → `app/api/admin/files/route.ts`
+- `/api/admin/free-pass` [POST,GET] → `app/api/admin/free-pass/route.ts`
+- `/api/admin/health` [GET] → `app/api/admin/health/route.ts`
+- `/api/admin/impersonate` [POST] → `app/api/admin/impersonate/route.ts`
+- `/api/admin/incentives` [GET,POST,PATCH,DELETE] → `app/api/admin/incentives/route.ts`
+- `/api/admin/leads/[id]/assign-user` [POST] → `app/api/admin/leads/[id]/assign-user/route.ts`
+- `/api/admin/leads/[id]/convert` [POST] → `app/api/admin/leads/[id]/convert/route.ts`
+- `/api/admin/leads/[id]` [GET,PATCH] → `app/api/admin/leads/[id]/route.ts`
+- `/api/admin/leads` [GET,POST] → `app/api/admin/leads/route.ts`
+- `/api/admin/me-debug` [GET] → `app/api/admin/me-debug/route.ts`
+- `/api/admin/me-exact-debug` [GET] → `app/api/admin/me-exact-debug/route.ts`
+- `/api/admin/me-ultra-debug` [GET] → `app/api/admin/me-ultra-debug/route.ts`
+- `/api/admin/network/analytics` [GET] → `app/api/admin/network/analytics/route.ts`
+- `/api/admin/network/campaigns` [GET,POST,PATCH,DELETE] → `app/api/admin/network/campaigns/route.ts`
+- `/api/admin/network/contractor-match/[id]` [GET,POST] → `app/api/admin/network/contractor-match/[id]/route.ts`
+- `/api/admin/network/enrichment` [GET,POST,PATCH] → `app/api/admin/network/enrichment/route.ts`
+- `/api/admin/network/funnels` [GET] → `app/api/admin/network/funnels/route.ts`
+- `/api/admin/network/health` [GET] → `app/api/admin/network/health/route.ts`
+- `/api/admin/network/intake/bill-intelligence` [POST] → `app/api/admin/network/intake/bill-intelligence/route.ts`
+- `/api/admin/network/intake` [GET,POST] → `app/api/admin/network/intake/route.ts`
+- `/api/admin/network/intelligence/runner` [POST] → `app/api/admin/network/intelligence/runner/route.ts`
+- `/api/admin/network/marketplace` [GET,POST] → `app/api/admin/network/marketplace/route.ts`
+- `/api/admin/network/opportunities` [GET,POST,PATCH] → `app/api/admin/network/opportunities/route.ts`
+- `/api/admin/network/screening` [GET,POST,PATCH] → `app/api/admin/network/screening/route.ts`
+- `/api/admin/network/simulator` [GET,POST] → `app/api/admin/network/simulator/route.ts`
+- `/api/admin/network/webhooks` [GET,POST] → `app/api/admin/network/webhooks/route.ts`
+- `/api/admin/perf-diag` [GET] → `app/api/admin/perf-diag/route.ts`
+- `/api/admin/projects/[id]` [GET,PATCH] → `app/api/admin/projects/[id]/route.ts`
+- `/api/admin/projects/[id]/send-portal-invite` [POST] → `app/api/admin/projects/[id]/send-portal-invite/route.ts`
+- `/api/admin/projects` [GET,PATCH] → `app/api/admin/projects/route.ts`
+- `/api/admin/repair-account` [POST] → `app/api/admin/repair-account/route.ts`
+- `/api/admin/set-roles` [GET] → `app/api/admin/set-roles/route.ts`
+- `/api/admin/staff` [GET] → `app/api/admin/staff/route.ts`
+- `/api/admin/stats` [GET] → `app/api/admin/stats/route.ts`
+- `/api/admin/survey-reassign` [POST] → `app/api/admin/survey-reassign/route.ts`
+- `/api/admin/survey-webhook-log/[id]/replay` [POST] → `app/api/admin/survey-webhook-log/[id]/replay/route.ts`
+- `/api/admin/survey-webhook-log` [GET] → `app/api/admin/survey-webhook-log/route.ts`
+- `/api/admin/system-tools` [POST] → `app/api/admin/system-tools/route.ts`
+- `/api/admin/users` [GET,PATCH,DELETE] → `app/api/admin/users/route.ts`
+- `/api/admin/utilities` [GET,POST,PATCH,DELETE] → `app/api/admin/utilities/route.ts`
+- `/api/assistant` [POST] → `app/api/assistant/route.ts`
+- `/api/auth/authorize` [GET] → `app/api/auth/authorize/route.ts`
+- `/api/auth/delete-account` [DELETE] → `app/api/auth/delete-account/route.ts`
+- `/api/auth/login` [POST] → `app/api/auth/login/route.ts`
+- `/api/auth/logout` [POST] → `app/api/auth/logout/route.ts`
+- `/api/auth/me` [GET] → `app/api/auth/me/route.ts`
+- `/api/auth/mobile-session` [POST] → `app/api/auth/mobile-session/route.ts`
+- `/api/auth/register` [POST] → `app/api/auth/register/route.ts`
+- `/api/auth/request-password-reset` [POST] → `app/api/auth/request-password-reset/route.ts`
+- `/api/auth/reset-password` [POST,GET] → `app/api/auth/reset-password/route.ts`
+- `/api/auth/tour-complete` [POST] → `app/api/auth/tour-complete/route.ts`
+- `/api/auto-design` [POST] → `app/api/auto-design/route.ts`
+- `/api/auto-size` [POST] → `app/api/auto-size/route.ts`
+- `/api/bill-upload/provision` [POST] → `app/api/bill-upload/provision/route.ts`
+- `/api/bill-upload` [POST] → `app/api/bill-upload/route.ts`
+- `/api/bill-upload/test` [GET,POST] → `app/api/bill-upload/test/route.ts`
+- `/api/bills` [GET,POST] → `app/api/bills/route.ts`
+- `/api/clients/[id]/notes` [GET,POST,DELETE] → `app/api/clients/[id]/notes/route.ts`
+- `/api/clients/[id]/projects` [GET] → `app/api/clients/[id]/projects/route.ts`
+- `/api/clients/[id]/proposals` [GET] → `app/api/clients/[id]/proposals/route.ts`
+- `/api/clients/[id]` [GET,PUT,DELETE] → `app/api/clients/[id]/route.ts`
+- `/api/clients/[id]/site-surveys` [GET] → `app/api/clients/[id]/site-surveys/route.ts`
+- `/api/clients` [GET,POST] → `app/api/clients/route.ts`
+- `/api/commands/[id]` [PATCH,DELETE] → `app/api/commands/[id]/route.ts`
+- `/api/commands/generate` [POST] → `app/api/commands/generate/route.ts`
+- `/api/commands` [GET,POST] → `app/api/commands/route.ts`
+- `/api/crew-members/[memberId]` [PATCH,DELETE] → `app/api/crew-members/[memberId]/route.ts`
+- `/api/crew-schedule` [GET] → `app/api/crew-schedule/route.ts`
+- `/api/crews/[id]/members/[memberId]` [DELETE,PATCH] → `app/api/crews/[id]/members/[memberId]/route.ts`
+- `/api/crews/[id]/members` [GET,POST] → `app/api/crews/[id]/members/route.ts`
+- `/api/crews` [GET,POST,DELETE] → `app/api/crews/route.ts`
+- `/api/cron/proposal-expiry` [GET] → `app/api/cron/proposal-expiry/route.ts`
+- `/api/debug/aerial` [GET] → `app/api/debug/aerial/route.ts`
+- `/api/debug/auth` [GET] → `app/api/debug/auth/route.ts`
+- `/api/debug/backfill-site-surveys` [GET,POST] → `app/api/debug/backfill-site-surveys/route.ts`
+- `/api/debug/bill` [POST] → `app/api/debug/bill/route.ts`
+- `/api/debug/force-ingest` [GET,POST] → `app/api/debug/force-ingest/route.ts`
+- `/api/debug/layout` [GET] → `app/api/debug/layout/route.ts`
+- `/api/debug/ocr` [POST] → `app/api/debug/ocr/route.ts`
+- `/api/debug/project` [GET] → `app/api/debug/project/route.ts`
+- `/api/debug/rate` [GET] → `app/api/debug/rate/route.ts`
+- `/api/dev-check` [GET] → `app/api/dev-check/route.ts`
+- `/api/dsm` [GET] → `app/api/dsm/route.ts`
+- `/api/elevation` [GET] → `app/api/elevation/route.ts`
+- `/api/engineering/ahj-lookup` [GET] → `app/api/engineering/ahj-lookup/route.ts`
+- `/api/engineering/assist` [POST] → `app/api/engineering/assist/route.ts`
+- `/api/engineering/auto-configure` [POST] → `app/api/engineering/auto-configure/route.ts`
+- `/api/engineering/bom` [POST] → `app/api/engineering/bom/route.ts`
+- `/api/engineering/calculate` [POST] → `app/api/engineering/calculate/route.ts`
+- `/api/engineering/enphase` [POST,GET] → `app/api/engineering/enphase/route.ts`
+- `/api/engineering/equipment` [GET,POST] → `app/api/engineering/equipment/route.ts`
+- `/api/engineering/generate` [POST] → `app/api/engineering/generate/route.ts`
+- `/api/engineering/ironridge` [POST,GET] → `app/api/engineering/ironridge/route.ts`
+- `/api/engineering/latest-run` [GET] → `app/api/engineering/latest-run/route.ts`
+- `/api/engineering/override` [POST] → `app/api/engineering/override/route.ts`
+- `/api/engineering/permit-preview` [GET] → `app/api/engineering/permit-preview/route.ts`
+- `/api/engineering/permit` [GET,POST] → `app/api/engineering/permit/route.ts`
+- `/api/engineering/plan-set` [GET,POST] → `app/api/engineering/plan-set/route.ts`
+- `/api/engineering/preliminary` [POST] → `app/api/engineering/preliminary/route.ts`
+- `/api/engineering/pvwatts` [POST,GET] → `app/api/engineering/pvwatts/route.ts`
+- `/api/engineering/report` [GET] → `app/api/engineering/report/route.ts`
+- `/api/engineering/rules` [POST] → `app/api/engineering/rules/route.ts`
+- `/api/engineering/run-from-file` [GET] → `app/api/engineering/run-from-file/route.ts`
+- `/api/engineering/save-config` [POST] → `app/api/engineering/save-config/route.ts`
+- `/api/engineering/save-outputs` [POST] → `app/api/engineering/save-outputs/route.ts`
+- `/api/engineering/sld/pdf` [POST] → `app/api/engineering/sld/pdf/route.ts`
+- `/api/engineering/sld` [POST] → `app/api/engineering/sld/route.ts`
+- `/api/engineering/slg/generate` [POST] → `app/api/engineering/slg/generate/route.ts`
+- `/api/engineering/structural-v2` [POST] → `app/api/engineering/structural-v2/route.ts`
+- `/api/engineering/structural` [POST] → `app/api/engineering/structural/route.ts`
+- `/api/engineering/sync-pipeline` [GET] → `app/api/engineering/sync-pipeline/route.ts`
+- `/api/engineering/topology` [POST] → `app/api/engineering/topology/route.ts`
+- `/api/enterprise/contact` [POST] → `app/api/enterprise/contact/route.ts`
+- `/api/equipment` [GET] → `app/api/equipment/route.ts`
+- `/api/equipment/save` [POST] → `app/api/equipment/save/route.ts`
+- `/api/feedback` [POST] → `app/api/feedback/route.ts`
+- `/api/geocode` [POST,GET] → `app/api/geocode/route.ts`
+- `/api/hardware` [GET,POST,PUT,DELETE] → `app/api/hardware/route.ts`
+- `/api/health/auth` [GET] → `app/api/health/auth/route.ts`
+- `/api/health/database` [GET] → `app/api/health/database/route.ts`
+- `/api/health/env` [GET] → `app/api/health/env/route.ts`
+- `/api/health` [GET] → `app/api/health/route.ts`
+- `/api/incentives` [GET,POST] → `app/api/incentives/route.ts`
+- `/api/intake/homeowner/qualification` [POST] → `app/api/intake/homeowner/qualification/route.ts`
+- `/api/intake/homeowner` [POST] → `app/api/intake/homeowner/route.ts`
+- `/api/intake` [POST] → `app/api/intake/route.ts`
+- `/api/intake/webhook/generic` [POST] → `app/api/intake/webhook/generic/route.ts`
+- `/api/intake/webhook/google` [POST] → `app/api/intake/webhook/google/route.ts`
+- `/api/intake/webhook/meta` [GET,POST] → `app/api/intake/webhook/meta/route.ts`
+- `/api/leads/public` [POST,OPTIONS] → `app/api/leads/public/route.ts`
+- `/api/maps-session` [GET,POST] → `app/api/maps-session/route.ts`
+- `/api/migrate` [GET,POST] → `app/api/migrate/route.ts`
+- `/api/mobile/clients/[clientId]/projects` [GET] → `app/api/mobile/clients/[clientId]/projects/route.ts`
+- `/api/mobile/clients` [GET] → `app/api/mobile/clients/route.ts`
+- `/api/mobile/debug-auth` [GET] → `app/api/mobile/debug-auth/route.ts`
+- `/api/network/contractor-profile` [GET,PATCH] → `app/api/network/contractor-profile/route.ts`
+- `/api/network/my-claims` [GET] → `app/api/network/my-claims/route.ts`
+- `/api/network/my-opportunities` [GET] → `app/api/network/my-opportunities/route.ts`
+- `/api/network/opportunities/[id]/claim` [POST,DELETE] → `app/api/network/opportunities/[id]/claim/route.ts`
+- `/api/network/opportunities/[id]` [GET,PATCH] → `app/api/network/opportunities/[id]/route.ts`
+- `/api/network/opportunities` [GET,POST] → `app/api/network/opportunities/route.ts`
+- `/api/ocr` [POST] → `app/api/ocr/route.ts`
+- `/api/operations/projects` [GET] → `app/api/operations/projects/route.ts`
+- `/api/organizations/invite` [POST,DELETE] → `app/api/organizations/invite/route.ts`
+- `/api/organizations/member` [DELETE] → `app/api/organizations/member/route.ts`
+- `/api/organizations` [GET,POST,DELETE] → `app/api/organizations/route.ts`
+- `/api/pipeline/run` [POST] → `app/api/pipeline/run/route.ts`
+- `/api/portal/bill-upload` [POST] → `app/api/portal/bill-upload/route.ts`
+- `/api/portal/dashboard` [GET] → `app/api/portal/dashboard/route.ts`
+- `/api/portal/login` [POST] → `app/api/portal/login/route.ts`
+- `/api/portal/logout` [POST] → `app/api/portal/logout/route.ts`
+- `/api/portal/verify-otp` [POST] → `app/api/portal/verify-otp/route.ts`
+- `/api/pricing` [GET,POST] → `app/api/pricing/route.ts`
+- `/api/production` [POST,GET] → `app/api/production/route.ts`
+- `/api/project-files/download` [GET] → `app/api/project-files/download/route.ts`
+- `/api/project-files` [GET,POST,DELETE] → `app/api/project-files/route.ts`
+- `/api/projects/[id]/homeowner-stage` [GET,PATCH] → `app/api/projects/[id]/homeowner-stage/route.ts`
+- `/api/projects/[id]/layout` [POST,GET] → `app/api/projects/[id]/layout/route.ts`
+- `/api/projects/[id]/milestones` [GET,POST,PATCH] → `app/api/projects/[id]/milestones/route.ts`
+- `/api/projects/[id]/operations` [GET,PATCH] → `app/api/projects/[id]/operations/route.ts`
+- `/api/projects/[id]/physical-data` [GET] → `app/api/projects/[id]/physical-data/route.ts`
+- `/api/projects/[id]/repair-system-type` [POST,GET] → `app/api/projects/[id]/repair-system-type/route.ts`
+- `/api/projects/[id]` [GET,PUT,PATCH,DELETE] → `app/api/projects/[id]/route.ts`
+- `/api/projects/[id]/site-conditions` [GET] → `app/api/projects/[id]/site-conditions/route.ts`
+- `/api/projects/[id]/site-surveys` [GET,POST] → `app/api/projects/[id]/site-surveys/route.ts`
+- `/api/projects/[id]/survey-context` [GET] → `app/api/projects/[id]/survey-context/route.ts`
+- `/api/projects/[id]/survey-handoff` [POST] → `app/api/projects/[id]/survey-handoff/route.ts`
+- `/api/projects/[id]/tasks` [GET,PATCH] → `app/api/projects/[id]/tasks/route.ts`
+- `/api/projects/[id]/versions/[versionId]` [GET,POST] → `app/api/projects/[id]/versions/[versionId]/route.ts`
+- `/api/projects/[id]/versions` [GET] → `app/api/projects/[id]/versions/route.ts`
+- `/api/projects/bulk-delete` [POST] → `app/api/projects/bulk-delete/route.ts`
+- `/api/projects` [GET,POST] → `app/api/projects/route.ts`
+- `/api/projects/transition` [POST] → `app/api/projects/transition/route.ts`
+- `/api/projects/update-status` [POST] → `app/api/projects/update-status/route.ts`
+- `/api/proposals/[id]/pdf` [GET,POST] → `app/api/proposals/[id]/pdf/route.ts`
+- `/api/proposals/[id]` [GET,PUT,PATCH,DELETE] → `app/api/proposals/[id]/route.ts`
+- `/api/proposals/[id]/send-email` [POST] → `app/api/proposals/[id]/send-email/route.ts`
+- `/api/proposals/[id]/share` [POST,GET] → `app/api/proposals/[id]/share/route.ts`
+- `/api/proposals/[id]/sign` [POST] → `app/api/proposals/[id]/sign/route.ts`
+- `/api/proposals/[id]/signature` [GET] → `app/api/proposals/[id]/signature/route.ts`
+- `/api/proposals/bulk` [POST] → `app/api/proposals/bulk/route.ts`
+- `/api/proposals` [GET,POST] → `app/api/proposals/route.ts`
+- `/api/schedule` [GET,POST] → `app/api/schedule/route.ts`
+- `/api/settings/branding` [PUT,GET] → `app/api/settings/branding/route.ts`
+- `/api/settings/logo` [POST,DELETE] → `app/api/settings/logo/route.ts`
+- `/api/settings/notifications` [GET,PATCH] → `app/api/settings/notifications/route.ts`
+- `/api/settings/onboarding-complete` [POST] → `app/api/settings/onboarding-complete/route.ts`
+- `/api/settings/profile` [PUT] → `app/api/settings/profile/route.ts`
+- `/api/site-surveys/[surveyId]` [GET,PATCH] → `app/api/site-surveys/[surveyId]/route.ts`
+- `/api/solar-tile` [GET] → `app/api/solar-tile/route.ts`
+- `/api/solar` [GET,POST] → `app/api/solar/route.ts`
+- `/api/solardog/aliases` [GET,DELETE] → `app/api/solardog/aliases/route.ts`
+- `/api/solardog/debug` [GET] → `app/api/solardog/debug/route.ts`
+- `/api/solardog/learn` [POST] → `app/api/solardog/learn/route.ts`
+- `/api/stats` [GET] → `app/api/stats/route.ts`
+- `/api/stripe/checkout` [POST] → `app/api/stripe/checkout/route.ts`
+- `/api/stripe/customer-status` [GET] → `app/api/stripe/customer-status/route.ts`
+- `/api/stripe/portal` [POST] → `app/api/stripe/portal/route.ts`
+- `/api/stripe/webhook` [POST] → `app/api/stripe/webhook/route.ts`
+- `/api/survey/lookup-data` [GET] → `app/api/survey/lookup-data/route.ts`
+- `/api/survey/standalone-handoff` [POST] → `app/api/survey/standalone-handoff/route.ts`
+- `/api/survey/submit` [POST] → `app/api/survey/submit/route.ts`
+- `/api/survey/upload-photo` [POST] → `app/api/survey/upload-photo/route.ts`
+- `/api/system-size` [POST] → `app/api/system-size/route.ts`
+- `/api/system/capabilities` [GET] → `app/api/system/capabilities/route.ts`
+- `/api/system/env` [GET] → `app/api/system/env/route.ts`
+- `/api/system/health` [GET] → `app/api/system/health/route.ts`
+- `/api/system/release` [GET] → `app/api/system/release/route.ts`
+- `/api/tile` [GET] → `app/api/tile/route.ts`
+- `/api/topography/state` [GET] → `app/api/topography/state/route.ts`
+- `/api/tos-accept` [POST,GET] → `app/api/tos-accept/route.ts`
+- `/api/tts` [POST] → `app/api/tts/route.ts`
+- `/api/utility-detect` [POST,GET] → `app/api/utility-detect/route.ts`
+- `/api/utility-rates` [GET] → `app/api/utility-rates/route.ts`
+- `/api/version` [GET] → `app/api/version/route.ts`
+- `/api/webhooks/survey-complete` [POST] → `app/api/webhooks/survey-complete/route.ts`

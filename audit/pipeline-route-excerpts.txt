@@ -1,0 +1,2332 @@
+\n===== app/api/intake/homeowner/route.ts =====
+/**
+ * /api/intake/homeowner/route.ts
+ *
+ * Public homeowner form submissions — no auth required.
+ * Rate-limited: 3 submissions per 15 minutes per IP.
+ * Looks up funnel config from intake_funnels table.
+ *
+ * Canonical review-first flow for /free-solar-estimate:
+ *   /free-solar-estimate → this route → intake_events → Admin Intake Feed
+ *   → operator review → later conversion into marketplace opportunity.
+ *
+ * POST /api/intake/homeowner
+ *   Body: RawIntakePayload + optional funnel_slug
+ */
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 30;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getDbReady } from '@/lib/db-neon';
+import {
+  logMalformedHomeownerIntake,
+  makeHomeownerIntakeEventId,
+  submitHomeownerIntakeEvent,
+} from '@/lib/intake/homeownerEventIntake';
+import {
+  isUtilityBillStorageFailure,
+  metadataOnlyUtilityBill,
+  storeUtilityBillAttachment,
+} from '@/lib/intake/utilityBillAttachment';
+import { runUtilityBillIntelligenceAsync } from '@/lib/intake/utilityBillIntelligence';
+
+async function sql(strings: TemplateStringsArray, ...values: unknown[]) {
+  const db = await getDbReady();
+  return (db as any)(strings, ...values);
+}
+
+// ── In-memory rate limiter (3 per 15 min per IP)
+const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const RATE_LIMIT_MAX = 3;
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): { allowed: boolean; remaining: number; resetAt: number } {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+
+  if (!entry || now > entry.resetAt) {
+    const resetAt = now + RATE_LIMIT_WINDOW_MS;
+    rateLimitMap.set(ip, { count: 1, resetAt });
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1, resetAt };
+  }
+
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return { allowed: false, remaining: 0, resetAt: entry.resetAt };
+  }
+
+  entry.count += 1;
+  return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count, resetAt: entry.resetAt };
+}
+
+// Clean up stale entries every 1000 requests
+let cleanupCounter = 0;
+function maybeCleanupRateLimitMap(): void {
+  if (++cleanupCounter % 1000 === 0) {
+    const now = Date.now();
+    for (const [key, val] of rateLimitMap.entries()) {
+      if (now > val.resetAt) rateLimitMap.delete(key);
+    }
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || req.headers.get('x-real-ip')
+    || 'unknown';
+  const userAgent = req.headers.get('user-agent') || null;
+  const referer = req.headers.get('referer') || null;
+
+  maybeCleanupRateLimitMap();
+
+  // ── Rate limit
+  const rateCheck = checkRateLimit(ip);
+  if (!rateCheck.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      {
+        status: 429,
+        headers: {
+          'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
+          'X-RateLimit-Remaining': '0',
+          'X-RateLimit-Reset': String(Math.ceil(rateCheck.resetAt / 1000)),
+          'Retry-After': String(Math.ceil((rateCheck.resetAt - Date.now()) / 1000)),
+        },
+      }
+    );
+  }
+
+  // ── Parse body. Existing JSON clients remain supported; multipart carries the
+  // real utility bill file for the public homeowner form.
+  let body: Record<string, unknown>;
+  let billFile: File | null = null;
+  const contentType = req.headers.get('content-type') || '';
+  try {
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await req.formData();
+      const payloadText = formData.get('payload');
+      if (typeof payloadText === 'string' && payloadText.trim()) {
+        body = JSON.parse(payloadText) as Record<string, unknown>;
+      } else {
+        body = {};
+        for (const [key, value] of formData.entries()) {
+          if (key === 'utility_bill') continue;
+          if (typeof value === 'string') body[key] = value;
+        }
+      }
+      const maybeFile = formData.get('utility_bill');
+      billFile = maybeFile instanceof File && maybeFile.size > 0 ? maybeFile : null;
+    } else {
+      body = await req.json();
+    }
+  } catch (err) {
+    const eventId = await logMalformedHomeownerIntake((err as Error).message || 'Invalid request body', {
+      source_system: 'homeowner_form',
+      source_channel: 'web',
+      funnel_slug: 'free-solar-estimate',
+      ip_address: ip,
+      user_agent: userAgent,
+      referer,
+    });
+    return NextResponse.json({ error: 'Invalid request body', event_id: eventId }, { status: 400 });
+  }
+
+  // ── Look up funnel config
+  const funnelSlug = (body.funnel_slug as string) || 'free-solar-estimate';
+  let funnelId: string | null = null;
+  let campaignId: string | null = null;
+  let requirePhone = false;
+  let requireAddress = false;
+
+  if (funnelSlug) {
+    try {
+      const funnels = await sql`
+        SELECT id, campaign_id, require_phone, require_address, require_monthly_bill, is_active
+        FROM intake_funnels
+        WHERE slug = ${funnelSlug}
+        LIMIT 1
+      `;
+      const funnel = funnels[0];
+      if (funnel) {
+        if (!funnel.is_active) {
+          return NextResponse.json({ error: 'This form is no longer active.' }, { status: 410 });
+        }
+        funnelId = funnel.id as string;
+        campaignId = funnel.campaign_id as string || null;
+        requirePhone = !!funnel.require_phone;
+        requireAddress = !!funnel.require_address;
+      }
+    } catch (err) {
+      console.warn('[POST /api/intake/homeowner] Funnel lookup failed (non-fatal):', (err as Error).message);
+    }
+  }
+
+  const eventId = makeHomeownerIntakeEventId();
+  body.event_id = eventId;
+
+  if (billFile) {
+    try {
+      const billMetadata = await storeUtilityBillAttachment(billFile, {
+        eventId,
+        funnelSlug,
+      });
+      body.uploaded_bill_filename = billMetadata.filename;
+      body.uploaded_bill_size_bytes = billMetadata.size_bytes;
+      body.uploaded_bill_content_type = billMetadata.content_type;
+      body.bill_metadata = billMetadata;
+      body.bill_attachment_metadata_only = false;
+    } catch (err) {
+      const fallbackMetadata = metadataOnlyUtilityBill(billFile);
+\n===== app/api/intake/homeowner/qualification/route.ts =====
+/**
+ * /api/intake/homeowner/qualification
+ *
+ * Post-submit homeowner qualification step.
+ *
+ * This endpoint intentionally does not replace the public low-friction intake.
+ * It appends a second lifecycle event to intake_events with derived
+ * qualification intelligence for admin review, scoring, matching, and
+ * marketplace enrichment.
+ */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 20;
+
+import { NextRequest, NextResponse } from "next/server";
+import { getDbReady } from "@/lib/db-neon";
+import {
+  HOMEOWNER_QUALIFICATION_EVENT_TYPE,
+  HOMEOWNER_QUALIFICATION_SCHEMA_VERSION,
+  deriveQualificationIntelligence,
+  normalizeQualificationInput,
+  type HomeownerQualificationContext,
+} from "@/lib/intake/homeownerQualification";
+
+type QualificationStage =
+  | "request_parse"
+  | "db_connect"
+  | "original_event_lookup"
+  | "qualification_insert";
+
+function qualificationError(
+  stage: QualificationStage,
+  error: unknown,
+  status = 500,
+) {
+  const err = error as {
+    message?: string;
+    code?: string;
+    detail?: string;
+    constraint?: string;
+    column?: string;
+  };
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Homeowner qualification failed",
+      stage,
+      message: err?.message ?? String(error),
+      code: err?.code,
+      details: {
+        detail: err?.detail,
+        constraint: err?.constraint,
+        column: err?.column,
+      },
+    },
+    { status },
+  );
+}
+
+function clientIp(req: NextRequest): string | null {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    null
+  );
+}
+
+function str(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function num(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value.replace(/[^0-9.]/g, ""));
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+
+function safeQualificationLog(originalEventId: string, qualification: Record<string, unknown>) {
+  return {
+    original_event_id: originalEventId,
+    purchase_intent: str(qualification.purchase_intent),
+    estimated_credit_band: str(qualification.estimated_credit_band),
+    estimated_income_band: str(qualification.estimated_income_band),
+    property_type: str(qualification.property_type),
+    electrical_panel_size: str(qualification.electrical_panel_size),
+    sunlight_confidence: str(qualification.sunlight_confidence),
+    prior_quotes: str(qualification.prior_quotes),
+  };
+}
+
+function makeEventId(originalEventId: string): string {
+  const random = Math.random().toString(36).slice(2, 10);
+  return `qual_${originalEventId}_${Date.now()}_${random}`
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 180);
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  let stage: QualificationStage = "request_parse";
+
+  try {
+    const body = (await req.json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    if (!body || typeof body !== "object") {
+      return qualificationError(stage, new Error("Invalid JSON body"), 400);
+    }
+
+    const originalEventId =
+      str(body.original_event_id) ??
+      str(body.event_id) ??
+      str(body.intake_event_id);
+    if (!originalEventId) {
+      return qualificationError(
+        stage,
+        new Error("original_event_id is required"),
+        400,
+      );
+    }
+
+    const submittedQualification =
+      body.qualification && typeof body.qualification === "object"
+        ? (body.qualification as Record<string, unknown>)
+        : body;
+    const qualification = normalizeQualificationInput(submittedQualification);
+    console.info('[QUALIFICATION SUBMIT]', {
+      nested_payload: body.qualification && typeof body.qualification === 'object',
+      ...safeQualificationLog(originalEventId, qualification),
+    });
+
+    stage = "db_connect";
+    const sql = await getDbReady();
+
+    stage = "original_event_lookup";
+    const originalRows = await sql`
+      SELECT
+        event_id,
+        opportunity_id,
+        source_system,
+        source_channel,
+        funnel_id::text AS funnel_id,
+        campaign_id::text AS campaign_id,
+        payload,
+        utm_source,
+        utm_medium,
+        utm_campaign,
+        utm_content,
+        utm_term,
+        gclid,
+        fbclid
+      FROM intake_events
+      WHERE event_id = ${originalEventId}
+        AND event_type = 'homeowner_intake'
+      LIMIT 1
+    `;
+
+    const original = originalRows[0] as Record<string, unknown> | undefined;
+    if (!original) {
+      return qualificationError(
+        stage,
+        new Error("Original homeowner intake event not found"),
+        404,
+      );
+    }
+
+    const originalPayload =
+      original.payload && typeof original.payload === "object"
+        ? (original.payload as Record<string, unknown>)
+        : {};
+    const context: HomeownerQualificationContext = {
+      monthly_bill_amount:
+        num(originalPayload.monthly_bill_amount) ??
+        num(originalPayload.average_monthly_bill),
+      homeowner_status:
+        str(originalPayload.homeowner_status) ??
+\n===== app/api/admin/network/intake/bill-intelligence/route.ts =====
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+import { NextRequest, NextResponse } from "next/server";
+import { requireAdminApi } from "@/lib/adminAuth";
+import { ingestUtilityBillIntelligence } from "@/lib/intake/utilityBillIntelligence";
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const admin = await requireAdminApi(req);
+  if (!admin) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await req.json().catch(() => ({}));
+  const requestBody =
+    body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : {};
+  const eventId =
+    typeof requestBody.event_id === "string" ? requestBody.event_id.trim() : "";
+
+  console.info("[ADMIN_BILL_PARSE_REQUEST]", {
+    intake_event_id: eventId || null,
+    has_event_id: !!eventId,
+    trigger: "operator_review",
+  });
+
+  if (!eventId) {
+    return NextResponse.json(
+      { success: false, error: "event_id is required" },
+      { status: 400 },
+    );
+  }
+
+  const result = await ingestUtilityBillIntelligence({
+    eventId,
+    trigger: "operator_review",
+  });
+
+  if (!result.ok) {
+    const reason = "reason" in result ? result.reason : "ingest_failed";
+    const status = reason === "intake_not_found" ? 404 : 422;
+    return NextResponse.json(
+      {
+        success: false,
+        status: "skipped",
+        reason,
+      },
+      { status },
+    );
+  }
+
+  return NextResponse.json({
+    success: true,
+    status: "completed",
+    projected: result.projected,
+    opportunity_id: result.opportunity_id,
+    intelligence: result.intelligence,
+    parser_result: result.parser_result,
+  });
+}
+\n===== app/api/admin/network/marketplace/route.ts =====
+/** Canonical admin Marketplace Workbench v1. */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+import { NextRequest, NextResponse } from "next/server";
+import { getDbReady } from "@/lib/db-neon";
+import { requireAdminApi } from "@/lib/adminAuth";
+import { matchContractors } from "@/lib/network/contractorMatcher";
+import { logNetworkEvent } from "@/lib/network/attributionTracker";
+import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import {
+  releaseMarketplaceInventoryFromIntake,
+  transitionMarketplaceInventory,
+  type MarketplaceInventoryAction,
+} from "@/lib/network/marketplaceInventory";
+
+function jsonError(error: string, status = 400, details?: unknown) {
+  return NextResponse.json({ success: false, error, details }, { status });
+}
+
+type MarketplaceStage =
+  | "auth"
+  | "db_connect"
+  | "request_parse"
+  | "list_query"
+  | "count_query"
+  | "gate_query"
+  | "inventory_release"
+  | "inventory_transition"
+  | "assignment_query"
+  | "matching_call"
+  | "assignment_insert"
+  | "intelligence_update"
+  | "event_log";
+
+function marketplaceError(stage: MarketplaceStage, error: unknown) {
+  const err = error as {
+    message?: string;
+    code?: string;
+    detail?: string;
+    constraint?: string;
+    column?: string;
+  };
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Marketplace Workbench failed",
+      stage,
+      message: err?.message ?? String(error),
+      code: err?.code,
+      details: {
+        detail: err?.detail,
+        constraint: err?.constraint,
+        column: err?.column,
+      },
+    },
+    { status: 500 },
+  );
+}
+
+async function assertLiveApprovedOpportunity(
+  sql: Awaited<ReturnType<typeof getDbReady>>,
+  opportunityId: string,
+) {
+  const rows = await sql`
+    SELECT no.id, no.status, no.screening_status, no.intake_metadata, no.raw_payload, osq.auto_decision, osq.override_decision
+    FROM network_opportunities no
+    LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+    WHERE no.id = ${opportunityId}
+    LIMIT 1
+  `;
+  const opp = rows[0] as Record<string, unknown> | undefined;
+  if (!opp)
+    return { ok: false as const, status: 404, error: "Opportunity not found" };
+  const gate = logMarketplaceGate(
+    "[MARKETPLACE RELEASE GATE]",
+    opp,
+    "marketplace_workbench_access",
+  );
+  if (opp.status !== "live")
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Only live opportunities can be managed in the marketplace workbench",
+    };
+  if (!gate.approvedScreening)
+    return {
+      ok: false as const,
+      status: 409,
+      error: "Opportunity must have passed or approved screening",
+    };
+  if (!gate.releaseReadiness.ready)
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Opportunity must be operator reviewed, qualified, financing-ready, homeowner-intent verified, and approved for marketplace before workbench actions",
+      details: gate.missing,
+    };
+  return { ok: true as const, opportunity: opp };
+}
+
+export async function GET(req: NextRequest) {
+  let stage: MarketplaceStage = "auth";
+  try {
+    const admin = await requireAdminApi(req);
+    if (!admin) return jsonError("Forbidden", 403);
+
+    stage = "db_connect";
+    const sql = await getDbReady();
+    stage = "request_parse";
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
+    const limit = Math.min(
+      Math.max(1, parseInt(searchParams.get("limit") ?? "25")),
+      100,
+    );
+    const offset = (page - 1) * limit;
+
+    stage = "list_query";
+    const rows = await sql`
+      WITH assignment_summary AS (
+        SELECT
+          opportunity_id,
+          COUNT(*)::int AS assignment_count,
+          COUNT(*) FILTER (WHERE status IN ('offered','viewed'))::int AS active_offer_count,
+          COUNT(*) FILTER (WHERE status IN ('claimed','contacted','appointment','proposal','won'))::int AS claimed_or_active_count,
+          MAX(status) FILTER (WHERE status IN ('claimed','contacted','appointment','proposal','won')) AS current_assignment_status,
+          MAX(offered_at) AS last_offered_at
+        FROM opportunity_assignments
+        GROUP BY opportunity_id
+      )
+      SELECT
+        no.id, no.homeowner_name,
+        no.address, no.location_city AS city, no.location_state AS state, no.location_city, no.location_state, no.location_zip,
+        no.source_type, no.status, no.screening_status, no.live_at, no.created_at,
+        no.estimated_project_value, no.asking_price, no.asking_price AS listing_price,
+        no.opportunity_score, no.opportunity_grade,
+        oi.overall_score, oi.overall_grade, oi.market_price, oi.executive_summary,
+        oi.enrichment_payload, oi.enrichment_completeness, oi.enrichment_warnings, oi.enriched_at,
+        oi.risk_flags, oi.opportunity_highlights, oi.total_eligible_contractors, oi.top_match_score,
+        osq.auto_decision, osq.override_decision, osq.confidence_score,
+        COALESCE(asg.assignment_count, 0) AS assignment_count,
+        COALESCE(asg.active_offer_count, 0) AS active_offer_count,
+        COALESCE(asg.claimed_or_active_count, 0) AS claimed_or_active_count,
+        asg.current_assignment_status, asg.last_offered_at
+      FROM network_opportunities no
+      LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+      LEFT JOIN opportunity_intelligence oi ON oi.opportunity_id = no.id
+      LEFT JOIN assignment_summary asg ON asg.opportunity_id = no.id
+      WHERE no.status = 'live'
+        AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
+      ORDER BY no.live_at DESC NULLS LAST, no.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    stage = "count_query";
+    const countRows = await sql`
+      SELECT COUNT(*)::int AS total
+      FROM network_opportunities no
+      LEFT JOIN opportunity_screening_queue osq ON osq.opportunity_id = no.id
+      WHERE no.status = 'live'
+        AND (no.screening_status = 'approved' OR osq.auto_decision = 'pass' OR osq.override_decision = 'pass')
+        AND no.intake_metadata->'operational'->>'approved_for_marketplace' = 'true'
+    `;
+    const total = Number(
+      (countRows[0] as Record<string, unknown> | undefined)?.total ?? 0,
+    );
+
+    return NextResponse.json({
+      success: true,
+      opportunities: rows,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    console.error("[GET /api/admin/network/marketplace]", { stage, error });
+    return marketplaceError(stage, error);
+\n===== app/api/network/opportunities/route.ts =====
+export const maxDuration = 30;
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+
+import { NextRequest, NextResponse } from "next/server";
+import { getUserFromRequest } from "@/lib/auth";
+import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
+import { logMarketplaceGate } from "@/lib/network/marketplaceReleaseGate";
+import { evaluateContractorEligibility } from "@/lib/network/contractorEligibility";
+import { buildMarketplaceIntelligence } from "@/lib/network/marketplaceIntelligence";
+
+// ---------------------------------------------------------------------------
+// GET /api/network/opportunities
+// Discovery feed — open opportunities matching caller's territory + capabilities.
+// Falls back to showing all open opportunities in the caller's states
+// if they have no profile yet.
+// ---------------------------------------------------------------------------
+export async function GET(req: NextRequest) {
+  const user = getUserFromRequest(req);
+  if (!user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+  const limit = Math.min(50, parseInt(searchParams.get("limit") || "20"));
+  const offset = (page - 1) * limit;
+  const filterState = searchParams.get("state") || null;
+  const filterBattery = searchParams.get("battery") === "1";
+  const filterMinKw = parseFloat(searchParams.get("min_kw") || "0") || null;
+  const filterMaxKw = parseFloat(searchParams.get("max_kw") || "0") || null;
+
+  try {
+    const sql = await getDbReady();
+
+    // Get caller's profile for personalized feed
+    const profileRows = await sql`
+      SELECT service_states, equipment_ecosystems, battery_certified,
+             min_project_kw, max_project_kw, network_active
+        FROM contractor_profiles
+       WHERE user_id = ${user.id}
+       LIMIT 1
+    `;
+    const profile = profileRows[0] as Record<string, unknown> | undefined;
+
+    // Build discovery query — exclude own opportunities
+    const rows = await sql`
+      SELECT
+        o.id,
+        o.source,
+        o.status,
+        o.site_name,
+        -- Address only shown after claim — show city/state/zip in feed
+        o.city,
+        o.state_code,
+        o.zip,
+        o.system_size_kw,
+        o.annual_kwh,
+        o.monthly_kwh_avg,
+        o.utility_name,
+        o.utility_rate_per_kwh,
+        o.estimated_system_cost,
+        o.estimated_payback_yrs,
+        o.roof_material,
+        o.roof_pitch,
+        o.roof_condition,
+        o.roof_age_years,
+        o.battery_candidate,
+        o.steep_roof,
+        o.complex_ahj,
+        o.ahj_name,
+        o.equipment_ecosystem,
+        o.asking_price,
+        o.listing_notes,
+        o.expires_at,
+        o.created_at,
+        -- DO NOT expose: address, lat, lng, project_id, created_by_user_id (pre-claim)
+        u.company AS creator_company
+      FROM opportunities o
+      JOIN users u ON u.id = o.created_by_user_id
+      WHERE o.status = 'open'
+        AND o.created_by_user_id != ${user.id}
+        AND o.expires_at > NOW()
+        AND (${filterState}::text IS NULL OR o.state_code = ${filterState})
+        AND (${filterBattery} = FALSE OR o.battery_candidate = TRUE)
+        AND (${filterMinKw}::numeric IS NULL OR o.system_size_kw >= ${filterMinKw})
+        AND (${filterMaxKw}::numeric IS NULL OR o.system_size_kw <= ${filterMaxKw})
+      ORDER BY o.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const canonicalCandidateRows = await sql`
+      SELECT
+        no.id,
+        no.source_type AS source,
+        'open'::text AS status,
+        NULL::text AS site_name,
+        no.location_city AS city,
+        no.location_state AS state_code,
+        no.location_zip AS zip,
+        no.estimated_system_size_kw AS system_size_kw,
+        no.annual_usage_kwh AS annual_kwh,
+        no.monthly_usage_avg_kwh AS monthly_kwh_avg,
+        no.utility_provider AS utility_name,
+        no.utility_rate_per_kwh,
+        no.estimated_project_value AS estimated_system_cost,
+        no.estimated_annual_savings,
+        COALESCE(
+          no.raw_payload->'bill_marketplace_projection'->>'offset_percentage',
+          no.intake_metadata->'bill_marketplace_projection'->>'offset_percentage',
+          no.raw_payload->'solar'->>'offset_percentage',
+          no.intake_metadata->'solar'->>'offset_percentage',
+          no.raw_payload->>'estimated_offset_pct',
+          no.intake_metadata->>'estimated_offset_pct'
+        ) AS estimated_offset_pct,
+        no.estimated_payback_yrs,
+        no.monthly_bill_amount,
+        no.homeowner_ownership AS homeowner_status,
+        no.homeowner_timeline AS timeline,
+        no.homeowner_financing_interest AS finance_readiness,
+        no.opportunity_grade AS lead_grade,
+        COALESCE(
+          no.intake_metadata->'qualification'->>'qualification_status',
+          no.intake_metadata->'qualification'->>'lead_grade'
+        ) AS qualification_status,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'estimated_income_band',
+          no.intake_metadata->'qualification'->>'estimated_income_band',
+          no.intake_metadata->'qualification'->>'income_band'
+        ) AS estimated_income_band,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'estimated_credit_band',
+          no.intake_metadata->'qualification'->>'estimated_credit_band'
+        ) AS estimated_credit_band,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'purchase_intent',
+          no.intake_metadata->'qualification'->>'purchase_intent',
+          no.intake_metadata->'qualification'->'scoring_input'->>'financing_preference'
+        ) AS purchase_intent,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'sunlight_confidence',
+          no.intake_metadata->'qualification'->>'sunlight_confidence'
+        ) AS sunlight_confidence,
+        COALESCE(
+          no.intake_metadata->'qualification'->'normalized'->>'property_type',
+          no.intake_metadata->'qualification'->>'property_type',
+          no.raw_payload->>'property_type'
+        ) AS property_type,
+        COALESCE(
+          no.raw_payload->>'battery_interest',
+          no.intake_metadata->>'battery_interest',
+          CASE WHEN no.battery_candidate THEN 'yes' ELSE NULL END
+        ) AS battery_interest,
+        COALESCE(
+          no.raw_payload->>'preferred_contact_method',
+          no.intake_metadata->>'preferred_contact_method'
+        ) AS preferred_contact_method,
+        no.roof_material,
+        no.roof_pitch,
+        no.roof_condition,
+        no.roof_age_years,
+        no.stories,
+        no.structure_type,
+        no.roof_usable_pct AS usable_roof_pct,
+        no.battery_candidate,
+        no.steep_roof_flag AS steep_roof,
+        (COALESCE(no.ahj_complexity_score, 0) >= 70) AS complex_ahj,
+        no.ahj_name,
+        NULL::text AS equipment_ecosystem,
+        no.asking_price,
+        COALESCE(no.listing_notes, no.screening_notes) AS listing_notes,
+        no.expires_at,
+        no.created_at,
+        no.released_at,
+        'SolarPro'::text AS creator_company,
+        offer.id AS claim_id,
+        offer.status AS claim_status,
+        offer.contractor_id AS claimed_by_user_id,
+        oi.enrichment_payload,
+\n===== app/api/network/opportunities/[id]/claim/route.ts =====
+export const maxDuration = 30;
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const revalidate = 0;
+
+import { NextRequest, NextResponse } from "next/server";
+import { getUserFromRequest } from "@/lib/auth";
+import { getDbReady, handleRouteDbError, isValidUUID } from "@/lib/db-neon";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
+import { evaluateContractorEligibility } from "@/lib/network/contractorEligibility";
+import { logNetworkEvent } from "@/lib/network/attributionTracker";
+
+type Params = { params: { id: string } };
+
+// ---------------------------------------------------------------------------
+// POST /api/network/opportunities/[id]/claim
+// Exclusively claim an opportunity.
+// DB-level UNIQUE index prevents race conditions — two contractors hitting
+// this simultaneously will result in one 409 and one 201.
+// ---------------------------------------------------------------------------
+export async function POST(req: NextRequest, { params }: Params) {
+  const user = getUserFromRequest(req);
+  if (!user)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const rl = await checkRateLimit("standard", getClientIp(req));
+  if (!rl.allowed)
+    return NextResponse.json({ error: "Too many requests." }, { status: 429 });
+
+  const { id } = params;
+  if (!isValidUUID(id))
+    return NextResponse.json({ error: "Invalid ID" }, { status: 400 });
+
+  try {
+    const sql = await getDbReady();
+
+    // Load the opportunity
+    const oppRows = await sql`
+      SELECT id, status, created_by_user_id, asking_price, site_name, state_code, system_size_kw
+        FROM opportunities
+       WHERE id = ${id}
+       LIMIT 1
+    `;
+
+    if (!oppRows.length) {
+      const networkRows = await sql`
+        SELECT
+          no.id,
+          no.status,
+          COALESCE(no.marketplace_status, 'live') AS marketplace_status,
+          no.claim_mode,
+          no.max_claims,
+          no.claim_count,
+          no.asking_price
+        FROM network_opportunities no
+        WHERE no.id = ${id}
+        LIMIT 1
+      `;
+
+      if (!networkRows.length) {
+        return NextResponse.json(
+          { error: "Opportunity not found" },
+          { status: 404 },
+        );
+      }
+
+      const networkOpportunity = networkRows[0] as Record<string, unknown>;
+      const eligibility = await evaluateContractorEligibility({
+        sql,
+        contractorId: user.id,
+        opportunityId: id,
+      });
+
+      if (!eligibility.eligible) {
+        await logNetworkEvent({
+          event_type: "assignment.claim_blocked",
+          event_category: "assignment",
+          opportunity_id: id,
+          contractor_id: user.id,
+          data: { source: "contractor_claim_flow_v1", eligibility },
+          triggered_by: "contractor",
+        });
+        return NextResponse.json(
+          {
+            error: "Contractor is not eligible to claim this marketplace opportunity.",
+            eligibility,
+          },
+          { status: 409 },
+        );
+      }
+
+      const claimMode = typeof networkOpportunity.claim_mode === "string" && networkOpportunity.claim_mode === "shared" ? "shared" : "exclusive";
+      const maxClaims = Math.max(1, Math.floor(Number(networkOpportunity.max_claims ?? 1)));
+
+      let updated = await sql`
+        UPDATE opportunity_assignments
+           SET status = 'claimed',
+               claimed_at = NOW(),
+               claim_amount = ${networkOpportunity.asking_price as number | null},
+               updated_at = NOW()
+         WHERE opportunity_id = ${id}
+           AND contractor_id = ${user.id}
+           AND status IN ('offered','viewed')
+           AND (offer_expires_at IS NULL OR offer_expires_at > NOW())
+        RETURNING *
+      `;
+
+      if (!updated.length) {
+        try {
+          updated = await sql`
+            INSERT INTO opportunity_assignments (
+              opportunity_id,
+              contractor_id,
+              status,
+              assignment_type,
+              assignment_rank,
+              match_score,
+              match_factors,
+              offered_at,
+              claimed_at,
+              claim_amount
+            ) VALUES (
+              ${id},
+              ${user.id},
+              'claimed',
+              'marketplace',
+              NULL,
+              NULL,
+              ${JSON.stringify({ source: "contractor_claim_flow_v1", eligibility })},
+              NOW(),
+              NOW(),
+              ${networkOpportunity.asking_price as number | null}
+            )
+            ON CONFLICT DO NOTHING
+            RETURNING *
+          `;
+        } catch (insertErr: unknown) {
+          const msg = (insertErr as Error)?.message ?? "";
+          if (msg.includes("unique") || msg.includes("duplicate") || msg.includes("23505")) {
+            return NextResponse.json({ error: "This marketplace opportunity was just claimed." }, { status: 409 });
+          }
+          throw insertErr;
+        }
+      }
+
+      if (!updated.length) {
+        return NextResponse.json({ error: "This opportunity is no longer available." }, { status: 409 });
+      }
+
+      const updatedOpportunity = await sql`
+        UPDATE network_opportunities
+           SET status = CASE WHEN ${claimMode} = 'exclusive' THEN 'claimed' ELSE status END,
+               marketplace_status = CASE WHEN ${claimMode} = 'exclusive' THEN 'claimed' ELSE marketplace_status END,
+               claimed_at = COALESCE(claimed_at, NOW()),
+               claim_count = LEAST(COALESCE(claim_count, 0) + 1, ${maxClaims}),
+               updated_at = NOW()
+         WHERE id = ${id}
+           AND status = 'live'
+           AND COALESCE(marketplace_status, 'live') = 'live'
+           AND (
+             (${claimMode} = 'exclusive' AND COALESCE(claim_count, 0) = 0)
+             OR (${claimMode} = 'shared' AND COALESCE(claim_count, 0) < ${maxClaims})
+           )
+        RETURNING id, status, marketplace_status, claim_count
+      `;
+
+      if (!updatedOpportunity.length) {
+        await logNetworkEvent({
+          event_type: "assignment.claim_blocked",
+          event_category: "assignment",
+          opportunity_id: id,
+          assignment_id: (updated[0] as Record<string, unknown>).id as string,
+          contractor_id: user.id,
+          data: {
+            source: "contractor_claim_flow_v1",
+            reason: "claim_capacity_or_status_changed",
+            claim_mode: claimMode,
+            max_claims: maxClaims,
+            eligibility,
+          },
+\n===== app/api/portal/dashboard/route.ts =====
+import { NextRequest, NextResponse } from 'next/server';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { getPortalSession } from '@/lib/portalAuth';
+import { normalizeDocumentLabel } from '@/lib/normalizeDocumentLabel';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+// ─── GET /api/portal/dashboard ──────────────────────────────────────────────
+// Returns client info + their projects (homeowner_stage only — NOT project_status)
+export async function GET(req: NextRequest) {
+  // Rate limit
+  const rl = await checkRateLimit('portal_read', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
+
+  // Auth — portal session cookie only
+  const session = getPortalSession(req);
+  if (!session) {
+    return NextResponse.json(
+      { success: false, error: 'Not authenticated', code: 'PORTAL_AUTH_REQUIRED' },
+      { status: 401 }
+    );
+  }
+
+  try {
+    const sql = await getDbReady();
+
+    // Fetch client record
+    const clients = await sql`
+      SELECT id, name, email, phone, address, city, state, zip
+      FROM clients
+      WHERE id = ${session.clientId}
+        AND LOWER(email) = ${session.email.toLowerCase()}
+        AND deleted_at IS NULL
+      LIMIT 1
+    `;
+
+    if (clients.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Account not found.', code: 'CLIENT_NOT_FOUND' },
+        { status: 404 }
+      );
+    }
+
+    const client = clients[0];
+
+    // Fetch projects for this client — ONLY homeowner_stage, NOT project_status
+    // Also pull owner contact info (company_phone, email) for the portal contact section
+    const projects = await sql`
+      SELECT
+        p.id,
+        p.name,
+        p.address,
+        p.system_size_kw,
+        p.homeowner_stage,
+        p.monitoring_platform AS "monitoringPlatform",
+        p.monitoring_url      AS "monitoringUrl",
+        p.updated_at,
+        p.created_at,
+        u.name           AS owner_name,
+        u.company_phone  AS owner_phone,
+        u.email          AS owner_email,
+        u.company        AS owner_company
+      FROM projects p
+      LEFT JOIN users u ON u.id = p.user_id
+      WHERE p.client_id = ${session.clientId}
+        AND p.deleted_at IS NULL
+      ORDER BY p.created_at DESC
+    `;
+
+    // Fetch stage history for all client projects (homeowner-safe: stage + date only)
+    const projectIds = projects.map((p: { id: string }) => p.id);
+    let stageHistory: { project_id: string; stage: string; created_at: string }[] = [];
+    if (projectIds.length > 0) {
+      const historyRows = await sql`
+        SELECT project_id, stage, created_at
+        FROM project_homeowner_stage_history
+        WHERE project_id = ANY(${projectIds})
+        ORDER BY created_at DESC
+        LIMIT 20
+      `;
+      stageHistory = historyRows.map((r: Record<string, unknown>) => ({
+        project_id: r.project_id as string,
+        stage: r.stage as string,
+        created_at: r.created_at as string,
+      }));
+    }
+
+    // Fetch documents — HOMEOWNER-SAFE ONLY
+    // Only surfaces files the homeowner uploaded themselves:
+    //   utility_bill  — their uploaded electric bill
+    //   portal_upload — anything they submitted via the portal
+    // Internal ops files (permit packets, BOM, SLD, engineering reports,
+    // site survey photos, client profile, etc.) are intentionally excluded.
+    let documents: {
+      project_id: string;
+      doc_type: string;
+      label: string;
+      uploaded_at: string;
+    }[] = [];
+
+    if (projectIds.length > 0) {
+      const pfRows = await sql`
+        SELECT
+          project_id::text,
+          'project_file'           AS doc_type,
+          file_type::text          AS file_type,
+          COALESCE(file_name, file_type, 'Document') AS label,
+          created_at::text         AS uploaded_at
+        FROM project_files
+        WHERE project_id = ANY(${projectIds})
+          AND file_type IN ('utility_bill', 'portal_upload')
+          AND (file_url IS NOT NULL OR file_data IS NOT NULL)
+          AND status != 'failed'
+        ORDER BY created_at DESC
+      `;
+
+      documents = pfRows.map((r: Record<string, unknown>) => ({
+        project_id:  String(r.project_id),
+        doc_type:    String(r.doc_type),
+        file_type:   r.file_type ? String(r.file_type) : undefined,
+        label:       normalizeDocumentLabel(String(r.label)),
+        uploaded_at: String(r.uploaded_at),
+      }));
+    }
+
+    // Fetch micro stages for all client projects (internal progress events)
+    let microStages: { project_id: string; micro_stage: string; created_at: string }[] = [];
+    if (projectIds.length > 0) {
+      try {
+        const microRows = await sql`
+          SELECT
+            project_id::text,
+            micro_stage::text,
+            created_at::text
+          FROM project_micro_stages
+          WHERE project_id = ANY(${projectIds})
+          ORDER BY created_at ASC
+        `;
+        microStages = microRows.map((r: Record<string, unknown>) => ({
+          project_id:  String(r.project_id),
+          micro_stage: String(r.micro_stage),
+          created_at:  String(r.created_at),
+        }));
+      } catch {
+        // project_micro_stages may not exist yet — non-fatal
+      }
+    }
+
+    // Derive owner contact info from the first project's owner (most recent project)
+    const firstProject = projects[0] as Record<string, unknown> | undefined;
+    const ownerName    = firstProject?.owner_name    ? String(firstProject.owner_name)    : null;
+    const ownerPhone   = firstProject?.owner_phone   ? String(firstProject.owner_phone)   : null;
+    const ownerEmail   = firstProject?.owner_email   ? String(firstProject.owner_email)   : null;
+    const ownerCompany = firstProject?.owner_company ? String(firstProject.owner_company) : null;
+
+    // Fetch proposals for all client projects (share_token + metadata for portal CTA)
+    // Only return proposals that have a share_token and haven't expired.
+    let proposals: {
+      id: string;
+      project_id: string;
+      name: string;
+      share_token: string;
+      share_expires_at: string | null;
+      signed_at: string | null;
+    }[] = [];
+
+    if (projectIds.length > 0) {
+      try {
+        const propRows = await sql`
+          SELECT
+            id::text,
+            project_id::text,
+            COALESCE(name, 'Solar Proposal') AS name,
+            share_token,
+            share_expires_at::text,
+\n===== app/api/portal/bill-upload/route.ts =====
+// ============================================================================
+// POST /api/portal/bill-upload
+//
+// Portal-specific bill upload endpoint.
+//
+// Flow:
+//   1. Verify portal session (cookie auth)
+//   2. Validate project_id belongs to this client
+//   3. Check if bill already exists → return early if so (no duplicate)
+//   4. Forward file to /api/bill-upload for parsing (reuse existing pipeline)
+//   5. Save parsed bill + raw file reference to project_files
+//   6. If current stage is 'lead_submitted' → advance to 'under_review'
+//   7. Return { success, billData, stageAdvanced }
+//
+// Rules:
+//   - Portal session cookie only (no bearer token)
+//   - project_id must belong to the authenticated client
+//   - Only renders upload UI when stage is lead_submitted or under_review
+//   - Idempotent: duplicate upload returns existing bill confirmation
+// ============================================================================
+
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
+import { getPortalSession } from '@/lib/portalAuth';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+import { writeMicroStage } from '@/lib/microStage';
+
+export async function POST(req: NextRequest) {
+  // ── Rate limit ────────────────────────────────────────────────────────────
+  const rl = await checkRateLimit('portal_read', getClientIp(req));
+  if (!rl.allowed) {
+    return NextResponse.json({ success: false, error: 'Too many requests' }, { status: 429 });
+  }
+
+  // ── Auth — portal session only ────────────────────────────────────────────
+  const session = getPortalSession(req);
+  if (!session) {
+    return NextResponse.json(
+      { success: false, error: 'Not authenticated', code: 'PORTAL_AUTH_REQUIRED' },
+      { status: 401 },
+    );
+  }
+
+  try {
+    const formData = await req.formData();
+    const file      = formData.get('file') as File | null;
+    const projectId = formData.get('project_id') as string | null;
+
+    if (!file) {
+      return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
+    }
+    if (!projectId || !isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'Invalid project_id' }, { status: 400 });
+    }
+
+    const sql = await getDbReady();
+
+    // ── Verify project belongs to this client ─────────────────────────────
+    const projectRows = await sql`
+      SELECT id, homeowner_stage, client_id
+      FROM projects
+      WHERE id = ${projectId}
+        AND client_id = ${session.clientId}
+        AND deleted_at IS NULL
+      LIMIT 1
+    `;
+    if (projectRows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+
+    const project = projectRows[0];
+    const currentStage = project.homeowner_stage as string | null;
+
+    // ── Check for existing bill (prevent duplicate upload UI) ─────────────
+    const existingBill = await sql`
+      SELECT id, created_at
+      FROM project_files
+      WHERE project_id = ${projectId}
+        AND file_type   = 'utility_bill'
+      LIMIT 1
+    `;
+    if (existingBill.length > 0) {
+      return NextResponse.json({
+        success:      true,
+        alreadyExists: true,
+        message:      'Utility bill already received.',
+        uploadedAt:   existingBill[0].created_at,
+      });
+    }
+
+    // ── Forward file to /api/bill-upload for parsing ──────────────────────
+    const parseFormData = new FormData();
+    parseFormData.append('file', file);
+
+    const parseRes = await fetch(
+      `${req.nextUrl.origin}/api/bill-upload`,
+      {
+        method:  'POST',
+        headers: { Cookie: req.headers.get('cookie') || '' },
+        body:    parseFormData,
+      },
+    );
+
+    const parseJson = await parseRes.json();
+
+    if (!parseJson.success || !parseJson.billData) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:   parseJson.error || 'Bill parsing failed. Please try a clearer image.',
+          stage:   parseJson.stage ?? null,
+          allow_manual_entry: parseJson.allow_manual_entry ?? false,
+        },
+        { status: parseRes.status >= 400 ? parseRes.status : 422 },
+      );
+    }
+
+    const billData = parseJson.billData;
+
+    // ── Save bill reference to project_files ──────────────────────────────
+    const summaryText = JSON.stringify({
+      utilityProvider: billData.utilityProvider ?? null,
+      monthlyKwh:      billData.monthlyKwh ?? null,
+      annualKwh:       billData.annualKwh ?? billData.estimatedAnnualKwh ?? null,
+      electricityRate: billData.electricityRate ?? null,
+      confidence:      billData.confidence ?? null,
+      uploadedVia:     'portal',
+    });
+
+    const buf = Buffer.from(summaryText, 'utf8');
+
+    // project_files requires user_id — use client_id as sentinel for portal uploads
+    const portalUserId = session.clientId;
+
+    try {
+      await sql`
+        INSERT INTO project_files
+          (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+        VALUES
+          (${projectId}, ${session.clientId}, ${portalUserId},
+           'Utility_Bill_Summary.json', 'utility_bill', ${buf.length},
+           'application/json', ${buf},
+           'Uploaded via homeowner portal')
+        ON CONFLICT (project_id, user_id, file_name)
+        DO UPDATE SET
+          file_data   = EXCLUDED.file_data,
+          notes       = EXCLUDED.notes,
+          upload_date = NOW()
+      `;
+    } catch {
+      // Fallback if ON CONFLICT not supported on this constraint
+      await sql`
+        DELETE FROM project_files
+        WHERE project_id = ${projectId}
+          AND user_id    = ${portalUserId}
+          AND file_name  = 'Utility_Bill_Summary.json'
+      `;
+      await sql`
+        INSERT INTO project_files
+          (project_id, client_id, user_id, file_name, file_type, file_size, mime_type, file_data, notes)
+        VALUES
+          (${projectId}, ${session.clientId}, ${portalUserId},
+           'Utility_Bill_Summary.json', 'utility_bill', ${buf.length},
+           'application/json', ${buf},
+           'Uploaded via homeowner portal')
+      `;
+    }
+
+    // ── Write micro stages: bill_uploaded + bill_parsed ────────────────────
+    // Critical events -- awaited so failures surface to the caller (writeMicroStage retries once internally)
+    await writeMicroStage(projectId, 'bill_uploaded', session.clientId, {
+      uploadedVia: 'portal',
+      fileType: file.type,
+    });
+    await writeMicroStage(projectId, 'bill_parsed', session.clientId, {
+      utilityProvider: billData.utilityProvider ?? null,
+\n===== app/api/engineering/plan-set/route.ts =====
+// ============================================================
+// /api/engineering/plan-set
+// POST — Generate a permit-grade plan set PDF from engineering data.
+//
+// ARCHITECTURE (v45.0 — Single Source of Truth):
+//   Design Studio → computeSystem() → ComputedSystem
+//   → buildPermitSystemModel() → PermitSystemModel
+//   → All sheet renderers (pure visual renderers)
+//   → PDF via wkhtmltopdf
+//
+//   The route calls computeSystem() ONCE at entry.
+//   All NEC 690.7 / 690.8 / 310.15 / 705.12 calculations
+//   come from the engine — NO duplicate NEC calcs in this file.
+//
+// Sheets generated (v45.0 — 7 sheets):
+//   G-1  Cover Sheet
+//   E-1  Electrical — Single-Line Diagram + Wire Schedule
+//   E-2  Equipment Schedule + BOM
+//   S-1  Structural Engineering
+//   A-1  Site / Roof Layout
+//   M-1  Mounting Details
+//   C-1  Code Compliance Checklist
+//
+// GET — Check if a plan set exists for a project
+// ============================================================
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getUserFromRequest } from '@/lib/auth';
+import { getDbReady, handleRouteDbError, isValidUUID } from '@/lib/db-neon';
+import { existsSync, unlinkSync } from 'fs';
+import { randomUUID } from 'crypto';
+import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
+
+import { buildCoverSheet, type CoverSheetInput } from '@/lib/plan-set/cover-sheet';
+import { buildElectricalSheet, type ElectricalSheetInput } from '@/lib/plan-set/electrical-sheet';
+import { buildStructuralSheet, type StructuralSheetInput } from '@/lib/plan-set/structural-sheet';
+import { buildEquipmentSchedule, buildDefaultEquipmentItems, enrichEquipmentItemsFromV4, type EquipmentScheduleInput } from '@/lib/plan-set/equipment-schedule';
+import { buildSiteLayoutSheet, type SiteLayoutSheetInput } from '@/lib/plan-set/site-layout-sheet';
+import { buildMountingDetailsSheet, type MountingDetailsSheetInput } from '@/lib/plan-set/mounting-details-sheet';
+import { buildComplianceSheet, type ComplianceSheetInput } from '@/lib/plan-set/compliance-sheet';
+import { wrapDocument, type TitleBlockData, fmtDate } from '@/lib/plan-set/title-block';
+import { searchAhj } from '@/lib/jurisdictions/ahj-national';
+import { calcFireSetbacks } from '@/lib/engineering/fire-setbacks';
+
+// ── Single Source of Truth: computeSystem + PermitSystemModel ──────────────
+import { computeSystem, type ComputedSystemInput, type ComputedSystem } from '@/lib/computed-system';
+import { buildPermitSystemModel, type PermitSystemModel } from '@/lib/plan-set/permit-system-model';
+import { BUILD_VERSION } from '@/lib/version';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 60;
+
+// ─── GET — check if plan set exists ───────────────────────────────────────
+export async function GET(req: NextRequest) {
+  try {
+    // v48.6: Rate limiting — 10 req / 30s per IP (protects heavy compute + external APIs)
+        const _rl = await checkRateLimit('engineering', getClientIp(req));
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please slow down.' },
+        { status: 429 }
+      );
+    }
+
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+
+    const { searchParams } = new URL(req.url);
+    const projectId = searchParams.get('projectId');
+    if (!projectId) return NextResponse.json({ success: false, error: 'projectId required' }, { status: 400 });
+
+    const sql = await getDbReady();
+    const rows = await sql`
+      SELECT id, file_name, file_size, upload_date
+      FROM project_files
+      WHERE project_id = ${projectId}
+        AND file_type = 'plan_set'
+      ORDER BY upload_date DESC
+      LIMIT 5
+    `;
+
+    return NextResponse.json({ success: true, planSets: rows });
+  } catch (err: unknown) {
+    return handleRouteDbError('[app/api/engineering/plan-set/route.ts]', err);
+  }
+}
+
+// ─── POST — generate plan set ─────────────────────────────────────────────
+export async function POST(req: NextRequest) {
+  const tmpFiles: string[] = [];
+
+  console.log('[PLANSET V43 ENTRY]', { timestamp: Date.now(), route: '/api/engineering/plan-set' });
+
+  try {
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+
+    const body = await req.json();
+    console.log('[PLANSET V43] Body received', {
+      systemKw: body.systemKw,
+      panelCount: body.panelCount,
+      projectId: body.projectId,
+      hasStrings: Array.isArray(body.strings) && body.strings.length > 0,
+    });
+    const {
+      projectId,
+      clientId,
+      // Project
+      projectName,
+      clientName,
+      ownerContact,
+      address,
+      city,
+      state,
+      zip,
+      county,
+      parcelNumber,
+      // System
+      systemKw,
+      panelCount,
+      panelModel,
+      panelWatts,
+      panelWeightLbs,
+      panelLengthIn,
+      panelWidthIn,
+      // Module electrical specs
+      moduleVoc,
+      moduleIsc,
+      moduleVmp,
+      moduleImp,
+      moduleTempCoeffVoc,
+      panelsPerString,
+      // Inverter
+      inverterType,
+      inverterModel,
+      inverterManufacturer,
+      inverterCount,
+      inverterKw,
+      inverterVacOut,
+      inverterMaxDcV,
+      inverterMaxAcA,
+      inverterMpptMin,
+      inverterMpptMax,
+      inverterMaxDcA,
+      // Temperature inputs
+      minAmbientTempC,
+      maxRooftopTempC,
+      // Mounting / Roof
+      mountType,
+      roofType,
+      roofPitchDeg,
+      roofPitchRatio,
+      rafterSize,
+      rafterSpacingIn,
+      rafterSpanFt,
+      // Site geometry (for A-1)
+      roofWidthFt,
+      roofLengthFt,
+      // Equipment locations (for A-1)
+      inverterLocation,
+      disconnectLocation,
+      meterLocation,
+      mainPanelLocation,
+      // Mounting hardware (for M-1)
+      mountingSystem,
+      railType,
+      flashingType,
+      lagBoltSize,
+      lagBoltSpacingFt,
+      panelThicknessIn,
+      panelFrameHeight,
+      sheathingType,
+      bondingHardware,
+      // Electrical (from config / compliance)
+      strings,
+      dcWireGauge,
+      dcConduitType,
+      acWireGauge,
+\n===== app/api/engineering/permit/route.ts =====
+// ============================================================
+// Permit Package PDF Generator — SolarPro V4
+// POST /api/engineering/permit
+//
+// MODULARIZED: All page generators + orchestrator live in lib/permit/
+// This file is a thin controller handling auth, DB, PDF conversion.
+// ============================================================
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getUserFromRequest } from '@/lib/auth';
+import { getDbReady, isValidUUID } from '@/lib/db-neon';
+import { checkPipelineGuard, extractCanonicalSnapshot } from '@/lib/engineering/pipelineGuard';
+import { getMountingSystemById } from '@/lib/mounting-hardware-db';
+import { generatePdfFromHtml } from '@/lib/pdf/generatePdf';
+
+// Permit engine imports (modularized)
+import { generatePermitHTML, PLANSET_ENGINE_VERSION, PDF_PAGE_CONFIG } from '@/lib/permit';
+import type { PermitInput } from '@/lib/permit';
+import { fetchAerialRoofData } from '@/lib/permit/sections/sitePlan';
+
+// Site Survey pipeline imports — survey data enriches the permit plan set
+import { fromPhysicalData, type ProjectPhysicalDataRow } from '@/lib/siteSurvey/fromPhysicalData';
+import { normalizeSurvey } from '@/lib/siteSurvey/normalizeSurvey';
+import { enrichSurvey } from '@/lib/siteSurvey/enrichSurvey';
+import { permitIntegration } from '@/lib/siteSurvey/permitIntegration';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';          // Ensure Node.js runtime (Buffer, child_process)
+export const maxDuration = 60;            // 60s — aerial API calls can take 10-15s total
+
+
+// ─── Route Handler ────────────────────────────────────────────────────────────
+
+// ── GET /api/engineering/permit?projectId=xxx[&format=pdf] ────────────────────
+// Serves the saved permit HTML (or PDF) from project_files.
+// Requires the permit to have been generated via POST first.
+// Used by the Download button in the permit viewer.
+export async function GET(req: NextRequest) {
+  try {
+    // v48.6: Rate limiting — 10 req / 30s per IP (protects heavy compute + external APIs)
+        const _rl = await checkRateLimit('engineering', getClientIp(req));
+    if (!_rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: 'Too many requests. Please slow down.' },
+        { status: 429 }
+      );
+    }
+
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+
+    const projectId = req.nextUrl.searchParams.get('projectId');
+    const format    = req.nextUrl.searchParams.get('format') || 'pdf';
+
+    if (!projectId || !isValidUUID(projectId)) {
+      return NextResponse.json({ success: false, error: 'projectId (UUID) required' }, { status: 400 });
+    }
+
+    const sql = await getDbReady();
+
+    // Ownership check
+    const projectRows = await sql`
+      SELECT id, user_id, name FROM projects WHERE id = ${projectId} AND deleted_at IS NULL
+    `;
+    if (projectRows.length === 0) {
+      return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+    const projectRow = projectRows[0];
+    if (projectRow.user_id !== user.id) {
+      const roleRows = await sql`SELECT role FROM users WHERE id = ${user.id}`;
+      if (roleRows[0]?.role !== 'super_admin' && roleRows[0]?.role !== 'admin') {
+        return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
+      }
+    }
+
+    // Load saved permit HTML
+    const fileRows = await sql`
+      SELECT file_data FROM project_files
+      WHERE project_id = ${projectId}
+        AND user_id    = ${projectRow.user_id}
+        AND file_name  = 'permit_planset.html'
+      LIMIT 1
+    `;
+
+    if (fileRows.length === 0 || !fileRows[0].file_data) {
+      return NextResponse.json({
+        success: false,
+        error: 'No permit package found for this project. Generate the permit first from the Engineering page.',
+        code: 'PERMIT_NOT_GENERATED',
+      }, { status: 404 });
+    }
+
+    const html = fileRows[0].file_data instanceof Buffer
+      ? fileRows[0].file_data.toString('utf8')
+      : String(fileRows[0].file_data);
+
+    // ── Staleness check ─────────────────────────────────────────────────────
+    // Reads the <meta name="planset-version"> tag embedded in every saved HTML.
+    // If the saved version is older than PLANSET_ENGINE_VERSION, force regenerate.
+    // Falls back gracefully if the meta tag is absent (pre-v47.312 plansets always stale).
+    {
+      const metaMatch = html.match(/<meta\s+name="planset-version"\s+content="(\d+)"/);
+      const savedVerNum = metaMatch ? parseInt(metaMatch[1], 10) : 0;
+      if (savedVerNum < PLANSET_ENGINE_VERSION) {
+        const savedVerLabel = savedVerNum > 0 ? `v47.${savedVerNum - 47000}` : 'pre-v47.312 (no version tag)';
+        console.warn(`[permit/GET] Stale planset detected: ${savedVerLabel} < v47.${PLANSET_ENGINE_VERSION - 47000} \u2014 forcing regenerate`);
+        return NextResponse.json({
+          success: false,
+          error: `Your saved permit package was generated with an older version (${savedVerLabel}). Please click "Generate Permit Package" again to create an updated version with the latest fixes.`,
+          code: 'PERMIT_STALE',
+          savedVersion: savedVerLabel,
+          minimumVersion: `v47.${PLANSET_ENGINE_VERSION - 47000}`,
+        }, { status: 409 });
+      }
+    }
+    // ── End staleness check ──────────────────────────────────────────────────
+
+    const safeProjectName = (projectRow.name || 'project')
+      .replace(/[^\x00-\xFF]/g, '')
+      .replace(/[\r\n]/g, '')
+      .replace(/[^\w\s\-\.]/g, '_')
+      .trim() || 'project';
+
+    if (format === 'html') {
+      return new NextResponse(html, {
+        headers: {
+          'Content-Type': 'text/html',
+          'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
+        },
+      });
+    }
+
+    // PDF via Puppeteer+chromium (Vercel-compatible)
+    const pdfResult = await generatePdfFromHtml(html, {
+      landscape: true,
+      widthIn: PDF_PAGE_CONFIG.width,
+      heightIn: PDF_PAGE_CONFIG.height,
+    });
+
+    if (pdfResult) {
+      return new NextResponse(pdfResult.pdf as unknown as BodyInit, {
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.pdf"`,
+          'Cache-Control': 'no-store',
+          'X-Pdf-Method': pdfResult.method,
+        },
+      });
+    }
+
+    return new NextResponse(html, {
+      headers: {
+        'Content-Type': 'text/html',
+        'Content-Disposition': `attachment; filename="PermitPackage-${safeProjectName}.html"`,
+        'X-Pdf-Method': 'html-fallback',
+      },
+    });
+
+  } catch (error: unknown) {
+    console.error('[permit/GET] Error:', error);
+    return NextResponse.json(
+      { success: false, error: (error as Error).message || 'Download failed' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const user = getUserFromRequest(req);
+    if (!user) return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+
+    const body = await req.json() as PermitInput;
+    const { project } = body;
+
+    if (!project) {
+      return NextResponse.json({ success: false, error: 'Missing project data' }, { status: 400 });
+    }
+
+\n===== app/api/webhooks/survey-complete/route.ts =====
+// ============================================================================
+// v47.435 Stage 9.2 — Inbound Survey Webhook Endpoint
+//
+// Receives survey.completed notifications from the in-house survey tool.
+//
+// Flow:
+//   1. Read raw body (must match signed bytes exactly).
+//   2. Verify HMAC signature against SURVEY_WEBHOOK_SECRET.
+//   3. Parse + validate envelope shape.
+//   4. Check webhook_deliveries for duplicate event_id → 200 no-op if seen.
+//   5. Insert webhook_deliveries row with status='verified'.
+//   6. Build IngestContext and call runIngestPipeline().
+//   7. Return 202 Accepted with ingest result (success or failed-but-logged).
+//
+// v47.435 PIPELINE STATE:
+//   - payload fetch (Step C) is a stub: rawPayload=null (blocked on Q2).
+//   - field mapping is a scaffold (blocked on Q3).
+//   - project upsert is LIVE: creates real projects with origin='survey'.
+//
+// v47.436+: async photo fetch worker, handoff JWT minter.
+// ============================================================================
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+export const maxDuration = 30;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getDbReady, handleRouteDbError } from '@/lib/db-neon';
+import { BUILD_VERSION } from '@/lib/version';
+import {
+  verifyWebhookSignature,
+  TIMESTAMP_TOLERANCE_SECONDS,
+} from '@/lib/survey/verifyWebhookSignature';
+import {
+  CURRENT_SCHEMA_VERSION,
+  type SurveyCompletedEvent,
+} from '@/lib/survey/types';
+import { validateEnvelope } from '@/lib/survey/envelopeValidator';
+import { runIngestPipeline } from '@/lib/survey/ingest/ingestPipeline';
+import type { IngestContext } from '@/lib/survey/ingest/types';
+import { resolveIngestOwner } from '@/lib/survey/ingest/ownerResolver';
+
+export async function POST(req: NextRequest) {
+  const secret = process.env.SURVEY_WEBHOOK_SECRET;
+  if (!secret) {
+    // Missing secret = server misconfiguration; return 500 without any DB side-effect.
+    // Never leak whether the secret is missing vs. invalid to the caller.
+    console.error('[webhook:survey-complete] SURVEY_WEBHOOK_SECRET is not configured');
+    return NextResponse.json(
+      { success: false, error: 'Webhook receiver not configured', producerVersion: BUILD_VERSION },
+      { status: 500 },
+    );
+  }
+
+  // ── Read raw body (bytes-exact for HMAC) ───────────────────────────────
+  let rawBody: string;
+  try {
+    rawBody = await req.text();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: 'Could not read request body', producerVersion: BUILD_VERSION },
+      { status: 400 },
+    );
+  }
+
+  const signatureHeader = req.headers.get('x-survey-signature');
+  const timestampHeader = req.headers.get('x-survey-timestamp');
+  const eventIdHeader = req.headers.get('x-survey-event-id');
+
+  // ── SURVEY_WEBHOOK_RECEIVED ────────────────────────────────────────────────
+  // Emitted on every inbound call BEFORE signature check so we can prove
+  // the payload reached SolarPro regardless of what happens next.
+  // Search Vercel logs for: SURVEY_WEBHOOK_RECEIVED
+  console.info(
+    JSON.stringify({
+      tag:          'SURVEY_WEBHOOK_RECEIVED',
+      timestamp:    new Date().toISOString(),
+      eventId:      eventIdHeader ?? null,
+      hasSignature: Boolean(signatureHeader),
+      hasTimestamp: Boolean(timestampHeader),
+      bodyLength:   rawBody.length,
+    }),
+  );
+
+  const sigResult = verifyWebhookSignature({
+    rawBody,
+    signatureHeader,
+    timestampHeader,
+    secret,
+  });
+
+  // ── DB handle (needed for both valid and invalid paths: we log everything) ─
+  let sql;
+  try {
+    sql = await getDbReady();
+  } catch (err) {
+    return handleRouteDbError('[POST /api/webhooks/survey-complete]', err);
+  }
+
+  // ── Parse envelope (only attempted if signature is valid; otherwise we log raw) ─
+  let envelope: SurveyCompletedEvent | null = null;
+  let envelopeError: string | null = null;
+
+  if (sigResult.valid) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawBody);
+    } catch {
+      envelopeError = 'Body is not valid JSON';
+    }
+    if (!envelopeError) {
+      const v = validateEnvelope(parsed);
+      if (v.ok) {
+        envelope = v.event;
+      } else {
+        envelopeError = v.error;
+      }
+    }
+  }
+
+  // ── Idempotency check (only meaningful when we have a verified event_id) ─
+  // Prefer event_id from envelope; fall back to X-Survey-Event-Id header if present.
+  const effectiveEventId = envelope?.event_id ?? eventIdHeader ?? null;
+
+  if (sigResult.valid && envelope && effectiveEventId) {
+    try {
+      const existing = await sql`
+        SELECT id, status FROM webhook_deliveries
+         WHERE source = 'survey' AND event_id = ${effectiveEventId}
+         LIMIT 1
+      `;
+      if (existing.length > 0) {
+        // Duplicate delivery — record nothing new, return 200 no-op.
+        // Survey backend will mark this delivered and stop retrying.
+        return NextResponse.json(
+          {
+            // Partner-contract fields (v47.435)
+            ok: true,
+            duplicate: true,
+            event_id: effectiveEventId,
+            // Extended fields for internal ops
+            success: true,
+            data: {
+              duplicate: true,
+              existingDeliveryId: existing[0].id,
+              existingStatus: existing[0].status,
+            },
+            producerVersion: BUILD_VERSION,
+          },
+          { status: 200 },
+        );
+      }
+    } catch (err) {
+      return handleRouteDbError('[POST /api/webhooks/survey-complete:idempotency]', err);
+    }
+  }
+
+  // ── Record delivery (valid or invalid — ops needs to see both) ────────
+  const deliveryStatus: 'verified' | 'failed' = sigResult.valid && envelope ? 'verified' : 'failed';
+  const deliveryError: string | null = !sigResult.valid
+    ? `HMAC verification failed: ${sigResult.reason ?? 'unknown'}`
+    : envelopeError;
+
+  // For the log row we need SOMETHING as event_id even when unverified, so
+  // downstream queries on webhook_deliveries don't fail. We use the header
+  // if present, else a synthetic marker. The (source, event_id) unique-ish
+  // pattern is NOT enforced as a DB UNIQUE to allow logging repeated failures.
+  const logEventId = effectiveEventId ?? `unverified-${Date.now()}`;
+  const logEventType = envelope?.event ?? 'survey.completed'; // best guess; we know only survey.completed is valid in v1
+
+  let deliveryId: string;
+  try {
+    const rows = await sql`
+      INSERT INTO webhook_deliveries (
+        source, event_type, event_id,
+        signature_header, timestamp_header, signature_valid,
+        raw_body, status, error_message, processed_at
+      ) VALUES (
+        'survey', ${logEventType}, ${logEventId},
+        ${signatureHeader}, ${timestampHeader}, ${sigResult.valid},
+\n===== app/api/survey/submit/route.ts =====
+// ============================================================================
+// v47.438 - Survey V2: POST /api/survey/submit
+//
+// Accepts the completed survey payload, verifies the JWT, validates required
+// fields, then forwards to the webhook ingest pipeline via the existing
+// POST /api/webhooks/survey-complete endpoint (internal call).
+//
+// Request body: { token: string, payload: SurveyV2Payload }
+//
+// Auth: JWT in request body (no session cookie - mobile field device).
+//
+// v47.438: Handles standalone surveys (project_id === "__standalone__"):
+//   - Skips the project_id === payload.projectId check for standalone tokens.
+//   - Validates that selectedClientId OR selectedProjectId is present for
+//     standalone surveys (ensures the field worker made a selection).
+//   - Forwards solarpro_selected_project_id and solarpro_selected_client_id
+//     to the ingest pipeline via the webhook body.
+//
+// Returns:
+//   200 { ok: true, surveyId }  - submitted + ingested
+//   400 { error }               - validation failure
+//   401 { error }               - invalid/expired token
+//   500 { error }               - internal error
+//
+// Pure ASCII, no Unicode.
+// ============================================================================
+
+export const maxDuration = 30;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { verifyHandoffToken } from '../../../../lib/survey/handoff/tokenMinter';
+import { REQUIRED_PHOTO_CATEGORIES, STANDALONE_PROJECT_ID } from '../../../../lib/survey/v2/types';
+import type { SurveyV2Payload } from '../../../../lib/survey/v2/types';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// ---------------------------------------------------------------------------
+// POST handler
+// ---------------------------------------------------------------------------
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    // -- Rate limiting -------------------------------------------------------
+    const rl = await checkRateLimit('survey', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429 });
+    }
+    const body = await req.json().catch(() => null);
+
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+    }
+
+    const { token, payload } = body as { token?: string; payload?: SurveyV2Payload };
+
+    // Validate token
+    if (typeof token !== 'string' || !token) {
+      return NextResponse.json({ error: 'Missing token' }, { status: 400 });
+    }
+
+    // Verify JWT
+    const claims = verifyHandoffToken(token);
+    if (!claims) {
+      return NextResponse.json(
+        { error: 'Invalid or expired survey token' },
+        { status: 401 },
+      );
+    }
+
+    // Validate payload shape
+    if (!payload || typeof payload !== 'object') {
+      return NextResponse.json({ error: 'Missing payload' }, { status: 400 });
+    }
+
+    const isStandalone =
+      claims.project_id === STANDALONE_PROJECT_ID || claims.standalone === true;
+
+    // For non-standalone surveys: verify payload.projectId matches JWT project_id.
+    // For standalone surveys: the project_id is "__standalone__" in both places — skip match.
+    if (!isStandalone && payload.projectId !== claims.project_id) {
+      return NextResponse.json(
+        { error: 'Token project_id does not match payload projectId' },
+        { status: 400 },
+      );
+    }
+
+    const validationError = validatePayload(payload, isStandalone);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Forward to internal webhook ingest pipeline
+    // ---------------------------------------------------------------------------
+    const webhookSecret = process.env.SURVEY_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      console.error('[survey/submit] SURVEY_WEBHOOK_SECRET not set');
+      return NextResponse.json(
+        { error: 'Server configuration error' },
+        { status: 500 },
+      );
+    }
+
+    // Build the webhook envelope body.
+    // v47.438: Add solarpro_selected_project_id and solarpro_selected_client_id
+    // for standalone surveys. These are forwarded to projectLinkResolver.
+    const webhookBodyObj: Record<string, unknown> = {
+      // Envelope fields required by envelopeValidator.ts
+      event:        'survey.completed',
+      event_id:     payload.surveyId,
+      survey_id:    payload.surveyId,
+      completed_at: payload.submittedAt,
+      // schemaVersion is intentionally OMITTED from the webhook envelope.
+      // The envelope validator (envelopeValidator.ts) accepts absent schemaVersion
+      // and coerces it to CURRENT_SCHEMA_VERSION ('1.0'). The mobile payload's
+      // schemaVersion ('2.0') is an internal V2 schema and must not be forwarded.
+      // F-06 ownership claims — forwarded from the verified handoff JWT.
+      solarpro_user_id:    claims.solarpro_user_id    ?? null,
+      // v47.442: Use claims.solarpro_project_id when present (explicit handoff JWT claim).
+      // Fall back to payload.projectId when solarpro_project_id is absent from the JWT
+      // (e.g. the JWT was minted without it) but the payload carries a real project UUID.
+      // This ensures Strategy 3 (project-based owner resolution in ownerResolver.ts) can
+      // fire even when the JWT predates the solarpro_project_id claim addition.
+      // NEVER forward __standalone__ as a project ID -- that is a sentinel, not a UUID.
+      solarpro_project_id: claims.solarpro_project_id
+        ?? (payload.projectId && payload.projectId !== STANDALONE_PROJECT_ID
+            ? payload.projectId
+            : null),
+      solarpro_email:      claims.solarpro_email       ?? null,
+      // Survey payload fields
+      projectId:         payload.projectId,
+      submittedAt:       payload.submittedAt,
+      inspectorName:     payload.inspectorName,
+      siteOverview:      payload.siteOverview,
+      roofConditions:    payload.roofConditions,
+      electricalService: payload.electricalService,
+      obstructions:      payload.obstructions,
+      photos:            payload.photos,
+    };
+
+    // v47.438: Forward on-device picker selections for standalone surveys
+    if (isStandalone) {
+      webhookBodyObj['solarpro_selected_project_id'] = payload.selectedProjectId ?? null;
+      webhookBodyObj['solarpro_selected_client_id']  = payload.selectedClientId  ?? null;
+    }
+
+    // v47.441: Inline the full SurveyV2Payload so the ingest pipeline (Step C)
+    // can use it directly as rawPayload without fetching from the partner API.
+    // This ensures photos (with category labels) and physicalData are extracted
+    // by the v2.0 transformer even though schemaVersion is absent from the envelope.
+    webhookBodyObj['inline_payload'] = payload as unknown as Record<string, unknown>;
+
+    const webhookBodyStr = JSON.stringify(webhookBodyObj);
+
+    // Timestamp is included in the signed string so the verifier can enforce
+    // replay-protection (5-minute tolerance window). ISO-8601 format is accepted
+    // by parseTimestampHeaderToSeconds() in verifyWebhookSignature.ts.
+    const timestamp = new Date().toISOString();
+    const signedString = `${timestamp}.${webhookBodyStr}`;
+
+    const { createHmac } = await import('crypto');
+    const signature = createHmac('sha256', webhookSecret)
+      .update(signedString)
+      .digest('hex');
+
+    // Construct internal webhook URL — always this app, never the partner app
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+    const webhookUrl = `${baseUrl.replace(/\/$/, '')}/api/webhooks/survey-complete`;
+
+    const webhookRes = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type':       'application/json',
+        'x-survey-signature': `sha256=${signature}`,
+        'x-survey-timestamp': timestamp,
+        'x-survey-event-id':  webhookBodyObj.event_id as string,
+      },
+      body: webhookBodyStr,
+    });
+
+    if (!webhookRes.ok) {
+      const webhookResBody = await webhookRes.json().catch(() => ({}));
+\n===== app/api/solar/route.ts =====
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const maxDuration = 30;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
+import { RoofPlane, RoofEdgeType, SolarApiSegment } from '@/types';
+import { requireAuth } from '@/lib/security';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// SECURITY: Read key from env var only — never hardcoded in source.
+const GOOGLE_SOLAR_API_KEY =
+  process.env.GOOGLE_SOLAR_API_KEY ||
+  process.env.GOOGLE_MAPS_API_KEY ||
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  '';
+
+// ─── Geometry helpers ────────────────────────────────────────────────────────
+
+const rad = (d: number) => (d * Math.PI) / 180;
+
+function offsetLatLng(
+  lat: number, lng: number, dxE: number, dyN: number
+): { lat: number; lng: number } {
+  return {
+    lat: lat + dyN / 111320,
+    lng: lng + dxE / (111320 * Math.cos(rad(lat))),
+  };
+}
+
+function distanceM(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const dLat = (b.lat - a.lat) * 111320;
+  const dLng = (b.lng - a.lng) * 111320 * Math.cos(rad((a.lat + b.lat) / 2));
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+}
+
+/**
+ * Reconstruct a 4-vertex polygon for a roof segment.
+ *
+ * Vertex order (clockwise from top-left when facing the slope):
+ *   [0] ridge-left   [1] ridge-right
+ *   [3] eave-left    [2] eave-right
+ *
+ * The "ridge" side is opposite the azimuth direction (up-slope).
+ * The "eave" side is in the azimuth direction (down-slope / facing direction).
+ */
+function reconstructPolygon(seg: SolarApiSegment): { lat: number; lng: number }[] {
+  const clat = seg.center.latitude;
+  const clng = seg.center.longitude;
+
+  // Bounding box half-dimensions
+  const bbW = distanceM(
+    { lat: seg.boundingBox.sw.latitude, lng: seg.boundingBox.sw.longitude },
+    { lat: seg.boundingBox.sw.latitude, lng: seg.boundingBox.ne.longitude }
+  ) / 2;
+  const bbH = distanceM(
+    { lat: seg.boundingBox.sw.latitude, lng: seg.boundingBox.sw.longitude },
+    { lat: seg.boundingBox.ne.latitude, lng: seg.boundingBox.sw.longitude }
+  ) / 2;
+
+  // Small margin so adjacent planes visually touch
+  const hw = bbW * 1.02;
+  const hd = bbH * 1.02;
+
+  // azimuth = down-slope direction; ridge is opposite (up-slope)
+  const az      = rad(seg.azimuthDegrees);
+  const perpAz  = az + Math.PI / 2;
+
+  const downE  = Math.sin(az);      const downN  = Math.cos(az);
+  const rightE = Math.sin(perpAz);  const rightN = Math.cos(perpAz);
+
+  return [
+    offsetLatLng(clat, clng, -rightE * hw - downE * hd, -rightN * hw - downN * hd), // [0] ridge-left
+    offsetLatLng(clat, clng,  rightE * hw - downE * hd,  rightN * hw - downN * hd), // [1] ridge-right
+    offsetLatLng(clat, clng,  rightE * hw + downE * hd,  rightN * hw + downN * hd), // [2] eave-right
+    offsetLatLng(clat, clng, -rightE * hw + downE * hd, -rightN * hw + downN * hd), // [3] eave-left
+  ];
+}
+
+/**
+ * Default edge types for a 4-vertex polygon from reconstructPolygon():
+ *   edge 0: [0]→[1] = top  = ridge
+ *   edge 1: [1]→[2] = right = rake
+ *   edge 2: [2]→[3] = bottom = eave
+ *   edge 3: [3]→[0] = left  = rake
+ */
+function defaultEdgeTypes(): RoofEdgeType[] {
+  return ['ridge', 'rake', 'eave', 'rake'];
+}
+
+/**
+ * Detect shared edges between all pairs of polygons.
+ * A shared edge = two edge midpoints within 3m of each other.
+ * Returns Map<segIndex, Array<{neighborIdx, edgeIdx}>>
+ */
+function detectAdjacencies(
+  polygons: { lat: number; lng: number }[][]
+): Map<number, { neighborIdx: number; edgeIdx: number }[]> {
+  const result = new Map<number, { neighborIdx: number; edgeIdx: number }[]>();
+
+  for (let i = 0; i < polygons.length; i++) {
+    result.set(i, []);
+  }
+
+  for (let i = 0; i < polygons.length; i++) {
+    for (let j = i + 1; j < polygons.length; j++) {
+      const polyI = polygons[i];
+      const polyJ = polygons[j];
+
+      for (let ei = 0; ei < polyI.length; ei++) {
+        const mI = {
+          lat: (polyI[ei].lat + polyI[(ei + 1) % polyI.length].lat) / 2,
+          lng: (polyI[ei].lng + polyI[(ei + 1) % polyI.length].lng) / 2,
+        };
+        for (let ej = 0; ej < polyJ.length; ej++) {
+          const mJ = {
+            lat: (polyJ[ej].lat + polyJ[(ej + 1) % polyJ.length].lat) / 2,
+            lng: (polyJ[ej].lng + polyJ[(ej + 1) % polyJ.length].lng) / 2,
+          };
+          if (distanceM(mI, mJ) < 2.5) { // tightened: 2.5m catches shared edges, avoids false positives
+            result.get(i)!.push({ neighborIdx: j, edgeIdx: ei });
+            result.get(j)!.push({ neighborIdx: i, edgeIdx: ej });
+          }
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Refine edge types using adjacency data and plane heights.
+ * Shared side edges become 'hip'.
+ * If the shared edge is the "top" (index 0, normally ridge) and the neighbor
+ * is also pointing roughly opposite, it stays 'ridge' (two planes meeting at ridge).
+ * If a shared edge has the neighbor HIGHER than self, it's a 'valley'.
+ */
+function refineEdgeTypes(
+  baseTypes: RoofEdgeType[],
+  segIdx: number,
+  adjacencies: { neighborIdx: number; edgeIdx: number }[],
+  segments: SolarApiSegment[]
+): RoofEdgeType[] {
+  const types = [...baseTypes] as RoofEdgeType[];
+  const selfHeight = segments[segIdx].planeHeightAtCenterMeters;
+
+  for (const { neighborIdx, edgeIdx } of adjacencies) {
+    const neighborHeight = segments[neighborIdx].planeHeightAtCenterMeters;
+    const neighborAz     = segments[neighborIdx].azimuthDegrees;
+    const selfAz         = segments[segIdx].azimuthDegrees;
+
+    // If edge 0 (ridge side) is shared and neighbor faces opposite direction
+    // → this is a true ridge between two slopes (keep as 'ridge')
+    if (edgeIdx === 0) {
+      const azDiff = Math.abs(((neighborAz - selfAz + 540) % 360) - 180);
+      if (azDiff > 120) {
+        types[0] = 'ridge'; // confirmed ridge
+      } else {
+        // Same-direction neighbors sharing top edge = hip return
+        types[0] = 'hip';
+      }
+    } else if (edgeIdx === 2) {
+      // Eave edge shared = wall or valley
+      types[2] = neighborHeight > selfHeight ? 'valley' : 'eave';
+    } else {
+      // Side edges (1 or 3)
+      types[edgeIdx] = neighborHeight > selfHeight ? 'valley' : 'hip';
+    }
+  }
+
+  return types;
+}
+
+/**
+ * Full pipeline: Solar API segments → RoofPlane[]
+ */
+\n===== app/api/maps-session/route.ts =====
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+export const maxDuration = 30;
+
+import { NextRequest, NextResponse } from 'next/server';
+import { handleRouteDbError } from '@/lib/db-neon';
+import { requireAuth } from '@/lib/security';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimiter';
+
+// SECURITY: Read key from env var only — never hardcoded in source.
+// Set GOOGLE_MAPS_API_KEY (server-side) or NEXT_PUBLIC_GOOGLE_MAPS_API_KEY in .env
+const GOOGLE_MAPS_API_KEY =
+  process.env.GOOGLE_MAPS_API_KEY ||
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ||
+  '';
+
+let cachedSession: { token: string; expiry: number } | null = null;
+
+async function getSessionToken(): Promise<string> {
+  if (!GOOGLE_MAPS_API_KEY) throw new Error('GOOGLE_MAPS_API_KEY not configured');
+  const now = Math.floor(Date.now() / 1000);
+  if (cachedSession && cachedSession.expiry > now + 300) {
+    return cachedSession.token;
+  }
+
+  const res = await fetch(
+    `https://tile.googleapis.com/v1/createSession?key=${GOOGLE_MAPS_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mapType: 'satellite', language: 'en-US', region: 'US' }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`Session creation failed: ${res.status}`);
+  const data = await res.json();
+  cachedSession = { token: data.session, expiry: parseInt(data.expiry) };
+  return data.session;
+}
+
+// GET /api/maps-session → returns { session }
+// SECURITY: Requires authentication — prevents unauthenticated quota abuse.
+// Client reads NEXT_PUBLIC_GOOGLE_MAPS_API_KEY from process.env directly;
+// the key is NOT returned in this response body.
+export async function GET(req: NextRequest) {
+  // SECURITY: Require authenticated user
+  const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
+  try {
+    const session = await getSessionToken();
+    // Return session only — do NOT expose key in response body
+    return NextResponse.json({ session });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/maps-session/route.ts]', e);
+  }
+}
+
+// POST /api/maps-session → proxies satellite tile
+// SECURITY: Requires authentication — prevents unauthenticated tile scraping.
+export async function POST(req: NextRequest) {
+  // SECURITY: Require authenticated user
+  const _auth = await requireAuth(req); if (_auth.response) return _auth.response;
+
+  try {
+    // Use the 'tile' rate limiter (60/60s) for tile proxy requests — higher volume OK
+    const rl = await checkRateLimit('tile', getClientIp(req));
+    if (!rl.allowed) {
+      return NextResponse.json({ success: false, error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
+
+    const body = await req.json();
+    // BUG-21-08 FIX: Validate z/x/y as non-negative integers before interpolating into URL
+    const z = parseInt(String(body.z), 10);
+    const x = parseInt(String(body.x), 10);
+    const y = parseInt(String(body.y), 10);
+    if (isNaN(z) || isNaN(x) || isNaN(y) || z < 0 || x < 0 || y < 0 || z > 22) {
+      return new NextResponse('Invalid tile coordinates', { status: 400 });
+    }
+    const session = await getSessionToken();
+    // BUG-21-08 FIX: Use validated integers and encodeURIComponent on token/key — no injection possible
+    const url = `https://tile.googleapis.com/v1/2dtiles/${z}/${x}/${y}?session=${encodeURIComponent(session)}&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`;
+    const res = await fetch(url);
+    if (!res.ok) return new NextResponse('Tile error', { status: res.status });
+    const buf = await res.arrayBuffer();
+    return new NextResponse(buf, {
+      headers: {
+        'Content-Type': res.headers.get('Content-Type') || 'image/jpeg',
+        'Cache-Control': 'public, max-age=86400',
+        // BUG-21-08 FIX: Removed CORS wildcard — endpoint requires auth, must not allow cross-origin access
+      },
+    });
+  } catch (e: unknown) {
+    return handleRouteDbError('[app/api/maps-session/route.ts]', e);
+  }
+}

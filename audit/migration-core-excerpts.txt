@@ -1,0 +1,1884 @@
+\n===== lib/migrations/001_initial_schema.sql =====
+-- ============================================================
+-- SolarPro Platform — Neon PostgreSQL Schema
+-- Migration 001: Initial schema with all entities
+-- Run once against Neon DB to create all tables
+-- ============================================================
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ============================================================
+-- CLIENTS TABLE
+-- ============================================================
+CREATE TABLE IF NOT EXISTS clients (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL,
+  name            TEXT NOT NULL,
+  email           TEXT NOT NULL,
+  phone           TEXT NOT NULL DEFAULT '',
+  address         TEXT NOT NULL DEFAULT '',
+  city            TEXT NOT NULL DEFAULT '',
+  state           TEXT NOT NULL DEFAULT '',
+  zip             TEXT NOT NULL DEFAULT '',
+  lat             DOUBLE PRECISION,
+  lng             DOUBLE PRECISION,
+  utility_provider TEXT NOT NULL DEFAULT '',
+  monthly_kwh     JSONB NOT NULL DEFAULT '[]',
+  annual_kwh      DOUBLE PRECISION NOT NULL DEFAULT 0,
+  average_monthly_kwh DOUBLE PRECISION NOT NULL DEFAULT 0,
+  average_monthly_bill DOUBLE PRECISION NOT NULL DEFAULT 0,
+  annual_bill     DOUBLE PRECISION NOT NULL DEFAULT 0,
+  utility_rate    DOUBLE PRECISION NOT NULL DEFAULT 0.13,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at      TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_clients_user_id ON clients(user_id);
+CREATE INDEX IF NOT EXISTS idx_clients_deleted_at ON clients(deleted_at);
+CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email);
+
+-- ============================================================
+-- PROJECTS TABLE
+-- ============================================================
+CREATE TABLE IF NOT EXISTS projects (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL,
+  client_id       UUID REFERENCES clients(id) ON DELETE SET NULL,
+  name            TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'lead',
+  system_type     TEXT NOT NULL DEFAULT 'roof',
+  notes           TEXT NOT NULL DEFAULT '',
+  address         TEXT,
+  system_size_kw  DOUBLE PRECISION,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deleted_at      TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_client_id ON projects(client_id);
+CREATE INDEX IF NOT EXISTS idx_projects_deleted_at ON projects(deleted_at);
+
+-- ============================================================
+-- LAYOUTS TABLE (panel designs)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS layouts (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL,
+  system_type     TEXT NOT NULL DEFAULT 'roof',
+  panels          JSONB NOT NULL DEFAULT '[]',
+  roof_planes     JSONB,
+  ground_tilt     DOUBLE PRECISION DEFAULT 20,
+  ground_azimuth  DOUBLE PRECISION DEFAULT 180,
+  row_spacing     DOUBLE PRECISION DEFAULT 1.5,
+  ground_height   DOUBLE PRECISION DEFAULT 0.6,
+  fence_azimuth   DOUBLE PRECISION,
+  fence_height    DOUBLE PRECISION,
+  fence_line      JSONB,
+  bifacial_optimized BOOLEAN DEFAULT FALSE,
+  total_panels    INTEGER DEFAULT 0,
+  system_size_kw  DOUBLE PRECISION DEFAULT 0,
+  map_center      JSONB,
+  map_zoom        INTEGER,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_layouts_project_id ON layouts(project_id);
+CREATE INDEX IF NOT EXISTS idx_layouts_user_id ON layouts(user_id);
+
+-- ============================================================
+-- PROJECT VERSIONS TABLE (version history / snapshots)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS project_versions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL,
+  version_number  INTEGER NOT NULL DEFAULT 1,
+  snapshot        JSONB NOT NULL,
+  panels_count    INTEGER DEFAULT 0,
+  system_size_kw  DOUBLE PRECISION DEFAULT 0,
+  change_summary  TEXT DEFAULT '',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_versions_project_id ON project_versions(project_id);
+CREATE INDEX IF NOT EXISTS idx_versions_created_at ON project_versions(created_at DESC);
+
+-- ============================================================
+-- PRODUCTIONS TABLE (energy calculation results)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS productions (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id      UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL,
+  annual_production_kwh DOUBLE PRECISION,
+  monthly_production  JSONB,
+  system_size_kw  DOUBLE PRECISION,
+  panel_count     INTEGER,
+  performance_ratio DOUBLE PRECISION,
+  specific_yield  DOUBLE PRECISION,
+  co2_offset_kg   DOUBLE PRECISION,
+  calculated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_productions_project_id ON productions(project_id);
+
+-- ============================================================
+-- AUTO-UPDATE updated_at trigger
+-- ============================================================
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+DROP TRIGGER IF EXISTS update_clients_updated_at ON clients;
+CREATE TRIGGER update_clients_updated_at
+  BEFORE UPDATE ON clients
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_projects_updated_at ON projects;
+CREATE TRIGGER update_projects_updated_at
+  BEFORE UPDATE ON projects
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_layouts_updated_at ON layouts;
+CREATE TRIGGER update_layouts_updated_at
+  BEFORE UPDATE ON layouts
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();\n===== lib/migrations/007_bill_data.sql =====
+-- ============================================================
+-- SolarPro Platform — Neon PostgreSQL Schema
+-- Migration 007: Add bill_data JSONB column to projects table
+-- Stores extracted utility bill data from bill upload feature
+-- Run once: psql $DATABASE_URL -f lib/migrations/007_bill_data.sql
+-- ============================================================
+
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS bill_data JSONB;
+
+-- Index for querying projects that have bill data
+CREATE INDEX IF NOT EXISTS idx_projects_bill_data ON projects USING gin(bill_data)
+  WHERE bill_data IS NOT NULL;
+
+COMMENT ON COLUMN projects.bill_data IS
+  'Extracted utility bill data from BillUploadFlow — includes kWh usage, rate, utility provider, address, confidence score';\n===== lib/migrations/008_admin_activity_log.sql =====
+-- Migration 008: Admin Activity Log + Impersonation tokens
+-- Run this migration to enable admin activity tracking and impersonation
+
+CREATE TABLE IF NOT EXISTS admin_activity_log (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action          VARCHAR(100) NOT NULL,
+  target_user_id  UUID REFERENCES users(id) ON DELETE SET NULL,
+  target_company  VARCHAR(255),
+  metadata        JSONB DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_activity_log_admin_id    ON admin_activity_log(admin_id);
+CREATE INDEX IF NOT EXISTS idx_admin_activity_log_target_user ON admin_activity_log(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_admin_activity_log_created_at  ON admin_activity_log(created_at DESC);
+
+-- Impersonation tokens table
+CREATE TABLE IF NOT EXISTS admin_impersonation_tokens (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  admin_id    UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  target_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token       VARCHAR(128) NOT NULL UNIQUE,
+  used        BOOLEAN NOT NULL DEFAULT false,
+  expires_at  TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '5 minutes'),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_impersonation_token ON admin_impersonation_tokens(token);\n===== lib/migrations/021_portal_otp.sql =====
+-- Migration 021: Portal OTP Tokens
+-- Adds a one-time passcode table for the homeowner portal login flow.
+-- A 6-digit code is emailed; the raw code is NEVER stored — only a SHA-256 hash.
+-- Codes expire after 10 minutes and are single-use (used_at IS NOT NULL = consumed).
+
+CREATE TABLE IF NOT EXISTS portal_otp_tokens (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  client_id  UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  code_hash  TEXT        NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Fast lookup by hash during verification
+CREATE INDEX IF NOT EXISTS idx_portal_otp_code_hash
+  ON portal_otp_tokens (code_hash);
+
+-- Fast cleanup sweep for expired / used tokens
+CREATE INDEX IF NOT EXISTS idx_portal_otp_client_id
+  ON portal_otp_tokens (client_id);
+
+CREATE INDEX IF NOT EXISTS idx_portal_otp_expires_at
+  ON portal_otp_tokens (expires_at);
+\n===== lib/migrations/044_contractor_profiles.sql =====
+-- ============================================================
+-- Migration 044: contractor_profiles
+--
+-- Stores capability intelligence for each SolarPro contractor.
+-- Powers intelligent opportunity matching — not just zip-code routing.
+--
+-- Phase 1: manually configured by contractor
+-- Phase 2+: auto-enriched from real project history / install outcomes
+--
+-- Safe to re-run (IF NOT EXISTS guards).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS contractor_profiles (
+  id                    UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id               UUID        NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+
+  -- ── Capability tags (phase 1: self-reported) ─────────────────────────────
+  battery_certified     BOOLEAN     NOT NULL DEFAULT FALSE,
+  commercial_capable    BOOLEAN     NOT NULL DEFAULT FALSE,
+  roofing_capable       BOOLEAN     NOT NULL DEFAULT FALSE,
+  steep_roof_capable    BOOLEAN     NOT NULL DEFAULT FALSE,
+  ev_charger_capable    BOOLEAN     NOT NULL DEFAULT FALSE,
+  generator_capable     BOOLEAN     NOT NULL DEFAULT FALSE,
+
+  -- ── Service territory ────────────────────────────────────────────────────
+  -- Array of 2-letter state codes: ['CA','NV','AZ']
+  service_states        TEXT[]      NOT NULL DEFAULT '{}',
+
+  -- Array of ZIP codes for fine-grained territory
+  service_zips          TEXT[]      NOT NULL DEFAULT '{}',
+
+  -- Travel radius in miles from company address (0 = ZIP/state only)
+  travel_radius_miles   INTEGER     NOT NULL DEFAULT 50,
+
+  -- ── Equipment ecosystems ──────────────────────────────────────────────────
+  -- Known values: 'enphase' | 'solaredge' | 'tesla' | 'franklin' | 'sungrow'
+  --               | 'goodwe' | 'generac' | 'sol-ark' | 'ecoflow' | 'other'
+  equipment_ecosystems  TEXT[]      NOT NULL DEFAULT '{}',
+
+  -- ── Project size preference ───────────────────────────────────────────────
+  min_project_kw        NUMERIC(6,2),
+  max_project_kw        NUMERIC(6,2),
+
+  -- ── Phase 2 fields (auto-enriched from history) ───────────────────────────
+  -- Populated automatically as projects close — do not write manually in phase 1
+  total_installs        INTEGER     NOT NULL DEFAULT 0,
+  avg_close_rate_pct    NUMERIC(5,2),            -- closed / claimed * 100
+  avg_response_hours    NUMERIC(6,2),            -- avg hours from claim to first contact
+  inspection_pass_rate  NUMERIC(5,2),            -- passed / total inspections * 100
+  known_ahjs            TEXT[]      NOT NULL DEFAULT '{}',   -- AHJ names they've worked in
+  known_utilities       TEXT[]      NOT NULL DEFAULT '{}',   -- utility names they've worked with
+
+  -- ── Metadata ──────────────────────────────────────────────────────────────
+  profile_complete      BOOLEAN     NOT NULL DEFAULT FALSE,  -- set true when states + 1 capability set
+  network_active        BOOLEAN     NOT NULL DEFAULT TRUE,   -- can be toggled to pause receiving opps
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Fast lookup by user
+CREATE INDEX IF NOT EXISTS idx_contractor_profiles_user
+  ON contractor_profiles (user_id);
+
+-- Filter active profiles in matching queries
+CREATE INDEX IF NOT EXISTS idx_contractor_profiles_active
+  ON contractor_profiles (network_active)
+  WHERE network_active = TRUE;
+
+COMMENT ON TABLE contractor_profiles IS
+  'Contractor capability intelligence — powers opportunity matching. Phase 1: self-reported. Phase 2+: auto-enriched from project history.';
+\n===== lib/migrations/047_network_opportunities.sql =====
+-- ============================================================
+-- Migration 047: network_opportunities
+--
+-- The canonical, enriched Opportunity object for the SolarPro
+-- Network Intelligence OS.
+--
+-- This is NOT a lead board. Every row here represents a
+-- property that has been ingested, analyzed, scored, and
+-- released to the marketplace — or is queued for processing.
+--
+-- RELATIONSHIP TO opportunities (table 045):
+--   - contractor_shared opps from table 045 are promoted into
+--     this table after screening. They link via source_opportunity_id.
+--   - solarpro_generated opps (Phase 2+) originate here directly.
+--   - This table is the single source of truth for the Control Center.
+--
+-- SOURCE TYPES:
+--   contractor_shared    — contractor shared a project via /network
+--   homeowner_direct     — homeowner submitted via intake form
+--   google_ads           — paid acquisition via Google
+--   facebook_ads         — paid acquisition via Facebook/Meta
+--   tiktok               — paid acquisition via TikTok
+--   seo                  — organic search traffic intake
+--   referral             — contractor/homeowner referral
+--   partner              — partner program integration
+--
+-- LIFECYCLE STATUS:
+--   intake       — just received, not yet screened
+--   screening    — in the screening pipeline
+--   enriching    — pending additional data (irradiance, AHJ lookup, etc.)
+--   scored       — intelligence complete, ready for routing
+--   routed       — sent to contractor matching
+--   live         — visible on contractor marketplace
+--   claimed      — exclusively claimed by a contractor
+--   closed_won   — installed / deal closed
+--   closed_lost  — homeowner declined / not viable
+--   expired      — listing expired without claim
+--   rejected     — failed screening (spam, duplicate, invalid)
+--   withdrawn    — source withdrew the opportunity
+--
+-- Safe to re-run (IF NOT EXISTS guards).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS network_opportunities (
+  id                        UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- ── Origin ────────────────────────────────────────────────────────────────
+  -- Source type — every opportunity knows exactly how it entered the system
+  source_type               TEXT        NOT NULL DEFAULT 'contractor_shared'
+                              CHECK (source_type IN (
+                                'contractor_shared', 'homeowner_direct',
+                                'google_ads', 'facebook_ads', 'tiktok',
+                                'seo', 'referral', 'partner'
+                              )),
+
+  -- Link back to the original opportunities table row (contractor_shared only)
+  source_opportunity_id     UUID        REFERENCES opportunities(id) ON DELETE SET NULL,
+
+  -- Link to a SolarPro project (if one exists)
+  project_id                UUID        REFERENCES projects(id) ON DELETE SET NULL,
+
+  -- The user who introduced this opportunity (contractor for shared; NULL for ads)
+  introduced_by_user_id     UUID        REFERENCES users(id) ON DELETE SET NULL,
+
+  -- ── Lifecycle ────────────────────────────────────────────────────────────
+  status                    TEXT        NOT NULL DEFAULT 'intake'
+                              CHECK (status IN (
+                                'intake', 'screening', 'enriching', 'scored',
+                                'routed', 'live', 'claimed',
+                                'closed_won', 'closed_lost', 'expired',
+                                'rejected', 'withdrawn'
+                              )),
+
+  -- Timestamps for each major state transition
+  intake_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  screened_at               TIMESTAMPTZ,
+  scored_at                 TIMESTAMPTZ,
+  live_at                   TIMESTAMPTZ,
+  claimed_at                TIMESTAMPTZ,
+  closed_at                 TIMESTAMPTZ,
+  expires_at                TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
+
+  -- ── Homeowner ────────────────────────────────────────────────────────────
+  -- For Phase 2+ homeowner intake. NULL for contractor_shared in Phase 1.
+  homeowner_name            TEXT,
+  homeowner_email           TEXT,
+  homeowner_phone           TEXT,
+  homeowner_ownership       TEXT        CHECK (homeowner_ownership IN ('own', 'rent', 'unknown')),
+  homeowner_timeline        TEXT        CHECK (homeowner_timeline IN ('asap', '3_months', '6_months', '1_year', 'just_researching', 'unknown')),
+  homeowner_financing_interest BOOLEAN  NOT NULL DEFAULT FALSE,
+
+  -- ── Location ─────────────────────────────────────────────────────────────
+  -- Full address only accessible to assigned contractor post-claim
+  address                   TEXT,
+  location_city             TEXT,
+  location_state            TEXT,
+  location_zip              TEXT,
+  lat                       NUMERIC(10,7),
+  lng                       NUMERIC(10,7),
+
+  -- ── Utility Intelligence ──────────────────────────────────────────────────
+  utility_provider          TEXT,
+  utility_rate_per_kwh      NUMERIC(8,5),
+  annual_usage_kwh          NUMERIC(10,2),
+  monthly_usage_avg_kwh     NUMERIC(8,2),
+  utility_complexity_score  INTEGER     CHECK (utility_complexity_score BETWEEN 0 AND 100),
+  -- NEM status / export rate policy
+  net_metering_type         TEXT,
+
+  -- ── Solar Intelligence ────────────────────────────────────────────────────
+  estimated_system_size_kw  NUMERIC(8,2),
+  irradiance_score          INTEGER     CHECK (irradiance_score BETWEEN 0 AND 100),
+  -- kWh/kWp/year from sun resource analysis
+  peak_sun_hours_annual     NUMERIC(8,2),
+  shading_score             INTEGER     CHECK (shading_score BETWEEN 0 AND 100),
+  -- 0 = no shading concern, 100 = severe shading
+  shading_flag              BOOLEAN     NOT NULL DEFAULT FALSE,
+
+  -- ── Roof Intelligence ─────────────────────────────────────────────────────
+  roof_material             TEXT,
+  roof_pitch                TEXT,
+  roof_condition            TEXT,
+  roof_age_years            INTEGER,
+  roof_usable_pct           NUMERIC(5,2),
+  stories                   TEXT,
+  structure_type            TEXT,
+  steep_roof_flag           BOOLEAN     NOT NULL DEFAULT FALSE,
+
+  -- ── Battery Intelligence ──────────────────────────────────────────────────
+  battery_candidate         BOOLEAN     NOT NULL DEFAULT FALSE,
+  -- Why battery is recommended
+  battery_reason            TEXT,
+  -- outage_protection | rate_arbitrage | backup_only | ev_charging | off_grid
+  battery_use_case          TEXT        CHECK (battery_use_case IN (
+                              'outage_protection','rate_arbitrage','backup_only',
+                              'ev_charging','off_grid', NULL
+                            )),
+
+  -- ── AHJ Intelligence ──────────────────────────────────────────────────────
+  ahj_name                  TEXT,
+  ahj_complexity_score      INTEGER     CHECK (ahj_complexity_score BETWEEN 0 AND 100),
+  -- 0 = easy (online portal, fast turnaround), 100 = nightmare
+  ahj_notes                 TEXT,
+
+  -- ── Financial Analysis ────────────────────────────────────────────────────
+  estimated_project_value   NUMERIC(12,2),
+  estimated_annual_savings  NUMERIC(10,2),
+  estimated_payback_yrs     NUMERIC(6,2),
+  estimated_roi_pct         NUMERIC(6,2),
+  -- ITC and state incentives applicable
+  applicable_incentives     TEXT[],
+
+  -- ── Opportunity Intelligence Score ────────────────────────────────────────
+  -- Composite score 0–100 powering A+/A/B/C grade
+  opportunity_score         INTEGER     CHECK (opportunity_score BETWEEN 0 AND 100),
+  opportunity_grade         TEXT        CHECK (opportunity_grade IN ('A+', 'A', 'B', 'C', NULL)),
+
+  -- Subscores (0–100 each)
+  score_financial           INTEGER     CHECK (score_financial BETWEEN 0 AND 100),
+  score_roof                INTEGER     CHECK (score_roof BETWEEN 0 AND 100),
+  score_solar               INTEGER     CHECK (score_solar BETWEEN 0 AND 100),
+  score_homeowner           INTEGER     CHECK (score_homeowner BETWEEN 0 AND 100),
+  score_complexity          INTEGER     CHECK (score_complexity BETWEEN 0 AND 100),
+
+  -- ── Screening ──────────────────────────────────────────────────────────────
+  -- Automated screening flags
+  spam_flag                 BOOLEAN     NOT NULL DEFAULT FALSE,
+  duplicate_flag            BOOLEAN     NOT NULL DEFAULT FALSE,
+  invalid_utility_flag      BOOLEAN     NOT NULL DEFAULT FALSE,
+  auto_flags                TEXT[]      NOT NULL DEFAULT '{}',
+
+  -- Human screening
+  screening_status          TEXT        NOT NULL DEFAULT 'pending'
+                              CHECK (screening_status IN (
+                                'pending', 'in_review', 'approved', 'rejected', 'escalated'
+                              )),
+  screening_notes           TEXT,
+  screened_by_admin_id      UUID        REFERENCES users(id) ON DELETE SET NULL,
+
+  -- ── Asking Price / Marketplace ────────────────────────────────────────────
+  asking_price              NUMERIC(10,2),
+  listing_notes             TEXT,
+
+  -- ── Routing ───────────────────────────────────────────────────────────────
+  -- When routed, which contractor was matched (best fit)
+  routed_to_user_id         UUID        REFERENCES users(id) ON DELETE SET NULL,
+  routing_score             INTEGER,    -- fit score at time of routing
+  routing_notes             TEXT,
+
+  -- ── Timestamps ────────────────────────────────────────────────────────────
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── Indexes ───────────────────────────────────────────────────────────────────
+
+-- Live feed: show scoreable/live opportunities by state
+CREATE INDEX IF NOT EXISTS idx_net_opps_status_state
+  ON network_opportunities (status, location_state)
+  WHERE status IN ('live', 'scored', 'routed');
+
+-- Screening queue feed
+CREATE INDEX IF NOT EXISTS idx_net_opps_screening
+  ON network_opportunities (screening_status, intake_at DESC)
+  WHERE screening_status IN ('pending', 'in_review', 'escalated');
+
+-- Score-based sorting for contractor matching
+CREATE INDEX IF NOT EXISTS idx_net_opps_score
+  ON network_opportunities (opportunity_score DESC, status)
+  WHERE status = 'live';
+
+-- Source attribution analytics
+CREATE INDEX IF NOT EXISTS idx_net_opps_source
+  ON network_opportunities (source_type, created_at DESC);
+
+-- Project link
+CREATE INDEX IF NOT EXISTS idx_net_opps_project
+  ON network_opportunities (project_id)
+  WHERE project_id IS NOT NULL;
+
+\n===== lib/migrations/049_opportunity_screening_queue.sql =====
+-- ============================================================
+-- Migration 049: opportunity_screening_queue
+--
+-- The 10-step automated screening pipeline.
+-- Each row tracks one opportunity through all screening steps.
+--
+-- Steps (run in order, can be skipped/failed individually):
+--   1. contact_validation     — phone/email format + disposable check
+--   2. duplicate_check        — fuzzy match against existing leads
+--   3. address_validation     — USPS/geocoding verification
+--   4. service_area_check     — is address in a served territory?
+--   5. utility_lookup         — identify utility company
+--   6. solar_viability        — basic feasibility (lat/lon irradiance)
+--   7. homeowner_verification — verify actual homeownership
+--   8. credit_proxy           — proxy credit tier from zip median income
+--   9. intent_scoring         — NLP on form text / engagement signals
+--  10. final_decision         — pass/fail/needs_review determination
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS opportunity_screening_queue (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  opportunity_id        UUID NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+
+  -- ── Overall Pipeline State ──────────────────────────────────
+  pipeline_status       TEXT NOT NULL DEFAULT 'pending',
+  -- pending | running | completed | failed | skipped | manual_review
+
+  started_at            TIMESTAMPTZ,
+  completed_at          TIMESTAMPTZ,
+  duration_ms           INTEGER,     -- total pipeline duration
+
+  auto_decision         TEXT,        -- pass | fail | needs_review
+  auto_decision_reason  TEXT,        -- human-readable summary
+  confidence_score      NUMERIC(5,2), -- 0-100 confidence in decision
+  override_decision     TEXT,         -- admin override: pass | fail | hold
+  override_by           UUID,         -- admin user who overrode
+  override_reason       TEXT,
+  override_at           TIMESTAMPTZ,
+
+  -- ── Step 1: Contact Validation ──────────────────────────────
+  step1_status          TEXT DEFAULT 'pending',
+  step1_phone_valid     BOOLEAN,
+  step1_email_valid     BOOLEAN,
+  step1_phone_type      TEXT,        -- mobile | landline | voip | unknown
+  step1_email_risk      TEXT,        -- low | medium | high | disposable
+  step1_data            JSONB DEFAULT '{}',
+  step1_completed_at    TIMESTAMPTZ,
+  step1_error           TEXT,
+
+  -- ── Step 2: Duplicate Check ─────────────────────────────────
+  step2_status          TEXT DEFAULT 'pending',
+  step2_is_duplicate    BOOLEAN,
+  step2_duplicate_of    UUID,
+  step2_match_score     NUMERIC(5,2), -- 0-100 similarity score
+  step2_match_fields    TEXT[],       -- which fields matched
+  step2_data            JSONB DEFAULT '{}',
+  step2_completed_at    TIMESTAMPTZ,
+  step2_error           TEXT,
+
+  -- ── Step 3: Address Validation ──────────────────────────────
+  step3_status          TEXT DEFAULT 'pending',
+  step3_address_valid   BOOLEAN,
+  step3_formatted_address TEXT,
+  step3_lat             NUMERIC(10,7),
+  step3_lng             NUMERIC(10,7),
+  step3_county          TEXT,
+  step3_fips            TEXT,        -- county FIPS code
+  step3_census_tract    TEXT,
+  step3_data            JSONB DEFAULT '{}',
+  step3_completed_at    TIMESTAMPTZ,
+  step3_error           TEXT,
+
+  -- ── Step 4: Service Area Check ──────────────────────────────
+  step4_status          TEXT DEFAULT 'pending',
+  step4_in_service_area BOOLEAN,
+  step4_matched_state   TEXT,
+  step4_matched_market  TEXT,        -- MSA / metro area
+  step4_nearest_contractor_mi NUMERIC(6,2),
+  step4_active_contractors_nearby INTEGER,
+  step4_data            JSONB DEFAULT '{}',
+  step4_completed_at    TIMESTAMPTZ,
+  step4_error           TEXT,
+
+  -- ── Step 5: Utility Lookup ──────────────────────────────────
+  step5_status          TEXT DEFAULT 'pending',
+  step5_utility_name    TEXT,
+  step5_utility_eia_id  TEXT,        -- EIA utility ID
+  step5_rate_class      TEXT,        -- residential rate class
+  step5_avg_rate_kwh    NUMERIC(6,4), -- average $/kWh
+  step5_net_metering    BOOLEAN,
+  step5_nem_type        TEXT,        -- NEM 2.0 | NEM 3.0 | VNEM | AVOIDED_COST
+  step5_data            JSONB DEFAULT '{}',
+  step5_completed_at    TIMESTAMPTZ,
+  step5_error           TEXT,
+
+  -- ── Step 6: Solar Viability ─────────────────────────────────
+  step6_status          TEXT DEFAULT 'pending',
+  step6_viable          BOOLEAN,
+  step6_annual_kwh_m2   NUMERIC(8,2), -- kWh/m²/year (irradiance)
+  step6_peak_sun_hours  NUMERIC(5,2),
+  step6_shade_class     TEXT,         -- excellent | good | fair | poor
+  step6_estimated_system_size_kw NUMERIC(6,2),
+  step6_data            JSONB DEFAULT '{}',
+  step6_completed_at    TIMESTAMPTZ,
+  step6_error           TEXT,
+
+  -- ── Step 7: Homeowner Verification ──────────────────────────
+  step7_status          TEXT DEFAULT 'pending',
+  step7_is_owner        BOOLEAN,
+  step7_owner_name      TEXT,
+  step7_owner_match     NUMERIC(5,2), -- 0-100 name match confidence
+  step7_year_purchased  INTEGER,
+  step7_assessed_value  NUMERIC(12,2),
+  step7_data            JSONB DEFAULT '{}',
+  step7_completed_at    TIMESTAMPTZ,
+  step7_error           TEXT,
+
+  -- ── Step 8: Credit Proxy ────────────────────────────────────
+  step8_status          TEXT DEFAULT 'pending',
+  step8_credit_tier     TEXT,         -- excellent | good | fair | poor
+  step8_median_income   NUMERIC(10,2),
+  step8_home_value      NUMERIC(12,2),
+  step8_debt_proxy      TEXT,         -- low | medium | high
+  step8_finance_eligible BOOLEAN,
+  step8_data            JSONB DEFAULT '{}',
+  step8_completed_at    TIMESTAMPTZ,
+  step8_error           TEXT,
+
+  -- ── Step 9: Intent Scoring ──────────────────────────────────
+  step9_status          TEXT DEFAULT 'pending',
+  step9_intent_score    NUMERIC(5,2), -- 0-100
+  step9_intent_tier     TEXT,         -- hot | warm | cold
+  step9_signals         TEXT[],       -- positive signals detected
+  step9_red_flags       TEXT[],       -- negative signals
+  step9_form_quality    TEXT,         -- complete | partial | sparse
+  step9_data            JSONB DEFAULT '{}',
+  step9_completed_at    TIMESTAMPTZ,
+  step9_error           TEXT,
+
+  -- ── Step 10: Final Decision ─────────────────────────────────
+  step10_status         TEXT DEFAULT 'pending',
+  step10_decision       TEXT,         -- pass | fail | needs_review
+  step10_score          NUMERIC(5,2), -- composite 0-100
+  step10_grade          TEXT,         -- A+ | A | B | C | F
+  step10_fail_reasons   TEXT[],       -- disqualification reasons
+  step10_review_flags   TEXT[],       -- flags needing human review
+  step10_data           JSONB DEFAULT '{}',
+  step10_completed_at   TIMESTAMPTZ,
+  step10_error          TEXT,
+
+  -- ── Retry / Error Handling ──────────────────────────────────
+  retry_count           INTEGER DEFAULT 0,
+  last_retry_at         TIMESTAMPTZ,
+  max_retries           INTEGER DEFAULT 3,
+  error_log             JSONB DEFAULT '[]',
+
+  -- ── Timestamps ──────────────────────────────────────────────
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_screening_queue_opp_id  ON opportunity_screening_queue(opportunity_id);
+CREATE INDEX IF NOT EXISTS idx_screening_pipeline_status       ON opportunity_screening_queue(pipeline_status);
+CREATE INDEX IF NOT EXISTS idx_screening_auto_decision         ON opportunity_screening_queue(auto_decision);
+CREATE INDEX IF NOT EXISTS idx_screening_created_at            ON opportunity_screening_queue(created_at DESC);
+\n===== lib/migrations/050_opportunity_intelligence.sql =====
+-- ============================================================
+-- Migration 050: opportunity_intelligence
+--
+-- Scoring engine output for each opportunity.
+-- Computed by lib/network/opportunityScorer.ts after screening.
+--
+-- Contains the full breakdown of the opportunity score so
+-- admins can understand WHY an opportunity was scored a given way,
+-- and contractors can understand what they're buying.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS opportunity_intelligence (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  opportunity_id          UUID NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+
+  -- ── Overall Score ───────────────────────────────────────────
+  overall_score           NUMERIC(5,2) NOT NULL DEFAULT 0,   -- 0-100
+  overall_grade           TEXT NOT NULL DEFAULT 'C',         -- A+ | A | B | C | D | F
+  score_version           TEXT DEFAULT 'v1.0',               -- scorer version
+  scored_at               TIMESTAMPTZ DEFAULT NOW(),
+  scored_by               TEXT DEFAULT 'auto',               -- auto | admin_user_id
+
+  -- ── Score Breakdown (5 dimensions) ─────────────────────────
+  -- Each dimension: 0-100, weighted into overall score
+
+  -- Dimension 1: Property Quality (weight: 25%)
+  property_score          NUMERIC(5,2),
+  property_weight         NUMERIC(4,3) DEFAULT 0.25,
+  property_factors        JSONB DEFAULT '{}',
+  -- {
+  --   home_value: 85,        home_value_raw: 485000
+  --   roof_age: 70,          roof_age_years: 8
+  --   structure_type: 90,    structure_type_raw: "single_family"
+  --   usable_roof: 80,       usable_roof_pct: 0.72
+  --   stories: 85,           stories_raw: 1
+  -- }
+
+  -- Dimension 2: Solar Opportunity (weight: 25%)
+  solar_score             NUMERIC(5,2),
+  solar_weight            NUMERIC(4,3) DEFAULT 0.25,
+  solar_factors           JSONB DEFAULT '{}',
+  -- {
+  --   irradiance: 88,        peak_sun_hours: 5.4
+  --   system_size: 75,       est_size_kw: 8.2
+  --   offset_potential: 90,  est_offset_pct: 0.95
+  --   bill_size: 85,         monthly_bill: 280
+  --   payback: 80,           est_payback_years: 7.2
+  -- }
+
+  -- Dimension 3: Financial Fit (weight: 20%)
+  financial_score         NUMERIC(5,2),
+  financial_weight        NUMERIC(4,3) DEFAULT 0.20,
+  financial_factors       JSONB DEFAULT '{}',
+  -- {
+  --   credit_tier: 90,       credit_tier_raw: "excellent"
+  --   home_equity: 80,       equity_pct: 0.62
+  --   income_proxy: 75,      median_income: 92000
+  --   finance_eligible: 95,  eligible: true
+  --   incentive_eligible: 90
+  -- }
+
+  -- Dimension 4: Market Opportunity (weight: 15%)
+  market_score            NUMERIC(5,2),
+  market_weight           NUMERIC(4,3) DEFAULT 0.15,
+  market_factors          JSONB DEFAULT '{}',
+  -- {
+  --   utility_rates: 85,     avg_rate_kwh: 0.18
+  --   net_metering: 95,      nem_type: "NEM 2.0"
+  --   state_incentives: 90,
+  --   competition: 70,       contractors_in_area: 4
+  --   market_maturity: 75
+  -- }
+
+  -- Dimension 5: Lead Intent (weight: 15%)
+  intent_score            NUMERIC(5,2),
+  intent_weight           NUMERIC(4,3) DEFAULT 0.15,
+  intent_factors          JSONB DEFAULT '{}',
+  -- {
+  --   form_completeness: 90,
+  --   response_speed: 85,    minutes_to_submit: 8
+  --   keyword_signals: 80,   signals: ["reduce bill", "quote"]
+  --   source_quality: 75,    source: "google_ads"
+  --   time_of_day: 70
+  -- }
+
+  -- ── Grade Thresholds (stored for reference) ─────────────────
+  grade_a_plus_threshold  NUMERIC(5,2) DEFAULT 90,
+  grade_a_threshold       NUMERIC(5,2) DEFAULT 80,
+  grade_b_threshold       NUMERIC(5,2) DEFAULT 65,
+  grade_c_threshold       NUMERIC(5,2) DEFAULT 50,
+
+  -- ── Competitive Intelligence ────────────────────────────────
+  market_price            NUMERIC(10,2),   -- recommended listing price
+  price_min               NUMERIC(10,2),   -- floor price
+  price_max               NUMERIC(10,2),   -- ceiling price
+  pricing_rationale       TEXT,
+  comparable_leads        JSONB DEFAULT '[]',  -- recent similar leads + prices
+
+  -- ── Contractor Match Summary ────────────────────────────────
+  total_eligible_contractors   INTEGER DEFAULT 0,
+  top_match_contractor_id      UUID,
+  top_match_score              NUMERIC(5,2),
+  match_summary                JSONB DEFAULT '[]',  -- [{contractor_id, score, factors}]
+
+  -- ── Risk Flags ──────────────────────────────────────────────
+  risk_flags              TEXT[],   -- list of risk factors
+  -- potential values:
+  -- shading_concern | old_roof | hoa_restriction | small_system
+  -- low_credit_proxy | high_competition | low_nem | temp_renter_risk
+
+  opportunity_highlights  TEXT[],   -- positive selling points
+  -- potential values:
+  -- high_bill | excellent_irradiance | new_roof | large_system
+  -- excellent_credit | strong_nem | low_competition | high_equity
+
+  -- ── Insight Text (for display) ──────────────────────────────
+  executive_summary       TEXT,     -- 2-3 sentence summary for contractors
+  contractor_pitch        TEXT,     -- why this is a good opportunity
+  admin_notes             TEXT,     -- internal notes
+
+  -- ── Score History ───────────────────────────────────────────
+  score_history           JSONB DEFAULT '[]',
+  -- [{score, grade, scored_at, scored_by, reason}]
+
+  -- ── Timestamps ──────────────────────────────────────────────
+  created_at              TIMESTAMPTZ DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE UNIQUE INDEX IF NOT EXISTS idx_opp_intelligence_opp_id  ON opportunity_intelligence(opportunity_id);
+CREATE INDEX IF NOT EXISTS idx_opp_intelligence_score          ON opportunity_intelligence(overall_score DESC);
+CREATE INDEX IF NOT EXISTS idx_opp_intelligence_grade          ON opportunity_intelligence(overall_grade);
+CREATE INDEX IF NOT EXISTS idx_opp_intelligence_scored_at      ON opportunity_intelligence(scored_at DESC);
+\n===== lib/migrations/051_opportunity_assignments.sql =====
+-- ============================================================
+-- Migration 051: opportunity_assignments
+--
+-- Lifecycle state machine for opportunity → contractor matching.
+-- Tracks every assignment attempt, routing decision, claim,
+-- appointment, and final outcome.
+--
+-- An opportunity can be assigned to multiple contractors
+-- (if unclaimed after TTL) but can only be WON by one.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS opportunity_assignments (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  opportunity_id        UUID NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+  contractor_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- ── Assignment State ────────────────────────────────────────
+  status                TEXT NOT NULL DEFAULT 'offered',
+  -- offered     — shown to contractor, awaiting action
+  -- viewed      — contractor viewed the detail
+  -- claimed     — contractor paid and claimed
+  -- contacted   — contractor has reached out to homeowner
+  -- appointment — appointment scheduled
+  -- proposal    — proposal delivered
+  -- won         — deal closed
+  -- lost        — deal lost (homeowner chose competitor/no-go)
+  -- expired     — contractor didn't claim within TTL
+  -- released    — admin released back to pool
+  -- refunded    — claim refunded (bad lead, etc.)
+
+  -- ── Assignment Metadata ─────────────────────────────────────
+  assignment_type       TEXT DEFAULT 'marketplace',
+  -- marketplace | direct | admin_assigned | exclusive
+
+  assignment_rank       INTEGER,     -- 1 = best match, 2 = 2nd best, etc.
+  match_score           NUMERIC(5,2), -- contractor fit score (0-100)
+  match_factors         JSONB DEFAULT '{}',
+
+  -- ── Offer Window ────────────────────────────────────────────
+  offered_at            TIMESTAMPTZ DEFAULT NOW(),
+  offer_expires_at      TIMESTAMPTZ,    -- when this offer expires
+  offer_ttl_hours       INTEGER DEFAULT 72,
+
+  -- ── Claim ───────────────────────────────────────────────────
+  claimed_at            TIMESTAMPTZ,
+  claim_amount          NUMERIC(10,2),  -- what contractor paid
+  claim_currency        TEXT DEFAULT 'USD',
+  payment_intent_id     TEXT,           -- Stripe payment intent
+  payment_status        TEXT,           -- succeeded | pending | failed | refunded
+
+  -- ── Contractor Activity ─────────────────────────────────────
+  first_viewed_at       TIMESTAMPTZ,
+  last_viewed_at        TIMESTAMPTZ,
+  view_count            INTEGER DEFAULT 0,
+  contact_attempts      INTEGER DEFAULT 0,
+  first_contact_at      TIMESTAMPTZ,
+  last_contact_at       TIMESTAMPTZ,
+
+  -- ── Appointment ─────────────────────────────────────────────
+  appointment_at        TIMESTAMPTZ,
+  appointment_type      TEXT,    -- in_home | virtual | phone
+  appointment_confirmed BOOLEAN DEFAULT false,
+  appointment_notes     TEXT,
+
+  -- ── Proposal ────────────────────────────────────────────────
+  proposal_at           TIMESTAMPTZ,
+  proposal_amount       NUMERIC(12,2),  -- quoted system price
+  system_size_kw        NUMERIC(6,2),
+  panel_brand           TEXT,
+  inverter_brand        TEXT,
+  warranty_years        INTEGER,
+  financing_offered     TEXT,    -- cash | loan | lease | ppa
+
+  -- ── Close ───────────────────────────────────────────────────
+  closed_at             TIMESTAMPTZ,
+  close_status          TEXT,    -- won | lost | no_decision
+  contract_value        NUMERIC(12,2),
+  lost_reason           TEXT,
+  lost_to               TEXT,    -- competitor name if known
+
+  -- ── Dispute / Refund ────────────────────────────────────────
+  dispute_filed_at      TIMESTAMPTZ,
+  dispute_reason        TEXT,
+  dispute_status        TEXT,    -- open | resolved | denied
+  refund_amount         NUMERIC(10,2),
+  refund_at             TIMESTAMPTZ,
+  refund_reason         TEXT,
+
+  -- ── Admin Control ───────────────────────────────────────────
+  admin_notes           TEXT,
+  flagged               BOOLEAN DEFAULT false,
+  flag_reason           TEXT,
+  quality_score         NUMERIC(5,2),  -- post-close quality rating
+
+  -- ── Notifications Sent ──────────────────────────────────────
+  notifications         JSONB DEFAULT '[]',
+  -- [{type, sent_at, channel, status}]
+
+  -- ── Timestamps ──────────────────────────────────────────────
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_opp_assignments_opportunity_id ON opportunity_assignments(opportunity_id);
+CREATE INDEX IF NOT EXISTS idx_opp_assignments_contractor_id  ON opportunity_assignments(contractor_id);
+CREATE INDEX IF NOT EXISTS idx_opp_assignments_status         ON opportunity_assignments(status);
+CREATE INDEX IF NOT EXISTS idx_opp_assignments_offered_at     ON opportunity_assignments(offered_at DESC);
+CREATE INDEX IF NOT EXISTS idx_opp_assignments_claimed_at     ON opportunity_assignments(claimed_at DESC) WHERE claimed_at IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_opp_assignments_unique_claimed
+  ON opportunity_assignments(opportunity_id)
+  WHERE status IN ('claimed','contacted','appointment','proposal','won');
+\n===== lib/migrations/053_network_events.sql =====
+-- ============================================================
+-- Migration 053: network_events
+--
+-- Immutable event log for everything that happens in the
+-- Network Intelligence OS.
+--
+-- This is the system of record. Every state change, admin action,
+-- contractor interaction, pipeline step, and scoring event
+-- is written here as an append-only event.
+--
+-- NEVER update or delete rows in this table.
+-- Use this for auditing, debugging, and analytics.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS network_events (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id              TEXT UNIQUE,   -- human-readable: NET-{YYYYMMDD}-{seq}
+
+  -- ── Event Classification ────────────────────────────────────
+  event_type            TEXT NOT NULL,
+  -- OPPORTUNITY events:
+  --   opportunity.created           — new opportunity ingested
+  --   opportunity.screening_started — entered screening pipeline
+  --   opportunity.screening_step    — individual step completed
+  --   opportunity.screening_passed  — all steps passed
+  --   opportunity.screening_failed  — failed one or more steps
+  --   opportunity.scored            — scoring engine ran
+  --   opportunity.published         — made live in marketplace
+  --   opportunity.unpublished       — removed from marketplace
+  --   opportunity.expired           — TTL expired, no claims
+  --   opportunity.status_changed    — generic status change
+  --
+  -- ASSIGNMENT events:
+  --   assignment.offered            — shown to contractor
+  --   assignment.viewed             — contractor viewed detail
+  --   assignment.claimed            — contractor claimed/paid
+  --   assignment.contacted          — contractor contacted homeowner
+  --   assignment.appointment        — appointment scheduled
+  --   assignment.proposal           — proposal delivered
+  --   assignment.won                — deal closed won
+  --   assignment.lost               — deal closed lost
+  --   assignment.expired            — offer expired unclaimed
+  --   assignment.released           — admin released back to pool
+  --   assignment.disputed           — dispute filed
+  --   assignment.refunded           — refund issued
+  --
+  -- SCREENING events:
+  --   screening.step_passed         — individual step passed
+  --   screening.step_failed         — individual step failed
+  --   screening.override            — admin override decision
+  --
+  -- ADMIN events:
+  --   admin.opportunity_edited      — admin edited opportunity data
+  --   admin.score_override          — admin overrode score/grade
+  --   admin.contractor_blacklisted  — contractor removed from matching
+  --   admin.campaign_paused         — campaign paused
+  --   admin.market_closed           — market closed to new leads
+  --   admin.bulk_action             — bulk admin operation
+  --
+  -- SYSTEM events:
+  --   system.scorer_ran             — scoring engine batch run
+  --   system.matcher_ran            — matching engine batch run
+  --   system.analytics_computed     — analytics job completed
+  --   system.migration_ran          — database migration applied
+  --   system.health_check           — health check result
+
+  event_category        TEXT NOT NULL,
+  -- opportunity | assignment | screening | admin | system | payment
+
+  -- ── Entity References ───────────────────────────────────────
+  opportunity_id        UUID REFERENCES network_opportunities(id) ON DELETE SET NULL,
+  assignment_id         UUID REFERENCES opportunity_assignments(id) ON DELETE SET NULL,
+  contractor_id         UUID REFERENCES users(id) ON DELETE SET NULL,
+  admin_user_id         UUID REFERENCES users(id) ON DELETE SET NULL,
+
+  -- ── Event Data ──────────────────────────────────────────────
+  data                  JSONB NOT NULL DEFAULT '{}',
+  -- Flexible payload. Examples:
+  -- opportunity.created:  {source_type, address, homeowner_name, score}
+  -- screening.step_passed: {step_number, step_name, result, duration_ms}
+  -- assignment.claimed:   {contractor_id, amount_paid, payment_intent}
+  -- admin.score_override: {old_score, new_score, old_grade, new_grade, reason}
+
+  -- ── State Transitions ───────────────────────────────────────
+  from_status           TEXT,         -- status before event
+  to_status             TEXT,         -- status after event
+
+  -- ── Scores Snapshot ─────────────────────────────────────────
+  score_at_event        NUMERIC(5,2), -- overall score at time of event
+  grade_at_event        TEXT,         -- grade at time of event
+
+  -- ── Source ──────────────────────────────────────────────────
+  triggered_by          TEXT NOT NULL DEFAULT 'system',
+  -- system | admin | contractor | homeowner | webhook | cron
+
+  ip_address            INET,
+  user_agent            TEXT,
+  session_id            TEXT,
+
+  -- ── Error Tracking ──────────────────────────────────────────
+  is_error              BOOLEAN DEFAULT false,
+  error_code            TEXT,
+  error_message         TEXT,
+  error_details         JSONB DEFAULT '{}',
+
+  -- ── Timestamps ──────────────────────────────────────────────
+  occurred_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at            TIMESTAMPTZ DEFAULT NOW()
+  -- NOTE: NO updated_at — this table is append-only
+);
+
+-- Indexes (optimized for common admin queries)
+CREATE INDEX IF NOT EXISTS idx_network_events_opportunity_id  ON network_events(opportunity_id) WHERE opportunity_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_network_events_assignment_id   ON network_events(assignment_id) WHERE assignment_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_network_events_contractor_id   ON network_events(contractor_id) WHERE contractor_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_network_events_event_type      ON network_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_network_events_category        ON network_events(event_category);
+CREATE INDEX IF NOT EXISTS idx_network_events_occurred_at     ON network_events(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_network_events_triggered_by    ON network_events(triggered_by);
+CREATE INDEX IF NOT EXISTS idx_network_events_errors          ON network_events(occurred_at DESC) WHERE is_error = true;
+\n===== lib/migrations/055_intake_events.sql =====
+-- Migration 055: intake_events — immutable lifecycle event log
+
+CREATE TABLE IF NOT EXISTS intake_events (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id                TEXT UNIQUE NOT NULL,
+  opportunity_id          UUID REFERENCES network_opportunities(id) ON DELETE CASCADE,
+  event_type              TEXT NOT NULL,
+  event_source            TEXT NOT NULL DEFAULT 'system',
+  source_system           TEXT,
+  source_channel          TEXT,
+  funnel_id               UUID,
+  campaign_id             UUID,
+  idempotency_key         TEXT,
+  payload                 JSONB NOT NULL DEFAULT '{}',
+  validation_result       JSONB DEFAULT '{}',
+  duplicate_result        JSONB DEFAULT '{}',
+  pipeline_result         JSONB DEFAULT '{}',
+  action                  TEXT NOT NULL DEFAULT 'unknown',
+  error_code              TEXT,
+  error_message           TEXT,
+  processing_duration_ms  INTEGER,
+  ip_address              INET,
+  user_agent              TEXT,
+  referer                 TEXT,
+  utm_source              TEXT,
+  utm_medium              TEXT,
+  utm_campaign            TEXT,
+  utm_content             TEXT,
+  utm_term                TEXT,
+  gclid                   TEXT,
+  fbclid                  TEXT,
+  is_replay               BOOLEAN DEFAULT false,
+  original_event_id       TEXT,
+  occurred_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_intake_events_opportunity_id ON intake_events(opportunity_id) WHERE opportunity_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intake_events_event_type ON intake_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_intake_events_idempotency_key ON intake_events(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intake_events_source_system ON intake_events(source_system) WHERE source_system IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_intake_events_action ON intake_events(action);
+CREATE INDEX IF NOT EXISTS idx_intake_events_occurred_at ON intake_events(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_intake_events_funnel_id ON intake_events(funnel_id) WHERE funnel_id IS NOT NULL;
+\n===== lib/migrations/056_enrichment_queue.sql =====
+-- Migration 056: enrichment_queue — per-provider job queue with UNIQUE(opportunity_id)
+
+CREATE TABLE IF NOT EXISTS enrichment_queue (
+  id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  opportunity_id              UUID UNIQUE NOT NULL REFERENCES network_opportunities(id) ON DELETE CASCADE,
+  status                      TEXT NOT NULL DEFAULT 'pending',
+  priority                    INTEGER NOT NULL DEFAULT 5,
+  attempt_count               INTEGER NOT NULL DEFAULT 0,
+  max_attempts                INTEGER NOT NULL DEFAULT 3,
+  providers_requested         TEXT[] DEFAULT ARRAY['property','solar','utility'],
+  providers_completed         TEXT[] DEFAULT ARRAY[]::TEXT[],
+  providers_failed            TEXT[] DEFAULT ARRAY[]::TEXT[],
+  providers_skipped           TEXT[] DEFAULT ARRAY[]::TEXT[],
+  property_status             TEXT DEFAULT 'pending',
+  property_provider_used      TEXT,
+  property_enriched_at        TIMESTAMPTZ,
+  property_error              TEXT,
+  solar_status                TEXT DEFAULT 'pending',
+  solar_provider_used         TEXT,
+  solar_enriched_at           TIMESTAMPTZ,
+  solar_error                 TEXT,
+  utility_status              TEXT DEFAULT 'pending',
+  utility_provider_used       TEXT,
+  utility_enriched_at         TIMESTAMPTZ,
+  utility_error               TEXT,
+  ahj_status                  TEXT DEFAULT 'pending',
+  ahj_provider_used           TEXT,
+  ahj_enriched_at             TIMESTAMPTZ,
+  ahj_error                   TEXT,
+  demographics_status         TEXT DEFAULT 'pending',
+  demographics_provider_used  TEXT,
+  demographics_enriched_at    TIMESTAMPTZ,
+  demographics_error          TEXT,
+  satellite_status            TEXT DEFAULT 'pending',
+  satellite_provider_used     TEXT,
+  satellite_enriched_at       TIMESTAMPTZ,
+  satellite_error             TEXT,
+  started_at                  TIMESTAMPTZ,
+  completed_at                TIMESTAMPTZ,
+  failed_at                   TIMESTAMPTZ,
+  next_retry_at               TIMESTAMPTZ,
+  last_error                  TEXT,
+  error_details               JSONB DEFAULT '{}',
+  duration_ms                 INTEGER,
+  force_refresh               BOOLEAN DEFAULT false,
+  dry_run                     BOOLEAN DEFAULT false,
+  triggered_by                TEXT NOT NULL DEFAULT 'system',
+  created_at                  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at                  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrichment_queue_status ON enrichment_queue(status);
+CREATE INDEX IF NOT EXISTS idx_enrichment_queue_next_retry ON enrichment_queue(next_retry_at) WHERE status = 'retry';
+CREATE INDEX IF NOT EXISTS idx_enrichment_queue_priority ON enrichment_queue(priority DESC, created_at ASC) WHERE status = 'pending';
+\n===== lib/migrations/057_webhook_ingestion_log.sql =====
+-- Migration 057: webhook_ingestion_log — immutable audit log with UNIQUE(idempotency_key)
+
+CREATE TABLE IF NOT EXISTS webhook_ingestion_log (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  idempotency_key         TEXT UNIQUE NOT NULL,
+  platform                TEXT NOT NULL,
+  partner_id              TEXT,
+  opportunity_id          UUID REFERENCES network_opportunities(id) ON DELETE SET NULL,
+  http_method             TEXT NOT NULL DEFAULT 'POST',
+  request_headers         JSONB DEFAULT '{}',
+  raw_body                TEXT,
+  parsed_payload          JSONB DEFAULT '{}',
+  signature_header        TEXT,
+  signature_verified      BOOLEAN DEFAULT false,
+  verification_method     TEXT,
+  status                  TEXT NOT NULL DEFAULT 'received',
+  action                  TEXT,
+  processing_error        TEXT,
+  retry_count             INTEGER DEFAULT 0,
+  is_replay               BOOLEAN DEFAULT false,
+  original_log_id         UUID REFERENCES webhook_ingestion_log(id) ON DELETE SET NULL,
+  leads_received          INTEGER DEFAULT 0,
+  leads_created           INTEGER DEFAULT 0,
+  leads_duplicate         INTEGER DEFAULT 0,
+  leads_errored           INTEGER DEFAULT 0,
+  processing_duration_ms  INTEGER,
+  ip_address              INET,
+  user_agent              TEXT,
+  received_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  processed_at            TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_log_platform ON webhook_ingestion_log(platform);
+CREATE INDEX IF NOT EXISTS idx_webhook_log_status ON webhook_ingestion_log(status);
+CREATE INDEX IF NOT EXISTS idx_webhook_log_received_at ON webhook_ingestion_log(received_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_log_opportunity_id ON webhook_ingestion_log(opportunity_id) WHERE opportunity_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_webhook_log_partner_id ON webhook_ingestion_log(partner_id) WHERE partner_id IS NOT NULL;
+\n===== lib/migrations/058_intake_funnels.sql =====
+-- Migration 058: intake_funnels
+-- Funnel configuration table for multi-channel lead intake
+-- Each funnel defines a source channel, required fields, and validation rules
+
+CREATE TABLE IF NOT EXISTS intake_funnels (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug                  TEXT UNIQUE NOT NULL,
+  name                  TEXT NOT NULL,
+  description           TEXT,
+  funnel_type           TEXT NOT NULL DEFAULT 'lead_gen',
+  source_channel        TEXT NOT NULL DEFAULT 'web',
+  is_active             BOOLEAN DEFAULT true,
+  require_phone         BOOLEAN DEFAULT false,
+  require_address       BOOLEAN DEFAULT false,
+  require_monthly_bill  BOOLEAN DEFAULT false,
+  require_roof_type     BOOLEAN DEFAULT false,
+  campaign_id           UUID,
+  thank_you_url         TEXT,
+  webhook_notify_url    TEXT,
+  custom_fields         JSONB DEFAULT '{}',
+  validation_rules      JSONB DEFAULT '{}',
+  intake_key            TEXT UNIQUE,
+  rate_limit_per_hour   INTEGER DEFAULT 100,
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed default funnels
+INSERT INTO intake_funnels (slug, name, description, funnel_type, source_channel, require_monthly_bill)
+VALUES
+  ('solar-estimate',  'Solar Savings Estimate',  'Homeowner solar estimate request form',       'lead_gen',     'web', false),
+  ('bill-upload',     'Bill Upload Flow',         'Upload utility bill to get savings estimate', 'bill_upload',  'web', true),
+  ('battery-savings', 'Battery + Solar Savings',  'Battery storage + solar combo inquiry',       'lead_gen',     'web', false),
+  ('instant-quote',   'Instant Quote Tool',       'Instant price estimate based on address',     'instant_quote','web', false)
+ON CONFLICT (slug) DO NOTHING;
+\n===== lib/migrations/059_acquisition_campaigns.sql =====
+-- Migration 059: acquisition_campaigns
+-- Tracks paid/organic campaigns linked to intake funnels
+-- Stores budget, targeting, UTM params, and performance counters
+
+CREATE TABLE IF NOT EXISTS acquisition_campaigns (
+  id                         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                       TEXT NOT NULL,
+  description                TEXT,
+  campaign_type              TEXT NOT NULL DEFAULT 'paid_search',
+  status                     TEXT NOT NULL DEFAULT 'draft',
+  platform                   TEXT,
+  funnel_id                  UUID REFERENCES intake_funnels(id) ON DELETE SET NULL,
+  daily_budget_cents         INTEGER,
+  monthly_budget_cents       INTEGER,
+  total_budget_cents         INTEGER,
+  cost_per_lead_target_cents INTEGER,
+  leads_target               INTEGER,
+  leads_received             INTEGER DEFAULT 0,
+  leads_qualified            INTEGER DEFAULT 0,
+  leads_converted            INTEGER DEFAULT 0,
+  total_spend_cents          INTEGER DEFAULT 0,
+  utm_source                 TEXT,
+  utm_medium                 TEXT,
+  utm_campaign               TEXT,
+  utm_content                TEXT,
+  utm_term                   TEXT,
+  geo_targeting              JSONB DEFAULT '{}',
+  audience_targeting         JSONB DEFAULT '{}',
+  ad_creative_ids            TEXT[] DEFAULT ARRAY[]::TEXT[],
+  start_date                 DATE,
+  end_date                   DATE,
+  created_by                 UUID REFERENCES users(id) ON DELETE SET NULL,
+  notes                      TEXT,
+  metadata                   JSONB DEFAULT '{}',
+  created_at                 TIMESTAMPTZ DEFAULT NOW(),
+  updated_at                 TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_acquisition_campaigns_status
+  ON acquisition_campaigns(status);
+
+CREATE INDEX IF NOT EXISTS idx_acquisition_campaigns_funnel_id
+  ON acquisition_campaigns(funnel_id)
+  WHERE funnel_id IS NOT NULL;
+\n===== lib/migrations/061_intelligence_observations.sql =====
+-- Migration 061: intelligence_observations
+--
+-- Canonical Intelligence Observations.
+--
+-- This table stores append-friendly, explainable derived facts attached to
+-- existing canonical entities. It is NOT lifecycle authority and does NOT
+-- replace network_opportunities, projects, users, contractor_profiles,
+-- utility_policies, network_events, intake_events, project_activity, or any
+-- other source-of-truth table.
+--
+-- Every observation must include source, confidence, timestamp, derivation,
+-- payload, and schema_version.
+
+CREATE TABLE IF NOT EXISTS intelligence_observations (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- Canonical entity attachment. entity_id is TEXT to support both UUID-backed
+  -- entities and canonical string IDs such as utility or AHJ identifiers.
+  entity_type       TEXT NOT NULL CHECK (entity_type IN (
+                      'opportunity',
+                      'project',
+                      'contractor',
+                      'client',
+                      'utility',
+                      'ahj',
+                      'campaign',
+                      'assignment',
+                      'user'
+                    )),
+  entity_id         TEXT NOT NULL,
+
+  -- Observation classification.
+  observation_type  TEXT NOT NULL,
+  source_system     TEXT NOT NULL,
+
+  -- Explainability contract.
+  confidence        NUMERIC(5,4) NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  observed_at       TIMESTAMPTZ NOT NULL,
+  derivation        JSONB NOT NULL DEFAULT '{}',
+  payload           JSONB NOT NULL DEFAULT '{}',
+  schema_version    TEXT NOT NULL,
+
+  -- Replay/correlation metadata.
+  correlation_id    TEXT,
+  causation_id      TEXT,
+  idempotency_key   TEXT,
+
+  -- Append-friendly timestamp. No updated_at column by design.
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Optional idempotency for replay/import safety. Multiple NULL values are allowed.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_intel_obs_idempotency_key
+  ON intelligence_observations(idempotency_key)
+  WHERE idempotency_key IS NOT NULL;
+
+-- Required lookup indexes.
+CREATE INDEX IF NOT EXISTS idx_intel_obs_entity
+  ON intelligence_observations(entity_type, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_intel_obs_observation_type
+  ON intelligence_observations(observation_type);
+
+CREATE INDEX IF NOT EXISTS idx_intel_obs_source_system
+  ON intelligence_observations(source_system);
+
+CREATE INDEX IF NOT EXISTS idx_intel_obs_observed_at
+  ON intelligence_observations(observed_at DESC);
+
+-- Common composite indexes for replay and explainability queries.
+CREATE INDEX IF NOT EXISTS idx_intel_obs_entity_observed_at
+  ON intelligence_observations(entity_type, entity_id, observed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_intel_obs_entity_type_source
+  ON intelligence_observations(entity_type, observation_type, source_system);
+
+CREATE INDEX IF NOT EXISTS idx_intel_obs_correlation
+  ON intelligence_observations(correlation_id)
+  WHERE correlation_id IS NOT NULL;
+
+COMMENT ON TABLE intelligence_observations IS
+  'Append-friendly explainable derived facts attached to canonical SolarPro entities. Not lifecycle authority and not a source-of-truth replacement.';
+\n===== lib/migrations/071_canonical_homeowner_intake_funnel.sql =====
+-- Migration 071: canonical homeowner intake funnel metadata
+-- Reuses intake_funnels and does not create a duplicate intake system.
+
+INSERT INTO intake_funnels (
+  slug,
+  name,
+  description,
+  funnel_type,
+  source_channel,
+  is_active,
+  require_phone,
+  require_address,
+  require_monthly_bill,
+  require_roof_type,
+  custom_fields,
+  rate_limit_per_hour
+) VALUES (
+  'free-solar-estimate',
+  'Canonical Homeowner Intake',
+  'Primary public homeowner solar estimate funnel at /free-solar-estimate. Submits to /api/intake/homeowner.',
+  'homeowner',
+  'web',
+  true,
+  true,
+  true,
+  true,
+  false,
+  '{"canonical_path":"/free-solar-estimate","canonical_endpoint":"/api/intake/homeowner","supports_embed_url":true}'::jsonb,
+  100
+)
+ON CONFLICT (slug) DO UPDATE SET
+  name = EXCLUDED.name,
+  description = EXCLUDED.description,
+  funnel_type = EXCLUDED.funnel_type,
+  source_channel = EXCLUDED.source_channel,
+  is_active = EXCLUDED.is_active,
+  require_phone = EXCLUDED.require_phone,
+  require_address = EXCLUDED.require_address,
+  require_monthly_bill = EXCLUDED.require_monthly_bill,
+  custom_fields = intake_funnels.custom_fields || EXCLUDED.custom_fields,
+  updated_at = NOW();
+\n===== lib/migrations/072_marketplace_inventory_claim_v1.sql =====
+-- Migration 072: Marketplace Inventory + Contractor Eligibility + Claim Flow v1
+--
+-- Additive-only support for explicit marketplace inventory projection and
+-- explainable claim behavior. Canonical rows remain network_opportunities,
+-- immutable history remains network_events, and contractor claims remain
+-- opportunity_assignments.
+--
+-- IMPORTANT RUNNER COMPATIBILITY:
+--   Keep this file as plain semicolon-delimited SQL only. Do not use DO $$
+--   blocks because the current System Tools runner splits statements by
+--   semicolon and cannot safely execute PL/pgSQL blocks.
+
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS intake_event_id UUID;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS release_gate_result JSONB NOT NULL DEFAULT '{}';
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS marketplace_status TEXT NOT NULL DEFAULT 'not_released';
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS released_by UUID;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS paused_by UUID;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS unreleased_at TIMESTAMPTZ;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS unreleased_by UUID;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS archived_by UUID;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS inventory_transition_reason TEXT;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS claim_mode TEXT NOT NULL DEFAULT 'exclusive';
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS max_claims INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE network_opportunities ADD COLUMN IF NOT EXISTS claim_count INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_net_opps_intake_event_id
+  ON network_opportunities (intake_event_id)
+  WHERE intake_event_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_net_opps_unique_intake_event_id
+  ON network_opportunities (intake_event_id)
+  WHERE intake_event_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_net_opps_marketplace_status
+  ON network_opportunities (marketplace_status, released_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_net_opps_live_inventory
+  ON network_opportunities (status, marketplace_status, released_at DESC)
+  WHERE status = 'live' AND marketplace_status = 'live';
+
+-- Replace the older opportunity-only claimed uniqueness so shared claim mode can
+-- support more than one contractor while still preventing the same contractor
+-- from holding duplicate active records for the same opportunity. Exclusive mode
+-- is enforced by network_opportunities.claim_mode/max_claims/claim_count in the
+-- claim mutation guard.
+DROP INDEX IF EXISTS idx_opp_assignments_unique_claimed;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_opp_assignments_unique_active_claim_v1
+  ON opportunity_assignments(opportunity_id, contractor_id)
+  WHERE status IN ('offered','viewed','claimed','contacted','appointment','proposal','won');
+
+COMMENT ON COLUMN network_opportunities.intake_event_id IS
+  'Canonical link back to the immutable homeowner intake event that produced this marketplace opportunity.';
+
+COMMENT ON COLUMN network_opportunities.release_gate_result IS
+  'Explainable marketplace release gate snapshot captured at release/unrelease/pause/archive time.';
+
+COMMENT ON COLUMN network_opportunities.marketplace_status IS
+  'Operational inventory state: not_released, live, paused, unreleased, archived, claimed, expired. Separate from lifecycle status.';
+\n===== migrations/013_project_physical_data.sql =====
+-- ============================================================
+-- Migration 013: project_physical_data (v47.438)
+--
+-- Creates the project_physical_data table — the single source
+-- of truth for the actual physical + electrical reality of a
+-- property.
+--
+-- ARCHITECTURE:
+--   Survey  WRITES to this table.
+--   Engineering READS from this table.
+--   Future systems (manual override, API, office entry) may
+--   also update it.
+--
+-- This is NOT survey_data. This is NOT site_conditions.
+-- site_conditions = jurisdiction/environmental (wind, snow, NEC)
+-- project_physical_data = physical + electrical reality of the property
+--
+-- All additive. IF NOT EXISTS guards make this safe to re-run.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS project_physical_data (
+  -- --------------------------------------------------------
+  -- Core
+  -- --------------------------------------------------------
+  id                      UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id              UUID          NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+
+  -- Source of this record:
+  --   'survey'   - written by the ingest pipeline from a completed survey
+  --   'manual'   - entered manually by office staff
+  --   'api'      - written by an external system
+  --   'override' - manually overridden after survey (corrects bad field data)
+  source                  TEXT          NOT NULL DEFAULT 'survey'
+                            CHECK (source IN ('survey', 'manual', 'api', 'override')),
+
+  -- --------------------------------------------------------
+  -- Structure / Roof
+  -- Engineering reads: roofType, rafterSpacingIn, roofPitch
+  -- --------------------------------------------------------
+
+  -- Enum values mirror RoofMaterial in lib/survey/v2/types.ts:
+  --   comp_shingle | tile_concrete | tile_clay | metal_standing_seam |
+  --   metal_r_panel | flat_tpo | flat_epdm | flat_torch | wood_shake | other
+  roof_material           TEXT,
+
+  -- Enum values mirror RoofPitch in lib/survey/v2/types.ts:
+  --   flat | low | standard | steep | very_steep
+  roof_pitch              TEXT,
+
+  -- Numeric rafter spacing in inches (16 or 24 are standard values).
+  -- Engineering reads this directly for structural calculations.
+  rafter_spacing_in       INTEGER,
+
+  -- Enum: good | fair | poor
+  roof_condition          TEXT,
+
+  -- Age of roof in years. Engineering uses for permit flagging.
+  roof_age_years          INTEGER,
+
+  -- Whether the attic is accessible. Engineering uses for wire routing decisions.
+  attic_access            BOOLEAN,
+
+  -- --------------------------------------------------------
+  -- Electrical
+  -- Engineering reads: panel_rating_amps → mainPanelBusAmps
+  --                    interconnection_point → interconnectionType
+  -- --------------------------------------------------------
+  panel_brand             TEXT,
+
+  -- Numeric panel bus rating in amps.
+  -- Maps PanelRating enum ('100','150','200','225','320','400','other') → integer.
+  -- Engineering uses this to determine load-side vs supply-side interconnection
+  -- per NEC 705.12(B): backfeed breaker must be ≤ 20% of bus rating.
+  panel_rating_amps       INTEGER,
+
+  -- Number of available breaker slots.
+  -- Stored as text to preserve the range values ('0','1-2','3-4','5+').
+  available_breaker_slots TEXT,
+
+  -- Enum: standard | combo | 320a | other
+  meter_socket_type       TEXT,
+
+  -- Enum: main_panel | sub_panel | load_side | supply_side
+  interconnection_point   TEXT,
+
+  -- Enum: overhead | underground
+  service_entrance_type   TEXT,
+
+  has_sub_panel           BOOLEAN,
+
+  -- Sub-panel bus rating in amps (same mapping as panel_rating_amps).
+  sub_panel_rating_amps   INTEGER,
+
+  -- --------------------------------------------------------
+  -- Constraints
+  -- --------------------------------------------------------
+
+  -- JSONB array of obstruction objects: { id, type, location, notes }
+  -- Engineering uses for CAD layout and usable roof area calculation.
+  obstructions            JSONB         NOT NULL DEFAULT '[]'::jsonb,
+
+  -- 0-100 percent of roof area usable for solar array.
+  -- Engineering uses for final panel count cap and CAD layout.
+  usable_roof_pct         INTEGER
+                            CHECK (usable_roof_pct IS NULL OR (usable_roof_pct >= 0 AND usable_roof_pct <= 100)),
+
+  -- --------------------------------------------------------
+  -- Survey Metadata
+  -- These fields do not drive engineering calculations but are
+  -- required for audit, permit packages, and QA review.
+  -- --------------------------------------------------------
+  inspector_name          TEXT,
+  surveyed_at             TIMESTAMPTZ,
+  access_notes            TEXT,
+  mounting_notes          TEXT,
+  electrical_notes        TEXT,
+
+  -- --------------------------------------------------------
+  -- Site Overview (structural context for permit plan sets)
+  -- --------------------------------------------------------
+  structure_type          TEXT,    -- residential | commercial | industrial
+  stories                 TEXT,    -- '1' | '2' | '3+'
+
+  -- --------------------------------------------------------
+  -- Timestamps
+  -- --------------------------------------------------------
+  created_at              TIMESTAMPTZ   NOT NULL DEFAULT now(),
+  updated_at              TIMESTAMPTZ   NOT NULL DEFAULT now()
+);
+
+-- --------------------------------------------------------
+-- One record per project. A project has exactly one
+-- current physical data record. ON CONFLICT allows the
+-- ingest pipeline to upsert safely on re-submission.
+-- --------------------------------------------------------
+CREATE UNIQUE INDEX IF NOT EXISTS idx_project_physical_data_project_id
+  ON project_physical_data(project_id);
+
+-- --------------------------------------------------------
+-- Indexes for engineering read patterns
+-- --------------------------------------------------------
+
+-- Engineering lookup by project_id (primary read pattern)
+CREATE INDEX IF NOT EXISTS idx_project_physical_data_source
+  ON project_physical_data(source);
+
+-- --------------------------------------------------------
+-- updated_at trigger
+-- --------------------------------------------------------
+CREATE OR REPLACE FUNCTION update_project_physical_data_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_project_physical_data_updated_at ON project_physical_data;
+CREATE TRIGGER trg_project_physical_data_updated_at
+  BEFORE UPDATE ON project_physical_data
+  FOR EACH ROW
+  EXECUTE FUNCTION update_project_physical_data_updated_at();
+
+-- ============================================================
+-- Notes for engineering integration (reportGenerator.ts)
+-- ============================================================
+--
+-- When generateStructuralEngineering() runs:
+--   SELECT * FROM project_physical_data WHERE project_id = $1
+--   Use roof_material      → roofType        (default: 'Asphalt Shingle' if NULL)
+--   Use rafter_spacing_in  → rafterSpacingIn (default: 24 if NULL)
+--   Use roof_pitch         → pitchDegrees    (via enum map if NULL, fall back to snap value)
+--
+-- When generateElectricalEngineering() runs:
+--   Use panel_rating_amps  → mainPanelBusAmps       (default: 200 if NULL)
+--   Use interconnection_point → interconnectionType (hint, overrides NEC calc if set)
+--
+-- ============================================================\n===== migrations/016_site_surveys.sql =====
+-- ============================================================
+-- Migration 016: Site Surveys — First-Class Field Data Layer
+--
+-- Establishes site_surveys and site_survey_files as the
+-- canonical storage for all field survey submissions.
+--
+-- Design principles:
+--   - client_id is REQUIRED (surveys always owned by a client)
+--   - project_id is NULLABLE (may not exist at survey time)
+--   - Completely separate from project_versions / layout data
+--   - Both project_handoff and standalone sources route here
+--   - Safe to re-run (IF NOT EXISTS / DO NOTHING guards)
+-- ============================================================
+
+-- ============================================================
+-- ENUM TYPES
+-- ============================================================
+
+DO $$ BEGIN
+  CREATE TYPE site_survey_status AS ENUM ('draft', 'completed', 'reviewed');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE site_survey_source AS ENUM ('project_handoff', 'standalone');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE TYPE survey_file_type AS ENUM ('photo', 'document');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================
+-- TABLE: site_surveys
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS site_surveys (
+  id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- Ownership (client is source of truth; project is optional link)
+  client_id         UUID        NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  project_id        UUID        REFERENCES projects(id) ON DELETE SET NULL,
+  created_by        UUID        NOT NULL,   -- user_id of the person who submitted
+
+  -- Timestamps
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  -- Status lifecycle
+  status            site_survey_status NOT NULL DEFAULT 'completed',
+
+  -- Source of survey (how it was initiated)
+  source            site_survey_source NOT NULL DEFAULT 'project_handoff',
+
+  -- Address snapshot at time of survey (denormalized for display without joins)
+  address_snapshot  TEXT,
+
+  -- Full structured survey payload (from ingest transform)
+  survey_data       JSONB,
+
+  -- Optional inspector / field notes
+  inspector_name    TEXT,
+  notes             TEXT,
+
+  -- Link back to the external survey system (for dedup / replay)
+  external_survey_id TEXT,
+
+  -- Webhook delivery that created this row (for traceability)
+  delivery_id       TEXT
+);
+
+-- ============================================================
+-- TABLE: site_survey_files
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS site_survey_files (
+  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  survey_id   UUID        NOT NULL REFERENCES site_surveys(id) ON DELETE CASCADE,
+
+  file_url    TEXT        NOT NULL,
+  file_type   survey_file_type NOT NULL DEFAULT 'photo',
+
+  -- Descriptive label for grouping in the UI
+  -- e.g. 'roof', 'panel', 'meter', 'attic', 'utility_room', 'exterior'
+  label       TEXT,
+
+  -- Original filename from the survey app (optional)
+  filename    TEXT,
+
+  -- MIME type if known
+  mime_type   TEXT,
+
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- INDEXES
+-- ============================================================
+
+-- Primary access pattern: surveys for a client (client page tab)
+CREATE INDEX IF NOT EXISTS idx_site_surveys_client_created
+  ON site_surveys(client_id, created_at DESC);
+
+-- Secondary access pattern: surveys for a project (project page card)
+CREATE INDEX IF NOT EXISTS idx_site_surveys_project_created
+  ON site_surveys(project_id, created_at DESC)
+  WHERE project_id IS NOT NULL;
+
+-- Files for a survey (detail page photo grid)
+CREATE INDEX IF NOT EXISTS idx_site_survey_files_survey
+  ON site_survey_files(survey_id, created_at ASC);
+
+-- Files grouped by label (for grouped photo display)
+CREATE INDEX IF NOT EXISTS idx_site_survey_files_label
+  ON site_survey_files(survey_id, label);
+
+-- Dedup / replay: look up by external survey id
+CREATE INDEX IF NOT EXISTS idx_site_surveys_external_id
+  ON site_surveys(external_survey_id)
+  WHERE external_survey_id IS NOT NULL;
+
+-- ============================================================
+-- updated_at trigger
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION update_site_surveys_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_site_surveys_updated_at ON site_surveys;
+CREATE TRIGGER trg_site_surveys_updated_at
+  BEFORE UPDATE ON site_surveys
+  FOR EACH ROW EXECUTE FUNCTION update_site_surveys_updated_at();\n===== migrations/019_homeowner_stage.sql =====
+-- ============================================================
+-- Migration 019: Homeowner-facing project stage column
+-- ============================================================
+-- IMPORTANT: project_status is the internal 13-stage ops pipeline.
+-- homeowner_stage is a separate, admin-controlled field used
+-- ONLY by the homeowner portal to display progress.
+-- Do NOT merge these two pipelines.
+-- ============================================================
+
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS homeowner_stage TEXT
+    CHECK (homeowner_stage IN (
+      'lead_submitted',
+      'under_review',
+      'site_survey',
+      'design',
+      'proposal',
+      'installation',
+      'completed'
+    ));
+
+-- Stage history: every time admin changes homeowner_stage, log it
+CREATE TABLE IF NOT EXISTS project_homeowner_stage_history (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id   UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  stage        TEXT NOT NULL,
+  changed_by   UUID,           -- admin user id (nullable for system changes)
+  note         TEXT,           -- optional admin note
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_phsh_project_id
+  ON project_homeowner_stage_history(project_id);
+
+CREATE INDEX IF NOT EXISTS idx_phsh_created_at
+  ON project_homeowner_stage_history(created_at DESC);\n===== migrations/009_engineering_runs.sql =====
+-- ============================================================
+-- Migration 009: Engineering Runs — Reverse State Loading
+-- Stores a structured config snapshot for every engineering run
+-- so files can be traced back to the exact system configuration
+-- that generated them.
+-- ============================================================
+
+-- engineering_runs: one row per engineering calc run
+CREATE TABLE IF NOT EXISTS engineering_runs (
+  id                    VARCHAR(36)   PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  project_id            VARCHAR(36)   NOT NULL,
+  user_id               VARCHAR(36)   NOT NULL,
+  client_id             VARCHAR(36),
+
+  -- System sizing
+  system_size_kw        DECIMAL(8,2)  NOT NULL DEFAULT 0,
+  panel_count           INTEGER       NOT NULL DEFAULT 0,
+  annual_production_kwh INTEGER,
+
+  -- Equipment
+  panel_id              VARCHAR(100),
+  panel_model           VARCHAR(200),
+  panel_wattage         INTEGER,
+  inverter_id           VARCHAR(100),
+  inverter_model        VARCHAR(200),
+  inverter_type         VARCHAR(20),   -- 'string' | 'micro' | 'optimizer'
+  inverter_qty          INTEGER        DEFAULT 1,
+  mounting_id           VARCHAR(100),
+  mount_type            VARCHAR(50),
+
+  -- Electrical
+  main_panel_rating     INTEGER,       -- bus amps
+  backfeed_breaker      INTEGER,       -- amps
+  interconnection_method VARCHAR(50),
+  wire_gauge            VARCHAR(30),
+  conduit_type          VARCHAR(30),
+  rapid_shutdown        BOOLEAN        DEFAULT true,
+  ac_disconnect         BOOLEAN        DEFAULT true,
+  dc_disconnect         BOOLEAN        DEFAULT true,
+
+  -- Site
+  utility_name          VARCHAR(200),
+  utility_id            VARCHAR(100),
+  state_code            VARCHAR(2),
+  address               TEXT,
+  ahj                   VARCHAR(200),
+  roof_pitch            INTEGER,
+  system_type           VARCHAR(20),   -- 'roof' | 'ground' | 'fence'
+
+  -- String configuration (full JSON for complete hydration)
+  string_config         JSONB          NOT NULL DEFAULT '[]',
+
+  -- Full config snapshot (complete ProjectConfig for full hydration)
+  config_snapshot       JSONB          NOT NULL DEFAULT '{}',
+
+  -- Calc outputs (for display in file viewer)
+  calc_outputs          JSONB          NOT NULL DEFAULT '{}',
+
+  -- Metadata
+  generated_at          TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
+  created_at            TIMESTAMPTZ    NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_eng_runs_project_id ON engineering_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_eng_runs_user_id ON engineering_runs(user_id);
+CREATE INDEX IF NOT EXISTS idx_eng_runs_created_at ON engineering_runs(created_at DESC);
+
+-- Add engineering_run_id to project_files (links each file to the run that generated it)
+ALTER TABLE project_files
+  ADD COLUMN IF NOT EXISTS engineering_run_id VARCHAR(36);
+
+CREATE INDEX IF NOT EXISTS idx_project_files_run_id ON project_files(engineering_run_id);
