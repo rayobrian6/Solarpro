@@ -35,7 +35,11 @@ const intakeMetadata = {
         totalAmount: 260,
         monthlyUsageHistory: [1500, 1480, 1520],
         confidence: "high",
-        extractedFields: ["utilityProvider", "annualKwh", "monthlyUsageHistory"],
+        extractedFields: [
+          "utilityProvider",
+          "annualKwh",
+          "monthlyUsageHistory",
+        ],
         billType: "electric",
       },
     },
@@ -79,14 +83,23 @@ describe("marketplace revenue intelligence helpers", () => {
     });
 
     expect(confidence.level).toBe("high");
-    expect(confidence.reasons).toContain("Verified stored utility bill evidence");
-    expect(confidence.reasons).toContain("Real parsed bill intelligence available");
+    expect(confidence.reasons).toContain(
+      "Verified stored utility bill evidence",
+    );
+    expect(confidence.reasons).toContain(
+      "Real parsed bill intelligence available",
+    );
   });
 
   it("emits only badges backed by input evidence", () => {
     vi.setSystemTime(new Date("2025-01-02T00:00:00Z"));
     const releaseGate = evaluateMarketplaceReleaseGate(gateRow());
-    const confidence = deriveMarketplaceConfidence({ releaseGate, annualUsageKwh: 18000, utilityProvider: "PG&E", utilityRatePerKwh: 0.21 });
+    const confidence = deriveMarketplaceConfidence({
+      releaseGate,
+      annualUsageKwh: 18000,
+      utilityProvider: "PG&E",
+      utilityRatePerKwh: 0.21,
+    });
     const badges = deriveMarketplaceBadges({
       releaseGate,
       confidence,
@@ -123,7 +136,11 @@ describe("marketplace revenue intelligence helpers", () => {
 
   it("builds deterministic narrative without inventing unavailable facts", () => {
     const releaseGate = evaluateMarketplaceReleaseGate(gateRow());
-    const badges = deriveMarketplaceBadges({ releaseGate, annualUsageKwh: 18000, utilityRatePerKwh: 0.21 });
+    const badges = deriveMarketplaceBadges({
+      releaseGate,
+      annualUsageKwh: 18000,
+      utilityRatePerKwh: 0.21,
+    });
     const narrative = buildMarketplaceNarrative({
       city: "Fresno",
       stateCode: "CA",
@@ -139,7 +156,9 @@ describe("marketplace revenue intelligence helpers", () => {
 
     expect(narrative.summary).toContain("Fresno, CA");
     expect(narrative.summary).toContain("$42,000 estimated project");
-    expect(narrative.bullets).toContain("Homeowner-entered monthly bill: $255.");
+    expect(narrative.bullets).toContain(
+      "Homeowner-entered monthly bill: $255.",
+    );
     expect(narrative.source_note).toContain("deterministic");
   });
 
@@ -195,6 +214,115 @@ describe("marketplace revenue intelligence helpers", () => {
       bill_type: "electric",
     });
     expect(JSON.stringify(projection)).not.toContain("marketplace_raw_payload");
-    expect(JSON.stringify(projection)).not.toContain("marketplace_intake_metadata");
+    expect(JSON.stringify(projection)).not.toContain(
+      "marketplace_intake_metadata",
+    );
+  });
+});
+
+describe("marketplace purchase and revenue expansion", () => {
+  it("adds deterministic purchase, financing, complexity, value, and score projections", () => {
+    const projection = buildMarketplaceIntelligence({
+      ...gateRow(),
+      city: "Fresno",
+      state_code: "CA",
+      estimated_system_cost: 42000,
+      estimated_annual_savings: 3100,
+      estimated_offset_pct: 94,
+      estimated_payback_yrs: 7.2,
+      system_size_kw: 11.8,
+      annual_kwh: 17500,
+      monthly_kwh_avg: 1458,
+      utility_rate_per_kwh: 0.2,
+      utility_name: "PG&E",
+      monthly_bill_amount: 255,
+      homeowner_status: "owner_occupied",
+      timeline: "1_3_months",
+      finance_readiness: true,
+      lead_grade: "A",
+      qualification_status: "qualified",
+      estimated_income_band: "high",
+      estimated_credit_band: "good",
+      battery_candidate: true,
+      roof_material: "composition_shingle",
+      roof_pitch: "4/12",
+      roof_condition: "good",
+      roof_age_years: 8,
+      stories: 1,
+      usable_roof_pct: 78,
+      complex_ahj: false,
+      steep_roof: false,
+      created_at: "2025-01-01T18:00:00Z",
+      claim_mode: "shared",
+      claim_count: 1,
+      max_claims: 3,
+      marketplace_lifecycle_status: "live",
+      marketplace_screening_status: "approved",
+      marketplace_intake_metadata: intakeMetadata,
+      marketplace_raw_payload: {},
+    });
+
+    expect(projection.purchase_profile.purchase_method_label).toMatch(
+      /Loan|Financing/,
+    );
+    expect(projection.purchase_profile.readiness_label).toContain(
+      "financing signal present",
+    );
+    expect(projection.project_value.project_value_range).toMatchObject({
+      min: 37800,
+      max: 46200,
+      unit: "usd",
+    });
+    expect(projection.project_value.basis).toContain(
+      "stored project value estimate",
+    );
+    expect(projection.financing.disclaimers[0]).toContain(
+      "not a credit approval",
+    );
+    expect(projection.financing.score).toBeGreaterThanOrEqual(70);
+    expect(projection.sales_complexity.label).toContain("sales complexity");
+    expect(projection.install_complexity.profitability_label).toContain(
+      "Install profile",
+    );
+    expect(projection.opportunity_score.score).toBeGreaterThan(60);
+    expect(projection.opportunity_score.reasons).toContain(
+      "Project value range available",
+    );
+    expect(projection.financing.disclaimers[0]).toContain(
+      "not a credit approval or loan quote",
+    );
+    expect(JSON.stringify(projection)).not.toContain("apr");
+    expect(JSON.stringify(projection)).not.toContain("monthly_payment");
+  });
+
+  it("degrades gracefully without inventing purchase economics", () => {
+    const projection = buildMarketplaceIntelligence({
+      id: "opp-limited",
+      status: "live",
+      marketplace_status: "live",
+      marketplace_lifecycle_status: "live",
+      marketplace_screening_status: "approved",
+      city: "Austin",
+      state_code: "TX",
+      marketplace_intake_metadata: {},
+      marketplace_raw_payload: {},
+    });
+
+    expect(projection.project_value.project_value_range).toBeNull();
+    expect(projection.project_value.value_label).toBe(
+      "Project value awaiting validation",
+    );
+    expect(projection.purchase_profile.purchase_method_label).toBe(
+      "Purchase method undetermined",
+    );
+    expect(projection.financing.likelihood_label).toBe(
+      "Financing likelihood awaiting validation",
+    );
+    expect(projection.install_complexity.label).toBe(
+      "Install complexity awaiting site validation",
+    );
+    expect(projection.opportunity_score.cautions).toEqual(
+      expect.arrayContaining(["Project value unavailable"]),
+    );
   });
 });

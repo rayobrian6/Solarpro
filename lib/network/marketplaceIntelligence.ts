@@ -1,6 +1,39 @@
-import { deriveMarketplaceBadges, type MarketplaceBadge } from "@/lib/network/marketplaceBadges";
-import { deriveMarketplaceConfidence, type MarketplaceConfidenceResult } from "@/lib/network/marketplaceConfidence";
-import { buildMarketplaceNarrative, type MarketplaceNarrativeResult } from "@/lib/network/marketplaceNarratives";
+import {
+  deriveMarketplaceBadges,
+  type MarketplaceBadge,
+} from "@/lib/network/marketplaceBadges";
+import {
+  deriveMarketplaceConfidence,
+  type MarketplaceConfidenceResult,
+} from "@/lib/network/marketplaceConfidence";
+import {
+  buildMarketplaceNarrative,
+  type MarketplaceNarrativeResult,
+} from "@/lib/network/marketplaceNarratives";
+import {
+  deriveFinancingIntelligence,
+  type FinancingIntelligenceResult,
+} from "@/lib/network/financingIntelligence";
+import {
+  deriveInstallComplexity,
+  type InstallComplexityResult,
+} from "@/lib/network/installComplexity";
+import {
+  deriveOpportunityScore,
+  type OpportunityScoreResult,
+} from "@/lib/network/opportunityScore";
+import {
+  deriveProjectValue,
+  type ProjectValueResult,
+} from "@/lib/network/projectValue";
+import {
+  derivePurchaseProfile,
+  type PurchaseProfileResult,
+} from "@/lib/network/purchaseProfile";
+import {
+  deriveSalesComplexity,
+  type SalesComplexityResult,
+} from "@/lib/network/salesComplexity";
 import {
   evaluateMarketplaceReleaseGate,
   type MarketplaceReleaseGateEvidence,
@@ -70,6 +103,12 @@ export interface MarketplaceIntelligenceProjection {
   badges: MarketplaceBadge[];
   narrative: MarketplaceNarrativeResult;
   revenue: MarketplaceRevenueIntelligence;
+  purchase_profile: PurchaseProfileResult;
+  project_value: ProjectValueResult;
+  financing: FinancingIntelligenceResult;
+  sales_complexity: SalesComplexityResult;
+  install_complexity: InstallComplexityResult;
+  opportunity_score: OpportunityScoreResult;
   bill_visuals: MarketplaceBillVisualsProjection;
   evidence: MarketplaceEvidenceSummary;
   release: MarketplaceReleaseSummary;
@@ -102,13 +141,19 @@ function boolValue(value: unknown): boolean | null {
   return null;
 }
 
-function recordAt(source: Record<string, unknown>, key: string): Record<string, unknown> {
+function recordAt(
+  source: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
   return isRecord(source[key]) ? source[key] : {};
 }
 
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return value.filter(
+    (item): item is string =>
+      typeof item === "string" && item.trim().length > 0,
+  );
 }
 
 function numberArray(value: unknown): number[] {
@@ -134,9 +179,15 @@ function firstNumberFrom(...values: unknown[]): number | null {
   return null;
 }
 
-function buildBillVisuals(row: Record<string, unknown>): MarketplaceBillVisualsProjection {
-  const rawPayload = isRecord(row.marketplace_raw_payload) ? row.marketplace_raw_payload : {};
-  const intakeMetadata = isRecord(row.marketplace_intake_metadata) ? row.marketplace_intake_metadata : {};
+function buildBillVisuals(
+  row: Record<string, unknown>,
+): MarketplaceBillVisualsProjection {
+  const rawPayload = isRecord(row.marketplace_raw_payload)
+    ? row.marketplace_raw_payload
+    : {};
+  const intakeMetadata = isRecord(row.marketplace_intake_metadata)
+    ? row.marketplace_intake_metadata
+    : {};
   const billIntelligence = isRecord(rawPayload.bill_intelligence)
     ? rawPayload.bill_intelligence
     : isRecord(intakeMetadata.bill_intelligence)
@@ -150,18 +201,40 @@ function buildBillVisuals(row: Record<string, unknown>): MarketplaceBillVisualsP
 
   const parserMonthlyUsageHistory = numberArray(billData.monthlyUsageHistory);
   const billMonthlyUsageHistory = numberArray(bill.monthly_usage_history);
-  const monthlyUsageHistory = parserMonthlyUsageHistory.length ? parserMonthlyUsageHistory : billMonthlyUsageHistory;
+  const monthlyUsageHistory = parserMonthlyUsageHistory.length
+    ? parserMonthlyUsageHistory
+    : billMonthlyUsageHistory;
   const parserExtractedFields = stringArray(billData.extractedFields);
   const extractionExtractedFields = stringArray(extraction.extracted_fields);
-  const extractedFields = parserExtractedFields.length ? parserExtractedFields : extractionExtractedFields;
+  const extractedFields = parserExtractedFields.length
+    ? parserExtractedFields
+    : extractionExtractedFields;
 
   return {
     status: firstStringFrom(extraction.status, billIntelligence.status),
-    confidence_label: firstStringFrom(extraction.confidence_label, billData.confidence),
-    confidence_score: firstNumberFrom(extraction.confidence, billData.confidenceScore),
-    parser_method: firstStringFrom(extraction.method, metadata.parserMethod, parserResult.parserMethod),
-    parser_model: firstStringFrom(metadata.claudeModel, metadata.model, parserResult.model),
-    parser_input: firstStringFrom(metadata.inputType, metadata.input, extraction.parser_path),
+    confidence_label: firstStringFrom(
+      extraction.confidence_label,
+      billData.confidence,
+    ),
+    confidence_score: firstNumberFrom(
+      extraction.confidence,
+      billData.confidenceScore,
+    ),
+    parser_method: firstStringFrom(
+      extraction.method,
+      metadata.parserMethod,
+      parserResult.parserMethod,
+    ),
+    parser_model: firstStringFrom(
+      metadata.claudeModel,
+      metadata.model,
+      parserResult.model,
+    ),
+    parser_input: firstStringFrom(
+      metadata.inputType,
+      metadata.input,
+      extraction.parser_path,
+    ),
     months_found: monthlyUsageHistory.length,
     monthly_usage_history: monthlyUsageHistory,
     extracted_fields: extractedFields,
@@ -169,7 +242,11 @@ function buildBillVisuals(row: Record<string, unknown>): MarketplaceBillVisualsP
   };
 }
 
-function field<T>(value: T | null, source: MarketplaceValueSource, label: string): MarketplaceSourcedValue<T> | null {
+function field<T>(
+  value: T | null,
+  source: MarketplaceValueSource,
+  label: string,
+): MarketplaceSourcedValue<T> | null {
   return value == null ? null : { value, source, label };
 }
 
@@ -179,7 +256,9 @@ function normalizedOffset(value: unknown): number | null {
   return numeric <= 1 ? Math.round(numeric * 100) : Math.round(numeric);
 }
 
-function buildReleaseGate(row: Record<string, unknown>): MarketplaceReleaseGateResult {
+function buildReleaseGate(
+  row: Record<string, unknown>,
+): MarketplaceReleaseGateResult {
   return evaluateMarketplaceReleaseGate({
     id: row.id,
     status: row.marketplace_lifecycle_status ?? row.status,
@@ -192,30 +271,62 @@ function buildReleaseGate(row: Record<string, unknown>): MarketplaceReleaseGateR
   });
 }
 
-function enrichmentField<T = unknown>(row: Record<string, unknown>, group: string, key: string): T | null {
+function enrichmentField<T = unknown>(
+  row: Record<string, unknown>,
+  group: string,
+  key: string,
+): T | null {
   const payload = row.enrichment_payload;
   if (!isRecord(payload)) return null;
   const groupRecord = payload[group];
   if (!isRecord(groupRecord)) return null;
   const fieldRecord = groupRecord[key];
-  if (isRecord(fieldRecord) && "value" in fieldRecord) return fieldRecord.value as T;
+  if (isRecord(fieldRecord) && "value" in fieldRecord)
+    return fieldRecord.value as T;
   return null;
 }
 
-export function buildMarketplaceIntelligence(row: Record<string, unknown>): MarketplaceIntelligenceProjection {
+export function buildMarketplaceIntelligence(
+  row: Record<string, unknown>,
+): MarketplaceIntelligenceProjection {
   const releaseGate = buildReleaseGate(row);
   const evidence = releaseGate.evidence;
   const billVisuals = buildBillVisuals(row);
 
-  const estimatedProjectValue = numberValue(row.estimated_system_cost ?? enrichmentField(row, "core", "estimated_project_value"));
-  const estimatedSystemSize = numberValue(row.system_size_kw ?? evidence.parsed_bill.estimated_system_size_kw ?? enrichmentField(row, "core", "estimated_system_size_kw"));
-  const monthlyBill = numberValue(row.monthly_bill_amount ?? evidence.homeowner_intake.monthly_bill_amount);
-  const annualUsage = numberValue(row.annual_kwh ?? evidence.parsed_bill.annual_usage_kwh);
-  const monthlyUsage = numberValue(row.monthly_kwh_avg ?? evidence.parsed_bill.monthly_usage_avg_kwh);
-  const utilityRate = numberValue(row.utility_rate_per_kwh ?? evidence.parsed_bill.utility_rate_per_kwh);
-  const utilityProvider = stringValue(row.utility_name ?? evidence.homeowner_intake.utility_provider ?? evidence.parsed_bill.utility_provider);
-  const estimatedAnnualSavings = numberValue(row.estimated_annual_savings ?? enrichmentField(row, "core", "estimated_annual_savings"));
-  const estimatedOffset = normalizedOffset(row.estimated_offset_pct ?? enrichmentField(row, "core", "estimated_offset_pct"));
+  const estimatedProjectValue = numberValue(
+    row.estimated_system_cost ??
+      enrichmentField(row, "core", "estimated_project_value"),
+  );
+  const estimatedSystemSize = numberValue(
+    row.system_size_kw ??
+      evidence.parsed_bill.estimated_system_size_kw ??
+      enrichmentField(row, "core", "estimated_system_size_kw"),
+  );
+  const monthlyBill = numberValue(
+    row.monthly_bill_amount ?? evidence.homeowner_intake.monthly_bill_amount,
+  );
+  const annualUsage = numberValue(
+    row.annual_kwh ?? evidence.parsed_bill.annual_usage_kwh,
+  );
+  const monthlyUsage = numberValue(
+    row.monthly_kwh_avg ?? evidence.parsed_bill.monthly_usage_avg_kwh,
+  );
+  const utilityRate = numberValue(
+    row.utility_rate_per_kwh ?? evidence.parsed_bill.utility_rate_per_kwh,
+  );
+  const utilityProvider = stringValue(
+    row.utility_name ??
+      evidence.homeowner_intake.utility_provider ??
+      evidence.parsed_bill.utility_provider,
+  );
+  const estimatedAnnualSavings = numberValue(
+    row.estimated_annual_savings ??
+      enrichmentField(row, "core", "estimated_annual_savings"),
+  );
+  const estimatedOffset = normalizedOffset(
+    row.estimated_offset_pct ??
+      enrichmentField(row, "core", "estimated_offset_pct"),
+  );
   const estimatedPayback = numberValue(row.estimated_payback_yrs);
 
   const confidence = deriveMarketplaceConfidence({
@@ -223,7 +334,11 @@ export function buildMarketplaceIntelligence(row: Record<string, unknown>): Mark
     annualUsageKwh: annualUsage,
     utilityProvider,
     utilityRatePerKwh: utilityRate,
-    enrichmentCompleteness: row.enrichment_completeness as number | string | null | undefined,
+    enrichmentCompleteness: row.enrichment_completeness as
+      | number
+      | string
+      | null
+      | undefined,
     enrichmentWarnings: row.enrichment_warnings,
   });
 
@@ -246,6 +361,77 @@ export function buildMarketplaceIntelligence(row: Record<string, unknown>): Mark
     claimMode: stringValue(row.claim_mode),
     claimCount: numberValue(row.claim_count),
     maxClaims: numberValue(row.max_claims),
+  });
+
+  const purchaseProfile = derivePurchaseProfile({
+    releaseGate,
+    financeReadiness: boolValue(row.finance_readiness),
+    timeline: stringValue(row.timeline),
+    leadGrade: stringValue(row.lead_grade),
+    qualificationStatus: stringValue(row.qualification_status),
+    homeownerStatus: stringValue(row.homeowner_status),
+    batteryInterest: stringValue(row.battery_interest),
+    preferredContactMethod: stringValue(row.preferred_contact_method),
+  });
+
+  const projectValue = deriveProjectValue({
+    releaseGate,
+    estimatedProjectValue,
+    estimatedAnnualSavings,
+    estimatedSystemSizeKw: estimatedSystemSize,
+    monthlyBillAmount: monthlyBill,
+    annualUsageKwh: annualUsage,
+    utilityRatePerKwh: utilityRate,
+    estimatedOffsetPct: estimatedOffset,
+  });
+
+  const financing = deriveFinancingIntelligence({
+    releaseGate,
+    financeReadiness: boolValue(row.finance_readiness),
+    estimatedIncomeBand: stringValue(row.estimated_income_band),
+    estimatedCreditBand: stringValue(row.estimated_credit_band),
+    monthlyBillAmount: monthlyBill,
+    estimatedProjectValue,
+    qualificationStatus: stringValue(row.qualification_status),
+    leadGrade: stringValue(row.lead_grade),
+  });
+
+  const installComplexity = deriveInstallComplexity({
+    roofMaterial: stringValue(row.roof_material),
+    roofPitch: stringValue(row.roof_pitch),
+    roofCondition: stringValue(row.roof_condition),
+    roofAgeYears: numberValue(row.roof_age_years),
+    stories: numberValue(row.stories),
+    structureType: stringValue(row.structure_type),
+    usableRoofPct: numberValue(row.usable_roof_pct),
+    steepRoof: boolValue(row.steep_roof),
+    complexAhj: boolValue(row.complex_ahj),
+    ahjName: stringValue(row.ahj_name),
+    batteryCandidate: boolValue(row.battery_candidate),
+  });
+
+  const salesComplexity = deriveSalesComplexity({
+    purchaseProfile,
+    financing,
+    installComplexity,
+    confidence,
+    monthlyBillAmount: monthlyBill,
+    utilityRatePerKwh: utilityRate,
+    timeline: stringValue(row.timeline),
+    leadGrade: stringValue(row.lead_grade),
+    qualificationStatus: stringValue(row.qualification_status),
+    releaseWarnings: releaseGate.warnings,
+  });
+
+  const opportunityScore = deriveOpportunityScore({
+    confidence,
+    purchaseProfile,
+    projectValue,
+    financing,
+    salesComplexity,
+    installComplexity,
+    batteryCandidate: boolValue(row.battery_candidate),
+    releaseOk: releaseGate.ok,
   });
 
   const narrative = buildMarketplaceNarrative({
@@ -273,17 +459,73 @@ export function buildMarketplaceIntelligence(row: Record<string, unknown>): Mark
     badges,
     narrative,
     revenue: {
-      estimated_project_value: field(estimatedProjectValue, "estimated", "Estimated project value"),
-      estimated_system_size_kw: field(estimatedSystemSize, estimatedSystemSize === evidence.parsed_bill.estimated_system_size_kw ? "parsed_bill" : "estimated", "Estimated system size"),
-      monthly_bill_amount: field(monthlyBill, "homeowner_entered", "Homeowner-entered monthly bill"),
-      annual_usage_kwh: field(annualUsage, annualUsage === evidence.parsed_bill.annual_usage_kwh ? "parsed_bill" : "estimated", "Annual usage"),
-      monthly_usage_avg_kwh: field(monthlyUsage, monthlyUsage === evidence.parsed_bill.monthly_usage_avg_kwh ? "parsed_bill" : "estimated", "Monthly usage average"),
-      utility_rate_per_kwh: field(utilityRate, utilityRate === evidence.parsed_bill.utility_rate_per_kwh ? "parsed_bill" : "estimated", "Utility rate"),
-      estimated_annual_savings: field(estimatedAnnualSavings, "estimated", "Estimated annual savings"),
-      estimated_offset_pct: field(estimatedOffset, "estimated", "Estimated offset"),
-      estimated_payback_yrs: field(estimatedPayback, "estimated", "Estimated payback"),
-      utility_provider: field(utilityProvider, utilityProvider === evidence.parsed_bill.utility_provider ? "parsed_bill" : "homeowner_entered", "Utility provider"),
+      estimated_project_value: field(
+        estimatedProjectValue,
+        "estimated",
+        "Estimated project value",
+      ),
+      estimated_system_size_kw: field(
+        estimatedSystemSize,
+        estimatedSystemSize === evidence.parsed_bill.estimated_system_size_kw
+          ? "parsed_bill"
+          : "estimated",
+        "Estimated system size",
+      ),
+      monthly_bill_amount: field(
+        monthlyBill,
+        "homeowner_entered",
+        "Homeowner-entered monthly bill",
+      ),
+      annual_usage_kwh: field(
+        annualUsage,
+        annualUsage === evidence.parsed_bill.annual_usage_kwh
+          ? "parsed_bill"
+          : "estimated",
+        "Annual usage",
+      ),
+      monthly_usage_avg_kwh: field(
+        monthlyUsage,
+        monthlyUsage === evidence.parsed_bill.monthly_usage_avg_kwh
+          ? "parsed_bill"
+          : "estimated",
+        "Monthly usage average",
+      ),
+      utility_rate_per_kwh: field(
+        utilityRate,
+        utilityRate === evidence.parsed_bill.utility_rate_per_kwh
+          ? "parsed_bill"
+          : "estimated",
+        "Utility rate",
+      ),
+      estimated_annual_savings: field(
+        estimatedAnnualSavings,
+        "estimated",
+        "Estimated annual savings",
+      ),
+      estimated_offset_pct: field(
+        estimatedOffset,
+        "estimated",
+        "Estimated offset",
+      ),
+      estimated_payback_yrs: field(
+        estimatedPayback,
+        "estimated",
+        "Estimated payback",
+      ),
+      utility_provider: field(
+        utilityProvider,
+        utilityProvider === evidence.parsed_bill.utility_provider
+          ? "parsed_bill"
+          : "homeowner_entered",
+        "Utility provider",
+      ),
     },
+    purchase_profile: purchaseProfile,
+    project_value: projectValue,
+    financing,
+    sales_complexity: salesComplexity,
+    install_complexity: installComplexity,
+    opportunity_score: opportunityScore,
     bill_visuals: billVisuals,
     evidence: {
       homeowner_intake: evidence.homeowner_intake,
