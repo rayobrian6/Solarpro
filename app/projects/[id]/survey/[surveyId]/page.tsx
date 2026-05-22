@@ -41,6 +41,7 @@ import type {
   SurveyEvidenceDomain,
   SurveyEvidenceManifest,
 } from '@/lib/survey/evidence/manifest';
+import { buildSurveyEvidenceEngineeringBridge } from '@/lib/survey/evidence/engineeringBridge';
 import type {
   SurveyV2Payload,
   SurveyElectricalService,
@@ -472,6 +473,13 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
   }, { electrical: [], roof: [], site: [], general: [] });
 
   const requiredCoverage = manifest.coverage.filter(group => group.required);
+  const bridge = buildSurveyEvidenceEngineeringBridge(manifest);
+  const bridgeCounts = {
+    electrical: bridge.electricalEvidence.length,
+    structural: bridge.structuralEvidence.length,
+    roofLayout: bridge.roofLayoutEvidence.length,
+    sitePlan: bridge.sitePlanEvidence.length,
+  };
   const statusColor = manifest.summary.completeness === 'sufficient'
     ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20'
     : manifest.summary.completeness === 'partial'
@@ -517,6 +525,25 @@ function SurveyEvidenceViewer({ manifest }: { manifest: SurveyEvidenceManifest |
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <p className="text-[10px] font-semibold text-cyan-300 uppercase tracking-wider">Engineering bridge</p>
+              <p className="text-[11px] text-slate-400">Advisory evidence-to-engineering traceability only; CAD automation is not started.</p>
+            </div>
+            <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[10px] font-semibold uppercase text-cyan-200">
+              {bridge.readiness}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px]">
+            <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Electrical: <b>{bridgeCounts.electrical}</b></span>
+            <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Structural: <b>{bridgeCounts.structural}</b></span>
+            <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Roof/Layout: <b>{bridgeCounts.roofLayout}</b></span>
+            <span className="rounded-lg border border-slate-700/60 bg-slate-950/30 px-2 py-1 text-slate-300">Site Plan: <b>{bridgeCounts.sitePlan}</b></span>
+          </div>
+          <p className="mt-2 text-[10px] text-slate-500">CAD automation: <b className="text-slate-300">{bridge.cadAutomationStatus}</b></p>
         </div>
 
         {manifest.warnings.length > 0 && (

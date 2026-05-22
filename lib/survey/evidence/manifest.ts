@@ -1,34 +1,30 @@
 import type { SiteSurvey, SiteSurveyFile } from '@/lib/db/surveys';
 
-export type SurveyEvidenceDomain = 'electrical' | 'roof' | 'site' | 'general';
+import {
+  REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
+  SURVEY_EVIDENCE_CATEGORIES,
+  getSurveyEvidenceDomain,
+  normalizeSurveyEvidenceCategory,
+} from './categoryRegistry';
+import type { SurveyEvidenceCategory, SurveyEvidenceDomain } from './categoryRegistry';
 
-export type SurveyEvidenceCategory =
-  | 'main_service_panel'
-  | 'subpanel'
-  | 'meter'
-  | 'disconnect'
-  | 'grounding'
-  | 'utility_connection'
-  | 'roof_plane'
-  | 'roof_edge'
-  | 'ridge'
-  | 'attic'
-  | 'rafters'
-  | 'obstructions'
-  | 'roof_surface'
-  | 'detached_structures'
-  | 'trench_path'
-  | 'battery_location'
-  | 'inverter_location'
-  | 'gateway_location'
-  | 'garage_interior_wall'
-  | 'attic_access'
-  | 'utility_access'
-  | 'overview'
-  | 'duplicate'
-  | 'blurry'
-  | 'unusable'
-  | 'uncategorized';
+export type {
+  SurveyEvidenceCategory,
+  SurveyEvidenceDomain,
+  SurveyEvidenceCategoryDefinition,
+  SurveyEvidenceEngineeringBucket,
+} from './categoryRegistry';
+export {
+  REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
+  SURVEY_EVIDENCE_CATEGORIES,
+  SURVEY_EVIDENCE_CATEGORY_DOMAIN,
+  SURVEY_EVIDENCE_CATEGORY_REGISTRY,
+  getSurveyEvidenceCategoryDefinition,
+  getSurveyEvidenceDomain,
+  getSurveyEvidenceLabel,
+  inferSurveyEvidenceCategoryFromText,
+  normalizeSurveyEvidenceCategory,
+} from './categoryRegistry';
 
 export type SurveyEvidenceProcessingStatus =
   | 'uploaded'
@@ -139,91 +135,6 @@ export interface SurveyEvidenceManifest {
   };
 }
 
-export const REQUIRED_SURVEY_EVIDENCE_CATEGORIES: SurveyEvidenceCategory[] = [
-  'main_service_panel',
-  'meter',
-  'roof_plane',
-  'overview',
-];
-
-export const SURVEY_EVIDENCE_CATEGORY_DOMAIN: Record<SurveyEvidenceCategory, SurveyEvidenceDomain> = {
-  main_service_panel: 'electrical',
-  subpanel: 'electrical',
-  meter: 'electrical',
-  disconnect: 'electrical',
-  grounding: 'electrical',
-  utility_connection: 'electrical',
-  roof_plane: 'roof',
-  roof_edge: 'roof',
-  ridge: 'roof',
-  attic: 'roof',
-  rafters: 'roof',
-  obstructions: 'roof',
-  roof_surface: 'roof',
-  detached_structures: 'site',
-  trench_path: 'site',
-  battery_location: 'site',
-  inverter_location: 'site',
-  gateway_location: 'site',
-  garage_interior_wall: 'site',
-  attic_access: 'site',
-  utility_access: 'site',
-  overview: 'general',
-  duplicate: 'general',
-  blurry: 'general',
-  unusable: 'general',
-  uncategorized: 'general',
-};
-
-const CATEGORY_ALIASES: Record<string, SurveyEvidenceCategory> = {
-  main_panel_open: 'main_service_panel',
-  main_panel_closed: 'main_service_panel',
-  main_panel: 'main_service_panel',
-  msp: 'main_service_panel',
-  main_service_panel: 'main_service_panel',
-  sub_panel: 'subpanel',
-  subpanel: 'subpanel',
-  meter: 'meter',
-  utility_meter: 'meter',
-  disconnect: 'disconnect',
-  ac_disconnect: 'disconnect',
-  grounding: 'grounding',
-  grounding_bonding: 'grounding',
-  utility_connection: 'utility_connection',
-  service_entrance: 'utility_connection',
-  roof_overview: 'roof_plane',
-  roof_plane: 'roof_plane',
-  roof_detail: 'roof_surface',
-  roof_surface: 'roof_surface',
-  roof_edge: 'roof_edge',
-  ridge: 'ridge',
-  attic: 'attic',
-  attic_access: 'attic_access',
-  rafters: 'rafters',
-  attic_rafter: 'rafters',
-  rafter: 'rafters',
-  obstruction: 'obstructions',
-  obstructions: 'obstructions',
-  roof_obstruction: 'obstructions',
-  detached_structures: 'detached_structures',
-  trench_path: 'trench_path',
-  battery_location: 'battery_location',
-  inverter_location: 'inverter_location',
-  gateway_location: 'gateway_location',
-  garage_interior_wall: 'garage_interior_wall',
-  utility_access: 'utility_access',
-  site: 'overview',
-  site_overview: 'overview',
-  site_exterior: 'overview',
-  overview: 'overview',
-  additional: 'uncategorized',
-  unknown: 'uncategorized',
-  uncategorized: 'uncategorized',
-  duplicate: 'duplicate',
-  blurry: 'blurry',
-  unusable: 'unusable',
-};
-
 interface PayloadPhotoLike {
   url?: unknown;
   uploadKey?: unknown;
@@ -238,16 +149,6 @@ export interface BuildSurveyEvidenceManifestInput {
   survey: Pick<SiteSurvey, 'id' | 'projectId' | 'surveyData' | 'inspectorName'>;
   files: SiteSurveyFile[];
   generatedAt?: string;
-}
-
-export function normalizeSurveyEvidenceCategory(category: string | null | undefined): SurveyEvidenceCategory {
-  if (!category) return 'uncategorized';
-  const key = category.trim().toLowerCase().replace(/[\s-]+/g, '_');
-  return CATEGORY_ALIASES[key] ?? 'uncategorized';
-}
-
-export function getSurveyEvidenceDomain(category: SurveyEvidenceCategory): SurveyEvidenceDomain {
-  return SURVEY_EVIDENCE_CATEGORY_DOMAIN[category];
 }
 
 export function buildSurveyEvidenceManifest(input: BuildSurveyEvidenceManifestInput): SurveyEvidenceManifest {
@@ -452,34 +353,7 @@ function buildPayloadOnlyEvidenceItem(input: {
 }
 
 function buildCoverage(items: SurveyEvidenceItem[]): SurveyEvidenceCoverageGroup[] {
-  const tracked: SurveyEvidenceCategory[] = [
-    'main_service_panel',
-    'subpanel',
-    'meter',
-    'disconnect',
-    'grounding',
-    'utility_connection',
-    'roof_plane',
-    'roof_edge',
-    'ridge',
-    'attic',
-    'rafters',
-    'obstructions',
-    'roof_surface',
-    'detached_structures',
-    'trench_path',
-    'battery_location',
-    'inverter_location',
-    'gateway_location',
-    'garage_interior_wall',
-    'attic_access',
-    'utility_access',
-    'overview',
-    'duplicate',
-    'blurry',
-    'unusable',
-    'uncategorized',
-  ];
+  const tracked = SURVEY_EVIDENCE_CATEGORIES;
 
   return tracked.map((category) => {
     const count = items.filter((item) => item.category === category).length;

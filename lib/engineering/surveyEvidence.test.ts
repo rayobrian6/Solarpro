@@ -54,9 +54,9 @@ function rawSurvey(overrides: Partial<RawSurveyPayload> = {}): RawSurveyPayload 
     },
     photos: [
       { slotKey: 'main_panel_open', url: 'https://cdn.example.com/panel.jpg', category: 'panel' },
-      { slotKey: 'utility_meter', url: 'https://cdn.example.com/meter.jpg', category: 'meter' },
+      { slotKey: 'meter', url: 'https://cdn.example.com/meter.jpg', category: 'meter' },
       { slotKey: 'roof_overview', url: 'https://cdn.example.com/roof.jpg', category: 'roof' },
-      { slotKey: 'site_exterior', url: 'https://cdn.example.com/site.jpg', category: 'site' },
+      { slotKey: 'overview', url: 'https://cdn.example.com/site.jpg', category: 'site' },
     ],
     ...overrides,
   };
@@ -79,9 +79,9 @@ describe('collectEngineeringSurveyEvidence', () => {
     expect(evidence.blockers).toEqual([]);
     expect(evidence.photos.map(photo => photo.category)).toEqual([
       'main_service_panel',
-      'utility_meter',
+      'meter',
       'roof_plane',
-      'site_exterior',
+      'overview',
     ]);
     expect(evidence.fieldEvidence.mainPanelRatingAmps).toBe(200);
     expect(evidence.fieldEvidence.rafterSpacingInches).toBe(24);
@@ -97,9 +97,9 @@ describe('collectEngineeringSurveyEvidence', () => {
     expect(evidence.blockers).toContain('No site survey photos are attached to support permit plan-set assumptions.');
     expect(evidence.missingCategories).toEqual([
       'main_service_panel',
-      'utility_meter',
+      'meter',
       'roof_plane',
-      'site_exterior',
+      'overview',
     ]);
     expect(evidence.warnings.length).toBeGreaterThan(0);
   });
@@ -113,7 +113,7 @@ describe('collectEngineeringSurveyEvidence', () => {
     }));
 
     expect(evidence.completeness).toBe('partial');
-    expect(evidence.missingCategories).toEqual(['utility_meter', 'site_exterior']);
+    expect(evidence.missingCategories).toEqual(['meter', 'overview']);
     expect(evidence.warnings.some(w => w.includes('utility meter'))).toBe(true);
   });
 });

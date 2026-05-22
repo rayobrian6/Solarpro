@@ -31,15 +31,16 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Invalid survey ID' }, { status: 400 });
     }
 
-    const [survey, files] = await Promise.all([
-      getSiteSurveyById(surveyId, user.id),
-      getSiteSurveyFiles(surveyId),
-    ]);
+    const survey = await getSiteSurveyById(surveyId, user.id);
 
     if (!survey) {
       return NextResponse.json({ success: false, error: 'Survey not found' }, { status: 404 });
     }
 
+    // Authorization must happen before file/evidence loading. getSiteSurveyById
+    // is user-scoped; only after it succeeds do we load survey files and derive
+    // the manifest for the authorized survey.
+    const files = await getSiteSurveyFiles(surveyId);
     const evidenceManifest = buildSurveyEvidenceManifest({ survey, files });
 
     return NextResponse.json({ success: true, data: { survey, files, evidenceManifest } });

@@ -11,19 +11,18 @@
 // ============================================================================
 
 import type { EnrichedSiteSurvey, SurveyPhotoRef } from '@/lib/siteSurvey/types';
+import {
+  REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
+  buildSurveyEvidenceManifest,
+  inferSurveyEvidenceCategoryFromText,
+} from '@/lib/survey/evidence/manifest';
+import type { SurveyEvidenceCategory } from '@/lib/survey/evidence/manifest';
+import {
+  buildSurveyEvidenceEngineeringBridge,
+  summarizeSurveyEvidenceEngineeringBridge,
+} from '@/lib/survey/evidence/engineeringBridge';
 
-export type SurveyPhotoEvidenceCategory =
-  | 'main_service_panel'
-  | 'subpanel'
-  | 'utility_meter'
-  | 'roof_plane'
-  | 'attic_rafter'
-  | 'roof_obstruction'
-  | 'roof_access'
-  | 'site_exterior'
-  | 'equipment_label'
-  | 'grounding_bonding'
-  | 'unknown';
+export type SurveyPhotoEvidenceCategory = SurveyEvidenceCategory;
 
 export interface SurveyPhotoEvidence {
   id: string;
@@ -94,10 +93,7 @@ export interface EngineeringSurveyEvidence {
 }
 
 export const REQUIRED_PLANSET_EVIDENCE_CATEGORIES: SurveyPhotoEvidenceCategory[] = [
-  'main_service_panel',
-  'utility_meter',
-  'roof_plane',
-  'site_exterior',
+  ...REQUIRED_SURVEY_EVIDENCE_CATEGORIES,
 ];
 
 /**
@@ -125,13 +121,13 @@ export function collectEngineeringSurveyEvidence(
   if (!present.has('main_service_panel')) {
     warnings.push('Missing main service panel photo evidence; electrical interconnection assumptions require engineer verification.');
   }
-  if (!present.has('utility_meter')) {
+  if (!present.has('meter')) {
     warnings.push('Missing utility meter photo evidence; meter/service location should be verified before permit submittal.');
   }
   if (!present.has('roof_plane')) {
     warnings.push('Missing roof plane photo evidence; CAD roof layout remains schematic until field/eagleview geometry is confirmed.');
   }
-  if (!present.has('site_exterior')) {
+  if (!present.has('overview')) {
     warnings.push('Missing site exterior photo evidence; equipment locations and access notes require verification.');
   }
 
@@ -153,24 +149,35 @@ export function collectEngineeringSurveyEvidence(
         ? 'sufficient'
         : 'partial';
 
-  const electricalEvidenceCount = photos.filter(photo =>
-    photo.category === 'main_service_panel' ||
-    photo.category === 'subpanel' ||
-    photo.category === 'utility_meter' ||
-    photo.category === 'equipment_label' ||
-    photo.category === 'grounding_bonding',
-  ).length;
-  const structuralEvidenceCount = photos.filter(photo =>
-    photo.category === 'attic_rafter' ||
-    photo.category === 'roof_access',
-  ).length;
-  const roofLayoutEvidenceCount = photos.filter(photo =>
-    photo.category === 'roof_plane' ||
-    photo.category === 'roof_obstruction',
-  ).length;
-  const sitePlanEvidenceCount = photos.filter(photo =>
-    photo.category === 'site_exterior',
-  ).length;
+  const canonicalManifest = buildSurveyEvidenceManifest({
+    survey: {
+      id: survey.id,
+      projectId: survey.projectId,
+      inspectorName: null,
+      surveyData: {
+        photos: survey.photos.map(photo => ({
+          url: photo.url,
+          uploadKey: photo.slotKey,
+          category: photo.slotKey || photo.category,
+          capturedAt: photo.capturedAt,
+          notes: photo.notes,
+        })),
+      },
+    },
+    files: survey.photos.map((photo, index) => ({
+      id: photo.slotKey || `photo-${index + 1}`,
+      surveyId: survey.id,
+      fileUrl: photo.url,
+      fileType: 'photo' as const,
+      label: photo.slotKey || photo.category,
+      filename: photo.slotKey ? `${photo.slotKey}.jpg` : null,
+      mimeType: null,
+      createdAt: photo.capturedAt ?? options.normalizedAt ?? new Date().toISOString(),
+    })),
+    generatedAt: options.normalizedAt,
+  });
+  const bridge = buildSurveyEvidenceEngineeringBridge(canonicalManifest);
+  const bridgeCounts = summarizeSurveyEvidenceEngineeringBridge(bridge);
 
   return {
     projectId: survey.projectId,
@@ -188,10 +195,10 @@ export function collectEngineeringSurveyEvidence(
       duplicateStatus: 'not_processed',
       engineeringBridge: {
         readiness: completeness === 'sufficient' ? 'ready_for_engineering' : photos.length === 0 ? 'blocked' : 'needs_review',
-        electricalEvidenceCount,
-        structuralEvidenceCount,
-        roofLayoutEvidenceCount,
-        sitePlanEvidenceCount,
+        electricalEvidenceCount: bridgeCounts.electricalEvidenceCount,
+        structuralEvidenceCount: bridgeCounts.structuralEvidenceCount,
+        roofLayoutEvidenceCount: bridgeCounts.roofLayoutEvidenceCount,
+        sitePlanEvidenceCount: bridgeCounts.sitePlanEvidenceCount,
         cadAutomationStatus: 'not_started',
       },
     },
@@ -232,7 +239,7 @@ function mapPhotoEvidence(
     }
   }
 
-  if (category === 'utility_meter' && survey.electrical.meterType !== 'unknown') {
+  if (category === 'meter' && survey.electrical.meterType !== 'unknown') {
     extracted.meterType = survey.electrical.meterType;
   }
 
@@ -244,7 +251,7 @@ function mapPhotoEvidence(
     if (survey.structural.roofPitchDegrees !== null) extracted.pitch = survey.structural.roofPitchDegrees;
   }
 
-  if (category === 'roof_obstruction') {
+  if (category === 'obstructions') {
     extracted.obstructionType = survey.geometry.obstructions[0]?.type;
   }
 
@@ -256,7 +263,7 @@ function mapPhotoEvidence(
     fileId: photo.slotKey,
     sourceCategory: photo.category,
     category,
-    confidence: category === 'unknown' ? 0.25 : 0.75,
+    confidence: category === 'uncategorized' ? 0.25 : 0.75,
     capturedAt: photo.capturedAt,
     notes: photo.notes,
     extracted: Object.keys(extracted).length > 0 ? extracted : undefined,
@@ -264,18 +271,5 @@ function mapPhotoEvidence(
 }
 
 function mapEvidenceCategory(photo: SurveyPhotoRef): SurveyPhotoEvidenceCategory {
-  const key = `${photo.slotKey} ${photo.category} ${photo.notes ?? ''}`.toLowerCase();
-
-  if (key.includes('subpanel') || key.includes('sub_panel')) return 'subpanel';
-  if (key.includes('meter')) return 'utility_meter';
-  if (key.includes('attic') || key.includes('rafter')) return 'attic_rafter';
-  if (key.includes('obstruction') || key.includes('chimney') || key.includes('skylight') || key.includes('vent')) return 'roof_obstruction';
-  if (key.includes('access')) return 'roof_access';
-  if (key.includes('label') || key.includes('nameplate')) return 'equipment_label';
-  if (key.includes('ground') || key.includes('bond')) return 'grounding_bonding';
-  if (key.includes('main_panel') || key.includes('main panel') || photo.category === 'panel') return 'main_service_panel';
-  if (key.includes('roof') || photo.category === 'roof') return 'roof_plane';
-  if (key.includes('site') || key.includes('exterior') || photo.category === 'site') return 'site_exterior';
-
-  return 'unknown';
+  return inferSurveyEvidenceCategoryFromText(`${photo.slotKey} ${photo.category} ${photo.notes ?? ''}`);
 }

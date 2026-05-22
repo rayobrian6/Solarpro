@@ -8,6 +8,10 @@ import type { CADModel } from '@/lib/cad/types';
 import { titleBlock } from '../utils/titleBlock';
 import { PLANSET_ENGINE_VERSION } from '../constants';
 import { isFence, isGround, isRoof } from '@/lib/system';
+import {
+  getSurveyEvidenceCategoryDefinition,
+  normalizeSurveyEvidenceCategory,
+} from '@/lib/survey/evidence/manifest';
 
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -168,6 +172,25 @@ export function pageValidationSummary(
     : surveyEvidence?.completeness === 'partial'
       ? '#b45309'
       : '#cc0000';
+  const fallbackBridgeCounts = surveyEvidence?.photos.reduce((acc, photo) => {
+    const category = normalizeSurveyEvidenceCategory(photo.category);
+    const bucket = getSurveyEvidenceCategoryDefinition(category).engineeringBucket;
+    if (bucket === 'electricalEvidence') acc.electricalEvidenceCount += 1;
+    if (bucket === 'structuralEvidence') acc.structuralEvidenceCount += 1;
+    if (bucket === 'roofLayoutEvidence') acc.roofLayoutEvidenceCount += 1;
+    if (bucket === 'sitePlanEvidence') acc.sitePlanEvidenceCount += 1;
+    return acc;
+  }, {
+    electricalEvidenceCount: 0,
+    structuralEvidenceCount: 0,
+    roofLayoutEvidenceCount: 0,
+    sitePlanEvidenceCount: 0,
+  }) ?? {
+    electricalEvidenceCount: 0,
+    structuralEvidenceCount: 0,
+    roofLayoutEvidenceCount: 0,
+    sitePlanEvidenceCount: 0,
+  };
   const manifestV1 = surveyEvidence?.manifestV1 ?? {
     itemCount: surveyEvidence?.photos.length ?? 0,
     lifecycleState: surveyEvidence?.photos.length ? 'classified' : 'uploaded',
@@ -176,13 +199,11 @@ export function pageValidationSummary(
     duplicateStatus: 'not_processed',
     engineeringBridge: {
       readiness: surveyEvidence?.completeness === 'sufficient' ? 'ready_for_engineering' : surveyEvidence?.photos.length ? 'needs_review' : 'blocked',
-      electricalEvidenceCount: 0,
-      structuralEvidenceCount: 0,
-      roofLayoutEvidenceCount: 0,
-      sitePlanEvidenceCount: 0,
+      ...fallbackBridgeCounts,
       cadAutomationStatus: 'not_started',
     },
   };
+  const manifestSummarySource = surveyEvidence?.manifestV1 ? 'canonical bridge summary' : 'explicit legacy evidence fallback';
   const surveyEvidenceSummary = surveyEvidence
     ? `${surveyEvidence.photos.length} photo(s) | completeness: ${surveyEvidence.completeness.toUpperCase()} | normalized: ${surveyEvidence.source.normalizedAt}`
     : 'No survey evidence attached to this permit run';
@@ -196,12 +217,12 @@ export function pageValidationSummary(
     ? surveyEvidence.missingCategories.join(', ')
     : surveyEvidence
       ? 'None'
-      : 'main_service_panel, utility_meter, roof_plane, site_exterior';
+      : 'main_service_panel, meter, roof_plane, overview';
   const surveyWarningRows = surveyEvidence
     ? [...surveyEvidence.blockers, ...surveyEvidence.warnings].slice(0, 6)
     : ['No normalized survey evidence object was provided; plan-set assumptions are based on design/canonical inputs only.'];
   const surveyFieldEvidenceRows = surveyEvidence ? [
-    ['Evidence Manifest v1', `items: ${manifestV1.itemCount} | lifecycle: ${manifestV1.lifecycleState} | quality: ${manifestV1.qualityStatus} | duplicates: ${manifestV1.duplicateStatus} | AI: ${manifestV1.aiExtractionStatus} | engineering readiness: ${manifestV1.engineeringBridge.readiness} | CAD automation: ${manifestV1.engineeringBridge.cadAutomationStatus}`],
+    ['Evidence Manifest v1', `items: ${manifestV1.itemCount} | source: ${manifestSummarySource} | lifecycle: ${manifestV1.lifecycleState} | quality: ${manifestV1.qualityStatus} | duplicates: ${manifestV1.duplicateStatus} | AI: ${manifestV1.aiExtractionStatus} | engineering readiness: ${manifestV1.engineeringBridge.readiness} | CAD automation: ${manifestV1.engineeringBridge.cadAutomationStatus}`],
     ['Physical Data', surveyEvidence.fieldEvidence.hasPhysicalData ? 'present' : 'missing'],
     ['Roof Geometry', `${surveyEvidence.fieldEvidence.hasRoofGeometry ? 'present' : 'missing'} | planes: ${surveyEvidence.fieldEvidence.roofPlaneCount} | usable area: ${surveyEvidence.fieldEvidence.usableAreaSqFt ?? '—'} sq ft`],
     ['Electrical', `${surveyEvidence.fieldEvidence.hasElectricalData ? 'present' : 'missing'} | MSP: ${surveyEvidence.fieldEvidence.mainPanelRatingAmps ?? '—'}A | Busbar: ${surveyEvidence.fieldEvidence.busbarRatingAmps ?? '—'}A | evidence items: ${manifestV1.engineeringBridge.electricalEvidenceCount}`],
@@ -226,7 +247,7 @@ export function pageValidationSummary(
         </div>
         <div style="text-align:right;">
           <div style="font-size:10px;font-weight:bold;">PLANSET ENGINE v47.323</div>
-          <div style="font-size:7px;color:#555;">Canonical pipeline — zero silent fallbacks</div>
+          <div style="font-size:7px;color:#555;">Canonical pipeline — explicit visible fallbacks only</div>
         </div>
       </div>
 
@@ -362,7 +383,7 @@ export function pageValidationSummary(
         <strong>VALIDATION AUTHORITY STATEMENT:</strong>
         This validation summary confirms that all engineering data required for the permit planset has been
         resolved through the canonical pipeline and verified before planset generation.
-        No placeholder values, silent fallbacks, or assumed data are present in this planset.
+        Required canonical engineering fields are validated before planset generation; survey evidence fallbacks, when used, are explicitly labeled and visible.
         The planset engine version is v47.323 (PLANSET_ENGINE_VERSION=${PLANSET_ENGINE_VERSION}).
         All structural calculations use canonical.site.windSpeed, canonical.structure, and canonical.module as
         authoritative inputs. The planset generation was blocked if any required field was missing.

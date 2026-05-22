@@ -9,8 +9,9 @@
 // Map tab serves the original SolarPro topography artifact vendored locally and merged with audit-backed missing pipelines.
 // Pipeline tab keeps the evidence-backed canonical SolarPro architecture audit:
 //   Homeowner Intake → Bill Intelligence → Lead Ops → Marketplace
-//   → Contractor Claim → Project/Portal/Engineering, plus Survey → 3D
-//   → Engineering documents.
+//   → Contractor Claim → Project/Portal/Engineering, plus Survey App → site_surveys → site_survey_files → SurveyEvidenceManifest
+//   → Engineering Bridge → Permit Validation → Future Worker Boundary.
+//   AI/CV/CAD worker stages are explicitly future-only/not started.
 //
 // Evidence-backed nodes and edges are shown with route/API/table/library
 // references, explicit partial/external/blocked status, and copy/export context.
@@ -415,14 +416,14 @@ function IntegrationPanel({
             note={survey.legacy ? fmtDate(survey.legacyUpdatedAt) : undefined}
           />
           <StatusRow
-            label="New Pipeline (project_site_surveys)"
+            label="Survey Evidence Pipeline (site_surveys + site_survey_files)"
             status={survey.newPipeline
               ? (survey.newPipelineEnriched ? 'green' : 'yellow')
               : 'red'
             }
             note={
               survey.newPipeline
-                ? (survey.newPipelineEnriched ? 'enriched' : 'normalized only')
+                ? (survey.newPipelineEnriched ? 'survey rows + files available' : 'survey rows only')
                 : undefined
             }
           />
@@ -501,13 +502,37 @@ function IntegrationPanel({
             />
             <FlowNode
               icon={<Database size={11} />}
-              label="project_site_surveys"
+              label="site_surveys + site_survey_files"
               sublabel={
                 survey.newPipeline
-                  ? (survey.newPipelineEnriched ? 'enriched' : 'normalized only')
+                  ? (survey.newPipelineEnriched ? 'survey rows + files available' : 'survey rows only')
                   : 'no data yet'
               }
               status={newPipelineStatus}
+            />
+            <FlowNode
+              icon={<Shield size={11} />}
+              label="SurveyEvidenceManifest v1"
+              sublabel="canonical deterministic evidence registry; no AI/CV processing"
+              status={newPipelineStatus}
+            />
+            <FlowNode
+              icon={<GitBranch size={11} />}
+              label="Engineering Bridge"
+              sublabel="advisory evidence traceability only; CAD automation not started"
+              status={newPipelineStatus === 'green' ? 'yellow' : newPipelineStatus}
+            />
+            <FlowNode
+              icon={<Shield size={11} />}
+              label="Permit Validation Evidence Summary"
+              sublabel={systemIntegration.usedInPermit ? 'canonical evidence visible' : 'permit evidence not fully wired'}
+              status={systemIntegration.usedInPermit ? 'green' : 'yellow'}
+            />
+            <FlowNode
+              icon={<Cpu size={11} />}
+              label="Future Worker Boundary"
+              sublabel="OpenCV / YOLO / OCR / Claude / Open3D / FreeCAD — NOT started"
+              status="red"
             />
             <FlowNode
               icon={<GitBranch size={11} />}
@@ -518,7 +543,7 @@ function IntegrationPanel({
             <FlowNode
               icon={<Home size={11} />}
               label="CAD Engine"
-              sublabel={systemIntegration.usedInCAD ? 'survey geometry used' : 'buildCADFromSurvey — NOT wired'}
+              sublabel={systemIntegration.usedInCAD ? 'survey geometry used' : 'CAD automation — NOT started from evidence manifest'}
               status={cadStatus}
             />
             <FlowNode
@@ -647,8 +672,8 @@ const ARCHITECTURE_NODES: ArchitectureNode[] = [
   { id: 'contractor', group: 'Contractor Network', title: 'Discovery + Claim', detail: 'Contractors discover live opportunities, maintain profiles, claim jobs, and view assigned/claimed inventory.', evidence: ['/network', '/api/network/opportunities', '/api/network/opportunities/[id]/claim', '/api/network/contractor-profile'], tables: ['contractor_profiles', 'opportunity_claims', 'opportunity_assignments', 'network_opportunities'], status: 'live', layer: 'mobile' },
   { id: 'portal', group: 'Homeowner Portal', title: 'OTP Portal + Dashboard', detail: 'Homeowners access project dashboard, stage state, bill upload, files, proposals, and logout flows.', evidence: ['/portal/dashboard', '/api/portal/dashboard', '/api/portal/bill-upload', '/api/portal/logout'], tables: ['portal_otp_tokens', 'projects', 'project_homeowner_stage_history', 'project_micro_stages'], status: 'live', layer: 'solarpro' },
   { id: 'core', group: 'Core Project/CRM', title: 'Clients, Projects, Layouts, Files, Proposals', detail: 'Canonical CRM/project layer backing project creation, design state, generated artifacts, proposal outputs, and portal surfaces.', evidence: ['/projects', '/proposals', '/api/projects', '/api/project-files', '/api/proposals'], tables: ['clients', 'projects', 'layouts', 'project_files', 'proposals', 'proposal_signatures'], status: 'live', layer: 'db' },
-  { id: 'survey', group: 'Survey & Physical Data', title: 'Survey Ingest + project_physical_data', detail: 'Partner/mobile and SolarPro survey paths normalize field data, webhook events, photos, and physical/electrical facts.', evidence: ['/api/auth/authorize', '/api/webhooks/survey-complete', '/api/survey/submit', 'lib/survey/ingest/ingestPipeline.ts'], tables: ['site_surveys', 'site_survey_files', 'project_physical_data', 'webhook_deliveries', 'webhook_ingestion_log'], status: 'live', layer: 'mobile' },
-  { id: 'survey-partial', group: 'Survey & Physical Data', title: 'Survey → Engineering Consumption', detail: 'Engineering report reads 4/20 physical-data fields; SystemDefinition/CAD/Permit/Proposal auto-application has source files but no production callers.', evidence: ['lib/topography/getTopographyState.ts', 'lib/engineering/reportGenerator.ts', 'lib/siteSurvey/applyToSystemDefinition.ts', 'lib/siteSurvey/permitIntegration.ts'], tables: ['project_physical_data', 'project_files'], status: 'partial', layer: 'blocked' },
+  { id: 'survey', group: 'Survey Evidence Foundation', title: 'SurveyEvidenceManifest v1 Canonical Evidence Pipeline', detail: 'Survey App writes site_surveys and site_survey_files; the canonical SurveyEvidenceManifest feeds advisory engineering bridge, permit validation, admin UI, and future worker contracts. AI/CV/CAD workers are explicitly not started.', evidence: ['/api/auth/authorize', '/api/webhooks/survey-complete', '/api/survey/submit', '/api/site-surveys/[surveyId]', 'lib/survey/evidence/manifest.ts', 'lib/survey/evidence/categoryRegistry.ts', 'lib/survey/evidence/engineeringBridge.ts'], tables: ['site_surveys', 'site_survey_files', 'project_physical_data', 'webhook_deliveries', 'webhook_ingestion_log'], status: 'live', layer: 'mobile' },
+  { id: 'survey-partial', group: 'Survey Evidence Foundation', title: 'Future Worker Boundary — AI/CV/CAD Not Started', detail: 'OpenCV blur scoring, YOLO/Supervision detection, OCR extraction, Claude reasoning, Open3D geometry, and FreeCAD/CAD automation remain future-only and must map back into the canonical evidence registry.', evidence: ['lib/topography/getTopographyState.ts', 'lib/survey/evidence/categoryRegistry.ts', 'lib/survey/evidence/manifest.ts'], tables: ['site_surveys', 'site_survey_files'], status: 'blocked', layer: 'blocked' },
   { id: 'engineering', group: 'Engineering & Documents', title: 'Engineering, SLD, BOM, Permit, Plan Set', detail: 'Engineering APIs calculate topology, BOM, SLD/PDF, permit, plan-set, PVWatts, structural output, sync, and saved artifacts.', evidence: ['/engineering', '/api/engineering/topology', '/api/engineering/bom', '/api/engineering/sld', '/api/engineering/permit', '/api/engineering/plan-set', '/api/engineering/pvwatts'], tables: ['engineering_runs', 'project_hardware', 'project_files', 'productions'], status: 'live', layer: 'engineering' },
   { id: 'maps3d', group: '3D / Maps / Solar Design', title: 'Maps, 3D, Solar Placement', detail: 'Map/session/solar design surfaces and dependencies support visual placement and layout persistence; the original topography artifact is now vendored locally with audited pipeline additions.', evidence: ['/api/maps-session', '/api/solar', 'Mapbox/Cesium/Three dependencies', TOPO_URL], tables: ['layouts', 'projects'], status: 'partial', layer: 'cloud' },
   { id: 'equipment', group: 'Equipment / Pricing / Utility', title: 'Equipment Registry + Pricing + Utility Policy', detail: 'Equipment registries, user equipment tables, distributor pricing, utility policies, and pricing config feed design, SLD/BOM, and proposal logic.', evidence: ['lib/topology-manager.ts', 'lib/equipment-registry-v4.ts', 'lib/proposal/buildCanonicalProposal.ts'], tables: ['user_equipment_panels', 'user_equipment_inverters', 'user_equipment_batteries', 'user_equipment_mounting', 'distributor_prices', 'utility_policies', 'pricing_config'], status: 'live', layer: 'backend' },

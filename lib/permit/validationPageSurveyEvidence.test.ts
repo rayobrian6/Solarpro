@@ -57,13 +57,13 @@ function mockSurveyEvidence(): EngineeringSurveyEvidence {
         confidence: 0.75,
       },
       {
-        id: 'utility_meter',
+        id: 'meter',
         projectId: 'project-evidence-001',
         surveyId: 'survey-evidence-001',
         fileUrl: 'https://cdn.example.com/meter.jpg',
-        fileId: 'utility_meter',
+        fileId: 'meter',
         sourceCategory: 'meter',
-        category: 'utility_meter',
+        category: 'meter',
         confidence: 0.75,
       },
       {
@@ -77,13 +77,13 @@ function mockSurveyEvidence(): EngineeringSurveyEvidence {
         confidence: 0.75,
       },
       {
-        id: 'site_exterior',
+        id: 'overview',
         projectId: 'project-evidence-001',
         surveyId: 'survey-evidence-001',
         fileUrl: 'https://cdn.example.com/site.jpg',
-        fileId: 'site_exterior',
+        fileId: 'overview',
         sourceCategory: 'site',
-        category: 'site_exterior',
+        category: 'overview',
         confidence: 0.75,
       },
     ],
@@ -178,8 +178,8 @@ describe('pageValidationSummary survey evidence rendering', () => {
     expect(html).toContain('Photo & Field Traceability');
     expect(html).toContain('completeness: SUFFICIENT');
     expect(html).toContain('main_service_panel: 1');
-    expect(html).toContain('utility_meter: 1');
-    expect(html).toContain('No placeholder values, silent fallbacks, or assumed data');
+    expect(html).toContain('meter: 1');
+    expect(html).toContain('survey evidence fallbacks, when used, are explicitly labeled and visible');
   });
 
   it('renders a no-evidence warning without failing canonical validation rendering', () => {
